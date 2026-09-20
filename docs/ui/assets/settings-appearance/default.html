@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-appearance">
+<meta name="state" content="default">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-appearance · default</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-appearance · default</p>
+<div class="mockup-stage" style="width: 1000px">
+  <div class="view settings-view">
+    <div class="col mid settings-body">
+    <div class="cfg-pane ap">
+      <div class="ap-head"><span class="app-title">Appearance</span><span class="app-secondary">every project on this machine</span></div>
+      <div class="ap-field">
+        <span class="app-label">app text</span>
+        <div class="ap-line">
+          <div class="face-box">
+            <div class="face-stack"><span class="face-chip is-ours" title="JaiRA's own — choosing a family replaces it"><span class="face-n data-num">1</span><span class="face-name app-text">DM Sans</span><span class="face-ours app-secondary">ours</span></span><button class="face-add app-secondary" aria-expanded="false">+ add…</button></div>
+          </div>
+          <div class="size-box"><input class="size-n data-num" type="number" min="11" max="17" step="0.5" value="12.5"><span class="data-faint">px</span><span class="size-step"><button title="larger (max 17)">▲</button><button title="smaller (min 11)">▼</button></span></div>
+        </div>
+        <span class="ap-note data-faint">→ &quot;DM Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif</span>
+      </div>
+      <div class="ap-field">
+        <span class="app-label">data text</span>
+        <div class="ap-line">
+          <div class="face-box">
+            <div class="face-stack"><span class="face-chip is-ours" title="JaiRA's own — choosing a family replaces it"><span class="face-n data-num">1</span><span class="face-name data-text">JetBrains Mono</span><span class="face-ours app-secondary">ours</span></span><button class="face-add app-secondary" aria-expanded="false">+ add…</button></div>
+          </div>
+          <div class="size-box"><input class="size-n data-num" type="number" min="10" max="16" step="0.5" value="12"><span class="data-faint">px</span><span class="size-step"><button title="larger (max 16)">▲</button><button title="smaller (min 10)">▼</button></span></div>
+        </div>
+        <span class="ap-note data-faint">→ &quot;JetBrains Mono&quot;, &quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, monospace</span>
+      </div>
+      <div class="ap-divider"></div>
+      <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Separate editor size" title="Separate editor size" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Separate editor size</span><span class="ap-toggle-value"><span class="app-secondary">follows the data text</span></span></div>
+      <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Smooth text" title="Smooth text" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Smooth text</span><span class="ap-toggle-value"><span class="app-secondary">the platform's own</span></span></div>
+      <div class="ap-divider"></div>
+      <span class="app-label">preview</span>
+      <div class="ap-preview">
+        <div class="ap-preview-band app-label">Files</div>
+        <div class="ap-preview-panes">
+          <div class="ap-preview-files"><span class="data-title">declarative-ai</span><span class="data-text">prompts/review.md</span><span class="data-secondary">4.2 kB</span></div>
+          <div class="ap-preview-task"><span class="data-text">tighten the sync lint</span><span class="pill pill-running pill-active" title="running"><span class="pill-glyph">▶</span><span class="pill-word">running</span></span><span class="data-secondary">40s · 3 turns</span></div>
+        </div>
+      </div>
+      <div class="ap-divider wide"></div>
+      <div class="ap-head wide"><span class="app-title">File types</span><span class="app-secondary">what opens a file, and what that thing looks like</span></div>
+      <div class="ft">
+        <div class="ft-tree">
+          <div class="ft-group"><button class="ft-row" aria-selected="false"><span class="ft-caret">▸</span><span class="ellip">Prose</span><span class="ft-count data-faint">2</span></button></div>
+          <div class="ft-group"><button class="ft-row" aria-selected="false"><span class="ft-caret">▾</span><span class="ellip">Code</span><span class="ft-count data-faint">8</span></button>
+            <div class="ft-kids">
+              <button class="ft-row" aria-selected="false"><span class="ellip">All code</span></button>
+              <button class="ft-row" aria-selected="true"><span class="ellip">TypeScript</span></button>
+              <button class="ft-row" aria-selected="false"><span class="ellip">Python</span></button>
+            </div>
+          </div>
+          <div class="ft-group"><button class="ft-row" aria-selected="false"><span class="ft-caret">▸</span><span class="ellip">Data</span><span class="ft-count data-faint">7</span></button></div>
+          <div class="ft-group"><button class="ft-row" aria-selected="false"><span class="ft-caret">▸</span><span class="ellip">Changes</span><span class="ft-count data-faint">1</span></button></div>
+          <div class="ft-group"><button class="ft-row" aria-selected="false"><span class="ft-caret">▸</span><span class="ellip">Media</span><span class="ft-count data-faint">1</span></button></div>
+        </div>
+        <div class="ft-stage">
+          <div class="ft-head"><span class="app-title">TypeScript</span><span class="grow"></span><span class="app-secondary ellip">text/x-typescript</span></div>
+          <div class="ft-modes">
+            <button class="ft-mode" aria-selected="true"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">text</span></span><span class="ft-mode-say ellip">Code view  ✎ Monaco</span></button>
+            <button class="ft-mode is-off" aria-selected="false" disabled><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">data</span></span><span class="ft-mode-say ellip">—</span></button>
+            <button class="ft-mode is-off" aria-selected="false" disabled><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">preview</span></span><span class="ft-mode-say ellip">—</span></button>
+          </div>
+          <div class="ft-body">
+            <div class="ft-preview">
+              <div class="ft-preview-bar"><span class="app-label">preview</span><span class="data-faint ellip">TypeScript · text · Code view</span><span class="ft-tag">read-only view</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/confirm-dialog">
+<meta name="state" content="confirm">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>confirm-dialog · confirm</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/confirm-dialog · confirm</p>
+<div class="mockup-stage" style="width: 760px; display: flex; flex-direction: column; align-items: center; gap: 22px; padding-block: 28px; background: var(--scrim)">
+  <!-- destructive: a task and everything it made -->
+  <form class="modal">
+    <h3>Delete "Pause a run and pick it up tomorrow"?</h3>
+    <div class="notice bad">This deletes the task, every run it made, and its worktree — uncommitted work included. None of it comes back.</div>
+    <div class="options">
+      <button type="submit" class="danger" autofocus>Delete</button>
+      <button type="button" class="ghost">Cancel</button>
+    </div>
+  </form>
+  <!-- the second ask, after a refusal names what depends on the target -->
+  <form class="modal">
+    <h3>Delete 'feature/build/plan' anyway?</h3>
+    <div class="notice bad">feature/build declares it as a child, and will fail to load without it.</div>
+    <div class="options">
+      <button type="submit" class="danger" autofocus>Delete anyway</button>
+      <button type="button" class="ghost">Cancel</button>
+    </div>
+  </form>
+  <!-- not destructive: setting a folder up as a project -->
+  <form class="modal">
+    <h3>Set up JaiRA in notes-api?</h3>
+    <div class="notice">C:\UbuntuCode\notes-api is not a JaiRA project yet. Setting it up creates a .jaira/ folder there for its workflows, settings and run history. Nothing else in the folder is touched.</div>
+    <div class="options">
+      <button type="submit" class="primary" autofocus>Set up project</button>
+      <button type="button" class="ghost">Cancel</button>
+    </div>
+  </form>
+</div>
+</body>
+</html>

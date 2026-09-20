@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-types-pane">
+<meta name="state" content="cannot-show">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-types-pane · cannot-show</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-types-pane · cannot-show</p>
+<div class="mockup-stage is-bare" style="width: 900px; display: grid; gap: 16px">
+  <div class="ft">
+    <div class="ft-tree">
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents — including text with nothing claimed about it"><span class="ft-caret">▸</span><span class="ellip">Prose</span><span class="ft-count data-faint">2</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="source files, drawn by grammar"><span class="ft-caret">▸</span><span class="ellip">Code</span><span class="ft-count data-faint">8</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents that denote a value — rows included"><span class="ft-caret">▾</span><span class="ellip">Data</span><span class="ft-count data-faint">7</span></button>
+        <div class="ft-kids">
+          <button class="ft-row" aria-selected="false" title="every type in this family — a value shows where they already agree"><span class="ellip">All data</span></button>
+          <button class="ft-row" aria-selected="false" title="application/json"><span class="ellip">JSON</span></button>
+          <button class="ft-row" aria-selected="false" title="application/yaml"><span class="ellip">YAML</span></button>
+          <button class="ft-row" aria-selected="false" title="application/toml"><span class="ellip">TOML</span></button>
+          <button class="ft-row" aria-selected="true" title="application/vnd.jaira.workflow+json"><span class="ellip">Workflow (JSON)</span></button>
+          <button class="ft-row" aria-selected="false" title="application/vnd.jaira.workflow+yaml"><span class="ellip">Workflow (YAML)</span></button>
+          <button class="ft-row" aria-selected="false" title="text/csv"><span class="ellip">CSV</span></button>
+          <button class="ft-row" aria-selected="false" title="text/tab-separated-values"><span class="ellip">TSV</span></button>
+        </div>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="a patch, and the edit it describes"><span class="ft-caret">▸</span><span class="ellip">Changes</span><span class="ft-count data-faint">1</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="pictures, and the markup that draws them"><span class="ft-caret">▸</span><span class="ellip">Media</span><span class="ft-count data-faint">1</span></button>
+      </div>
+    </div>
+    <div class="ft-stage">
+      <div class="ft-head"><span class="app-title">Workflow (JSON)</span><span class="grow"></span><span class="app-secondary ellip" title="application/vnd.jaira.workflow+json">application/vnd.jaira.workflow+json</span></div>
+      <div class="ft-modes">
+        <button class="ft-mode" aria-selected="false" title="the characters as they are on disk — an editor, or coloured source"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">text</span></span><span class="ft-mode-say ellip">Schema-aware</span></button>
+        <button class="ft-mode" aria-selected="false" title="the value the document denotes, once parsed — a tree, a table, a form"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">data</span></span><span class="ft-mode-say ellip">Authoring form</span></button>
+        <button class="ft-mode" aria-selected="true" title="what the document means, rendered — prose, a page, a drawing, a board"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">preview</span></span><span class="ft-mode-say ellip">Board</span></button>
+      </div>
+      <div class="ft-body">
+        <div class="ft-arranging"><span class="app-label">arranging</span><span class="ft-seg"><button aria-pressed="true">the read-only view</button><button aria-pressed="false">the editor</button></span></div>
+        <div class="ft-menu">
+          <div class="ft-menu-head"><span class="app-label">preview</span><span class="app-secondary">the view you cannot type into</span></div>
+          <div class="ft-mm-row is-lead"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick">✓</span><span class="ft-mm-name"><span class="app-text">Board<span class="app-secondary"> ours</span></span><span class="app-secondary ellip">what this state is doing right now</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+          <div class="ft-mm-row"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Nothing</span><span class="app-secondary ellip">no view of this kind — a surface that would show one shows none</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+        </div>
+        <div class="ft-preview">
+          <div class="ft-preview-bar"><span class="app-label">preview</span><span class="data-faint ellip">Workflow (JSON) · preview · Board</span><span class="ft-tag">read-only view</span></div>
+          <div class="ft-preview-note app-secondary">Board needs a file that is actually open — it draws a run, not a sample. Open one to see it.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ft">
+    <div class="ft-tree">
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents — including text with nothing claimed about it"><span class="ft-caret">▸</span><span class="ellip">Prose</span><span class="ft-count data-faint">2</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="source files, drawn by grammar"><span class="ft-caret">▾</span><span class="ellip">Code</span><span class="ft-count data-faint">8</span></button>
+        <div class="ft-kids">
+          <button class="ft-row" aria-selected="false" title="every type in this family — a value shows where they already agree"><span class="ellip">All code</span></button>
+          <button class="ft-row" aria-selected="true" title="text/x-typescript"><span class="ellip">TypeScript</span></button>
+          <button class="ft-row" aria-selected="false" title="text/javascript"><span class="ellip">JavaScript</span></button>
+          <button class="ft-row" aria-selected="false" title="text/x-python"><span class="ellip">Python</span></button>
+          <button class="ft-row" aria-selected="false" title="application/x-sh"><span class="ellip">Shell</span></button>
+          <button class="ft-row" aria-selected="false" title="text/css"><span class="ellip">CSS</span></button>
+          <button class="ft-row" aria-selected="false" title="text/html"><span class="ellip">HTML</span></button>
+          <button class="ft-row" aria-selected="false" title="application/xml"><span class="ellip">XML</span></button>
+          <button class="ft-row" aria-selected="false" title="text/x-sql"><span class="ellip">SQL</span></button>
+        </div>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents that denote a value — rows included"><span class="ft-caret">▸</span><span class="ellip">Data</span><span class="ft-count data-faint">7</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="a patch, and the edit it describes"><span class="ft-caret">▸</span><span class="ellip">Changes</span><span class="ft-count data-faint">1</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="pictures, and the markup that draws them"><span class="ft-caret">▸</span><span class="ellip">Media</span><span class="ft-count data-faint">1</span></button>
+      </div>
+    </div>
+    <div class="ft-stage">
+      <div class="ft-head"><span class="app-title">TypeScript</span><span class="grow"></span><span class="app-secondary ellip" title="text/x-typescript">text/x-typescript</span></div>
+      <div class="ft-modes">
+        <button class="ft-mode" aria-selected="false" title="the characters as they are on disk — an editor, or coloured source"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">text</span></span><span class="ft-mode-say ellip">Monaco</span></button>
+        <button class="ft-mode is-off" aria-selected="true" disabled title="this type has no rendering of that kind"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">data</span></span><span class="ft-mode-say ellip">—</span></button>
+        <button class="ft-mode is-off" aria-selected="false" disabled title="this type has no rendering of that kind"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">preview</span></span><span class="ft-mode-say ellip">—</span></button>
+      </div>
+      <div class="ft-body">
+        <span class="app-secondary">This type has no rendering of that kind — a TypeScript file denotes no value, a CSV has nothing to render.</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

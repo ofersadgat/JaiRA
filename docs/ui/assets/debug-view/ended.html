@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/debug-view">
+<meta name="state" content="ended">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>debug-view · ended</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/debug-view · ended</p>
+<div class="mockup-stage" style="width: 670px; display: flex">
+  <div class="col mid debug">
+    <!-- a pass: the verdict with both halves of its evidence -->
+    <section>
+      <h3>Result</h3>
+      <div class="debug-verdict good"><span class="badge badge-completed" title="completed">✓</span><span class="debug-verdict-word">PASS</span><span class="sub">completed</span></div>
+      <div class="field"><span>the greeting</span><pre class="outputs">Hello, world!</pre></div>
+      <div class="field"><span>the judgement</span><pre class="outputs">The reply was "Hello, world!", which greets the world.</pre></div>
+    </section>
+    <!-- a fail: the model answered, and the check said no -->
+    <section>
+      <h3>Result</h3>
+      <div class="debug-verdict bad"><span class="badge badge-completed" title="completed">✓</span><span class="debug-verdict-word">FAIL</span><span class="sub">completed</span></div>
+      <div class="field"><span>the greeting</span><pre class="outputs"></pre></div>
+      <div class="field"><span>the judgement</span><pre class="outputs">The text between the markers is empty, so there is no greeting to judge.</pre></div>
+    </section>
+    <!-- no verdict: the run settled without publishing one -->
+    <section>
+      <h3>Result</h3>
+      <div class="debug-verdict unknown"><span class="badge badge-failed" title="failed">✗</span><span class="debug-verdict-word">NO VERDICT</span><span class="sub">failed</span></div>
+      <div class="notice warn">The run settled without publishing a verdict — look at the instance tree and the events beside it for where it stopped.</div>
+<pre class="outputs">{
+  "stateId": "debug/hello_world/say",
+  "code": "provider_unavailable",
+  "message": "AI_LoadAPIKeyError: Anthropic API key is missing. Pass it using the 'apiKey' parameter or the ANTHROPIC_API_KEY environment variable."
+}</pre>
+    </section>
+  </div>
+</div>
+</body>
+</html>

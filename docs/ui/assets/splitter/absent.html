@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/splitter">
+<meta name="state" content="absent">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>splitter · absent</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/splitter · absent</p>
+<div class="mockup-stage" style="width: 620px; height: 240px">
+  <div class="app" style="--sidebar: 46px">
+    <nav class="sidebar shut">
+      <div class="side-title">
+        <button class="side-toggle" title="show the sidebar" aria-label="Show the sidebar" aria-expanded="false">▸|</button>
+      </div>
+      <div class="side-rail">
+        <div class="rail-views">
+          <div class="side-row"><button class="side-hit" title="All tasks" aria-label="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button></div>
+          <div class="side-row"><button class="side-hit" title="All conversations" aria-label="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button></div>
+        </div>
+        <div class="rail-split"></div>
+        <div class="rail-projects">
+          <button class="rail-tile on" title="C:\UbuntuCode\declarative-ai" aria-current="true" style="--hue: var(--p1)"><span class="side-glyph">de</span></button>
+          <button class="rail-tile" title="C:\UbuntuCode\notes-api" style="--hue: var(--p2)"><span class="side-glyph">no</span></button>
+        </div>
+        <div class="rail-split"></div>
+        <div class="rail-views">
+          <div class="side-row"><button class="side-hit" title="Files" aria-label="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button></div>
+          <div class="side-row on is-active"><button class="side-hit" title="Tasks" aria-label="Tasks" aria-current="page"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button></div>
+          <div class="side-row"><button class="side-hit" title="Chat" aria-label="Chat"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button></div>
+        </div>
+      </div>
+    </nav>
+    <div class="body">
+      <div class="title-bar"><div class="title-drag"></div></div>
+      <div class="viewport">
+        <div class="view tasks-view" style="--pane-right: 220px">
+          <div class="col mid"><p class="empty">No board here yet.</p></div>
+          <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the task panel" tabindex="0"></div>
+          <aside class="col panel">
+            <header>
+              <h2><span class="badge badge-running" title="running">▶</span> <span class="task-name">Rewind a run</span></h2>
+              <div class="sub">t-qfr49rm80m · feature</div>
+            </header>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

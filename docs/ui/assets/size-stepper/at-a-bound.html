@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/size-stepper">
+<meta name="state" content="at-a-bound">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>size-stepper · at-a-bound</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/size-stepper · at-a-bound</p>
+<div class="mockup-stage" style="width: 600px; padding: 16px 20px 0">
+  <div class="cfg-pane ap">
+    <div class="ap-field">
+      <span class="app-label">app text</span>
+      <div class="ap-line">
+        <div class="face-box">
+          <div class="face-stack">
+            <span class="face-chip is-ours" title="JaiRA's own — choosing a family replaces it"><span class="face-n data-num">1</span><span class="face-name app-text">DM Sans</span><span class="face-ours app-secondary">ours</span></span>
+            <button class="face-add app-secondary" aria-expanded="false">+ add…</button>
+          </div>
+        </div>
+        <div class="size-box">
+          <input class="size-n data-num" type="number" min="11" max="17" step="0.5" value="17">
+          <span class="data-faint">px</span>
+          <span class="size-step"><button title="larger (max 17)" disabled>▲</button><button title="smaller (min 11)">▼</button></span>
+        </div>
+      </div>
+    </div>
+    <div class="ap-field">
+      <span class="app-label">data text</span>
+      <div class="ap-line">
+        <div class="face-box">
+          <div class="face-stack">
+            <span class="face-chip is-ours" title="JaiRA's own — choosing a family replaces it"><span class="face-n data-num">1</span><span class="face-name data-text">JetBrains Mono</span><span class="face-ours app-secondary">ours</span></span>
+            <button class="face-add app-secondary" aria-expanded="false">+ add…</button>
+          </div>
+        </div>
+        <div class="size-box">
+          <input class="size-n data-num" type="number" min="10" max="16" step="0.5" value="24">
+          <span class="data-faint">px</span>
+          <span class="size-step"><button title="larger (max 16)" disabled>▲</button><button title="smaller (min 10)">▼</button></span>
+        </div>
+      </div>
+    </div>
+    <div class="ft-knobs">
+      <div class="ft-knobs-head"><span class="app-label">how it is drawn</span><span class="app-secondary ellip">every file Live preview draws, not only this type</span></div>
+      <div class="ap-toggle">
+        <span></span>
+        <span class="app-text">Line spacing</span>
+        <span class="ap-toggle-value">
+          <div class="size-box">
+            <input class="size-n data-num" type="number" min="1.1" max="2.2" step="0.05" value="1.1">
+            <span class="data-faint">×</span>
+            <span class="size-step"><button title="larger (max 2.2)">▲</button><button title="smaller (min 1.1)" disabled>▼</button></span>
+          </div>
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

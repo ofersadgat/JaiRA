@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/logs-view">
+<meta name="state" content="configuring">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>logs-view · configuring</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/logs-view · configuring</p>
+<div class="mockup-stage" style="width: 1030px; height: 480px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view logs-view">
+        <div class="logs">
+          <div class="logs-bar">
+            <select aria-label="Minimum level"><option>debug and worse</option></select>
+            <select aria-label="Source"><option>all sources</option></select>
+            <input placeholder="Filter…" aria-label="Filter">
+            <span class="grow"></span>
+            <button class="on">Configure</button>
+            <span class="sub">200+ shown</span>
+          </div>
+          <div class="log-config">
+            <div class="log-config-head">
+              <label class="field-inline"><span>Keep</span><select aria-label="Minimum level kept"><option>info and worse</option></select></label>
+              <span class="sub">everywhere, unless a rule below says otherwise. An error is kept whatever this says.</span>
+            </div>
+            <table class="log-rules">
+              <thead><tr><th>match</th><th>key</th><th>keep</th><th>sample</th><th></th></tr></thead>
+              <tbody>
+                <tr><td class="sub">scope</td><td class="log-rule-key">jaira.persistence</td><td><select aria-label="Minimum level for jaira.persistence"><option>warn</option></select></td><td><input type="number" min="0" max="1" step="0.1" value="1" aria-label="Sampling for jaira.persistence"></td><td><button class="link">remove</button></td></tr>
+                <tr><td class="sub">tag</td><td class="log-rule-key">llm</td><td><select aria-label="Minimum level for llm"><option>debug</option></select></td><td><input type="number" min="0" max="1" step="0.1" value="0.2" aria-label="Sampling for llm"></td><td><button class="link">remove</button></td></tr>
+              </tbody>
+            </table>
+            <div class="log-config-add">
+              <select aria-label="Rule kind"><option>scope</option></select>
+              <select aria-label="Rule scope"><option>all sources</option></select>
+              <select aria-label="Rule level"><option>debug</option></select>
+              <button disabled>Add rule</button>
+            </div>
+          </div>
+          <div class="logs-head"><span>time</span><span>level</span><span>source</span><span>message</span><span></span></div>
+          <div class="logs-list">
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0"><span class="log-at">2:22:07 PM</span><span class="log-level log-info">info</span><span class="log-source" title="run">run</span><span class="log-message">t-qfr49rm80m entered feature/ux/draft</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-debug" role="button" tabindex="0"><span class="log-at">2:22:06 PM</span><span class="log-level log-debug">debug</span><span class="log-source" title="jaira.llm.anthropic">jaira.llm.anthropic</span><span class="log-message">request claude-sonnet-5 · 4,812 in · streaming</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-warn" role="button" tabindex="0"><span class="log-at">2:22:05 PM</span><span class="log-level log-warn">warn</span><span class="log-source" title="engine">engine</span><span class="log-message">t-qfr49rm80m feature/ux/critique: the model returned no text, retrying once (attempt 2 of 2)</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0"><span class="log-at">2:21:12 PM</span><span class="log-level log-info">info</span><span class="log-source" title="ipc">ipc</span><span class="log-message">settings:write logging</span><span class="log-links"></span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

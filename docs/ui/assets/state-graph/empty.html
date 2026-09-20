@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/state-graph">
+<meta name="state" content="empty">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>state-graph · empty</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/state-graph · empty</p>
+<div class="mockup-stage" style="width: 720px; height: 360px; display: flex; flex-direction: column">
+  <div class="config-half whole">
+    <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Configuration</span><span class="grow"></span></button>
+    <div class="pane editor">
+      <div class="edit-bar editor-top">
+        <div class="sub file-path" title="C:\Users\ofer\.jaira\workflows\feature\ui\sketch.json">C:\Users\ofer\.jaira\workflows\feature\ui\sketch.json</div>
+        <span class="chip chip-warn" title="Editing the shared copy. Every project that has not overridden this state will see the change.">shared copy</span>
+        <div class="tabs seg">
+          <button class="ghost" title="the fields, as controls">Form</button>
+          <button class="ghost" title="the document, as text">JSON</button>
+          <button class="layer-on" title="what runs after what, and what makes it">Graph</button>
+        </div>
+      </div>
+<div class="sg">
+<div class="sg-bar edit-bar">
+<span class="sg-key" title="a value moving from where it is produced to where it is read&#10;&#10;grey until you point at something: the lines that answer take the colour of the value they carry, one colour per value, wherever it goes"><i class="sg-swatch sg-swatch-data"></i>values</span>
+<span class="sg-key" title="the cursor's own path: the sequence, in order"><i class="sg-swatch sg-swatch-spine"></i>the sequence</span>
+<span class="sg-key" title="nearer the end: on to a later step, or out"><i class="sg-swatch sg-swatch-onward"></i>onward</span>
+<span class="spacer"></span><span class="sub">drag to pan · scroll to zoom</span>
+<div class="tabs seg"><button class="ghost" title="zoom out">−</button><button class="layer-on" title="fit the whole state in the pane">100%</button><button class="ghost" title="zoom in">+</button></div>
+</div>
+<div class="sg-map">
+<div class="sg-canvas" style="width: 668px; height: 138px; transform: translate(9.5px, 32px) scale(1)">
+<svg class="sg-lines" width="668" height="138" aria-hidden="true" focusable="false"><defs>
+<marker id="sg-arrow-spine" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" class="sg-head-spine"></path></marker>
+<marker id="sg-arrow-onward" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" class="sg-head-onward"></path></marker>
+<marker id="sg-arrow-back" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" class="sg-head-back"></path></marker>
+<marker id="sg-arrow-abort" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" class="sg-head-abort"></path></marker>
+</defs>
+<g><path d="M 282 44 C 282 44, 386 44, 386 44" class="sg-step sg-step-onward sg-step-sequence" marker-end="url(#sg-arrow-spine)"></path><path d="M 282 44 C 282 44, 386 44, 386 44" class="sg-hit"><title>unconditional
+
+declared in the state's own list — considered after every round, whatever finished</title></path></g>
+</svg>
+<div class="sg-node sg-entry" style="left: 24px; top: 24px; width: 258px; height: 76px"><div class="sg-title app-text">Entry</div><div class="sg-subtitle data-secondary" title="feature/ui/sketch">feature/ui/sketch</div><div class="sg-node-chips"><span class="chip">no inputs</span></div></div>
+<div class="sg-node sg-exit" style="left: 386px; top: 24px; width: 258px; height: 76px"><div class="sg-title app-text">Exit</div><div class="sg-subtitle data-secondary" title="terminate.success">terminate.success</div><div class="sg-node-chips"><span class="chip">no outputs</span></div></div>
+</div>
+<div class="sg-edge-marks">
+</div></div></div>
+      <div class="pane-actions pinned">
+        <button class="primary" disabled>Save</button>
+        <button class="ghost" disabled>Revert</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-link-field">
+<meta name="state" content="unresolved">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-link-field · unresolved</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-link-field · unresolved</p>
+<div class="mockup-stage" style="width: 640px">
+  <div class="config-half whole">
+    <div class="pane editor">
+      <div class="form">
+        <div class="slots">
+          <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+          <label class="field"><span>Kind</span><select><option value="prompt" selected>prompt — one model call</option></select></label>
+          <div class="op-block">
+            <label class="field">
+              <span>Prompt<button type="button" class="ghost sm link-toggle on" title="hold this value inline instead of in a file — what you had before linking comes back">🔗 Linked</button></span>
+              <input class="link-input unresolved" list="link-targets" value="$/prompts/feature/ui/rendr.md" spellcheck="false" placeholder="$/prompts/feature_goals.md">
+              <span class="sub warn">no file here yet — the linter will call this unresolved</span>
+              <span class="sub">spliced in where it is referenced — a copy, not a live link</span>
+            </label>
+          </div>
+        </div>
+        <div class="slots">
+          <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+          <label class="field"><span>Kind</span><select><option value="prompt" selected>prompt — one model call</option></select></label>
+          <div class="op-block">
+            <label class="field" title="reference '$/prompts/feature/ui/critque.md' names 'prompts/feature/ui/critque.md', which does not exist" data-issue="operation.prompt">
+              <span>Prompt<button type="button" class="ghost sm link-toggle on" title="hold this value inline instead of in a file — what you had before linking comes back">🔗 Linked</button></span>
+              <input class="link-input unresolved issue-bad" list="link-targets" value="$/prompts/feature/ui/critque.md" spellcheck="false" placeholder="$/prompts/feature_goals.md">
+              <span class="sub warn">no file here yet — the linter will call this unresolved</span>
+              <span class="sub">spliced in where it is referenced — a copy, not a live link</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

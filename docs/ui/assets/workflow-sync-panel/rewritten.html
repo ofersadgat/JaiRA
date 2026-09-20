@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/workflow-sync-panel">
+<meta name="state" content="rewritten">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>workflow-sync-panel · rewritten</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/workflow-sync-panel · rewritten</p>
+<div class="mockup-stage" style="width: 720px; height: 640px; display: grid">
+<div class="col mid config-shut" style="--viewer-height: 600px">
+    <div class="run-half">
+      <div class="sync-panel">
+        <div class="sync-head">
+          <div class="sync-line"><span class="grow">The description has changed since the last sync; the workflows have not.</span><span class="sub" title="13/09/2026, 08:14:03">last synced 3 hours ago</span></div>
+          <div class="sync-actions"><button class="ghost" title="from the workflows as they are">Rewrite the description</button><button title="from what the description asks for">Propose workflow changes</button><button class="ghost sync-toggle">Preview</button></div>
+          <div class="sub">A proposal from this session is still unsaved — the baseline moves when you save it.</div>
+        </div>
+        <div class="sync-body">
+          <div class="sync-report"><div class="sync-verdict"><span class="chip chip-warn">diverges</span><span class="sub">against feature · $0.092</span></div><section class="sync-section"><h3><span>Changes to this document</span><span class="count">2</span></h3><div class="notice">The rewritten description is in the editor below, unsaved. Read it, then Save or Revert.</div><div class="sync-change"><span class="grow">States that the reject path of the plan gate returns to the draft.</span><span class="sub">R2</span></div><div class="sync-change"><span class="grow">Adds a requirement that a critique failing twice ends the run.</span><span class="sub">R5</span></div></section><section class="sync-section"><h3><span>Requirements</span><span class="count">4</span></h3><div class="sync-finding"><div class="sync-finding-head"><span class="chip chip-bad">missing</span><b>R3</b><span class="grow">The plan names the tests each step must pass.</span></div><div class="sub">feature/plan/draft asks for steps and never for their tests.</div><div class="sub sync-states">feature/plan/draft</div></div><div class="sync-finding"><div class="sync-finding-head"><span class="chip chip-warn">partial</span><b>R2</b><span class="grow">A person approves the plan before anything is built.</span></div><div class="sub">The gate exists but its reject path ends the run instead of returning to the plan.</div><div class="sub sync-states">feature/plan/gate · feature/plan</div></div><div class="sync-finding"><div class="sync-finding-head"><span class="chip chip-ok">satisfied</span><b>R1</b><span class="grow">The plan is drafted, critiqued and redrafted at most three times.</span></div><div class="sub sync-states">feature/plan/draft · feature/plan/critique</div></div><div class="sync-finding"><div class="sync-finding-head"><span class="chip chip-ok">satisfied</span><b>R4</b><span class="grow">The merge waits for a changeset review.</span></div><div class="sub sync-states">feature/merge/review</div></div></section></div>
+        </div>
+      </div>
+    </div>
+    <div class="config-half shut">
+      <button type="button" class="half-bar" title="folded away — click for half the column"><span class="half-caret">▁</span><span class="half-label">Source</span><span class="grow"></span><span class="dirty-dot" title="unsaved edits">●</span></button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

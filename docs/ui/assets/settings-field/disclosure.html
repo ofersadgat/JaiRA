@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/settings-field">
+<meta name="state" content="disclosure">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-field · disclosure</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/settings-field · disclosure</p>
+<div class="mockup-stage" style="width: 760px">
+<div class="settings-body">
+    <div class="cfg-pane">
+      <div class="cfg-disclosure">
+        <button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">The raw document</span><span class="cfg-hint">· everything, as it is stored</span></button>
+      </div>
+      <div class="cfg-disclosure open">
+        <button type="button" class="cfg-disclosure-head" aria-expanded="true"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Add a preset</span><span class="cfg-hint">· a named set of call settings</span></button>
+        <div class="cfg-disclosure-body">
+          <div class="cfg-stack">
+            <div class="cfg-fields">
+          <div class="cfg-field">
+            <div class="cfg-field-say">
+              <span class="cfg-field-head"><span class="cfg-label">Name</span></span>
+              <span class="cfg-hint">What a state will write in configRef.<code class="cfg-param">models.presets.&lt;name&gt;</code></span>
+            </div>
+            <div class="cfg-control"><input class="cfg-input mono" value="review-strict" placeholder="fast"></div>
+          </div>
+            </div>
+            <div class="pane-actions"><button>Add it</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

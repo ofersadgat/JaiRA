@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/context-panel">
+<meta name="state" content="absent">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>context-panel · absent</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/context-panel · absent</p>
+<div class="mockup-stage is-bare" style="width: 360px; display: grid; grid-template-rows: repeat(4, 96px); gap: 12px">
+  <!-- Tasks, no card selected -->
+  <aside class="col panel">
+    <p class="empty">Select a task.</p>
+  </aside>
+  <!-- Files, no file open -->
+  <aside class="col panel">
+    <p class="empty">Select a file.</p>
+  </aside>
+  <!-- a run on the address, not yet read -->
+  <aside class="col panel">
+    <div class="inspector">
+      <div class="insp-crumb">
+        <button class="link back-arrow" title="back to the state">←</button>
+        <span class="state-id ellip">draft</span>
+        <span class="sub">· the run</span>
+        <span class="grow"></span>
+      </div>
+      <p class="empty">Reading the run…</p>
+    </div>
+  </aside>
+  <!-- the task behind a run could not be read -->
+  <aside class="col panel">
+    <div class="inspector">
+      <div class="insp-crumb">
+        <button class="link back-arrow" title="Back to feature/ux/draft">←</button>
+        <span class="sub">no task</span>
+      </div>
+      <p class="empty">That task could not be read.</p>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

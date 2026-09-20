@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/code-editor">
+<meta name="state" content="fitted">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>code-editor · fitted</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/code-editor · fitted</p>
+<div class="mockup-stage" style="width: 720px; padding: 12px 15px; --ed-scheme: light; --ed-bg: #ffffff; --ed-panel: #f4f4f2; --ed-text: #000000; --ed-dim: #9f9f8f; --ed-line: #e0e0e0; --ed-tok-string: #f25a00; --ed-tok-number: #ae81ff; --ed-tok-keyword: #f92672; --ed-tok-type: #28c6e4; --ed-tok-hint: #9f9f8f; --ed-selection: #c2e8ff">
+  <div class="md-editor ed-themed">
+    <div class="cm-editor">
+      <div class="cm-content">
+        <div class="cm-line cm-h2">Picking a reviewer</div>
+        <div class="cm-line">The review state calls this with the task and the team, and the answer is who the gate asks.</div>
+        <div class="cm-fence-block">
+          <div class="vv vv-inline">
+            <div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" aria-pressed="true" title="Highlighted, in an editor">Code</button><button type="button" aria-pressed="false" title="The text exactly as it was produced">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+            <div class="vv-body">
+              <!-- Sized to its text at run time: no floor, no scrollbars, long lines wrapped. -->
+              <div class="monaco-host monaco-fit">
+                <div class="md-editor ed-themed">
+                  <div class="vv-patch-body">
+                    <div class="vv-patch-line"><span class="vv-patch-no">1</span><span class="vv-patch-text"><span class="tok-comment">/** The reviewer for a task: its owner, unless they wrote it, in which case the first</span></span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no"></span><span class="vv-patch-text"><span class="tok-comment">    other member of the team who is not away. */</span></span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no">2</span><span class="vv-patch-text"><span class="tok-keyword">export</span> <span class="tok-type">function</span> <span class="tok-fn">pickReviewer</span>(task: <span class="tok-type">Task</span>, team: <span class="tok-type">string</span>[]): <span class="tok-type">string</span> {</span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no">3</span><span class="vv-patch-text">  <span class="tok-keyword">return</span> team.<span class="tok-fn">find</span>(<span class="tok-fn">isNot</span>(task.createdBy)) <span class="tok-keyword">??</span> task.createdBy;</span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no">4</span><span class="vv-patch-text">}</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cm-line">It never picks the author while anyone else is there.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

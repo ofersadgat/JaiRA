@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/llm-config-form">
+<meta name="state" content="disabled">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>llm-config-form · disabled</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/llm-config-form · disabled</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <div class="llm-config">
+          <nav class="llm-rail">
+            <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">temperature · topP</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+          </nav>
+          <div class="llm-detail">
+            <div class="llm-detail-head">
+              <span class="llm-detail-title">Sampling</span>
+              <span class="cfg-hint">How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.</span>
+            </div>
+            <div class="cfg-fields">
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Temperature</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">Higher is more varied, lower more repeatable. Empty inherits the provider's default.<code class="cfg-param">temperature</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" value="0.2" placeholder="—" disabled></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Top-p</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">Nucleus sampling: consider only the most likely tokens adding up to this probability mass (0–1).<code class="cfg-param">topP</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" value="0.9" placeholder="—" disabled></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Top-k</span></span><span class="cfg-hint">Consider only the k most likely tokens. Provider-dependent; empty inherits.<code class="cfg-param">topK</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—" disabled></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/schema-json-editor">
+<meta name="state" content="success">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>schema-json-editor · success</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/schema-json-editor · success</p>
+<div class="mockup-stage" style="width: 720px; height: 860px; display: flex; flex-direction: column">
+  <div class="config-half whole">
+    <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Configuration</span><span class="grow"></span></button>
+    <div class="pane editor">
+      <div class="edit-bar editor-top">
+        <div class="sub file-path" title="C:\Users\ofer\.jaira\workflows\feature\ui\item\draft.json">C:\Users\ofer\.jaira\workflows\feature\ui\item\draft.json</div>
+        <span class="chip chip-warn" title="Editing the shared copy. Every project that has not overridden this state will see the change.">shared copy</span>
+        <div class="tabs seg">
+          <button class="ghost" title="the fields, as controls">Form</button>
+          <button class="layer-on" title="the document, as text">JSON</button>
+          <button class="ghost" title="what runs after what, and what makes it">Graph</button>
+        </div>
+      </div>
+      <div class="file-edit schema-edit">
+        <div class="edit-bar schema-bar">
+          <label class="schema-pick"><span class="sub">Schema</span><select><option value="">none — plain JSON</option><option value="state" selected>Workflow state</option><option value="state-prompt">Workflow state (prompt)</option><option value="prompt-operation">Prompt operation</option></select></label>
+          <button class="ghost" title="a state file as it lives under workflows/ — WORKFLOWS.md §2">Add missing fields</button>
+          <button class="ghost">Fields</button>
+          <span class="chip chip-ok">conforms</span>
+          <label class="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways"><input type="checkbox"><span class="sub">Wrap</span></label>
+        </div>
+        <div class="sub schema-hint">a state file as it lives under workflows/ — WORKFLOWS.md §2</div>
+        <div class="schema-body" style="--reference-width: 300px">
+          <div class="schema-main">
+            <div class="editor-stack">
+              <pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"label"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Draft the component"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">display name on the board; falls back to the id</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"One turn in this item's conversation; the prompt arrives rendered by whichever rule sent control here."</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">author's note; also useful prompt context</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"environment"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">defaults for this state's operation and every descendant's (§5)</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"session"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"name"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"ui-item"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"in"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"parent"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"inputs"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"prompt"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"blob"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">JSON Schema for the value; absent ⇒ unconstrained, and nothing about it …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"contentMediaType"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"text/markdown"</span><span class="line-hint-slot"><span class="line-hint">the media type — THIS is what makes a slot a blob (§3), e.g. text/markdo…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"outputs"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"doc"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"blob"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">JSON Schema for the value; absent ⇒ unconstrained, and nothing about it …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"contentMediaType"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"text/markdown"</span><span class="line-hint-slot"><span class="line-hint">the media type — THIS is what makes a slot a blob (§3), e.g. text/markdo…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.doc"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"doc_path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.doc_path"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"standing_amendment"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"blob"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">JSON Schema for the value; absent ⇒ unconstrained, and nothing about it …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"contentMediaType"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"text/markdown"</span><span class="line-hint-slot"><span class="line-hint">the media type — THIS is what makes a slot a blob (§3), e.g. text/markdo…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.standing_amendment"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"optional"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-literal">true</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"questions"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.questions"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"optional"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-literal">true</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"responses"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.responses"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"optional"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-literal">true</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"operation"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">the one thing this state does (§4); {} means "what my environment chain …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"prompt"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">which of the two operation shapes applies</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"prompt"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"{{.inputs.prompt}}"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">Prompt — {{.inputs.x}} interpolates; Link holds it in a file instead</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span><span class="line-hint-slot"><span class="line-hint">Tools — logical names resolved through the tool registry — an empty list…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-string">"read_file"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"permissions"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"profile"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"read-only"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">a named profile — read-only, plan, full, or a custom one</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">per-tool modes, keyed by tool name</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"scopes"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/product/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ux/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ui/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/_templates/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">]</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"output"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">output slot (§4.4); absent ⇒ built from the state's produced outputs</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"doc"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"contentMediaType"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"text/markdown"</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"The complete doc, frontmatter included."</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"doc_path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Where it goes: docs/&lt;id&gt;.md."</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"standing_amendment"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Only when a standing doc is wrong."</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"questions"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"array"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"items"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"object"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"required"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-string">"name"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-string">"question"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-string">"options"</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"properties"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"name"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"question"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"header"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"options"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"array"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"items"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"object"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-key">"required"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">                    </span><span class="tok tok-string">"value"</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-key">"properties"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                    </span><span class="tok tok-key">"value"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                      </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">                    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">                    </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                      </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">                    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"default"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"custom"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"boolean"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"optional"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"boolean"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"responses"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"array"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"items"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"object"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"required"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-string">"claim"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-string">"disposition"</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"properties"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"severity"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"claim"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"target_id"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"disposition"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"enum"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-string">"fixed"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-string">"rejected"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">                  </span><span class="tok tok-string">"blocked"</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-punct">]</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-key">"note"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">                </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span>
+</span><span class="code-line"><span class="tok tok-plain">              </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span><span class="code-line">
+</span></pre>
+              <textarea class="code-layer code-input" spellcheck="false" wrap="off">{
+  "label": "Draft the component",
+  "description": "One turn in this item's conversation; the prompt arrives rendered by whichever rule sent control here.",
+  "environment": {
+    "session": {
+      "name": "ui-item",
+      "in": "parent"
+    }
+  },
+  "inputs": {
+    "prompt": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    }
+  },
+  "outputs": {
+    "doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      },
+      "binding": ".operation.output.doc"
+    },
+    "doc_path": {
+      "binding": ".operation.output.doc_path"
+    },
+    "standing_amendment": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      },
+      "binding": ".operation.output.standing_amendment",
+      "optional": true
+    },
+    "questions": {
+      "binding": ".operation.output.questions",
+      "optional": true
+    },
+    "responses": {
+      "binding": ".operation.output.responses",
+      "optional": true
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "prompt": "{{.inputs.prompt}}",
+    "tools": [
+      "read_file"
+    ],
+    "permissions": {
+      "profile": "read-only",
+      "tools": {
+        "read_file": "allow"
+      },
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ux/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        }
+      ]
+    },
+    "output": {
+      "doc": {
+        "schema": {
+          "type": "string",
+          "contentMediaType": "text/markdown"
+        },
+        "description": "The complete doc, frontmatter included."
+      },
+      "doc_path": {
+        "schema": {
+          "type": "string"
+        },
+        "description": "Where it goes: docs/&lt;id&gt;.md."
+      },
+      "standing_amendment": {
+        "schema": {
+          "type": "string"
+        },
+        "description": "Only when a standing doc is wrong."
+      },
+      "questions": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "question",
+              "options"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "default": {
+                "type": "string"
+              },
+              "custom": {
+                "type": "boolean"
+              },
+              "optional": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "claim",
+              "disposition"
+            ],
+            "properties": {
+              "severity": {
+                "type": "string"
+              },
+              "claim": {
+                "type": "string"
+              },
+              "target_id": {
+                "type": "string"
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "fixed",
+                  "rejected",
+                  "blocked"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pane-actions pinned">
+        <button class="primary">Save</button>
+        <button class="ghost">Revert</button>
+        <span class="sub">unsaved changes</span>
+      </div>
+    </div>
+  </div>
+  <div class="config-half">
+    <div class="file-edit schema-edit">
+      <div class="edit-bar schema-bar">
+        <span class="schema-pick"><span class="sub">Schema</span><span class="chip" title="a decision with named outcomes — `choose_option`&#39;s args">choose_option config</span></span>
+        <button class="ghost" title="a decision with named outcomes — `choose_option`&#39;s args">Add missing fields</button>
+        <button class="ghost">Fields</button>
+        <span class="chip chip-ok">conforms</span>
+        <label class="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways"><input type="checkbox"><span class="sub">Wrap</span></label>
+      </div>
+      <div class="sub schema-hint">a decision with named outcomes — `choose_option`&#39;s args</div>
+      <div class="schema-body" style="--reference-width: 300px">
+        <div class="schema-main">
+          <div class="editor-stack">
+            <pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"prompt"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Pick a direction for the plan."</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the question, as the person reads it — the dialog's heading</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"options"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span><span class="line-hint-slot"><span class="line-hint">the decision buttons, in order; a bare string is an option whose label i…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"value"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"approve"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"the plan goes forward as written"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"icon"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"check"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"value"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"request_changes"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"back to the model with your note"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"icon"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"comment"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"value"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"block"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"nothing downstream is built"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"tone"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"danger"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"icon"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"cross"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">]</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span><span class="code-line">
+</span></pre>
+            <textarea class="code-layer code-input" spellcheck="false" wrap="off">{
+  "prompt": "Pick a direction for the plan.",
+  "options": [
+    {
+      "value": "approve",
+      "description": "the plan goes forward as written",
+      "icon": "check"
+    },
+    {
+      "value": "request_changes",
+      "description": "back to the model with your note",
+      "icon": "comment"
+    },
+    {
+      "value": "block",
+      "description": "nothing downstream is built",
+      "tone": "danger",
+      "icon": "cross"
+    }
+  ]
+}
+</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

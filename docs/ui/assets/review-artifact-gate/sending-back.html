@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/review-artifact-gate">
+<meta name="state" content="sending-back">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>review-artifact-gate · sending-back</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/review-artifact-gate · sending-back</p>
+<div class="mockup-stage is-bare" style="width: 720px">
+<div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="feature/plan — describe this run of it">feature/plan</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="st-block" data-instance="60">
+          <button type="button" class="lh tb amber" aria-expanded="true">
+            <span class="lh-chev open"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span>
+            <svg class="lh-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"></path></svg>
+            <span class="lh-kind">asked of you</span>
+            <span class="lh-name mono">review</span>
+            <span class="lh-label ellip">Review the plan</span>
+            <span class="lh-meta">10:52:16</span>
+          </button>
+          <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"></path><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"></path></svg> Review the plan document.</h3>
+          <div class="artifact-view" data-testid="artifact">
+            <div class="vv">
+              <div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" aria-pressed="true">Rendered</button><button type="button" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+              <div class="vv-body">
+                <div class="markdown">
+                  <h1>Plan: cache the availability probe</h1>
+                  <p>The probe runs on open, on every configuration write, and on demand. The third is the only one a person waits for, so the other two should not be able to make it slow.</p>
+                  <ol>
+                    <li>Keep the last snapshot with the time it was taken.</li>
+                    <li>Answer from it while it is younger than the interval.</li>
+                    <li>Re-probe in the background when it is not.</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="note-list" data-testid="note-list">
+            <div class="note-list-head"><svg class="note-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"></path></svg>1 note</div>
+            <div class="note-row">
+              <div class="note-row-top"><button class="note-row-quote" title="show this passage">the other two should not be able to make it slow</button><button class="ghost note-row-remove" title="delete this thread"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="M6 6l12 12"></path></svg></button></div>
+              <div class="note-msg"><div class="note-msg-by"><svg class="note-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"></path></svg> Maya Cohen</div><div class="note-msg-body">Make this a requirement: a write must never wait on the probe.</div></div>
+              <form class="note-reply"><input placeholder="Reply as Maya Cohen…"><button class="ghost" type="submit" disabled>Reply</button></form>
+            </div>
+          </div>
+          <div class="review-summary" data-testid="review-verdict"><span class="review-count commented"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"></path></svg> 1 note</span><span class="review-verdict">comments left — this goes back as "reject"</span></div>
+          <div class="question-block">
+            <label class="field"><small>Comments (optional)</small><textarea rows="3" placeholder="">Say what happens to a read while the background re-probe is running.</textarea></label>
+            <div class="question-options"></div>
+          </div>
+          <div class="options"><button class="primary">Send back with comments</button></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/value-view">
+<meta name="state" content="structured">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>value-view · structured</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/value-view · structured</p>
+<div class="mockup-stage is-bare" style="width: 720px">
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="feature/sync — describe this run of it">feature/sync</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">result</span><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" title="Highlighted, in an editor" aria-pressed="false">Code</button><button type="button" class="on" title="Parsed — the value this document denotes" aria-pressed="true">Data</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body">
+            <ul class="doc-tree doc-root"><li><span class="sub">{4}</span><ul class="doc-tree">
+              <li><span class="doc-key">label</span><code class="doc-value doc-string">"Review fixture"</code></li>
+              <li><span class="doc-key">max_iterations</span><code class="doc-value doc-number">3</code></li>
+              <li><span class="doc-key">outputs</span><span class="sub">{1}</span><ul class="doc-tree">
+                <li><span class="doc-key">decision</span><span class="sub">{2}</span><ul class="doc-tree">
+                  <li><span class="doc-key">schema</span><span class="sub">{1}</span><ul class="doc-tree"><li><span class="doc-key">type</span><code class="doc-value doc-string">"string"</code></li></ul></li>
+                  <li><span class="doc-key">binding</span><code class="doc-value doc-string">".children.gate.output.decision"</code></li>
+                </ul></li>
+              </ul></li>
+              <li><span class="doc-key">sequence</span><span class="sub">[2]</span><ul class="doc-tree"><li><span class="doc-key">0</span><code class="doc-value doc-string">"draft"</code></li><li><span class="doc-key">1</span><code class="doc-value doc-string">"gate"</code></li></ul></li>
+            </ul></li></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="ops/costs — describe this run of it">ops/costs</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">result</span><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="As rows and columns" aria-pressed="true">Table</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body">
+            <div class="vv-table-wrap">
+              <table class="vv-table">
+                <thead><tr><th>task</th><th>state</th><th>model</th><th>in</th><th>out</th><th>cost</th></tr></thead>
+                <tbody>
+                  <tr><td>t-qfr49rm80m</td><td>feature.plan</td><td>claude-sonnet-5</td><td>48210</td><td>3120</td><td>0.19</td></tr>
+                  <tr><td>t-qfr49rm80m</td><td>feature.ux</td><td>claude-sonnet-5</td><td>61877</td><td>5402</td><td>0.27</td></tr>
+                  <tr><td>t-u9895uzcg8</td><td>chat/agent</td><td>claude-opus-5</td><td>12004</td><td>880</td><td>0.31</td></tr>
+                </tbody>
+              </table>
+              <p class="sub vv-table-cut">1240 more rows — the whole file is under Source.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

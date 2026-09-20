@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/sidebar">
+<meta name="state" content="at-root">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>sidebar · at-root</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/sidebar · at-root</p>
+<div class="mockup-stage is-bare" style="width: 250px; height: 600px; display: flex; --sidebar: 250px">
+  <nav class="sidebar">
+    <div class="side-title">
+      <button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar" aria-expanded="true">|◂</button>
+      <span class="side-brand app-label">JAIRA</span>
+    </div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row">
+          <button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button>
+          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="3 running"><span class="pill-glyph">▶</span><span class="pill-n">3</span></span><span class="pill pill-waiting pill-active" title="2 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">2</span></span><span class="pill pill-more pill-error" title="4 more">+4</span></span>
+        </div>
+        <div class="side-row on is-active">
+          <button class="side-hit" title="All conversations" aria-current="page"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button>
+          <button class="side-act" title="new conversation" aria-label="new conversation">+</button><button class="side-act on" title="find" aria-pressed="true">⌕</button>
+        </div>
+        <div class="side-drawer">
+          <div class="chat-list">
+            <input class="chat-search" placeholder="Search conversations" value="">
+            <ul class="chat-rows">
+              <li class="sel"><span class="chat-row-mark" title="Read"></span><span class="chat-row-title ellip">Why does the rail skip a lane on a fork</span><span class="chip strip-project" style="--hue: var(--p1)">declarative-ai</span><span class="chat-row-when sub">4 min</span></li>
+              <li><span class="chat-row-mark unread" title="The latest reply has not been read"></span><span class="chat-row-title ellip">Draft the release notes for 0.9</span><span class="chip strip-project" style="--hue: var(--p2)">JaiRA</span><span class="chat-row-when sub">2 h</span></li>
+              <li><span class="chat-row-mark" title="Read"></span><span class="chat-row-title ellip">Explain the prune preview</span><span class="chip strip-project" style="--hue: var(--p0)">~/.jaira</span><span class="chat-row-when sub">3 d</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p1)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\UbuntuCode\declarative-ai" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">declarative-ai</span></span></button>
+          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-success pill-status" title="3 success"><span class="pill-glyph">✓</span><span class="pill-n">3</span></span></span>
+          <span class="side-twist is-mark">▸</span>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p2)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\UbuntuCode\JaiRA" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">JaiRA</span></span></button>
+          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span>
+          <span class="side-twist is-mark">▸</span>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p0)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\Users\Ofer\.jaira" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">~/.jaira</span></span></button>
+          <span class="side-twist is-mark">▸</span>
+        </div>
+      </div>
+      <button class="side-row side-open" title="open another project" aria-haspopup="menu"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
+    </div>
+    <div class="side-foot">
+      <div class="side-row">
+        <button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button>
+      </div>
+    </div>
+  </nav>
+</div>
+</body>
+</html>

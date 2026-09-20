@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-files">
+<meta name="state" content="empty">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-files · empty</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-files · empty</p>
+<div class="mockup-stage" style="width: 1000px">
+  <div class="view settings-view">
+    <div class="col mid settings-body">
+      <div class="settings-head">
+        <div class="layer-picker" role="group" aria-label="Configuration layer">
+          <button class="layer-on" title="this project only">This project</button>
+          <button class="ghost" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button>
+        </div>
+      </div>
+      <div class="pane files-pane">
+        <section class="cfg-level" data-depth="0">
+          <div class="cfg-level-head">
+            <span class="cfg-level-title">Hidden in the tree</span>
+            <span class="cfg-hint">Glob patterns, matched against the path inside each root. A folder that matches takes its contents with it. Later rules win, so a <code class="cfg-param">!pattern</code> below can put something back.</span>
+          </div>
+          <div class="cfg-level-body">
+            <div class="cfg-fields">
+              <div class="cfg-field">
+                <div class="cfg-field-say">
+                  <span class="cfg-field-head"><span class="cfg-label">Shared</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+                  <span class="cfg-hint">Written in this project's settings.json, so everyone who opens it sees the same tree.<code class="cfg-param">files.hidden</code></span>
+                </div>
+                <div class="cfg-control">
+                  <div class="rule-stack">
+                    
+                    <input class="rule-add data-text" placeholder="+ pattern…" spellcheck="false">
+                  </div>
+                </div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say">
+                  <span class="cfg-field-head"><span class="cfg-label">Yours</span></span>
+                  <span class="cfg-hint">Applied after the shared list and kept out of it — in user-settings.json, so it never arrives through a pull request.<code class="cfg-param">filesHidden</code></span>
+                </div>
+                <div class="cfg-control">
+                  <div class="rule-stack">
+                    
+                    <input class="rule-add data-text" placeholder="+ pattern, or !pattern to reveal…" spellcheck="false">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="cfg-level" data-depth="0">
+          <div class="cfg-level-head">
+            <span class="cfg-level-title">JaiRA's own directory</span>
+            <span class="cfg-hint"><code class="cfg-param">system/</code> holds the database, tasks, snapshots, logs and artifacts. Nobody authors it, so it is hidden — but reading what a run wrote is a fair thing to want when a run has gone wrong.</span>
+          </div>
+          <div class="cfg-level-body">
+            <div class="cfg-fields">
+              <div class="cfg-field">
+                <div class="cfg-field-say">
+                  <span class="cfg-field-head"><span class="cfg-label">Show system/</span></span>
+                  <span class="cfg-hint">Hidden — the default, and what almost everyone wants.</span>
+                </div>
+                <div class="cfg-control"><button type="button" role="switch" aria-checked="false" aria-label="hidden" title="hidden" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button></div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="cfg-level" data-depth="0">
+          <div class="cfg-level-head">
+            <span class="cfg-level-title">In effect</span>
+            <span class="cfg-hint">Every rule, in the order it is applied. The last one to match a path decides.</span>
+          </div>
+          <div class="cfg-level-body">
+            <div class="rule-effect">
+              
+              <span class="cfg-hint">No rules: every root shows everything, <code class="cfg-param">system/</code> included.</span>
+            </div>
+            <div class="pane-actions">
+              <button class="ghost">Reset shared list to the defaults</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

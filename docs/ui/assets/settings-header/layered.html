@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/settings-header">
+<meta name="state" content="layered">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-header · layered</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/settings-header · layered</p>
+<div class="mockup-stage" style="width: 960px">
+  <div class="view settings-view">
+    <div class="col mid settings-body">
+      <div class="settings-head">
+        <div class="layer-picker" role="group" aria-label="Configuration layer">
+          <button class="layer-on" title="this project only">This project</button>
+          <button class="ghost" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button>
+        </div>
+      </div>
+      <div class="cfg-pane">
+        <section class="cfg-group">
+          <header class="cfg-group-head">
+            <h4>Artifacts</h4>
+            <p class="cfg-hint">Where a file an agent produces actually lands. A path TEMPLATE rather than a mode, because “which backend” and “how the path is derived” are independent questions and an enum conflates them.</p>
+          </header>
+        </section>
+      </div>
+    </div>
+  </div>
+  <div class="view settings-view">
+    <div class="col mid settings-body">
+      <div class="settings-head">
+        <div class="layer-picker" role="group" aria-label="Configuration layer">
+          <button class="ghost" title="this project only">This project</button>
+          <button class="layer-on" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button>
+        </div>
+      </div>
+      <div class="pane files-pane">
+        <section class="cfg-level" data-depth="0">
+          <div class="cfg-level-head">
+            <span class="cfg-level-title">Hidden in the tree</span>
+            <span class="cfg-hint">Glob patterns, matched against the path inside each root. A folder that matches takes its contents with it. Later rules win, so a <code class="cfg-param">!pattern</code> below can put something back.</span>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

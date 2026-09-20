@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/components-view">
+<meta name="state" content="answered">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>components-view · answered</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/components-view · answered</p>
+<div class="mockup-stage" style="width: 1030px; background: var(--bg)">
+  <div class="col mid gallery-page">
+    <div class="gallery">
+      <!-- an interaction, answered: the contract check passed -->
+      <section class="gallery-card">
+        <header class="gallery-head">
+          <h4>Buttons that say what they do</h4>
+          <p class="sub">`confirmLabel` and `cancelLabel` are the whole of the config: a yes/no whose buttons are verbs.</p>
+        </header>
+        <div class="gallery-body">
+          <div class="gallery-stage">
+            <div class="modal-backdrop">
+              <div class="modal" data-testid="interaction">
+                <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg> Merge the plan into main?</h3>
+                <div class="options"><button>Merge</button><button class="ghost">Not yet</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="gallery-side">
+            <div class="gallery-config">
+              <div class="gallery-config-head">
+                <div class="tabs seg"><button class="layer-on" title="edit it as a form">Form</button><button class="ghost">JSON</button></div>
+                <span class="sub grow">the state's authored args</span>
+                <button class="link">reset</button>
+              </div>
+              <div class="cfg-fields">
+                <div class="cfg-field">
+                  <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" class="cfg-switch on"><span class="cfg-switch-knob"></span></button><span class="cfg-label">prompt</span></span><span class="cfg-hint">the question, as the person reads it — the dialog's heading<code class="cfg-param">prompt</code></span></div>
+                  <div class="cfg-control"><input class="cfg-input" value="Merge the plan into main?"></div>
+                </div>
+                <div class="cfg-field">
+                  <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" class="cfg-switch on"><span class="cfg-switch-knob"></span></button><span class="cfg-label">confirmLabel</span></span><span class="cfg-hint">the affirmative button; absent ⇒ Confirm<code class="cfg-param">confirmLabel</code></span></div>
+                  <div class="cfg-control"><input class="cfg-input" value="Merge"></div>
+                </div>
+                <div class="cfg-field">
+                  <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" class="cfg-switch on"><span class="cfg-switch-knob"></span></button><span class="cfg-label">cancelLabel</span></span><span class="cfg-hint">the other one; absent ⇒ Cancel<code class="cfg-param">cancelLabel</code></span></div>
+                  <div class="cfg-control"><input class="cfg-input" value="Not yet"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="gallery-result">
+          <div class="gallery-result-head"><span class="sub">what it submitted</span><span class="chip chip-ok">contract ok</span></div>
+<pre class="outputs">{
+  "confirmed": true
+}</pre>
+        </div>
+      </section>
+
+      <!-- the same block when the contract refuses the answer -->
+      <div class="gallery-result">
+        <div class="gallery-result-head"><span class="sub">what it submitted</span><span class="chip chip-bad">rejected</span></div>
+<pre class="outputs">{
+  "decisions": [
+    { "id": "c1", "decision": "merged" },
+    { "id": "c2", "decision": "merged" }
+  ]
+}</pre>
+        <p class="reason">result.decision is required: this state offers approve, revise, cut</p>
+      </div>
+
+      <!-- a command approval, answered: the raw answer, with no contract to check -->
+      <section class="gallery-card">
+        <header class="gallery-head">
+          <h4>A command line</h4>
+          <p class="sub">A tool that takes a command shows the command, and the policy's reason under it. The three allows widen left to right; deny sits apart so the destructive-looking choice is not the easy mis-click.</p>
+        </header>
+        <div class="gallery-body">
+          <div class="gallery-stage">
+            <div class="inline-gate">
+              <div class="approval-surface" data-testid="approval">
+                <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"></path></svg> Approve this command?</h3>
+                <div class="sub">Bash</div>
+                <pre class="artifact" data-testid="approval-command">rm -rf build &amp;&amp; npm run build</pre>
+                <p class="reason-note">Policy: `rm -rf` is not on the allow list for this profile</p>
+                <div class="options"><button>Allow once</button><button>Allow for this run</button><button>Always allow</button></div>
+                <div class="options"><button class="danger">Deny</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="gallery-side">
+            <div class="gallery-config">
+              <div class="gallery-config-head">
+                <div class="tabs seg"><button class="ghost" title="edit it as a form">Form</button><button class="layer-on">JSON</button></div>
+                <span class="sub grow">the request the dialog was raised with</span>
+                <button class="link">reset</button>
+              </div>
+              <div class="gallery-json">
+                <div class="file-edit schema-edit">
+                  <div class="edit-bar schema-bar">
+                    <span class="schema-pick"><span class="sub">Schema</span><span class="chip">Command approval</span></span>
+                    <button class="ghost">Add missing fields</button>
+                    <button class="ghost">Fields</button>
+                    <span class="chip chip-ok">conforms</span>
+                    <label class="toggle wrap-toggle"><input type="checkbox"><span class="sub">Wrap</span></label>
+                  </div>
+                  <div class="sub schema-hint">a tool call policy escalated — DESIGN §10.2</div>
+                  <div class="schema-body">
+                    <div class="schema-main">
+                      <div class="editor-stack">
+<pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line">  <span class="tok tok-key">"tool"</span><span class="tok tok-punct">:</span> <span class="tok tok-string">"Bash"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line">  <span class="tok tok-key">"command"</span><span class="tok tok-punct">:</span> <span class="tok tok-string">"rm -rf build &amp;&amp; npm run build"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line">  <span class="tok tok-key">"reason"</span><span class="tok tok-punct">:</span> <span class="tok tok-string">"`rm -rf` is not on the allow list for this profile"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line">  <span class="tok tok-key">"input"</span><span class="tok tok-punct">:</span> <span class="tok tok-punct">{</span>
+</span><span class="code-line">    <span class="tok tok-key">"command"</span><span class="tok tok-punct">:</span> <span class="tok tok-string">"rm -rf build &amp;&amp; npm run build"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line">    <span class="tok tok-key">"cwd"</span><span class="tok tok-punct">:</span> <span class="tok tok-string">"/repo"</span>
+</span><span class="code-line">  <span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span></pre>
+                        <textarea class="code-layer code-input" spellcheck="false" wrap="off"></textarea>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="gallery-result">
+          <div class="gallery-result-head"><span class="sub">what it submitted</span></div>
+<pre class="outputs">{
+  "decision": "allow",
+  "scope": "once"
+}</pre>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

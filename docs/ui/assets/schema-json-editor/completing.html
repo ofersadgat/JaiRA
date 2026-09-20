@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/schema-json-editor">
+<meta name="state" content="completing">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>schema-json-editor · completing</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/schema-json-editor · completing</p>
+<div class="mockup-stage" style="width: 720px; height: 460px; display: flex; flex-direction: column">
+  <div class="config-half whole">
+    <div class="file-edit schema-edit">
+      <div class="edit-bar schema-bar">
+        <label class="schema-pick"><span class="sub">Schema</span><select><option value="">none — plain JSON</option><option value="state" selected>Workflow state</option><option value="state-prompt">Workflow state (prompt)</option><option value="prompt-operation">Prompt operation</option></select></label>
+        <button class="ghost" disabled title="fix the JSON first — a document that cannot be read cannot be merged into">Add missing fields</button>
+        <button class="ghost">Fields</button>
+        <span class="chip chip-bad">not JSON</span>
+        <label class="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways"><input type="checkbox"><span class="sub">Wrap</span></label>
+      </div>
+      <div class="sub schema-hint">a state file as it lives under workflows/ — WORKFLOWS.md §2</div>
+      <div class="schema-body" style="--reference-width: 300px">
+        <div class="schema-main">
+          <div class="editor-stack">
+            <pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"label"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Render the mockups"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">display name on the board; falls back to the id</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"One mockup per state the doc declares."</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">author's note; also useful prompt context</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"outputs"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"mockups"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.mockups"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"operation"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">the one thing this state does (§4); {} means "what my environment chain …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"prompt"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">which of the two operation shapes applies</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"prompt"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">Prompt — {{.inputs.x}} interpolates; Link holds it in a file instead</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"$ref"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"$/prompts/feature/ui/render.md"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-string">"m</span><span class="caret-slot"><span class="caret-anchor"></span><span class="completion-ghost">odel": </span></span>
+</span><span class="code-line"><span class="tok tok-string">  }</span>
+</span><span class="code-line"><span class="tok tok-string">}</span>
+</span><span class="code-line">
+</span></pre>
+            <textarea class="code-layer code-input" spellcheck="false" wrap="off">{
+  "label": "Render the mockups",
+  "description": "One mockup per state the doc declares.",
+  "outputs": {
+    "mockups": {
+      "binding": ".operation.output.mockups"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "prompt": {
+      "$ref": "$/prompts/feature/ui/render.md"
+    },
+    "m
+  }
+}
+</textarea>
+          </div>
+          <div class="completions" style="left: 52px; top: 333px">
+            <div class="completions-head sub"><span class="ellip">inside operation</span><span>tab ⇥</span></div>
+            <ul>
+              <li class="on"><code class="completion-key">model</code><span class="sub completion-type">string</span><span class="sub ellip">Model — a bare id routes to whatever serves that family here — prefix it to insist on one route</span></li>
+              <li><code class="completion-key">maxOutputTokens</code><span class="sub completion-type">number</span><span class="sub ellip">Max output tokens</span></li>
+              <li><code class="completion-key">maxSteps</code><span class="sub completion-type">number</span><span class="sub ellip">Max steps — how many tool-use rounds one call may take</span></li>
+            </ul>
+          </div>
+          <div class="reason">not valid JSON: Bad control character in string literal in JSON at position 297 (line 14 column 7)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-types-pane">
+<meta name="state" content="off">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-types-pane · off</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-types-pane · off</p>
+<div class="mockup-stage is-bare" style="width: 900px; display: grid; gap: 16px">
+  <div class="ft">
+    <div class="ft-tree">
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents — including text with nothing claimed about it"><span class="ft-caret">▾</span><span class="ellip">Prose</span><span class="ft-count data-faint">2</span></button>
+        <div class="ft-kids">
+          <button class="ft-row" aria-selected="false" title="every type in this family — a value shows where they already agree"><span class="ellip">All prose</span></button>
+          <button class="ft-row" aria-selected="true" title="text/markdown"><span class="ellip">Markdown</span><span class="ft-dot" title="set here, on its own"></span></button>
+          <button class="ft-row" aria-selected="false" title="text/plain"><span class="ellip">Plain text</span></button>
+        </div>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="source files, drawn by grammar"><span class="ft-caret">▸</span><span class="ellip">Code</span><span class="ft-count data-faint">8</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents that denote a value — rows included"><span class="ft-caret">▸</span><span class="ellip">Data</span><span class="ft-count data-faint">7</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="a patch, and the edit it describes"><span class="ft-caret">▸</span><span class="ellip">Changes</span><span class="ft-count data-faint">1</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="pictures, and the markup that draws them"><span class="ft-caret">▸</span><span class="ellip">Media</span><span class="ft-count data-faint">1</span></button>
+      </div>
+    </div>
+    <div class="ft-stage">
+      <div class="ft-head"><span class="app-title">Markdown</span><span class="grow"></span><span class="app-secondary ellip" title="text/markdown">text/markdown</span></div>
+      <div class="ft-modes">
+        <button class="ft-mode" aria-selected="false" title="the characters as they are on disk — an editor, or coloured source"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">text</span></span><span class="ft-mode-say ellip">Live preview</span></button>
+        <button class="ft-mode is-off" aria-selected="false" disabled title="this type has no rendering of that kind"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">data</span></span><span class="ft-mode-say ellip">—</span></button>
+        <button class="ft-mode is-off" aria-selected="true" title="what the document means, rendered — prose, a page, a drawing, a board"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">preview</span></span><span class="ft-mode-say ellip">off</span></button>
+      </div>
+      <div class="ft-body">
+        <div class="ft-arranging"><span class="app-label">arranging</span><span class="ft-seg"><button aria-pressed="true">the read-only view</button><button aria-pressed="false">the editor</button></span></div>
+        <div class="ft-menu">
+          <div class="ft-menu-head"><span class="app-label">preview</span><span class="app-secondary">the view you cannot type into</span></div>
+          <div class="ft-mm-sep"></div>
+          <div class="ft-mm-foot app-label">not offered</div>
+          <div class="ft-mm-row is-dim"><button class="ft-mm-pick" title="put it back on the menu"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Rendered</span></span></button><button class="ft-mm-x" title="put it back on the menu">+</button></div>
+          <div class="ft-mm-row is-dim"><button class="ft-mm-pick" title="put it back on the menu"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Nothing</span></span></button><button class="ft-mm-x" title="put it back on the menu">+</button></div>
+        </div>
+        <span class="app-secondary">Every renderer is off, so this kind is off: nothing of it is drawn for this type.</span>
+        <div class="ft-preview">
+          <div class="ft-preview-bar"><span class="app-label">preview</span><span class="data-faint ellip">Markdown · preview · nothing</span><span class="ft-tag">read-only view</span></div>
+          <div class="ft-preview-note app-secondary">Nothing is drawn here.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

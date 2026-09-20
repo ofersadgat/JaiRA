@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/activity-strip">
+<meta name="state" content="ended">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>activity-strip · ended</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/activity-strip · ended</p>
+<div class="mockup-stage" style="width: 720px">
+  <div class="cx-doing">
+    <div class="run-doing bad">
+      <span class="run-doing-mark bad" aria-hidden="true"></span>
+      <span class="ellip">Failed in <b>build → confidence</b></span>
+      <span class="grow"></span>
+      <button type="button" class="primary" title="Re-runs the state that failed — keeps the 14 operations before it and runs none of them again">Retry</button>
+    </div>
+  </div>
+  <div class="cx-doing">
+    <div class="run-doing warn">
+      <span class="run-doing-mark warn" aria-hidden="true"></span>
+      <span class="ellip">Interrupted in <b>ux → draft</b></span>
+      <span class="grow"></span>
+      <button type="button" class="primary" title="Picks up in draft — keeps the 6 operations this task already finished and runs nothing again">Resume</button>
+    </div>
+  </div>
+  <div class="cx-doing">
+    <div class="run-doing warn">
+      <span class="run-doing-mark warn" aria-hidden="true"></span>
+      <span class="ellip">Stopped in <b>product → explore</b></span>
+      <span class="grow"></span>
+      <button type="button" class="primary" title="Runs the workflow again from the top, against the snapshot this task pinned">Start again</button>
+    </div>
+  </div>
+  <div class="cx-doing">
+    <div class="run-doing idle">
+      <span class="run-doing-mark idle" aria-hidden="true"></span>
+      <span class="ellip">Not started</span>
+      <span class="grow"></span>
+      <button type="button" class="primary" title="Runs the workflow">Start</button>
+    </div>
+  </div>
+  <div class="cx-doing">
+    <div class="run-doing idle">
+      <span class="run-doing-mark idle" aria-hidden="true"></span>
+      <span class="ellip">Waiting</span>
+      <span class="grow"></span>
+      <button type="button" class="primary" title="Runs the workflow">Start</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

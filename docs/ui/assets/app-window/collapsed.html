@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/app-window">
+<meta name="state" content="collapsed">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>app-window · collapsed</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/app-window · collapsed</p>
+<div class="mockup-stage" style="width: 1280px; height: 600px; display: flex; background: var(--bg); --sidebar: 46px">
+  <nav class="sidebar shut">
+    <div class="side-title">
+      <button class="side-toggle" title="show the sidebar" aria-label="Show the sidebar" aria-expanded="false">▸|</button>
+    </div>
+    <div class="side-rail">
+      <div class="rail-views">
+        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button></div>
+        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button></div>
+      </div>
+      <div class="rail-split"></div>
+      <div class="rail-projects">
+        <button class="rail-tile on" title="C:\UbuntuCode\declarative-ai" aria-current="true" style="--hue: var(--p1)"><span class="side-glyph">de</span></button>
+        <button class="rail-tile" title="C:\UbuntuCode\JaiRA" style="--hue: var(--p2)"><span class="side-glyph">ja</span></button>
+        <button class="rail-tile" title="C:\Users\Ofer\.jaira" style="--hue: var(--p0)"><span class="side-glyph">ja</span></button>
+      </div>
+      <div class="rail-split"></div>
+      <div class="rail-views">
+        <div class="side-row"><button class="side-hit" title="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button></div>
+        <div class="side-row"><button class="side-hit" title="Tasks"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button></div>
+        <div class="side-row on is-active"><button class="side-hit" title="Chat" aria-current="page"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button></div>
+      </div>
+    </div>
+    <div class="side-foot">
+      <div class="side-row"><button class="side-hit" title="Logs"><span class="side-glyph">≡</span><span class="side-label ellip app-label">Logs</span></button></div>
+      <div class="side-row"><button class="side-hit" title="Debug"><span class="side-glyph">⌁</span><span class="side-label ellip app-label">Debug</span></button></div>
+      <div class="side-row"><button class="side-hit" title="Components"><span class="side-glyph">▤</span><span class="side-label ellip app-label">Components</span></button></div>
+      <button class="side-row side-theme" title="switch to dark" aria-label="Toggle theme"><span class="side-glyph">☾</span><span class="side-label ellip app-label">Dark</span></button>
+      <div class="side-row"><button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button></div>
+    </div>
+  </nav>
+  <div class="body">
+    <header class="title-bar">
+      <span class="chat-title ellip">Why does the rail skip a lane on a fork</span>
+      <span class="title-drag"></span>
+    </header>
+    <div class="viewport">
+      <div class="view chat-view">
+        <div class="chat-thread">
+          <div class="chat-scroll scroll">
+            <div class="ts-page">
+              <div class="ts-paper">
+                <div class="ts">
+                  <div class="ts-msg ts-msg-user"><div class="ts-bubble"><div class="vv"><div class="vv-body"><div class="markdown"><p>The state rail skips a lane when a run forks at <code>feature.ux</code>. Why?</p></div></div></div></div></div>
+                  <div class="ts-msg ts-msg-assistant"><div class="vv"><div class="vv-body"><div class="markdown"><p>The lane for a fork is allocated when the child is entered, and a fork entered twice at the same ordinal reuses the first lane's slot. The second pass then draws one lane to the right.</p><p>The fix is to key lanes by instance, not by state id.</p></div></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="chat-foot">
+            <div class="cx">
+              <div class="cx-frame">
+                <div class="cx-shell">
+                  <textarea class="cx-text" placeholder="Ask for more changes…" rows="1"></textarea>
+                  <div class="cx-foot"><span class="grow"></span><button class="cx-send" title="Send"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

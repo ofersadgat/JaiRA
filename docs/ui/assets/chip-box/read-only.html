@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/chip-box">
+<meta name="state" content="read-only">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>chip-box · read-only</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/chip-box · read-only</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="pane files-pane">
+      <section class="cfg-level" data-depth="0">
+        <div class="cfg-level-body">
+          <div class="cfg-fields">
+            <div class="cfg-field">
+              <div class="cfg-field-say">
+                <span class="cfg-field-head"><span class="cfg-label">Shared</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+                <span class="cfg-hint">Written in the shared root's settings.json, so everyone who opens it sees the same tree.<code class="cfg-param">files.hidden</code></span>
+              </div>
+              <div class="cfg-control">
+                <div class="rule-stack">
+                  <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">system</span><span class="rule-origin app-secondary">shared</span></span>
+                  <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">.git</span><span class="rule-origin app-secondary">shared</span></span>
+                  <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/node_modules</span><span class="rule-origin app-secondary">shared</span></span>
+                  <input class="rule-add data-text" placeholder="+ pattern…" spellcheck="false" disabled>
+                </div>
+              </div>
+            </div>
+            <div class="cfg-field">
+              <div class="cfg-field-say">
+                <span class="cfg-field-head"><span class="cfg-label">Yours</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+                <span class="cfg-hint">Applied after the shared list and kept out of it — in user-settings.json, so it never arrives through a pull request.<code class="cfg-param">filesHidden</code></span>
+              </div>
+              <div class="cfg-control">
+                <div class="rule-stack">
+                  <span class="rule-chip reveal"><span class="rule-mark" aria-hidden="true">◉</span><span class="rule-pattern data-text">system</span><span class="rule-origin app-secondary">yours</span></span>
+                  <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">*.log</span><span class="rule-origin app-secondary">yours</span></span>
+                  <input class="rule-add data-text" placeholder="+ pattern, or !pattern to reveal…" spellcheck="false" disabled>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="cfg-level" data-depth="0">
+        <div class="cfg-level-head">
+          <span class="cfg-level-title">In effect</span>
+          <span class="cfg-hint">Every rule, in the order it is applied. The last one to match a path decides.</span>
+        </div>
+        <div class="cfg-level-body">
+          <div class="rule-effect">
+            <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">system</span><span class="rule-origin app-secondary">shared</span></span>
+            <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">.git</span><span class="rule-origin app-secondary">shared</span></span>
+            <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/node_modules</span><span class="rule-origin app-secondary">shared</span></span>
+            <span class="rule-chip reveal"><span class="rule-mark" aria-hidden="true">◉</span><span class="rule-pattern data-text">system</span><span class="rule-origin app-secondary">yours</span></span>
+            <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">*.log</span><span class="rule-origin app-secondary">yours</span></span>
+          </div>
+          <div class="pane-actions">
+            <button class="ghost" disabled>Reset shared list to the defaults</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="cfg-pane ap">
+      <div class="ap-field">
+        <span class="app-label">data text</span>
+        <div class="ap-line">
+          <div class="face-box">
+            <div class="face-stack">
+              <span class="face-chip"><span class="face-n data-num">1</span><span class="face-name data-text" style="font-family: &quot;JetBrains Mono&quot;, &quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, monospace">JetBrains Mono</span><button class="face-drop" title="remove JetBrains Mono" disabled>✕</button></span>
+              <span class="face-chip"><span class="face-n data-num">2</span><span class="face-name data-text" style="font-family: &quot;Cascadia Code&quot;, &quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, monospace">Cascadia Code</span><button class="face-drop" title="remove Cascadia Code" disabled>✕</button></span>
+              <button class="face-add app-secondary" aria-expanded="false" disabled>+ add…</button>
+            </div>
+          </div>
+          <div class="size-box off">
+            <input class="size-n data-num" type="number" min="10" max="16" step="0.5" value="12" disabled>
+            <span class="data-faint">px</span>
+            <span class="size-step"><button disabled>▲</button><button disabled>▼</button></span>
+          </div>
+        </div>
+        <span class="ap-note data-faint">→ "JetBrains Mono", "Cascadia Code", "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

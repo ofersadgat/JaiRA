@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/new-task-popover">
+<meta name="state" content="form">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>new-task-popover · form</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/new-task-popover · form</p>
+<div class="mockup-stage" style="width: 1030px; height: 620px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar">
+      <header class="doc-bar inert">
+        <span class="crumb-part" style="--hue: var(--p1)"><button class="crumb-sep first" title="what else is at this level">›</button><button class="crumb crumb-project" title="C:\UbuntuCode\declarative-ai">declarative-ai</button></span>
+        <span class="crumb-part"><span class="crumb-sep">›</span><button class="crumb crumb-state" title="open this state">feature</button></span>
+        <span class="crumb-part"><button class="crumb-sep" title="what else is at this level">›</button><span class="crumb crumb-state last">build</span></span>
+        <span class="grow"></span>
+        <span class="doc-bar-tools">
+          <div class="new-task-wrap">
+            <button aria-expanded="true">+ New task</button>
+            <form class="new-task-pop">
+              <label class="field"><span>Workflow</span><select class="cfg-input"><option>Feature workflow</option></select></label>
+              <div class="new-task-fields">
+                <div class="run-inputs">
+                  <div class="cfg-fields">
+                    <div class="cfg-span cfg-block">
+                      <div class="cfg-field">
+                        <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label mono">issue</span><b class="sf-req" title="required">*</b><span class="sf-type">text/markdown · at least 1 character</span></span><span class="cfg-hint">What is being asked for.</span></div>
+                        <div class="cfg-control"><textarea class="cfg-input" rows="4">Let a person pause a running task and pick it up the next day from the state it stopped in, without paying again for finished operations.</textarea></div>
+                      </div>
+                    </div>
+                    <div class="cfg-field">
+                      <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" title="set severity_threshold" class="cfg-switch"><span class="cfg-switch-knob"></span></button><span class="cfg-label mono">severity_threshold</span><span class="sf-type">one of 4</span></span></div>
+                      <div class="cfg-control"><div class="sf-absent">not set — the default applies: significant</div></div>
+                    </div>
+                    <div class="cfg-field">
+                      <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" title="leave threshold_rank out" class="cfg-switch on"><span class="cfg-switch-knob"></span></button><span class="cfg-label mono">threshold_rank</span><span class="sf-type">integer</span></span><span class="cfg-hint">blocker=3, significant=2, minor=1, note=0.</span></div>
+                      <div class="cfg-control"><input class="cfg-input mono num" inputmode="decimal" value="3"></div>
+                    </div>
+                    <div class="cfg-field">
+                      <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" title="set ask_below" class="cfg-switch"><span class="cfg-switch-knob"></span></button><span class="cfg-label mono">ask_below</span><span class="sf-type">number · 0 to 1</span></span></div>
+                      <div class="cfg-control"><div class="sf-absent">not set — the default applies: 0.8</div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="pane-actions">
+                <button type="submit" class="primary" title="creates feature">Create</button>
+                <button type="button" class="ghost">Cancel</button>
+                <span class="sub ellip">4 inputs</span>
+              </div>
+            </form>
+          </div>
+        </span>
+      </header>
+      <span class="title-drag"></span>
+    </header>
+    <div class="viewport">
+      <div class="view tasks-view narrowed" style="--pane-right: 360px">
+        <div class="col mid"></div>
+        <div class="splitter" role="separator" aria-label="Resize the task panel"></div>
+        <aside class="col panel"><p class="empty">Select a task.</p></aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

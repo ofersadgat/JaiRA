@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-configuration">
+<meta name="state" content="empty">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-configuration · empty</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-configuration · empty</p>
+<div class="mockup-stage" style="width: 1000px">
+  <div class="view settings-view">
+    <div class="col mid settings-body">
+      <div class="cfg-pane">
+        <section class="cfg-group">
+          <header class="cfg-group-head">
+            <h4>Safety policy</h4>
+            <p class="cfg-hint">What an agent may run without asking. Rules are checked IN ORDER and the first match wins; anything no rule matches falls through to the built-in rules and then to the default below. A matcher is over parsed intent — a program, a subcommand, a flag — never a regex over the raw string, so a rule means the same thing however the command was spelled.</p>
+          </header>
+          <div class="cfg-fields">
+            <div class="cfg-field">
+              <div class="cfg-field-say">
+                <span class="cfg-field-head"><span class="cfg-label">Anything else</span></span>
+                <span class="cfg-hint">The verdict for a command no rule and no built-in matches.<code class="cfg-param">policy.default</code></span>
+              </div>
+              <div class="cfg-control"><select class="cfg-input"><option selected>— inherit (allow)</option><option>allow</option><option>ask first</option><option>deny</option></select></div>
+            </div>
+            <div class="cfg-field">
+              <div class="cfg-field-say">
+                <span class="cfg-field-head"><span class="cfg-label">Unlisted tools</span></span>
+                <span class="cfg-hint">For tools that do not run a command line — writing a file, say.<code class="cfg-param">policy.toolDefault</code></span>
+              </div>
+              <div class="cfg-control"><select class="cfg-input"><option selected>— inherit</option><option>allow</option><option>ask first</option><option>deny</option></select></div>
+            </div>
+            <div class="cfg-field">
+              <div class="cfg-field-say">
+                <span class="cfg-field-head"><span class="cfg-label">Built-in rules</span></span>
+                <span class="cfg-hint">JaiRA's own refusals — force pushes, credential paths, package publishes. Turning them off is a deliberate opt-out.<code class="cfg-param">policy.builtins</code></span>
+              </div>
+              <div class="cfg-control"><select class="cfg-input"><option selected>on — the built-in refusals apply</option><option>off — this project's rules only</option></select></div>
+            </div>
+          </div>
+          <section class="cfg-level" data-depth="1">
+            <div class="cfg-level-head">
+              <span class="cfg-level-title">Rules (0)</span>
+              <span class="cfg-hint">First match wins, so order matters.</span>
+            </div>
+            <div class="cfg-level-body">
+              <div class="cfg-stack">
+                <p class="cfg-hint">No rules of this project's own — the built-ins and the default above decide everything.</p>
+                <div class="pane-actions">
+                  <button>Add a rule</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+        <section class="cfg-group">
+          <header class="cfg-group-head">
+            <h4>Memoization</h4>
+            <p class="cfg-hint">Remember what a model answered and reuse it. Off by default, because it changes what a re-run observes.</p>
+          </header>
+          <div class="cfg-fields"><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set enabled here" title="set enabled here" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">remember model answers</span><span class="sf-type">yes / no</span></span><span class="cfg-hint">It saves real money, and it is not a pure optimization: a re-run returns the first run's answer rather than asking again — surprising if you re-ran precisely because you wanted a fresh one.<code class="cfg-param">memo.enabled</code></span></div><div class="cfg-control"><div class="sf-absent">not set</div></div></div></div>
+        </section>
+        <section class="cfg-group">
+          <header class="cfg-group-head">
+            <h4>Workflow lookup</h4>
+            <p class="cfg-hint">The roots a bare workflow reference is searched along — shell PATH semantics, first match wins.</p>
+          </header>
+          <div class="cfg-fields"><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set path here" title="set path here" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">search path</span><span class="sf-type">list</span></span><span class="cfg-hint">Empty means the layers in order, generated from the roots — which is what almost every project wants. Setting it REPLACES that list rather than extending it, so a project that sets it takes on naming every root it wants.<code class="cfg-param">workflows.path</code></span></div><div class="cfg-control"><div class="sf-absent">not set</div></div></div></div>
+        </section>
+        <div class="cfg-disclosure">
+          <button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">The raw document</span><span class="cfg-hint">· everything, as it is stored</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

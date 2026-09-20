@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/gate-modal">
+<meta name="state" content="gate">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>gate-modal · gate</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/gate-modal · gate</p>
+<div class="mockup-stage" style="width: 680px; display: flex; flex-direction: column; gap: 14px; padding: 14px">
+  <!-- a choose_option question in its Components view stage -->
+  <div class="gallery-stage">
+    <div class="modal-backdrop">
+      <div class="modal" data-testid="interaction">
+        <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v6a3 3 0 0 0 3 3h7"></path><path d="M6 21v-6"></path><path d="m13 9 3 3-3 3"></path></svg> Pick a direction for the plan.</h3>
+        <div class="question-block">
+          <div class="question-options">
+            <button class="question-option" title="the plan goes forward as written"><span class="question-option-label">approve</span><small class="question-option-desc">the plan goes forward as written</small></button>
+            <button class="question-option" title="back to the model with your note"><span class="question-option-label">request_changes</span><small class="question-option-desc">back to the model with your note</small></button>
+            <button class="question-option danger" title="nothing downstream is built"><span class="question-option-label">block</span><small class="question-option-desc">nothing downstream is built</small></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- a confirm_action question -->
+  <div class="gallery-stage">
+    <div class="modal-backdrop">
+      <div class="modal" data-testid="interaction">
+        <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg> Merge the plan into main?</h3>
+        <div class="options"><button>Merge</button><button class="ghost">Not yet</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

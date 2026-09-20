@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-history">
+<meta name="state" content="settled">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-history · settled</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-history · settled</p>
+<div class="mockup-stage" style="width: 1000px; display: grid; gap: 1px; background: var(--line)">
+  <div class="view settings-view">
+    <div class="col mid settings-body">
+      <div class="pane history">
+        <div>
+          <div class="pane-title">Stored history</div>
+          <div class="sub">214 tasks · 48312 events · 1907 commands</div>
+        </div>
+        <div class="prune-controls">
+          <label>older than<input type="number" min="0" value="365">d</label>
+          <button class="ghost">Preview</button>
+        </div>
+        <div class="prune-report">
+          <div class="sub">nothing matches — no task history is old enough</div>
+          <button class="ghost">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="view settings-view">
+    <div class="col mid settings-body">
+      <div class="pane history">
+        <div>
+          <div class="pane-title">Stored history</div>
+          <div class="sub">51 tasks · 9192 events · 419 commands</div>
+        </div>
+        <div class="prune-controls">
+          <label>older than<input type="number" min="0" value="30">d</label>
+          <button class="ghost">Preview</button>
+        </div>
+        <div class="prune-report">
+          <div class="sub">deleted the history of 163 task(s); 9192 events remain</div>
+          <div class="sub" title="t-qfr49rm80m: waiting on a gate&#10;t-u9895uzcg8: paused, resumable">kept 2 unfinished task(s)</div>
+          <button class="ghost">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

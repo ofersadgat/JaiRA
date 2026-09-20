@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/logs-view">
+<meta name="state" content="listing">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>logs-view · listing</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/logs-view · listing</p>
+<div class="mockup-stage" style="width: 1030px; height: 600px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view logs-view">
+        <div class="logs">
+          <div class="logs-bar">
+            <select aria-label="Minimum level"><option>info and worse</option></select>
+            <select aria-label="Source"><option>all sources</option></select>
+            <input placeholder="Filter…" aria-label="Filter" value="t-qfr49rm80m">
+            <span class="grow"></span>
+            <button>Configure</button>
+            <span class="sub">11+ shown</span>
+          </div>
+          <div class="logs-head"><span>time</span><span>level</span><span>source</span><span>message</span><span></span></div>
+          <div class="logs-list">
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:22:07 PM</span><span class="log-level log-info">info</span><span class="log-source" title="run">run</span><span class="log-message">t-qfr49rm80m entered feature/ux/draft</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-warn" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:22:05 PM</span><span class="log-level log-warn">warn</span><span class="log-source" title="engine">engine</span><span class="log-message">t-qfr49rm80m feature/ux/critique: the model returned no text, retrying once (attempt 2 of 2)</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line log-shown"><div class="log-row log-error" role="button" tabindex="0" aria-expanded="true"><span class="log-at">2:21:58 PM</span><span class="log-level log-error">error</span><span class="log-source" title="runtime">runtime</span><span class="log-message">t-qfr49rm80m feature/ux/critique failed: TypeError: Cannot read properties of undefined (reading 'outputs') while binding .children.draft.output.plan_doc into critique</span><span class="log-links"><button class="link">task</button><button class="link">output</button></span></div>
+              <div class="log-detail">
+<pre class="log-stack">TypeError: Cannot read properties of undefined (reading 'outputs')
+    at bindInputs (runtime/bind.js:118:31)
+    at enterState (runtime/engine.js:402:17)
+    at async runChild (runtime/engine.js:655:9)</pre>
+<pre class="log-fields">{
+  "taskId": "t-qfr49rm80m",
+  "stateId": "feature/ux/critique",
+  "project": "C:\\UbuntuCode\\declarative-ai"
+}</pre>
+              </div>
+            </div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:18:40 PM</span><span class="log-level log-info">info</span><span class="log-source" title="process">process</span><span class="log-message">claude started for t-qfr49rm80m in C:\UbuntuCode\declarative-ai\.jaira\worktrees\t-qfr49rm80m</span><span class="log-links"><button class="link">task</button><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:18:39 PM</span><span class="log-level log-info">info</span><span class="log-source" title="run">run</span><span class="log-message">t-qfr49rm80m entered feature/ux</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:18:39 PM</span><span class="log-level log-info">info</span><span class="log-source" title="jaira.persistence.views">jaira.persistence.views</span><span class="log-message">projected the board for t-qfr49rm80m in 14 ms</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:18:38 PM</span><span class="log-level log-info">info</span><span class="log-source" title="ipc">ipc</span><span class="log-message">task:start t-qfr49rm80m</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-warn" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:18:31 PM</span><span class="log-level log-warn">warn</span><span class="log-source" title="review">review</span><span class="log-message">t-qfr49rm80m: 2 files changed on disk since the changeset was proposed</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:18:02 PM</span><span class="log-level log-info">info</span><span class="log-source" title="run">run</span><span class="log-message">t-qfr49rm80m pinned snapshot 41f9e340df1f</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:17:55 PM</span><span class="log-level log-info">info</span><span class="log-source" title="project">project</span><span class="log-message">created worktree jaira/t-qfr49rm80m from main</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0" aria-expanded="false"><span class="log-at">2:17:54 PM</span><span class="log-level log-info">info</span><span class="log-source" title="ipc">ipc</span><span class="log-message">task:create t-qfr49rm80m "Pause a run and pick it up tomorrow" on feature</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <p class="empty">Scroll for older entries.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

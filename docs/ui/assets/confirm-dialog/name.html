@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/confirm-dialog">
+<meta name="state" content="name">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>confirm-dialog · name</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/confirm-dialog · name</p>
+<div class="mockup-stage" style="width: 760px; display: flex; flex-direction: column; align-items: center; gap: 22px; padding-block: 28px; background: var(--scrim)">
+  <!-- a name is asked for, prefilled -->
+  <form class="modal">
+    <h3>Rename 'feature/build/plan'</h3>
+    <div class="notice">A state's id is its path, and every state that names it as a child names this id.</div>
+    <label class="field">
+      <span>New state id</span>
+      <input value="feature/build/plan_units" spellcheck="false" autofocus>
+    </label>
+    <div class="options">
+      <button type="submit" class="primary">Rename</button>
+      <button type="button" class="ghost">Cancel</button>
+    </div>
+  </form>
+  <!-- the field emptied: the confirm cannot be pressed -->
+  <form class="modal">
+    <h3>Duplicate 'feature/build/plan'</h3>
+    <label class="field">
+      <span>New state id</span>
+      <input value="" spellcheck="false">
+    </label>
+    <div class="options">
+      <button type="submit" class="primary" disabled>Duplicate</button>
+      <button type="button" class="ghost">Cancel</button>
+    </div>
+  </form>
+</div>
+</body>
+</html>

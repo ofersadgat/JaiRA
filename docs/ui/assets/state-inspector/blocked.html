@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/state-inspector">
+<meta name="state" content="blocked">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>state-inspector · blocked</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/state-inspector · blocked</p>
+<div class="mockup-stage is-bare" style="width: 300px">
+  <aside class="col panel">
+    <div class="inspector">
+      <div class="insp-crumb"><span class="state-id ellip" title="feature/product">product</span><span class="sub">· the state</span></div>
+      <section class="run-section"><h3><span>Run</span><span class="count">1 inputs</span></h3><div class="sub run-target" title="JaiRA">runs in <b>JaiRA</b></div><div class="notice warn">Unsaved edits — the run uses the last saved file.</div><div class="run-inputs"><div class="cfg-fields"><div class="cfg-span cfg-block"><div class="cfg-field bad"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label mono">goal</span><b class="sf-req" title="required">*</b></span></div><div class="cfg-control"><textarea class="cfg-input" rows="3"></textarea><div class="reason cfg-error">can't be empty</div></div></div></div></div></div><div class="pane-actions run-actions"><button class="primary" disabled title="2 validation errors — fix them first">Run</button><span class="sub ellip">2 validation errors — fix them first</span></div></section>
+      <section class="run-history"><h3><span>History</span><span class="count">0</span></h3><div class="sub" title="no task in JaiRA names 'feature/product' as its workflow">No runs — searched 14 tasks in JaiRA.</div></section>
+      <section><h3><span>Validation</span><span class="count">3</span></h3><button type="button" class="notice bad clickable" title="show the control this is about"><b>children.critique.inputs.draft</b> — no output named 'features' on draft</button><button type="button" class="notice bad clickable" title="show the control this is about"><b>transitions[0].to</b> — 'feature/product/revise' is not a child of this state</button><button type="button" class="notice warn clickable" title="show the control this is about"><b>children.verify</b> — nothing can reach this child</button></section>
+      <section><h3>Environment</h3><dl class="kv"><dt>executor</dt><dd><code>codex</code> <span class="chip chip-bad">not available</span></dd><dt>model</dt><dd><code>gpt-5.1-codex</code></dd></dl><div class="pane-actions"><button class="link" title="read what a run here resolves against">the effective configuration</button></div></section>
+      <section><h3><span>Children</span><span class="count">in run order</span></h3><ol class="children"><li><span class="ellip">explore</span></li><li><span class="ellip">draft</span></li><li><span class="ellip">critique</span></li><li><span class="ellip">verify</span></li></ol></section>
+      <section><h3>Snapshot drift</h3><div class="notice warn">2 task(s) here are pinned to an older snapshot and will not see an edit until they are re-run.</div></section>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/editor-chrome">
+<meta name="state" content="unsaved">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>editor-chrome · unsaved</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/editor-chrome · unsaved</p>
+<div class="mockup-stage is-bare" style="width: 720px; display: grid; grid-template-rows: 250px 190px 190px auto; gap: 14px">
+  <!-- the state editor with an edited label -->
+  <div class="col mid">
+    <div class="config-half whole">
+      <div class="pane editor">
+        <div class="edit-bar editor-top">
+          <div class="sub file-path" title="C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json">C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json</div>
+          <div class="tabs seg"><button class="layer-on" title="the fields, as controls">Form</button><button class="ghost" title="the document, as text">JSON</button><button class="ghost" title="what runs after what, and what makes it">Graph</button></div>
+        </div>
+        <div class="form">
+          <div class="identity">
+            <label class="field inline"><span>Label</span><input value="Verify the component doc"></label>
+            <label class="field inline"><span>Description</span><textarea rows="2">Always entered: the person verifies this step's work before the run moves on.</textarea></label>
+          </div>
+          <div class="slots">
+            <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+            <label class="field"><span>Kind</span><select><option>function — host code, a gate, or an agent</option></select></label>
+          </div>
+        </div>
+        <div class="pane-actions pinned"><button class="primary">Save</button><button class="ghost">Revert</button><span class="sub">unsaved changes</span></div>
+      </div>
+    </div>
+  </div>
+  <!-- a save under way on a plain text file -->
+  <div class="col mid">
+    <div class="config-half whole">
+      <div class="file-edit"><textarea class="code-editor" spellcheck="false">Release checklist
+- bump the version in packages/app/package.json
+- run npm test on Linux and Windows
+- tag and push once both pass</textarea><div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost">Revert</button><span class="sub">unsaved changes</span></div></div>
+    </div>
+  </div>
+  <!-- a file that does not exist on disk yet -->
+  <div class="col mid">
+    <div class="config-half whole">
+      <div class="file-edit"><textarea class="code-editor" spellcheck="false"></textarea><div class="pane-actions pinned"><button class="primary">Save</button><button class="ghost">Revert</button><span class="sub">unsaved changes</span><span class="sub">new file — saving creates it</span></div></div>
+    </div>
+  </div>
+  <!-- the edit-artifact gate, before anything is typed -->
+  <section class="sb-sheet">
+    <div class="sb-body">
+      <div class="st-block">
+      <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Z"></path><path d="M14.5 6.5 17.5 9.5"></path></svg> Tighten the feature brief before the plan is drawn.</h3>
+      <div class="artifact-view">
+        <div class="vv">
+          <div class="vv-head"><span class="grow"></span><button class="ghost" title="throw away what you typed">Revert</button><button type="button" class="vv-more" title="What else can be done with this">…</button></div>
+          <div class="vv-body"><div class="markdown"><p>Pause and stop become one control on the task card. A paused task keeps its worktree and its seat; a stopped one releases both.</p></div></div>
+        </div>
+      </div>
+      <div class="pane-actions pinned"><button class="primary">Save</button></div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

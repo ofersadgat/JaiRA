@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-link-field">
+<meta name="state" content="preview">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-link-field · preview</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-link-field · preview</p>
+<div class="mockup-stage" style="width: 640px">
+  <div class="config-half whole">
+    <div class="pane editor">
+      <div class="form">
+        <div class="slots">
+          <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+          <div class="op-block">
+            <label class="field">
+              <span>Prompt<button type="button" class="ghost sm link-toggle on" title="hold this value inline instead of in a file — what you had before linking comes back">🔗 Linked</button></span>
+              <input class="link-input" list="link-targets" value="$/prompts/feature/ui/render.md" spellcheck="false" placeholder="$/prompts/feature_goals.md">
+              <span class="sub">spliced in where it is referenced — a copy, not a live link</span>
+              <div class="link-preview">
+                <button type="button" class="link-preview-bar" title="prompts/feature/ui/render.md — click to hide what it says"><span class="half-caret">▾</span><span class="sub">what $/prompts/feature/ui/render.md says</span></button>
+                <div class="link-preview-body"><p class="empty">Reading…</p></div>
+              </div>
+            </label>
+            <label class="field">
+              <span>System<button type="button" class="ghost sm link-toggle on" title="hold this value inline instead of in a file — what you had before linking comes back">🔗 Linked</button></span>
+              <input class="link-input" list="link-targets" value="$/prompts/feature/system.md" spellcheck="false" placeholder="$/prompts/feature_goals.md">
+              <span class="sub">spliced in where it is referenced — a copy, not a live link</span>
+              <div class="link-preview">
+                <button type="button" class="link-preview-bar" title="prompts/feature/system.md — click to hide what it says"><span class="half-caret">▾</span><span class="sub">what $/prompts/feature/system.md says</span></button>
+                <div class="link-preview-body"><p class="empty">Nothing readable at prompts/feature/system.md.</p></div>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

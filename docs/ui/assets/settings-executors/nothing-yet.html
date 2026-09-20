@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-executors">
+<meta name="state" content="nothing-yet">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-executors · nothing-yet</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-executors · nothing-yet</p>
+<div class="mockup-stage" style="width: 812px; background: var(--bg)">
+<div class="col mid settings-body"><div class="settings-head"><div class="layer-picker" role="group" aria-label="Configuration layer"><button class="layer-on" title="this project only">This project</button><button class="ghost" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button></div><div class="settings-head-right"><span class="sub">not checked yet</span><button class="ghost">Re-check</button></div></div><div class="cfg-pane">
+  <section class="cfg-group">
+    <header class="cfg-group-head"><h4>The default executor</h4><p class="cfg-hint">What every UI-initiated operation uses — starting a task, proposing workflow changes, summarizing a conversation. It is a TREE: an operation executor over a function executor and a router, and the whole of it is below. Nothing here has to be configured: what is shown is DERIVED from what is available, and a change pins only the field you changed, so a provider or agent you set up tomorrow still appears by itself.</p></header>
+    <p class="cfg-hint">Not resolved yet — the startup check has not finished.</p>
+  </section>
+  <section class="cfg-group">
+  <header class="cfg-group-head"><h4>Presets</h4><p class="cfg-hint">A named set of call settings a state picks with <code>configRef</code>, merged under its own config. A definition is the heavier tool — it chooses the provider and the stack too; a preset is only the settings.</p></header>
+  <p class="cfg-hint">None yet.</p>
+  <div class="cfg-disclosure"><button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Add a preset</span><span class="cfg-hint">· a named set of call settings</span></button></div>
+</section>
+</div><div class="cfg-pane"><section class="cfg-group"><section class="cfg-level" data-depth="1"><div class="cfg-level-head"><span class="cfg-level-title">Prompts</span><span class="cfg-hint">How a prompt state is answered.</span></div><div class="cfg-level-body"><div class="cfg-stack"><div class="cfg-node-banner"><span class="cfg-node-kind">Router</span><code class="cfg-param">PromptRouterExecutor</code><span class="cfg-hint">Dispatches a prompt on its model id's PREFIX. Its routes are derived from everything available, so a provider or agent you set up appears here without being added.</span></div><section class="cfg-level" data-depth="2"><div class="cfg-level-head"><span class="cfg-level-title">Routes (0)</span><span class="cfg-hint">Derived from everything available, so a provider or agent you set up appears here by itself. Configuring one pins only what you changed.</span></div><div class="cfg-level-body"><div class="cfg-stack"><p class="cfg-hint warn-text">Nothing can answer a prompt here yet — no provider key, no local server, and no agent that runs. Set one up under Providers and a route appears.</p></div></div></section></div></div></section></section></div></div>
+</div>
+</body>
+</html>

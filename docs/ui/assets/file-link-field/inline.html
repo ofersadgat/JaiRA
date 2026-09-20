@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-link-field">
+<meta name="state" content="inline">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-link-field · inline</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-link-field · inline</p>
+<div class="mockup-stage" style="width: 640px">
+  <div class="config-half whole">
+    <div class="pane editor">
+      <div class="form">
+        <div class="slots">
+          <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+          <label class="field"><span>Kind</span><select><option value="prompt" selected>prompt — one model call</option></select></label>
+          <div class="op-block">
+            <label class="field">
+              <span>Prompt<button type="button" class="ghost sm link-toggle" title="hold this value in a file and reference it (WORKFLOWS.md §2.2)">🔗 Link</button></span>
+              <textarea rows="6" spellcheck="false" title="{{.inputs.x}} interpolates; Link holds it in a file instead">{{.inputs.prompt}}</textarea>
+            </label>
+            <label class="field">
+              <span>System<button type="button" class="ghost sm link-toggle" disabled title="hold this value in a file and reference it (WORKFLOWS.md §2.2)">🔗 Link</button></span>
+              <textarea rows="3" spellcheck="false" disabled title="a referenced value — edit it on the JSON tab">{"expr": "renderTemplate($BASE/prompts/feature/system.md, { layer: 'ui' })"}</textarea>
+              <span class="sub">a referenced value — edit it on the JSON tab</span>
+            </label>
+            <label class="field">
+              <span>Tools</span>
+              <input spellcheck="false" value="read_file" placeholder="read_file, run_command" title="logical names resolved through the tool registry — an empty list drops the inherited ones">
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

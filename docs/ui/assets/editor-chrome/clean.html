@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/editor-chrome">
+<meta name="state" content="clean">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>editor-chrome · clean</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/editor-chrome · clean</p>
+<div class="mockup-stage is-bare" style="width: 720px; height: 320px; display: grid">
+  <div class="col mid">
+    <div class="config-half whole">
+      <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Configuration</span><span class="grow"></span></button>
+      <div class="pane editor">
+        <div class="edit-bar editor-top">
+          <div class="sub file-path" title="C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json">C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json</div>
+          <div class="tabs seg"><button class="layer-on" title="the fields, as controls">Form</button><button class="ghost" title="the document, as text">JSON</button><button class="ghost" title="what runs after what, and what makes it">Graph</button></div>
+        </div>
+        <div class="form">
+          <div class="identity">
+            <label class="field inline"><span>Label</span><input value="Verify the component" placeholder="a short name — what the board shows"></label>
+            <label class="field inline"><span>Description</span><textarea rows="2" placeholder="an author's note — also useful prompt context">Always entered: the person verifies this step's work before the run moves on.</textarea></label>
+          </div>
+          <div class="slots">
+            <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+            <label class="field"><span>Kind</span><select><option>function — host code, a gate, or an agent</option></select></label>
+            <div class="op-block">
+              <label class="field"><span>Function</span><input value="review_artifact" placeholder="claude-code, codex-cli, choose_option, …"></label>
+            </div>
+          </div>
+        </div>
+        <div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

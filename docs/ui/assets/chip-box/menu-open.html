@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/chip-box">
+<meta name="state" content="menu-open">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>chip-box · menu-open</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/chip-box · menu-open</p>
+<div class="mockup-stage" style="width: 600px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane ap">
+      <div class="ap-field">
+        <span class="app-label">app text</span>
+        <div class="ap-line">
+          <div class="face-box">
+            <div class="face-stack open">
+              <span class="face-chip"><span class="face-n data-num">1</span><span class="face-name app-text" style="font-family: Inter, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif">Inter</span><button class="face-drop" title="remove Inter">✕</button></span>
+              <button class="face-add app-secondary" aria-expanded="true">+ add…</button>
+            </div>
+            <div class="face-menu">
+              <div class="face-menu-head app-label">sans faces</div>
+              <div class="face-menu-list">
+                <button class="face-menu-row on"><span class="face-tick">✓</span><span class="face-menu-name ellip app-text" style="font-family: Inter, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif">Inter</span></button>
+                <button class="face-menu-row"><span class="face-tick"></span><span class="face-menu-name ellip app-text" style="font-family: &quot;DM Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif">DM Sans</span></button>
+                <button class="face-menu-row"><span class="face-tick"></span><span class="face-menu-name ellip app-text" style="font-family: &quot;Segoe UI&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif">Segoe UI</span></button>
+                <button class="face-menu-row"><span class="face-tick"></span><span class="face-menu-name ellip app-text" style="font-family: &quot;Helvetica Neue&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif">Helvetica Neue</span><span class="face-elsewhere app-secondary">not on this machine</span></button>
+                <button class="face-menu-row"><span class="face-tick"></span><span class="face-menu-name ellip app-text" style="font-family: &quot;IBM Plex Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif">IBM Plex Sans</span><span class="face-elsewhere app-secondary">not on this machine</span></button>
+                <button class="face-menu-row"><span class="face-tick"></span><span class="face-menu-name ellip app-text" style="font-family: Roboto, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif">Roboto</span><span class="face-elsewhere app-secondary">not on this machine</span></button>
+              </div>
+              <div class="face-menu-sep"></div>
+              <div class="face-menu-row"><span class="face-tick"></span><input class="cfg-input" placeholder="another family…"></div>
+              <div class="face-menu-sep"></div>
+              <div class="face-menu-row is-note" title="-apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif"><span class="face-tick"></span><span class="app-secondary">always ends with the default stack</span></div>
+            </div>
+          </div>
+          <div class="size-box">
+            <input class="size-n data-num" type="number" min="11" max="17" step="0.5" value="12.5">
+            <span class="data-faint">px</span>
+            <span class="size-step"><button>▲</button><button>▼</button></span>
+          </div>
+        </div>
+        <span class="ap-note data-faint">→ Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif</span>
+      </div>
+      <div class="ap-field">
+        <span class="app-label">data text</span>
+        <div class="ap-line">
+          <div class="face-box">
+            <div class="face-stack">
+              <span class="face-chip is-ours" title="JaiRA's own — choosing a family replaces it"><span class="face-n data-num">1</span><span class="face-name data-text" style="font-family: &quot;JetBrains Mono&quot;, &quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, monospace">JetBrains Mono</span><span class="face-ours app-secondary">ours</span></span>
+              <button class="face-add app-secondary" aria-expanded="false">+ add…</button>
+            </div>
+          </div>
+          <div class="size-box">
+            <input class="size-n data-num" type="number" min="10" max="16" step="0.5" value="12">
+            <span class="data-faint">px</span>
+            <span class="size-step"><button>▲</button><button>▼</button></span>
+          </div>
+        </div>
+        <span class="ap-note data-faint">→ "JetBrains Mono", "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace</span>
+      </div>
+      <div class="ap-divider"></div>
+      <div class="ap-toggle">
+        <button type="button" role="switch" aria-checked="false" aria-label="Separate editor size" title="Separate editor size" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+        <span class="app-text">Separate editor size</span>
+        <span class="ap-toggle-value"><span class="app-secondary">follows the data text</span></span>
+      </div>
+      <div class="ap-toggle">
+        <button type="button" role="switch" aria-checked="false" aria-label="Smooth text" title="Smooth text" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+        <span class="app-text">Smooth text</span>
+        <span class="ap-toggle-value"><span class="app-secondary">the platform's own</span></span>
+      </div>
+      <div class="ap-divider"></div>
+      <span class="app-label">preview</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

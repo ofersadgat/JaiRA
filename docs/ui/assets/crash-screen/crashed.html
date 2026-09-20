@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/crash-screen">
+<meta name="state" content="crashed">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>crash-screen · crashed</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/crash-screen · crashed</p>
+<div class="mockup-stage" style="width: 1280px; height: 700px; transform: translateZ(0)">
+  <div class="crash">
+    <div class="crash-card">
+      <h1>The interface stopped drawing.</h1>
+      <p class="sub">Nothing that was running has been lost — this is the window, not the work. Reloading rebuilds the view from what is already recorded.</p>
+      <pre class="crash-stack">TypeError: Cannot read properties of undefined (reading 'instances')
+    at nodeAt (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:18214:31)
+    at RunInspector (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:22107:18)
+    at renderWithHooks (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:3811:22)
+    at updateFunctionComponent (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:5530:20)
+    at beginWork (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:6402:16)
+
+    at RunInspector (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:22080:3)
+    at aside
+    at div
+    at div
+    at div
+    at App (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:30112:3)
+    at CrashBoundary (file:///C:/UbuntuCode/JaiRA/packages/app/dist/renderer/assets/index-4f2a91c7.js:1204:5)</pre>
+      <div class="crash-actions">
+        <button class="primary">Reload the window</button>
+        <button>Copy the error</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

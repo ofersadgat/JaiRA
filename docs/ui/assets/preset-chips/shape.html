@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/preset-chips">
+<meta name="state" content="shape">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>preset-chips · shape</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/preset-chips · shape</p>
+<div class="mockup-stage" style="width: 560px; padding: 8px 16px">
+  <div class="cfg-fields">
+    <div class="cfg-span">
+      <div class="cfg-field">
+        <div class="cfg-field-say">
+          <span class="cfg-field-head">
+            <button type="button" role="switch" aria-checked="true" aria-label="leave anchor out" title="leave anchor out" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+            <span class="cfg-label mono">anchor</span>
+            <span class="sf-pick" role="group" aria-label="shape"><button type="button" class="cfg-chip">path</button><button type="button" class="cfg-chip on">path + line</button><button type="button" class="cfg-chip">none</button></span>
+          </span>
+        </div>
+        <div class="cfg-control">
+          <div class="cfg-fields">
+            <div class="cfg-field">
+              <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label mono">path</span><b class="sf-req" title="required">*</b></span></div>
+              <div class="cfg-control"><input class="cfg-input mono" value="packages/app/src/renderer/runForm.ts"></div>
+            </div>
+            <div class="cfg-field">
+              <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label mono">line</span><b class="sf-req" title="required">*</b><span class="sf-type">integer · at least 1</span></span></div>
+              <div class="cfg-control"><input class="cfg-input mono num" value="221"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cfg-field">
+      <div class="cfg-field-say">
+        <span class="cfg-field-head">
+          <button type="button" role="switch" aria-checked="true" aria-label="leave reviewer out" title="leave reviewer out" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+          <span class="cfg-label mono">reviewer</span>
+          <span class="sf-pick" role="group" aria-label="shape"><button type="button" class="cfg-chip">text</button><button type="button" class="cfg-chip on">none</button></span>
+        </span>
+      </div>
+      <div class="cfg-control"><div class="sf-absent">sends null</div></div>
+    </div>
+    <div class="cfg-field">
+      <div class="cfg-field-say">
+        <span class="cfg-field-head">
+          <button type="button" role="switch" aria-checked="false" aria-label="set base_branch" title="set base_branch" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+          <span class="cfg-label mono">base_branch</span>
+        </span>
+      </div>
+      <div class="cfg-control"><div class="sf-absent">not set</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

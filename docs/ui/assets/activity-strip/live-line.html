@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/activity-strip">
+<meta name="state" content="live-line">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>activity-strip · live-line</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/activity-strip · live-line</p>
+<div class="mockup-stage" style="width: 720px; display: flex; flex-direction: column; gap: 14px; padding-block: 14px; background: var(--bg)">
+  <div class="ts-status">
+    <span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="ts-status-verb">Thinking</span>
+    <span class="ts-status-what ellip"></span>
+    <span class="ts-status-figure">12.4 seconds</span>
+  </div>
+  <div class="ts-status">
+    <span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="ts-status-verb">Answering</span>
+    <span class="ts-status-what ellip"></span>
+    <span class="ts-status-figure">3.1 seconds</span>
+    <button type="button" class="ts-status-jump">Jump to live ↓</button>
+  </div>
+  <div class="ts-status">
+    <span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="ts-status-verb">Writing</span>
+    <span class="ts-status-what ellip">docs/ui/components/fork-mark.md</span>
+    <span class="ts-status-figure">12 KB</span>
+  </div>
+  <div class="ts-status">
+    <span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="ts-status-verb">Running</span>
+    <span class="ts-status-what ellip">Bash · npx vitest run packages/app/test/sessionPanels.test.ts --reporter verbose</span>
+    <span class="ts-status-figure">1 m 4.2 s</span>
+    <button type="button" class="ts-status-jump">Jump to live ↓</button>
+  </div>
+  <div class="ts-status">
+    <span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="ts-status-verb">Working</span>
+    <span class="ts-status-what ellip"></span>
+  </div>
+</div>
+</body>
+</html>

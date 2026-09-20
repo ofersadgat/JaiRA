@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/value-view">
+<meta name="state" content="rendered">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>value-view · rendered</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/value-view · rendered</p>
+<div class="mockup-stage is-bare" style="width: 720px">
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="feature/plan — describe this run of it">feature/plan</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">result</span><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="As markdown, rendered" aria-pressed="true">Rendered</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body">
+            <div class="markdown">
+              <h2>Plan: cache the availability probe</h2>
+              <p>The probe runs on open, on every configuration write, and on demand. Only the third is waited for.</p>
+              <ul>
+                <li>Keep the last snapshot with the time it was taken.</li>
+                <li>Answer from it while it is younger than <code>INTERVAL</code>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="feature/ui/render — describe this run of it">feature/ui/render</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">result</span><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="As HTML, rendered" aria-pressed="true">Rendered</button><button type="button" title="Highlighted, in an editor" aria-pressed="false">Code</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body"><iframe class="vv-html" sandbox="" title="Rendered HTML" srcdoc="<h2>Providers</h2><p>anthropic: ready, checked 40 s ago</p><p>openai: not set up</p><button>Check again</button>"></iframe></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

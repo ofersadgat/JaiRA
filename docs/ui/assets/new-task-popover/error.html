@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/new-task-popover">
+<meta name="state" content="error">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>new-task-popover · error</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/new-task-popover · error</p>
+<div class="mockup-stage" style="width: 780px; height: 470px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; align-content: start; background: var(--bg)">
+  <!-- a workflow with lint errors, and values the form refuses -->
+  <header class="title-bar">
+    <span class="title-drag"></span>
+    <span class="doc-bar-tools">
+      <div class="new-task-wrap">
+        <button aria-expanded="true">+ New task</button>
+        <form class="new-task-pop">
+          <label class="field"><span>Workflow</span><select class="cfg-input"><option>Feature workflow</option></select></label>
+          <div class="notice warn">3 validation errors — it will start, and probably fail.</div>
+          <div class="new-task-fields">
+            <div class="run-inputs">
+              <div class="cfg-fields">
+                <div class="cfg-span cfg-block">
+                  <div class="cfg-field bad">
+                    <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label mono">issue</span><b class="sf-req" title="required">*</b><span class="sf-type">text/markdown · at least 1 character</span></span><span class="cfg-hint">What is being asked for.</span></div>
+                    <div class="cfg-control"><textarea class="cfg-input" rows="3"></textarea><div class="reason cfg-error">must NOT have fewer than 1 characters</div></div>
+                  </div>
+                </div>
+                <div class="cfg-field bad">
+                  <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" title="leave ask_below out" class="cfg-switch on"><span class="cfg-switch-knob"></span></button><span class="cfg-label mono">ask_below</span><span class="sf-type">number · 0 to 1</span></span></div>
+                  <div class="cfg-control"><input class="cfg-input mono num" inputmode="decimal" value="1.5"><div class="reason cfg-error">must be &lt;= 1</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="pane-actions">
+            <button type="submit" class="primary" disabled title="2 problems — issue: must NOT have fewer than 1 characters">Create</button>
+            <button type="button" class="ghost">Cancel</button>
+            <span class="sub ellip">2 problems — issue: must NOT have fewer than 1 characters</span>
+          </div>
+        </form>
+      </div>
+    </span>
+  </header>
+  <!-- a workflow whose file cannot be read -->
+  <header class="title-bar">
+    <span class="title-drag"></span>
+    <span class="doc-bar-tools">
+      <div class="new-task-wrap">
+        <button aria-expanded="true">+ New task</button>
+        <form class="new-task-pop">
+          <label class="field"><span>Workflow</span><select class="cfg-input"><option>explore</option></select></label>
+          <div class="notice bad">Unexpected token '}', ..."guidance": }... is not valid JSON</div>
+          <div class="notice bad">That workflow's file does not parse, so its inputs cannot be read.</div>
+          <div class="pane-actions">
+            <button type="submit" class="primary" disabled title="that workflow's file does not parse">Create</button>
+            <button type="button" class="ghost">Cancel</button>
+            <span class="sub ellip">that workflow's file does not parse</span>
+          </div>
+        </form>
+      </div>
+    </span>
+  </header>
+</div>
+</body>
+</html>

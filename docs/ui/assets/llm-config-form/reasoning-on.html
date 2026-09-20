@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/llm-config-form">
+<meta name="state" content="reasoning-on">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>llm-config-form · reasoning-on</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/llm-config-form · reasoning-on</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <div class="llm-config">
+          <nav class="llm-rail">
+            <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">not applicable — reasoning is on</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">high</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+          </nav>
+          <div class="llm-detail">
+            <div class="llm-detail-head">
+              <span class="llm-detail-title">Sampling</span>
+              <span class="cfg-hint">How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.</span>
+            </div>
+            <div class="notice warn">Reasoning is on, and a model is sampling <em>or</em> reasoning — never both. The sampling knobs are refused by a reasoning endpoint, so they are not offered here. Turn reasoning off to use them.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

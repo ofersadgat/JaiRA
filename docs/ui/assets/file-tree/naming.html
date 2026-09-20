@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-tree">
+<meta name="state" content="naming">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-tree · naming</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-tree · naming</p>
+<div class="mockup-stage is-bare" style="width: 250px">
+  <nav class="sidebar">
+    <div class="side-nav">
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\UbuntuCode\notes-api" aria-expanded="true"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">notes-api</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button>
+        </div>
+        <div class="side-views">
+          <div class="side-row side-nested on is-active">
+            <button class="side-hit" title="Files" aria-label="Files" aria-current="page"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button>
+            <button class="side-act" title="new file, folder or workflow" aria-label="new file, folder or workflow">+</button>
+            <button class="side-act" title="find in files" aria-label="find in files" aria-pressed="false">⌕</button>
+          </div>
+          <div class="side-drawer">
+            <div class="file-browser">
+          <div class="scroll">
+            <ul class="file-tree" title="C:/UbuntuCode/notes-api">
+              <li class="tree-item" title=".jaira"><span class="glyph">▾</span><span class="name">.jaira</span><button class="tree-add" title="new file, folder or workflow in .jaira" aria-label="New in .jaira">+</button></li>
+              <li class="tree-item tree-draft"><i class="tree-guide"></i><span class="glyph" aria-hidden="true">◻</span><span class="draft-lead">workflows/</span><input class="draft-name" spellcheck="false" value="release" placeholder="state id" aria-label="new state id"></li>
+              <li class="tree-item" title="settings.json"><i class="tree-guide"></i><span class="glyph">⚙</span><span class="name">settings.json</span></li>
+              <li class="tree-item" title="src"><span class="glyph">▸</span><span class="name">src</span><button class="tree-add" title="new file, folder or workflow in src" aria-label="New in src">+</button></li>
+              <li class="tree-item" title="package.json"><span class="glyph">·</span><span class="name">package.json</span></li>
+            </ul>
+          </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+</div>
+</body>
+</html>

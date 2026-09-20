@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/llm-config-form">
+<meta name="state" content="empty">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>llm-config-form · empty</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/llm-config-form · empty</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <header class="cfg-group-head">
+          <h4>Default environment</h4>
+          <p class="cfg-hint">What a state that names nothing is filled in with — the same fields a state’s own<code> environment </code>block carries, one level out. Applied UNDER whatever a state says, so naming a field there always wins.</p>
+        </header>
+        <div class="cfg-field">
+          <div class="cfg-field-say">
+            <span class="cfg-field-head"><span class="cfg-label">Default model</span></span>
+            <span class="cfg-hint">A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state.<code class="cfg-param">executors.default.prompt.defaults.model</code></span>
+          </div>
+          <div class="cfg-control"><input class="cfg-input mono" placeholder="left to the state"></div>
+        </div>
+        <div class="llm-config">
+          <nav class="llm-rail">
+            <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">provider defaults</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+          </nav>
+          <div class="llm-detail">
+            <div class="llm-detail-head">
+              <span class="llm-detail-title">Sampling</span>
+              <span class="cfg-hint">How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.</span>
+            </div>
+            <div class="cfg-fields">
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Temperature</span></span><span class="cfg-hint">Higher is more varied, lower more repeatable. Empty inherits the provider's default.<code class="cfg-param">temperature</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Top-p</span></span><span class="cfg-hint">Nucleus sampling: consider only the most likely tokens adding up to this probability mass (0–1).<code class="cfg-param">topP</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Top-k</span></span><span class="cfg-hint">Consider only the k most likely tokens. Provider-dependent; empty inherits.<code class="cfg-param">topK</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Presence penalty</span></span><span class="cfg-hint">Discourages tokens that already appeared at all.<code class="cfg-param">presencePenalty</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Frequency penalty</span></span><span class="cfg-hint">Discourages tokens in proportion to how often they already appeared.<code class="cfg-param">frequencyPenalty</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Seed</span></span><span class="cfg-hint">Fixes the sampler so an identical call draws an identical answer, where the provider supports it.<code class="cfg-param">seed</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="cfg-hint">provider defaults</p>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

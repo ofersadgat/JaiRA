@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/context-panel">
+<meta name="state" content="run">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>context-panel · run</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/context-panel · run</p>
+<div class="mockup-stage is-bare" style="width: 300px; height: 640px; display: grid">
+  <aside class="col panel">
+    <div class="inspector">
+      <div class="insp-crumb">
+        <button class="link back-arrow" title="back to the state">←</button>
+        <span class="state-id ellip">draft</span>
+        <span class="sub">· the run</span>
+        <span class="grow"></span>
+        <button class="link" title="describe the task this run belongs to">the task ↗</button>
+      </div>
+      <section>
+        <h3><span>This run</span><span class="chip chip-warn">waiting for user</span></h3>
+        <dl class="kv">
+          <dt>state</dt>
+          <dd><button class="link ellip" title="open its file">feature/ux/draft</button></dd>
+          <dt>started</dt>
+          <dd title="2026-09-13T14:02:17.000Z">14:02:17</dd>
+          <dt class="ellip">brief</dt>
+          <dd class="ellip" title="Pause a run and pick it up tomorrow without paying twice"><code>Pause a run and pick it up tomorrow without paying twice</code></dd>
+          <dt class="ellip">pattern_ids</dt>
+          <dd class="ellip" title="[&quot;park-and-ask&quot;]"><code>["park-and-ask"]</code></dd>
+          <dt>config</dt>
+          <dd><button class="link" title="read what this run resolves against">the effective configuration</button></dd>
+        </dl>
+      </section>
+      <section>
+        <h3><span>Metrics</span><span class="count">3 calls</span></h3>
+        <dl class="kv metrics">
+          <dt>started</dt>
+          <dd>9/13/2026, 2:02:17 PM</dd>
+          <dt>in calls</dt>
+          <dd>4 m 12 s</dd>
+          <dt>cost</dt>
+          <dd>$0.4122<span class="chip chip-warn" title="not the provider's own charge">price table</span></dd>
+          <dt>in</dt>
+          <dd>184,203</dd>
+          <dt>out</dt>
+          <dd>6,118<span class="sub"> · 2,904 thinking</span></dd>
+          <dt>cache</dt>
+          <dd>171,550 read · 9,812 written</dd>
+        </dl>
+      </section>
+      <div class="detail">
+        <header>
+          <h2><span class="badge badge-waiting_for_user">⏸</span> <span class="task-name">Pause a run and pick it up tomorrow</span></h2>
+          <div class="sub">t-qfr49rm80m · feature</div>
+          <div class="actions"><button>Re-run</button><button class="ghost">Cancel</button><button class="ghost" title="feature/ux/draft">Open state ↗</button></div>
+        </header>
+      </div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

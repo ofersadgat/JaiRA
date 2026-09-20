@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/task-panel">
+<meta name="state" content="ended">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>task-panel · ended</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/task-panel · ended</p>
+<div class="mockup-stage is-bare" style="width: 1100px"><div class="viewport">
+  <aside class="col panel" style="width: 360px">
+    <div class="detail">
+      <header>
+        <h2><span class="badge badge-interrupted" title="interrupted">⚠</span> <span class="task-name">Pause and stop</span></h2>
+        <div class="sub">t-4kd8x2m1qa · feature · snapshot c27fe752ca20</div>
+        <div class="actions">
+          <button title="Picks up in draft — keeps the 4 operations this task already finished and runs nothing again">Resume</button>
+          <button class="ghost">Cancel</button>
+          <button class="ghost" title="feature/ux/draft">Open state ↗</button>
+        </div>
+      </header>
+      <section>
+        <h3><span>Instances</span></h3>
+        <div class="rail run-index">
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-canceled"></span><span class="rail-mark-name">feature</span><span class="rail-mark-meta">09:40:02 · 6 m 10 s</span></span></div></div></div>
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-completed"></span><span class="rail-mark-name">product</span><span class="rail-mark-meta">09:40:02 · 2 m 55 s</span></span></div></div></div>
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-canceled"></span><span class="rail-mark-name">ux</span><span class="rail-mark-meta">09:42:58 · 3 m 14 s</span></span></div></div></div>
+        </div>
+      </section>
+      <section>
+        <h3>Live events</h3>
+        <pre class="stream">instance.entered  feature/ux
+operation.started  feature/ux/draft
+instance.terminated  feature/ux/draft → canceled</pre>
+      </section>
+    </div>
+  </aside>
+  <aside class="col panel" style="width: 360px">
+    <div class="detail">
+      <header>
+        <h2><span class="badge badge-failed" title="failed">✗</span> <span class="task-name">Questions under structured output</span></h2>
+        <div class="sub">t-9vq3e7c2lz · feature · snapshot 41f9e340df1f</div>
+        <div class="actions">
+          <button title="Re-runs the state that failed — keeps the 6 operations before it and runs none of them again">Retry</button>
+          <button class="ghost">Cancel</button>
+          <button class="ghost" title="feature/ux/critique">Open state ↗</button>
+        </div>
+      </header>
+      <section>
+        <h3><span>Instances</span></h3>
+        <div class="rail run-index">
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-failed"></span><span class="rail-mark-name">feature</span><span class="rail-mark-meta">08:12:40 · 9 m 2 s</span></span></div></div></div>
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-completed"></span><span class="rail-mark-name">ux</span><span class="rail-mark-meta">08:15:01 · 4 m 20 s</span></span></div></div></div>
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark tb red"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-failed"></span><span class="rail-mark-name">critique</span><span class="rail-mark-why">operation failed: model returned no text</span><span class="rail-mark-meta">08:19:21 · 1.2 s</span></span></div></div></div>
+        </div>
+      </section>
+      <section>
+        <h3>Live events</h3>
+        <pre class="stream">instance.entered  feature/ux/critique
+operation.failed  feature/ux/critique
+instance.terminated  feature → failed</pre>
+      </section>
+    </div>
+  </aside>
+  <aside class="col panel" style="width: 360px">
+    <div class="detail">
+      <header>
+        <h2><span class="badge badge-completed" title="completed">✓</span> <span class="task-name">debug/hello_world #2</span></h2>
+        <div class="sub">t-2mx81c0vbe · debug/hello_world · snapshot 0f3a91d2c7b4</div>
+        <div class="actions">
+          <button title="">Re-run</button>
+          <button class="ghost">Cancel</button>
+        </div>
+      </header>
+      <section>
+        <h3><span>Instances</span></h3>
+        <div class="rail run-index">
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-completed"></span><span class="rail-mark-name">debug/hello_world</span><span class="rail-mark-meta">07:58:09 · 4.1 s</span></span></div></div></div>
+        </div>
+      </section>
+      <section>
+        <h3>Live events</h3>
+        <pre class="stream">instance.entered  debug/hello_world
+operation.completed  debug/hello_world
+instance.terminated  debug/hello_world → completed</pre>
+      </section>
+      <section>
+        <h3>Outputs</h3>
+        <pre class="outputs">{
+  "greeting": "Hello, JaiRA",
+  "tokens": 18
+}</pre>
+      </section>
+    </div>
+  </aside>
+</div></div>
+</body>
+</html>

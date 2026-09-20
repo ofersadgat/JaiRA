@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/workflow-editor">
+<meta name="state" content="reading">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>workflow-editor · reading</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/workflow-editor · reading</p>
+<div class="mockup-stage is-bare" style="width: 480px; display: grid; grid-template-rows: auto 420px; gap: 14px"><aside class="col panel holding"><div class="pinned-pane"><div class="pinned-head"><span class="pinned-title ellip" title="verify · configuration">verify · configuration</span><button type="button" class="pinned-close" title="Close this and give the panel back"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg></button></div><div class="pinned-body pinned-surface"><div class="pane config-panel"><div class="sb-gutter"><span class="sb-session mono ellip" title="in feature/ui/item">feature/ui/item/verify</span><span class="sub ellip">the file this run pinned</span><button class="link" title="open its file">open ↗</button></div><div class="pane editor"><div class="edit-bar editor-top"><div class="sub file-path" title="C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json">C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json</div><div class="tabs seg"><button class="layer-on" title="the fields, as controls">Form</button><button class="ghost" title="the document, as text">JSON</button><button class="ghost" title="what runs after what, and what makes it">Graph</button></div></div><fieldset class="reading" disabled><div class="form"><div class="identity"><label class="field inline"><span>Label</span><input value="Verify the component" placeholder="a short name — what the board shows"></label><label class="field inline"><span>Description</span><textarea rows="2" placeholder="an author's note — also useful prompt context">Always entered: the person verifies this step's work before the run moves on. Whether it parks or resolves on the recommendation is the component's call from the score, the reasons and the viewer's threshold.</textarea></label></div><div class="slots"><div class="slots-head"><span>Inputs</span></div><div class="slot-row slot-head with-optional"><span>Name</span><span>Type</span><span>Binding — where the value comes from</span><span></span></div><div class="slot-group"><div class="slot-row with-optional"><input value="doc" placeholder="name" spellcheck="false"><span class="slot-type-custom" title="content with a media type — this is what makes a slot a blob">artifact · text/markdown</span><input value="" placeholder="default binding (optional)" spellcheck="false"><span class="slot-opt sub">optional</span></div></div><div class="slot-group"><div class="slot-row with-optional"><input value="ask_below" placeholder="name" spellcheck="false"><span class="slot-type-custom" title="any JSON number">number</span><input value="" placeholder="default binding (optional)" spellcheck="false"><span class="slot-opt sub"></span></div></div><div class="slot-group"><div class="slot-row with-optional"><input value="score" placeholder="name" spellcheck="false"><span class="slot-type-custom" title="any JSON number">number</span><input value="" placeholder="default binding (optional)" spellcheck="false"><span class="slot-opt sub">optional</span></div></div><div class="slot-group"><div class="slot-row with-optional"><input value="reasons" placeholder="name" spellcheck="false"><span class="slot-type-custom" title="a plain string">list of text</span><input value="" placeholder="default binding (optional)" spellcheck="false"><span class="slot-opt sub">optional</span></div><div class="slot-more open"><div class="row-controls"><label class="field"><span>description</span><input value="Shown instead of the bare number."></label></div></div></div><div class="slot-group"><div class="slot-row with-optional"><input value="must_ask" placeholder="name" spellcheck="false"><span class="slot-type-custom" title="a plain string">list of text</span><input value="" placeholder="default binding (optional)" spellcheck="false"><span class="slot-opt sub">optional</span></div><div class="slot-more open"><div class="row-controls"><label class="field"><span>description</span><input value="Non-empty means ask regardless of score."></label></div></div></div></div><div class="slots"><div class="slots-head"><span>Outputs</span></div><div class="slot-row slot-head"><span>Name</span><span>Type</span><span>Binding — empty means the component's answer lands here by name</span></div><div class="slot-group"><div class="slot-row"><input value="decision" placeholder="name, or prefix* to spread a child" spellcheck="false"><span class="slot-type-custom" title="{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;approve&quot;,&quot;revise&quot;]} — edit it on the JSON tab">string +enum</span><input class="binding-produced" value="" placeholder="the component's answer lands here by name" spellcheck="false" title="§3.3: an output with a binding is derived, one without is produced — there is no third case"></div></div><div class="slot-group"><div class="slot-row"><input value="comments" placeholder="name, or prefix* to spread a child" spellcheck="false"><span class="slot-type-custom" title="a plain string">text</span><input class="binding-produced" value="" placeholder="the component's answer lands here by name" spellcheck="false" title="§3.3: an output with a binding is derived, one without is produced — there is no third case"></div><div class="slot-more open"><div class="row-controls"><label class="field"><span>description</span><input value="What to change, when the answer is revise."></label></div></div></div></div><div class="slots"><div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div><label class="field"><span>Kind</span><select><option>function — host code, a gate, or an agent</option></select></label><div class="op-block"><label class="field"><span>Function</span><input value="review_artifact" placeholder="claude-code, codex-cli, choose_option, …" list="operation-functions" spellcheck="false" title=""></label><label class="field"><span>Arguments</span><textarea class="code-editor" rows="3" spellcheck="false" placeholder="{ &quot;options&quot;: [&quot;approve&quot;, &quot;block&quot;] }" title="bound as the function's `config` input; a reference here must be written {&quot;$ref&quot;: …}">{
+  &quot;prompt&quot;: &quot;This is one component doc for the feature. Approve it, or send it back with what to change.&quot;,
+  &quot;artifact&quot;: &quot;doc&quot;,
+  &quot;options&quot;: [
+    &quot;approve&quot;,
+    &quot;revise&quot;
+  ],
+  &quot;comments&quot;: true
+}</textarea></label><div class="slots"><div class="slots-head"><span>Operation inputs</span></div><div class="sub">none declared</div></div><div class="slots"><div class="slots-head"><span>Operation output</span></div><div class="sub">none declared</div></div></div></div></div></fieldset></div></div></div></div></aside><aside class="col panel holding"><div class="pinned-pane"><div class="pinned-head"><span class="pinned-title ellip" title="verify · configuration">verify · configuration</span><button type="button" class="pinned-close" title="Close this and give the panel back"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg></button></div><div class="pinned-body pinned-surface"><div class="pane config-panel"><div class="sb-gutter"><span class="sb-session mono ellip" title="in feature/ui/item">feature/ui/item/verify</span><span class="sub ellip">the file this run pinned</span><button class="link" title="open its file">open ↗</button></div><div class="pane editor"><div class="edit-bar editor-top"><div class="sub file-path" title="C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json">C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json</div><div class="tabs seg"><button class="ghost" title="the fields, as controls">Form</button><button class="layer-on" title="the document, as text">JSON</button><button class="ghost" title="what runs after what, and what makes it">Graph</button></div></div><textarea class="code-editor tall reading-doc" spellcheck="false" readonly>{
+  &quot;label&quot;: &quot;Verify the component&quot;,
+  &quot;description&quot;: &quot;Always entered: the person verifies this step's work before the run moves on. Whether it parks or resolves on the recommendation is the component's call from the score, the reasons and the viewer's threshold.&quot;,
+  &quot;inputs&quot;: {
+    &quot;doc&quot;: {
+      &quot;kind&quot;: &quot;blob&quot;,
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;contentMediaType&quot;: &quot;text/markdown&quot;
+      },
+      &quot;optional&quot;: true
+    },
+    &quot;ask_below&quot;: {
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;number&quot;
+      }
+    },
+    &quot;score&quot;: {
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;number&quot;
+      },
+      &quot;optional&quot;: true
+    },
+    &quot;reasons&quot;: {
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;array&quot;,
+        &quot;items&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      },
+      &quot;optional&quot;: true,
+      &quot;description&quot;: &quot;Shown instead of the bare number.&quot;
+    },
+    &quot;must_ask&quot;: {
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;array&quot;,
+        &quot;items&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      },
+      &quot;optional&quot;: true,
+      &quot;description&quot;: &quot;Non-empty means ask regardless of score.&quot;
+    }
+  },
+  &quot;outputs&quot;: {
+    &quot;decision&quot;: {
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;enum&quot;: [
+          &quot;approve&quot;,
+          &quot;revise&quot;
+        ]
+      }
+    },
+    &quot;comments&quot;: {
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;optional&quot;: true,
+      &quot;description&quot;: &quot;What to change, when the answer is revise.&quot;
+    },
+    &quot;notes&quot;: {
+      &quot;schema&quot;: {
+        &quot;type&quot;: &quot;array&quot;,
+        &quot;items&quot;: {
+          &quot;type&quot;: &quot;object&quot;
+        }
+      },
+      &quot;optional&quot;: true,
+      &quot;description&quot;: &quot;Comments anchored to passages of the artifact: each has `quote` (the passage, verbatim) and `body` (what to change there).&quot;
+    }
+  },
+  &quot;operation&quot;: {
+    &quot;kind&quot;: &quot;function&quot;,
+    &quot;function&quot;: &quot;review_artifact&quot;,
+    &quot;args&quot;: {
+      &quot;prompt&quot;: &quot;This is one component doc for the feature. Approve it, or send it back with what to change.&quot;,
+      &quot;artifact&quot;: &quot;doc&quot;,
+      &quot;options&quot;: [
+        &quot;approve&quot;,
+        &quot;revise&quot;
+      ],
+      &quot;comments&quot;: true
+    }
+  }
+}</textarea></div></div></div></div></aside></div>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/patch-view">
+<meta name="state" content="loading">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>patch-view · loading</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/patch-view · loading</p>
+<div class="mockup-stage" style="width: 720px; height: 340px; display: grid">
+  <div class="col mid" style="--viewer-height: 340px">
+    <div class="run-half">
+      <div class="file-edit"><pre class="vv-source">diff --git a/packages/shared/src/unifiedDiff.ts b/packages/shared/src/unifiedDiff.ts
+--- a/packages/shared/src/unifiedDiff.ts
++++ b/packages/shared/src/unifiedDiff.ts
+@@ -241,7 +241,9 @@ export function parseUnifiedDiff(text: string): PatchFile[] {
+     if ((line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) &amp;&amp; file !== null) {
+-      file.binary = "binary";
++      file.binary = "binary — the patch carries no readable content";
++      file.added = 0;
+       continue;
+     }
+diff --git a/docs/ui/components/patch-view.md b/docs/ui/components/patch-view.md
+new file mode 100644
+--- /dev/null
++++ b/docs/ui/components/patch-view.md</pre><div class="pane-actions pinned"><span class="sub">packages/shared/src/unifiedDiff.ts — and 1 other file in this patch</span></div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

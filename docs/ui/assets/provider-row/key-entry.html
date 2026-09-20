@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/provider-row">
+<meta name="state" content="key-entry">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>provider-row · key-entry</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/provider-row · key-entry</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <ul class="cfg-rows">
+          <li class="cfg-row unavailable">
+            <div class="cfg-row-head">
+              <span class="cfg-mark">
+                <svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#6566F1" opacity="0.9"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="#fff" font-family="system-ui, sans-serif">O</text></svg>
+                <span class="cfg-dot unavailable" title="not working" aria-hidden="true"></span>
+              </span>
+              <span class="cfg-row-title">OpenRouter</span>
+              <span class="grow"></span>
+              <button type="button" role="switch" aria-checked="true" aria-label="stop using OpenRouter in this project" title="stop using OpenRouter in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+              <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure OpenRouter" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <p class="cfg-say"><span class="cfg-say-state">not working</span> — no value was found for 'OPENROUTER_API_KEY'<span class="cfg-fix">→ store a key under OPENROUTER_API_KEY, or turn this route off</span></p>
+            <div class="cfg-credential">
+              <span class="cfg-hint">Key <code>OPENROUTER_API_KEY</code> — not found anywhere</span>
+              <div class="cfg-key-entry">
+                <input type="password" class="cfg-input mono" value="sk-or-v1-3f9a2c" placeholder="the value of OPENROUTER_API_KEY — empty clears it">
+                <select class="cfg-input"><option selected>OS keychain (encrypted)</option><option>this project's .jaira/.env.local</option><option>the shared root's .env.local</option></select>
+                <div class="pane-actions">
+                  <button>Store the key</button>
+                  <button class="ghost">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="cfg-row available">
+            <div class="cfg-row-head">
+              <span class="cfg-mark">
+                <svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">L</text></svg>
+                <span class="cfg-dot available" title="ready" aria-hidden="true"></span>
+              </span>
+              <span class="cfg-row-title">Local server</span>
+              <span class="grow"></span>
+              <button type="button" role="switch" aria-checked="true" aria-label="stop using Local server in this project" title="stop using Local server in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+              <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure Local server" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <p class="cfg-say"><span class="cfg-say-state">ready</span> — http://localhost:1234/v1 answered</p>
+            <div class="cfg-credential">
+              <span class="cfg-hint">No key named, which is fine unless this provider needs one.</span>
+              <div class="cfg-key-entry">
+                <div class="cfg-field">
+                  <div class="cfg-field-say">
+                    <span class="cfg-field-head"><span class="cfg-label">Secret name</span></span>
+                    <span class="cfg-hint">What this key is filed under. Config stores this NAME; the value goes to the store you pick below.<code class="cfg-param">credential</code></span>
+                  </div>
+                  <div class="cfg-control"><input class="cfg-input mono" value="LMSTUDIO_API_KEY" placeholder="LOCAL_API_KEY"></div>
+                </div>
+                <input type="password" class="cfg-input mono" placeholder="the value of LMSTUDIO_API_KEY — empty clears it">
+                <select class="cfg-input"><option selected>OS keychain (encrypted)</option><option>this project's .jaira/.env.local</option><option>the shared root's .env.local</option></select>
+                <div class="pane-actions">
+                  <button>Store the key</button>
+                  <button class="ghost">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

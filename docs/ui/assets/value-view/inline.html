@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/value-view">
+<meta name="state" content="inline">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>value-view · inline</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/value-view · inline</p>
+<div class="mockup-stage is-bare" style="width: 720px">
+  <div class="sb-panel">
+    <div class="sb-gutter">
+      <span class="sb-session mono ellip" title="analyst">analyst</span>
+      <button type="button" class="link sb-workflow ellip" title="chat/agent — describe this run of it">chat/agent</button>
+      <span class="sb-span">16:40:02 · 18 s</span>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="sb-bare">
+          <div class="ts-msg ts-msg-assistant"><div class="markdown">
+            <p>The three most expensive steps this week, from the cost export:</p>
+            <div class="md-block">
+              <div class="vv vv-inline">
+                <div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="As rows and columns" aria-pressed="true">Table</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+                <div class="vv-body">
+                  <div class="vv-table-wrap">
+                    <table class="vv-table">
+                      <thead><tr><th>state</th><th>runs</th><th>cost</th><th>share of the week</th></tr></thead>
+                      <tbody>
+                        <tr><td>feature.ux</td><td>14</td><td>3.81</td><td>31%</td></tr>
+                        <tr><td>feature.plan</td><td>22</td><td>2.95</td><td>24%</td></tr>
+                        <tr><td>chat/agent</td><td>61</td><td>2.40</td><td>19%</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p>Most of the ux cost is the critique pass re-reading the whole spec.</p>
+          </div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

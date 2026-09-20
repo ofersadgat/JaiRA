@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/run-value-field">
+<meta name="state" content="long">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>run-value-field · long</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/run-value-field · long</p>
+<div class="mockup-stage is-bare" style="width: 480px">
+  <aside class="col panel holding">
+    <div class="pinned-body pinned-surface">
+      <div class="pane config-panel">
+        <div class="pane editor">
+          <fieldset class="reading" disabled>
+            <div class="form">
+              <div class="slots">
+                <div class="slots-head"><span>Inputs</span></div>
+                <div class="slot-row slot-head with-optional"><span>Name</span><span>Type</span><span>Binding — where the value comes from</span><span></span></div>
+                <div class="slot-group">
+                  <div class="slot-row with-optional"><input value="doc"><span class="slot-type-custom" title="content with a media type — this is what makes a slot a blob">artifact · text/markdown</span><input value=""><span class="slot-opt sub">optional</span></div>
+                  <div class="slot-more open"><div class="row-controls"><div class="field run-value"><span>value</span><div class="value-box mono">---
+id: ui/components/pause-control
+type: ui-component
+status: proposed
+updated: 2026-09-13
+realizes: [ux/patterns/button-says-what-will-happen]
+serves: [product/pick-up-where-it-left-off]
+---
+
+# Pause control
+
+One button on the task card's hover row that reads `Pause` while the task runs and `Resume` once it has stopped.
+
+## A pause control is the one verb that stops work without releasing it
+
+**Use when.** A running task can be held and picked up later with its worktree and seat kept.
+
+**Do not use when.** The work should end and give its resources back: use the stop verb in the card's menu.
+
+## The word says what a click will do
+
+| State | Rendered as |
+| --- | --- |
+| running | `Pause` in a ghost button |
+| pausing | `Pausing…` with the button dimmed |
+| paused | `Resume` in the primary fill |</div></div></div></div>
+                </div>
+                <div class="slot-group">
+                  <div class="slot-row with-optional"><input value="ask_below"><span class="slot-type-custom" title="any JSON number">number</span><input value=""><span class="slot-opt sub"></span></div>
+                  <div class="slot-more open"><div class="row-controls"><div class="field run-value"><span>value</span><div class="value-box mono">0.8</div></div></div></div>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

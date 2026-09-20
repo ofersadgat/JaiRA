@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-panel">
+<meta name="state" content="whole">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-panel · whole</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-panel · whole</p>
+<div class="mockup-stage is-bare" style="width: 720px; display: grid; grid-template-rows: 420px 300px; gap: 12px">
+  <div class="col mid">
+    <div class="config-half whole">
+      <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button>
+      <div class="file-edit"><textarea class="code-editor" spellcheck="false">{
+  &quot;executors&quot;: {
+    &quot;claude&quot;: {
+      &quot;provider&quot;: &quot;claude-code&quot;,
+      &quot;model&quot;: &quot;claude-sonnet-5&quot;
+    }
+  },
+  &quot;policy&quot;: {
+    &quot;rules&quot;: [
+      { &quot;action&quot;: &quot;ask&quot;, &quot;tool&quot;: &quot;Bash&quot;, &quot;command&quot;: &quot;git push*&quot; }
+    ]
+  }
+}</textarea><div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div></div>
+    </div>
+  </div>
+  <div class="col mid">
+    <div class="config-half whole">
+      <div class="file-edit"><textarea class="code-editor" spellcheck="false">Release checklist
+- bump the version in package.json
+- run npm test on Linux and Windows
+- tag and push once both pass</textarea><div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

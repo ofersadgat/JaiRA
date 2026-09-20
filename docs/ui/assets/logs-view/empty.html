@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/logs-view">
+<meta name="state" content="empty">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>logs-view · empty</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/logs-view · empty</p>
+<div class="mockup-stage" style="width: 1030px; display: flex; flex-direction: column; gap: 14px; padding-block: 14px; background: var(--bg)">
+  <!-- nothing matches, the log is empty, or the read failed -->
+  <div class="logs">
+    <div class="logs-bar">
+      <select aria-label="Minimum level"><option>warn and worse</option></select>
+      <select aria-label="Source"><option>all sources</option></select>
+      <input placeholder="Filter…" aria-label="Filter" value="hello_world">
+      <span class="grow"></span>
+      <button>Configure</button>
+      <span class="sub">0 shown</span>
+    </div>
+    <div class="logs-head"><span>time</span><span>level</span><span>source</span><span>message</span><span></span></div>
+    <div class="logs-list">
+      <p class="empty">Nothing to show.</p>
+    </div>
+  </div>
+  <!-- the first page on its way -->
+  <div class="logs">
+    <div class="logs-bar">
+      <select aria-label="Minimum level"><option>debug and worse</option></select>
+      <select aria-label="Source"><option>all sources</option></select>
+      <input placeholder="Filter…" aria-label="Filter">
+      <span class="grow"></span>
+      <button>Configure</button>
+      <span class="sub">0 shown</span>
+    </div>
+    <div class="logs-head"><span>time</span><span>level</span><span>source</span><span>message</span><span></span></div>
+    <div class="logs-list">
+      <p class="empty">Reading…</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

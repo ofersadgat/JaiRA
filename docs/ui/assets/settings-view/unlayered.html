@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-view">
+<meta name="state" content="unlayered">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-view · unlayered</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-view · unlayered</p>
+<div class="mockup-stage" style="width: 1280px; height: 520px; display: flex; background: var(--bg); --sidebar: 250px">
+  <nav class="sidebar">
+    <div class="side-title">
+      <button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar" aria-expanded="true">|◂</button>
+      <span class="side-brand app-label">JAIRA</span>
+    </div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button></div>
+        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button></div>
+      </div>
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\UbuntuCode\declarative-ai" aria-expanded="true"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">declarative-ai</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button>
+        </div>
+      </div>
+    </div>
+    <div class="side-panel">
+      <div class="side-row on is-active">
+        <button class="side-back" title="back to where you were" aria-label="Back">‹</button>
+        <button class="side-hit" title="Settings" aria-label="Settings" aria-current="page"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button>
+      </div>
+      <div class="side-drawer"><ul class="sections"><li>Providers</li><li>Executors</li><li>Configuration</li><li>Files</li><li>Appearance</li><li>Conversation</li><li class="sel">History</li></ul></div>
+      <div class="side-panel-rest">
+        <div class="side-row"><button class="side-hit" title="Logs"><span class="side-glyph">≡</span><span class="side-label ellip app-label">Logs</span></button></div>
+        <div class="side-row"><button class="side-hit" title="Debug"><span class="side-glyph">⌁</span><span class="side-label ellip app-label">Debug</span></button></div>
+        <div class="side-row"><button class="side-hit" title="Components"><span class="side-glyph">▤</span><span class="side-label ellip app-label">Components</span></button></div>
+        <button class="side-row side-theme" title="switch to dark" aria-label="Toggle theme"><span class="side-glyph">☾</span><span class="side-label ellip app-label">Dark</span></button>
+      </div>
+    </div>
+  </nav>
+  <div class="splitter" role="separator" aria-label="Resize the sidebar" tabindex="0"></div>
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view settings-view"><div class="col mid settings-body"><div class="pane history">
+  <div><div class="pane-title">Stored history</div><div class="sub">148 tasks · 52310 events · 9412 commands</div></div>
+  <div class="prune-controls"><label>older than <input type="number" min="0" value="30">d</label><button class="ghost">Preview</button></div>
+  <div class="prune-report">
+    <div class="sub">would delete the history of 61 task(s): 20114 events, 3870 commands</div>
+    <button class="danger">Delete permanently</button>
+    <div class="sub">kept 2 unfinished task(s)</div>
+    <button class="ghost">Dismiss</button>
+  </div>
+</div></div></div>
+    </div>
+    <footer class="strip">
+      <span class="strip-label app-title">Awaiting you</span>
+      <span class="pill pill-waiting pill-active" title="1 waiting on you"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span>
+      <span class="strip-item" title="confirm_action"><span class="chip strip-project" style="--hue: var(--p1)">declarative-ai</span><span class="ellip data-text">Merge the plan into main?</span></span>
+    </footer>
+  </div>
+</div>
+</body>
+</html>

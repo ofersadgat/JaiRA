@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/provider-row">
+<meta name="state" content="disabled">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>provider-row · disabled</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/provider-row · disabled</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <ul class="cfg-rows">
+          <li class="cfg-row available">
+            <div class="cfg-row-head">
+              <span class="cfg-mark">
+                <svg class="cfg-mark-svg" viewBox="0 0 24 24" fill="#191919" aria-hidden="true"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>
+                <span class="cfg-dot available" title="ready" aria-hidden="true"></span>
+              </span>
+              <span class="cfg-row-title">Anthropic</span>
+              <span class="grow"></span>
+              <button type="button" role="switch" aria-checked="true" aria-label="stop using Anthropic in this project" title="stop using Anthropic in this project" class="cfg-switch on" disabled><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+              <button class="quiet cfg-chevron open" aria-expanded="true" aria-label="hide Anthropic's settings" title="Done"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <p class="cfg-say"><span class="cfg-say-state">ready</span> — 'ANTHROPIC_API_KEY' resolves</p>
+            <div class="cfg-row-body">
+              <p class="cfg-hint">Claude models, billed to an API key. Serves every model id starting anthropic/.</p>
+              <section class="cfg-level" data-depth="0">
+                <div class="cfg-level-head">
+                  <span class="cfg-level-title">API provider</span>
+                  <span class="cfg-hint">Reached over HTTP with a key. With no credential named, the SDK reads ANTHROPIC_API_KEY from the environment.</span>
+                </div>
+                <div class="cfg-level-body">
+                  <div class="cfg-fields">
+                    <div class="cfg-field">
+                      <div class="cfg-field-say">
+                        <span class="cfg-field-head"><span class="cfg-label">Credential</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+                        <span class="cfg-hint">The NAME of the secret holding the key — never the key. It is resolved at run time from the OS keychain, a .env file, or the environment.<code class="cfg-param">models.routes.anthropic.credential</code></span>
+                      </div>
+                      <div class="cfg-control"><input class="cfg-input mono" value="ANTHROPIC_API_KEY" placeholder="ANTHROPIC_API_KEY" disabled></div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <p class="cfg-hint">An empty box removes the setting from this layer, so it goes back to whatever the other layer or the built-in default says.</p>
+              <div class="pane-actions">
+                <button class="primary" disabled>Save</button>
+                <button class="ghost" disabled>Revert</button>
+              </div>
+            </div>
+            <div class="cfg-credential">
+              <span class="cfg-hint">Key <code>ANTHROPIC_API_KEY</code> — found in OS keychain</span>
+              <button class="ghost" disabled>Replace the key</button>
+            </div>
+          </li>
+          <li class="cfg-row unavailable">
+            <div class="cfg-row-head">
+              <span class="cfg-mark">
+                <svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#6566F1" opacity="0.9"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="#fff" font-family="system-ui, sans-serif">O</text></svg>
+                <span class="cfg-dot unavailable" title="not working" aria-hidden="true"></span>
+              </span>
+              <span class="cfg-row-title">OpenRouter</span>
+              <span class="grow"></span>
+              <button type="button" role="switch" aria-checked="true" aria-label="stop using OpenRouter in this project" title="stop using OpenRouter in this project" class="cfg-switch on" disabled><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+              <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure OpenRouter" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <p class="cfg-say"><span class="cfg-say-state">not working</span> — no key — OPENROUTER_API_KEY is not set and this route names no credential<span class="cfg-fix">→ store a key under OPENROUTER_API_KEY, or turn this route off</span></p>
+            <div class="cfg-credential">
+              <span class="cfg-hint">No key named. Storing one below also writes the name <code>OPENROUTER_API_KEY</code> into this layer, so it is actually looked up.</span>
+              <button class="ghost" disabled>Add a key</button>
+            </div>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/debug-view">
+<meta name="state" content="first-run">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>debug-view · first-run</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/debug-view · first-run</p>
+<div class="mockup-stage" style="width: 1030px; height: 720px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view debug-view">
+        <div class="col mid debug">
+          <header class="debug-head">
+            <h2>Workflow self-test</h2>
+            <p class="sub">Two prompt states run in sequence. The first is asked to say hello world; the second takes what it said as a declared input and reports whether it did. A pass means the model answered <em>and</em> that its output was validated, bound and carried into the next state.</p>
+          </header>
+          <section>
+            <h3>What it runs</h3>
+            <ol class="debug-stages">
+              <li><span class="mono">debug/hello_world/say</span><span class="sub">asks for the greeting, publishes it as </span><span class="mono">greeting: string</span></li>
+              <li><span class="mono">debug/hello_world/check</span><span class="sub">reads </span><span class="mono">.children.say.output.greeting</span><span class="sub">, publishes </span><span class="mono">passed: boolean</span><span class="sub"> and </span><span class="mono">verdict: string</span></li>
+            </ol>
+            <details class="debug-source"><summary>The state files, as they will be written</summary></details>
+          </section>
+          <section>
+            <h3>Installed</h3>
+            <div class="notice">The self-test lives in the SHARED root, not in the open project — it is a fact about this installation, and three debug files in a checkout's <code>.jaira/</code> would be three files in its next commit.</div>
+            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world.json">debug/hello_world</span><span class="chip">installed</span><button class="link">open ↗</button></div>
+            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world\say.json">debug/hello_world/say</span><span class="chip">installed</span><button class="link">open ↗</button></div>
+            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world\check.json">debug/hello_world/check</span><span class="chip">installed</span><button class="link">open ↗</button></div>
+            <div class="sub mono ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world.json">C:\Users\Ofer\.jaira\workflows\debug\hello_world.json</div>
+            <div class="pane-actions">
+              <button class="ghost" disabled>Install missing</button>
+              <button class="ghost">Reinstall</button>
+              <button class="ghost">Re-check</button>
+            </div>
+          </section>
+          <section>
+            <h3>Run it</h3>
+            <div class="notice">A live run goes to whatever <code>models.default</code> resolves to. Reported healthy: anthropic, claude-code.</div>
+            <div class="pane-actions">
+              <button>Run (live LLM)</button>
+              <button class="ghost" title="Replaces the model with canned replies — exercises everything except the provider">Run scripted</button>
+              <button class="ghost" disabled title="A new task, rather than another run on the last one">New task</button>
+              <button class="ghost" disabled>Cancel</button>
+            </div>
+          </section>
+        </div>
+        <aside class="col panel">
+          <p class="empty">Run the self-test to see its task here.</p>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

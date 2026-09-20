@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/module-approval-dialog">
+<meta name="state" content="asking">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>module-approval-dialog · asking</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/module-approval-dialog · asking</p>
+<div class="mockup-stage" style="width: 1140px; display: flex; flex-direction: column; align-items: center; gap: 22px; padding-block: 28px; background: var(--scrim)">
+  <!-- one file never approved, one changed since its approval -->
+  <div class="modal modal-wide" data-testid="module-approval">
+    <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"></path></svg> Run this workflow's TypeScript?</h3>
+    <div class="sub">2 files · 1 changed since you approved it · nothing has run yet</div>
+    <div>
+      <div class="sub">workflows/feature/lib/split.ts — changed since you approved it · calls splitFeatures, countPieces</div>
+      <pre class="artifact">export function splitFeatures(doc: string): string[] {
+  return doc
+    .split(/^## /m)
+    .slice(1)
+    .map((section) =&gt; section.trim());
+}
+
+export function countPieces(pieces: string[]): number {
+  return pieces.filter((p) =&gt; p.length &gt; 0).length;
+}</pre>
+    </div>
+    <div>
+      <div class="sub">workflows/feature/lib/slug.ts — never approved</div>
+      <pre class="artifact">export const slug = (title: string): string =&gt;
+  title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");</pre>
+    </div>
+    <div class="options">
+      <button>Approve and run</button>
+      <button class="danger">Cancel</button>
+    </div>
+  </div>
+  <!-- one file, with a failure from elsewhere under the answers -->
+  <div class="modal modal-wide" data-testid="module-approval">
+    <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"></path></svg> Run this workflow's TypeScript?</h3>
+    <div class="sub">1 file · nothing has run yet</div>
+    <div>
+      <div class="sub">workflows/review/score.ts — never approved · calls scoreReview</div>
+      <pre class="artifact">export function scoreReview(notes: string[]): number {
+  return Math.max(0, 10 - notes.length);
+}</pre>
+    </div>
+    <div class="options">
+      <button>Approve and run</button>
+      <button class="danger">Cancel</button>
+    </div>
+    <p class="reason">no project is open at C:\UbuntuCode\notes-api</p>
+  </div>
+</div>
+</body>
+</html>

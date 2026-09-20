@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/logs-view">
+<meta name="state" content="output">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>logs-view · output</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/logs-view · output</p>
+<div class="mockup-stage" style="width: 1030px; height: 600px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view logs-view">
+        <div class="logs">
+          <div class="logs-bar">
+            <select aria-label="Minimum level"><option>debug and worse</option></select>
+            <select aria-label="Source"><option>process</option></select>
+            <input placeholder="Filter…" aria-label="Filter">
+            <span class="grow"></span>
+            <button>Configure</button>
+            <span class="sub">38 shown</span>
+          </div>
+          <div class="logs-head"><span>time</span><span>level</span><span>source</span><span>message</span><span></span></div>
+          <div class="logs-list">
+            <div class="log-line"><div class="log-row log-error" role="button" tabindex="0"><span class="log-at">2:21:58 PM</span><span class="log-level log-error">error</span><span class="log-source" title="process">process</span><span class="log-message">claude exited with code 1 after 41 s for t-qfr49rm80m</span><span class="log-links"><button class="link">task</button><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0"><span class="log-at">2:18:40 PM</span><span class="log-level log-info">info</span><span class="log-source" title="process">process</span><span class="log-message">claude started for t-qfr49rm80m in C:\UbuntuCode\declarative-ai\.jaira\worktrees\t-qfr49rm80m</span><span class="log-links"><button class="link">task</button><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0"><span class="log-at">2:02:11 PM</span><span class="log-level log-info">info</span><span class="log-source" title="process">process</span><span class="log-message">git worktree add .jaira/worktrees/t-6h2c91xk0d exited with code 0 after 1.2 s</span><span class="log-links"><button class="link">task</button><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0"><span class="log-at">1:47:30 PM</span><span class="log-level log-info">info</span><span class="log-source" title="process">process</span><span class="log-message">codex --version exited with code 0 after 0.4 s</span><span class="log-links"><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0"><span class="log-at">1:47:29 PM</span><span class="log-level log-info">info</span><span class="log-source" title="process">process</span><span class="log-message">claude --version exited with code 0 after 0.6 s</span><span class="log-links"><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-warn" role="button" tabindex="0"><span class="log-at">1:12:04 PM</span><span class="log-level log-warn">warn</span><span class="log-source" title="process">process</span><span class="log-message">wsl.exe -d Ubuntu -- true took 6.8 s to answer</span><span class="log-links"><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info" role="button" tabindex="0"><span class="log-at">1:11:57 PM</span><span class="log-level log-info">info</span><span class="log-source" title="process">process</span><span class="log-message">npm test exited with code 0 after 38 s for t-u9895uzcg8</span><span class="log-links"><button class="link">task</button><button class="link">output</button></span></div></div>
+          </div>
+          <div class="console">
+            <div class="console-head"><span class="grow">Process output</span><button>Close</button></div>
+            <div class="console-stream console-stdout">
+              <h4>stdout</h4>
+              <div><pre>{"type":"system","subtype":"init","session_id":"5b1f0c2e-8d7a-4e51-9a0c-3c2f1d9e7b44","model":"claude-sonnet-5"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Reading docs/ux/patterns/park-and-ask.md"}]}}</pre></div>
+              <div><p class="console-gap">… 184,302 bytes not kept …</p><pre>{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"docs/ux/draft.md"}}]}}
+{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":41022}</pre></div>
+            </div>
+            <div class="console-stream console-stderr">
+              <h4>stderr</h4>
+              <div><pre>Error: mcp__dai__approve not found in the configured MCP servers</pre></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

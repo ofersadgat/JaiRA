@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-types-pane">
+<meta name="state" content="editor">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-types-pane · editor</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-types-pane · editor</p>
+<div class="mockup-stage is-bare" style="width: 900px; display: grid; gap: 16px">
+  <div class="ft">
+    <div class="ft-tree">
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents — including text with nothing claimed about it"><span class="ft-caret">▸</span><span class="ellip">Prose</span><span class="ft-count data-faint">2</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="source files, drawn by grammar"><span class="ft-caret">▾</span><span class="ellip">Code</span><span class="ft-count data-faint">8</span></button>
+        <div class="ft-kids">
+          <button class="ft-row" aria-selected="false" title="every type in this family — a value shows where they already agree"><span class="ellip">All code</span></button>
+          <button class="ft-row" aria-selected="true" title="text/x-typescript"><span class="ellip">TypeScript</span></button>
+          <button class="ft-row" aria-selected="false" title="text/javascript"><span class="ellip">JavaScript</span></button>
+          <button class="ft-row" aria-selected="false" title="text/x-python"><span class="ellip">Python</span></button>
+          <button class="ft-row" aria-selected="false" title="application/x-sh"><span class="ellip">Shell</span></button>
+          <button class="ft-row" aria-selected="false" title="text/css"><span class="ellip">CSS</span></button>
+          <button class="ft-row" aria-selected="false" title="text/html"><span class="ellip">HTML</span></button>
+          <button class="ft-row" aria-selected="false" title="application/xml"><span class="ellip">XML</span></button>
+          <button class="ft-row" aria-selected="false" title="text/x-sql"><span class="ellip">SQL</span></button>
+        </div>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents that denote a value — rows included"><span class="ft-caret">▸</span><span class="ellip">Data</span><span class="ft-count data-faint">7</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="a patch, and the edit it describes"><span class="ft-caret">▸</span><span class="ellip">Changes</span><span class="ft-count data-faint">1</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="pictures, and the markup that draws them"><span class="ft-caret">▸</span><span class="ellip">Media</span><span class="ft-count data-faint">1</span></button>
+      </div>
+    </div>
+    <div class="ft-stage">
+      <div class="ft-head"><span class="app-title">TypeScript</span><span class="grow"></span><span class="app-secondary ellip" title="text/x-typescript">text/x-typescript</span></div>
+      <div class="ft-modes">
+        <button class="ft-mode" aria-selected="true" title="the characters as they are on disk — an editor, or coloured source"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">text</span></span><span class="ft-mode-say ellip">Monaco</span></button>
+        <button class="ft-mode is-off" aria-selected="false" disabled title="this type has no rendering of that kind"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">data</span></span><span class="ft-mode-say ellip">—</span></button>
+        <button class="ft-mode is-off" aria-selected="false" disabled title="this type has no rendering of that kind"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">preview</span></span><span class="ft-mode-say ellip">—</span></button>
+      </div>
+      <div class="ft-body">
+        <div class="ft-arranging"><span class="app-label">arranging</span><span class="ft-seg"><button aria-pressed="false">the read-only view</button><button aria-pressed="true">the editor</button></span></div>
+        <div class="ft-menu">
+          <div class="ft-menu-head"><span class="app-label">text</span><span class="app-secondary">the view you type into</span></div>
+          <div class="ft-mm-row is-lead"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick">✓</span><span class="ft-mm-name"><span class="app-text">Monaco<span class="app-secondary"> ours</span></span><span class="app-secondary ellip">a real editor — typing, a caret, its own selection</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+          <div class="ft-mm-row is-dim"><button class="ft-mm-pick" disabled title="this renderer cannot be typed into, so it is never an editor"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Code view</span><span class="app-secondary ellip">coloured, but not an editor — a selection can be dragged through it</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+        </div>
+        <div class="ft-theme"><span class="app-label">theme</span><select class="cfg-input"><option>Monokai Light</option></select><span class="ft-swatches" title="github.com/anoff/vscode-monokai-light — themes/Monokai%20Light.tmTheme"><span class="ft-swatch" style="background: #ffffff"></span><span class="ft-swatch" style="background: #f92672"></span><span class="ft-swatch" style="background: #f25a00"></span><span class="ft-swatch" style="background: #6aaf19"></span><span class="ft-swatch" style="background: #28c6e4"></span></span><span class="grow"></span><span class="app-secondary ellip">Monaco — the one view and the other of TypeScript<span class="ft-caveat"> · editors share one, and the last one you were in wins</span></span></div>
+        <div class="ft-knobs">
+          <div class="ft-knobs-head"><span class="app-label">how it is drawn</span><span class="app-secondary ellip">every file Monaco draws, not only this type</span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="true" aria-label="Line numbers" title="Line numbers" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Line numbers</span><span class="ap-toggle-value"><span class="app-secondary">numbered</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Wrap long lines" title="Wrap long lines" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Wrap long lines</span><span class="ap-toggle-value"><span class="app-secondary">scrolls sideways</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Minimap" title="Minimap" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Minimap</span><span class="ap-toggle-value"><span class="app-secondary">hidden</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="true" aria-label="Indent guides" title="Indent guides" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Indent guides</span><span class="ap-toggle-value"><span class="app-secondary">shown</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Mark the current line" title="Mark the current line" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Mark the current line</span><span class="ap-toggle-value"><span class="app-secondary">the caret says it</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Show spaces and tabs" title="Show spaces and tabs" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Show spaces and tabs</span><span class="ap-toggle-value"><span class="app-secondary">hidden</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Colour bracket pairs" title="Colour bracket pairs" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Colour bracket pairs</span><span class="ap-toggle-value"><span class="app-secondary">the theme's own</span></span></div>
+          <div class="ap-toggle"><span class="ap-chip-row"><button type="button" class="cfg-chip on">2</button><button type="button" class="cfg-chip">4</button><button type="button" class="cfg-chip">8</button></span><span class="app-text">Tab width</span><span class="ap-toggle-value app-secondary">columns</span></div>
+          <div class="ap-toggle"><span></span><span class="app-text">Line spacing</span><span class="ap-toggle-value"><div class="size-box"><input class="size-n data-num" type="number" min="1.1" max="2.2" step="0.05" value="1.5"><span class="data-faint">×</span><span class="size-step"><button title="larger (max 2.2)">▲</button><button title="smaller (min 1.1)">▼</button></span></div></span></div>
+        </div>
+        <div class="ft-preview">
+          <div class="ft-preview-bar"><span class="app-label">preview</span><span class="data-faint ellip">TypeScript · text · Monaco</span><span class="ft-tag">editor view</span></div>
+          <div class="ft-preview-body write" style="--ed-scheme: light; --ed-bg: #ffffff; --ed-panel: #f4f4f2; --ed-text: #000000; --ed-dim: #9f9f8f; --ed-line: #e0e0e0; --ed-tok-string: #f25a00; --ed-tok-number: #ae81ff; --ed-tok-keyword: #f92672; --ed-tok-type: #28c6e4; --ed-tok-hint: #9f9f8f; --ed-selection: #c2e8ff">
+            <div class="file-edit">
+              <div class="monaco-host">
+                <div class="md-editor ed-themed">
+                  <div class="vv-patch-body">
+                    <div class="vv-patch-line"><span class="vv-patch-no">1</span><span class="vv-patch-text"><span class="tok-keyword">export</span> <span class="tok-type">function</span> <span class="tok-fn">paletteOf</span>(chosen: <span class="tok-type">string</span>, dark: <span class="tok-type">boolean</span>): <span class="tok-type">string</span> {</span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no">2</span><span class="vv-patch-text">  <span class="tok-keyword">if</span> (chosen <span class="tok-keyword">!==</span> <span class="tok-string">"app"</span>) <span class="tok-keyword">return</span> chosen;</span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no">3</span><span class="vv-patch-text">  <span class="tok-comment">// what a person means by “follows the app”</span></span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no">4</span><span class="vv-patch-text">  <span class="tok-keyword">return</span> dark <span class="tok-keyword">?</span> <span class="tok-string">"app-dark"</span> <span class="tok-keyword">:</span> <span class="tok-string">"app-light"</span>;</span></div>
+                    <div class="vv-patch-line"><span class="vv-patch-no">5</span><span class="vv-patch-text">}</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="pane-actions pinned"><button class="primary">Save</button><button class="ghost">Revert</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/switch">
+<meta name="state" content="on">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>switch · on</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/switch · on</p>
+<div class="mockup-stage" style="width: 600px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane ap">
+      <div class="ap-toggle">
+        <button type="button" role="switch" aria-checked="true" aria-label="Smooth text" title="Smooth text" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+        <span class="app-text">Smooth text</span>
+        <span class="ap-toggle-value"><span class="app-secondary">grayscale</span></span>
+      </div>
+      <div class="ap-toggle">
+        <button type="button" role="switch" aria-checked="true" aria-label="Wrap long lines" title="Wrap long lines" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+        <span class="app-text">Wrap long lines</span>
+        <span class="ap-toggle-value"><span class="app-secondary">wrapped</span></span>
+      </div>
+    </div>
+    <div class="cfg-fields">
+      <div class="cfg-field">
+        <div class="cfg-field-say">
+          <span class="cfg-field-head">
+            <button type="button" role="switch" aria-checked="true" aria-label="leave ask_below out" title="leave ask_below out" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+            <span class="cfg-label mono">ask_below</span>
+            <span class="sf-type">number · 0 to 1</span>
+          </span>
+        </div>
+        <div class="cfg-control"><input class="cfg-input mono num" value="0.8" inputmode="decimal"></div>
+      </div>
+      <div class="cfg-field">
+        <div class="cfg-field-say">
+          <span class="cfg-field-head"><span class="cfg-label">Show system/</span></span>
+          <span class="cfg-hint">Shown, for you alone. This is a `!system` rule in your own list.</span>
+        </div>
+        <div class="cfg-control">
+          <button type="button" role="switch" aria-checked="true" aria-label="shown" title="shown" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

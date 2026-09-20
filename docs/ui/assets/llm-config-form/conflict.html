@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/llm-config-form">
+<meta name="state" content="conflict">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>llm-config-form · conflict</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/llm-config-form · conflict</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <div class="llm-config">
+          <nav class="llm-rail">
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">not applicable — reasoning is on</span></button>
+            <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">high</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+          </nav>
+          <div class="llm-detail">
+            <div class="llm-detail-head">
+              <span class="llm-detail-title">Reasoning</span>
+              <span class="cfg-hint">How hard to think, as an effort level and/or a token budget. Provider-neutral: it is adapted to each provider's own shape at the call.</span>
+            </div>
+            <div class="cfg-stack">
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Effort</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">A level rather than a number of tokens, so it means the same thing across providers. A provider that tops out lower clamps rather than refusing.<code class="cfg-param">reasoning.effort</code></span></div>
+                <div class="cfg-control"><select class="cfg-input"><option>— inherit</option><option>low</option><option>medium</option><option selected>high</option><option>xhigh</option></select></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Thinking budget</span></span><span class="cfg-hint">A token ceiling on the thinking itself, for the models that take one instead of a level.<code class="cfg-param">reasoning.budgetTokens</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+              <div class="notice warn">This configuration also sets temperature, topP, which a reasoning endpoint refuses. Clear them, or turn reasoning off.<div class="pane-actions"><button class="ghost">Clear the sampling knobs</button></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

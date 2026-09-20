@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/run-value-field">
+<meta name="state" content="success">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>run-value-field · success</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/run-value-field · success</p>
+<div class="mockup-stage is-bare" style="width: 480px; display: grid; gap: 14px">
+  <!-- a function state read against one run: produced outputs and the call's whole result -->
+  <aside class="col panel holding">
+    <div class="pinned-pane">
+      <div class="pinned-head">
+        <span class="pinned-title ellip" title="verify · configuration">verify · configuration</span>
+        <button type="button" class="pinned-close" title="Close this and give the panel back"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg></button>
+      </div>
+      <div class="pinned-body pinned-surface">
+        <div class="pane config-panel">
+          <div class="sb-gutter">
+            <span class="sb-session mono ellip">feature/ui/item/verify</span>
+            <span class="sub ellip">the file this run pinned</span>
+            <button class="link" title="open its file">open ↗</button>
+          </div>
+          <div class="pane editor">
+            <fieldset class="reading" disabled>
+              <div class="form">
+                <div class="slots">
+                  <div class="slots-head"><span>Inputs</span></div>
+                  <div class="slot-row slot-head with-optional"><span>Name</span><span>Type</span><span>Binding — where the value comes from</span><span></span></div>
+                  <div class="slot-group">
+                    <div class="slot-row with-optional"><input value="score"><span class="slot-type-custom" title="any JSON number">number</span><input value=""><span class="slot-opt sub">optional</span></div>
+                    <div class="slot-more open"><div class="row-controls"><div class="field run-value"><span>value</span><div class="value-box mono">0.72</div></div></div></div>
+                  </div>
+                  <div class="slot-group">
+                    <div class="slot-row with-optional"><input value="reasons"><span class="slot-type-custom" title="a plain string">list of text</span><input value=""><span class="slot-opt sub">optional</span></div>
+                    <div class="slot-more open"><div class="row-controls"><div class="field run-value"><span>value</span><div class="value-box mono">[
+  "one significant finding left after 2 passes",
+  "the draft adds a standing amendment"
+]</div></div><label class="field"><span>description</span><input value="Shown instead of the bare number."></label></div></div>
+                  </div>
+                </div>
+                <div class="slots">
+                  <div class="slots-head"><span>Outputs</span></div>
+                  <div class="slot-row slot-head"><span>Name</span><span>Type</span><span>Binding — empty means the component's answer lands here by name</span></div>
+                  <div class="slot-group">
+                    <div class="slot-row"><input value="decision"><span class="slot-type-custom" title="{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;approve&quot;,&quot;revise&quot;]} — edit it on the JSON tab">string +enum</span><input class="binding-produced" value=""></div>
+                    <div class="slot-more open"><div class="row-controls"><div class="field run-value"><span>value</span><div class="value-box mono">revise</div></div></div></div>
+                  </div>
+                  <div class="slot-group">
+                    <div class="slot-row"><input value="comments"><span class="slot-type-custom" title="a plain string">text</span><input class="binding-produced" value=""></div>
+                    <div class="slot-more open"><div class="row-controls"><div class="field run-value"><span>value</span><div class="value-box mono">Draw the error state.
+The table says it cannot occur, but a parse error shows a red line.</div></div><label class="field"><span>description</span><input value="What to change, when the answer is revise."></label></div></div>
+                  </div>
+                </div>
+                <div class="slots">
+                  <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+                  <label class="field"><span>Kind</span><select><option>function — host code, a gate, or an agent</option></select></label>
+                  <div class="op-block">
+                    <label class="field"><span>Function</span><input value="review_artifact"></label>
+                    <label class="field"><span>Arguments</span><textarea class="code-editor" rows="3">{
+  "prompt": "This is one component doc for the feature. Approve it, or send it back with what to change.",
+  "artifact": "doc",
+  "options": ["approve", "revise"],
+  "comments": true
+}</textarea></label>
+                    <div class="field run-value"><span>value</span><div class="value-box mono">{
+  "decision": "revise",
+  "comments": "Draw the error state.\nThe table says it cannot occur, but a parse error shows a red line.",
+  "notes": []
+}</div></div>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <!-- a child's wires read against the same run -->
+  <aside class="col panel holding">
+    <div class="pinned-body pinned-surface">
+      <div class="pane config-panel">
+        <div class="pane editor">
+          <fieldset class="reading" disabled>
+            <div class="form">
+              <div class="slots children">
+                <div class="slots-head"><span>Children</span><span class="sub">in run order</span></div>
+                <div class="slot-group">
+                  <div class="slot-row child-row"><span class="seq">5</span><input value="confidence"><span class="child-state"><input value=""><span class="mount-id" title="this mount runs the state 'feature/ui/item/confidence'">→ feature/ui/item/confidence</span></span><span class="slot-opt sub">in the sequence</span></div>
+                  <div class="bindings">
+                    <div class="slots-head"><span>Inputs</span><span class="sub">wired into the child's declared slots</span></div>
+                    <div class="binding-group">
+                      <div class="slot-row binding-row"><input value="threshold_rank"><span class="arrow">←</span><input value=".inputs.threshold_rank"></div>
+                      <div class="field run-value"><span>value</span><div class="value-box mono">2</div></div>
+                    </div>
+                    <div class="binding-group">
+                      <div class="slot-row binding-row"><input value="target"><span class="arrow">←</span><input value=".children.critique.output.target"></div>
+                      <div class="field run-value"><span>value</span><div class="value-box mono">draft</div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

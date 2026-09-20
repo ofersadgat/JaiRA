@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/workflow-editor">
+<meta name="state" content="json">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>workflow-editor · json</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/workflow-editor · json</p>
+<div class="mockup-stage is-bare" style="width: 720px; height: 560px; display: grid"><div class="col mid"><div class="config-half whole"><button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Configuration</span><span class="grow"></span></button><div class="pane editor"><div class="edit-bar editor-top"><div class="sub file-path" title="C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json">C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item\verify.json</div><div class="tabs seg"><button class="ghost" title="the fields, as controls">Form</button><button class="layer-on" title="the document, as text">JSON</button><button class="ghost" title="what runs after what, and what makes it">Graph</button></div></div><div class="file-edit schema-edit"><div class="edit-bar schema-bar"><label class="schema-pick"><span class="sub">Schema</span><select><option>none — plain JSON</option><option selected>Workflow state</option></select></label><button class="ghost" title="a state file as it lives under workflows/ — WORKFLOWS.md §2">Add missing fields</button><button class="ghost">Fields</button><span class="chip chip-ok">conforms</span><label class="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways"><input type="checkbox"><span class="sub">Wrap</span></label></div><div class="sub schema-hint">a state file as it lives under workflows/ — WORKFLOWS.md §2</div><div class="schema-body"><div class="schema-main"><div class="editor-stack"><pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok-punct">{</span>
+</span><span class="code-line">  <span class="tok-key">"label"</span><span class="tok-punct">:</span> <span class="tok-string">"Verify the component doc"</span><span class="tok-punct">,</span>
+</span><span class="code-line">  <span class="tok-key">"description"</span><span class="tok-punct">:</span> <span class="tok-string">"Always entered: the person verifies this step's work before the run moves on."</span><span class="tok-punct">,</span>
+</span><span class="code-line">  <span class="tok-key">"inputs"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span>
+</span><span class="code-line">    <span class="tok-key">"doc"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span>
+</span><span class="code-line">      <span class="tok-key">"kind"</span><span class="tok-punct">:</span> <span class="tok-string">"blob"</span><span class="tok-punct">,</span>
+</span><span class="code-line">      <span class="tok-key">"schema"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span> <span class="tok-key">"type"</span><span class="tok-punct">:</span> <span class="tok-string">"string"</span><span class="tok-punct">,</span> <span class="tok-key">"contentMediaType"</span><span class="tok-punct">:</span> <span class="tok-string">"text/markdown"</span> <span class="tok-punct">}</span><span class="tok-punct">,</span>
+</span><span class="code-line">      <span class="tok-key">"optional"</span><span class="tok-punct">:</span> <span class="tok-literal">true</span>
+</span><span class="code-line">    <span class="tok-punct">},</span>
+</span><span class="code-line">    <span class="tok-key">"ask_below"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span> <span class="tok-key">"schema"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span> <span class="tok-key">"type"</span><span class="tok-punct">:</span> <span class="tok-string">"number"</span> <span class="tok-punct">}</span> <span class="tok-punct">},</span>
+</span><span class="code-line">    <span class="tok-key">"score"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span> <span class="tok-key">"schema"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span> <span class="tok-key">"type"</span><span class="tok-punct">:</span> <span class="tok-string">"number"</span> <span class="tok-punct">},</span> <span class="tok-key">"optional"</span><span class="tok-punct">:</span> <span class="tok-literal">true</span> <span class="tok-punct">}</span>
+</span><span class="code-line">  <span class="tok-punct">},</span>
+</span><span class="code-line">  <span class="tok-key">"operation"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span>
+</span><span class="code-line">    <span class="tok-key">"kind"</span><span class="tok-punct">:</span> <span class="tok-string">"function"</span><span class="tok-punct">,</span>
+</span><span class="code-line">    <span class="tok-key">"function"</span><span class="tok-punct">:</span> <span class="tok-string">"review_artifact"</span><span class="tok-punct">,</span>
+</span><span class="code-line">    <span class="tok-key">"args"</span><span class="tok-punct">:</span> <span class="tok-punct">{</span> <span class="tok-key">"artifact"</span><span class="tok-punct">:</span> <span class="tok-string">"doc"</span><span class="tok-punct">,</span> <span class="tok-key">"options"</span><span class="tok-punct">:</span> <span class="tok-punct">[</span><span class="tok-string">"approve"</span><span class="tok-punct">,</span> <span class="tok-string">"revise"</span><span class="tok-punct">],</span> <span class="tok-key">"comments"</span><span class="tok-punct">:</span> <span class="tok-literal">true</span> <span class="tok-punct">}</span>
+</span><span class="code-line">  <span class="tok-punct">}</span>
+</span><span class="code-line"><span class="tok-punct">}</span>
+</span></pre><textarea class="code-layer code-input" spellcheck="false"></textarea></div></div></div></div><div class="pane-actions pinned"><button class="primary">Save</button><button class="ghost">Revert</button><span class="sub">unsaved changes</span></div></div></div></div></div>
+</body>
+</html>

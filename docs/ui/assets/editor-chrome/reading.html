@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/editor-chrome">
+<meta name="state" content="reading">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>editor-chrome · reading</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/editor-chrome · reading</p>
+<div class="mockup-stage is-bare" style="width: 720px; display: grid; grid-template-rows: 210px 250px; gap: 14px">
+  <!-- a type whose reading is set to an editor that refuses typing -->
+  <div class="col mid">
+    <div class="config-half whole">
+      <div class="file-edit"><textarea class="code-editor" spellcheck="false" readonly>You are critiquing one component doc for the feature.
+
+Read the doc against the standard and the UI checks. Report each problem once,
+with the passage it is about and how severe it is.</textarea><div class="pane-actions pinned"><span class="sub">The reading of this type — not a place to type. Appearance › File types.</span></div></div>
+    </div>
+  </div>
+  <!-- the code view -->
+  <div class="col mid">
+    <div class="config-half whole">
+      <div class="file-edit"><pre class="vv-source"><span class="tok-keyword">export function</span> <span class="tok-fn">renderTemplate</span>(path: <span class="tok-type">string</span>, values: <span class="tok-type">Record</span>&lt;<span class="tok-type">string</span>, <span class="tok-type">unknown</span>&gt;): <span class="tok-type">string</span> {
+  <span class="tok-keyword">const</span> text = readFileSync(path, <span class="tok-string">"utf8"</span>);
+  <span class="tok-keyword">return</span> text.replace(<span class="tok-string">/\{\{\s*(\w+)\s*\}\}/g</span>, (_, key) =&gt; String(values[key] ?? <span class="tok-string">""</span>));
+}</pre><div class="pane-actions pinned"><span class="sub">Code view — coloured, not an editor. Appearance › File types › text.</span></div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

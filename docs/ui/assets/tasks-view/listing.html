@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/tasks-view">
+<meta name="state" content="listing">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>tasks-view · listing</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/tasks-view · listing</p>
+<div class="mockup-stage" style="width: 1280px; height: 720px; display: flex; background: var(--bg)">
+<nav class="sidebar">
+    <div class="side-title"><button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar">|◂</button><span class="side-brand app-label">JAIRA</span></div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="3 running"><span class="pill-glyph">▶</span><span class="pill-n">3</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+      </div>
+      
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/JaiRA"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">JaiRA</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-views">
+          <div class="side-row side-nested"><button class="side-hit" title="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button><button class="side-act" title="new file, folder or workflow">+</button><button class="side-act" title="find">⌕</button></div>
+          <div class="side-row side-nested on is-active"><button class="side-hit" title="Tasks"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+          <div class="side-row side-nested"><button class="side-hit" title="Chat"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p2)"><div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/declarative-ai"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">declarative-ai</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span><span class="side-twist is-mark">▸</span></div></div>
+      <button class="side-row side-open"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
+    </div>
+    <div class="side-foot"><div class="side-row"><button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button></div></div>
+  </nav>
+  <div class="body">
+    <header class="title-bar"><header class="doc-bar inert"><span class="crumb-part" style="--hue: var(--p1)"><button class="crumb-sep first" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-project">JaiRA</button></span><span class="grow"></span><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span></header><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view tasks-view" style="--pane-right: 360px">
+        <div class="col mid">
+        <section class="board-group" data-project="C:/UbuntuCode/JaiRA"><div class="board-body"><div class="columns wrap">
+    <section class="column">
+      <h4><span class="col-name">Feature</span><span class="count app-secondary">3</span></h4>
+      <div class="column-body"><div class="lane lane-running"><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Inbox strip by kind</span></span><span class="pill pill-running pill-active" title="running"><span class="pill-glyph">▶</span><span class="pill-word">running</span></span></div>
+          <div class="card-meta"><span class="ellip">feature/ui/render</span></div>
+        </div><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Letterhead fold</span></span><span class="pill pill-waiting pill-active" title="waiting"><span class="pill-glyph">⏸</span><span class="pill-word">waiting</span></span></div>
+          <div class="card-meta"><span class="ellip">feature/ux/ask</span><span class="card-status">gate</span></div>
+        </div></div><div class="lane lane-finished"><h5><span class="grow app-label">Finished</span><span class="count data-num">1</span></h5><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Rewind and fork</span></span><span class="pill pill-success pill-status" title="done"><span class="pill-glyph">✓</span><span class="pill-word">done</span></span></div>
+          <div class="card-meta"><span class="ellip">feature/verify</span><span class="card-status">2 hours ago</span></div>
+        </div></div></div>
+    </section>
+    <section class="column">
+      <h4><span class="col-name">Review</span><span class="count app-secondary">1</span></h4>
+      <div class="column-body"><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Tighten the changeset lint</span></span><span class="pill pill-error pill-status" title="failed"><span class="pill-glyph">⛔</span><span class="pill-word">failed</span></span></div>
+          <div class="card-meta"><span class="ellip">review/judge</span><span class="card-status">18 minutes ago</span></div>
+        </div></div>
+    </section>
+    <section class="column">
+      <h4><span class="col-name">Chat</span><span class="count app-secondary">0</span></h4>
+      <div class="column-body"><div class="empty">—</div></div>
+    </section>
+  </div></div></section>
+        <section class="board-group" data-project="C:/UbuntuCode/declarative-ai">
+          <header class="doc-bar inert"><span class="crumb-part" style="--hue: var(--p2)"><button class="crumb-sep first" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-project">declarative-ai</button></span><span class="grow"></span><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-warning pill-status" title="1 warning"><span class="pill-glyph">⚠</span><span class="pill-n">1</span></span></span></header>
+          <div class="board-body"><div class="columns wrap">
+    <section class="column">
+      <h4><span class="col-name">Release</span><span class="count app-secondary">1</span></h4>
+      <div class="column-body"><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Publish 0.14.0</span></span><span class="pill pill-running pill-active" title="running"><span class="pill-glyph">▶</span><span class="pill-word">running</span></span></div>
+          <div class="card-meta"><span class="ellip">release/build</span></div>
+        </div></div>
+    </section>
+    <section class="column">
+      <h4><span class="col-name">Debug</span><span class="count app-secondary">1</span></h4>
+      <div class="column-body"><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">NaN passes the number schema</span></span><span class="pill pill-warning pill-status" title="stopped"><span class="pill-glyph">⚠</span><span class="pill-word">stopped</span></span></div>
+          <div class="card-meta"><span class="ellip">debug/bisect</span><span class="card-status">1 day ago</span></div>
+        </div></div>
+    </section>
+  </div></div>
+        </section>
+        <div class="board-tail"></div>
+      </div>
+        <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the task panel"></div>
+        <aside class="col panel"><p class="empty">Select a task.</p></aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

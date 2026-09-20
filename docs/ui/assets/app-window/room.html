@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/app-window">
+<meta name="state" content="room">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>app-window · room</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/app-window · room</p>
+<div class="mockup-stage" style="width: 1030px; display: flex; flex-direction: column; gap: 14px; padding-block: 14px; background: var(--bg)">
+  <!-- Files, a state file open -->
+  <header class="title-bar">
+    <header class="doc-bar" title="describe the open file">
+      <span class="crumb-part" style="--hue: var(--p1)"><button class="crumb-sep first" title="what else is at this level">›</button><button class="crumb crumb-project" title="C:\UbuntuCode\declarative-ai">declarative-ai</button></span>
+      <span class="crumb-part"><span class="crumb-sep">›</span><button class="crumb crumb-folder">workflows</button></span>
+      <span class="crumb-part"><button class="crumb-sep" title="what else is at this level">›</button><button class="crumb crumb-state" title="open this state">feature</button></span>
+      <span class="crumb-part"><button class="crumb-sep" title="what else is at this level">›</button><span class="crumb crumb-state last">build</span></span>
+      <span class="grow"></span>
+    </header>
+    <span class="title-drag"></span>
+  </header>
+  <!-- Tasks, walked into a run -->
+  <header class="title-bar">
+    <header class="doc-bar inert">
+      <span class="crumb-part" style="--hue: var(--p1)"><button class="crumb-sep first" title="what else is at this level">›</button><button class="crumb crumb-project" title="C:\UbuntuCode\declarative-ai">declarative-ai</button></span>
+      <span class="crumb-part"><span class="crumb-sep">›</span><button class="crumb crumb-state" title="open this state">feature</button></span>
+      <span class="crumb-part"><button class="crumb-sep" title="what else is at this level">›</button><span class="crumb crumb-run last">Pause a run and pick it up tomorrow</span></span>
+      <span class="grow"></span>
+      <span class="doc-bar-tools">
+        <div class="run-mode"><button type="button">Tasks</button><button type="button" class="on">Conversation</button></div>
+        <span class="new-task-wrap"><button aria-expanded="false">+ New task</button></span>
+      </span>
+    </header>
+    <span class="title-drag"></span>
+  </header>
+  <!-- Chat -->
+  <header class="title-bar">
+    <span class="chat-title ellip">Why does the rail skip a lane on a fork</span>
+    <span class="title-drag"></span>
+  </header>
+  <!-- Logs, Debug, Components, Settings -->
+  <header class="title-bar">
+    <span class="title-drag"></span>
+  </header>
+</div>
+</body>
+</html>

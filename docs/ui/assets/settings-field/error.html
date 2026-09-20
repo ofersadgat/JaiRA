@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/settings-field">
+<meta name="state" content="error">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-field · error</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/settings-field · error</p>
+<div class="mockup-stage is-bare" style="width: 640px">
+<div class="modal" data-testid="interaction">
+    <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"></path><path d="M8 9h8"></path><path d="M8 13h8"></path><path d="M8 17h3"></path></svg> Describe the follow-up.</h3>
+    <div class="cfg-fields"><div class="cfg-field bad"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Title</span><b class="sf-req" title="required">*</b><span class="sf-type">at least 1 character</span></span></div><div class="cfg-control"><input class="cfg-input" value=""/><div class="reason cfg-error">can&#x27;t be empty</div></div></div><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Severity</span><b class="sf-req" title="required">*</b><span class="sf-type">minor / significant / critical · at least 1 character</span></span></div><div class="cfg-control"><input class="cfg-input mono" list="_R_69_-choices" value="significant"/><datalist id="_R_69_-choices"><option value="minor"></option><option value="significant"></option><option value="critical"></option></datalist></div></div><div class="cfg-field bad"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Estimate (days)</span><b class="sf-req" title="required">*</b><span class="sf-type">number</span></span></div><div class="cfg-control"><input class="cfg-input mono num" inputMode="decimal" value="2d"/><div class="reason cfg-error">&#x27;2d&#x27; is not a number</div></div></div><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set blocking" title="set blocking" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">Blocking?</span><span class="sf-type">yes / no</span></span></div><div class="cfg-control"><div class="sf-absent">not set — left out of the answer</div></div></div><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set notes" title="set notes" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">notes</span></span><span class="cfg-hint">Anything else</span></div><div class="cfg-control"><div class="sf-absent">not set — left out of the answer</div></div></div></div>
+    <div class="options">
+      <button class="primary" disabled title="2 problems — title: can't be empty">Submit</button>
+      <span class="sub ellip">2 problems — title: can't be empty</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

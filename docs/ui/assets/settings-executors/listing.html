@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-executors">
+<meta name="state" content="listing">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-executors · listing</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-executors · listing</p>
+<div class="mockup-stage" style="width: 812px; background: var(--bg)">
+<div class="col mid settings-body"><div class="settings-head"><div class="layer-picker" role="group" aria-label="Configuration layer"><button class="layer-on" title="this project only">This project</button><button class="ghost" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button></div><div class="settings-head-right"><span class="sub">checked 4 min ago</span><button class="ghost">Re-check</button></div></div><div class="cfg-pane">
+  <section class="cfg-group">
+    <header class="cfg-group-head"><h4>The default executor</h4><p class="cfg-hint">What every UI-initiated operation uses — starting a task, proposing workflow changes, summarizing a conversation. It is a TREE: an operation executor over a function executor and a router, and the whole of it is below. Nothing here has to be configured: what is shown is DERIVED from what is available, and a change pins only the field you changed, so a provider or agent you set up tomorrow still appears by itself.</p></header>
+    <div class="cfg-stack"><div class="cfg-node-banner"><span class="cfg-node-kind">Operation</span><code class="cfg-param">OperationExecutor</code><span class="cfg-hint">The top. Dispatches on the KIND of operation a state runs — a prompt, or a registered function — and holds one executor for each.</span></div><section class="cfg-level" data-depth="1"><div class="cfg-level-head"><span class="cfg-level-title">Functions</span><span class="cfg-hint">Host code, human gates, delegated agents and tools. Which of them EXIST is the run's business — a workflow's states decide that — so what is settable here is which this executor may reach.</span></div><div class="cfg-level-body"><div class="cfg-stack"><div class="cfg-fields"><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Rules</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract. Empty means everything the workflow registers.<code class="cfg-param">function.rules</code></span></div>
+<div class="cfg-control"><div class="cfg-rules"><ol class="cfg-rule-list">
+<li class="cfg-rule everything"><span class="cfg-rule-index" aria-hidden="true">1</span><span class="cfg-rule-text">everything</span><button class="ghost" title="earlier" disabled>↑</button><button class="ghost" title="later">↓</button><button class="ghost danger">Remove</button></li>
+<li class="cfg-rule deny"><span class="cfg-rule-index" aria-hidden="true">2</span><select class="cfg-input"><option>deny</option></select><input class="cfg-input mono" value="run_command"><button class="ghost" title="earlier">↑</button><button class="ghost" title="later" disabled>↓</button><button class="ghost danger">Remove</button></li>
+</ol></div></div></div></div><div class="cfg-disclosure"><button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Around every function call</span><span class="cfg-hint">· no layers</span></button></div></div></div></section><section class="cfg-level" data-depth="1"><div class="cfg-level-head"><span class="cfg-level-title">Prompts</span><span class="cfg-hint">How a prompt state is answered.</span></div><div class="cfg-level-body"><div class="cfg-stack"><div class="cfg-node-banner"><span class="cfg-node-kind">Router</span><code class="cfg-param">PromptRouterExecutor</code><span class="cfg-hint">Dispatches a prompt on its model id's PREFIX. Its routes are derived from everything available, so a provider or agent you set up appears here without being added.</span></div><section class="cfg-level" data-depth="2"><div class="cfg-level-head"><span class="cfg-level-title">Routes (3)</span><span class="cfg-hint">Derived from everything available, so a provider or agent you set up appears here by itself. Configuring one pins only what you changed.</span></div><div class="cfg-level-body"><div class="cfg-stack"><div class="cfg-route derived"><div class="cfg-route-head"><code class="cfg-route-prefix">anthropic/…</code><span class="cfg-hint">provider anthropic · its own default · provider defaults</span><span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>derived</span><button class="ghost">Configure</button></div></div><div class="cfg-route"><div class="cfg-route-head"><code class="cfg-route-prefix">claude-cli/…</code><span class="cfg-hint">agent claude-cli · sonnet · memoize → retry · reasoning high</span><span class="cfg-status available"><span class="cfg-dot" aria-hidden="true"></span>pinned</span><button class="ghost">Configure</button></div></div><div class="cfg-route derived"><div class="cfg-route-head"><code class="cfg-route-prefix">openrouter/…</code><span class="cfg-hint">provider openrouter · its own default · provider defaults</span><span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>derived</span><button class="ghost">Configure</button></div></div></div></div></section><div class="cfg-disclosure"><button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Around every routed call</span><span class="cfg-hint">· no layers</span></button></div></div></div></section><div class="cfg-disclosure"><button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Around the whole executor</span><span class="cfg-hint">· no layers</span></button></div></div>
+  </section>
+  <section class="cfg-group">
+  <header class="cfg-group-head"><h4>Presets</h4><p class="cfg-hint">A named set of call settings a state picks with <code>configRef</code>, merged under its own config. A definition is the heavier tool — it chooses the provider and the stack too; a preset is only the settings.</p></header>
+  <ul class="cfg-rows"><li class="cfg-row">
+  <div class="cfg-row-head"><span class="cfg-row-title mono">fast</span><button class="ghost">Configure</button></div>
+  <p class="cfg-hint">temperature 0.2 · ≤1200 tokens</p>
+  
+</li><li class="cfg-row">
+  <div class="cfg-row-head"><span class="cfg-row-title mono">review</span><button class="ghost">Configure</button></div>
+  <p class="cfg-hint">reasoning high · ≤4000 tokens</p>
+  
+</li><li class="cfg-row">
+  <div class="cfg-row-head"><span class="cfg-row-title mono">thorough</span><span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>inherited</span></div>
+  <p class="cfg-hint">reasoning xhigh · +1 more</p>
+</li></ul>
+  <div class="cfg-disclosure"><button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Add a preset</span><span class="cfg-hint">· a named set of call settings</span></button></div>
+</section>
+</div></div>
+</div>
+</body>
+</html>

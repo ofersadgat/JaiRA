@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/code-editor">
+<meta name="state" content="loading">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>code-editor · loading</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/code-editor · loading</p>
+<div class="mockup-stage" style="width: 720px; height: 260px; display: grid">
+  <div class="col mid">
+    <div class="config-half whole">
+      <div class="file-edit">
+        <pre class="vv-source">import type { Task } from "@jaira/shared";
+
+/** The reviewer for a task: its owner, unless they wrote it. */
+export function pickReviewer(task: Task, team: string[]): string {
+  const author = task.createdBy;
+  const others = team.filter(isNot(author));
+  return others[0] ?? author;
+}</pre>
+        <div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

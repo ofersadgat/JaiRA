@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/code-view">
+<meta name="state" content="coloured">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>code-view · coloured</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/code-view · coloured</p>
+<div class="mockup-stage is-bare" style="width: 720px; display: grid; gap: 16px">
+  <!-- A file in the Files view's lower half, in the palette that follows the app. -->
+  <div class="mockup-stage" style="height: 420px; display: grid">
+    <div class="col mid">
+      <div class="config-half whole">
+        <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button>
+        <div class="file-edit">
+          <div class="code-shiki" style="tab-size: 2"><pre class="shiki light-plus" style="background-color:#FFFFFF;color:#000000" tabindex="0"><code><span class="line"><span style="color:#AF00DB">import</span><span style="color:#000000"> { </span><span style="color:#001080">parseUnifiedDiff</span><span style="color:#000000"> } </span><span style="color:#AF00DB">from</span><span style="color:#A31515"> "@jaira/shared/browser"</span><span style="color:#000000">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#008000">/** How many rows a table draws before it stops. */</span></span>
+<span class="line"><span style="color:#AF00DB">export</span><span style="color:#0000FF"> const</span><span style="color:#0070C1"> TABLE_ROW_LIMIT</span><span style="color:#000000"> = </span><span style="color:#098658">500</span><span style="color:#000000">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#AF00DB">export</span><span style="color:#0000FF"> function</span><span style="color:#795E26"> rowsShown</span><span style="color:#000000">(</span><span style="color:#001080">total</span><span style="color:#000000">: </span><span style="color:#267F99">number</span><span style="color:#000000">): </span><span style="color:#267F99">number</span><span style="color:#000000"> {</span></span>
+<span class="line"><span style="color:#AF00DB">  return</span><span style="color:#001080"> Math</span><span style="color:#000000">.</span><span style="color:#795E26">min</span><span style="color:#000000">(</span><span style="color:#001080">total</span><span style="color:#000000">, </span><span style="color:#0070C1">TABLE_ROW_LIMIT</span><span style="color:#000000">); </span><span style="color:#008000">// the rest is under Source</span></span>
+<span class="line"><span style="color:#000000">}</span></span>
+<span class="line"></span></code></pre></div>
+          <div class="pane-actions pinned"><span class="sub">Code view — coloured, not an editor. Appearance › File types › text.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- A fenced shell block in an answer, in a palette chosen for shell. -->
+  <div class="mockup-stage">
+    <div class="ts">
+      <div class="ts-msg ts-msg-assistant">
+        <div class="vv">
+          <div class="vv-body">
+            <div class="markdown">
+              <p>Start the app against the other checkout, then run the feature workflow on the product index:</p>
+              <div class="md-block">
+                <div class="vv vv-inline">
+                  <div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="Highlighted, in an editor" aria-pressed="true">Code</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+                  <div class="vv-body">
+                    <div class="code-shiki" style="tab-size: 2"><pre class="shiki one-dark-pro" style="background-color:#282c34;color:#abb2bf" tabindex="0"><code><span class="line"><span style="color:#61AFEF">npm</span><span style="color:#98C379"> run</span><span style="color:#98C379"> app</span><span style="color:#D19A66"> --</span><span style="color:#D19A66"> --project</span><span style="color:#98C379"> ../declarative-ai</span></span>
+<span class="line"><span style="color:#61AFEF">jaira</span><span style="color:#98C379"> run</span><span style="color:#98C379"> feature</span><span style="color:#D19A66"> --input</span><span style="color:#98C379"> brief=@docs/product/index.md</span></span>
+<span class="line"></span></code></pre></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

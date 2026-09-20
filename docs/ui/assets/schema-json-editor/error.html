@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/schema-json-editor">
+<meta name="state" content="error">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>schema-json-editor · error</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/schema-json-editor · error</p>
+<div class="mockup-stage" style="width: 720px; height: 640px; display: flex; flex-direction: column">
+  <div class="config-half whole">
+    <div class="file-edit schema-edit">
+      <div class="edit-bar schema-bar">
+        <label class="schema-pick"><span class="sub">Schema</span><select><option value="">none — plain JSON</option><option value="state" selected>Workflow state</option><option value="state-prompt">Workflow state (prompt)</option><option value="prompt-operation">Prompt operation</option></select></label>
+        <button class="ghost" title="a state file as it lives under workflows/ — WORKFLOWS.md §2">Add missing fields</button>
+        <button class="ghost">Fields</button>
+        <span class="chip chip-bad">2 problems</span>
+        <label class="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways"><input type="checkbox"><span class="sub">Wrap</span></label>
+      </div>
+      <div class="sub schema-hint">a state file as it lives under workflows/ — WORKFLOWS.md §2</div>
+      <div class="schema-body" style="--reference-width: 300px">
+        <div class="schema-main">
+          <div class="editor-stack">
+            <pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"label"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Render the mockups"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">display name on the board; falls back to the id</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"descripton"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"One mockup per state the doc declares, written under docs/ui/assets/&lt;component&gt;/ and stamped with when it was captured and which doc revision it reflects. An agent, because it writes files."</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"inputs"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"doc"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"blob"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">JSON Schema for the value; absent ⇒ unconstrained, and nothing about it …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"contentMediaType"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"text/markdown"</span><span class="line-hint-slot"><span class="line-hint">the media type — THIS is what makes a slot a blob (§3), e.g. text/markdo…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"spec"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">JSON Schema for the value; absent ⇒ unconstrained, and nothing about it …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"object"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"required"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span><span class="line-hint-slot"><span class="line-hint">which properties must be present</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-string">"id"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-string">"brief"</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"properties"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">an object's declared properties, each a schema of its own</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"id"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"The doc id under docs/, e.g. ux/patterns/grouped-list."</span><span class="line-hint-slot"><span class="line-hint">author's note, carried into prompts and tool schemas</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Which template: pattern | component | surface | unit | contract."</span><span class="line-hint-slot"><span class="line-hint">author's note, carried into prompts and tool schemas</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"brief"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"What this concept is and what the feature needs from it, in a few sentences."</span><span class="line-hint-slot"><span class="line-hint">author's note, carried into prompts and tool schemas</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"outputs"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"mockups"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.mockups"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"operation"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">the one thing this state does (§4); {} means "what my environment chain …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"prompt"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">which of the two operation shapes applies</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"model"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"claude-cli/default"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">Model — a bare id routes to whatever serves that family here — prefix it…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"prompt"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">Prompt — {{.inputs.x}} interpolates; Link holds it in a file instead</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"$ref"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"$/prompts/feature/ui/render.md"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"write_file"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">Tools — logical names resolved through the tool registry — an empty list…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"permissions"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">per-tool modes, keyed by tool name</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"write_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"scopes"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/product/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ux/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ui/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/_templates/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ui/assets/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"write_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">]</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span><span class="code-line">
+</span></pre>
+            <textarea class="code-layer code-input" spellcheck="false" wrap="off">{
+  "label": "Render the mockups",
+  "descripton": "One mockup per state the doc declares, written under docs/ui/assets/&lt;component&gt;/ and stamped with when it was captured and which doc revision it reflects. An agent, because it writes files.",
+  "inputs": {
+    "doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "spec": {
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "brief"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The doc id under docs/, e.g. ux/patterns/grouped-list."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Which template: pattern | component | surface | unit | contract."
+          },
+          "brief": {
+            "type": "string",
+            "description": "What this concept is and what the feature needs from it, in a few sentences."
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "mockups": {
+      "binding": ".operation.output.mockups"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "model": "claude-cli/default",
+    "prompt": {
+      "$ref": "$/prompts/feature/ui/render.md"
+    },
+    "tools": "write_file",
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "write_file": "allow"
+      },
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ux/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/assets/**",
+          "tools": {
+            "read_file": "allow",
+            "write_file": "allow"
+          }
+        }
+      ]
+    }
+  }
+}
+</textarea>
+          </div>
+          <div class="notice bad violation"><b>(root)</b> — unknown field 'descripton' — nothing else is recognized here</div>
+          <div class="notice bad violation"><b>operation.tools</b> — must be array</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="config-half">
+    <div class="file-edit schema-edit">
+      <div class="edit-bar schema-bar">
+        <label class="schema-pick"><span class="sub">Schema</span><select><option value="">none — plain JSON</option><option value="state" selected>Workflow state</option><option value="state-prompt">Workflow state (prompt)</option><option value="prompt-operation">Prompt operation</option></select></label>
+        <button class="ghost" disabled title="fix the JSON first — a document that cannot be read cannot be merged into">Add missing fields</button>
+        <button class="ghost">Fields</button>
+        <span class="chip chip-bad">not JSON</span>
+        <label class="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways"><input type="checkbox"><span class="sub">Wrap</span></label>
+      </div>
+      <div class="sub schema-hint">a state file as it lives under workflows/ — WORKFLOWS.md §2</div>
+      <div class="schema-body" style="--reference-width: 300px">
+        <div class="schema-main">
+          <div class="editor-stack">
+            <pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"label"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Render the mockups"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">display name on the board; falls back to the id</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"One mockup per state the doc declares, written under docs/ui/assets/&lt;component&gt;/ and stamped with when it was captured and which doc revision it reflects. An agent, because it writes files."</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">author's note; also useful prompt context</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"operation"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">the one thing this state does (§4); {} means "what my environment chain …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"prompt"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">which of the two operation shapes applies</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"model"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"claude-cli/default"</span><span class="line-hint-slot"><span class="line-hint">Model — a bare id routes to whatever serves that family here — prefix it…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"prompt"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">Prompt — {{.inputs.x}} interpolates; Link holds it in a file instead</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"$ref"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"$/prompts/feature/ui/render.md"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span><span class="line-hint-slot"><span class="line-hint">Tools — logical names resolved through the tool registry — an empty list…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-string">"read_file"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-string">"write_file"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"permissions"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">per-tool modes, keyed by tool name</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"write_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"scopes"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/product/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ux/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ui/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/_templates/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"path"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"docs/ui/assets/**"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"tools"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"read_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"write_file"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"allow"</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">]</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"inputs"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"doc"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"blob"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">JSON Schema for the value; absent ⇒ unconstrained, and nothing about it …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"contentMediaType"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"text/markdown"</span><span class="line-hint-slot"><span class="line-hint">the media type — THIS is what makes a slot a blob (§3), e.g. text/markdo…</span></span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"spec"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"schema"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">JSON Schema for the value; absent ⇒ unconstrained, and nothing about it …</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"object"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"required"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span><span class="line-hint-slot"><span class="line-hint">which properties must be present</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-string">"id"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-string">"brief"</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-key">"properties"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span><span class="line-hint-slot"><span class="line-hint">an object's declared properties, each a schema of its own</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"id"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"The doc id under docs/, e.g. ux/patterns/grouped-list."</span><span class="line-hint-slot"><span class="line-hint">author's note, carried into prompts and tool schemas</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"kind"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"Which template: pattern | component | surface | unit | contract."</span><span class="line-hint-slot"><span class="line-hint">author's note, carried into prompts and tool schemas</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-key">"brief"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"string"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">the JSON type; a slot's kind is derived from this</span></span>
+</span><span class="code-line"><span class="tok tok-plain">            </span><span class="tok tok-key">"description"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"What this concept is and what the feature needs from it, in a few sentences."</span><span class="line-hint-slot"><span class="line-hint">author's note, carried into prompts and tool schemas</span></span>
+</span><span class="code-line"><span class="tok tok-plain">          </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">        </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"outputs"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"mockups"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">      </span><span class="tok tok-key">"binding"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">".operation.output.mockups"</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span><span class="code-line">
+</span></pre>
+            <textarea class="code-layer code-input" spellcheck="false" wrap="off">{
+  "label": "Render the mockups",
+  "description": "One mockup per state the doc declares, written under docs/ui/assets/&lt;component&gt;/ and stamped with when it was captured and which doc revision it reflects. An agent, because it writes files.",
+  "operation": {
+    "kind": "prompt",
+    "model": "claude-cli/default"
+    "prompt": {
+      "$ref": "$/prompts/feature/ui/render.md"
+    },
+    "tools": [
+      "read_file",
+      "write_file"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "write_file": "allow"
+      },
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ux/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/assets/**",
+          "tools": {
+            "read_file": "allow",
+            "write_file": "allow"
+          }
+        }
+      ]
+    }
+  },
+  "inputs": {
+    "doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "spec": {
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "brief"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The doc id under docs/, e.g. ux/patterns/grouped-list."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Which template: pattern | component | surface | unit | contract."
+          },
+          "brief": {
+            "type": "string",
+            "description": "What this concept is and what the feature needs from it, in a few sentences."
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "mockups": {
+      "binding": ".operation.output.mockups"
+    }
+  }
+}
+</textarea>
+          </div>
+          <div class="reason">not valid JSON: Expected ',' or '}' after property value in JSON at position 322 (line 7 column 5)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-executors">
+<meta name="state" content="editing">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-executors · editing</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-executors · editing</p>
+<div class="mockup-stage" style="width: 812px; background: var(--bg)">
+<div class="col mid settings-body"><div class="cfg-pane"><section class="cfg-group">
+  <header class="cfg-group-head"><h4>Presets</h4><p class="cfg-hint">A named set of call settings a state picks with <code>configRef</code>, merged under its own config. A definition is the heavier tool — it chooses the provider and the stack too; a preset is only the settings.</p></header>
+  <ul class="cfg-rows"><li class="cfg-row">
+  <div class="cfg-row-head"><span class="cfg-row-title mono">fast</span><button class="ghost">Done</button></div>
+  <p class="cfg-hint">temperature 0.2 · ≤1200 tokens</p>
+  <div class="cfg-row-body">
+    <div class="llm-config">
+  <nav class="llm-rail">
+    <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">temperature</span></button>
+    <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
+    <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">1200 tokens</span></button>
+    <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+  </nav>
+  <div class="llm-detail">
+    <div class="llm-detail-head"><span class="llm-detail-title">Sampling</span><span class="cfg-hint">How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.</span></div>
+    <div class="cfg-fields"><div class="cfg-field">
+  <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Temperature</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">Higher is more varied, lower more repeatable. Empty inherits the provider's default.<code class="cfg-param">temperature</code></span></div>
+  <div class="cfg-control"><input class="cfg-input" value="0.2" placeholder="—"></div>
+</div><div class="cfg-field">
+  <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Top-p</span></span><span class="cfg-hint">Nucleus sampling: consider only the most likely tokens adding up to this probability mass (0–1).<code class="cfg-param">topP</code></span></div>
+  <div class="cfg-control"><input class="cfg-input" value="" placeholder="—"></div>
+</div></div>
+  </div>
+</div>
+    <div class="pane-actions"><button class="primary">Save</button><button class="ghost">Revert</button><button class="ghost danger">Remove</button></div>
+  </div>
+</li><li class="cfg-row">
+  <div class="cfg-row-head"><span class="cfg-row-title mono">review</span><button class="ghost">Done</button></div>
+  <p class="cfg-hint">provider defaults</p>
+  <div class="cfg-row-body">
+    <div class="llm-config">
+  <nav class="llm-rail">
+    <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">provider defaults</span></button>
+    <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
+    <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+    <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+  </nav>
+  <div class="llm-detail">
+    <div class="llm-detail-head"><span class="llm-detail-title">Sampling</span><span class="cfg-hint">How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.</span></div>
+    <div class="cfg-fields"><div class="cfg-field">
+  <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Temperature</span></span><span class="cfg-hint">Higher is more varied, lower more repeatable. Empty inherits the provider's default.<code class="cfg-param">temperature</code></span></div>
+  <div class="cfg-control"><input class="cfg-input" value="" placeholder="—"></div>
+</div><div class="cfg-field">
+  <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Top-p</span></span><span class="cfg-hint">Nucleus sampling: consider only the most likely tokens adding up to this probability mass (0–1).<code class="cfg-param">topP</code></span></div>
+  <div class="cfg-control"><input class="cfg-input" value="" placeholder="—"></div>
+</div></div>
+  </div>
+</div>
+    <div class="pane-actions"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button><button class="ghost danger">Remove</button></div>
+  </div>
+</li><li class="cfg-row">
+  <div class="cfg-row-head"><span class="cfg-row-title mono">thorough</span><span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>inherited</span></div>
+  <p class="cfg-hint">reasoning xhigh · +1 more</p>
+</li></ul>
+  <div class="cfg-disclosure open"><button type="button" class="cfg-disclosure-head" aria-expanded="true"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Add a preset</span><span class="cfg-hint">· a named set of call settings</span></button>
+  <div class="cfg-disclosure-body">
+    <div class="cfg-stack">
+      <div class="cfg-fields">
+        <div class="cfg-field">
+  <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Name</span></span><span class="cfg-hint">What a state will write in configRef.<code class="cfg-param">models.presets.&lt;name&gt;</code></span></div>
+  <div class="cfg-control"><input class="cfg-input mono" value="cheap" placeholder="fast"></div>
+</div>
+      </div>
+      <div class="pane-actions"><button>Add it</button></div>
+    </div>
+  </div>
+</div>
+</section></div></div>
+</div>
+</body>
+</html>

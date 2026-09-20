@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/command-approval">
+<meta name="state" content="asking">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>command-approval · asking</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/command-approval · asking</p>
+<div class="mockup-stage is-bare" style="width: 720px">
+  <div class="sb-panel">
+    <div class="sb-gutter">
+      <span class="sb-session mono ellip" title="builder">builder</span>
+      <button type="button" class="link sb-workflow ellip" title="feature/build — describe this run of it">feature/build</button>
+      <span class="sb-span">15:02:47</span>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="st-block" data-instance="51">
+          <button type="button" class="lh tb accent" aria-expanded="true">
+            <span class="lh-chev open"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span>
+            <span class="lh-dot ts-dot-running"></span>
+            <span class="lh-name mono">implement</span>
+            <span class="lh-label ellip">Implement the cache</span>
+            <span class="lh-meta">15:02:47</span>
+          </button>
+          <div class="ts"><div class="ts-msg ts-msg-assistant"><div class="markdown"><p>The old build output still has the uncached probe in it. Clearing it and rebuilding.</p></div></div></div>
+          <div class="inline-gate">
+            <div class="approval-surface" data-testid="approval">
+              <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"></path></svg> Approve this command?</h3>
+              <div class="sub">Bash</div>
+              <pre class="artifact" data-testid="approval-command">rm -rf build &amp;&amp; npm run build</pre>
+              <p class="reason-note">Policy: `rm -rf` is not on the allow list for this profile</p>
+              <div class="options"><button>Allow once</button><button>Allow for this run</button><button>Always allow</button></div>
+              <div class="options"><button class="danger">Deny</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="sb-panel">
+    <div class="sb-gutter">
+      <span class="sb-session mono ellip" title="builder">builder</span>
+      <button type="button" class="link sb-workflow ellip" title="ops/hosts — describe this run of it">ops/hosts</button>
+      <span class="sb-span">15:20:11</span>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="st-block" data-instance="9">
+          <button type="button" class="lh tb accent" aria-expanded="true">
+            <span class="lh-chev open"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span>
+            <span class="lh-dot ts-dot-running"></span>
+            <span class="lh-name mono">route</span>
+            <span class="lh-label ellip">Point the registry at the mirror</span>
+            <span class="lh-meta">15:20:11</span>
+          </button>
+          <div class="inline-gate">
+            <div class="approval-surface" data-testid="approval">
+              <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"></path></svg> Approve this command?</h3>
+              <div class="sub">write_file</div>
+              <pre class="artifact">{
+  "path": "/etc/hosts",
+  "content": "127.0.0.1 registry.internal"
+}</pre>
+              <p class="reason-note">Policy: writes outside the worktree</p>
+              <div class="options"><button>Allow once</button><button>Allow for this run</button><button>Always allow</button></div>
+              <div class="options"><button class="danger">Deny</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

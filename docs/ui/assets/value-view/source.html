@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/value-view">
+<meta name="state" content="source">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>value-view · source</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/value-view · source</p>
+<div class="mockup-stage is-bare" style="width: 720px">
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="feature/plan/review — describe this run of it">feature/plan/review</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="The value as JSON" aria-pressed="true">JSON</button><button type="button" title="As the fields its schema declares" aria-pressed="false">Form</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body"><pre class="vv-source vv-json"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"decision"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"request_changes"</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">what the review concluded</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"risk"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-number">0.4</span><span class="tok tok-punct">,</span><span class="line-hint-slot"><span class="line-hint">0 is safe to merge as it stands, 1 must not merge</span></span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"files"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span><span class="line-hint-slot"><span class="line-hint">every file the verdict is about</span></span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-string">"src/availability.ts"</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">]</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span></pre></div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="runtime/cache/implement — describe this run of it">runtime/cache/implement</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">arguments</span><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" title="The value as JSON" aria-pressed="false">JSON</button><button type="button" class="on" title="The text exactly as it was produced" aria-pressed="true">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body"><pre class="vv-source">{
+  "command": "rg -n \"probeEverything\" src",
+  "description": "Find every caller of the uncached probe"
+}</pre></div>
+        </div>
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">result</span><span class="grow"></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body"><pre class="vv-source">src/availability.ts:14:  return await probeEverything();
+src/settings/save.ts:88:  void probeEverything();
+src/main/launch.ts:31:  await probeEverything();</pre></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

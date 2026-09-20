@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/context-panel">
+<meta name="state" content="task">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>context-panel · task</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/context-panel · task</p>
+<div class="mockup-stage is-bare" style="width: 300px; height: 640px; display: grid">
+  <aside class="col panel">
+    <div class="inspector">
+      <div class="insp-crumb">
+        <button class="link back-arrow" title="Back to feature/ux/draft">←</button>
+        <span class="state-id ellip">Pause a run and pick it up tomorrow</span>
+        <span class="sub">· the task</span>
+      </div>
+      <section>
+        <h3><span>Metrics</span><span class="count">4 calls</span></h3>
+        <dl class="kv metrics">
+          <dt>started</dt>
+          <dd>9/13/2026, 1:48:03 PM</dd>
+          <dt>in calls</dt>
+          <dd>11 m 40 s</dd>
+          <dt>cost</dt>
+          <dd>$1.0876</dd>
+          <dt>in</dt>
+          <dd>512,776</dd>
+          <dt>out</dt>
+          <dd>18,440<span class="sub"> · 7,215 thinking</span></dd>
+          <dt>cache</dt>
+          <dd>488,019 read · 20,331 written</dd>
+        </dl>
+      </section>
+      <section>
+        <h3><span>States it ran</span><span class="count">4</span></h3>
+        <div class="task-states">
+          <div class="leaf-row task-state-row" title="open feature/product/ask and read this run's pass through it"><span class="dot success"></span><span class="grow ellip">feature/product/ask</span><span class="cost">$0.000</span></div>
+          <div class="leaf-row task-state-row" title="open feature/product/draft and read this run's pass through it"><span class="dot success"></span><span class="grow ellip">feature/product/draft</span><span class="cost">$0.412</span></div>
+          <div class="leaf-row task-state-row" title="open feature/product/critique and read this run's pass through it"><span class="dot success"></span><span class="grow ellip">feature/product/critique</span><span class="cost">$0.263</span></div>
+          <div class="leaf-row task-state-row sel" title="open feature/ux/draft and read this run's pass through it"><span class="dot running"></span><span class="grow ellip">feature/ux/draft</span><span class="cost">$0.412</span></div>
+        </div>
+      </section>
+      <div class="detail">
+        <header>
+          <h2><span class="badge badge-running">▶</span> <span class="task-name">Pause a run and pick it up tomorrow</span></h2>
+          <div class="sub">t-qfr49rm80m · feature</div>
+          <div class="actions"><button>Re-run</button><button class="ghost">Cancel</button><button class="ghost" title="feature/ux/draft">Open state ↗</button></div>
+        </header>
+      </div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

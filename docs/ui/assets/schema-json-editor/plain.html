@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/schema-json-editor">
+<meta name="state" content="plain">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>schema-json-editor · plain</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/schema-json-editor · plain</p>
+<div class="mockup-stage" style="width: 720px; height: 400px; display: flex; flex-direction: column">
+  <div class="config-half whole">
+    <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button>
+    <div class="file-edit schema-edit">
+      <div class="edit-bar schema-bar">
+        <label class="schema-pick"><span class="sub">Schema</span><select><option value="" selected>none — plain JSON</option><option value="state">Workflow state</option><option value="state-prompt">Workflow state (prompt)</option><option value="prompt-operation">Prompt operation</option></select></label>
+        <label class="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways"><input type="checkbox"><span class="sub">Wrap</span></label>
+      </div>
+      <div class="schema-body" style="--reference-width: 300px">
+        <div class="schema-main">
+          <div class="editor-stack">
+            <pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"name"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"declarative-ai"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"private"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-literal">true</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"version"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"0.4.0"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"type"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"module"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"workspaces"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">[</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-string">"packages/*"</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">]</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"scripts"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"build"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"tsc -b"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"test"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"vitest run"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"lint"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"eslint . --max-warnings 0"</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-key">"devDependencies"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-punct">{</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"typescript"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"^5.9.2"</span><span class="tok tok-punct">,</span>
+</span><span class="code-line"><span class="tok tok-plain">    </span><span class="tok tok-key">"vitest"</span><span class="tok tok-punct">:</span><span class="tok tok-plain"> </span><span class="tok tok-string">"^3.2.4"</span>
+</span><span class="code-line"><span class="tok tok-plain">  </span><span class="tok tok-punct">}</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span><span class="code-line">
+</span></pre>
+            <textarea class="code-layer code-input" spellcheck="false" wrap="off">{
+  "name": "declarative-ai",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "lint": "eslint . --max-warnings 0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
+</textarea>
+          </div>
+        </div>
+      </div>
+      <div class="pane-actions pinned">
+        <button class="primary" disabled>Save</button>
+        <button class="ghost" disabled>Revert</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

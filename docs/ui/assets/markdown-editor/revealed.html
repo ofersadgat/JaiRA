@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/markdown-editor">
+<meta name="state" content="revealed">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>markdown-editor · revealed</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/markdown-editor · revealed</p>
+<div class="mockup-stage is-bare" style="width: 720px; display: grid; gap: 14px">
+  <!-- The caret on a line of prose: that line shows its marks, the heading above stays drawn. -->
+  <div class="mockup-stage" style="padding: 0 15px">
+    <div class="md-editor">
+      <div class="cm-editor cm-focused">
+        <div class="cm-scroller">
+          <div class="cm-content" contenteditable="true" style="padding: 8px 2px; line-height: 1.6">
+            <div class="cm-line"><span class="cm-h2">Each pass does three things</span></div>
+            <div class="cm-line">The critique reads <span class="cm-link">[the authoring reference](WORKFLOWS.md)</span> and <span class="cm-strong">**stops**</span> after three passes.</div>
+            <div class="cm-line cm-quote-line"><span class="cm-quote">A child input may only read a sibling earlier in the sequence.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- The caret inside a fenced block: the whole block is source. -->
+  <div class="mockup-stage" style="padding: 0 15px">
+    <div class="md-editor">
+      <div class="cm-editor cm-focused">
+        <div class="cm-scroller">
+          <div class="cm-content" contenteditable="true" style="padding: 8px 2px; line-height: 1.6">
+            <div class="cm-line">The state as the run read it:</div>
+            <div class="cm-line cm-code-line cm-code-open" data-lang="yaml"><span class="cm-code">```yaml</span></div>
+            <div class="cm-line cm-code-line"><span class="cm-code"><span class="tok-key">state</span><span class="tok-punct">:</span> feature.ux</span></div>
+            <div class="cm-line cm-code-line"><span class="cm-code"><span class="tok-key">max_iterations</span><span class="tok-punct">:</span> <span class="tok-number">3</span></span></div>
+            <div class="cm-line cm-code-line"><span class="cm-code"><span class="tok-comment"># a named session keeps the draft in view</span></span></div>
+            <div class="cm-line cm-code-line"><span class="cm-code"><span class="tok-key">session</span><span class="tok-punct">:</span> refine</span></div>
+            <div class="cm-line cm-code-line cm-code-close"><span class="cm-code">```</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- The caret inside a table: the whole table is source. -->
+  <div class="mockup-stage" style="padding: 0 15px">
+    <div class="md-editor">
+      <div class="cm-editor cm-focused">
+        <div class="cm-scroller">
+          <div class="cm-content" contenteditable="true" style="padding: 8px 2px; line-height: 1.6">
+            <div class="cm-line cm-table-line cm-table-head"><span class="cm-table-delim">|</span> state <span class="cm-table-delim">|</span> passes <span class="cm-table-delim">|</span> session <span class="cm-table-delim">|</span></div>
+            <div class="cm-line cm-table-line cm-table-rule">| --- | ---: | --- |</div>
+            <div class="cm-line cm-table-line"><span class="cm-table-delim">|</span> feature.ux.draft <span class="cm-table-delim">|</span> 3 <span class="cm-table-delim">|</span> <span class="cm-code">`refine`</span> <span class="cm-table-delim">|</span></div>
+            <div class="cm-line cm-table-line"><span class="cm-table-delim">|</span> feature.ux.critique <span class="cm-table-delim">|</span> 3 <span class="cm-table-delim">|</span> <span class="cm-code">`refine`</span> <span class="cm-table-delim">|</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/components-view">
+<meta name="state" content="broken">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>components-view · broken</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/components-view · broken</p>
+<div class="mockup-stage" style="width: 1030px; background: var(--bg)">
+  <div class="col mid gallery-page">
+    <div class="gallery">
+      <!-- the document stopped being JSON, and the Form view was chosen -->
+      <section class="gallery-card">
+        <header class="gallery-head">
+          <h4>With a comment</h4>
+          <p class="sub">`comments: true` adds an ALONGSIDE box: said in addition to the pick, so the click still answers even with text in it.</p>
+        </header>
+        <div class="gallery-body">
+          <div class="gallery-stage">
+            <p class="reason">Not JSON yet: Expected ',' or '}' after property value in JSON at position 58 (line 3 column 3)</p>
+          </div>
+          <div class="gallery-side">
+            <div class="gallery-config">
+              <div class="gallery-config-head">
+                <div class="tabs seg"><button class="layer-on" title="edit it as a form">Form</button><button class="ghost">JSON</button></div>
+                <span class="sub grow">the state's authored args</span>
+                <button class="link">reset</button>
+              </div>
+              <p class="reason">This is not JSON yet: Expected ',' or '}' after property value in JSON at position 58 (line 3 column 3). Fix it in the JSON view — the form edits a parsed document.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- the document parses, and the component refuses it -->
+      <section class="gallery-card">
+        <header class="gallery-head">
+          <h4>One tap</h4>
+          <p class="sub">A single-select with no free text answers on the click. Descriptions, icons and a `danger` tone are the option's own to declare.</p>
+        </header>
+        <div class="gallery-body">
+          <div class="gallery-stage">
+            <div class="modal-backdrop">
+              <div class="modal" data-testid="interaction">
+                <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v6a3 3 0 0 0 3 3h7"></path><path d="M6 21v-6"></path><path d="m13 9 3 3-3 3"></path></svg> choose_option</h3>
+                <p class="reason">This state's <code>choose_option</code> config is invalid: choose_option.options must be a non-empty array of options</p>
+              </div>
+            </div>
+          </div>
+          <div class="gallery-side">
+            <div class="gallery-config">
+              <div class="gallery-config-head">
+                <div class="tabs seg"><button class="ghost" title="edit it as a form">Form</button><button class="layer-on">JSON</button></div>
+                <span class="sub grow">the state's authored args</span>
+                <button class="link">reset</button>
+              </div>
+              <div class="gallery-json">
+                <div class="file-edit schema-edit">
+                  <div class="edit-bar schema-bar">
+                    <span class="schema-pick"><span class="sub">Schema</span><span class="chip">choose_option config</span></span>
+                    <button class="ghost">Add missing fields</button>
+                    <button class="ghost">Fields</button>
+                    <span class="chip chip-bad">1 problem</span>
+                    <label class="toggle wrap-toggle"><input type="checkbox"><span class="sub">Wrap</span></label>
+                  </div>
+                  <div class="sub schema-hint">a decision with named outcomes — `choose_option`'s args</div>
+                  <div class="schema-body">
+                    <div class="schema-main">
+                      <div class="editor-stack">
+<pre class="code-layer highlight" aria-hidden="true"><span class="code-line"><span class="tok tok-punct">{</span>
+</span><span class="code-line">  <span class="tok tok-key">"prompt"</span><span class="tok tok-punct">:</span> <span class="tok tok-string">"Pick a direction for the plan."</span><span class="tok tok-punct">,</span>
+</span><span class="code-line">  <span class="tok tok-key">"options"</span><span class="tok tok-punct">:</span> <span class="tok tok-punct">[]</span>
+</span><span class="code-line"><span class="tok tok-punct">}</span>
+</span></pre>
+                        <textarea class="code-layer code-input" spellcheck="false" wrap="off"></textarea>
+                      </div>
+                      <div class="notice bad violation"><b>options</b> — must NOT have fewer than 1 items</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- an agent's question with its questions removed -->
+      <section class="gallery-card">
+        <header class="gallery-head">
+          <h4>One question</h4>
+          <p class="sub">One question with a single choice answers on the click; the Other box is INSTEAD text, so typing in it waits for Answer. Dismissal is the one affordance a gate never gets.</p>
+        </header>
+        <div class="gallery-body">
+          <div class="gallery-stage">
+            <p class="reason">A question request needs at least one question.</p>
+          </div>
+          <div class="gallery-side">
+            <div class="gallery-config">
+              <div class="gallery-config-head">
+                <div class="tabs seg"><button class="layer-on" title="edit it as a form">Form</button><button class="ghost">JSON</button></div>
+                <span class="sub grow">the request the dialog was raised with</span>
+                <button class="link">reset</button>
+              </div>
+              <div class="cfg-fields">
+                <div class="cfg-span cfg-block">
+                  <div class="cfg-field">
+                    <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">questions</span><b class="sf-req" title="required">*</b><span class="sf-type">list · at least 1</span></span><span class="cfg-hint">asked together, answered together — a batch is one tool call<code class="cfg-param">questions</code></span></div>
+                    <div class="cfg-control">
+                      <div class="cfg-list"><div class="cfg-list-add"><button type="button" class="ghost">+ add</button></div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

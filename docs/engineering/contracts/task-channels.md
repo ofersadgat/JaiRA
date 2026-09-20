@@ -1,0 +1,153 @@
+---
+id: engineering/contracts/task-channels
+type: engineering-contract
+status: shipped
+updated: 2026-09-13
+visibility: internal
+kind: api
+owned_by: [engineering/units/task-lifecycle, engineering/units/rewind-and-fork]
+consumers: ["@jaira/app renderer store.ts task actions", "@jaira/app renderer taskAction.ts, through task:detail", "@jaira/app main index.ts handler table", "@jaira/app tests driving AppService"]
+siblings: [engineering/contracts/chat-channels, engineering/contracts/inbox-channels, engineering/contracts/ipc-channels, engineering/contracts/task-view-models, engineering/contracts/refusal-errors]
+---
+
+# Task channels
+
+The IPC request channels the renderer invokes to create, start, stop, resume, rerun, rewind, fork, rename and delete a task, and to approve the module files a start refused on.
+
+## A caller reaches for these to change what a task is doing, and for nothing it only reads
+
+**Use when.** Acting on a task's lifecycle from the renderer, asking which of resume, start or rerun its primary action performs, or answering an `ApprovalRequired` refusal.
+
+**Do not use when.** Typing into a conversation: [chat-channels](chat-channels.md). Answering a gate, an approval or a question: [inbox-channels](inbox-channels.md). Reading tasks with `task:list` or `task:detail`: [ipc-channels](ipc-channels.md), with the shapes in [task-view-models](task-view-models.md). Working from a terminal: [jaira-cli](jaira-cli.md). How a call is invoked and how its failure travels: [preload-bridge](preload-bridge.md).
+
+## The shape is one request per channel, and every request may name its project
+
+### Every request resolves its project the same way
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `project` | `ProjectRef`, a string | no | a project directory, or `"shared"` for the shared root; absent names the only open user project |
+
+### Creating and renaming answer the task's summary
+
+`task:create` takes `CreateTaskRequest` and answers a `TaskSummary` with `status: "queued"`.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `title` | string | yes | the task's name |
+| `workflow` | string | yes | root state id; not checked until the first start |
+| `description` | string | no | free text |
+| `labels` | string array | no | free labels |
+| `inputs` | `Record<string, JsonValue>` | no | the root inputs, fixed for the task's life |
+| `branch` | string | no | branch binding; refused on the shared root |
+| `project` | `ProjectRef` | no | where the task is recorded, and whose config governs its runs |
+
+`task:rename` takes `{taskId: string; title: string; project?}` and answers the renamed `TaskSummary`. The title is trimmed. Both answers fill only `taskId`, `title`, `status`, `workflow`, `labels`, `createdAt` and `updatedAt`.
+
+### Starting, resuming and rerunning share one request
+
+`task:start`, `task:resume` and `task:rerun` take `StartTaskRequest` and answer `{taskId: string}`.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `taskId` | string | yes | the task to start, to resume, or to copy and start |
+| `interactions` | `Record<string, JsonValue[]>` | no | scripted gate answers keyed by function name: [interactions-script-format](interactions-script-format.md) |
+| `fake` | `JsonValue` | no | scripted prompt rules, parsed in main as `FakeRule[]`: [fake-rules-format](fake-rules-format.md) |
+| `overrides` | `ChatSettings` | no | settings written into the root state's prompt operation and pinned as the snapshot; read by `task:start` and `task:rerun` only |
+| `project` | `ProjectRef` | no | as above |
+
+| Channel | `taskId` answered | Resolves when |
+| --- | --- | --- |
+| `task:start` | the task asked about | the run is wired and detached; its end arrives as `run:finished` over [push-messages](push-messages.md) |
+| `task:resume` | the task asked about | the same, with the machine loaded from its record |
+| `task:rerun` | a new task, `parentTaskId` naming the one asked about | the new task's start resolved |
+
+### `task:resumable` answers the plan the primary action follows
+
+`task:resumable` takes `{taskId: string; project?}` and answers a `ResumePlan`, whose fields are in [task-view-models](task-view-models.md). Its `kind` is decided in this order:
+
+| `kind` | When |
+| --- | --- |
+| `none` | the task is unknown, or its status is not startable |
+| `fresh` | no snapshot is pinned, or the journal holds no event |
+| `none`, with `blocked` | the load is blocked or has an unreadable operation; `blocked` carries the block or the first unreadable reason |
+| `none` | the load finds no machine in the journal |
+| `continue` | a frontier entry's cause is `interrupted` |
+| `retry` | every frontier entry's cause is `failed`, or the frontier is empty |
+
+### Stopping and deleting take only the task
+
+`task:cancel` and `task:delete` take `{taskId: string; project?}` and answer `{taskId: string}`. A cancel of a run in this process sets `stopping` and answers; `canceled` is written when the run settles.
+
+### Rewinding and forking take a journal seq
+
+`task:rewind` answers `{taskId}` of the same task. `task:fork` answers `{taskId}` of the copy.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `taskId` | string | yes | the task to cut or copy |
+| `at` | number | yes | a `state_machine_events.seq` of that task, as a view was handed it in `ConversationTurn.seq` or `ChatEditPoint.seq` |
+| `message` | string | no, `task:fork` only | trimmed; non-empty makes a chat fork that sends it as the copy's next turn |
+| `overrides` | `ChatSettings` | no, `task:fork` only | settings for that message |
+| `interactions` | `Record<string, JsonValue[]>` | no | scripts the resume that follows |
+| `fake` | `JsonValue` | no | scripts the resume or the message that follows |
+| `project` | `ProjectRef` | no | as above |
+
+### Module approval reads the refused files and approves them by path
+
+`functions:pending` takes `{taskId: string; project?}` and answers `ModuleApproval[]`, empty unless the task's last start refused with `ApprovalRequired`.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `file` | string | yes | absolute path with forward slashes |
+| `hash` | string | yes | the file's hash as it reads now |
+| `source` | string | yes | the file's source as it reads now |
+| `previousHash` | string | no | the hash approved before, present when the file changed since |
+| `symbols` | string array | no | the symbols the workflow calls from the file; absent for a file reached only as an import |
+
+`functions:approve` takes `{files: string[]; project?}` and answers `{approved: number}`. Main reads and hashes each file itself, approves it in the machine-wide store, and rebuilds the module pair with the project's workflow search path.
+
+## Every error arrives as a message, and most leave nothing half done
+
+| Condition | Response | Caller does |
+| --- | --- | --- |
+| `project` names no open project, or is absent with none or several open | `project '<ref>' is not open`, `no project is open`, or `several projects are open, so this call must name one` | name the project |
+| An unknown task | `unknown task '<id>'`; `task:resume` says `cannot resume unknown task '<id>'`; a start whose file is gone says `no task file for '<id>' in <dir>` | refresh the list |
+| `task:create` binds a branch on the shared root | `a shared task cannot be bound to a branch — the shared root is not a checkout` | drop the branch |
+| A start of a task already running in this process | `task '<id>' is already running in this process` | wait, or stop it |
+| A start or resume of a holding task | `task '<id>' is waiting for '<title>' (<status>), … to complete` | wait for the dependencies |
+| A start of a task whose status cannot start | `task '<id>' is <status>; only queued/interrupted/failed tasks can start` | rerun it |
+| A start of a task with journal history | `task '<id>' is <status> and already has history — …Resume it to continue, or re-run it as a new task.` | call `task:resume` or `task:rerun` |
+| An unapproved module | the `ApprovalRequired` message listing each file | call `functions:pending`, show the sources, call `functions:approve`, then retry the start |
+| The root does not load, or fails validation | the load error with any `unreadable files:`, or `workflow validation failed for '<workflow>':` with each issue | fix the workflow |
+| A state whose runtime cannot enforce the policy | `<stateId>: <reason>` joined by `; `, with the task recorded `failed` | fix the state, then resume |
+| A model the start-time check cannot serve, a malformed `fake`, or a policy that does not compile | the check's message, after the task was marked `running` | restart the app before trying again |
+| `task:resume` of a running, unstartable or never-pinned task | `task '<id>' is already running`, `… is <status> and cannot be resumed — run it again instead`, or `… has no pinned snapshot to resume against — run it instead` | rerun or start it |
+| `task:resume` of a history that cannot load | `task '<id>' cannot be resumed: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Running it again would repeat them.` | rerun it |
+| A rewind, fork or delete of a running task | `task '<id>' is running — stop it before rewinding it`, `… forking it`, or `… cancel it before deleting it` | stop it first |
+| A cut the journal cannot take | `has no journal event <seq>`, `nothing in task '<id>' comes after event <seq>`, `… comes before event <seq>`, `has never run, so there is nothing to fork`, `has history in per-run journal files, which a cut cannot address`, or `the journal file holds N events and the table M — refusing to cut a journal that disagrees with its file` | refresh the view, rerun, or reopen the project, as the message says |
+| A chat fork whose copy has no instance that spoke | `the fork of '<id>' holds no conversation to continue`, after the copy exists | delete the copy |
+| A bound task's worktree cannot be removed | `could not remove the task's worktree: <reason>`, with nothing deleted | fix the worktree |
+| `task:rename` with a blank title | `a task needs a title` | give a title |
+| `functions:approve` in a process without module support, or on a file it cannot read | `this process has no js/ts function support to approve into`, or `cannot approve '<file>': it could not be read` | fix the path; files before it are already approved |
+
+## A change to a channel breaks the renderer in the same build, and there is no deprecation path
+
+- Channel names live in `IPC_CHANNELS`, which the preload whitelist is built from. The renderer and main ship together, so a change lands in both at once and no older caller exists.
+- `primaryAct` in `taskAction.ts` maps `continue` and `retry` to `task:resume`, `fresh` to `task:start`, and anything else to `task:rerun`. A new `kind`, or a change to when one is answered, changes what the button does. `runViews.test.ts` pins the verbs: "says Resume where instances were still live", "says Retry where the run ended and nothing is live", "falls back to the restart verbs when there is nothing to resume", "STARTS a task that recorded nothing, rather than copying one with nothing to copy", "says nothing at all for a run that finished or is still going", "explains a record it cannot read, rather than silently dropping the button".
+- `at` is a journal seq, so a change to how seqs are minted or cut breaks every view that hands one over.
+
+## Several answers arrive before the work they name is done, and some refusals leave work behind
+
+- `task:start`, `task:resume` and `task:rerun` resolve once the run is wired. Success says nothing about the outcome.
+- `task:rerun` always creates a new task, whatever the status, and answers the new id. When that task's start refuses, it stays `queued` and a retry makes another.
+- `task:resume` ignores `overrides`. A start applies them only while no snapshot is pinned and only to a root state with a prompt operation, and then skips `validateBundle`.
+- A malformed `fake`, a model the check refuses, or a policy that does not compile refuses after the task is marked `running` and held in `open.live`, so the task stays running in this process and a later stop only reaches `stopping`.
+- A start refused by `beginTaskRun` or later has already deleted the task's durable gates and, for a bound task, cut its worktree.
+- `task:cancel` of a finished task answers `{taskId}` and changes nothing, where `jaira task cancel` refuses.
+- `functions:pending` ignores `project`: the list is keyed by task id alone, set when a `task:start` or `task:rerun` start refuses with `ApprovalRequired`, and cleared when a later start of that task succeeds.
+- `task:resumable` and `task:detail` throw for a startable task with history whose snapshot is missing or corrupt, because the plan loads the snapshot without a fallback.
+- `task:resumable` has no renderer caller. The renderer reads the same plan from `task:detail`'s `resume`, present only for a startable task.
+- A rewind whose cut leaves no frontier restores the task's status and outcome without resuming, and its outputs are cleared.
+- A run fork whose resume refuses rejects the request while the copy stays. A chat fork answers the copy's id before its message is answered; a failed message is only logged.
+- A rejection crosses IPC as its message alone, so `ApprovalRequired.pending` is read back through `functions:pending`.

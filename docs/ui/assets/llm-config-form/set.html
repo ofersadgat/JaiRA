@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/llm-config-form">
+<meta name="state" content="set">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>llm-config-form · set</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/llm-config-form · set</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <div class="llm-config">
+          <nav class="llm-rail">
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">temperature</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
+            <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">4000 tokens · 1 stop</span></button>
+            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">1 extra</span></button>
+          </nav>
+          <div class="llm-detail">
+            <div class="llm-detail-head">
+              <span class="llm-detail-title">Output limits</span>
+              <span class="cfg-hint">How long an answer may run, and what ends it.</span>
+            </div>
+            <div class="cfg-fields">
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Max output tokens</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">A ceiling on the answer's length — the main lever on the cost of one call. Empty means the model's own maximum.<code class="cfg-param">maxOutputTokens</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" value="4000" placeholder="—"></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Max tool steps</span></span><span class="cfg-hint">How many model→tool→model round trips one call may take before it is stopped.<code class="cfg-param">maxSteps</code></span></div>
+                <div class="cfg-control"><input class="cfg-input num" inputmode="decimal" placeholder="—"></div>
+              </div>
+              <div class="cfg-field">
+                <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Stop sequences</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">Comma-separated strings that end generation as soon as they appear.<code class="cfg-param">stopSequences</code></span></div>
+                <div class="cfg-control"><input class="cfg-input" value="&lt;/answer&gt;" placeholder="—"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

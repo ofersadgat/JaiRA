@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/value-view">
+<meta name="state" content="changes">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>value-view · changes</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/value-view · changes</p>
+<div class="mockup-stage is-bare" style="width: 720px">
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="runtime/cache/implement — describe this run of it">runtime/cache/implement</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">result</span><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="The files this changes, as a diff" aria-pressed="true">Files</button><button type="button" title="The value as JSON" aria-pressed="false">JSON</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body">
+            <div class="vv-changes">
+              <div class="vv-changes-head"><span class="sub">3 files</span><span class="vv-stats"><span class="vv-add">+6</span><span class="vv-del">−2</span></span></div>
+              <div class="vv-change"><div class="vv-change-line"><button type="button" class="vv-change-head" aria-expanded="false"><span class="ts-chev"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span class="chip vv-action vv-action-update">update</span><span class="vv-path ellip" title="src/availability.ts">src/availability.ts</span><span class="vv-stats"><span class="vv-add">+3</span><span class="vv-del">−1</span></span></button></div></div>
+              <div class="vv-change"><div class="vv-change-line"><button type="button" class="vv-change-head" aria-expanded="false"><span class="ts-chev"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span class="chip vv-action vv-action-create">create</span><span class="vv-path ellip" title="src/availabilityCache.ts">src/availabilityCache.ts</span><span class="vv-stats"><span class="vv-add">+3</span></span></button></div></div>
+              <div class="vv-change"><div class="vv-change-line"><button type="button" class="vv-change-head" aria-expanded="false"><span class="ts-chev"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span class="chip vv-action vv-action-delete">delete</span><span class="vv-path ellip" title="docs/legacy-probe.md">docs/legacy-probe.md</span><span class="vv-stats"><span class="vv-del">−1</span></span></button></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="sb-panel">
+    <div class="sb-gutter bare">
+      <button type="button" class="link sb-workflow ellip" title="chat/agent — describe this run of it">chat/agent</button>
+    </div>
+    <section class="sb-sheet">
+      <div class="sb-body">
+        <div class="vv">
+          <div class="vv-head"><span class="vv-label">result</span><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="The change this patch describes" aria-pressed="true">Diff</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+          <div class="vv-body">
+            <div class="vv-patch">
+              <div class="vv-changes-head"><span class="sub">1 file</span><span class="vv-stats"><span class="vv-add">+2</span><span class="vv-del">−1</span></span></div>
+              <div class="vv-patch-file">
+                <button type="button" class="vv-patch-head" aria-expanded="true"><svg class="vv-patch-chev open" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg><span class="vv-patch-act act-update">update</span><span class="vv-patch-path">src/availability.ts</span><span class="grow"></span><span class="vv-stats"><span class="vv-add">+2</span><span class="vv-del">−1</span></span></button>
+                <div class="vv-patch-body">
+                  <div class="vv-patch-hunk">
+                    <div class="vv-patch-at"><span class="vv-patch-at-range">@@ -12,3 +12,4 @@</span><span class="vv-patch-at-sec">export async function availability(): Promise&lt;Snapshot&gt; {</span></div>
+                    <div class="vv-patch-line ln-context"><span class="vv-patch-no">12</span><span class="vv-patch-no">12</span><span class="vv-patch-sign"> </span><span class="vv-patch-text">export async function availability(): Promise&lt;Snapshot&gt; {</span></div>
+                    <div class="vv-patch-line ln-del"><span class="vv-patch-no">13</span><span class="vv-patch-no"></span><span class="vv-patch-sign">−</span><span class="vv-patch-text">  return await probeEverything();</span></div>
+                    <div class="vv-patch-line ln-add"><span class="vv-patch-no"></span><span class="vv-patch-no">13</span><span class="vv-patch-sign">+</span><span class="vv-patch-text">  if (cached !== null &amp;&amp; Date.now() - cached.checkedAt &lt; INTERVAL) return cached;</span></div>
+                    <div class="vv-patch-line ln-add"><span class="vv-patch-no"></span><span class="vv-patch-no">14</span><span class="vv-patch-sign">+</span><span class="vv-patch-text">  return (cached = await probeEverything());</span></div>
+                    <div class="vv-patch-line ln-context"><span class="vv-patch-no">14</span><span class="vv-patch-no">15</span><span class="vv-patch-sign"> </span><span class="vv-patch-text">}</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

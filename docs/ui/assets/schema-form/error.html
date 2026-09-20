@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/schema-form">
+<meta name="state" content="error">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>schema-form · error</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/schema-form · error</p>
+<div class="mockup-stage is-bare" style="width: 360px; height: 590px">
+<div class="new-task-wrap">
+    <button aria-expanded="true">+ New task</button>
+    <form class="new-task-pop">
+      <label class="field">
+        <span>Workflow</span>
+        <select class="cfg-input"><option value="">choose a workflow…</option><option value="feature" selected>Feature workflow</option><option value="explore">Exploration</option></select>
+      </label>
+      <div class="new-task-fields">
+        <div class="run-inputs">
+          <div class="cfg-fields"><div class="cfg-span cfg-block"><div class="cfg-field bad"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label mono">issue</span><b class="sf-req" title="required">*</b><span class="sf-type">text/markdown · at least 1 character</span></span><span class="cfg-hint">What is being asked for.</span></div><div class="cfg-control"><textarea class="cfg-input" rows="4"></textarea><div class="reason cfg-error">can&#x27;t be empty</div></div></div></div><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set severity_threshold" title="set severity_threshold" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label mono">severity_threshold</span><span class="sf-type">one of 4</span></span></div><div class="cfg-control"><div class="sf-absent">not set — the default applies: significant</div></div></div><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set threshold_rank" title="set threshold_rank" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label mono">threshold_rank</span><span class="sf-type">integer</span></span><span class="cfg-hint">blocker=3, significant=2, minor=1, note=0.</span></div><div class="cfg-control"><div class="sf-absent">not set — the default applies: 2</div></div></div><div class="cfg-field bad"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" aria-label="leave ask_below out" title="leave ask_below out" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label mono">ask_below</span><span class="sf-type">number · 0 to 1</span></span></div><div class="cfg-control"><input class="cfg-input mono num" inputMode="decimal" value="2"/><div class="reason cfg-error">must be at most 1</div></div></div></div>
+        </div>
+      </div>
+      <div class="pane-actions">
+        <button type="submit" class="primary" disabled title="2 problems — issue: can't be empty">Create</button>
+        <button type="button" class="ghost">Cancel</button>
+        <span class="sub ellip">2 problems — issue: can't be empty</span>
+      </div>
+    </form>
+  </div>
+</div>
+</body>
+</html>

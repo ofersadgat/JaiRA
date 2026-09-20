@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/provider-row">
+<meta name="state" content="dirty">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>provider-row · dirty</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/provider-row · dirty</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <ul class="cfg-rows">
+          <li class="cfg-row available">
+            <div class="cfg-row-head">
+              <span class="cfg-mark">
+                <svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">L</text></svg>
+                <span class="cfg-dot available" title="ready" aria-hidden="true"></span>
+              </span>
+              <span class="cfg-row-title">Local server</span>
+              <span class="grow"></span>
+              <button type="button" role="switch" aria-checked="true" aria-label="stop using Local server in this project" title="stop using Local server in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+              <button class="quiet cfg-chevron open" aria-expanded="true" aria-label="hide Local server's settings" title="Done"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <p class="cfg-say"><span class="cfg-say-state">ready</span> — http://localhost:1234/v1 answered</p>
+            <div class="cfg-row-body">
+              <p class="cfg-hint">An OpenAI-compatible server on this machine — Ollama, LM Studio, llama-server, vLLM.</p>
+              <section class="cfg-level" data-depth="0">
+                <div class="cfg-level-head">
+                  <span class="cfg-level-title">API provider</span>
+                  <span class="cfg-hint">It speaks the same HTTP as a remote fleet, so it takes a key when one is required.</span>
+                </div>
+                <div class="cfg-level-body">
+                  <div class="cfg-fields">
+                    <div class="cfg-field">
+                      <div class="cfg-field-say">
+                        <span class="cfg-field-head"><span class="cfg-label">Credential</span></span>
+                        <span class="cfg-hint">The NAME of the secret holding the key — never the key. It is resolved at run time from the OS keychain, a .env file, or the environment.<code class="cfg-param">models.routes.local.credential</code></span>
+                      </div>
+                      <div class="cfg-control"><input class="cfg-input mono" value="lm studio key" placeholder="usually none"></div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="cfg-level" data-depth="1">
+                <div class="cfg-level-head">
+                  <span class="cfg-level-title">Local server</span>
+                  <span class="cfg-hint">Where it listens, what it can honour, and how to start it if nothing answers.</span>
+                </div>
+                <div class="cfg-level-body">
+                  <div class="cfg-fields">
+                    <div class="cfg-field">
+                      <div class="cfg-field-say">
+                        <span class="cfg-field-head"><span class="cfg-label">Server URL</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+                        <span class="cfg-hint">Including the version path. This is what the startup check connects to.<code class="cfg-param">models.routes.local.baseURL</code></span>
+                      </div>
+                      <div class="cfg-control"><input class="cfg-input mono" value="http://localhost:1234/v1" placeholder="http://localhost:11434/v1"></div>
+                    </div>
+                    <div class="cfg-field">
+                      <div class="cfg-field-say">
+                        <span class="cfg-field-head"><span class="cfg-label">Structured output</span></span>
+                        <span class="cfg-hint">A CEILING on what a call may ask for. llama-server and vLLM honour a full JSON schema; a bare completion shim does not.<code class="cfg-param">models.routes.local.supportsStructuredOutputs</code></span>
+                      </div>
+                      <div class="cfg-control"><select class="cfg-input"><option selected>yes — honours a full json_schema</option><option>no — cap it at json_object</option></select></div>
+                    </div>
+                    <div class="cfg-field">
+                      <div class="cfg-field-say">
+                        <span class="cfg-field-head"><span class="cfg-label">Start it with</span></span>
+                        <span class="cfg-hint">Left empty the server is expected to be running already. Given a command, JaiRA probes first and starts it only if nothing answers.<code class="cfg-param">models.routes.local.serve</code></span>
+                      </div>
+                      <div class="cfg-control"><input class="cfg-input" placeholder="ollama serve"></div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <p class="cfg-hint">An empty box removes the setting from this layer, so it goes back to whatever the other layer or the built-in default says.</p>
+              <p class="sub warn-text">'lm studio key' is not a usable secret name — it NAMES the key (like ANTHROPIC_API_KEY), it does not hold it</p>
+              <div class="pane-actions">
+                <button class="primary">Save</button>
+                <button class="ghost">Revert</button>
+              </div>
+            </div>
+            <div class="cfg-credential">
+              <span class="cfg-hint">No key named, which is fine unless this provider needs one.</span>
+              <button class="ghost">Add a key</button>
+            </div>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

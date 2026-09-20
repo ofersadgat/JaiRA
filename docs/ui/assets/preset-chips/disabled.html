@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/preset-chips">
+<meta name="state" content="disabled">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>preset-chips · disabled</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/preset-chips · disabled</p>
+<div class="mockup-stage" style="width: 760px; padding: 16px 20px 0">
+  <div class="cfg-pane">
+    <section class="cfg-group">
+      <header class="cfg-group-head">
+        <h4>Artifacts</h4>
+        <p class="cfg-hint">Where a file an agent produces actually lands. A path TEMPLATE rather than a mode, because “which backend” and “how the path is derived” are independent questions and an enum conflates them.</p>
+      </header>
+      <div class="cfg-field">
+        <div class="cfg-field-say">
+          <span class="cfg-field-head"><span class="cfg-label">Destination</span></span>
+          <span class="cfg-hint">Pick one, or write a template of your own.<code class="cfg-param">artifacts.destination</code></span>
+        </div>
+        <div class="cfg-control">
+          <div class="cfg-stack">
+            <div class="cfg-chips">
+              <button type="button" class="cfg-chip" title="beside the code the run is working on" disabled>the workspace</button>
+              <button type="button" class="cfg-chip on" title="outside the repo, grouped by task" disabled>one directory per task</button>
+              <button type="button" class="cfg-chip" title="outside the repo, filenames derived" disabled>one flat directory</button>
+              <button type="button" class="cfg-chip" title="recorded, but nothing is written to disk" disabled>memory only</button>
+            </div>
+            <input class="cfg-input mono" value="$CENTRAL" placeholder="$JAIRA/artifacts/$TASK_ID/$RELPATH" disabled>
+            <p class="cfg-hint">Variables: <code>$JAIRA </code><code>$PROJECT </code><code>$TASK_ID </code><code>$RELPATH </code><code>$ARTIFACT_DIR </code></p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

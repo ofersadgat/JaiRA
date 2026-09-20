@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/issue-mark">
+<meta name="state" content="clean">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>issue-mark · clean</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/issue-mark · clean</p>
+<div class="mockup-stage" style="width: 720px">
+  <div class="config-half whole">
+    <div class="pane editor">
+      <div class="form">
+        <div class="slots" data-issue="outputs">
+          <div class="slots-head"><span>Outputs</span><button type="button" class="ghost sm">+ Add</button></div>
+          <div class="slot-row slot-head"><span>Name</span><span>Type</span><span>Binding — empty means unbound — say where the value comes from</span><span></span></div>
+            <div class="slot-group">
+              <div class="slot-row" data-issue="outputs.reuse">
+                <input value="reuse" placeholder="name, or prefix* to spread a child" spellcheck="false">
+                <span class="slot-type"><select title="no schema — an output with a binding takes the bound value&apos;s type; anywhere else, unchecked"><option value="any" selected>any</option><option value="text">text</option><option value="url">url</option><option value="file">file path</option><option value="artifact">artifact</option><option value="number">number</option><option value="integer">integer</option><option value="datetime">datetime</option><option value="boolean">boolean</option><option value="object">object</option></select><label class="slot-opt" title="wrap the type in an array — a list of these"><input type="checkbox">list</label><button type="button" class="ghost sm link-toggle" title="hold this value in a file and reference it (WORKFLOWS.md §2.2)">🔗 Link</button></span>
+                <input class="" value='.children.plan.output.reuse' list="binding-targets" placeholder=".children.critique.output.outcome" spellcheck="false">
+                <button type="button" class="ghost sm" title="remove">✕</button>
+              </div>
+              <details class="slot-more"><summary>default &amp; description</summary></details>
+            </div>
+            <div class="slot-group">
+              <div class="slot-row" data-issue="outputs.built">
+                <input value="built" placeholder="name, or prefix* to spread a child" spellcheck="false">
+                <span class="slot-type"><select title="no schema — an output with a binding takes the bound value&apos;s type; anywhere else, unchecked"><option value="any" selected>any</option><option value="text">text</option><option value="url">url</option><option value="file">file path</option><option value="artifact">artifact</option><option value="number">number</option><option value="integer">integer</option><option value="datetime">datetime</option><option value="boolean">boolean</option><option value="object">object</option></select><label class="slot-opt" title="wrap the type in an array — a list of these"><input type="checkbox">list</label><button type="button" class="ghost sm link-toggle" title="hold this value in a file and reference it (WORKFLOWS.md §2.2)">🔗 Link</button></span>
+                <input class="" value='.children.item.output.id' list="binding-targets" placeholder=".children.critique.output.outcome" spellcheck="false">
+                <button type="button" class="ghost sm" title="remove">✕</button>
+              </div>
+              <details class="slot-more"><summary>default &amp; description</summary></details>
+            </div>
+            <div class="slot-group">
+              <div class="slot-row" data-issue="outputs.components">
+                <input value="components" placeholder="name, or prefix* to spread a child" spellcheck="false">
+                <span class="slot-type"><select title="no schema — an output with a binding takes the bound value&apos;s type; anywhere else, unchecked"><option value="any" selected>any</option><option value="text">text</option><option value="url">url</option><option value="file">file path</option><option value="artifact">artifact</option><option value="number">number</option><option value="integer">integer</option><option value="datetime">datetime</option><option value="boolean">boolean</option><option value="object">object</option></select><label class="slot-opt" title="wrap the type in an array — a list of these"><input type="checkbox">list</label><button type="button" class="ghost sm link-toggle" title="hold this value in a file and reference it (WORKFLOWS.md §2.2)">🔗 Link</button></span>
+                <input class="" value='concat(.children.plan.output.reuse, .children.item.output.id)' list="binding-targets" placeholder=".children.critique.output.outcome" spellcheck="false" disabled title="a computed binding — edit it on the JSON tab">
+                <button type="button" class="ghost sm" title="remove">✕</button>
+              </div>
+              <details class="slot-more"><summary>default &amp; description</summary></details>
+            </div>
+            <div class="slot-group">
+              <div class="slot-row" data-issue="outputs.docs">
+                <input value="docs" placeholder="name, or prefix* to spread a child" spellcheck="false">
+                <span class="slot-type"><select title="no schema — an output with a binding takes the bound value&apos;s type; anywhere else, unchecked"><option value="any" selected>any</option><option value="text">text</option><option value="url">url</option><option value="file">file path</option><option value="artifact">artifact</option><option value="number">number</option><option value="integer">integer</option><option value="datetime">datetime</option><option value="boolean">boolean</option><option value="object">object</option></select><label class="slot-opt" title="wrap the type in an array — a list of these"><input type="checkbox">list</label><button type="button" class="ghost sm link-toggle" title="hold this value in a file and reference it (WORKFLOWS.md §2.2)">🔗 Link</button></span>
+                <input class="" value='.children.item.output.doc' list="binding-targets" placeholder=".children.critique.output.outcome" spellcheck="false">
+                <button type="button" class="ghost sm" title="remove">✕</button>
+              </div>
+              <details class="slot-more"><summary>default &amp; description</summary></details>
+            </div>
+        </div>
+        <div class="slots">
+          <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+          <label class="field"><span>Kind</span><select><option value="prompt" selected>prompt — one model call</option></select></label>
+          <div class="op-block" data-issue="operation">
+            <label class="field" data-issue="operation.prompt">
+              <span>Prompt<button type="button" class="ghost sm link-toggle" title="hold this value in a file and reference it (WORKFLOWS.md §2.2)">🔗 Link</button></span>
+              <textarea rows="3" spellcheck="false" class="" title="{{.inputs.x}} interpolates; Link holds it in a file instead">{{.inputs.prompt}}</textarea>
+            </label>
+            <label class="field" data-issue="operation.tools">
+              <span>Tools</span>
+              <input spellcheck="false" value="read_file" placeholder="read_file, run_command" title="logical names resolved through the tool registry — an empty list drops the inherited ones">
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

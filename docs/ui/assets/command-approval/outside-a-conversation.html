@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/command-approval">
+<meta name="state" content="outside-a-conversation">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>command-approval · outside-a-conversation</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/command-approval · outside-a-conversation</p>
+<div class="mockup-stage is-bare" style="width: 560px">
+  <div class="modal">
+    <div class="approval-surface" data-testid="approval">
+      <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"></path></svg> Approve this command?</h3>
+      <div class="sub">Bash</div>
+      <pre class="artifact" data-testid="approval-command">git push --force-with-lease origin cache-probe</pre>
+      <p class="reason-note">Policy: pushing to a remote needs approval</p>
+      <div class="options"><button>Allow once</button><button>Allow for this run</button><button>Always allow</button></div>
+      <div class="options"><button class="danger">Deny</button></div>
+      <p class="reason">no pending approval 'apr-7f3k2q'</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

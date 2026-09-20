@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/code-view">
+<meta name="state" content="plain">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>code-view · plain</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/code-view · plain</p>
+<div class="mockup-stage" style="width: 720px; height: 300px; display: grid">
+  <div class="col mid">
+    <div class="config-half whole">
+      <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button>
+      <div class="file-edit">
+        <pre class="code-text"><code>syntax = "proto3";
+
+package jaira.journal;
+
+// One thing that happened in a run, in the order it happened.
+message Event {
+  uint64 seq = 1;
+  string task_id = 2;     // t-qfr49rm80m
+  string state = 3;       // feature.ux
+  oneof body {
+    Entered entered = 10;
+    Settled settled = 11;
+  }
+}</code></pre>
+        <div class="pane-actions pinned"><span class="sub">Code view — coloured, not an editor. Appearance › File types › text.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

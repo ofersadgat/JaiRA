@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/debug-view">
+<meta name="state" content="running">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>debug-view · running</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/debug-view · running</p>
+<div class="mockup-stage" style="width: 1030px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view debug-view">
+        <div class="col mid debug">
+          <header class="debug-head">
+            <h2>Workflow self-test</h2>
+            <p class="sub">Two prompt states run in sequence. The first is asked to say hello world; the second takes what it said as a declared input and reports whether it did. A pass means the model answered <em>and</em> that its output was validated, bound and carried into the next state.</p>
+          </header>
+          <section>
+            <h3>What it runs</h3>
+            <ol class="debug-stages">
+              <li><span class="mono">debug/hello_world/say</span><span class="sub">asks for the greeting, publishes it as </span><span class="mono">greeting: string</span></li>
+              <li><span class="mono">debug/hello_world/check</span><span class="sub">reads </span><span class="mono">.children.say.output.greeting</span><span class="sub">, publishes </span><span class="mono">passed: boolean</span><span class="sub"> and </span><span class="mono">verdict: string</span></li>
+            </ol>
+            <details class="debug-source"><summary>The state files, as they will be written</summary></details>
+          </section>
+          <section>
+            <h3>Installed</h3>
+            <div class="notice">The self-test lives in the SHARED root, not in the open project — it is a fact about this installation, and three debug files in a checkout's <code>.jaira/</code> would be three files in its next commit.</div>
+            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip">debug/hello_world</span><span class="chip">installed</span><button class="link">open ↗</button></div>
+            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip">debug/hello_world/say</span><span class="chip">installed</span><button class="link">open ↗</button></div>
+            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip">debug/hello_world/check</span><span class="chip">installed</span><button class="link">open ↗</button></div>
+            <div class="sub mono ellip">C:\Users\Ofer\.jaira\workflows\debug\hello_world.json</div>
+            <div class="pane-actions">
+              <button class="ghost" disabled>Install missing</button>
+              <button class="ghost">Reinstall</button>
+              <button class="ghost">Re-check</button>
+            </div>
+          </section>
+          <section>
+            <h3>Run it</h3>
+            <div class="notice">A live run goes to whatever <code>models.default</code> resolves to. Reported healthy: anthropic, claude-code.</div>
+            <div class="pane-actions">
+              <button disabled>Run (live LLM)</button>
+              <button class="ghost" disabled>Run scripted</button>
+              <button class="ghost" disabled>New task</button>
+              <button class="ghost">Cancel</button>
+            </div>
+          </section>
+          <section>
+            <h3>Result</h3>
+            <div class="debug-verdict unknown"><span class="badge badge-running" title="running">▶</span><span class="debug-verdict-word">NO VERDICT</span><span class="sub">running</span></div>
+          </section>
+          <section class="debug-transcript">
+            <h3>What was actually said</h3>
+            <div class="session">
+              <div class="session-history">
+                <h3><span>States</span><span class="count">2</span></h3>
+                <div class="session-row" title="5b1f0c2e @ 3"><span class="dot success"></span><span class="grow ellip">debug/hello_world/say</span><span class="cost">$0.002</span></div>
+                <div class="session-row sel" title="9c04a7d1 @ 5"><span class="dot running"></span><span class="grow ellip">debug/hello_world/check</span></div>
+              </div>
+              <div class="session-body">
+                <div class="session-head"><span class="grow ellip">debug/hello_world/check</span><span class="dot running"></span></div>
+                <div class="sturns">
+                  <div class="sturn sturn-system"><span class="sturn-role">system</span><div class="sturn-body"><pre class="sturn-text">Respond with a JSON object matching the schema: {"passed": boolean, "verdict": string}</pre></div></div>
+                  <div class="sturn sturn-user"><span class="sturn-role">sent</span><div class="sturn-body"><pre class="sturn-text">Another model was asked to say hello world. Its reply is between the markers below.
+
+---
+Hello, world!
+---
+
+Set `passed` to true only if the text between the markers is a hello-world greeting.
+Set it to false if the text is empty, missing, or says something else.
+Set `verdict` to one short sentence quoting what you saw and saying why you decided that.</pre></div></div>
+                  <div class="sturn sturn-assistant sturn-live"><span class="sturn-role">writing</span><div class="sturn-body"><pre class="sturn-text">{"passed": true, "verdict": "The reply was</pre></div></div>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section>
+            <h3>Journal</h3>
+            <div class="convo">
+              <h3><span>Conversation · Self-test (live)</span><span class="sub">6 turns</span></h3>
+              <div class="turns">
+                <div class="turn turn-operation"><span class="role">state</span><div class="turn-body"><span class="turn-state">debug/hello_world</span><span class="turn-text">entered</span></div></div>
+                <div class="turn turn-operation"><span class="role">state</span><div class="turn-body"><span class="turn-state">debug/hello_world/say</span><span class="turn-text">prompt sent</span></div></div>
+                <div class="turn turn-output"><span class="role">output</span><div class="turn-body"><span class="turn-state">debug/hello_world/say</span><span class="turn-data">{"greeting":"Hello, world!"}</span></div></div>
+                <div class="turn turn-transition"><span class="role">→</span><div class="turn-body"><span class="turn-state">debug/hello_world/check</span><span class="turn-text">next in sequence</span></div></div>
+                <div class="turn turn-operation"><span class="role">state</span><div class="turn-body"><span class="turn-state">debug/hello_world/check</span><span class="turn-text">entered</span><span class="turn-data">{"greeting":"Hello, world!"}</span></div></div>
+                <div class="turn turn-operation"><span class="role">state</span><div class="turn-body"><span class="turn-state">debug/hello_world/check</span><span class="turn-text">prompt sent</span></div></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <aside class="col panel">
+          <div class="detail">
+            <header>
+              <h2><span class="badge badge-running" title="running">▶</span> <span class="task-name">Self-test (live)</span></h2>
+              <div class="sub">t-7m2k40qz1c · debug/hello_world · snapshot 41f9e340df1f</div>
+              <div class="actions">
+                <button title="">Re-run</button>
+                <button class="ghost">Cancel</button>
+                <button class="ghost" title="debug/hello_world/check">Open state ↗</button>
+              </div>
+            </header>
+            <section>
+              <h3><span>Instances</span></h3>
+              <div class="rail run-index">
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-running"></span><span class="rail-mark-name">hello_world</span><span class="rail-mark-meta">3:04:12 PM</span></span></div></div></div>
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-completed"></span><span class="rail-mark-name">say</span><span class="rail-mark-meta">3:04:12 PM · 1.8 s</span></span></div></div></div>
+<div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><div class="rail-seg" style="left: 6px; background: var(--rule)"></div></div><div class="rail-content"><div class="rail-mark tb accent"><span class="rail-mark-chev pad" aria-hidden="true"></span><span class="rail-mark-go static"><span class="rail-mark-dot ts-dot-running"></span><span class="rail-mark-name">check</span><span class="rail-mark-meta">3:04:14 PM</span></span></div></div></div>
+              </div>
+            </section>
+            <section>
+              <h3>Live events</h3>
+              <pre class="stream">instance.entered  debug/hello_world
+instance.entered  debug/hello_world/say
+operation.started  debug/hello_world/say
+operation.completed  debug/hello_world/say
+transition.taken  debug/hello_world/say → check
+instance.entered  debug/hello_world/check
+operation.started  debug/hello_world/check</pre>
+            </section>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

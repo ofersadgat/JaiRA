@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/executor-tree">
+<meta name="state" content="pinned">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>executor-tree · pinned</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/executor-tree · pinned</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <div class="cfg-stack">
+          <div class="cfg-route derived">
+            <div class="cfg-route-head">
+              <code class="cfg-route-prefix">anthropic/…</code>
+              <span class="cfg-hint">provider anthropic · its own default · provider defaults</span>
+              <span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>derived</span>
+              <button class="ghost">Configure</button>
+            </div>
+          </div>
+          <div class="cfg-route">
+            <div class="cfg-route-head">
+              <code class="cfg-route-prefix">claude-cli/…</code>
+              <span class="cfg-hint">agent claude-cli · sonnet · retry · reasoning high</span>
+              <span class="cfg-status available"><span class="cfg-dot" aria-hidden="true"></span>pinned</span>
+              <button class="ghost">Done</button>
+            </div>
+            <div class="cfg-route-body">
+              <div class="cfg-stack">
+                <div class="cfg-node-banner">
+                  <span class="cfg-node-kind">Agent</span>
+                  <code class="cfg-param">AgentApiExecutor / AgentCliExecutor / AgentCodexExecutor</code>
+                  <span class="cfg-hint">One agent runtime, answering the prompt by running rather than by returning a completion.</span>
+                </div>
+                <div class="cfg-fields">
+                  <div class="cfg-field">
+                    <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Agent</span></span><span class="cfg-hint">What actually serves the call. Derived from the route this sits under.<code class="cfg-param">prompt.routes.claude-cli.agent</code></span></div>
+                    <div class="cfg-control"><input class="cfg-input mono" value="claude-cli" placeholder="the provider path" disabled></div>
+                  </div>
+                  <div class="cfg-field">
+                    <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Model</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span><span class="cfg-hint">As it knows it — bare, because the route's own name is already the prefix. Empty means the runtime's own default.<code class="cfg-param">prompt.routes.claude-cli.model</code></span></div>
+                    <div class="cfg-control"><input class="cfg-input mono" value="sonnet" placeholder="the runtime's own default"></div>
+                  </div>
+                  <div class="cfg-field">
+                    <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">May only run</span></span><span class="cfg-hint">One pattern per line. 'opus' restricts a model; 'openrouter/*' restricts a provider. A state asking for anything else is refused before it runs.<code class="cfg-param">prompt.routes.claude-cli.allow</code></span></div>
+                    <div class="cfg-control"><textarea class="cfg-input mono" rows="2" placeholder="anything"></textarea></div>
+                  </div>
+                </div>
+                <section class="cfg-level" data-depth="3">
+                  <div class="cfg-level-head"><span class="cfg-level-title">Call settings</span><span class="cfg-hint">Merged under a state's own config.</span></div>
+                  <div class="cfg-level-body">
+                    <div class="llm-config">
+                      <nav class="llm-rail">
+                        <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">not applicable — reasoning is on</span></button>
+                        <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">high</span></button>
+                        <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+                        <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+                      </nav>
+                      <div class="llm-detail">
+                        <div class="llm-detail-head"><span class="llm-detail-title">Sampling</span><span class="cfg-hint">How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.</span></div>
+                        <div class="notice warn">Reasoning is on, and a model is sampling <em>or</em> reasoning — never both. The sampling knobs are refused by a reasoning endpoint, so they are not offered here. Turn reasoning off to use them.</div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                <div class="cfg-disclosure open">
+                  <button type="button" class="cfg-disclosure-head" aria-expanded="true"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Around this route's calls</span><span class="cfg-hint">· retry</span></button>
+                  <div class="cfg-disclosure-body">
+                    <div class="cfg-stack">
+<div class="cfg-step"><div class="cfg-step-head"><span class="cfg-step-index" aria-hidden="true">1</span><span class="cfg-step-title">Memoize</span><button class="ghost">Add</button></div><p class="cfg-hint">Remember what a model answered, and reuse it when the identical call is made again. It saves real money and is not a pure optimization: a re-run returns the first run's answer rather than asking again.</p><p class="cfg-hint">Outermost, so a hit costs nothing else — no slot acquired, no retry loop entered.</p></div>
+<div class="cfg-step on"><div class="cfg-step-head"><span class="cfg-step-index" aria-hidden="true">2</span><span class="cfg-step-title">Retry</span><button class="ghost">Remove</button></div><p class="cfg-hint">Re-attempt a call that failed for a reason worth trying again — a 429, a dropped connection, or output that did not satisfy its schema.</p><p class="cfg-hint">Outside the rate limiter, so each attempt goes through admission separately rather than holding one slot across the whole loop and its backoff.</p><div class="cfg-step-body"><div class="cfg-fields"><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" aria-label="transient is set here — switch off to inherit it" title="transient is set here — switch off to inherit it" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">transient attempts</span><span class="sf-type">number</span></span><span class="cfg-hint">Extra attempts for a retriable failure. Empty means none — the first failure is the answer.<code class="cfg-param">prompt.routes.claude-cli.steps.retry.transient</code></span></div><div class="cfg-control"><input class="cfg-input mono num" value="2"></div></div><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set baseBackoffMs here" title="set baseBackoffMs here" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">base backoff (ms)</span><span class="sf-type">number</span></span><span class="cfg-hint">The first wait between attempts. It grows from here.<code class="cfg-param">prompt.routes.claude-cli.steps.retry.baseBackoffMs</code></span></div><div class="cfg-control"><div class="sf-absent">not set</div></div></div><div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set maxBackoffMs here" title="set maxBackoffMs here" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">max backoff (ms)</span><span class="sf-type">number</span></span><span class="cfg-hint">A ceiling on that growth, so a long outage does not turn into a very long sleep.<code class="cfg-param">prompt.routes.claude-cli.steps.retry.maxBackoffMs</code></span></div><div class="cfg-control"><div class="sf-absent">not set</div></div></div></div></div></div>
+<div class="cfg-step"><div class="cfg-step-head"><span class="cfg-step-index" aria-hidden="true">3</span><span class="cfg-step-title">Rate limit</span><button class="ghost">Add</button></div><p class="cfg-hint">Hold each call until there is a concurrency slot and enough rate headroom, and back off automatically when the provider says no.</p><p class="cfg-hint">Immediately around the call, inside retry.</p></div>
+<div class="cfg-step"><div class="cfg-step-head"><span class="cfg-step-index" aria-hidden="true">4</span><span class="cfg-step-title">Deadline</span><button class="ghost">Add</button></div><p class="cfg-hint">Give a call a wall-clock window, and refuse to start one that cannot finish inside it.</p><p class="cfg-hint">Innermost, so the window bounds the call itself rather than the queueing and the backoff — neither of which is the call's own latency.</p></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

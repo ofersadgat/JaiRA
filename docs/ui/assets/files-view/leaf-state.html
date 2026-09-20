@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/files-view">
+<meta name="state" content="leaf-state">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>files-view · leaf-state</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/files-view · leaf-state</p>
+<div class="mockup-stage" style="width: 1280px; height: 720px; display: flex; background: var(--bg)">
+<nav class="sidebar">
+    <div class="side-title"><button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar">|◂</button><span class="side-brand app-label">JAIRA</span></div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="3 running"><span class="pill-glyph">▶</span><span class="pill-n">3</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+      </div>
+      
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/JaiRA"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">JaiRA</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-views">
+          <div class="side-row side-nested on is-active"><button class="side-hit" title="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button><button class="side-act" title="new file, folder or workflow">+</button><button class="side-act" title="find">⌕</button></div><div class="side-drawer"><div class="file-browser"><div class="scroll">
+    <ul class="file-tree"><li class="tree-item" title=".jaira"><span class="glyph">▾</span><span class="name">.jaira</span><button class="tree-add" title="new file, folder or workflow in .jaira">+</button></li><li class="tree-item" title="prompts"><i class="tree-guide"></i><span class="glyph">▸</span><span class="name">prompts</span><button class="tree-add" title="new file, folder or workflow in prompts">+</button></li><li class="tree-item" title="workflows"><i class="tree-guide"></i><span class="glyph">▾</span><span class="name">workflows</span><button class="tree-add" title="new file, folder or workflow in workflows">+</button></li><li class="tree-item" title="feature.json"><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">feature.json</span></li><li class="tree-item" title="feature"><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">▾</span><span class="name">feature</span><button class="tree-add" title="new file, folder or workflow in feature">+</button></li><li class="tree-item" title="product.json"><i class="tree-guide"></i><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">product.json</span></li><li class="tree-item" title="ux.json"><i class="tree-guide"></i><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">ux.json</span></li><li class="tree-item" title="ux"><i class="tree-guide"></i><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">▾</span><span class="name">ux</span><button class="tree-add" title="new file, folder or workflow in ux">+</button></li><li class="tree-item sel" title="draft.json"><i class="tree-guide"></i><i class="tree-guide"></i><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">draft.json</span></li><li class="tree-item" title="ask.json"><i class="tree-guide"></i><i class="tree-guide"></i><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">ask.json</span></li><li class="tree-item has-error" title="review.json"><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">review.json</span><span class="lint-dot">●</span><span class="chip chip-bad">2</span></li><li class="tree-item" title="settings.json"><i class="tree-guide"></i><span class="glyph">⚙</span><span class="name">settings.json</span></li><li class="tree-item" title="docs"><span class="glyph">▸</span><span class="name">docs</span><button class="tree-add" title="new file, folder or workflow in docs">+</button></li><li class="tree-item" title="packages"><span class="glyph">▸</span><span class="name">packages</span><button class="tree-add" title="new file, folder or workflow in packages">+</button></li></ul>
+    <ul class="file-tree"><li class="tree-root" title="C:/Users/Ofer/.jaira"><span class="data-secondary grow ellip">~/.jaira</span><button class="tree-add" title="new file, folder or workflow in ~/.jaira">+</button></li><li class="tree-item" title="prompts"><span class="glyph">▸</span><span class="name">prompts</span><button class="tree-add" title="new file, folder or workflow in prompts">+</button></li><li class="tree-item" title="workflows"><span class="glyph">▸</span><span class="name">workflows</span><button class="tree-add" title="new file, folder or workflow in workflows">+</button></li><li class="tree-item" title="settings.json"><span class="glyph">⚙</span><span class="name">settings.json</span></li></ul>
+  </div></div></div>
+          <div class="side-row side-nested"><button class="side-hit" title="Tasks"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+          <div class="side-row side-nested"><button class="side-hit" title="Chat"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p2)"><div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/declarative-ai"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">declarative-ai</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span><span class="side-twist is-mark">▸</span></div></div>
+      <button class="side-row side-open"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
+    </div>
+    <div class="side-foot"><div class="side-row"><button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button></div></div>
+  </nav>
+  <div class="body">
+    <header class="title-bar"><header class="doc-bar"><span class="crumb-part"><button class="crumb-sep first" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-folder">.jaira</button></span><span class="crumb-part"><button class="crumb-sep" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-folder">workflows</button></span><span class="crumb-part"><button class="crumb-sep" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-state">feature</button></span><span class="crumb-part"><button class="crumb-sep" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-state">ux</button></span><span class="crumb-part"><button class="crumb-sep" title="what else is at this level" aria-haspopup="menu">›</button><span class="crumb crumb-state last">draft</span></span><span class="grow"></span><span class="sub ellip doc-label" title="Draft the patterns">Draft the patterns</span></header><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view files-view" style="--pane-right: 300px">
+        <div class="col mid config-shut" style="--viewer-height: 320px">
+      <div class="run-half"><div class="leaf">
+        <div class="leaf-list">
+          <h3><span>Tasks here</span><span class="count">1</span></h3>
+          <div class="leaf-row sel"><span class="badge badge-waiting_for_user" title="waiting_for_user">⏸</span><span class="task-name grow ellip">Letterhead fold</span></div>
+          <h3>Recently</h3>
+          <div class="leaf-row"><span class="badge badge-completed" title="completed">✓</span><span class="task-name grow ellip">Rewind and fork</span></div>
+          <div class="leaf-row"><span class="badge badge-failed" title="failed">✗</span><span class="task-name grow ellip">Tighten the changeset lint</span></div>
+        </div>
+        <div class="leaf-convo scroll">
+          <div class="ts-page"><div class="ts-paper"><div class="ts">
+            <div class="ts-msg ts-msg-user"><div class="ts-bubble"><div class="markdown"><p>Draft the UX patterns for the letterhead fold.</p></div></div></div>
+            <div class="ts-work"><div class="ts-row ts-tone-read can-open"><button type="button" class="ts-row-line" aria-expanded="false"><span class="ts-icon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"></path><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"></path></svg></span><span class="ts-name">Read</span><span class="ts-preview ellip">docs/ux/patterns/park-and-ask.md</span><span class="ts-at">10:09:02</span><span class="ts-chev"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span class="ts-mark"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg></span></button></div></div>
+            <div class="ts-msg ts-msg-assistant"><div class="markdown"><p>Three patterns carry the fold: the summary line, the kept arrangement, and the tone that is derived and never chosen.</p></div></div>
+          </div></div></div>
+          <div class="waiting-on"><span class="badge badge-waiting_for_user" title="waiting_for_user">⏸</span><span class="grow">Waiting on you — Which summary should a folded state show</span><button class="primary">Answer</button></div>
+        </div>
+      </div></div>
+      <div class="config-half shut"><button type="button" class="half-bar" title="folded away — click for half the column"><span class="half-caret">▁</span><span class="half-label">Configuration</span><span class="grow"></span></button></div>
+    </div>
+        <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the inspector"></div>
+        <aside class="col panel"><div class="inspector">
+    <div class="insp-crumb"><span class="state-id ellip" title="feature/ux/draft">draft</span><span class="sub">· the state</span></div>
+    <section><h3><span>Validation</span></h3><div class="sub">lints clean</div></section>
+    <section><h3><span>Transitions</span><span class="count">1</span></h3><div class="transitions"><div class="trans-row"><span class="when">completed</span><span class="arrow">→</span><span class="to">ask</span></div></div></section>
+    
+  </div></aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

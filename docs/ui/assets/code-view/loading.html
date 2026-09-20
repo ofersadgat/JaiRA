@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/code-view">
+<meta name="state" content="loading">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>code-view · loading</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/code-view · loading</p>
+<div class="mockup-stage" style="width: 720px; height: 320px; display: grid">
+  <div class="col mid">
+    <div class="config-half whole">
+      <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button>
+      <div class="file-edit">
+        <pre class="vv-source">import { parseUnifiedDiff } from "@jaira/shared/browser";
+
+/** How many rows a table draws before it stops. */
+export const TABLE_ROW_LIMIT = 500;
+
+export function rowsShown(total: number): number {
+  return Math.min(total, TABLE_ROW_LIMIT); // the rest is under Source
+}
+</pre>
+        <div class="pane-actions pinned"><span class="sub">Code view — coloured, not an editor. Appearance › File types › text.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

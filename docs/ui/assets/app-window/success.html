@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/app-window">
+<meta name="state" content="success">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>app-window · success</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/app-window · success</p>
+<div class="mockup-stage" style="width: 1280px; height: 640px; display: flex; background: var(--bg); --sidebar: 250px">
+  <nav class="sidebar">
+    <div class="side-title">
+      <button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar">|◂</button>
+      <span class="side-brand app-label">JAIRA</span>
+    </div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row">
+          <button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button>
+          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="3 running"><span class="pill-glyph">▶</span><span class="pill-n">3</span></span><span class="pill pill-waiting pill-active" title="2 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">2</span></span></span>
+        </div>
+        <div class="side-row">
+          <button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button>
+          <button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button>
+        </div>
+      </div>
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\UbuntuCode\declarative-ai" aria-expanded="true"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">declarative-ai</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button>
+          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-more pill-waiting" title="1 more">+1</span></span>
+        </div>
+        <div class="side-views">
+          <div class="side-row side-nested">
+            <button class="side-hit" title="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button>
+            <button class="side-act" title="new file, folder or workflow">+</button><button class="side-act" title="find">⌕</button>
+          </div>
+          <div class="side-row side-nested on is-active">
+            <button class="side-hit" title="Tasks" aria-current="page"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button>
+            <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-success pill-status" title="1 success"><span class="pill-glyph">✓</span><span class="pill-n">1</span></span></span>
+          </div>
+          <div class="side-row side-nested">
+            <button class="side-hit" title="Chat"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button>
+            <button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button>
+            <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span></span>
+          </div>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p2)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\UbuntuCode\JaiRA" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">JaiRA</span></span></button>
+          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span>
+          <span class="side-twist is-mark">▸</span>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p0)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\Users\Ofer\.jaira" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">~/.jaira</span></span></button>
+          <span class="side-twist is-mark">▸</span>
+        </div>
+      </div>
+      <button class="side-row side-open" title="open another project" aria-haspopup="menu"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
+    </div>
+    <div class="side-foot">
+      <div class="side-row">
+        <button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button>
+      </div>
+    </div>
+  </nav>
+  <div class="splitter" role="separator" aria-label="Resize the sidebar" tabindex="0"></div>
+  <div class="body">
+    <header class="title-bar">
+      <header class="doc-bar inert">
+        <span class="crumb-part" style="--hue: var(--p1)"><button class="crumb-sep first" title="what else is at this level">›</button><button class="crumb crumb-project" title="C:\UbuntuCode\declarative-ai">declarative-ai</button></span>
+        <span class="crumb-part"><span class="crumb-sep">›</span><span class="crumb crumb-state last">feature</span></span>
+        <span class="grow"></span>
+        <span class="doc-bar-tools"><span class="new-task-wrap"><button aria-expanded="false">+ New task</button></span></span>
+      </header>
+      <span class="title-drag"></span>
+    </header>
+    <div class="viewport">
+      <div class="view tasks-view narrowed" style="--pane-right: 360px">
+        <div class="col mid">
+          <section class="board-group">
+            <div class="board-body">
+              <div class="columns">
+                <section class="column">
+                  <h4><span class="seq data-num">1</span><span class="col-name">product</span><span class="count app-secondary">1</span></h4>
+                  <div class="column-body">
+                    <div class="card">
+                      <div class="card-head"><span class="card-title"><span class="task-name">Rewind a run to a chosen state</span></span><span class="pill pill-waiting pill-active" title="waiting_for_user"><span class="pill-glyph">⏸</span><span class="pill-word">waiting</span></span></div>
+                      <div class="card-meta"><span class="ellip">feature/product/ask</span><span class="card-status">gate</span></div>
+                    </div>
+                  </div>
+                </section>
+                <section class="column">
+                  <h4><span class="seq data-num">2</span><span class="col-name">ux</span><span class="count app-secondary">1</span></h4>
+                  <div class="column-body">
+                    <div class="card card-selected is-active">
+                      <div class="card-head"><span class="card-title"><span class="task-name">Pause a run and pick it up tomorrow</span></span><span class="pill pill-running pill-active" title="running"><span class="pill-glyph">▶</span><span class="pill-word">running</span></span></div>
+                      <div class="card-meta"><span class="ellip">feature/ux/draft</span></div>
+                    </div>
+                  </div>
+                </section>
+                <section class="column">
+                  <h4><span class="seq data-num">3</span><span class="col-name">build</span><span class="count app-secondary">1</span></h4>
+                  <div class="column-body">
+                    <div class="card">
+                      <div class="card-head"><span class="card-title"><span class="task-name">Split large work into tasks</span></span><span class="pill pill-success pill-status" title="completed"><span class="pill-glyph">✓</span><span class="pill-word">done</span></span></div>
+                      <div class="card-meta"><span class="ellip">feature/build/verify</span></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="splitter" role="separator" aria-label="Resize the task panel" tabindex="0"></div>
+        <aside class="col panel">
+          <div class="detail task-context">
+            <header>
+              <h2><span class="badge badge-running">▶</span> <span class="task-name">Pause a run and pick it up tomorrow</span></h2>
+              <div class="sub">t-qfr49rm80m · feature</div>
+              <div class="sub">⎇ jaira/t-qfr49rm80m · C:\UbuntuCode\declarative-ai\.jaira\worktrees\t-qfr49rm80m</div>
+              <div class="actions"><button>Re-run</button><button class="ghost">Cancel</button><button class="ghost">Open state ↗</button></div>
+            </header>
+          </div>
+        </aside>
+      </div>
+    </div>
+    <footer class="strip">
+      <span class="strip-label app-title">Awaiting you</span>
+      <span class="pill pill-waiting pill-active" title="2 waiting on you"><span class="pill-glyph">⏸</span><span class="pill-n">2</span></span>
+      <span class="strip-item" title="confirm_action">
+        <span class="chip strip-project" style="--hue: var(--p1)">declarative-ai</span>
+        <span class="ellip data-text">Which states should the rewind offer?</span>
+      </span>
+      <span class="strip-item" title="git push is set to ask first">
+        <span class="chip strip-project" style="--hue: var(--p2)">JaiRA</span>
+        <span class="ellip data-text">git push origin feature/each-kinds</span>
+      </span>
+    </footer>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/logs-view">
+<meta name="state" content="dated">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>logs-view · dated</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/logs-view · dated</p>
+<div class="mockup-stage" style="width: 1030px; height: 460px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view logs-view">
+        <div class="logs">
+          <div class="logs-bar">
+            <select aria-label="Minimum level"><option>debug and worse</option></select>
+            <select aria-label="Source"><option>engine</option></select>
+            <input placeholder="Filter…" aria-label="Filter">
+            <span class="grow"></span>
+            <button>Configure</button>
+            <span class="sub">400+ shown</span>
+          </div>
+          <div class="logs-head logs-dated"><span>date</span><span>time</span><span>level</span><span>source</span><span>message</span><span></span></div>
+          <div class="logs-list logs-dated">
+            <div class="log-line"><div class="log-row log-debug logs-dated" role="button" tabindex="0"><span class="log-day"></span><span class="log-at">12:04:51 AM</span><span class="log-level log-debug">debug</span><span class="log-source" title="engine">engine</span><span class="log-message">cursor moved to feature/build/verify after 3 operations</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info logs-dated" role="button" tabindex="0"><span class="log-day"></span><span class="log-at">12:02:19 AM</span><span class="log-level log-info">info</span><span class="log-source" title="engine">engine</span><span class="log-message">loaded 85 states for feature from snapshot c27fe752ca20</span><span class="log-links"></span></div></div>
+            <div class="log-line"><div class="log-row log-debug logs-dated" role="button" tabindex="0"><span class="log-day"></span><span class="log-at">12:00:03 AM</span><span class="log-level log-debug">debug</span><span class="log-source" title="engine">engine</span><span class="log-message">fanOut split build into 4 elements, element 0 stays in t-u9895uzcg8</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-warn logs-dated" role="button" tabindex="0"><span class="log-day">9/12/2026</span><span class="log-at">11:58:44 PM</span><span class="log-level log-warn">warn</span><span class="log-source" title="engine">engine</span><span class="log-message">feature/ux/verify_plan: input 'plan_doc' has no value, the state is blocked</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-error logs-dated" role="button" tabindex="0"><span class="log-day">9/12/2026</span><span class="log-at">11:41:10 PM</span><span class="log-level log-error">error</span><span class="log-source" title="engine">engine</span><span class="log-message">debug/hello_world/check: the value NaN is not valid JSON and was recorded as null</span><span class="log-links"><button class="link">task</button><button class="link">output</button></span></div></div>
+            <div class="log-line"><div class="log-row log-debug logs-dated" role="button" tabindex="0"><span class="log-day">9/12/2026</span><span class="log-at">11:40:58 PM</span><span class="log-level log-debug">debug</span><span class="log-source" title="engine">engine</span><span class="log-message">entered debug/hello_world/say with 0 inputs</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <div class="log-line"><div class="log-row log-info logs-dated" role="button" tabindex="0"><span class="log-day">9/12/2026</span><span class="log-at">11:40:57 PM</span><span class="log-level log-info">info</span><span class="log-source" title="engine">engine</span><span class="log-message">loaded 3 states for debug/hello_world from snapshot 41f9e340df1f</span><span class="log-links"></span></div></div>
+            <div class="log-line"><div class="log-row log-debug logs-dated" role="button" tabindex="0"><span class="log-day">9/12/2026</span><span class="log-at">10:12:30 PM</span><span class="log-level log-debug">debug</span><span class="log-source" title="engine">engine</span><span class="log-message">resumed t-6h2c91xk0d at feature/product/ask, keeping 7 finished operations</span><span class="log-links"><button class="link">task</button></span></div></div>
+            <p class="empty">Reading…</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

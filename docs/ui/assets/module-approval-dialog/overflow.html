@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/module-approval-dialog">
+<meta name="state" content="overflow">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>module-approval-dialog · overflow</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/module-approval-dialog · overflow</p>
+<!-- an 800px-tall window; transform makes the scrim fill the stage as it fills the window -->
+<div class="mockup-stage" style="width: 1180px; height: 800px; transform: translateZ(0); background: var(--bg)">
+  <div class="modal-backdrop">
+    <!-- 90% of an 800px window -->
+    <div class="modal modal-wide" data-testid="module-approval" style="max-height: 720px">
+      <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"></path></svg> Run this workflow's TypeScript?</h3>
+      <div class="sub">2 files · nothing has run yet</div>
+      <div>
+        <div class="sub">workflows/feature/lib/fanout.ts — never approved · calls planBatches, mergeResults</div>
+        <pre class="artifact">import { slug } from "./slug";
+
+export interface Piece { title: string; dependsOn: string[] }
+
+export function planBatches(pieces: Piece[]): Piece[][] {
+  const done = new Set&lt;string&gt;();
+  const batches: Piece[][] = [];
+  let left = [...pieces];
+  while (left.length &gt; 0) {
+    const ready = left.filter((p) =&gt; p.dependsOn.every((d) =&gt; done.has(slug(d))));
+    if (ready.length === 0) throw new Error("the pieces depend on each other in a circle");
+    batches.push(ready);
+    for (const p of ready) done.add(slug(p.title));
+    left = left.filter((p) =&gt; !ready.includes(p));
+  }
+  return batches;
+}
+
+export function mergeResults(results: Record&lt;string, string&gt;[]): Record&lt;string, string&gt; {
+  return Object.assign({}, ...results);
+}
+
+export function describe(batches: Piece[][]): string {
+  return batches.map((b, i) =&gt; `${i + 1}: ${b.map((p) =&gt; p.title).join(", ")}`).join("\n");
+}</pre>
+      </div>
+      <div>
+        <div class="sub">workflows/feature/lib/slug.ts — never approved</div>
+        <pre class="artifact">export const slug = (title: string): string =&gt;
+  title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+export const unslug = (id: string): string =&gt;
+  id
+    .split("-")
+    .map((w) =&gt; w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+
+export function uniqueSlug(title: string, taken: Set&lt;string&gt;): string {
+  const base = slug(title);
+  let candidate = base;
+  let n = 2;
+  while (taken.has(candidate)) candidate = `${base}-${n++}`;
+  taken.add(candidate);
+  return candidate;
+}</pre>
+      </div>
+      <div class="options">
+        <button>Approve and run</button>
+        <button class="danger">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/run-view">
+<meta name="state" content="conversation">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>run-view · conversation</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/run-view · conversation</p>
+<div class="mockup-stage" style="width: 1280px; height: 720px; display: flex; background: var(--bg)">
+<nav class="sidebar">
+    <div class="side-title"><button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar">|◂</button><span class="side-brand app-label">JAIRA</span></div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="3 running"><span class="pill-glyph">▶</span><span class="pill-n">3</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+      </div>
+      
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/JaiRA"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">JaiRA</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-views">
+          <div class="side-row side-nested"><button class="side-hit" title="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button><button class="side-act" title="new file, folder or workflow">+</button><button class="side-act" title="find">⌕</button></div>
+          <div class="side-row side-nested on is-active"><button class="side-hit" title="Tasks"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+          <div class="side-row side-nested"><button class="side-hit" title="Chat"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p2)"><div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/declarative-ai"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">declarative-ai</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span><span class="side-twist is-mark">▸</span></div></div>
+      <button class="side-row side-open"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
+    </div>
+    <div class="side-foot"><div class="side-row"><button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button></div></div>
+  </nav>
+  <div class="body">
+    <header class="title-bar"><header class="doc-bar inert"><span class="crumb-part" style="--hue: var(--p1)"><button class="crumb-sep first" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-project">JaiRA</button></span><span class="crumb-part"><span class="crumb-sep">›</span><button class="crumb crumb-state">Feature</button></span><span class="crumb-part"><button class="crumb-sep" title="what else is at this level" aria-haspopup="menu">›</button><span class="crumb crumb-run last">Letterhead fold</span></span><span class="grow"></span><span class="doc-bar-tools"><div class="run-mode"><button type="button">Tasks</button><button type="button" class="on">Conversation</button></div><div class="new-task-wrap"><button aria-expanded="false">+ New task</button></div></span></header><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view tasks-view narrowed" style="--pane-right: 360px">
+        <div class="col mid"><div class="composite"><div class="run-convo-wrap">
+    <div class="run-convo scroll"><div class="sb">
+      <div class="rail">
+        <div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><span class="rail-seg" style="left: 6px; background: var(--p1)"></span><svg class="rail-cap" viewBox="0 0 14 34" preserveAspectRatio="none" aria-hidden="true"><circle class="rail-knot" cx="7" cy="17" r="4.5" fill="var(--bg)" stroke="var(--p1)" stroke-width="2"></circle></svg></div><div class="rail-content"><div class="sb-note step" role="note"><svg class="sb-note-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v6a3 3 0 0 0 3 3h7"></path><path d="M6 21v-6"></path><path d="m13 9 3 3-3 3"></path></svg><span class="sb-note-verb">entered</span><span class="sb-note-state mono ellip">feature → product</span></div></div></div>
+        <div class="rail-row"><div class="rail-gut" style="width: 14px"><span class="rail-seg" style="left: 6px; background: var(--p1)"></span></div><div class="rail-content"><div class="sb-band"><div class="sb-panel">
+            <div class="sb-gutter solo"><span class="sb-gut-chev open"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span class="sb-session mono ellip">product-writer</span><button type="button" class="link sb-workflow ellip">feature/product/draft</button><span class="sb-span">10:02:11 · 6 m 18 s</span></div>
+            <section class="sb-sheet"><div class="sb-body"><div class="ts-msg ts-msg-assistant"><div class="markdown"><p>Four features cover the request. <strong>Pause and stop</strong> keeps a run's place when it is stopped, and <strong>Rewind</strong> takes it back to the turn that went wrong.</p></div></div></div></section>
+          </div></div></div></div>
+        <div class="rail-row rail-turn"><div class="rail-gut" style="width: 14px"><span class="rail-seg" style="left: 6px; background: var(--p2)"></span><svg class="rail-cap" viewBox="0 0 14 34" preserveAspectRatio="none" aria-hidden="true"><circle class="rail-knot" cx="7" cy="17" r="4.5" fill="var(--bg)" stroke="var(--p2)" stroke-width="2"></circle></svg></div><div class="rail-content"><div class="sb-note step" role="note"><svg class="sb-note-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v6a3 3 0 0 0 3 3h7"></path><path d="M6 21v-6"></path><path d="m13 9 3 3-3 3"></path></svg><span class="sb-note-verb">entered</span><span class="sb-note-state mono ellip">feature → ux</span></div></div></div>
+        <div class="rail-row"><div class="rail-gut" style="width: 14px"><span class="rail-seg" style="left: 6px; background: var(--p2)"></span></div><div class="rail-content"><div class="sb-band"><div class="sb-panel">
+            <div class="sb-gutter"><span class="sb-session mono ellip">ux-writer</span><button type="button" class="link sb-workflow ellip">feature/ux</button><span class="sb-span">10:08:40 · 4 m 2 s</span></div>
+            <section class="sb-sheet"><div class="sb-body">
+              <div class="st-block"><button type="button" class="lh" aria-expanded="true"><span class="lh-chev open"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span class="lh-dot ts-dot-completed"></span><span class="lh-name mono">draft</span><span class="lh-label ellip">Draft the patterns</span><span class="lh-meta">10:08:40 · 3 m 12 s</span></button><div class="ts-msg ts-msg-assistant"><div class="markdown"><p>Three patterns carry the fold: the summary line, the kept arrangement, and the tone that is derived and never chosen.</p></div></div></div>
+              <div class="st-block"><button type="button" class="lh tb amber" aria-expanded="true"><span class="lh-chev open"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><svg class="lh-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"></path></svg><span class="lh-kind">asked of you</span><span class="lh-name mono">ask</span><span class="lh-label ellip">Settle the fold</span><span class="lh-meta">10:12:40</span></button></div>
+            </div></section>
+          </div></div></div></div>
+      </div>
+    </div></div>
+    <div class="cx-doing"><div class="run-doing waiting"><span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span><span class="ellip">Waiting for you in <b>ux → ask</b></span><span class="run-doing-cut">·</span><span class="run-doing-el">2 m 40 s</span><span class="grow"></span><button type="button" class="danger">Stop</button></div></div>
+  </div></div></div>
+        <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the task panel"></div>
+        <aside class="col panel"><div class="detail">
+    <header>
+      <h2><span class="badge badge-waiting_for_user" title="waiting_for_user">⏸</span> <span class="task-name">Letterhead fold</span></h2>
+      <div class="sub">t-qfr49rm80m · feature · snapshot 41f9e340df1f</div>
+      <div class="sub">⎇ jaira/letterhead-fold · .jaira/worktrees/t-qfr49rm80m</div>
+      <div class="actions"><button>Re-run</button><button class="ghost">Cancel</button><button class="ghost">Open state ↗</button><button class="ghost">Review changes</button><button class="ghost">Conversation</button></div>
+    </header>
+    <section><h3>Live events</h3><pre class="stream">operation.started  feature/ux/draft
+operation.completed  feature/ux/draft
+state.entered  feature/ux/ask
+interaction.requested  feature/ux/ask</pre></section>
+  </div></aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

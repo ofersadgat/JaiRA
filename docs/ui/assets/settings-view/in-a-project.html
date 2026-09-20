@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/settings-view">
+<meta name="state" content="in-a-project">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>settings-view · in-a-project</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/settings-view · in-a-project</p>
+<div class="mockup-stage" style="width: 1280px; height: 760px; display: flex; background: var(--bg); --sidebar: 250px">
+  <nav class="sidebar">
+    <div class="side-title">
+      <button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar" aria-expanded="true">|◂</button>
+      <span class="side-brand app-label">JAIRA</span>
+    </div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button></div>
+        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button></div>
+      </div>
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\UbuntuCode\declarative-ai" aria-expanded="true"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">declarative-ai</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button>
+        </div>
+      </div>
+    </div>
+    <div class="side-panel">
+      <div class="side-row on is-active">
+        <button class="side-back" title="back to where you were" aria-label="Back">‹</button>
+        <button class="side-hit" title="Settings" aria-label="Settings" aria-current="page"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button>
+      </div>
+      <div class="side-drawer"><ul class="sections"><li class="sel">Providers</li><li>Executors</li><li>Configuration</li><li>Files</li><li>Appearance</li><li>Conversation</li><li>History</li></ul></div>
+      <div class="side-panel-rest">
+        <div class="side-row"><button class="side-hit" title="Logs"><span class="side-glyph">≡</span><span class="side-label ellip app-label">Logs</span></button></div>
+        <div class="side-row"><button class="side-hit" title="Debug"><span class="side-glyph">⌁</span><span class="side-label ellip app-label">Debug</span></button></div>
+        <div class="side-row"><button class="side-hit" title="Components"><span class="side-glyph">▤</span><span class="side-label ellip app-label">Components</span></button></div>
+        <button class="side-row side-theme" title="switch to dark" aria-label="Toggle theme"><span class="side-glyph">☾</span><span class="side-label ellip app-label">Dark</span></button>
+      </div>
+    </div>
+  </nav>
+  <div class="splitter" role="separator" aria-label="Resize the sidebar" tabindex="0"></div>
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view settings-view"><div class="col mid settings-body"><div class="settings-head"><div class="layer-picker" role="group" aria-label="Configuration layer"><button class="layer-on" title="this project only">This project</button><button class="ghost" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button></div><div class="settings-head-right"><span class="sub">checked 4 min ago</span><button class="ghost">Re-check</button></div></div><div class="cfg-pane">
+  <section class="cfg-group">
+    <header class="cfg-group-head"><h4>Model providers</h4><p class="cfg-hint">They return a completion. A model id's prefix names one — anthropic/claude-sonnet-5 goes to the first of these.</p></header>
+    <ul class="cfg-rows">
+<li class="cfg-row available">
+  <div class="cfg-row-head">
+    <span class="cfg-mark"><svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">A</text></svg><span class="cfg-dot available" title="ready" aria-hidden="true"></span></span>
+    <span class="cfg-row-title">Anthropic</span>
+    <span class="grow"></span>
+    <button type="button" role="switch" aria-checked="true" aria-label="stop using Anthropic in this project" title="stop using Anthropic in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+    <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure Anthropic" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <p class="cfg-say"><span class="cfg-say-state">ready</span> — 'ANTHROPIC_API_KEY' resolves</p>
+  <div class="cfg-credential"><span class="cfg-hint">Key <code>ANTHROPIC_API_KEY</code> — found in OS keychain</span><button class="ghost">Replace the key</button></div>
+</li>
+<li class="cfg-row unavailable">
+  <div class="cfg-row-head">
+    <span class="cfg-mark"><svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">O</text></svg><span class="cfg-dot unavailable" title="not working" aria-hidden="true"></span></span>
+    <span class="cfg-row-title">OpenRouter</span>
+    <span class="grow"></span>
+    <button type="button" role="switch" aria-checked="true" aria-label="stop using OpenRouter in this project" title="stop using OpenRouter in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+    <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure OpenRouter" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <p class="cfg-say"><span class="cfg-say-state">not working</span> — no value was found for 'OPENROUTER_API_KEY'<span class="cfg-fix">→ store a key under OPENROUTER_API_KEY, or turn this route off</span></p>
+  <div class="cfg-credential"><span class="cfg-hint">Key <code>OPENROUTER_API_KEY</code> — not found anywhere</span><button class="ghost">Add a key</button></div>
+</li>
+<li class="cfg-row unconfigured">
+  <div class="cfg-row-head">
+    <span class="cfg-mark"><svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">L</text></svg><span class="cfg-dot unconfigured" title="not set up" aria-hidden="true"></span></span>
+    <span class="cfg-row-title">Local server</span>
+    <span class="grow"></span>
+    <button type="button" role="switch" aria-checked="true" aria-label="stop using Local server in this project" title="stop using Local server in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+    <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure Local server" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <p class="cfg-say"><span class="cfg-say-state">not set up</span> — no server URL is configured, so nothing is served on this route<span class="cfg-fix">→ set a server URL — http://localhost:11434/v1 for Ollama, http://localhost:1234/v1 for LM Studio</span></p>
+  <div class="cfg-credential"><span class="cfg-hint">No key named, which is fine unless this provider needs one.</span><button class="ghost">Add a key</button></div>
+</li>
+<li class="cfg-row off">
+  <div class="cfg-row-head">
+    <span class="cfg-mark"><svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">E</text></svg><span class="cfg-dot off" title="turned off" aria-hidden="true"></span></span>
+    <span class="cfg-row-title">Embedded weights</span>
+    <span class="grow"></span>
+    <button type="button" role="switch" aria-checked="false" aria-label="use Embedded weights again" title="use Embedded weights again" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+    <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure Embedded weights" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <p class="cfg-say"><span class="cfg-say-state">turned off</span></p>
+  
+</li>
+    </ul>
+  </section>
+  <section class="cfg-group">
+    <header class="cfg-group-head"><h4>Agent providers</h4><p class="cfg-hint">They answer by RUNNING — reading files, executing commands — on their own subscription or key. A prefix names one of these too: claude-cli/sonnet.</p></header>
+    <ul class="cfg-rows">
+<li class="cfg-row available">
+  <div class="cfg-row-head">
+    <span class="cfg-mark"><svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">C</text></svg><span class="cfg-dot available" title="ready" aria-hidden="true"></span></span>
+    <span class="cfg-row-title">claude-code</span>
+    <span class="grow"></span>
+    <button type="button" role="switch" aria-checked="true" aria-label="stop using claude-code in this project" title="stop using claude-code in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+    <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure claude-code" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <p class="cfg-say"><span class="cfg-say-state">ready</span> — 'ANTHROPIC_API_KEY' resolves</p>
+  <div class="cfg-credential"><span class="cfg-hint">Key <code>ANTHROPIC_API_KEY</code> — found in OS keychain</span><button class="ghost">Replace the key</button></div>
+</li>
+<li class="cfg-row available">
+  <div class="cfg-row-head">
+    <span class="cfg-mark"><svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">C</text></svg><span class="cfg-dot available" title="ready" aria-hidden="true"></span></span>
+    <span class="cfg-row-title">claude-cli</span><code class="cfg-version">2.1.142 (Claude Code)</code>
+    <span class="grow"></span>
+    <button type="button" role="switch" aria-checked="true" aria-label="stop using claude-cli in this project" title="stop using claude-cli in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+    <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure claude-cli" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <p class="cfg-say"><span class="cfg-say-state">ready</span> — 'claude' responded — it signs itself in, so no key is needed</p>
+  <p class="cfg-hint">No API key — this runtime signs itself in. If it is not authenticated, run <code>claude login</code> in a terminal.</p>
+</li>
+<li class="cfg-row unchecked">
+  <div class="cfg-row-head">
+    <span class="cfg-mark"><svg class="cfg-mark-svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor" opacity="0.18"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor" font-family="system-ui, sans-serif">C</text></svg><span class="cfg-dot unchecked" title="not checked" aria-hidden="true"></span></span>
+    <span class="cfg-row-title">codex-cli</span>
+    <span class="grow"></span>
+    <button type="button" role="switch" aria-checked="true" aria-label="stop using codex-cli in this project" title="stop using codex-cli in this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button>
+    <button class="quiet cfg-chevron" aria-expanded="false" aria-label="configure codex-cli" title="Configure"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <p class="cfg-say"><span class="cfg-say-state">not checked</span></p>
+  <p class="cfg-hint">No API key — this runtime signs itself in. If it is not authenticated, run <code>codex login</code> in a terminal.</p>
+</li>
+    </ul>
+  </section>
+  <div class="cfg-disclosure"><button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Add an agent CLI</span><span class="cfg-hint">· any other coding-agent binary</span></button></div>
+</div></div></div>
+    </div>
+    <footer class="strip">
+      <span class="strip-label app-title">Awaiting you</span>
+      <span class="pill pill-waiting pill-active" title="1 waiting on you"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span>
+      <span class="strip-item" title="confirm_action"><span class="chip strip-project" style="--hue: var(--p1)">declarative-ai</span><span class="ellip data-text">Merge the plan into main?</span></span>
+    </footer>
+  </div>
+</div>
+</body>
+</html>

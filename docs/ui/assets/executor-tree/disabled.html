@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/executor-tree">
+<meta name="state" content="disabled">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>executor-tree · disabled</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/executor-tree · disabled</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <div class="cfg-stack">
+          <section class="cfg-level" data-depth="1">
+            <div class="cfg-level-head">
+              <span class="cfg-level-title">Functions</span>
+              <span class="cfg-hint">Host code, human gates, delegated agents and tools. Which of them EXIST is the run's business — a workflow's states decide that — so what is settable here is which this executor may reach.</span>
+            </div>
+            <div class="cfg-level-body">
+              <div class="cfg-stack">
+                <div class="cfg-field">
+                  <div class="cfg-field-say">
+                    <span class="cfg-field-head"><span class="cfg-label">Rules</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+                    <span class="cfg-hint">Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract. Empty means everything the workflow registers.<code class="cfg-param">function.rules</code></span>
+                  </div>
+                  <div class="cfg-control">
+                    <div class="cfg-rules">
+                      <ol class="cfg-rule-list">
+                        <li class="cfg-rule nothing"><span class="cfg-rule-index" aria-hidden="true">1</span><span class="cfg-rule-text">nothing</span><button class="ghost" title="earlier" disabled disabled>↑</button><button class="ghost" title="later" disabled>↓</button><button class="ghost danger" disabled>Remove</button></li>
+                        <li class="cfg-rule allow"><span class="cfg-rule-index" aria-hidden="true">2</span><select class="cfg-input" disabled><option selected>allow</option><option>deny</option></select><input class="cfg-input mono" value="read_file" placeholder="name or pattern" disabled><button class="ghost" title="earlier" disabled>↑</button><button class="ghost" title="later" disabled disabled>↓</button><button class="ghost danger" disabled>Remove</button></li>
+                      </ol>
+                      <div class="cfg-rule-add">
+                        <button class="ghost" disabled>+ everything</button>
+                        <button class="ghost" disabled>+ nothing</button>
+                        <select class="cfg-input" disabled><option>allow</option><option selected>deny</option></select>
+                        <select class="cfg-input" disabled><option selected>— pick a function</option><option>run_command — tool — run a shell command, under the project's policy</option></select>
+                        <input class="cfg-input mono" placeholder="…or type a name / pattern" disabled>
+                        <button disabled>Add</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div class="cfg-route">
+            <div class="cfg-route-head">
+              <code class="cfg-route-prefix">claude-cli/…</code>
+              <span class="cfg-hint">agent claude-cli · sonnet · retry · reasoning high</span>
+              <span class="cfg-status available"><span class="cfg-dot" aria-hidden="true"></span>pinned</span>
+              <button class="ghost">Configure</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

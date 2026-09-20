@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/markdown-view">
+<meta name="state" content="success">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>markdown-view · success</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/markdown-view · success</p>
+<div class="mockup-stage" style="width: 720px; height: 660px; display: grid">
+  <div class="col mid" style="--viewer-height: 660px">
+    <div class="run-half">
+      <div class="markdown">
+        <details class="md-front"><summary>front matter</summary></details>
+        <h1>Refine loop</h1>
+        <p>The draft and the critique share one conversation, named <code>refine</code>, so the critique reads what the draft wrote without being handed it. See <a href="https://example.com/workflows" target="_blank" rel="noreferrer noopener">the authoring reference</a> for how a named session is declared.</p>
+        <h2>Each pass does three things</h2>
+        <ul>
+          <li>The draft writes <code>docs/ux/patterns/park-and-ask.md</code> from the brief.</li>
+          <li>The critique lists what a builder would miss.</li>
+          <li>The loop stops when the critique is empty or after three passes.</li>
+        </ul>
+        <blockquote><p>A child input may only read a sibling earlier in the sequence.</p></blockquote>
+        <table>
+          <thead><tr><th>state</th><th>passes</th><th>session</th></tr></thead>
+          <tbody>
+            <tr><td>feature.ux.draft</td><td>3</td><td>refine</td></tr>
+            <tr><td>feature.ux.critique</td><td>3</td><td>refine</td></tr>
+          </tbody>
+        </table>
+        <div class="md-block">
+          <div class="vv vv-inline">
+            <div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" title="Highlighted, in an editor" aria-pressed="true">Code</button><button type="button" title="Parsed — the value this document denotes" aria-pressed="false">Data</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+            <div class="vv-body">
+              <div class="code-shiki" style="tab-size: 2"><pre class="shiki light-plus" style="background-color:#FFFFFF;color:#000000" tabindex="0"><code><span class="line"><span style="color:#800000">state</span><span style="color:#000000">: </span><span style="color:#0000FF">feature.ux</span></span>
+<span class="line"><span style="color:#800000">max_iterations</span><span style="color:#000000">: </span><span style="color:#098658">3</span></span>
+<span class="line"><span style="color:#800000">inputs</span><span style="color:#000000">:</span></span>
+<span class="line"><span style="color:#800000">  brief</span><span style="color:#000000">: { </span><span style="color:#800000">type</span><span style="color:#000000">: </span><span style="color:#0000FF">string</span><span style="color:#000000"> }</span></span>
+<span class="line"></span></code></pre></div>
+            </div>
+          </div>
+        </div>
+        <pre><code>jaira run feature --input brief=@docs/product/index.md
+</code></pre>
+        <hr>
+        <p>Raw <code>&lt;details&gt;</code> tags in the source show as text: &lt;details&gt;open&lt;/details&gt;</p>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

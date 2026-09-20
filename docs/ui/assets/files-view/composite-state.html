@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/files-view">
+<meta name="state" content="composite-state">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>files-view · composite-state</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/files-view · composite-state</p>
+<div class="mockup-stage" style="width: 1280px; height: 720px; display: flex; background: var(--bg)">
+<nav class="sidebar">
+    <div class="side-title"><button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar">|◂</button><span class="side-brand app-label">JAIRA</span></div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="3 running"><span class="pill-glyph">▶</span><span class="pill-n">3</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+      </div>
+      
+      <div class="side-section open" style="--hue: var(--p1)">
+        <div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/JaiRA"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">JaiRA</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+        <div class="side-views">
+          <div class="side-row side-nested on is-active"><button class="side-hit" title="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button><button class="side-act" title="new file, folder or workflow">+</button><button class="side-act" title="find">⌕</button></div><div class="side-drawer"><div class="file-browser"><div class="scroll">
+    <ul class="file-tree"><li class="tree-item" title=".jaira"><span class="glyph">▾</span><span class="name">.jaira</span><button class="tree-add" title="new file, folder or workflow in .jaira">+</button></li><li class="tree-item" title="prompts"><i class="tree-guide"></i><span class="glyph">▸</span><span class="name">prompts</span><button class="tree-add" title="new file, folder or workflow in prompts">+</button></li><li class="tree-item" title="workflows"><i class="tree-guide"></i><span class="glyph">▾</span><span class="name">workflows</span><button class="tree-add" title="new file, folder or workflow in workflows">+</button></li><li class="tree-item sel" title="feature.json"><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">feature.json</span></li><li class="tree-item" title="feature"><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">▸</span><span class="name">feature</span><button class="tree-add" title="new file, folder or workflow in feature">+</button></li><li class="tree-item has-error" title="review.json"><i class="tree-guide"></i><i class="tree-guide"></i><span class="glyph">◻</span><span class="name">review.json</span><span class="lint-dot">●</span><span class="chip chip-bad">2</span></li><li class="tree-item" title="settings.json"><i class="tree-guide"></i><span class="glyph">⚙</span><span class="name">settings.json</span></li><li class="tree-item" title="docs"><span class="glyph">▸</span><span class="name">docs</span><button class="tree-add" title="new file, folder or workflow in docs">+</button></li><li class="tree-item" title="packages"><span class="glyph">▸</span><span class="name">packages</span><button class="tree-add" title="new file, folder or workflow in packages">+</button></li></ul>
+    <ul class="file-tree"><li class="tree-root" title="C:/Users/Ofer/.jaira"><span class="data-secondary grow ellip">~/.jaira</span><button class="tree-add" title="new file, folder or workflow in ~/.jaira">+</button></li><li class="tree-item" title="prompts"><span class="glyph">▸</span><span class="name">prompts</span><button class="tree-add" title="new file, folder or workflow in prompts">+</button></li><li class="tree-item" title="workflows"><span class="glyph">▸</span><span class="name">workflows</span><button class="tree-add" title="new file, folder or workflow in workflows">+</button></li><li class="tree-item" title="settings.json"><span class="glyph">⚙</span><span class="name">settings.json</span></li></ul>
+  </div></div></div>
+          <div class="side-row side-nested"><button class="side-hit" title="Tasks"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span></span></div>
+          <div class="side-row side-nested"><button class="side-hit" title="Chat"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button><button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button></div>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p2)"><div class="side-row side-project-row"><button class="side-hit" title="C:/UbuntuCode/declarative-ai"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">declarative-ai</span></span></button><span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span><span class="side-twist is-mark">▸</span></div></div>
+      <button class="side-row side-open"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
+    </div>
+    <div class="side-foot"><div class="side-row"><button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button></div></div>
+  </nav>
+  <div class="body">
+    <header class="title-bar"><header class="doc-bar"><span class="crumb-part"><button class="crumb-sep first" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-folder">.jaira</button></span><span class="crumb-part"><button class="crumb-sep" title="what else is at this level" aria-haspopup="menu">›</button><button class="crumb crumb-folder">workflows</button></span><span class="crumb-part"><button class="crumb-sep" title="what else is at this level" aria-haspopup="menu">›</button><span class="crumb crumb-state last">feature</span></span><span class="grow"></span><span class="sub ellip doc-label" title="Feature">Feature</span><span class="doc-bar-tools"><div class="run-mode"><button type="button" class="on">Tasks</button><button type="button">Conversation</button></div></span></header><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view files-view" style="--pane-right: 300px">
+        <div class="col mid" style="--viewer-height: 320px">
+      <div class="run-half"><div class="composite"><div class="board-body"><div class="columns">
+        <section class="column">
+      <h4><span class="seq data-num">1</span><span class="col-name">Product</span><span class="count app-secondary">1</span></h4>
+      <div class="column-body"><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Rewind and fork</span></span><span class="pill pill-success pill-status" title="done"><span class="pill-glyph">✓</span><span class="pill-word">done</span></span></div>
+          <div class="card-meta"><span class="ellip">feature/product</span><span class="card-status">2 hours ago</span></div>
+        </div></div>
+    </section>
+        <section class="column">
+      <h4><span class="seq data-num">2</span><span class="col-name">UX</span><span class="count app-secondary">1</span></h4>
+      <div class="column-body"><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Letterhead fold</span></span><span class="pill pill-waiting pill-active" title="waiting"><span class="pill-glyph">⏸</span><span class="pill-word">waiting</span></span></div>
+          <div class="card-meta"><span class="ellip">feature/ux/ask</span><span class="card-status">gate</span></div>
+        </div></div>
+    </section>
+        <section class="column">
+      <h4><span class="seq data-num">3</span><span class="col-name">UI</span><span class="count app-secondary">1</span></h4>
+      <div class="column-body"><div class="card">
+          <div class="card-head"><span class="card-title"><span class="task-name">Inbox strip by kind</span></span><span class="pill pill-running pill-active" title="running"><span class="pill-glyph">▶</span><span class="pill-word">running</span></span></div>
+          <div class="card-meta"><span class="ellip">feature/ui/render</span></div>
+        </div></div>
+    </section>
+        <section class="column">
+      <h4><span class="seq data-num">4</span><span class="col-name">Build</span><span class="count app-secondary">0</span></h4>
+      <div class="column-body"><div class="empty">—</div></div>
+    </section>
+      </div></div></div></div>
+      <div class="splitter horizontal" role="separator" aria-orientation="horizontal" aria-label="Resize the viewer"></div>
+      <div class="config-half"><button type="button" class="half-bar" title="half the column — click for the whole column"><span class="half-caret">▄</span><span class="half-label">Configuration</span><span class="grow"></span></button><div class="pane"><div class="edit-bar editor-top"><div class="sub file-path" title="C:/UbuntuCode/JaiRA/.jaira/workflows/feature.json">C:/UbuntuCode/JaiRA/.jaira/workflows/feature.json</div><div class="tabs seg"><button class="layer-on">Form</button><button class="ghost">JSON</button><button class="ghost">Graph</button></div></div><div class="cfg-fields">
+    <div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Label</span></span><span class="cfg-hint">What the board and the letterhead call this state.</span></div><div class="cfg-control"><input value="Feature"></div></div>
+    <div class="cfg-field"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Description</span></span></div><div class="cfg-control"><input value="Carry a feature from product through build."></div></div>
+  </div></div></div>
+    </div>
+        <div class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the inspector"></div>
+        <aside class="col panel"><div class="inspector">
+    <div class="insp-crumb"><span class="state-id ellip" title="feature">feature</span><span class="sub">· the state</span></div>
+    <section><h3><span>Validation</span></h3><div class="sub">lints clean</div></section>
+    <section><h3><span>Transitions</span><span class="count">2</span></h3><div class="transitions"><div class="trans-row"><span class="when">build.completed</span><span class="arrow">→</span><span class="to">done</span></div><div class="trans-row"><span class="when">ux.failed</span><span class="arrow">→</span><span class="to">product</span></div></div></section>
+    <section><h3><span>Children</span><span class="count">in run order</span></h3><ol class="children"><li><span class="ellip">product</span></li><li><span class="ellip">ux</span></li><li><span class="ellip">ui</span></li><li><span class="ellip">build</span></li></ol></section>
+  </div></aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

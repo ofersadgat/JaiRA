@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/data-tree">
+<meta name="state" content="data-reading">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>data-tree · data-reading</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/data-tree · data-reading</p>
+<div class="mockup-stage" style="width: 720px">
+  <div class="ts">
+    <div class="ts-msg ts-msg-assistant">
+      <div class="vv">
+        <div class="vv-body">
+          <div class="markdown">
+            <p>The critique loop stops after three passes. This is the state as the run read it:</p>
+            <div class="md-block">
+              <div class="vv vv-inline">
+                <div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" title="Highlighted, in an editor" aria-pressed="false">Code</button><button type="button" class="on" title="Parsed — the value this document denotes" aria-pressed="true">Data</button><button type="button" title="The text exactly as it was produced" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this" aria-haspopup="menu" aria-expanded="false">…</button></div>
+                <div class="vv-body">
+                  <ul class="doc-tree doc-root">
+                    <li><span class="sub">{4}</span>
+                      <ul class="doc-tree">
+                        <li><span class="doc-key">state</span><code class="doc-value doc-string">"feature.ux.critique"</code></li>
+                        <li><span class="doc-key">max_iterations</span><code class="doc-value doc-number">3</code></li>
+                        <li><span class="doc-key">target</span><code class="doc-value doc-string">"ask"</code></li>
+                        <li><span class="doc-key">inputs</span><span class="sub">{2}</span>
+                          <ul class="doc-tree">
+                            <li><span class="doc-key">draft</span><code class="doc-value doc-string">"docs/ux/patterns/park-and-ask.md"</code></li>
+                            <li><span class="doc-key">notes</span><code class="doc-value doc-null">null</code></li>
+                          </ul>
+                        </li>
+                      </ul>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <p>Raising the limit to four gives the draft one more pass before it asks you.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

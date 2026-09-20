@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/new-task-popover">
+<meta name="state" content="first-run">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>new-task-popover · first-run</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/new-task-popover · first-run</p>
+<div class="mockup-stage" style="width: 1140px; height: 270px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-content: start; background: var(--bg)">
+  <!-- nothing picked yet -->
+  <header class="title-bar">
+    <span class="title-drag"></span>
+    <span class="doc-bar-tools">
+      <div class="new-task-wrap">
+        <button aria-expanded="true">+ New task</button>
+        <form class="new-task-pop">
+          <label class="field"><span>Workflow</span><select class="cfg-input"><option>choose a workflow…</option></select></label>
+          <div class="sub">Its inputs appear here.</div>
+          <div class="pane-actions">
+            <button type="submit" class="primary" disabled title="choose a workflow">Create</button>
+            <button type="button" class="ghost">Cancel</button>
+            <span class="sub ellip">choose a workflow</span>
+          </div>
+        </form>
+      </div>
+    </span>
+  </header>
+  <!-- picked, its inputs on their way -->
+  <header class="title-bar">
+    <span class="title-drag"></span>
+    <span class="doc-bar-tools">
+      <div class="new-task-wrap">
+        <button aria-expanded="true">+ New task</button>
+        <form class="new-task-pop">
+          <label class="field"><span>Workflow</span><select class="cfg-input"><option>Feature workflow</option></select></label>
+          <div class="sub">reading its inputs…</div>
+          <div class="pane-actions">
+            <button type="submit" class="primary" disabled title="reading its inputs">Create</button>
+            <button type="button" class="ghost">Cancel</button>
+            <span class="sub ellip">reading its inputs</span>
+          </div>
+        </form>
+      </div>
+    </span>
+  </header>
+  <!-- picked, and it declares nothing to fill -->
+  <header class="title-bar">
+    <span class="title-drag"></span>
+    <span class="doc-bar-tools">
+      <div class="new-task-wrap">
+        <button aria-expanded="true">+ New task</button>
+        <form class="new-task-pop">
+          <label class="field"><span>Workflow</span><select class="cfg-input"><option>Nightly dependency audit</option></select></label>
+          <div class="sub">This workflow declares no inputs.</div>
+          <div class="pane-actions">
+            <button type="submit" class="primary" title="creates audit/nightly">Create</button>
+            <button type="button" class="ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </span>
+  </header>
+</div>
+</body>
+</html>

@@ -2,259 +2,110 @@
 id: engineering/units/conversation-lookup
 type: engineering-unit
 status: shipped
-updated: 2026-08-17
-implements: [] # the Chat and run-transcript surfaces are not catalogued yet
+updated: 2026-09-13
+implements: [product/complete-record-of-every-run, product/chat-with-agents, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/components/transcript, ui/components/session-sheet, ux/patterns/choose-a-side-where-it-divided, ux/patterns/absence-is-stated]
 layer: data
 owns_contracts: []
-requires: []
-decisions: []
-verified_by:
-  [
-    "packages/persistence/test/sessionStore.test.ts",
-    "packages/app/test/chatConversation.test.ts",
-    "packages/app/test/chatDurability.test.ts",
-    "packages/app/test/chatFork.test.ts",
-    "packages/app/test/service.test.ts",
-  ]
-exceptions: []
-siblings: []
+requires: [engineering/units/operation-record-store, engineering/units/event-journal, engineering/units/board-projection]
+implemented_by: [packages/persistence/src/views.ts, packages/persistence/src/sessionStore.ts, packages/persistence/src/recordMessages.ts, packages/app/src/main/service.ts]
+verified_by: [packages/persistence/test/sessionStore.test.ts, packages/persistence/test/recordCorners.test.ts, packages/app/test/service.test.ts, packages/app/test/chatConversation.test.ts, packages/app/test/chatDurability.test.ts]
+siblings: [engineering/units/operation-record-store, engineering/units/live-turns, engineering/units/chat-turns, engineering/units/board-projection]
 ---
 
 # Conversation lookup
 
-## Responsibility
+## Conversation lookup gets a reader from a task id to the turns a conversation said, and writes nothing
 
-How a conversation is stored, and how a reader gets from a **task id** to the
-**turns on screen**. It owns the record/position/lineage model, the two readers
-over it (`chatThread` and `sessionView`), and the rule about what a record
-contains.
+A reader is handed a task id and never a session id. The journal is the index that leads to the records, and the records hold what was said. This unit owns that path:
 
-It does not own the *live* turn — what a call is streaming right now reaches the
-screen over `session:turn` and is held in `liveTurns`. This unit is about what is
-on disk, and about the moment the two hand over.
+- **The index.** `stateSessions(project, taskId)` in `views.ts` returns one `StateSession {instanceId, stateId, sessionId, seq, at, outcome}` per operation that ran in a conversation, in time order. `interruptedSessions` adds the calls that have no terminal event. `parseSessionRef` splits `<id>@<seq>` on the last `@`.
+- **The store's reads** on `SqliteSessionStore`: `transcript(ref)` returns the rows along the lineage, oldest first, each ancestor only up to where its child left it; `forks(ref)` returns, per seam on that path, the parent's own tail and any sibling branch the path did not take; `lineageOf(id)`, `at(sessionId, seq)`, and `messages(ref)` and `bySession`, which skip `open` rows. `rowsOf` keeps one row per effective seat, the live claimant when there is one and else the newest dead row, and `projectValue` turns a result's reported `messages` into `entries`. A read resolves a name through `session_names` or a legacy `task/run/name` id and never mints a session.
+- **The wire history.** `messagesOfRecord` in `recordMessages.ts` is a record's finished main-chain `message` entries as `{role, content}`, without sidechain, event or partial entries. It is what a resume sends back to a provider and what native turn lines are written from.
+- **The readers**, in main `service.ts`. `sessionHistory` joins `stateSessions` with each call's start time, cost, lineage and instance address into `SessionRef[]` for `session:history`. `sessionView` reads one instance's record through `store.at` for `session:view`. `chatThread` walks `store.transcript` from the conversation's position for `chat:thread`, adds edit `points` and `forks`, and joins each record to the journal seq its turn began at. Every view is derived from a record's one `entries` array by `turnsSaidBy`, `sidechainsOf`, `recordEventsOf`, `nativeOf` and `structuredOutputOf`.
 
-## Where this fits
+It deliberately does not own:
 
-- **Position in the architecture** — `data`. `SqliteSessionStore`
-  (`packages/persistence/src/sessionStore.ts`) is the store; `views.ts` is the
-  projection that finds a conversation in the journal; the two readers live in
-  `packages/app/src/main/service.ts` and are reached over IPC. Nothing above the
-  store parses a session id or a ref — those spellings are the store's.
-- **Serves** — the Chat surface (whole conversation) and the run transcript panel
-  (one state's contribution).
-- **Neighbors** — `liveTurns` owns the in-flight turn; `sessionBands` owns how
-  several conversations in one run are laid out against a clock. Neither reads
-  records.
-- **Depends on / used by** — depends on the journal (`state_machine_events`) for
-  the index and on the run/task tables for scope. Used by the `chat:thread`,
-  `chat:send`, `chat:plan` and `session:view` IPC handlers, by `sessionHistory`
-  (and through it the run panel and `sessionBands`), and by provider replay —
-  `materialize` is what a resumed conversation is rebuilt from.
-- **History** — the model is upstream's (`@declarative-ai/exec`
-  `SessionStore`/`RecordStore`); JaiRA supplies the SQLite implementation.
-  Migration 4 normalised records and positions into their own tables; migration 7
-  gave interrupted records the message they were called with.
+- Writing records, claiming seats, handles and cuts: [operation-record-store](operation-record-store.md).
+- The turn still streaming, and its handover to the stored record: [live-turns](live-turns.md) and [session-live-protocol](../contracts/session-live-protocol.md).
+- Where a typed message goes and the host instance it continues: `chatContextOf` and `chatPositionOf` in [chat-turns](chat-turns.md).
+- The instance tree, `instanceAddresses` and the run timeline `conversationView`: [board-projection](board-projection.md).
+- Laying several conversations of one run out against a clock: the renderer's `sessionBands`, drawn by [run-conversation](../../ui/surfaces/run-conversation.md).
 
-## The model, in four facts
+## A conversation is a tree of records, each holding only what its own call added
 
-Most confusion about this code comes from expecting a `messages` table. There
-isn't one.
+1. **The unit of storage is a record, not a message.** One `operation_records` row per call holds the whole payload as JSON. No messages table exists.
+2. **A record holds the delta its call contributed**, opening with the `user` message it was called with. A conversation's messages are its records concatenated along the lineage. No reader subtracts a prefix or guesses a record's shape; the store writes one shape from the record's first instant.
+3. **Order is a seat.** A record's seat is `session.id` and `session.seq` in its request, and its effective seat is `COALESCE(landed_session_id, session_id)` with the matching seq. A failed or interrupted row stays at its seat as history, and a landed row reads at the seat it landed on.
+4. **A session is a tree.** `sessions(id, parent, cursor)`: an edited message, a divergence or a refused seat mints a child that leaves its parent at `cursor`, nothing is deleted, and the child inherits the prefix by lineage, never by copying.
 
-1. **The unit of storage is a record, not a message.** One row of
-   `operation_records` per model call, holding the whole payload as JSON.
-2. **A record holds the messages its call contributed — a delta.**
-   `LlmOutput.messages` is *"the messages this call APPENDED to the conversation,
-   verbatim"*. A conversation's messages are its records concatenated.
-3. **Order is a claimed position, not a timestamp.** `session_positions` maps
-   `(session_id, seq) → record`. The primary key **is** the claim: a second
-   claimant raises `PositionTaken`, and the correct answer to that is to fork.
-4. **A session is a tree.** `sessions(id, parent, cursor)`. Editing a message
-   mints a child branching from the parent at `cursor`; nothing is deleted. A
-   fork inherits its prefix *by lineage*, never by copying.
-
-Session ids are namespaced at the SQL boundary — `k(id)` = `${taskId}/${runId}/${id}`
-— because a bare id like `#i1` names the first instance of *every* run.
-
-```
-sessions            #i1 ──────────────┬──────────────►  (cursor 2)
-                                      └── #i1~edit1 ──►
-
-session_positions   #i1@0   #i1@1   #i1@2 …
-                      │       │       │
-operation_records    rec     rec     rec        ← each holds its own delta
-```
-
-## The lookup path
-
-Neither reader is handed a session id. Both are handed a **task id**, and the
-journal is the index that gets them the rest.
-
-```
+```text
 task id
-  └─ latest run                                     runtime.listRuns(taskId)
-       └─ journal: operation.completed / .failed    stateSessions()
-            carrying metrics.sessionRef = "<id>@<seq+1>"
-            └─ …or, for a call with no terminal event:
-               interruptedSessions() pairs orphan operation.started
-               events against orphan records, in start order
-                 └─ session id + seq
-                      └─ position "<id>@<seq+1>"     chatPositionOf()
-                           └─ store.transcript(position)
-                                └─ chain(): walk parent/cursor to the root
-                                     └─ rows, oldest first, forks walked
+  └─ stateSessions(project, taskId)
+       ├─ operation.completed and operation.failed rows whose session_ref is "<id>@<end>"   seat = end - 1
+       └─ interruptedSessions: unterminated operation.started events, paired in start order
+          with placed records that no terminal event accounts for
+            └─ StateSession {instanceId, sessionId, seq}
+                 ├─ sessionView: store.at(sessionId, seq), then turnsSaidBy
+                 └─ chatThread: position "<sessionId>@<seq + 1>", then store.transcript
+                      └─ chain: walk parent and cursor to the root, rows oldest first
 ```
 
-`stateSessions` is the whole index. It reads `session_ref`, a **generated column**
-over the event payload (migration 1), so it cannot drift from the event it came
-from. `NOT NULL` on it means exactly "this operation ran in a conversation".
+A typed chat message is recorded on its host's session under instance `chat:<hostInstanceId>`, so a conversation continued by hand is more records on one chain. Its `operation.completed` carries no `operationId`, so `chatThread` joins its record to the journal by seat.
 
-`interruptedSessions` is the recovery arm, and exists because a terminal event can
-be missing three different ways: the process died mid-call; the engine threw
-*after* the call returned (so the record is settled and whole, and nothing in the
-journal points at it); or the run was **cancelled**, which terminates the instance
-and settles the record but writes no `operation.completed`/`operation.failed` at
-all. It pairs unterminated `operation.started` events against records the journal
-does not already name, in start order — and refuses to pair at all when the two
-lists differ in length, because a conversation attributed to the wrong state is
-worse than one that is merely missing.
+## The lookup reads the data layer and answers the renderer through three channels
 
-### Two readers, two questions
+- `views.ts`, `recordMessages.ts` and the store's reads are layer `data` in `@jaira/persistence`. `stateSessions` and `interruptedSessions` query `project.db` directly; `interruptedSessions` reads `task_runtime`, `state_machine_events` and `operation_records` in one pass.
+- The readers sit in `@jaira/app` main `service.ts`, beside the channels they answer, `session:history`, `session:view` and `chat:thread` in [ipc-channels](../contracts/ipc-channels.md).
+- Upstream seam: the join rides upstream's `withSessionPosition`, which reports the position a call ended at as `metrics.sessionRef`, and hw puts those metrics on `operation.completed` and on a post-dispatch `operation.failed`. The `session_ref` column is generated from that payload, so it cannot drift from the event.
 
-| | `sessionView(taskId, instanceId)` | `chatThread(taskId)` |
-| --- | --- | --- |
-| Asks | what did **this instance add**? | the **whole conversation**, in order |
-| Reads | one record (`store.at`) | the chain from the tip (`store.transcript`) |
-| Surface | run transcript panel | Chat |
-| Fold | `turnsSaidBy` | `turnsSaidBy`, per row, concatenated |
-
-Both fold through the same function. They answer different questions; they must
-never disagree about whether a turn happened.
-
-A chat turn is recorded on its **host's** session under instance
-`CHAT_INSTANCE_BASE + host` (`1_000_000 + n`), so a conversation continued by hand
-is more records on one chain rather than a second conversation beside the first.
-
-### A run holds several conversations
-
-Not one. States share a session on purpose (`environment.session`) and just as
-deliberately do not, so a run is a set of chains, not a single thread. That is why
-there is no "read the run" reader: `sessionBands` lays the chains out against a
-clock, one panel per session per band, and never merges two — merging would claim
-a conversation nobody had.
-
-## Data
+## The journal indexes a conversation and the record row holds it
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `operation_records` | written by `open`/`streamPartial`/`close`, read by every projection | the record's own row | native capture folds `nativeLines` in |
-| `session_positions` | written once at `open` | the position claim | never updated |
-| `sessions` | written at branch creation | lineage | `compact` / `resync` mint derived ids |
-| `state_machine_events.session_ref` | generated column | the event payload | `stateSessions` |
+| `state_machine_events.session_ref`, `operation_id` and the `operation.*` payloads | read by `stateSessions`, `interruptedSessions`, `sessionHistory` and `chatThread` | the event payload | written by [event-journal](event-journal.md) |
+| `operation_records` status, effective seat, `instance_id`, `request_json`, `result_json` | read | the record row | written by [operation-record-store](operation-record-store.md) |
+| `sessions.parent`, `cursor` and `session_names` | read by `chain`, `forks`, `lineageOf` and name resolution | the lineage rows | written by [operation-record-store](operation-record-store.md) |
+| `task_runtime.outcome`, `status`, `ended_at` | read by `interruptedSessions` to admit a task and to tell `running` from `interrupted` | the task row | written by [task-lifecycle](task-lifecycle.md) |
 
-## Invariants
+## The invariants make every call that ran findable and keep the readers agreeing about what it said
 
 | # | Invariant | Asserted by |
 | --- | --- | --- |
-| 1 | A record holds only the messages its own call contributed; a session's messages are its records concatenated | `sessionStore.test.ts` |
-| 2 | A record carries the message its call was made with, at every instant of its life — at birth, through every flush, and through the settle | `sessionStore.test.ts` — "the message the call was made with" |
-| 3 | A settled record is never doubled by the splice: the provider's delta already opens with the question | `sessionStore.test.ts` |
-| 4 | `messageTimes` stays index-aligned with `messages` across any splice | `sessionStore.test.ts` |
-| 5 | An open (streaming) row never reaches materialized history — a half-written turn is not replayed into a provider | `sessionStore.test.ts` |
-| 6 | Every non-success run outcome — `error`, `interrupted`, `canceled` — can still have its conversation found | `sessionStore.test.ts` — "a run the process died inside" |
-| 7 | A conversation never comes back shorter than it was, by any of the five routes | `chatDurability.test.ts` |
-| 8 | An edit forks; the replaced branch stays reachable and renders through the same viewer | `chatFork.test.ts` |
-| 9 | The two readers agree about what a record said | `chatDurability.test.ts` — "not only the chat's" |
+| 1 | A settled call is listed at the seat one back from where it ended, whether it completed or failed, and an operation with no conversation is not listed | `sessionStore.test.ts` "reads one row per operation that ran in a conversation, one position back from where it ended", `"lists a FAILED call too — it ran, it said things, and its transcript is in the store"` |
+| 2 | Calls with no terminal event are paired with their records in start order, and nothing is listed when the counts differ | `sessionStore.test.ts` "pairs several in-flight calls in start order, which both lists share", "says nothing rather than guessing when the two lists disagree" |
+| 3 | An `open` record reads `running` while its task has not ended and `interrupted` once it has | `sessionStore.test.ts` "calls a live run's in-flight conversation running rather than interrupted", "still calls an open record interrupted once the run it belongs to has ended" |
+| 4 | A call that settled and lost its event, a stopped call, and a call reclaiming a failed call's seat are each still listed | `sessionStore.test.ts` "lists a call that SETTLED and then lost its event, on a run the engine died in", "recovers the call somebody STOPPED, on a run whose outcome is canceled", "lists a call that reclaimed a FAILED call's position, while it runs" |
+| 5 | A conversation reads back along its lineage at any position, a branch sharing its parent's prefix | `sessionStore.test.ts` `"forks by lineage — the branch shares the prefix and diverges after it"`, "reads a conversation AT a position, not merely at its head", "says where a branch came from, which is the other direction from `forks`" |
+| 6 | A streamed partial is visible to a transcript read with its status and never enters replayed history | `sessionStore.test.ts` `"streams into the open row, visible with its status — and out of materialized history"` |
+| 7 | The wire history leaves out subagent turns, event entries and the partial entry | `recordCorners.test.ts` "derives messages from entries, and leaves a subagent's turns out of them", `"skips EVENT entries — a context injection is not a turn"`, `"skips the PARTIAL entry — a turn nobody finished must not go back on the wire"` |
+| 8 | A state's turns are read straight off its record, with nothing subtracted | `service.test.ts` "reads a state's turns straight off its record, without subtracting a phantom prefix" |
+| 9 | `sessionView` and `chatThread` show the same stopped turn: its question, its tool traffic and its half-written answer | `chatDurability.test.ts` "is recovered for the run's transcript too, not only the chat's", `"stays on screen — the half-written answer is part of the conversation"`, "survives an agent's tool traffic, which is user-role messages nobody typed" |
+| 10 | An edited message branches, the thread follows the new branch, and the side it replaced is reported | `chatConversation.test.ts` `"replaces it — the branch keeps what came before and drops what came after"`, "says WHERE the conversation split, and what it said down the other side" |
+| 11 | A conversation recorded under a legacy run-scoped session id still reads by its bare name within its task | `sessionStore.test.ts` "normalises an old turn store into records plus positions, keeping every conversation readable" |
+| 12 | A thread already on screen is never replaced by a read that answers nothing | `chatDurability.test.ts` "never replaces a conversation with an empty one" |
 
-## The rule about record shape, and why it is a rule
-
-**A record is the delta it will finally be, from its first instant, and only ever
-grows.** Four writers keep that true, all through one function (`openingMessage`):
-
-| Moment | Writer |
-| --- | --- |
-| birth | `insertRecord` — the row is created holding `{value:{messages:[question]}}` |
-| streaming | `streamPartial` — keeps it in front of each flush's turns |
-| errored settle | `preservePartial` — carries it through |
-| success settle | the provider's authoritative delta, which already contains it |
-
-The birth write is load-bearing, not tidy: a process killed between `open` and the
-first flush reaches no later writer, and that row is all anybody will ever have.
-
-### What this replaced, and the argument against it
-
-The store used to tolerate **two** record shapes and guess between them at read
-time. `ownMessages` dropped a leading run of messages whenever a record began with
-the previous record's list in full, on the theory that a record might carry the
-history it was called with rather than its own delta.
-
-The argument that killed it:
-
-- The upstream contract says delta (`LlmOutput.messages`, quoted above), and
-  `MapSessionStore` — the reference implementation — states it as *"a
-  conversation's messages ARE its records"*.
-- `materialize()` concatenates records **without subtracting anything**. If a
-  cumulative record existed, provider replay would already have been sending the
-  model its own history twice over. Nothing guards it, so nothing writes it.
-- Checked empirically across every adjacent record pair in a real database:
-  zero cumulative records.
-
-What the guess actually did was lose data. Two byte-identical consecutive
-deltas — ask the same question twice, get the same answer twice — and the second
-pair was read as history and dropped. Its companion in `recordEventsOf` subtracted
-the *previous record's* length from every provider-event index, so in an ordinary
-chat every event after the first collapsed onto index 0 and drew above the turn it
-happened after.
-
-**The general lesson, worth keeping:** when a reader has to sniff the shape of
-what it reads, the shape is under-specified at the write. Fix it at the write.
-
-## Failure modes
+## A call with a missing event is recovered by pairing, and an ambiguous pairing shows nothing rather than the wrong state
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| Run cancelled mid-call | Record settles `failed` holding everything streamed plus the question; no terminal event | `interruptedSessions` finds it by pairing | Transcript reads normally, ending in the fragment it was cut off writing |
-| Process killed mid-call | Row stays `open` with the question and whatever flushed | Same pairing; `recoverInterrupted` re-reads the agent's own session file | Turn visible immediately; excluded from replay until settled |
-| Engine throws after the call returned | Record `completed`, journal has nothing | Same pairing; reported as the success it was | Normal |
-| Two calls want one position | `PositionTaken` | Fork | Fork seam with tabs for each side |
-| A read answers `null` | The last good thread stands (`kept`) | Next read replaces it | No blank — never |
-| Record predates conversations being kept | `store.at` finds nothing | None | "this run was recorded before conversations were kept" |
+| A run is stopped mid-call | the record settles where it stood and the journal has no `operation.completed` or `operation.failed` | `interruptedSessions` admits the `canceled` task and pairs the start with the record | the transcript ends in the fragment the call was writing |
+| The process is killed mid-call | the journal holds `operation.started` only, and the record stays `open` until recovery settles it | the same pairing, reading `interrupted` once the task has ended | the turn shows its question and what streamed |
+| The engine throws after a call returned | the record is `completed` and no event names it | the same pairing, reading `success` | the transcript reads normally |
+| An operation that holds no seat is in flight beside an unterminated call, such as a gate waiting on a person | the start and record counts differ, so `interruptedSessions` lists nothing | none; the call is listed once the other operation settles | the in-flight conversation is missing from the history |
+| A composite or a task that never ran is read | `chatThread` answers null; `sessionView` answers `empty: "this state ran no model call, so there is no conversation to show"` | none needed | the stated absence |
+| A listed seat has no record | `sessionView` answers `empty: "this run was recorded before conversations were kept"` | none | that sentence |
+| `chat:thread` answers null or rejects while a thread is on screen | `kept` in `chatPane.tsx` keeps the thread, and the rejection is swallowed | the next read replaces it | the last thread stays |
+| A reader runs while a call is writing | every query is one SQLite read, so the reader sees a whole state before or after that write; readers write nothing, so two readers cannot conflict | none needed | an `open` turn shows what has streamed so far |
+| A legacy journal reuses a counter instance id across runs | `sessionView` takes the last history row for the instance | none | the newest conversation for that id |
+| The branch a thread's path took at a seam holds no record yet, as just after an edit is sent | `chatThread` cannot place the seam as a turn and drops it from `forks` | none; the seam is reported once the branch's first record lands | no marker for that split until then |
 
-## Compatibility
+## Readers accept every shape older databases hold and migrate nothing
 
-**Migration 7** splices the question into interrupted records already on disk. It
-is narrowed to `failed` records holding messages on the result channel — a record
-whose messages live on `session_outcome_json` would be *shadowed* rather than
-repaired, since `projectValue` prefers the result when it has messages — and it is
-naturally idempotent, so a half-finished upgrade is re-runnable.
+- Legacy `task/run/name` session ids resolve through `legacyTwin` and are reported bare through `bareSessionId`.
+- A result whose conversation rides as a `messages` sibling, which migration 14 folded out of `session_outcome_json`, is read as `entries` by `projectValue`.
+- A numeric instance id on an old failed event is matched against a record's text `instance_id` as a string in `interruptedSessions`.
 
-It is the first migration to use a `run(db)` step rather than `sql`. SQLite's JSON1
-can read a blob but cannot prepend to an array, and the contortion that fakes one
-(`json_group_array` over a `UNION ALL`, ordered by a synthetic column) relies on an
-ordering SQLite does not promise.
+## The readers live in the main process, and in-flight calls are joined by order rather than by key
 
-Rollback: the data change is additive and the old readers tolerated a leading user
-message, so an older build reads a migrated database correctly. The reverse is what
-migration 7 exists for.
-
-## Budgets
-
-| Budget | Limit | Why this is at risk |
-| --- | --- | --- |
-| Partial flush writes | one per debounce window, not one per delta | A chatty stream would otherwise put a synchronous `UPDATE` of the whole payload on the main thread per token; `LiveTurnFlusher` is the throttle |
-| `transcript()` queries | one per branch in the lineage | A conversation edited N times walks N+1 branches. Fine at the depths seen; if forks ever nest deeply this becomes a recursive CTE |
-
-## Security and permissions
-
-None of this widens reach: a record is only ever read within the task and run that
-wrote it (`SessionScope`), which is the boundary `k()` enforces in SQL rather than
-in a caller's discipline.
-
-## Out of scope
-
-- **The live turn.** Streaming, the `n` merge protocol, and the handover to the
-  stored record belong to `liveTurns`.
-- **Nested fork seams.** `chatThread` reports the newest fork only; a conversation
-  edited three times has three, nested, and a tab row inside a tab row is a case
-  nobody has had yet.
-- **Cross-session interleaving.** Deliberately not offered — see "a run holds
-  several conversations".
+- `sessionHistory`, `sessionView`, `chatThread` and the record folds sit in `service.ts` rather than `@jaira/persistence`, because they build `@jaira/shared` view models and resolve a chat host through the pinned snapshot and the projected instance tree.
+- `interruptedSessions` pairs starts with records by start order, because a call with no terminal event leaves no key joining the two.

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/preset-chips">
+<meta name="state" content="chosen">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>preset-chips · chosen</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/preset-chips · chosen</p>
+<div class="mockup-stage" style="width: 760px; padding: 16px 20px 0">
+  <div class="cfg-pane">
+    <section class="cfg-group">
+      <header class="cfg-group-head">
+        <h4>Artifacts</h4>
+        <p class="cfg-hint">Where a file an agent produces actually lands. A path TEMPLATE rather than a mode, because “which backend” and “how the path is derived” are independent questions and an enum conflates them.</p>
+      </header>
+      <div class="cfg-field">
+        <div class="cfg-field-say">
+          <span class="cfg-field-head"><span class="cfg-label">Destination</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+          <span class="cfg-hint">Pick one, or write a template of your own.<code class="cfg-param">artifacts.destination</code></span>
+        </div>
+        <div class="cfg-control">
+          <div class="cfg-stack">
+            <div class="cfg-chips">
+              <button type="button" class="cfg-chip on" title="beside the code the run is working on">the workspace</button>
+              <button type="button" class="cfg-chip" title="outside the repo, grouped by task">one directory per task</button>
+              <button type="button" class="cfg-chip" title="outside the repo, filenames derived">one flat directory</button>
+              <button type="button" class="cfg-chip" title="recorded, but nothing is written to disk">memory only</button>
+            </div>
+            <input class="cfg-input mono" value="$DEFAULT" placeholder="$JAIRA/artifacts/$TASK_ID/$RELPATH">
+            <p class="cfg-hint">Variables: <code>$JAIRA </code><code>$PROJECT </code><code>$TASK_ID </code><code>$RELPATH </code><code>$ARTIFACT_DIR </code></p>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-field">
+        <div class="cfg-field-say">
+          <span class="cfg-field-head"><span class="cfg-label">Destination</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
+          <span class="cfg-hint">Pick one, or write a template of your own.<code class="cfg-param">artifacts.destination</code></span>
+        </div>
+        <div class="cfg-control">
+          <div class="cfg-stack">
+            <div class="cfg-chips">
+              <button type="button" class="cfg-chip" title="beside the code the run is working on">the workspace</button>
+              <button type="button" class="cfg-chip" title="outside the repo, grouped by task">one directory per task</button>
+              <button type="button" class="cfg-chip" title="outside the repo, filenames derived">one flat directory</button>
+              <button type="button" class="cfg-chip" title="recorded, but nothing is written to disk">memory only</button>
+            </div>
+            <input class="cfg-input mono" value="$PROJECT/docs/out/$TASK_ID/$RELPATH" placeholder="$JAIRA/artifacts/$TASK_ID/$RELPATH">
+            <p class="cfg-hint">Variables: <code>$JAIRA </code><code>$PROJECT </code><code>$TASK_ID </code><code>$RELPATH </code><code>$ARTIFACT_DIR </code></p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <div class="ft-knobs">
+      <div class="ft-knobs-head"><span class="app-label">how it is drawn</span><span class="app-secondary ellip">every file Monaco draws, not only this type</span></div>
+      <div class="ap-toggle">
+        <span class="ap-chip-row"><button type="button" class="cfg-chip">2</button><button type="button" class="cfg-chip on">4</button><button type="button" class="cfg-chip">8</button></span>
+        <span class="app-text">Tab width</span>
+        <span class="ap-toggle-value app-secondary">columns</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

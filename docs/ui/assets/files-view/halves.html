@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/files-view">
+<meta name="state" content="halves">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>files-view · halves</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/files-view · halves</p>
+<div class="mockup-stage" style="width: 1260px; height: 520px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; background: var(--bg)">
+<div class="col mid config-shut" style="--viewer-height: 320px">
+      <div class="run-half"><div class="vv"><div class="vv-head"><span class="grow"></span><span class="vv-toggle" role="group" aria-label="How to show this"><button type="button" class="on" aria-pressed="true">Rendered</button><button type="button" aria-pressed="false">Source</button></span><button type="button" class="vv-more" title="What else can be done with this">…</button></div><div class="vv-body"><div class="markdown"><h2>UX</h2><p>Write one pattern per interaction the feature needs. Name the states each pattern declares, and say what the person knows at each step.</p><ul><li>Reuse a pattern that does its job unchanged.</li><li>Add a pattern only when none does.</li></ul></div></div></div></div>
+      <div class="config-half shut"><button type="button" class="half-bar" title="folded away — click for half the column"><span class="half-caret">▁</span><span class="half-label">Source</span><span class="grow"></span><span class="dirty-dot" title="unsaved edits">●</span></button></div>
+    </div>
+    <div class="col mid" style="--viewer-height: 320px">
+      <div class="config-half whole"><button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button><div class="file-edit"><div class="markdown"><h2>UX</h2><p>Write one pattern per interaction the feature needs. Name the states each pattern declares, and say what the person knows at each step.</p><ul><li>Reuse a pattern that does its job unchanged.</li><li>Add a pattern only when none does.</li></ul></div><div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div></div></div>
+    </div>
+    <div class="col mid">
+      <div class="config-half whole"><p class="empty">Nothing here can edit image/png.</p></div>
+    </div>
+</div>
+</body>
+</html>

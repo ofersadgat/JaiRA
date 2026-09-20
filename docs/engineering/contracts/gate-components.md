@@ -61,9 +61,12 @@ Four ideas, composed rather than parallel. `review_artifact` is a viewer plus a
 
 `fill_form` reads a JSON-Schema **subset**: `string` · `number` · `boolean` ·
 `enum`, with `optional`, `default`, `multiline`, and — on an `enum` only —
-`custom`, which ends the list in *Custom…* and opens a text box: what is typed
-there is the answer, and the field then accepts any non-empty string. Not
-arbitrary schemas — that is what a form can honestly render.
+`custom`, which makes the declared values suggestions rather than the only
+answers: the box offers them and takes any other non-empty text. The fields are
+converted to a JSON Schema (`fillFormSchema`) and drawn by the app's one schema
+form — the renderer the Run panel and Settings use — so an optional field has a
+switch that leaves it out of the answer, and a `default` is the answer the form
+starts on.
 
 ### `choose_option` — one component, two callers
 

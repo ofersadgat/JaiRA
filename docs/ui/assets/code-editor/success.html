@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/code-editor">
+<meta name="state" content="success">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>code-editor · success</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/code-editor · success</p>
+<div class="mockup-stage" style="width: 720px; height: 300px; display: grid; --ed-scheme: light; --ed-bg: #ffffff; --ed-panel: #f4f4f2; --ed-text: #000000; --ed-dim: #9f9f8f; --ed-line: #e0e0e0; --ed-tok-string: #f25a00; --ed-tok-number: #ae81ff; --ed-tok-keyword: #f92672; --ed-tok-type: #28c6e4; --ed-tok-hint: #9f9f8f; --ed-selection: #c2e8ff">
+  <div class="col mid">
+    <div class="config-half whole">
+      <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button>
+      <div class="file-edit">
+        <div class="monaco-host">
+          <!-- The editor draws into its own surface at run time; this is its rendered result, painted in the editor palette (Monokai Light). -->
+          <div class="md-editor ed-themed">
+            <div class="vv-patch-body">
+              <div class="vv-patch-line"><span class="vv-patch-no">1</span><span class="vv-patch-text"><span class="tok-keyword">import</span> <span class="tok-keyword">type</span> { <span class="tok-type">Task</span> } <span class="tok-keyword">from</span> <span class="tok-string">"@jaira/shared"</span>;</span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">2</span><span class="vv-patch-text"> </span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">3</span><span class="vv-patch-text"><span class="tok-comment">/** The reviewer for a task: its owner, unless they wrote it. */</span></span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">4</span><span class="vv-patch-text"><span class="tok-keyword">export</span> <span class="tok-type">function</span> <span class="tok-fn">pickReviewer</span>(task: <span class="tok-type">Task</span>, team: <span class="tok-type">string</span>[]): <span class="tok-type">string</span> {</span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">5</span><span class="vv-patch-text">  <span class="tok-type">const</span> author = task.createdBy;</span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">6</span><span class="vv-patch-text">  <span class="tok-type">const</span> others = team.<span class="tok-fn">filter</span>(<span class="tok-fn">isNot</span>(author));</span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">7</span><span class="vv-patch-text">  <span class="tok-keyword">return</span> others[<span class="tok-number">0</span>] <span class="tok-keyword">??</span> author;</span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">8</span><span class="vv-patch-text">}</span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">9</span><span class="vv-patch-text"> </span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">10</span><span class="vv-patch-text"> </span></div>
+              <div class="vv-patch-line"><span class="vv-patch-no">11</span><span class="vv-patch-text"> </span></div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-actions pinned"><button class="primary">Save</button><button class="ghost">Revert</button><span class="sub">unsaved changes</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

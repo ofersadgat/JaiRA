@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-types-pane">
+<meta name="state" content="mixed">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-types-pane · mixed</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-types-pane · mixed</p>
+<div class="mockup-stage is-bare" style="width: 900px; display: grid; gap: 16px">
+  <div class="ft">
+    <div class="ft-tree">
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents — including text with nothing claimed about it"><span class="ft-caret">▸</span><span class="ellip">Prose</span><span class="ft-count data-faint">2</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="true" title="source files, drawn by grammar"><span class="ft-caret">▾</span><span class="ellip">Code</span><span class="ft-count data-faint">8</span></button>
+        <div class="ft-kids">
+          <button class="ft-row" aria-selected="true" title="every type in this family — a value shows where they already agree"><span class="ellip">All code</span></button>
+          <button class="ft-row" aria-selected="false" title="text/x-typescript"><span class="ellip">TypeScript</span><span class="ft-dot" title="set here, on its own"></span></button>
+          <button class="ft-row" aria-selected="false" title="text/javascript"><span class="ellip">JavaScript</span></button>
+          <button class="ft-row" aria-selected="false" title="text/x-python"><span class="ellip">Python</span></button>
+          <button class="ft-row" aria-selected="false" title="application/x-sh"><span class="ellip">Shell</span></button>
+          <button class="ft-row" aria-selected="false" title="text/css"><span class="ellip">CSS</span></button>
+          <button class="ft-row" aria-selected="false" title="text/html"><span class="ellip">HTML</span></button>
+          <button class="ft-row" aria-selected="false" title="application/xml"><span class="ellip">XML</span></button>
+          <button class="ft-row" aria-selected="false" title="text/x-sql"><span class="ellip">SQL</span></button>
+        </div>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents that denote a value — rows included"><span class="ft-caret">▸</span><span class="ellip">Data</span><span class="ft-count data-faint">7</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="a patch, and the edit it describes"><span class="ft-caret">▸</span><span class="ellip">Changes</span><span class="ft-count data-faint">1</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="pictures, and the markup that draws them"><span class="ft-caret">▸</span><span class="ellip">Media</span><span class="ft-count data-faint">1</span></button>
+      </div>
+    </div>
+    <div class="ft-stage">
+      <div class="ft-head"><span class="app-title">All code</span><span class="grow"></span><span class="app-secondary ellip" title="8 types — a value shows where they agree">8 types — a value shows where they agree</span></div>
+      <div class="ft-modes">
+        <button class="ft-mode" aria-selected="true" title="the characters as they are on disk — an editor, or coloured source"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">text</span></span><span class="ft-mode-say ellip is-mixed">types disagree</span></button>
+        <button class="ft-mode is-off" aria-selected="false" disabled title="this type has no rendering of that kind"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">data</span></span><span class="ft-mode-say ellip">—</span></button>
+        <button class="ft-mode" aria-selected="false" title="what the document means, rendered — prose, a page, a drawing, a board"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">preview</span></span><span class="ft-mode-say ellip">Rendered</span></button>
+      </div>
+      <div class="ft-body">
+        <div class="ft-arranging"><span class="app-label">arranging</span><span class="ft-seg"><button aria-pressed="true">the read-only view</button><button aria-pressed="false">the editor</button></span></div>
+        <div class="ft-menu">
+          <div class="ft-menu-head"><span class="app-label">text</span><span class="app-secondary">the view you cannot type into</span></div>
+          <div class="ft-mm-row"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Monaco<span class="app-secondary"> ours</span></span><span class="app-secondary ellip">a real editor — typing, a caret, its own selection</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+          <div class="ft-mm-row"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Code view</span><span class="app-secondary ellip">coloured, but not an editor — a selection can be dragged through it</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+        </div>
+        <span class="app-secondary">No row is ticked: the types in this family are set differently. Clicking one sets this view for every type that can take it.</span>
+        <div class="ft-theme"><span class="app-label">theme</span><select class="cfg-input"><option>Monokai Light</option></select><span class="ft-swatches" title="github.com/anoff/vscode-monokai-light — themes/Monokai%20Light.tmTheme"><span class="ft-swatch" style="background: #ffffff"></span><span class="ft-swatch" style="background: #f92672"></span><span class="ft-swatch" style="background: #f25a00"></span><span class="ft-swatch" style="background: #6aaf19"></span><span class="ft-swatch" style="background: #28c6e4"></span></span><span class="grow"></span><span class="app-secondary ellip"></span></div>
+        <div class="ft-preview">
+          <div class="ft-preview-bar"><span class="app-label">preview</span><span class="data-faint ellip">TypeScript · text · nothing</span><span class="ft-tag">read-only view</span></div>
+          <div class="ft-preview-note app-secondary">The types in this family are set differently, so there is nothing single to show. Choose above to make them agree, or open one type in the tree to see it on its own.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

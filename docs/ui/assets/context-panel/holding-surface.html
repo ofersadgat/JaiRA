@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/context-panel">
+<meta name="state" content="holding-surface">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>context-panel · holding-surface</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/context-panel · holding-surface</p>
+<div class="mockup-stage is-bare" style="width: 480px; display: grid; grid-template-rows: 400px 360px; gap: 14px">
+  <!-- a state's configuration, editable, pinned from a box on the Graph tab -->
+  <aside class="col panel holding">
+    <div class="pinned-pane">
+      <div class="pinned-head">
+        <span class="pinned-title ellip" title="feature/build/plan">feature/build/plan</span>
+        <button type="button" class="pinned-close" title="Close this and give the panel back"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg></button>
+      </div>
+      <div class="pinned-body pinned-surface">
+        <div class="state-panel">
+          <div class="state-panel-go"><button class="ghost">Open in the editor</button></div>
+          <div class="pane editor">
+            <div class="edit-bar editor-top">
+              <div class="sub file-path" title="C:\UbuntuCode\declarative-ai\.jaira\workflows\feature\build\plan.json">C:\UbuntuCode\declarative-ai\.jaira\workflows\feature\build\plan.json</div>
+              <div class="tabs seg"><button class="layer-on">Form</button><button class="ghost">JSON</button></div>
+            </div>
+            <div class="form">
+              <div class="identity">
+                <label class="field inline"><span>Label</span><input value="Plan the build" spellcheck="false"></label>
+                <label class="field inline"><span>Description</span><textarea rows="2">Break each feature into the units it needs, reusing what exists.</textarea></label>
+              </div>
+              <div class="slots">
+                <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+                <label class="field"><span>Kind</span><select><option>prompt — one model call</option></select></label>
+              </div>
+            </div>
+            <div class="pane-actions pinned"><button class="primary">Save</button><button class="ghost">Revert</button><span class="sub">unsaved changes</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <!-- the configuration one run resolved against, read-only -->
+  <aside class="col panel holding">
+    <div class="pinned-pane">
+      <div class="pinned-head">
+        <span class="pinned-title ellip" title="plan · configuration">plan · configuration</span>
+        <button type="button" class="pinned-close" title="Close this and give the panel back"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg></button>
+      </div>
+      <div class="pinned-body pinned-surface">
+        <div class="pane config-panel">
+          <div class="sb-gutter">
+            <span class="sb-session mono ellip" title="in feature">feature/build/plan</span>
+            <span class="sub ellip warn" title="41f9e340df1f606cbe0e03d0bbf0dd2c">the workflow has changed since this run — this is the file as it stands now</span>
+            <button class="link" title="open its file">open ↗</button>
+          </div>
+          <div class="pane editor">
+            <div class="edit-bar editor-top">
+              <div class="sub file-path" title="C:\UbuntuCode\declarative-ai\.jaira\workflows\feature\build\plan.json">C:\UbuntuCode\declarative-ai\.jaira\workflows\feature\build\plan.json</div>
+              <div class="tabs seg"><button class="layer-on">Form</button><button class="ghost">JSON</button><button class="ghost">Graph</button></div>
+            </div>
+            <fieldset class="reading" disabled>
+              <div class="form">
+                <div class="identity">
+                  <label class="field inline"><span>Label</span><input value="Plan the build"></label>
+                </div>
+                <div class="slots">
+                  <div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div>
+                  <label class="field"><span>Kind</span><select><option>prompt — one model call</option></select></label>
+                  <div class="field run-value"><span>value</span><div class="value-box mono">{ "units": ["pause-control", "resume-plan"], "reuse": ["task-card"] }</div></div>
+                </div>
+              </div>
+            </fieldset>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

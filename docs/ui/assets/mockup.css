@@ -1,0 +1,28 @@
+/* The frame a mockup is drawn in. Every mockup links the app's own stylesheet first, so its tokens,
+   faces and classes are the ones that ship; this file only places the specimen on the page. */
+
+body.mockup {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.mockup-stage {
+  position: relative;
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.mockup-stage.is-bare {
+  background: transparent;
+  border: 0;
+  overflow: visible;
+}
+
+.mockup-caption {
+  width: fit-content;
+  margin: 0 0 10px;
+  font: 600 11px/1.4 var(--font-data);
+  color: var(--dim);
+}

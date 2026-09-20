@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/workflow-editor">
+<meta name="state" content="graph">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>workflow-editor · graph</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/workflow-editor · graph</p>
+<div class="mockup-stage is-bare" style="width: 720px; height: 560px; display: grid"><div class="col mid"><div class="config-half whole"><button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Configuration</span><span class="grow"></span></button><div class="pane editor"><div class="edit-bar editor-top"><div class="sub file-path" title="C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item.json">C:\UbuntuCode\JaiRA\.jaira\workflows\feature\ui\item.json</div><div class="tabs seg"><button class="ghost" title="the fields, as controls">Form</button><button class="ghost" title="the document, as text">JSON</button><button class="layer-on" title="what runs after what, and what makes it">Graph</button></div></div><div class="sg"><div class="sg-bar edit-bar"><span class="sg-key" title="a value moving from where it is produced to where it is read"><i class="sg-swatch sg-swatch-data"></i>values</span><span class="sg-key" title="the cursor's own path: the sequence, in order"><i class="sg-swatch sg-swatch-spine"></i>the sequence</span><span class="sg-key" title="over ground already covered: a loop, or a step re-entered"><i class="sg-swatch sg-swatch-back"></i>back</span><span class="sg-key" title="nearer the end: on to a later step, or out"><i class="sg-swatch sg-swatch-onward"></i>onward</span><span class="chip">max_iterations 2</span><span class="spacer"></span><span class="sub">drag to pan · scroll to zoom</span><div class="tabs seg"><button class="ghost" title="zoom out">−</button><button class="layer-on" title="fit the whole state in the pane">100%</button><button class="ghost" title="zoom in">+</button></div></div>
+<div class="sg-map"><div class="sg-canvas" style="width: 690px; height: 360px">
+<svg class="sg-lines" width="690" height="360" aria-hidden="true" focusable="false"><defs><marker id="h-spine" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" class="sg-head-spine"/></marker><marker id="h-back" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" class="sg-head-back"/></marker><marker id="h-on" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" class="sg-head-onward"/></marker></defs>
+<path class="sg-step sg-step-sequence" d="M 126 160 L 154 160" marker-end="url(#h-spine)"/>
+<path class="sg-step sg-step-sequence" d="M 274 160 L 302 160" marker-end="url(#h-spine)"/>
+<path class="sg-step sg-step-sequence" d="M 422 160 L 450 160" marker-end="url(#h-spine)"/>
+<path class="sg-step sg-step-sequence" d="M 570 160 L 598 160" marker-end="url(#h-spine)"/>
+<path class="sg-step sg-step-back" d="M 362 122 C 362 60, 214 60, 214 118" marker-end="url(#h-back)"/>
+<path class="sg-step sg-step-back" d="M 510 198 C 510 290, 214 290, 214 202" marker-end="url(#h-back)"/>
+<path class="sg-flow" d="M 126 176 C 140 176, 140 188, 154 188"/>
+<path class="sg-flow" d="M 274 188 C 288 188, 288 176, 302 176"/>
+</svg>
+<div class="sg-label sg-label-back" style="left: 288px; top: 66px">.children.critique.outcome === 'success'</div>
+<div class="sg-label sg-label-back" style="left: 362px; top: 266px">.children.verify.output.decision === 'revise'</div>
+<div class="sg-node sg-entry" style="left: 16px; top: 122px; width: 110px; height: 76px"><div class="sg-title app-text">Entry</div><div class="sg-subtitle data-secondary" title="One component">One component</div><div class="sg-node-chips"><span class="chip">spec</span></div></div>
+<div class="sg-node sg-child" style="left: 164px; top: 122px; width: 110px; height: 76px"><div class="sg-title data-title">draft</div><div class="sg-subtitle data-secondary" title="./draft">./draft</div><div class="sg-node-session" title="runs in the conversation &quot;ui-item&quot;, scoped parent"><i class="sg-session-mark"></i><span class="data-text ellip">ui-item</span></div></div>
+<div class="sg-node sg-child" style="left: 312px; top: 122px; width: 110px; height: 76px"><div class="sg-title data-title">critique</div><div class="sg-subtitle data-secondary" title="./critique">./critique</div></div>
+<div class="sg-node sg-child" style="left: 460px; top: 122px; width: 110px; height: 76px"><div class="sg-title data-title">verify</div><div class="sg-subtitle data-secondary" title="./verify">./verify</div><div class="sg-node-chips"><span class="chip sg-chip-on">function</span></div></div>
+<div class="sg-node sg-exit" style="left: 608px; top: 122px; width: 70px; height: 76px"><div class="sg-title app-text">Exit</div><div class="sg-subtitle data-secondary" title="terminate.success">terminate.success</div></div>
+</div></div></div><div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div></div></div></div></div>
+</body>
+</html>

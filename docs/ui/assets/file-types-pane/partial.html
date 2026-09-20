@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/file-types-pane">
+<meta name="state" content="partial">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>file-types-pane · partial</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/file-types-pane · partial</p>
+<div class="mockup-stage is-bare" style="width: 900px; display: grid; gap: 16px">
+  <div class="ft">
+    <div class="ft-tree">
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="true" title="documents — including text with nothing claimed about it"><span class="ft-caret">▾</span><span class="ellip">Prose</span><span class="ft-count data-faint">2</span></button>
+        <div class="ft-kids">
+          <button class="ft-row" aria-selected="true" title="every type in this family — a value shows where they already agree"><span class="ellip">All prose</span></button>
+          <button class="ft-row" aria-selected="false" title="text/markdown"><span class="ellip">Markdown</span></button>
+          <button class="ft-row" aria-selected="false" title="text/plain"><span class="ellip">Plain text</span></button>
+        </div>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="source files, drawn by grammar"><span class="ft-caret">▸</span><span class="ellip">Code</span><span class="ft-count data-faint">8</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="documents that denote a value — rows included"><span class="ft-caret">▸</span><span class="ellip">Data</span><span class="ft-count data-faint">7</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="a patch, and the edit it describes"><span class="ft-caret">▸</span><span class="ellip">Changes</span><span class="ft-count data-faint">1</span></button>
+      </div>
+      <div class="ft-group">
+        <button class="ft-row" aria-selected="false" title="pictures, and the markup that draws them"><span class="ft-caret">▸</span><span class="ellip">Media</span><span class="ft-count data-faint">1</span></button>
+      </div>
+    </div>
+    <div class="ft-stage">
+      <div class="ft-head"><span class="app-title">All prose</span><span class="grow"></span><span class="app-secondary ellip" title="2 types — a value shows where they agree">2 types — a value shows where they agree</span></div>
+      <div class="ft-modes">
+        <button class="ft-mode" aria-selected="true" title="the characters as they are on disk — an editor, or coloured source"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">text</span></span><span class="ft-mode-say ellip">Live preview  1/2</span></button>
+        <button class="ft-mode is-off" aria-selected="false" disabled title="this type has no rendering of that kind"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">data</span></span><span class="ft-mode-say ellip">—</span></button>
+        <button class="ft-mode" aria-selected="false" title="what the document means, rendered — prose, a page, a drawing, a board"><span class="ft-mode-top"><span class="ft-bulb"></span><span class="app-label">preview</span></span><span class="ft-mode-say ellip">Rendered</span></button>
+      </div>
+      <div class="ft-body">
+        <div class="ft-arranging"><span class="app-label">arranging</span><span class="ft-seg"><button aria-pressed="true">the read-only view</button><button aria-pressed="false">the editor</button></span></div>
+        <div class="ft-menu">
+          <div class="ft-menu-head"><span class="app-label">text</span><span class="app-secondary">the view you cannot type into</span></div>
+          <div class="ft-mm-row is-part"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick">✓</span><span class="ft-mm-name"><span class="app-text">Live preview<span class="app-secondary"> ours</span><span class="ft-reach data-faint">only Markdown</span></span><span class="app-secondary ellip">CodeMirror, marks drawn as what they mean</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+          <div class="ft-mm-row"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Monaco</span><span class="app-secondary ellip">a real editor — typing, a caret, its own selection</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+          <div class="ft-mm-row"><button class="ft-mm-pick" title="make this the one that leads"><span class="ft-mm-tick"></span><span class="ft-mm-name"><span class="app-text">Code view</span><span class="app-secondary ellip">coloured, but not an editor — a selection can be dragged through it</span></span></button><button class="ft-mm-x" title="take it off this menu">✕</button></div>
+        </div>
+        <span class="app-secondary">The tick is hollow: Live preview reaches 1 of these 2 types, and the rest keep what they had.</span>
+        <div class="ft-theme"><span class="app-label">theme</span><select class="cfg-input"><option>Monokai Light</option></select><span class="ft-swatches" title="github.com/anoff/vscode-monokai-light — themes/Monokai%20Light.tmTheme"><span class="ft-swatch" style="background: #ffffff"></span><span class="ft-swatch" style="background: #f92672"></span><span class="ft-swatch" style="background: #f25a00"></span><span class="ft-swatch" style="background: #6aaf19"></span><span class="ft-swatch" style="background: #28c6e4"></span></span><span class="grow"></span><span class="app-secondary ellip">Live preview — the read-only view of these types</span></div>
+        <div class="ft-knobs">
+          <div class="ft-knobs-head"><span class="app-label">how it is drawn</span><span class="app-secondary ellip">every file Live preview draws, not only this type</span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Line numbers" title="Line numbers" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Line numbers</span><span class="ap-toggle-value"><span class="app-secondary">no gutter</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="true" aria-label="Wrap long lines" title="Wrap long lines" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Wrap long lines</span><span class="ap-toggle-value"><span class="app-secondary">wrapped</span></span></div>
+          <div class="ap-toggle"><button type="button" role="switch" aria-checked="false" aria-label="Mark the current line" title="Mark the current line" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="app-text">Mark the current line</span><span class="ap-toggle-value"><span class="app-secondary">the caret says it</span></span></div>
+          <div class="ap-toggle"><span class="ap-chip-row"><button type="button" class="cfg-chip on">2</button><button type="button" class="cfg-chip">4</button><button type="button" class="cfg-chip">8</button></span><span class="app-text">Tab width</span><span class="ap-toggle-value app-secondary">columns</span></div>
+          <div class="ap-toggle"><span></span><span class="app-text">Line spacing</span><span class="ap-toggle-value"><div class="size-box"><input class="size-n data-num" type="number" min="1.1" max="2.2" step="0.05" value="1.6"><span class="data-faint">×</span><span class="size-step"><button title="larger (max 2.2)">▲</button><button title="smaller (min 1.1)">▼</button></span></div></span></div>
+        </div>
+        <div class="ft-preview">
+          <div class="ft-preview-bar"><span class="app-label">preview</span><span class="data-faint ellip">Markdown · text · Live preview</span><span class="ft-tag">read-only view</span></div>
+          <div class="ft-preview-body read" style="--ed-scheme: light; --ed-bg: #ffffff; --ed-panel: #f4f4f2; --ed-text: #000000; --ed-dim: #9f9f8f; --ed-line: #e0e0e0; --ed-tok-string: #f25a00; --ed-tok-number: #ae81ff; --ed-tok-keyword: #f92672; --ed-tok-type: #28c6e4; --ed-tok-hint: #9f9f8f; --ed-selection: #c2e8ff">
+            <div class="file-edit">
+              <div class="md-editor ed-themed">
+                <div class="cm-editor">
+                  <div class="cm-scroller">
+                    <div class="cm-content" style="padding: 8px 2px; line-height: 1.6">
+                      <div class="cm-line"><span class="cm-h2">What this shows</span></div>
+                      <div class="cm-line"><br></div>
+                      <div class="cm-line">The <span class="cm-strong">real</span> renderer, drawing a real document — the same component the Files panel mounts.</div>
+                      <div class="cm-line"><br></div>
+                      <div class="cm-line cm-item-line" style="padding-left: calc(var(--md-inset, 0px) + 2ch) !important; text-indent: -2ch"><span class="cm-list"><span class="cm-bullet">•</span> </span>so the preview is the thing itself</div>
+                      <div class="cm-line cm-item-line" style="padding-left: calc(var(--md-inset, 0px) + 2ch) !important; text-indent: -2ch"><span class="cm-list"><span class="cm-bullet">•</span> </span>and every choice above moves it</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

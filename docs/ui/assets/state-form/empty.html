@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/state-form">
+<meta name="state" content="empty">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>state-form · empty</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/state-form · empty</p>
+<div class="mockup-stage" style="width: 720px; padding: 10px 15px 14px">
+<div class="pane editor"><div class="form"><div class="identity"><label class="field inline"><span>Label</span><input value="" placeholder="a short name — what the board shows"></label><label class="field inline"><span>Description</span><textarea rows="2" placeholder="an author's note — also useful prompt context"></textarea></label></div>
+<div class="slots"><div class="slots-head"><span>Inputs</span><button type="button" class="ghost sm">+ Add</button></div><div class="sub">none declared</div></div>
+<div class="slots"><div class="slots-head"><span>Outputs</span><button type="button" class="ghost sm">+ Add</button></div><div class="sub">none declared</div></div>
+<div class="slots"><div class="slots-head"><span>Operation</span><span class="sub">what this state does when the cursor is on it</span></div><label class="field"><span>Kind</span><select><option selected>none — groups its children</option><option>prompt — one model call</option><option>function — host code, a gate, or an agent</option><option>inherited — whatever the environment chain says</option><option>linked — a block held in another file</option></select></label></div>
+<div class="slots children"><div class="slots-head"><span>Children</span><span class="sub"></span><button type="button" class="ghost sm">+ Add</button></div><div class="sub">none — this state runs its own operation and nothing below it</div></div>
+<div class="slots"><div class="slots-head"><span>Transitions</span><span class="sub"></span><button type="button" class="ghost sm">+ Add</button></div><div class="sub">none — the state terminates when its children are done</div></div>
+<div class="slots"><div class="slots-head"><span>Environment</span><span class="sub">defaults for this state and every descendant</span><button type="button" class="ghost sm">+ Add</button></div><div class="sub">none — this state adds no defaults to what it inherits</div></div>
+<div class="slots"><div class="slots-head"><span>Limits</span><span class="sub">how far this state may go before it is stopped</span></div><div class="row-controls"><label class="field"><span>Max iterations</span><input value="" inputmode="decimal" placeholder="guard value: limits.max_iterations" spellcheck="false"></label><label class="field"><span>Timeout</span><input value="" inputmode="decimal" placeholder="seconds — then terminate.timeout" spellcheck="false"></label></div></div>
+<div class="sub">A plain reference is editable here — 🔗 links a value to a file and unlinking gives back what was inline. Anything richer than that (a reference with sibling overrides, a computed binding) is kept exactly as written and shown read-only; edit those on the JSON tab.</div></div></div>
+</div>
+</body>
+</html>

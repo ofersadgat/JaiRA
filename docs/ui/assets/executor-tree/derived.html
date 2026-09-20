@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/executor-tree">
+<meta name="state" content="derived">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>executor-tree · derived</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/executor-tree · derived</p>
+<div class="mockup-stage" style="width: 812px">
+  <div class="col mid settings-body">
+    <div class="cfg-pane">
+      <section class="cfg-group">
+        <header class="cfg-group-head">
+          <h4>The default executor</h4>
+          <p class="cfg-hint">What every UI-initiated operation uses — starting a task, proposing workflow changes, summarizing a conversation. It is a TREE: an operation executor over a function executor and a router, and the whole of it is below. Nothing here has to be configured: what is shown is DERIVED from what is available, and a change pins only the field you changed, so a provider or agent you set up tomorrow still appears by itself.</p>
+        </header>
+        <div class="cfg-stack">
+          <div class="cfg-node-banner">
+            <span class="cfg-node-kind">Operation</span>
+            <code class="cfg-param">OperationExecutor</code>
+            <span class="cfg-hint">The top. Dispatches on the KIND of operation a state runs — a prompt, or a registered function — and holds one executor for each.</span>
+          </div>
+          <section class="cfg-level" data-depth="1">
+            <div class="cfg-level-head">
+              <span class="cfg-level-title">Functions</span>
+              <span class="cfg-hint">Host code, human gates, delegated agents and tools. Which of them EXIST is the run's business — a workflow's states decide that — so what is settable here is which this executor may reach.</span>
+            </div>
+            <div class="cfg-level-body">
+              <div class="cfg-stack">
+                <div class="cfg-field">
+                  <div class="cfg-field-say">
+                    <span class="cfg-field-head"><span class="cfg-label">Rules</span></span>
+                    <span class="cfg-hint">Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract. Empty means everything the workflow registers.<code class="cfg-param">function.rules</code></span>
+                  </div>
+                  <div class="cfg-control">
+                    <div class="cfg-rules">
+                      <p class="cfg-hint">No rules — everything the workflow registers.</p>
+                      <ol class="cfg-rule-list"></ol>
+                      <div class="cfg-rule-add">
+                        <button class="ghost">+ everything</button>
+                        <button class="ghost">+ nothing</button>
+                        <select class="cfg-input"><option>allow</option><option selected>deny</option></select>
+                        <select class="cfg-input"><option selected>— pick a function</option><option>choose_option — human gate — pick one of several options</option></select>
+                        <input class="cfg-input mono" placeholder="…or type a name / pattern">
+                        <button disabled>Add</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="cfg-disclosure">
+                  <button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Around every function call</span><span class="cfg-hint">· no layers</span></button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="cfg-level" data-depth="1">
+            <div class="cfg-level-head">
+              <span class="cfg-level-title">Prompts</span>
+              <span class="cfg-hint">How a prompt state is answered.</span>
+            </div>
+            <div class="cfg-level-body">
+              <div class="cfg-stack">
+                <div class="cfg-node-banner">
+                  <span class="cfg-node-kind">Router</span>
+                  <code class="cfg-param">PromptRouterExecutor</code>
+                  <span class="cfg-hint">Dispatches a prompt on its model id's PREFIX. Its routes are derived from everything available, so a provider or agent you set up appears here without being added.</span>
+                </div>
+                <section class="cfg-level" data-depth="2">
+                  <div class="cfg-level-head">
+                    <span class="cfg-level-title">Default call settings</span>
+                    <span class="cfg-hint">What a state that names nothing is filled in with — applied BEFORE the prefix is read, which is what lets a default reach an agent at all.</span>
+                  </div>
+                  <div class="cfg-level-body">
+                    <div class="cfg-fields">
+                      <div class="cfg-field">
+                        <div class="cfg-field-say">
+                          <span class="cfg-field-head"><span class="cfg-label">Default model</span></span>
+                          <span class="cfg-hint">A bare id routes to whatever serves that family below; prefix it to insist on one route. Empty leaves the choice to the state. The same block as Settings → Default environment.<code class="cfg-param">prompt.defaults.model</code></span>
+                        </div>
+                        <div class="cfg-control"><input class="cfg-input mono" placeholder="left to the state"></div>
+                      </div>
+                    </div>
+                    <div class="llm-config">
+                      <nav class="llm-rail">
+                        <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">provider defaults</span></button>
+                        <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
+                        <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+                        <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">none</span></button>
+                      </nav>
+                      <div class="llm-detail">
+                        <div class="llm-detail-head">
+                          <span class="llm-detail-title">Sampling</span>
+                          <span class="cfg-hint">How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.</span>
+                        </div>
+                        <div class="cfg-fields">
+                          <div class="cfg-field">
+                            <div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Temperature</span></span><span class="cfg-hint">Higher is more varied, lower more repeatable. Empty inherits the provider's default.<code class="cfg-param">temperature</code></span></div>
+                            <div class="cfg-control"><input class="cfg-input num" placeholder="—"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                <section class="cfg-level" data-depth="2">
+                  <div class="cfg-level-head">
+                    <span class="cfg-level-title">Routes (3)</span>
+                    <span class="cfg-hint">Derived from everything available, so a provider or agent you set up appears here by itself. Configuring one pins only what you changed.</span>
+                  </div>
+                  <div class="cfg-level-body">
+                    <div class="cfg-stack">
+                      <div class="cfg-route derived">
+                        <div class="cfg-route-head">
+                          <code class="cfg-route-prefix">anthropic/…</code>
+                          <span class="cfg-hint">provider anthropic · its own default · provider defaults</span>
+                          <span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>derived</span>
+                          <button class="ghost">Configure</button>
+                        </div>
+                      </div>
+                      <div class="cfg-route derived">
+                        <div class="cfg-route-head">
+                          <code class="cfg-route-prefix">claude-cli/…</code>
+                          <span class="cfg-hint">agent claude-cli · its own default · provider defaults</span>
+                          <span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>derived</span>
+                          <button class="ghost">Configure</button>
+                        </div>
+                      </div>
+                      <div class="cfg-route derived">
+                        <div class="cfg-route-head">
+                          <code class="cfg-route-prefix">local/…</code>
+                          <span class="cfg-hint">provider local · its own default · provider defaults</span>
+                          <span class="cfg-status unchecked"><span class="cfg-dot" aria-hidden="true"></span>derived</span>
+                          <button class="ghost">Configure</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                <div class="cfg-disclosure">
+                  <button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Around every routed call</span><span class="cfg-hint">· no layers</span></button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div class="cfg-disclosure">
+            <button type="button" class="cfg-disclosure-head" aria-expanded="false"><span class="cfg-caret" aria-hidden="true">▶</span><span class="cfg-disclosure-title">Around the whole executor</span><span class="cfg-hint">· no layers</span></button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

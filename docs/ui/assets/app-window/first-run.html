@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/app-window">
+<meta name="state" content="first-run">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>app-window · first-run</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/app-window · first-run</p>
+<div class="mockup-stage" style="width: 1280px; height: 560px; display: flex; background: var(--bg); --sidebar: 250px">
+  <nav class="sidebar">
+    <div class="side-title">
+      <button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar">|◂</button>
+      <span class="side-brand app-label">JAIRA</span>
+    </div>
+    <div class="side-nav">
+      <div class="side-roots">
+        <div class="side-row on is-active">
+          <button class="side-hit" title="All tasks" aria-current="page"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button>
+        </div>
+        <div class="side-row">
+          <button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button>
+          <button class="side-act" title="new conversation">+</button><button class="side-act" title="find">⌕</button>
+        </div>
+      </div>
+      <div class="side-section" style="--hue: var(--p0)">
+        <div class="side-row side-project-row">
+          <button class="side-hit" title="C:\Users\Ofer\.jaira" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">~/.jaira</span></span></button>
+          <span class="side-twist is-mark">▸</span>
+        </div>
+      </div>
+      <button class="side-row side-open" title="open another project" aria-haspopup="menu"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
+    </div>
+    <div class="side-foot">
+      <div class="side-row">
+        <button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button>
+      </div>
+    </div>
+  </nav>
+  <div class="splitter" role="separator" aria-label="Resize the sidebar" tabindex="0"></div>
+  <div class="body">
+    <header class="title-bar">
+      <header class="doc-bar inert">
+        <span class="crumb-part" style="--hue: var(--p0)"><button class="crumb-sep first" title="what else is at this level">›</button><span class="crumb crumb-project last" title="C:\Users\Ofer\.jaira">~/.jaira</span></span>
+        <span class="grow"></span>
+      </header>
+      <span class="title-drag"></span>
+    </header>
+    <div class="viewport">
+      <div class="view tasks-view" style="--pane-right: 360px">
+        <div class="col mid">
+          <section class="board-group">
+            <div class="board-body">
+              <div class="columns wrap">
+                <section class="column">
+                  <h4><span class="col-name">feature</span><span class="count app-secondary">0</span></h4>
+                  <div class="column-body"><div class="empty">—</div></div>
+                </section>
+                <section class="column">
+                  <h4><span class="col-name">hello_world</span><span class="count app-secondary">0</span></h4>
+                  <div class="column-body"><div class="empty">—</div></div>
+                </section>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="splitter" role="separator" aria-label="Resize the task panel" tabindex="0"></div>
+        <aside class="col panel">
+          <p class="empty">Select a task.</p>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

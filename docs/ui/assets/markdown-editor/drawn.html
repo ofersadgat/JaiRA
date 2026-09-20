@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/markdown-editor">
+<meta name="state" content="drawn">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>markdown-editor · drawn</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/markdown-editor · drawn</p>
+<div class="mockup-stage" style="width: 720px; height: 760px; display: grid">
+  <div class="col mid">
+    <div class="config-half whole">
+      <button type="button" class="half-bar" title="the whole column — click for folded away"><span class="half-caret">█</span><span class="half-label">Source</span><span class="grow"></span></button>
+      <div class="file-edit">
+        <div class="md-editor">
+          <div class="cm-editor">
+            <div class="cm-scroller">
+              <div class="cm-content" contenteditable="true" style="padding: 8px 2px; line-height: 1.6">
+                <div class="cm-line"><span class="cm-h1">Refine loop</span></div>
+                <div class="cm-line">The draft and the critique share one conversation, named <span class="cm-code">refine</span>, so the critique reads what the draft wrote. See <span class="cm-link">the authoring reference</span> for how a named session is declared.</div>
+                <div class="cm-line"><br></div>
+                <div class="cm-line"><span class="cm-h2">Each pass does three things</span></div>
+                <div class="cm-line cm-item-line" style="padding-left: calc(var(--md-inset, 0px) + 2ch) !important; text-indent: -2ch"><span class="cm-list"><span class="cm-bullet">•</span> </span>The draft writes <span class="cm-code">docs/ux/patterns/park-and-ask.md</span> from the brief, following every pattern the brief names and the writing standard in the prompt.</div>
+                <div class="cm-line cm-item-line" style="padding-left: calc(var(--md-inset, 0px) + 2ch) !important; text-indent: -2ch"><span class="cm-list"><span class="cm-bullet">•</span> </span>The critique lists what a builder would miss.</div>
+                <div class="cm-line cm-item-line" style="padding-left: calc(var(--md-inset, 0px) + 2ch) !important; text-indent: -2ch"><span class="cm-list"><span class="cm-bullet">•</span> </span><span class="cm-strong">Stop</span> when the critique is empty or after three passes.</div>
+                <div class="cm-line"><br></div>
+                <div class="cm-line cm-item-line" style="padding-left: calc(var(--md-inset, 0px) + 2ch) !important; text-indent: -2ch"><span class="cm-list"><span class="cm-bullet">•</span> </span><span class="cm-task cm-task-done">☑</span> name the session</div>
+                <div class="cm-line cm-item-line" style="padding-left: calc(var(--md-inset, 0px) + 2ch) !important; text-indent: -2ch"><span class="cm-list"><span class="cm-bullet">•</span> </span><span class="cm-task">☐</span> add <span class="cm-em">target: ask</span> as the escape</div>
+                <div class="cm-line"><br></div>
+                <div class="cm-line cm-quote-line"><span class="cm-quote">A child input may only read a sibling earlier in the sequence.</span></div>
+                <div class="cm-table-block"><table><thead><tr><th>state</th><th>passes</th><th>session</th></tr></thead><tbody><tr><td>feature.ux.draft</td><td>3</td><td><code>refine</code></td></tr><tr><td>feature.ux.critique</td><td>3</td><td><code>refine</code></td></tr></tbody></table></div>
+                <div class="cm-fence-block"><pre class="vv-source">jaira run feature --input brief=@docs/product/index.md</pre></div>
+                <div class="cm-line cm-hr-line"><br></div>
+                <div class="cm-line cm-linkref-line">[ref]: https://example.com/workflows</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-actions pinned"><button class="primary" disabled>Save</button><button class="ghost" disabled>Revert</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

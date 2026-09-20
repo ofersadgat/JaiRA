@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/components-view">
+<meta name="state" content="gallery">
+<meta name="captured" content="2026-09-13">
+<meta name="reflects" content="shipped">
+<title>components-view · gallery</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/surfaces/components-view · gallery</p>
+<div class="mockup-stage" style="width: 1030px; height: 880px; display: flex; background: var(--bg)">
+  <div class="body">
+    <header class="title-bar"><span class="title-drag"></span></header>
+    <div class="viewport">
+      <div class="view gallery-view">
+        <div class="col mid gallery-page">
+          <header class="gallery-page-head">
+            <h2>Components</h2>
+            <p class="sub">Every surface a run can put in front of you, with nothing behind it: the six built-in UI components a state's <code>operation.function</code> may name, the fallback for one it may not, and the two dialogs JaiRA raises on its own — a command approval and an agent's question. One row each; flip through the variations its config can express, or use the bar to send every row to the same one. Each card renders the REAL dialog from the config beside it — so editing the config is editing what you see, and answering it shows what a state's declared outputs would receive.</p>
+          </header>
+          <div class="gallery">
+            <div class="gallery-common" role="toolbar" aria-label="Show every row's variant">
+              <span class="sub">Every row to</span>
+              <button type="button" class="chip gallery-common-btn" title="slide the 9 rows that have a &quot;basic&quot; variant to it"><span class="mono">basic</span><span class="gallery-jump-n">9</span></button>
+              <button type="button" class="chip gallery-common-btn" title="slide the 2 rows that have a &quot;comments&quot; variant to it"><span class="mono">comments</span><span class="gallery-jump-n">2</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">custom</span><span class="gallery-jump-n">2</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">multiple</span><span class="gallery-jump-n">2</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">steps</span><span class="gallery-jump-n">2</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">follow_up</span><span class="gallery-jump-n">1</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">confirm</span><span class="gallery-jump-n">1</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">defaults</span><span class="gallery-jump-n">2</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">editable</span><span class="gallery-jump-n">1</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">routed</span><span class="gallery-jump-n">1</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">base</span><span class="gallery-jump-n">1</span></button>
+              <button type="button" class="chip gallery-common-btn"><span class="mono">input</span><span class="gallery-jump-n">1</span></button>
+              <button type="button" class="chip gallery-common-btn" title="slide the one row that has a &quot;empty&quot; variant to it"><span class="mono">empty</span><span class="gallery-jump-n">1</span></button>
+            </div>
+
+            <section class="gallery-row" id="gallery-choose_option">
+              <header class="gallery-row-head">
+                <div class="gallery-row-title">
+                  <h3>Choose an option<span class="chip">interaction</span><span class="mono sub">choose_option</span></h3>
+                  <p class="sub">One decision, taken from a set the state names. The answer lands as `decision`, which is why the state's declared output usually carries the same enum. The SAME control draws a running agent's question — the two differ in where the answer goes and in nothing you can see (decision 0002).</p>
+                </div>
+                <div class="gallery-row-nav">
+                  <div class="tabs seg gallery-tabs">
+                    <button type="button" class="layer-on">One tap</button>
+                    <button type="button" class="ghost">With a comment</button>
+                    <button type="button" class="ghost">With an answer of your own</button>
+                    <button type="button" class="ghost">Several at once</button>
+                    <button type="button" class="ghost">Held until confirmed</button>
+                    <button type="button" class="ghost">Several questions, one at a time</button>
+                    <button type="button" class="ghost">With follow-up questions</button>
+                  </div>
+                  <div class="gallery-arrows">
+                    <button type="button" class="ghost" aria-label="Previous variant" disabled>‹</button>
+                    <span class="sub mono">1/7</span>
+                    <button type="button" class="ghost" aria-label="Next variant">›</button>
+                  </div>
+                </div>
+              </header>
+              <div class="gallery-track">
+                <div class="gallery-slide">
+                  <section class="gallery-card">
+                    <header class="gallery-head">
+                      <h4>One tap</h4>
+                      <p class="sub">A single-select with no free text answers on the click. Descriptions, icons and a `danger` tone are the option's own to declare.</p>
+                    </header>
+                    <div class="gallery-body">
+                      <div class="gallery-stage">
+                        <div class="modal-backdrop">
+                          <div class="modal" data-testid="interaction">
+                            <h3><svg class="gate-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v6a3 3 0 0 0 3 3h7"></path><path d="M6 21v-6"></path><path d="m13 9 3 3-3 3"></path></svg> Pick a direction for the plan.</h3>
+                            <div class="question-block">
+                              <div class="question-options">
+                                <button class="question-option" title="the plan goes forward as written"><span class="question-option-label"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg> approve</span><small class="question-option-desc">the plan goes forward as written</small></button>
+                                <button class="question-option" title="back to the model with your note"><span class="question-option-label"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"></path></svg> request_changes</span><small class="question-option-desc">back to the model with your note</small></button>
+                                <button class="question-option danger" title="nothing downstream is built"><span class="question-option-label"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="M6 6l12 12"></path></svg> block</span><small class="question-option-desc">nothing downstream is built</small></button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="gallery-side">
+                        <div class="gallery-config">
+                          <div class="gallery-config-head">
+                            <div class="tabs seg">
+                              <button class="layer-on" title="edit it as a form">Form</button>
+                              <button class="ghost">JSON</button>
+                            </div>
+                            <span class="sub grow">the state's authored args</span>
+                            <button class="link">reset</button>
+                          </div>
+                          <div class="cfg-fields">
+                            <div class="cfg-field">
+                              <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" title="leave prompt out" class="cfg-switch on"><span class="cfg-switch-knob"></span></button><span class="cfg-label">prompt</span></span><span class="cfg-hint">the question, as the person reads it — the dialog's heading<code class="cfg-param">prompt</code></span></div>
+                              <div class="cfg-control"><input class="cfg-input" value="Pick a direction for the plan."></div>
+                            </div>
+                            <div class="cfg-span cfg-block">
+                              <div class="cfg-field">
+                                <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" title="leave options out" class="cfg-switch on"><span class="cfg-switch-knob"></span></button><span class="cfg-label">options</span><span class="sf-type">list · at least 1</span></span><span class="cfg-hint">the decision buttons, in order; a bare string is an option whose label is its value<code class="cfg-param">options</code></span></div>
+                                <div class="cfg-control">
+                                  <div class="cfg-list">
+                                    <div class="cfg-list-row"><div class="cfg-list-body"><div class="sf-row-head closed"><button type="button" class="quiet sf-caret" aria-expanded="false">▸</button><span class="sf-index">[0]</span><span class="sub ellip">approve</span><div class="cfg-list-acts"><button type="button" class="quiet" disabled>↑</button><button type="button" class="quiet">↓</button><button type="button" class="quiet">✕</button></div></div></div></div>
+                                    <div class="cfg-list-row"><div class="cfg-list-body"><div class="sf-row-head closed"><button type="button" class="quiet sf-caret" aria-expanded="false">▸</button><span class="sf-index">[1]</span><span class="sub ellip">request_changes</span><div class="cfg-list-acts"><button type="button" class="quiet">↑</button><button type="button" class="quiet">↓</button><button type="button" class="quiet">✕</button></div></div></div></div>
+                                    <div class="cfg-list-row"><div class="cfg-list-body"><div class="sf-row-head closed"><button type="button" class="quiet sf-caret" aria-expanded="false">▸</button><span class="sf-index">[2]</span><span class="sub ellip">block</span><div class="cfg-list-acts"><button type="button" class="quiet">↑</button><button type="button" class="quiet" disabled>↓</button><button type="button" class="quiet">✕</button></div></div></div></div>
+                                    <div class="cfg-list-add"><button type="button" class="ghost">+ add</button></div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div class="cfg-field">
+                              <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" title="set comments" class="cfg-switch"><span class="cfg-switch-knob"></span></button><span class="cfg-label">comments</span><span class="sf-type">yes / no</span></span><span class="cfg-hint">offer a free-text note alongside the choice<code class="cfg-param">comments</code></span></div>
+                              <div class="cfg-control"><div class="sf-absent">not set</div></div>
+                            </div>
+                            <div class="cfg-field">
+                              <div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" title="set multiple" class="cfg-switch"><span class="cfg-switch-knob"></span></button><span class="cfg-label">multiple</span><span class="sf-type">yes / no</span></span><span class="cfg-hint">several options may be chosen; the answer is then a list<code class="cfg-param">multiple</code></span></div>
+                              <div class="cfg-control"><div class="sf-absent">not set</div></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </section>
+
+            <section class="gallery-row" id="gallery-review_artifact">
+              <header class="gallery-row-head">
+                <div class="gallery-row-title">
+                  <h3>Review an artifact<span class="chip">interaction</span><span class="mono sub">review_artifact</span></h3>
+                  <p class="sub">The same decision, shown beside the thing it is about. `artifact` names the input to display — a decision about something you cannot see is the failure this component exists to prevent.</p>
+                </div>
+                <div class="gallery-row-nav">
+                  <div class="tabs seg gallery-tabs">
+                    <button type="button" class="layer-on">Read and decide</button>
+                    <button type="button" class="ghost">With a review-level comment</button>
+                    <button type="button" class="ghost">Editable</button>
+                  </div>
+                  <div class="gallery-arrows">
+                    <button type="button" class="ghost" aria-label="Previous variant" disabled>‹</button>
+                    <span class="sub mono">1/3</span>
+                    <button type="button" class="ghost" aria-label="Next variant">›</button>
+                  </div>
+                </div>
+              </header>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
