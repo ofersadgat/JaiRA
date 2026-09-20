@@ -1,0 +1,20 @@
+{
+  "_source": "recorded 2026-09-19 from the public API with an unauthenticated GET",
+  "_recordedUrl": "https://gitlab.com/api/v4/user",
+  "match": {
+    "method": "GET",
+    "path": "/api/v4/user",
+    "header": {
+      "private-token": "refused"
+    }
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "message": "401 Unauthorized"
+    }
+  }
+}

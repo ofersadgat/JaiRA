@@ -44,14 +44,20 @@ export interface ConfigPaneProps {
   children?: JSX.Element;
 }
 
-export function ConfigPane({ config, layer, busy, editable, onSave, children }: ConfigPaneProps): JSX.Element {
-  if (config === null) return <p className="empty">The configuration could not be read.</p>;
-
-  const doc = (layer === "base" ? config.base : config.project) as Record<string, unknown> | null;
-  const effective = config.effective as Record<string, unknown>;
-  const locked = busy || !editable;
-
-  /** Write one dotted path into the LAYER's document. `undefined` removes it, so it inherits again. */
+/**
+ * Write into ONE layer's document, a dotted path at a time — what every form on a settings screen
+ * saves through.
+ *
+ * `set` writes one path; `undefined` removes it, so the field inherits again, and a container the
+ * removal emptied goes with it. `stated` says whether THIS layer says anything at a path, which is
+ * what a field's set/not-set switch shows. Both read the layer's own document and never the merged
+ * one: saving in a project must not copy the shared root's settings out of it.
+ */
+export function layerWriter(
+  doc: Record<string, unknown> | null,
+  layer: ConfigLayer,
+  onSave: (layer: ConfigLayer, doc: unknown) => void,
+): { set: (path: string, value: unknown) => void; stated: (path: string) => boolean } {
   const set = (path: string, value: unknown): void => {
     const next = structuredClone(doc ?? {}) as Record<string, unknown>;
     const parts = path.split(".");
@@ -85,6 +91,17 @@ export function ConfigPane({ config, layer, busy, editable, onSave, children }: 
     }
     return true;
   };
+  return { set, stated };
+}
+
+export function ConfigPane({ config, layer, busy, editable, onSave, children }: ConfigPaneProps): JSX.Element {
+  if (config === null) return <p className="empty">The configuration could not be read.</p>;
+
+  const doc = (layer === "base" ? config.base : config.project) as Record<string, unknown> | null;
+  const effective = config.effective as Record<string, unknown>;
+  const locked = busy || !editable;
+
+  const { set, stated } = layerWriter(doc, layer, onSave);
 
   return (
     <div className="cfg-pane">

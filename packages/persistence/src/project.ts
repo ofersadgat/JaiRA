@@ -189,7 +189,11 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
   mkdirSync(paths.snapshotsDir, { recursive: true });
   mkdirSync(paths.tasksDir, { recursive: true });
   if (!existsSync(paths.settingsFile)) {
-    writeFileSync(paths.settingsFile, JSON.stringify(defaultConfig(), null, 2) + "\n", "utf8");
+    // `integrations` is left out of the starter file. A connection is a fact about a MACHINE — its
+    // hosts, its tokens — and belongs to the shared root; a project file that spelled the defaults out
+    // would shadow whatever the shared root says, in every project created after it was said.
+    const { integrations: _machineWide, ...starter } = defaultConfig();
+    writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");
   if (existsSync(ignoreFile)) ensureKeyIgnored(ignoreFile);

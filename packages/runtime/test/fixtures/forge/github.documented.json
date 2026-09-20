@@ -1,0 +1,122 @@
+{
+  "_source": "BUILT from GitHub's documented response shapes (docs.github.com/rest: users, pulls, issues comments, pull review comments; docs.github.com/graphql: PullRequest, PullRequestReviewThread, latestOpinionatedReviews, addPullRequestReviewThreadReply, resolveReviewThread) — GraphQL and every write need a token, so none could be recorded without one. Field names and nesting follow the docs; logins, ids and bodies are invented. The repository and request are the ones the recorded fixtures use (cli/cli #14462).",
+  "fixtures": [
+    {
+      "match": { "method": "GET", "path": "/user", "header": { "authorization": "Bearer good" } },
+      "response": { "status": 200, "headers": { "x-oauth-scopes": "repo, read:org" }, "body": { "login": "jaira-bot", "id": 900, "name": "JaiRA Bot" } }
+    },
+    {
+      "match": { "method": "GET", "path": "/user", "header": { "authorization": "Bearer noscope" } },
+      "response": { "status": 200, "headers": { "x-oauth-scopes": "read:user" }, "body": { "login": "jaira-bot", "id": 900, "name": "JaiRA Bot" } }
+    },
+    {
+      "match": { "method": "GET", "path": "/user", "header": { "authorization": "Bearer finegrained" } },
+      "response": { "status": 200, "headers": {}, "body": { "login": "jaira-bot", "id": 900, "name": null } }
+    },
+
+    {
+      "match": { "method": "POST", "path": "/graphql", "operation": "JairaRead", "body": { "variables": { "owner": "cli", "name": "cli", "number": 14462 } } },
+      "response": {
+        "status": 200, "headers": {},
+        "body": { "data": { "repository": { "pullRequest": {
+          "state": "OPEN", "isDraft": false, "merged": false, "updatedAt": "2026-09-18T10:00:00Z",
+          "headRefOid": "189706bccb1686c68fb73c5bd9013358320a9e71",
+          "mergeCommit": null, "mergedBy": null,
+          "timelineItems": { "nodes": [] },
+          "latestOpinionatedReviews": { "nodes": [
+            { "id": "PRR_mara", "state": "CHANGES_REQUESTED", "body": "needs tests", "submittedAt": "2026-09-18T09:40:00Z", "authorAssociation": "MEMBER", "author": { "login": "mara" } },
+            { "id": "PRR_sam", "state": "APPROVED", "body": "", "submittedAt": "2026-09-18T09:45:00Z", "authorAssociation": "COLLABORATOR", "author": { "login": "sam" } },
+            { "id": "PRR_old", "state": "DISMISSED", "body": "", "submittedAt": "2026-09-17T09:00:00Z", "authorAssociation": "MEMBER", "author": { "login": "lee" } }
+          ] },
+          "reviews": { "nodes": [
+            { "id": "PRR_c1", "body": "An overall comment, submitted as a review.", "createdAt": "2026-09-18T09:10:00Z", "authorAssociation": "MEMBER", "author": { "login": "mara" } },
+            { "id": "PRR_c2", "body": "", "createdAt": "2026-09-18T09:11:00Z", "authorAssociation": "MEMBER", "author": { "login": "mara" } }
+          ] },
+          "comments": { "nodes": [
+            { "id": "IC_1", "body": "nice", "createdAt": "2026-09-18T09:05:00Z", "authorAssociation": "CONTRIBUTOR", "author": { "login": "drive-by" } },
+            { "id": "IC_2", "body": "approve", "createdAt": "2026-09-18T09:50:00Z", "authorAssociation": "COLLABORATOR", "author": { "login": "sam" } },
+            { "id": "IC_3", "body": "Opened by JaiRA for review.", "createdAt": "2026-09-18T09:00:00Z", "authorAssociation": "COLLABORATOR", "author": { "login": "jaira-bot" } }
+          ] },
+          "reviewThreads": { "nodes": [
+            { "id": "PRRT_1", "isResolved": false, "path": "pkg/cmd/root/root.go", "line": 12, "originalLine": 12, "diffSide": "RIGHT",
+              "comments": { "nodes": [
+                { "id": "PRRC_1", "body": "This flag is never read.", "createdAt": "2026-09-18T09:15:00Z", "authorAssociation": "MEMBER", "author": { "login": "mara" } },
+                { "id": "PRRC_2", "body": "Fixed in the next push.", "createdAt": "2026-09-18T09:25:00Z", "authorAssociation": "COLLABORATOR", "author": { "login": "jaira-bot" } }
+              ] } },
+            { "id": "PRRT_2", "isResolved": true, "path": "go.mod", "line": null, "originalLine": 7, "diffSide": "LEFT",
+              "comments": { "nodes": [
+                { "id": "PRRC_3", "body": "Why drop this?", "createdAt": "2026-09-17T08:00:00Z", "authorAssociation": "NONE", "author": { "login": "drive-by" } }
+              ] } }
+          ] }
+        } } } }
+      }
+    },
+    {
+      "match": { "method": "POST", "path": "/graphql", "operation": "JairaRead", "body": { "variables": { "number": 14463 } } },
+      "response": {
+        "status": 200, "headers": {},
+        "body": { "data": { "repository": { "pullRequest": {
+          "state": "MERGED", "isDraft": false, "merged": true, "updatedAt": "2026-09-18T11:00:00Z",
+          "headRefOid": "2222222222222222222222222222222222222222",
+          "mergeCommit": { "oid": "0cf1092493af067646fc5f3db9421c6a6ec9c938" }, "mergedBy": { "login": "mara" },
+          "timelineItems": { "nodes": [ { "actor": { "login": "mara" } } ] },
+          "latestOpinionatedReviews": { "nodes": [] }, "reviews": { "nodes": [] }, "comments": { "nodes": [] }, "reviewThreads": { "nodes": [] }
+        } } } }
+      }
+    },
+    {
+      "match": { "method": "POST", "path": "/graphql", "operation": "JairaRead", "body": { "variables": { "number": 14464 } } },
+      "response": {
+        "status": 200, "headers": {},
+        "body": { "data": { "repository": { "pullRequest": {
+          "state": "CLOSED", "isDraft": false, "merged": false, "updatedAt": "2026-09-18T11:30:00Z",
+          "headRefOid": "3333333333333333333333333333333333333333",
+          "mergeCommit": null, "mergedBy": null,
+          "timelineItems": { "nodes": [ { "actor": { "login": "lee" } } ] },
+          "latestOpinionatedReviews": { "nodes": [] }, "reviews": { "nodes": [] }, "comments": { "nodes": [] }, "reviewThreads": { "nodes": [] }
+        } } } }
+      }
+    },
+    {
+      "match": { "method": "POST", "path": "/graphql", "operation": "JairaRead", "body": { "variables": { "number": 99999 } } },
+      "response": {
+        "status": 200, "headers": {},
+        "body": { "data": { "repository": { "pullRequest": null } }, "errors": [ { "type": "NOT_FOUND", "path": ["repository", "pullRequest"], "message": "Could not resolve to a PullRequest with the number of 99999." } ] }
+      }
+    },
+    {
+      "match": { "method": "POST", "path": "/graphql", "operation": "JairaReply", "body": { "variables": { "thread": "PRRT_1" } } },
+      "response": { "status": 200, "headers": {}, "body": { "data": { "addPullRequestReviewThreadReply": { "comment": { "id": "PRRC_9" } } } } }
+    },
+    {
+      "match": { "method": "POST", "path": "/graphql", "operation": "JairaResolve", "body": { "variables": { "thread": "PRRT_1" } } },
+      "response": { "status": 200, "headers": {}, "body": { "data": { "resolveReviewThread": { "thread": { "id": "PRRT_1", "isResolved": true } } } } }
+    },
+
+    {
+      "match": { "method": "GET", "path": "/repos/cli/cli/pulls", "query": { "head": "cli:jaira/t-1/review" } },
+      "response": { "status": 200, "headers": {}, "body": [] }
+    },
+    {
+      "match": { "method": "POST", "path": "/repos/cli/cli/pulls", "body": { "head": "jaira/t-1/review" } },
+      "response": {
+        "status": 201, "headers": {},
+        "body": { "number": 14470, "state": "open", "draft": true, "title": "Review the implementation", "html_url": "https://github.com/cli/cli/pull/14470", "head": { "ref": "jaira/t-1/review", "sha": "4444444444444444444444444444444444444444" }, "base": { "ref": "trunk" } }
+      }
+    },
+
+    { "match": { "method": "POST", "path": "/repos/cli/cli/issues/14462/comments" }, "response": { "status": 201, "headers": {}, "body": { "id": 7001 } } },
+    {
+      "match": { "method": "POST", "path": "/repos/cli/cli/pulls/14462/comments", "body": { "line": 999 } },
+      "response": { "status": 422, "headers": {}, "body": { "message": "Validation Failed", "errors": [ { "resource": "PullRequestReviewComment", "code": "custom", "field": "pull_request_review_thread.line", "message": "pull_request_review_thread.line must be part of the diff" } ] } }
+    },
+    { "match": { "method": "POST", "path": "/repos/cli/cli/pulls/14462/comments" }, "response": { "status": 201, "headers": {}, "body": { "id": 7002 } } },
+
+    { "match": { "method": "PUT", "path": "/repos/cli/cli/pulls/14462/merge" }, "response": { "status": 200, "headers": {}, "body": { "sha": "0cf1092493af067646fc5f3db9421c6a6ec9c938", "merged": true, "message": "Pull Request successfully merged" } } },
+    { "match": { "method": "PUT", "path": "/repos/cli/cli/pulls/14464/merge" }, "response": { "status": 405, "headers": {}, "body": { "message": "Pull Request is not mergeable" } } },
+    { "match": { "method": "PATCH", "path": "/repos/cli/cli/pulls/14462", "body": { "state": "closed" } }, "response": { "status": 200, "headers": {}, "body": { "number": 14462, "state": "closed" } } },
+
+    { "match": { "method": "GET", "path": "/repos/cli/cli/pulls/14465" }, "response": { "status": 429, "headers": { "retry-after": "60" }, "body": { "message": "API rate limit exceeded" } } },
+    { "match": { "method": "GET", "path": "/repos/cli/cli/pulls/14466" }, "response": { "status": 404, "headers": {}, "body": { "message": "Not Found" } } }
+  ]
+}

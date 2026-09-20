@@ -1,0 +1,20 @@
+{
+  "_source": "recorded 2026-09-19 from the public API with an unauthenticated GET — the conditional repeat of github.pull.json, answered 304 with no body",
+  "_recordedUrl": "https://api.github.com/repos/cli/cli/pulls/14462",
+  "match": {
+    "method": "GET",
+    "path": "/repos/cli/cli/pulls/14462",
+    "header": {
+      "if-none-match": "\"317fc63fc44b31f5301de92dd4280de06f430c441e1d92421783b7f19609f265\""
+    }
+  },
+  "response": {
+    "status": 304,
+    "headers": {
+      "etag": "\"317fc63fc44b31f5301de92dd4280de06f430c441e1d92421783b7f19609f265\"",
+      "content-type": "application/json; charset=utf-8",
+      "x-github-media-type": "github.v3; format=json"
+    },
+    "body": null
+  }
+}

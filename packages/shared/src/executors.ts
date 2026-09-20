@@ -177,12 +177,15 @@ export interface ProbeResult {
  * which is derived from BOTH halves and would otherwise be recomputed differently by each caller.
  */
 import type { JairaOperationNode } from "./executorTree";
+import type { ForgeCheck } from "./forge";
 
 export interface AvailabilitySnapshot {
   /** Provider routes, keyed in `MODEL_ROUTE_KEYS` order. */
   routes: ProbeResult[];
   /** Executors, in inventory order. */
   executors: ProbeResult[];
+  /** Forge connections, in configuration order — each checked by asking its host who the token is. */
+  forges?: ForgeCheck[];
   /**
    * The DEFAULT executor, resolved — the whole tree, derived from what the checks above found.
    *

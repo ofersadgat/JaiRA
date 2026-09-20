@@ -146,6 +146,8 @@ import {
   enabledGenericAgents,
   listExecutors,
   probeExecutor,
+  checkForges,
+  type ForgeHttp,
   SecretResolver,
   persistEngineArtifacts,
   registerFileTools,
@@ -478,6 +480,11 @@ export interface AppServiceOptions {
    * always available, and the snapshot is always readable — this only decides who triggers them.
    */
   probeOnStart?: boolean;
+  /**
+   * How a forge is reached (decision 0004 §1). Absent ⇒ the platform `fetch`; a test passes a replay,
+   * so checking a connection never leaves the process.
+   */
+  forgeHttp?: ForgeHttp;
   /**
    * What answers {@link AppService.checkFile} — the TypeScript language service, wherever it runs.
    *
@@ -5375,9 +5382,15 @@ export class AppService {
   private async computeAvailability(): Promise<AvailabilitySnapshot> {
     const config = this.effectiveConfig();
     const secrets = this.secretResolver();
-    const [routes, executors] = await Promise.all([
+    const [routes, executors, forges] = await Promise.all([
       probeModelRoutes(config.models, { secrets }),
       this.probeExecutors(),
+      // A connection with no token stored makes no request, so an install that uses no forge pays
+      // nothing here; one that does is asked who its token is, which is the whole of the check.
+      checkForges(config.integrations, {
+        secrets,
+        ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+      }),
     ]);
     // What the DEFAULT executor's tree resolves to, derived from both halves and only here: an
     // executor whose binary is missing is not a route, which is the difference between "it routes to
@@ -5390,7 +5403,7 @@ export class AppService {
       // will do — a bare `claude-sonnet-5` resolving to `claude-cli` is a property of the tree.
       vendors: agentRouteVendors(config.agents),
     });
-    this.availability = { routes, executors, tree, checkedAt: Date.now() };
+    this.availability = { routes, executors, forges, tree, checkedAt: Date.now() };
     this.publish({ type: "store:invalidate", scope: "availability" });
     return this.availability;
   }

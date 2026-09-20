@@ -26,6 +26,12 @@ export const BASE_DIR = mkdtempSync(join(tmpdir(), "jaira-base-"));
 
 process.env["JAIRA_HOME"] = BASE_DIR;
 
+// A developer's shell may export real forge tokens, and the environment is the last link of the
+// secret chain. With no token a connection check makes no request at all, so removing the two
+// conventional names is what keeps a test from ever signing in to a real forge by accident.
+delete process.env["GITLAB_TOKEN"];
+delete process.env["GITHUB_TOKEN"];
+
 afterAll(() => {
   rmSync(BASE_DIR, { recursive: true, force: true });
 });

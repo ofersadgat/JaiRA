@@ -26,6 +26,7 @@ export * from "./executors";
 export * from "./executorStack";
 export * from "./executorTree";
 export * from "./configSchema";
+export * from "./forge";
 export * from "./slotTypes";
 export * from "./references";
 export * from "./changeset";

@@ -11,6 +11,7 @@ import type { Scope } from "./scopes";
 import { PERMISSION_MODES, type PermissionMode } from "./operationVocabulary";
 import type { JsonValue } from "@declarative-ai/json";
 import type { CredentialUse } from "./executors";
+import { defaultIntegrations, parseIntegrations, type JairaIntegrationsConfig } from "./forge";
 import { EXECUTOR_STEPS, type JairaExecutorSteps } from "./executorStack";
 import { parseFunctionRule, type JairaOperationNode, type JairaPromptNode } from "./executorTree";
 
@@ -309,6 +310,8 @@ export interface JairaConfig {
   workflows: JairaWorkflowConfig;
   /** What the Files tree draws, and what it leaves out (`./hiddenPaths`). */
   files: JairaFilesConfig;
+  /** Connections to remote systems, and the defaults of what runs over them (`./forge`, decision 0004). */
+  integrations: JairaIntegrationsConfig;
 }
 
 /**
@@ -514,6 +517,7 @@ export function defaultConfig(): JairaConfig {
     executors: {},
     workflows: {},
     files: {},
+    integrations: defaultIntegrations(),
   };
 }
 
@@ -1007,6 +1011,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     executors: parseExecutorDefinitions(cfg["executors"]),
     workflows: parseWorkflows(cfg["workflows"]),
     files: parseFiles(cfg["files"]),
+    integrations: parseIntegrations(cfg["integrations"]),
   };
 }
 

@@ -780,7 +780,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "providers" | "executors" | "files" | "appearance" | "conversation" | "config" | "history";
+export type SettingsSection = "providers" | "executors" | "integrations" | "files" | "appearance" | "conversation" | "config" | "history";
 
 const EMPTY: AppState = {
   at: null,
@@ -3432,7 +3432,7 @@ export function useApp() {
         // Read what main already knows. It does NOT trigger a check: the checks ran at startup and
         // after the last write, so opening this section shows an answer immediately rather than a row
         // of "not checked" that fills in a second later — which is what the old on-open probe did.
-        if (section === "providers" || section === "executors") void refreshAvailability();
+        if (section === "providers" || section === "executors" || section === "integrations") void refreshAvailability();
       },
       // Refused rather than silently accepted when there is nothing to write: the shell hides the
       // switch without a project, and an action that could still be reached another way should agree
@@ -3818,6 +3818,44 @@ export function useApp() {
             // A stored key nothing points at would never be looked up, so naming it in the layer
             // being edited is part of saving it — not a second thing to remember.
             await actionsRef.current.setExecutorConfig(executor, { credential: name }, layer);
+          } else {
+            // The name was already in config, so nothing was written and no re-check was pushed —
+            // but the VALUE behind it changed, which is exactly what the last check was reporting on.
+            await actionsRef.current.recheckAvailability();
+          }
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /**
+       * Store a forge connection's token (decision 0004 §1) — {@link saveCredential}'s sibling.
+       *
+       * The value goes straight to main and is never held in renderer state; an empty one CLEARS it.
+       * A connection that names no token yet gets the name written into the layer being edited, for
+       * the reason an executor does: a stored secret nothing points at is never looked up.
+       */
+      saveForgeToken: async (request: {
+        connection: string;
+        named?: string;
+        name: string;
+        value: string;
+        target: SecretTarget;
+        layer: ConfigLayer;
+      }) => {
+        const { connection, named, name, value, target, layer } = request;
+        patch({ busy: true, error: null });
+        try {
+          await invoke("secret:set", { name, value, target });
+          patch({ busy: false });
+          if (name !== named) {
+            const view = ref.current.config;
+            const doc = structuredClone(((layer === "base" ? view?.base : view?.project) ?? {}) as Record<string, unknown>);
+            const integrations = (doc["integrations"] ??= {}) as Record<string, unknown>;
+            const forges = (integrations["forges"] ??= {}) as Record<string, unknown>;
+            forges[connection] = { ...((forges[connection] ?? {}) as object), credential: name };
+            // Writing config re-checks on its own, with the new name in hand.
+            await actionsRef.current.saveConfig(layer, doc);
           } else {
             // The name was already in config, so nothing was written and no re-check was pushed —
             // but the VALUE behind it changed, which is exactly what the last check was reporting on.

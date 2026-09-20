@@ -104,6 +104,7 @@ import { ConfigPanel } from "./configPanel";
 import { DebugPane } from "./debugPane";
 import { GalleryPane } from "./galleryPane";
 import { ProvidersPane } from "./providersPane";
+import { IntegrationsPane } from "./integrationsPane";
 import { ExecutorsPane } from "./executorsPane";
 import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
@@ -220,7 +221,7 @@ function SettingsHeader({
   onRecheck: () => void;
 }): JSX.Element | null {
   const meta = SECTIONS.find((s) => s.id === section);
-  const observed = section === "providers" || section === "executors";
+  const observed = section === "providers" || section === "executors" || section === "integrations";
   if (meta === undefined || (!meta.layered && !observed)) return null;
   return (
     <div className="settings-head">
@@ -340,6 +341,8 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
 const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; needsProject?: boolean }> = [
   { id: "providers", label: "Providers", layered: true },
   { id: "executors", label: "Executors", layered: true },
+  // Observed like the two above it: a connection is checked by asking its host who the token is.
+  { id: "integrations", label: "Integrations", layered: true },
   { id: "config", label: "Configuration", layered: true },
   // Layered, because a checkout can have an opinion about its own tree worth sharing — and NOT
   // `needsProject`, because the shared root is a tree too and hiding something in it is exactly what
@@ -2269,6 +2272,18 @@ export default function App(): JSX.Element {
                     onAdd={actions.addExecutor}
                     onRemove={actions.removeExecutor}
                     onSaveCredential={actions.saveCredential}
+                  />
+                ) : null}
+                {state.section === "integrations" ? (
+                  <IntegrationsPane
+                    config={state.config}
+                    layer={state.configLayer}
+                    busy={state.busy}
+                    editable={state.configLayer === "base" || state.at !== null}
+                    checks={state.availability.forges ?? []}
+                    secrets={state.secrets}
+                    onSave={actions.saveConfig}
+                    onSaveToken={actions.saveForgeToken}
                   />
                 ) : null}
                 {state.section === "executors" ? (

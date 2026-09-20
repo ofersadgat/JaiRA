@@ -241,7 +241,7 @@ export function BrandIcon({ name, className }: { name: string; className?: strin
   const mark = brandMark(company);
   if (mark !== undefined) {
     return (
-      <svg className={className} viewBox="0 0 24 24" fill={mark.hex} aria-hidden>
+      <svg className={className} viewBox="0 0 24 24" fill={mark.onGround === true ? "currentColor" : mark.hex} aria-hidden>
         <path d={mark.path} />
       </svg>
     );

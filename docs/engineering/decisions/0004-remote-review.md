@@ -379,6 +379,42 @@ Mockups (today's gate as the baseline, then each proposed state):
 Each step is usable on its own. Until 5, a loop carries the request by
 value through `coalesce(...)`; nothing before it is blocked on it.
 
+## Built
+
+**Step 1 (2026-09-19).** `packages/shared/src/forge.ts` holds the wire shapes, the `integrations`
+block and its parser; `packages/runtime/src/forge/` holds the HTTP seam (`ForgeHttp`), the two
+providers and the connection check; Settings → Integrations is `integrationsPane.tsx`. What the
+build settled that the text above left open:
+
+- A connection is keyed by a **name** (`integrations.forges.<name>`), not by its host: a host has
+  dots and a config path splits on them. `gitlab` and `github` are built in, each naming a
+  conventional token (`GITLAB_TOKEN`, `GITHUB_TOKEN`) and holding none; two connections on one host
+  are refused, because the host is what picks.
+- `jaira init` leaves `integrations` out of a new project's `settings.json`. It spells out the other
+  defaults, and spelling these out would shadow whatever the shared root says about a machine's
+  hosts in every project created afterwards.
+- `ForgeProvider` gained `whoami()`, which is what validating a connection calls. A classic GitHub
+  token that signs in without the `repo` scope fails the check; a fine-grained one lists no scopes
+  and passes.
+- A note the forge cannot place (GitLab `400`, GitHub `422` — a line outside the diff) is posted on
+  the request instead, prefixed with `path:line`. A note is never lost to an anchor.
+- GitLab has no endpoint for "requested changes" on the versions this must work with; it is read
+  from the system note the act leaves in the discussions, and a later approval by the same person
+  withdraws it. Write access is one `members/all/:id` call per author, remembered.
+- **Measured:** GitLab's `updated_after` is **inclusive** — asked for a request's exact
+  `updated_at`, the list returned that request (the recorded fixture
+  `gitlab.list-updated-after.json` is that call). The probe cursor therefore moves one millisecond
+  past the newest row, or the newest request would read as moved on every tick.
+- **Measured:** an *unauthenticated* conditional request answered `304` on GitHub still spent one of
+  the 60 (57 → 56). Only the authenticated one is free, as documented; not yet measured with a token.
+- GitHub's `/notifications` shortcut is not built. The per-request conditional probe is free, so it
+  costs only the cross-repo shortcut, and a fine-grained token cannot read it anyway.
+
+Fixtures are of two kinds and each says which in `_source`: recorded from the public API with an
+unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both
+`401`s), and built from the documented shapes for what needs a token (every write, GitLab's
+discussions, GitHub's GraphQL). Nothing has been run against a real project with a real token.
+
 ## Open
 
 - A `tree: "base"` changeset has no commit to push. Step 2 materializes one
