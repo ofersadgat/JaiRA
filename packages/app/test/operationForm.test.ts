@@ -217,7 +217,7 @@ describe("session", () => {
   });
 
   it("shows a computed position read-only", () => {
-    const computed = { session: { expr: ".children.plan.operation.output.session" } };
+    const computed = { session: { $expr: ".children.plan.operation.output.session" } };
     expect(operationFieldsOf(computed).session.mode).toBe("structured");
     expect(round(computed)).toEqual(computed);
   });

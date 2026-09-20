@@ -325,7 +325,7 @@ that knows.
 "transitions": [
   { "to": "engineering",
     "when": ".children.review.output.verdict === 'revise'",
-    "inputs": { "returned_findings": { "expr": ".children.review.output.findings" } } }
+    "inputs": { "returned_findings": { "$expr": ".children.review.output.findings" } } }
 ]
 ```
 
@@ -355,7 +355,7 @@ alongside the source's. "What I just found, on top of what you already had" is o
 ```jsonc
 { "to": "collect",
   "when": ".run.iteration < .limits.max_iterations",
-  "inputs": { "all": { "expr": "concat(.children.collect.output.all, .children.judge.output.found)" } } }
+  "inputs": { "all": { "$expr": "concat(.children.collect.output.all, .children.judge.output.found)" } } }
 ```
 
 No indexing, no walking the passes. History remains what §2 built it for — comparing a pass with the

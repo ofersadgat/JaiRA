@@ -80,7 +80,7 @@ export interface ChatPlan extends Omit<ChatPlanView, "live" | "effective" | "ava
    * Inherited settings that are expressions rather than values.
    *
    * Reported rather than silently defaulted. A composer that showed the project default model beside
-   * a state whose model is `{"expr": …}` would be stating something false about what the call will
+   * a state whose model is `{"$expr": …}` would be stating something false about what the call will
    * do, and the person would have no way to tell.
    */
   unresolved: UnresolvedSetting[];
@@ -89,10 +89,10 @@ export interface ChatPlan extends Omit<ChatPlanView, "live" | "effective" | "ava
 /** hw's own fields on a prompt op's config bag — everything else is passed through to the call. */
 const CONFIG_OWN = new Set(["model", "reasoning"]);
 
-/** `{"expr": "…"}` — a value the loader kept for the engine to evaluate against an instance scope. */
+/** `{"$expr": "…"}` — a value the loader kept for the engine to evaluate against an instance scope. */
 function exprOf(value: unknown): string | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const expr = (value as Record<string, unknown>)["expr"];
+  const expr = (value as Record<string, unknown>)["$expr"];
   return typeof expr === "string" ? expr : undefined;
 }
 

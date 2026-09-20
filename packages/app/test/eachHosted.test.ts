@@ -42,7 +42,7 @@ function files(root: string, each: "split" | "task", start?: "manual" | "when_re
       },
       children: {
         decide: { inputs: { issue: ".inputs.issue" } },
-        work: { inputs: { item: { expr: ".children.decide.output.items", each, title: "title", ...(start !== undefined ? { start } : {}) } } },
+        work: { inputs: { item: { $expr: ".children.decide.output.items", each, title: "title", ...(start !== undefined ? { start } : {}) } } },
         finish: { inputs: { doc: ".children.work.output.doc" } },
       },
       sequence: ["decide", "work", "finish"],

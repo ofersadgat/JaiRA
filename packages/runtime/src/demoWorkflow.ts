@@ -48,7 +48,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       outputs: {
         outcome: {
           schema: { type: "string", enum: ["complete", "blocked"] },
-          binding: { expr: ".children.critique.output.outcome === 'clean' ? 'complete' : 'blocked'" },
+          binding: { $expr: ".children.critique.output.outcome === 'clean' ? 'complete' : 'blocked'" },
         },
         // `output` defaults to the slot's own name, so this is context's `plan_doc`.
         plan_doc: { ...artifact("markdown"), binding: ".children.context.output.plan_doc" },

@@ -59,13 +59,13 @@ const files: Record<string, string> = {
 const states = {
   "plan.json": {
     label: "Planning",
-    title: { binding: { expr: "title(.inputs.issue).title", environment: { session: null }, failureValue: "Untitled" } },
+    title: { binding: { $expr: "title(.inputs.issue).title", environment: { session: null }, failureValue: "Untitled" } },
     inputs: { issue: { kind: "text", schema: { type: "string" } } },
     outputs: { done: { schema: { type: "string" } } },
     operation: {
       kind: "prompt",
       prompt: "Work on {{.inputs.issue}}",
-      model: { expr: "startsWith(.title, 'Ship') ? 'fast' : 'slow'" },
+      model: { $expr: "startsWith(.title, 'Ship') ? 'fast' : 'slow'" },
     },
   },
 };

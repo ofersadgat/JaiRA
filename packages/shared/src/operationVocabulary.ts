@@ -351,7 +351,7 @@ export interface ChatPlanView {
   from?: string;
   /**
    * Shown rather than defaulted away. A composer that printed the project default beside a state
-   * whose model is `{"expr": …}` would state something false about what the call will do, and the
+   * whose model is `{"$expr": …}` would state something false about what the call will do, and the
    * person would have no way to tell.
    */
   unresolved: UnresolvedSetting[];

@@ -547,7 +547,7 @@ function literal(value: unknown): string {
 /**
  * True for an error that only exists because a leaf offers the binding forms.
  *
- * Every leaf is `anyOf: [own type, {$ref}, {expr}, {json}]`. When something deep inside one is wrong,
+ * Every leaf is `anyOf: [own type, {$ref}, {$expr}, {json}]`. When something deep inside one is wrong,
  * ajv reports the real error AND, at every enclosing level, that the value "must have required
  * property '$ref'" — because it did not happen to be a reference either. One misspelled `type` four
  * levels down produced four rows, three of them advising that `inputs` could have been a `$ref`.
@@ -558,7 +558,7 @@ function literal(value: unknown): string {
 function isBindingFormArtifact(error: ErrorObject): boolean {
   if (error.keyword !== "required") return false;
   const missing = (error.params as { missingProperty?: string }).missingProperty;
-  return missing === "$ref" || missing === "expr" || missing === "json";
+  return missing === "$ref" || missing === "$expr" || missing === "json";
 }
 
 function collapseErrors(all: readonly ErrorObject[]): SchemaViolation[] {

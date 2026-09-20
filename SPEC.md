@@ -320,7 +320,7 @@ comes from:
 ".artifacts.name"                            a session artifact
 "messages(.operation.output.session)"       a conversation, by ref
 "add(.outputs.n, 1)"                         a small computation
-{ "expr": "add(.outputs.n, 1)" }             the same, spelled explicitly
+{ "$expr": "add(.outputs.n, 1)" }             the same, spelled explicitly
 { "text": "significant" }                    a string literal
 { "json": { "a": 1 } }                       a JSON literal
 ```
@@ -342,7 +342,7 @@ binding must be produced by the state's operation.
 > Revised: an output's `from` expression is now that slot's `binding`, drawn from
 > the same vocabulary as input wiring (§4.2). `"from": "children.x.outputs.y"`
 > becomes `"binding": ".children.x.outputs.y"`, and a computed one becomes
-> `"binding": { "expr": "…" }`.
+> `"binding": { "$expr": "…" }`.
 
 Outputs should be schema-validated when they are used for:
 
@@ -542,7 +542,7 @@ References to a child that has started but not yet finished are pending, not
 evaluation round, and input wiring using one waits for it to resolve
 (Section 10.4).
 
-The same language is used for transition conditions and for `{ "expr": … }`
+The same language is used for transition conditions and for `{ "$expr": … }`
 bindings — the one binding form that computes rather than references (§4.2).
 
 **Guards are strictly boolean.** A transition condition must *infer* to boolean;
@@ -704,15 +704,15 @@ Agents may not:
       "state": "feature/plan/critique/address_weaknesses",
       "inputs": {
         "plan_doc": ".inputs.plan_doc",
-        "weaknesses": { "expr": ".outputs.weaknesses" },
-        "critique_report": { "expr": ".outputs.critique_report" }
+        "weaknesses": { "$expr": ".outputs.weaknesses" },
+        "critique_report": { "$expr": ".outputs.critique_report" }
       }
     },
     "human_review": {
       "state": "feature/plan/critique/human_review",
       "inputs": {
         "plan_doc": ".inputs.plan_doc",
-        "critique_report": { "expr": ".outputs.critique_report" }
+        "critique_report": { "$expr": ".outputs.critique_report" }
       }
     }
   },
@@ -823,7 +823,7 @@ validated outputs. The parent branches on `outputs.decision`.
   "outputs": {
     "outcome": {
       "schema": { "type": "string", "enum": ["complete", "blocked"] },
-      "binding": { "expr": ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
+      "binding": { "$expr": ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
     },
     "plan_doc": {
       "schema": { "type": "string", "contentMediaType": "text/markdown" },

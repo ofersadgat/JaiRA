@@ -954,7 +954,7 @@ confidence-guarded gate.
     "confidence": { "inputs": {
       "critique":   ".children.critique.outputs",
       "exploration": ".children.explore.outputs",
-      "iteration":  { "expr": ".run.iteration" },
+      "iteration":  { "$expr": ".run.iteration" },
       "ask_below":  ".inputs.ask_below"
     } },
     "gate":    { "inputs": {
@@ -1042,9 +1042,9 @@ lands they degrade to bare `enum` values with the pros and cons folded into
     "function": "review_artifact",
     "args": {
       "prompt":   "These are the product deliverables. Approve, send back, or cut the feature.",
-      "artifact": { "expr": ".inputs.docs" },
-      "brief":    { "expr": ".inputs.brief" },
-      "ask_below": { "expr": ".inputs.brief.ask_below" },
+      "artifact": { "$expr": ".inputs.docs" },
+      "brief":    { "$expr": ".inputs.brief" },
+      "ask_below": { "$expr": ".inputs.brief.ask_below" },
       "options": [
         { "value": "approve", "means": "UX planning starts from these deliverables",
           "pros": ["…"], "cons": ["…"], "drives": "…", "recommended": true },

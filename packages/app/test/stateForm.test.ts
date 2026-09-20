@@ -27,7 +27,7 @@ const PLAN = {
   environment: { kind: "prompt", model: "planner" },
   inputs: { issue: { kind: "blob", schema: { type: "string", contentMediaType: "markdown" } } },
   outputs: {
-    outcome: { schema: { type: "string" }, binding: { expr: ".children.critique.output.outcome === 'clean'" } },
+    outcome: { schema: { type: "string" }, binding: { $expr: ".children.critique.output.outcome === 'clean'" } },
     plan_doc: { kind: "blob", binding: ".children.context.output.plan_doc" },
   },
   children: {
@@ -111,7 +111,7 @@ describe("applyForm", () => {
   it("never writes a structured binding back as a string", () => {
     const out = round(PLAN);
     expect((out["outputs"] as Record<string, Record<string, unknown>>)["outcome"]!["binding"]).toEqual({
-      expr: ".children.critique.output.outcome === 'clean'",
+      $expr: ".children.critique.output.outcome === 'clean'",
     });
   });
 

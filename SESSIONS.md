@@ -170,7 +170,7 @@ attached accessor only if present. Losing it must cost a store read, never corre
 marker should not encode an intent about how a later caller will use it.
 
 ```jsonc
-{ "session": { "expr": ".children.plan.operation.output.session" }, "fork": true }
+{ "session": { "$expr": ".children.plan.operation.output.session" }, "fork": true }
 ```
 
 | `fork` | Meaning |

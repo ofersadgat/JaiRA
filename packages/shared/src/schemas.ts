@@ -18,7 +18,7 @@
  *    after merging is carried separately in {@link SchemaEntry.expected} — read by the skeleton and
  *    the reference panel, which are advice, and never by the validator, which is a verdict.
  *  - **Any value may be a reference.** §2.2: a block can be transcluded, so `"prompt"` may hold a
- *    string OR `{"$ref": "$/prompts/x.md"}` OR `{"expr": …}`. Every leaf therefore accepts its own
+ *    string OR `{"$ref": "$/prompts/x.md"}` OR `{"$expr": …}`. Every leaf therefore accepts its own
  *    type or a binding form. Without that, the single most idiomatic thing in the format reads as an
  *    error.
  *
@@ -75,12 +75,12 @@ export interface SchemaEntry {
 /**
  * The three ways a value can arrive instead of being written literally (WORKFLOWS.md §2.2, §8).
  *
- * Listed once and spread into every leaf. `$ref` is a path reference, `expr` an expression, `json`
+ * Listed once and spread into every leaf. `$ref` is a path reference, `$expr` an expression, `json`
  * an explicit literal wrapper — and a leaf that refused them would flag the format's own examples.
  */
 const BINDING_FORMS: SchemaDoc[] = [
   { type: "object", properties: { $ref: { type: "string" } }, required: ["$ref"] },
-  { type: "object", properties: { expr: { type: "string" } }, required: ["expr"] },
+  { type: "object", properties: { $expr: { type: "string" } }, required: ["$expr"] },
   { type: "object", properties: { json: {} }, required: ["json"] },
 ];
 
@@ -319,7 +319,7 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
     }),
     output: { ...leaf(slotSchema()), description: "output slot (§4.4); absent ⇒ built from the state's produced outputs" },
     session: leaf({
-      anyOf: [{ type: "string" }, { type: "object", properties: { id: { type: "string" }, expr: { type: "string" } } }],
+      anyOf: [{ type: "string" }, { type: "object", properties: { id: { type: "string" }, $expr: { type: "string" } } }],
       description: 'logical session this call joins; absent ⇒ "default", null ⇒ a fresh one',
     }),
     conversation: leaf({

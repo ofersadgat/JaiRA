@@ -357,7 +357,7 @@ const BOARD = {
   "ticket/triage.json": {
     label: "Triage",
     inputs: { issue: { kind: "text", schema: { type: "string" } } },
-    outputs: { summary: { schema: { type: "string" }, binding: { expr: "concat('summary of ', .inputs.issue)" } } },
+    outputs: { summary: { schema: { type: "string" }, binding: { $expr: "concat('summary of ', .inputs.issue)" } } },
     operation: { kind: "function", function: "start" },
   },
   "ticket/in_review.json": {

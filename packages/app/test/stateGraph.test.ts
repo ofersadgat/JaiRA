@@ -154,7 +154,7 @@ describe("graphOf", () => {
   /** An expression reads several paths, and each one is a line: that is what makes it a join. */
   it("draws one wire per path an expression reads", () => {
     const graph = graphOf({
-      children: { a: {}, b: { inputs: { both: { expr: ".children.a.output.x + .inputs.y" } } } },
+      children: { a: {}, b: { inputs: { both: { $expr: ".children.a.output.x + .inputs.y" } } } },
       inputs: { y: {} },
     });
     expect(wire(graph, childNodeId("b"), "both")).toBe(`${childNodeId("a")}.out:x + ${ENTRY}.out:y`);
@@ -582,7 +582,7 @@ describe("sessions", () => {
         "review/second": { inputs: [], outputs: [], ...(b === undefined ? {} : { session: { declared: b } }) },
       },
     );
-  const shared = { name: "review", in: "parent" };
+  const shared = { $ref: "review", $in: "parent" };
 
   it("puts two children that name one conversation in one session", () => {
     const graph = joined(shared, shared);

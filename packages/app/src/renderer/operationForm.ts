@@ -88,7 +88,7 @@ export interface SessionForm {
   /** `named` only. `""` is an error in the engine, never "fresh" — a template that interpolated a
    *  bad reference must not quietly produce an isolated conversation that looks like it worked. */
   name: string;
-  /** `structured` only: `{ id }` or `{ expr }`, as text, for the read-only display. */
+  /** `structured` only: `{ id }` or `{ $expr }`, as text, for the read-only display. */
   text: string;
 }
 
@@ -327,7 +327,7 @@ function applySession(op: Record<string, unknown>, session: SessionForm): void {
     case "structured":
       return; // shown read-only — an exact position, normally computed rather than typed
     case "absent":
-      // Reaching here with a `{ expr }` in place means the author moved the control OFF structured,
+      // Reaching here with a `{ $expr }` in place means the author moved the control OFF structured,
       // which is a deliberate "stop inheriting a position" and not an accident of rendering.
       delete op["session"];
       return;

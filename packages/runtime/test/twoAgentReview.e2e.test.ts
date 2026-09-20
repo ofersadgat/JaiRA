@@ -63,7 +63,7 @@ const files: Record<string, unknown> = {
       // is built with `concat` — the expression language has no `+`, and a function op gets no
       // `{{…}}` rendering (that is a prompt op's own template).
       input: {
-        prompt: { kind: "text", binding: { expr: "concat('Review this change and list what is wrong: ', .inputs.change)" } },
+        prompt: { kind: "text", binding: { $expr: "concat('Review this change and list what is wrong: ', .inputs.change)" } },
       },
       output: { report: { kind: "blob" } },
     },

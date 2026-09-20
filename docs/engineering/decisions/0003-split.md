@@ -100,14 +100,14 @@ move to the root unchanged. Nothing in `product` changes.
 ```
 "ux": {
   "inputs": {
-    "feature": { "expr": ".children.product.output.features", "each": "split",
+    "feature": { "$expr": ".children.product.output.features", "each": "split",
                  "id": "id", "title": "story", "requires": "requires" },
     "issue": ".inputs.issue"
   }
 },
 "ui": {
   "inputs": {
-    "feature": { "expr": ".children.product.output.features", "each": "split" },
+    "feature": { "$expr": ".children.product.output.features", "each": "split" },
     ...
   }
 },
@@ -118,7 +118,7 @@ And inside `ux`, where `item` is entered once per thing the plan decided:
 ```
 "item": {
   "inputs": {
-    "item": { "expr": ".children.plan.output.items", "each": "task", "title": "name" }
+    "item": { "$expr": ".children.plan.output.items", "each": "task", "title": "name" }
   }
 }
 ```

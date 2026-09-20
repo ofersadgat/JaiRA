@@ -39,13 +39,13 @@ const files: Record<string, unknown> = {
   "review/first": {
     inputs: { change: { schema: { type: "string" } } },
     outputs: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
-    environment: { session: { name: "review", in: "parent" } },
+    environment: { session: { $ref: "review", $in: "parent" } },
     operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { report: { kind: "blob" } } },
   },
   "review/second": {
     inputs: { change: { schema: { type: "string" } } },
     outputs: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
-    environment: { session: { name: "review", in: "parent" } },
+    environment: { session: { $ref: "review", $in: "parent" } },
     operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { report: { kind: "blob" } } },
   },
   "review/alone": {
@@ -150,7 +150,7 @@ const loopFiles: Record<string, unknown> = {
   "loop/turn": {
     inputs: { change: { schema: { type: "string" } } },
     outputs: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
-    environment: { session: { name: "loop", in: "parent" } },
+    environment: { session: { $ref: "loop", $in: "parent" } },
     operation: {
       kind: "function",
       function: "agent",

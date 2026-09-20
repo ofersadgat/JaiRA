@@ -63,7 +63,7 @@ describe("what must NOT be reported", () => {
   });
 
   it("accepts an expression and an explicit json literal", () => {
-    expect(check("prompt-operation", { prompt: { expr: "inputs.issue" } })).toEqual([]);
+    expect(check("prompt-operation", { prompt: { $expr: "inputs.issue" } })).toEqual([]);
     expect(check("state", { sequence: { json: ["a", "b"] } })).toEqual([]);
   });
 
@@ -101,7 +101,7 @@ describe("what must NOT be reported", () => {
         },
         outputs: {
           weaknesses: { schema: { type: "array", items: { type: "string" } } },
-          outcome: { binding: { expr: ".children.critique.output.outcome" } },
+          outcome: { binding: { $expr: ".children.critique.output.outcome" } },
         },
         children: {
           goals: { inputs: { issue: ".inputs.issue" } },

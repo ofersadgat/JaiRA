@@ -480,7 +480,7 @@ function bindingOf(value: unknown): { text: string; reads: WireEnd[]; kind: Wire
   if (typeof value === "string") return { text: value, reads: readsIn(value), kind: "binding" };
   const record = asRecord(value);
   const only = Object.keys(record).length === 1;
-  const expr = record["expr"];
+  const expr = record["$expr"];
   if (typeof expr === "string" && only) return { text: expr, reads: readsIn(expr), kind: "expr" };
   // `{ text }`, `{ json }`, `{ $ref }` and anything embedded are VALUES rather than reads. They get
   // no wire, which is why the port shows them instead: a literal with no line to it would otherwise
@@ -623,10 +623,10 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
           ? { declared: inherited, from: "here" }
           : undefined;
     if (layer === undefined) return null;
-    // `join` names another declaration and takes its name and scope whole. The only ancestry this
-    // file can see is itself, so `join: "parent"` from a child is exactly what this state declares
+    // `$join` names another declaration and takes its name and scope whole. The only ancestry this
+    // file can see is itself, so `$join: "parent"` from a child is exactly what this state declares
     // — and every other join names something outside the file and is left unresolved.
-    const join = asRecord(layer.declared)["join"];
+    const join = asRecord(layer.declared)["$join"];
     if (typeof join === "string") {
       return join === "parent" && layer.from === "child" && inheritedKey !== null
         ? { ...inheritedKey, from: "here" }
@@ -973,17 +973,17 @@ function operationRows(operation: Record<string, unknown>): GraphRow[] {
  * depending on which file they are in, and — the trap this is mostly here for — two siblings that
  * each write a bare `session: "review"` scope that name to THEMSELVES and do not share a word.
  * Sharing is spelled by naming a common scope, and the commonest spelling of that is
- * `{ "name": "review", "in": "parent" }` in each child, whose parent is the state drawn here.
+ * `{ "$ref": "review", "$in": "parent" }` in each child, whose parent is the state drawn here.
  *
- * `writer` is which document the declaration was found in, which is what `in` is relative to:
+ * `writer` is which document the declaration was found in, which is what `$in` is relative to:
  *
  *  - `child` — the mounted state's own file. `parent` then means THIS state, which is why a child
- *    saying `in: "parent"` is groupable at all.
+ *    saying `$in: "parent"` is groupable at all.
  *  - `here` / `mount` — this file, either the state's own `environment` or one mount's. The writer
  *    is this state, so a bare name scopes HERE and every child inheriting it is in one conversation.
  *
  * `null` is a declaration and not an absence — "a fresh stream, private to this call" — so it
- * resolves to nothing groupable, deliberately. So do `{ id }` and `{ expr }`, which name a position
+ * resolves to nothing groupable, deliberately. So do `{ id }` and `{ $expr }`, which name a position
  * arrived at through data flow: what they resolve to is a fact about a RUN, and this is a drawing of
  * a document.
  */
@@ -994,12 +994,12 @@ function sessionKeyOf(
 ): { id: string; name: string; scope: string } | null {
   const name = typeof declared === "string" ? declared : undefined;
   const record = asRecord(declared);
-  // `join` takes another declaration's name AND its scope verbatim: the joiner does not know the
-  // name and must not have to. `join: "parent"` from a child is therefore whatever THIS state
+  // `$join` takes another declaration's name AND its scope verbatim: the joiner does not know the
+  // name and must not have to. `$join: "parent"` from a child is therefore whatever THIS state
   // declares — which the caller has already resolved and passes back in as `here`.
-  const named = name ?? (typeof record["name"] === "string" ? record["name"] : undefined);
+  const named = name ?? (typeof record["$ref"] === "string" ? record["$ref"] : undefined);
   if (named === undefined || named.length === 0) return null;
-  const scope = typeof record["in"] === "string" ? record["in"] : undefined;
+  const scope = typeof record["$in"] === "string" ? record["$in"] : undefined;
   const mine = writer === "child" ? `the child ${mountKey}` : "this state";
   if (scope === undefined) {
     // The writer itself. Written in this file that is this state — so every child inheriting it is

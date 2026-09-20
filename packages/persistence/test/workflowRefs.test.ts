@@ -116,9 +116,9 @@ describe("inherited environment across files", () => {
     const goals = load("feature/plan").states["feature/plan/goals"]!;
     expect(goals.operation).toMatchObject({ kind: "prompt", config: { model: "anthropic/claude-sonnet-5" } });
     // The session arrives CANONICALIZED, not as the sugar the root wrote: `"planning"` is
-    // `{ name: "planning", in: <the state that declared it> }` (hw's `session.ts`), and the scope is
+    // `{ $ref: "planning", $in: <the state that declared it> }` (hw's `session.ts`), and the scope is
     // what keeps two mounts of one subtree from sharing a conversation because they share a name.
-    expect(goals.environment).toEqual({ session: { name: "planning", in: "feature/plan" } });
+    expect(goals.environment).toEqual({ session: { $ref: "planning", $in: "feature/plan" } });
     // Nothing in the lint surface objects to an operation completed from an ancestor.
     expect(browseWorkflows(project).workflows[0]!.issues.filter((i) => i.severity === "error")).toEqual([]);
   });

@@ -106,14 +106,14 @@ describe("what the composer changed, and what it inherited", () => {
 
 describe("a setting the host declared as an expression", () => {
   it("is reported rather than silently defaulted", () => {
-    const plan = chatPlanFor([speaking({ config: { model: { expr: ".inputs.model" } } })]);
+    const plan = chatPlanFor([speaking({ config: { model: { $expr: ".inputs.model" } } })]);
     expect(plan.settings.model).toBeUndefined();
     expect(plan.origin.model).toBe("unset");
     expect(plan.unresolved).toEqual([{ field: "model", expr: ".inputs.model" }]);
   });
 
   it("is still overridable — picking a model answers the question the expression could not", () => {
-    const plan = chatPlanFor([speaking({ config: { model: { expr: ".inputs.model" } } })], { model: "picked" });
+    const plan = chatPlanFor([speaking({ config: { model: { $expr: ".inputs.model" } } })], { model: "picked" });
     expect(plan.settings.model).toBe("picked");
     expect(plan.origin.model).toBe("override");
     expect(plan.unresolved).toHaveLength(1);
