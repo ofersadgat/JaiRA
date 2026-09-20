@@ -11,6 +11,7 @@ import { formatRecord, setLogSink } from "@declarative-ai/log";
 import { loadBundle, validateBundle, moduleHash as moduleHashOf } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { registerCliChangesetReviewer } from "./changesetReviewer";
+import { wireRemotes } from "./remoteWiring";
 import {
   beginTaskRun,
   boardView,
@@ -929,6 +930,7 @@ async function runTaskNow(
 ): Promise<number> {
   // Declared out here so `finally` can release the claim however the run ends.
   let owner: RunOwner | undefined;
+  let remotes: { dispose(): void } | undefined;
   try {
     // Validation at task start resolves every `functionRef` against the registry
     // this run will actually use, so a missing interactive function is an
@@ -1020,6 +1022,20 @@ async function runTaskNow(
       { artifacts, store: project.artifacts, observer: owner.observer() },
       project.paths.projectDir,
     );
+    // Remotes (decision 0004): the primitives, `on_remote_event` with a watcher that lives as long as
+    // this run, and the gate's second door around whatever answers the gate here. Only a durable run
+    // gets them — a merge request has to be remembered on a task — and after the registry is built,
+    // because the door wraps the reviewer that build registered.
+    remotes = wireRemotes(registry, {
+      project,
+      taskId,
+      taskTitle: started.meta.title,
+      workspace: { root: workspace.root, isWorktree: workspace.isWorktree === true },
+      exec: new NodeExec({ execEnv: project.config.execEnvironment, observer: owner.observer() }),
+      ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { terminal: { input: process.stdin, output: process.stdout } } : {}),
+      scripted: wiring.interactions !== undefined,
+      log: (message) => io.stderr(`remote: ${message}\n`),
+    });
     // The DURABLE conversation store, scoped to this task — the same wiring the app's runs get. A
     // task run that wrote its records into a `MapSessionStore` dropped every conversation at exit,
     // and left the journal's operation ids pointing at records a resume could never read back.
@@ -1089,6 +1105,8 @@ async function runTaskNow(
     // Release before the caller closes the database: the claim and any child still recorded
     // as running must be closed, or the next open reports phantom orphans.
     owner?.release();
+    // And stop listening to the forge: the run this process was waiting on behalf of is over.
+    remotes?.dispose();
   }
 }
 

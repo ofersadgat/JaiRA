@@ -416,6 +416,19 @@ fragment or a diff, because everything you leave out is deleted. Leave changes t
 or reverted alone. If a comment asks for something you cannot express as a file, say so in notes
 rather than inventing content.`;
 
+/**
+ * What the responder is told when the review is also a merge request: its `reason` is not a private
+ * note any more. It is posted, under the connection's name, as the reply on each reviewer's thread
+ * about that file — and `fixed` as its first word resolves the thread.
+ */
+const REMOTE_RESPOND_NOTE = `
+
+This review is also open as a merge request, and the decisions above carry the reviewers' own threads
+as notes. Give every edit a \`reason\`: one or two sentences saying what you changed and why. It is
+posted as your reply on each thread about that file. Begin it with the word \`fixed\` ONLY when the
+edit fully does what the thread asked — that resolves the thread; anything less, say what is still
+open instead.`;
+
 const REVISE_EDITS_SCHEMA = {
   type: "array",
   items: {
@@ -504,7 +517,15 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
         applied: { schema: { type: "array", items: { type: "string" } }, optional: true, binding: ".children.apply.output.applied" },
       },
       children: {
-        gate: { inputs: { changeset: CURRENT } },
+        gate: {
+          inputs: {
+            changeset: CURRENT,
+            // What the last round's responder did, so the gate can say so on the threads that asked
+            // (decision 0004). `respond` sits outside the sequence and survives the loop-back, like
+            // `revise`; on round one it never ran and the slot's default stands.
+            ...(remote !== undefined ? { addressed: ".children.respond.output.edits" } : {}),
+          },
+        },
         status: { inputs: { decisions: ".children.gate.output.decisions" } },
         apply: {
           inputs: {
@@ -548,7 +569,7 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
     },
     [`${CHANGESET_REVIEW_LOOP_ID}/gate`]: {
       label: "Approve the changes",
-      inputs: { changeset: changesetSlot },
+      inputs: { changeset: changesetSlot, ...(remote !== undefined ? { addressed: { schema: REVISE_EDITS_SCHEMA, default: [] } } : {}) },
       outputs: {
         decisions: DECISIONS_SLOT,
         ...(remote !== undefined
@@ -589,7 +610,7 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
       },
       operation: {
         kind: "prompt",
-        prompt: options.respondPrompt ?? RESPOND_PROMPT,
+        prompt: `${options.respondPrompt ?? RESPOND_PROMPT}${remote !== undefined ? REMOTE_RESPOND_NOTE : ""}`,
         ...(options.model !== undefined ? { model: options.model } : {}),
       },
     },

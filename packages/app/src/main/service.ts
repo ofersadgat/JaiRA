@@ -148,6 +148,7 @@ import {
   probeExecutor,
   checkForges,
   registerRemoteFunctions,
+  reviewWithRemote,
   RemoteEventHub,
   RemoteWatcher,
   PollingSource,
@@ -320,7 +321,6 @@ let installed: LogSink | undefined;
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
-import { reviewWithRemote } from "./remoteReview";
 import type {
   Scope,
   ApprovalScope,
@@ -3284,7 +3284,9 @@ export class AppService {
               {
                 taskId,
                 ...(title !== undefined ? { taskTitle: title } : {}),
-                hub: open.hub,
+                // Parked on the hub, like every gate — which is also how the forge's answer arrives: the
+                // watcher submits it to the same request, so there is nothing to race here.
+                ask: (given, hooks) => open.hub.ask(REVIEW_ARTIFACTS, given, taskId, hooks.onParked),
                 handles: project.remotes,
                 primitives: remotePrimitives,
                 workspace: { root: workspace.root, isWorktree: workspace.isWorktree === true },

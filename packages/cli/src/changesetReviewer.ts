@@ -32,6 +32,8 @@ import { INTERACTIVE, REVIEW_ARTIFACTS } from "@jaira/runtime";
 export interface ReviewerIo {
   input: Readable;
   output: Writable;
+  /** Aborts the question in progress — the review was answered somewhere else. */
+  signal?: AbortSignal;
 }
 
 const KEYS: Array<{ key: string; kind: DecisionKind; hint: string }> = [
@@ -71,6 +73,9 @@ function renderChange(change: Change, index: number, total: number, out: Writabl
 /** Walk the changeset once, one decision per change — exported so a test can drive it directly. */
 export async function reviewChangesetOnTerminal(changeset: Changeset, io: ReviewerIo): Promise<ChangeDecision[]> {
   const rl: Interface = createInterface({ input: io.input, output: io.output as NodeJS.WritableStream });
+  // A question that can be WITHDRAWN (decision 0004): when the review is also a merge request and the
+  // forge answers first, the prompt is aborted rather than left waiting for a reply nobody needs.
+  const ask = (question: string): Promise<string> => rl.question(question, io.signal !== undefined ? { signal: io.signal } : {});
   try {
     io.output.write(`reviewing ${changeset.changes.length} change(s) against ${changeset.source}\n`);
     const decisions: ChangeDecision[] = [];
@@ -78,13 +83,13 @@ export async function reviewChangesetOnTerminal(changeset: Changeset, io: Review
       renderChange(change, index, changeset.changes.length, io.output);
       let kind: DecisionKind | undefined;
       while (kind === undefined) {
-        const answer = (await rl.question(`  ${KEYS.map((k) => `[${k.key}]${k.kind}`).join(" ")}: `)).trim().toLowerCase();
+        const answer = (await ask(`  ${KEYS.map((k) => `[${k.key}]${k.kind}`).join(" ")}: `)).trim().toLowerCase();
         kind = KEYS.find((k) => k.key === answer || k.kind === answer)?.kind;
         if (kind === undefined) io.output.write(`  choose one of: ${KEYS.map((k) => `${k.key} = ${k.hint}`).join(", ")}\n`);
       }
       const decision: ChangeDecision = { id: change.id, decision: kind };
       if (kind === "comment") {
-        const comment = (await rl.question("  comment: ")).trim();
+        const comment = (await ask("  comment: ")).trim();
         if (comment !== "") decision.comment = comment;
       }
       decisions.push(decision);
@@ -106,12 +111,12 @@ export function registerCliChangesetReviewer(
 ): void {
   registry.functions.set(
     REVIEW_ARTIFACTS,
-    hostFunction(async (inputs: FunctionInputs) => {
+    hostFunction(async (inputs: FunctionInputs, ctx: { abortSignal?: AbortSignal } | undefined) => {
       try {
         const config = (inputs["config"] ?? {}) as Record<string, unknown>;
         const slot = typeof config["changeset"] === "string" ? config["changeset"] : "changeset";
         const changeset = changesetOf(inputs[slot]);
-        const decisions = await reviewChangesetOnTerminal(changeset, io);
+        const decisions = await reviewChangesetOnTerminal(changeset, { ...io, ...(ctx?.abortSignal !== undefined ? { signal: ctx.abortSignal } : {}) });
         // The same re-validation the app's main process performs — a reviewer must not be able to
         // hand the workflow a partial or out-of-vocabulary judgement either.
         const checked = checkDecisions(changeset, { decisions });

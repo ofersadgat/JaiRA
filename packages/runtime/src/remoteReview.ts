@@ -2,24 +2,37 @@
  * `review_artifacts` with a `remote` (decision 0004 §3): two doors, one answer.
  *
  * With no `remote` — none written, none inherited, or `null` — the gate is local only, exactly as it
- * always was, and this module does nothing but park it. With one, the gate parks EXACTLY as it does
+ * always was, and this module does nothing but ask it. With one, the gate is asked EXACTLY as it is
  * today and the same request also lives on the forge: the review is pushed, a merge request is
- * opened (or found — a loop's next round gets the same one), the row is marked awaited with the
- * gate's request id, and then whichever side settles first answers the state.
+ * opened (or found — a loop's next round gets the same one), the row is marked awaited, and then
+ * whichever side settles first answers the state.
  *
- *  - **The forge settles it** → the watcher submits the settlement to the hub, this function wakes
- *    with it, and — when the request was MERGED — adopts the forge's history before returning.
+ *  - **The forge settles it** → this function wakes with the settlement and — when the request was
+ *    MERGED — adopts the forge's history before returning.
  *  - **The person settles it here** → the row stops being awaited, the notes they wrote are posted as
  *    inline threads, and one closing comment says what was decided. Approve at the gate does not
  *    merge the request; what happens to it afterwards is the workflow's to say.
  *
- * Both halves of the adoption and the telling live HERE, after the park, rather than in whoever
+ * Both halves of the adoption and the telling live HERE, after the ask, rather than in whoever
  * answered — because the answer may arrive as a seed on a resumed run, days later, in a process that
  * was not there when it was given.
+ *
+ * ## Who asks
+ *
+ * The HOST, through {@link RemoteReviewOptions.ask}. The app parks the gate on its interaction hub,
+ * which the forge's settlement can be submitted to like any answer. The CLI asks at a terminal,
+ * which nothing can answer from outside — so it also supplies {@link RemoteReviewOptions.forge}, and
+ * the two are raced here, the loser withdrawn through the abort signal `ask` was given.
+ *
+ * ## A revise round answers the threads it addressed
+ *
+ * The loop's next pass arrives with `addressed` — the responder's edits, each with the `reason` it
+ * gave. After the revision is pushed, every unresolved forge thread on a revised file gets that
+ * reason as a reply, and is resolved when the responder said `fixed`. Threads carry over; nothing
+ * is replied to twice, because a thread whose last word is already JaiRA's is left alone.
  */
 import { failureOf, type FunctionInputs, type FunctionResult, type JsonValue, type ResolvedValue } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
-import { REVIEW_ARTIFACTS, type AdoptReport, type InteractionHub, type RemotePrimitives } from "@jaira/runtime";
 import {
   changesetInputOf,
   handleOfRow,
@@ -28,17 +41,34 @@ import {
   type ChangeDecision,
   type Changeset,
   type ForgeAnchor,
+  type ForgeProvider,
+  type RemoteHandle,
   type RemoteHandlePort,
   type RemoteHandleRow,
   type ReviewNote,
 } from "@jaira/shared";
+import { REVIEW_ARTIFACTS } from "./changesetGate";
+import type { AdoptReport, RemotePrimitives } from "./remote";
 
 type Result = FunctionResult<ResolvedValue, WorkflowMetrics>;
+
+export interface AskHooks {
+  /** Called with the request's id the moment the question is actually put — never for a seeded answer. */
+  onParked(requestId: string): void;
+  /** Aborted when the OTHER door answered first, for an asker that can withdraw its question. */
+  signal: AbortSignal;
+}
 
 export interface RemoteReviewOptions {
   taskId: string;
   taskTitle?: string;
-  hub: InteractionHub;
+  /** Put the gate's question to a person, however this host does that. */
+  ask: (inputs: Record<string, JsonValue>, hooks: AskHooks) => Promise<Result>;
+  /**
+   * The forge's settlement of this request, for a host whose {@link ask} cannot be answered from
+   * outside. Absent ⇒ the host delivers the forge's answer THROUGH `ask` (the app's hub does).
+   */
+  forge?: (row: RemoteHandleRow, requestId: string) => Promise<JsonValue>;
   handles: RemoteHandlePort;
   primitives: RemotePrimitives;
   workspace: { root: string; isWorktree: boolean };
@@ -85,10 +115,62 @@ export function closingComment(who: string | undefined, value: Record<string, un
   return `Decided in JaiRA${who !== undefined ? ` by ${who}` : ""}: ${level}${tally.length > 0 ? ` (${tally})` : ""}.`;
 }
 
+/** One thing the responder did, as the revise round hands it to the gate. */
+export interface AddressedEdit {
+  path: string;
+  reason?: string;
+}
+
+/** `fixed`, as the FIRST word of a reason: the responder's way of saying a thread can be closed. */
+export const saysFixed = (reason: string | undefined): boolean => reason !== undefined && /^\s*fixed\b/i.test(reason);
+
+/**
+ * What to say on which thread after a revision was pushed — pure, so the rule is a test.
+ *
+ * A thread is answered when it is UNRESOLVED, sits on a file the round revised, somebody other than
+ * JaiRA has spoken on it, and its last word is not already JaiRA's. That last condition is what makes
+ * this safe to run on every park: a resumed run re-reaches the gate, and must not say it all again.
+ */
+export function threadReplies(
+  threads: ReadonlyArray<{ id: string; resolved: boolean; anchor?: { path: string }; comments: ReadonlyArray<{ own: boolean }> }>,
+  addressed: readonly AddressedEdit[],
+  head: string,
+): Array<{ thread: string; body: string; resolve: boolean }> {
+  const byPath = new Map(addressed.map((edit) => [edit.path, edit]));
+  const out: Array<{ thread: string; body: string; resolve: boolean }> = [];
+  for (const thread of threads) {
+    const edit = thread.anchor !== undefined ? byPath.get(thread.anchor.path) : undefined;
+    if (edit === undefined || thread.resolved) continue;
+    if (!thread.comments.some((c) => !c.own) || thread.comments.at(-1)?.own === true) continue;
+    const said = edit.reason !== undefined && edit.reason.trim().length > 0 ? edit.reason.trim() : "Revised.";
+    out.push({ thread: thread.id, body: `${said} (${head.slice(0, 8)})`, resolve: saysFixed(edit.reason) });
+  }
+  return out;
+}
+
+function addressedOf(inputs: FunctionInputs): AddressedEdit[] {
+  const raw = inputs["addressed"] ?? record(inputs["config"])["addressed"];
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    const edit = record(entry);
+    return typeof edit["path"] === "string" ? [{ path: edit["path"], ...(typeof edit["reason"] === "string" ? { reason: edit["reason"] } : {}) }] : [];
+  });
+}
+
+async function answerThreads(provider: ForgeProvider, handle: RemoteHandle, addressed: readonly AddressedEdit[], head: string): Promise<number> {
+  if (addressed.length === 0) return 0;
+  const state = await provider.read(handle);
+  const replies = threadReplies(state.threads, addressed, head);
+  for (const reply of replies) await provider.reply(handle, reply.thread, reply.body, reply.resolve);
+  return replies.length;
+}
+
 export async function reviewWithRemote(options: RemoteReviewOptions, inputs: FunctionInputs, ctx: unknown): Promise<Result> {
-  const { hub, taskId, handles, primitives } = options;
+  const { taskId, handles, primitives } = options;
+  const never = new AbortController();
+  const plain = (given: Record<string, JsonValue>): Promise<Result> => options.ask(given, { onParked: () => undefined, signal: never.signal });
   const remote = remoteOf(inputs);
-  if (remote === undefined) return hub.ask(REVIEW_ARTIFACTS, inputs as Record<string, JsonValue>, taskId);
+  if (remote === undefined) return plain(inputs as Record<string, JsonValue>);
 
   const config = record(inputs["config"]);
   const changeset = changesetInputOf(inputs as Record<string, unknown>).changeset;
@@ -115,19 +197,52 @@ export async function reviewWithRemote(options: RemoteReviewOptions, inputs: Fun
     const message = (error as Error).message;
     // "Review here only": the person declined to publish, which is an answer about the FORGE and not
     // about the review. The gate goes ahead as the local one it always was.
-    if (/publishing was declined/.test(message)) return hub.ask(REVIEW_ARTIFACTS, { ...(inputs as Record<string, JsonValue>), remote: null }, taskId);
+    if (/publishing was declined/.test(message)) return plain({ ...(inputs as Record<string, JsonValue>), remote: null });
     return { error: failureOf(new Error(`${REVIEW_ARTIFACTS}: ${message}`)) };
   }
   const handle = handleOfRow(row);
   if (handle === undefined) return { error: failureOf(new Error(`${REVIEW_ARTIFACTS}: the merge request could not be opened`)) };
 
-  // --- park: the gate as today, and the same request on the forge ------------------------------------
+  // --- a revise round says what it did, on the threads that asked ------------------------------------
+  try {
+    const told = await answerThreads(primitives.providerFor(row), handle, addressedOf(inputs), row.pushedHead ?? handle.head);
+    if (told > 0) options.log(`replied on ${told} thread(s) the revision addressed`);
+  } catch (error) {
+    // The revision is pushed and the review goes on; a reply that could not be posted is a warning.
+    options.log(`the revision was pushed, but its threads could not be answered: ${(error as Error).message}`);
+  }
+
+  // --- ask: the gate as today, and the same request on the forge -------------------------------------
   const settleAfter = typeof remote["settle_after"] === "string" ? parseDuration(remote["settle_after"]) : undefined;
   const parked = { ...(inputs as Record<string, JsonValue>), remote: { ...remote, ...handle, key: row.key } as unknown as JsonValue };
-  const result = await hub.ask(REVIEW_ARTIFACTS, parked, taskId, (requestId) => {
-    handles.update(taskId, row.key, { awaiting: true, requestId, settleAfterMs: settleAfter ?? null });
-    options.onAwaiting();
+  const withdrawn = new AbortController();
+  let parkedAs: string | undefined;
+  const asked = options.ask(parked, {
+    signal: withdrawn.signal,
+    onParked: (requestId) => {
+      parkedAs = requestId;
+      handles.update(taskId, row.key, { awaiting: true, requestId, settleAfterMs: settleAfter ?? null });
+      options.onAwaiting();
+    },
   });
+  // Whichever settles first answers. A host that delivers the forge's answer through `ask` has
+  // nothing to race; one that cannot be answered from outside races the two here.
+  let result: Result;
+  if (options.forge === undefined) {
+    result = await asked;
+  } else {
+    const forge = options.forge;
+    const settled = (async (): Promise<Result> => {
+      // Not until the question is actually out: a seeded answer parks nothing and races nothing.
+      while (parkedAs === undefined) await new Promise((next) => setTimeout(next, 5));
+      return { value: (await forge(row, parkedAs)) as ResolvedValue };
+    })();
+    result = await Promise.race([asked, settled]);
+    withdrawn.abort();
+    // The loser's promise is abandoned, not awaited: a withdrawn terminal prompt rejects, and that
+    // rejection is nobody's error.
+    void asked.catch(() => undefined);
+  }
 
   const stop = (): void => void handles.update(taskId, row.key, { awaiting: false, requestId: null, settleAt: null });
   if ("error" in result && result.error !== undefined) {

@@ -7,12 +7,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initProject, openProject } from "@jaira/persistence";
-import { writeWorkflowFiles, type ForgeHttp } from "@jaira/runtime";
+import { anchorOfNote, closingComment, describeReview, writeWorkflowFiles, type ForgeHttp } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { Changeset, PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
-import { anchorOfNote, closingComment, describeReview } from "../src/main/remoteReview";
 import { replayForge, type Replay } from "../../runtime/test/forgeReplay";
 import { buildRig, type Rig } from "../../runtime/test/remoteRig";
 

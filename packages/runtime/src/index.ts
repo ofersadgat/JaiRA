@@ -43,6 +43,7 @@ export * from "./secrets";
 export * from "./forge";
 export * from "./remote";
 export * from "./remoteWatch";
+export * from "./remoteReview";
 export * from "./remoteEvents";
 export * from "./executors";
 export * from "./executorStack";
