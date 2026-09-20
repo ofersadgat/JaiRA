@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type RefObject } from "react";
 import { FORGE_LABELS, anchorNotes, decisionWordOf, shortQuote, type ForgeProviderKind, type ReviewNote } from "@jaira/shared/browser";
 import { BrandIcon, Icon } from "./icons";
+import { forgeName as forgeLabel, repliesOnForge } from "./remoteStrip";
 import { invoke } from "./store";
 
 /** A live selection inside the artifact, in the terms a note is written in. */
@@ -576,7 +577,8 @@ export function NoteList({
   hovered?: number | null;
   onHover?: ((index: number | null) => void) | undefined;
   onReselect: (note: ReviewNote) => void;
-  onReply?: ((index: number, body: string) => void) | undefined;
+  /** May return a promise: a reply on a forge thread is a network call, and the row says so while it runs. */
+  onReply?: ((index: number, body: string, resolve?: boolean) => void | Promise<void>) | undefined;
   /** Absent ⇒ the threads are a record: nothing can be deleted. */
   onRemove?: ((index: number) => void) | undefined;
 }): JSX.Element | null {
@@ -598,7 +600,7 @@ export function NoteList({
           onEnter={() => onHover?.(i)}
           onLeave={() => onHover?.(null)}
           onReselect={() => onReselect(note)}
-          onReply={onReply === undefined ? undefined : (body) => onReply(i, body)}
+          onReply={onReply === undefined ? undefined : (body, resolve) => onReply(i, body, resolve)}
           onRemove={onRemove === undefined ? undefined : () => onRemove(i)}
         />
       ))}
@@ -639,10 +641,31 @@ function NoteThread({
   onEnter(): void;
   onLeave(): void;
   onReselect(): void;
-  onReply?: ((body: string) => void) | undefined;
+  onReply?: ((body: string, resolve?: boolean) => void | Promise<void>) | undefined;
   onRemove?: (() => void) | undefined;
 }): JSX.Element {
   const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  const [failed, setFailed] = useState<string | undefined>(undefined);
+  // A thread that lives on the forge: a reply is posted THERE, as the connection's account.
+  const onForge = repliesOnForge(note);
+  const send = (resolve: boolean): void => {
+    const body = reply.trim();
+    if (body.length === 0 || onReply === undefined || sending) return;
+    setFailed(undefined);
+    const sent = onReply(body, resolve);
+    if (!(sent instanceof Promise)) {
+      setReply("");
+      return;
+    }
+    // The words stay in the box until the forge has them: a reply lost to a dropped connection must
+    // still be there to send again.
+    setSending(true);
+    void sent
+      .then(() => setReply(""))
+      .catch((e: unknown) => setFailed((e as Error).message))
+      .finally(() => setSending(false));
+  };
   const messages = [{ author: note.author, body: note.body, at: note.at }, ...(note.replies ?? [])];
 
   return (
@@ -685,19 +708,24 @@ function NoteThread({
           className="note-reply"
           onSubmit={(e) => {
             e.preventDefault();
-            if (reply.trim().length === 0) return;
-            onReply(reply.trim());
-            setReply("");
+            send(false);
           }}
         >
           <input
             value={reply}
-            placeholder={`Reply as ${author}…`}
+            disabled={sending}
+            placeholder={onForge ? `Reply on ${forgeLabel(note.source)}…` : `Reply as ${author}…`}
             onChange={(e) => setReply(e.target.value)}
           />
-          <button className="ghost" type="submit" disabled={reply.trim().length === 0}>
-            Reply
+          <button className="ghost" type="submit" disabled={sending || reply.trim().length === 0}>
+            {sending ? "Sending…" : "Reply"}
           </button>
+          {onForge ? (
+            <button className="ghost" type="button" disabled={sending || reply.trim().length === 0} title="post the reply and mark the thread resolved on the forge" onClick={() => send(true)}>
+              Reply &amp; resolve
+            </button>
+          ) : null}
+          {failed === undefined ? null : <span className="sub warn-text">{failed}</span>}
         </form>
       )}
     </div>

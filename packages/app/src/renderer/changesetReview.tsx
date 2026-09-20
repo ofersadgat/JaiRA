@@ -54,7 +54,7 @@ import {
 } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { ImageDiff, type ImageLayout } from "./imageDiff";
-import { mergeForgeNotes } from "./remoteStrip";
+import { mergeForgeNotes, repliesOnForge } from "./remoteStrip";
 import { RemoteStrip, ReviewThread, SettledBy } from "./remoteStripView";
 import {
   NoteComposer,
@@ -109,6 +109,8 @@ export interface ComponentServices {
   remote?: {
     status(): Promise<RemoteStatusView[]>;
     check(): Promise<RemoteStatusView[]>;
+    /** Reply on a forge thread; answers with the request as re-read, so the reply comes back as the forge's copy. */
+    reply(thread: string, body: string, resolve?: boolean): Promise<RemoteStatusView[]>;
   };
   /**
    * Who a note is signed as (decision 0002).
@@ -478,6 +480,16 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
               moved={moved.has(change.id)}
               baseline={baseline}
               readOnly={readOnly}
+              // Replying to a thread that lives on the forge posts THERE, now, while the gate is open —
+              // and what comes back is the forge's own copy of the reply, laid in by the effect above.
+              onForgeReply={
+                readOnly || watch === undefined || remote === undefined
+                  ? undefined
+                  : async (thread, body, resolve) => {
+                      const rows = await watch.reply(thread, body, resolve);
+                      setRemoteStatus(rows.find((row) => row.key === remote.key) ?? rows[0]);
+                    }
+              }
             />
           )}
         </div>
@@ -704,6 +716,7 @@ function ChangeDetail({
   moved,
   baseline,
   readOnly,
+  onForgeReply,
 }: {
   change: Change;
   tree: "base" | "proposal";
@@ -716,6 +729,8 @@ function ChangeDetail({
   baseline: BaselineFile[];
   /** The change as it was decided: the diff, the notes and the comment, none of them editable. */
   readOnly?: boolean | undefined;
+  /** Post a reply on a forge thread. Absent ⇒ no second door, and every reply is a draft. */
+  onForgeReply?: ((thread: string, body: string, resolve?: boolean) => Promise<void>) | undefined;
 }): JSX.Element {
   const well = useRef<HTMLDivElement>(null);
   // The well is still the notes' host element; the diff inside it is Monaco's own DOM.
@@ -968,14 +983,17 @@ function ChangeDetail({
         {...(readOnly === true
           ? {}
           : {
-              onReply: (i: number, body: string) =>
-                onDraft({
+              onReply: (i: number, body: string, resolve?: boolean) => {
+                const target = notes[i];
+                if (target !== undefined && onForgeReply !== undefined && repliesOnForge(target)) return onForgeReply(target.thread!, body, resolve);
+                return onDraft({
                   notes: notes.map((note, at) =>
                     at === i
                       ? { ...note, replies: [...(note.replies ?? []), { author, body, at: new Date().toISOString() }] }
                       : note,
                   ),
-                }),
+                });
+              },
               onRemove: (i: number) => onDraft({ notes: notes.filter((_, at) => at !== i) }),
             })}
       />

@@ -427,6 +427,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
   "remote:status": ((request: { taskId: string; project?: string }) => service.remoteStatus(request.taskId, request.project)) as Handler,
   "remote:check": ((request: { taskId: string; project?: string }) => service.checkRemotes(request.taskId, request.project)) as Handler,
+  "remote:reply": ((request: { taskId: string; key: string; thread: string; body: string; resolve?: boolean; project?: string }) => service.replyRemote(request)) as Handler,
   "question:pending": (() => service.pendingQuestions()) as Handler,
   "question:submit": ((request: { requestId: string; answers?: Record<string, string | string[]> }) =>
     service.submitQuestion(request.requestId, request.answers)) as Handler,

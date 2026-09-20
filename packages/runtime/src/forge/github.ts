@@ -182,12 +182,68 @@ export class GitHubProvider implements ForgeProvider {
     return this.handleOf(request, asRecord(created.body));
   }
 
+  /**
+   * Whether `/notifications` can be read: `undefined` until asked, then what the forge said.
+   *
+   * Only a CLASSIC token can — it lists its scopes, which is how one is recognised; a fine-grained
+   * token lists none and is refused the endpoint. A refusal is remembered for the life of the
+   * provider, so a token that cannot read it costs one wasted request, once.
+   */
+  private notifications: boolean | undefined;
+
+  /**
+   * The cross-repository shortcut (decision 0004): ONE conditional call that says whether anything
+   * the token's owner is subscribed to has moved, and which. JaiRA's requests are opened by that
+   * owner, who is therefore subscribed to them.
+   *
+   * Returns the api urls of the pull requests it names, or `undefined` when it cannot say — not
+   * available, or an answer that is not a clean 200/304 — in which case every request is probed
+   * directly, exactly as before. A MISSED notification (a repository the person muted) is what the
+   * 30-minute backstop read is for.
+   */
+  private async notified(cursor: ProbeCursor): Promise<{ urls: Set<string>; notifiedAt?: string; floor?: number } | undefined> {
+    if (this.notifications === false) return undefined;
+    if (this.notifications === undefined) {
+      const scopes = (await this.whoami().catch(() => undefined))?.scopes;
+      if (scopes === undefined || !(scopes.includes("notifications") || scopes.includes("repo"))) {
+        this.notifications = false;
+        return undefined;
+      }
+    }
+    const response = await this.call("GET", "/notifications?all=true&per_page=50", undefined, cursor.notifiedAt !== undefined ? { "If-Modified-Since": cursor.notifiedAt } : undefined);
+    const floor = Number(response.headers["x-poll-interval"]) || undefined;
+    if (response.status === 304) {
+      this.notifications = true;
+      return { urls: new Set(), ...(cursor.notifiedAt !== undefined ? { notifiedAt: cursor.notifiedAt } : {}), ...(floor !== undefined ? { floor } : {}) };
+    }
+    if (response.status !== 200) {
+      // 401/403/404: this token may not read it. Anything else: not an answer to build on this tick.
+      if ([401, 403, 404].includes(response.status)) this.notifications = false;
+      return undefined;
+    }
+    this.notifications = true;
+    const urls = new Set<string>();
+    for (const entry of asList(response.body)) {
+      const subject = asRecord(asRecord(entry)["subject"]);
+      if (asText(subject["type"]) === "PullRequest") urls.add(asText(subject["url"]));
+    }
+    const stamp = response.headers["last-modified"];
+    return { urls, ...(stamp !== undefined ? { notifiedAt: stamp } : {}), ...(floor !== undefined ? { floor } : {}) };
+  }
+
   async probe(handles: RemoteHandle[], cursor: ProbeCursor): Promise<Probe> {
     const etags = { ...(cursor.etags ?? {}) };
     const moved: string[] = [];
     let pollAfterSeconds: number | undefined;
+    // With several requests watched, ask once whether ANY of them moved. One watched request gains
+    // nothing from it — its own conditional probe is already a single free call.
+    const notified = handles.length > 1 ? await this.notified(cursor) : undefined;
+    if (notified?.floor !== undefined) pollAfterSeconds = notified.floor;
     for (const handle of handles) {
       const known = etags[handle.id];
+      // Named by no notification, and seen before: it did not move. A request with no ETag yet is
+      // always probed — there is nothing to compare a notification against.
+      if (notified !== undefined && known !== undefined && !notified.urls.has(`${this.rest}${this.pull(handle)}`)) continue;
       const response = await this.call("GET", this.pull(handle), undefined, known !== undefined ? { "If-None-Match": known } : undefined);
       const floor = Number(response.headers["x-poll-interval"]) || retryAfterOf(response.headers);
       if (floor !== undefined && floor > 0) pollAfterSeconds = Math.max(pollAfterSeconds ?? 0, floor);
@@ -206,7 +262,8 @@ export class GitHubProvider implements ForgeProvider {
     // A request nobody watches any more takes its ETag with it.
     const watched = new Set(handles.map((h) => h.id));
     for (const id of Object.keys(etags)) if (!watched.has(id)) delete etags[id];
-    return { moved, cursor: { etags }, ...(pollAfterSeconds !== undefined ? { pollAfterSeconds } : {}) };
+    const notifiedAt = notified?.notifiedAt ?? cursor.notifiedAt;
+    return { moved, cursor: { etags, ...(notifiedAt !== undefined ? { notifiedAt } : {}) }, ...(pollAfterSeconds !== undefined ? { pollAfterSeconds } : {}) };
   }
 
   async read(handle: RemoteHandle): Promise<RemoteState> {

@@ -161,6 +161,34 @@ describe("the gate parks exactly as today, and the same request lives on the for
   });
 });
 
+describe("replying here posts there", () => {
+  const THREAD = "9090909090909090909090909090909090909090";
+
+  it("posts a reply on the forge thread while the gate is open, and resolves it when asked", async () => {
+    await boot();
+    const { taskId } = await parked();
+    // Released first: a reply answers with the request as RE-READ, so the reply comes back as the
+    // forge's own copy of it rather than as something this window merely believes it sent.
+    release();
+    const rows = await service.replyRemote({ taskId, key: "review", thread: THREAD, body: "  Renamed it, as you suggested.  ", resolve: true });
+    const writes = replay.seen.filter((r) => r.url.includes(`/discussions/${THREAD}`)).map((r) => [r.method, r.body]);
+    expect(writes).toEqual([
+      ["POST", { body: "Renamed it, as you suggested." }],
+      ["PUT", { resolved: true }],
+    ]);
+    expect(rows[0]).toMatchObject({ number: 7430 });
+    expect(rows[0]!.checkedAt).toBeGreaterThan(0);
+  });
+
+  it("refuses a reply on a request this task never opened, and one with no words", async () => {
+    await boot();
+    const { taskId } = await parked();
+    await expect(service.replyRemote({ taskId, key: "somebody-elses", thread: THREAD, body: "hello" })).rejects.toThrow(/has no open merge request 'somebody-elses'/);
+    await expect(service.replyRemote({ taskId, key: "review", thread: THREAD, body: "   " })).rejects.toThrow(/needs words/);
+    expect(replay.seen.filter((r) => r.url.includes(`/discussions/${THREAD}`))).toEqual([]);
+  });
+});
+
 describe("the forge settles first", () => {
   it("merged there → approve, every change merged, and the task's worktree adopts the forge's history", async () => {
     await boot();

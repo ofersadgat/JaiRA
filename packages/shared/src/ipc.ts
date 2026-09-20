@@ -1605,6 +1605,12 @@ export interface IpcContract {
   "remote:status": { request: { taskId: string; project?: ProjectRef }; response: RemoteStatusView[] };
   /** "Check now": read the forge for this task's awaited requests, then answer as `remote:status` does. */
   "remote:check": { request: { taskId: string; project?: ProjectRef }; response: RemoteStatusView[] };
+  /**
+   * Reply on a forge thread from the reviewer, while the gate is open — "replying here posts there".
+   * Posted as the connection's token owner; optionally resolves the thread. Answers as `remote:check`
+   * does, after re-reading, so the reply comes back as the forge's own copy of it.
+   */
+  "remote:reply": { request: { taskId: string; key: string; thread: string; body: string; resolve?: boolean; project?: ProjectRef }; response: RemoteStatusView[] };
   "workflow:browse": { request: { project?: ProjectRef } | void; response: WorkflowBrowser };
   "workflow:read": { request: ReadWorkflowRequest; response: WorkflowSource };
   "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
@@ -1840,6 +1846,7 @@ export const IPC_CHANNELS = [
   "userEvent:deliver",
   "remote:status",
   "remote:check",
+  "remote:reply",
   "workflow:browse",
   "workflow:read",
   "workflow:write",

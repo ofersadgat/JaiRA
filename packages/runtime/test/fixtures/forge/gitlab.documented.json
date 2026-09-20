@@ -597,6 +597,32 @@
           "notes": []
         }
       }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7430/discussions/9090909090909090909090909090909090909090/notes"
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": 1402
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "PUT",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7430/discussions/9090909090909090909090909090909090909090"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": "9090909090909090909090909090909090909090"
+        }
+      }
     }
   ]
 }

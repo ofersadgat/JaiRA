@@ -86,6 +86,17 @@ export function mergeForgeNotes(mine: readonly ReviewNote[] | undefined, theirs:
   return [...local, ...((theirs ?? []) as ReviewNote[])];
 }
 
+/**
+ * Whether replying to a note posts on the forge rather than into the draft.
+ *
+ * Both halves are needed: `source` says the thread lives there, `thread` is how to find it. A note
+ * that lost its thread id is still shown with its mark, and a reply to it stays local — it rides the
+ * review when the gate settles, like any other words written here.
+ */
+export function repliesOnForge(note: Pick<ReviewNote, "source" | "thread">): boolean {
+  return note.source !== undefined && note.thread !== undefined;
+}
+
 /** How a gate that was answered ELSEWHERE says so. `undefined` for a gate answered here. */
 export function settledByLines(recorded: Record<string, unknown>): { head: string; lines: Array<{ text: string; warned?: boolean }> } | undefined {
   const by = recorded["settled_by"] as { via?: string; who?: string; act?: string; word?: string } | undefined;

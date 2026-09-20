@@ -115,3 +115,14 @@ describe("the board card", () => {
     expect(waitingKindOf({ ...(card as object), inReview: { provider: "gitlab", number: 41, url: "u" } } as never)).toBe("in review on GitLab !41");
   });
 });
+
+describe("replying to a note", () => {
+  it("posts on the forge only when the note says where it lives AND how to find it", async () => {
+    const { repliesOnForge } = await import("../src/renderer/remoteStrip");
+    expect(repliesOnForge({ source: "gitlab", thread: "t1" })).toBe(true);
+    // Written here: a reply is a draft, and rides the review when the gate settles.
+    expect(repliesOnForge({})).toBe(false);
+    // Marked as the forge's but with no thread id to reply on: the reply stays local rather than lost.
+    expect(repliesOnForge({ source: "gitlab" })).toBe(false);
+  });
+});

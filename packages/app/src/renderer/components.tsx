@@ -814,6 +814,15 @@ export function ChangesetGate({
                   remote: {
                     status: () => invoke("remote:status", { taskId: gate.taskId, ...(gate.project !== undefined ? { project: gate.project } : {}) }),
                     check: () => invoke("remote:check", { taskId: gate.taskId, ...(gate.project !== undefined ? { project: gate.project } : {}) }),
+                    reply: (thread, body, resolve) =>
+                      invoke("remote:reply", {
+                        taskId: gate.taskId,
+                        key: config.remote?.key ?? "review",
+                        thread,
+                        body,
+                        ...(resolve === true ? { resolve: true } : {}),
+                        ...(gate.project !== undefined ? { project: gate.project } : {}),
+                      }),
                   },
                 }
               : {}),

@@ -407,8 +407,8 @@ build settled that the text above left open:
   past the newest row, or the newest request would read as moved on every tick.
 - **Measured:** an *unauthenticated* conditional request answered `304` on GitHub still spent one of
   the 60 (57 → 56). Only the authenticated one is free, as documented; not yet measured with a token.
-- GitHub's `/notifications` shortcut is not built. The per-request conditional probe is free, so it
-  costs only the cross-repo shortcut, and a fine-grained token cannot read it anyway.
+- GitHub's `/notifications` shortcut was left out of this step and built afterwards — see "After the
+  steps" below.
 
 **Step 2 (2026-09-19).** `packages/runtime/src/remote.ts` holds the five primitives;
 `packages/persistence/src/remoteHandles.ts` and migration 18 hold the row (its type and the port
@@ -433,8 +433,7 @@ the runtime reads it through are in `shared/forge.ts`, because runtime cannot im
 - `.jaira/` is excluded from what is committed, as `worktreeChangeset` excludes it from a review.
 - Deleting a task deletes its row and leaves the merge request alone: closing a request on
   somebody's forge because a card was removed would be an outward act nobody asked for.
-- **Not done:** the CLI does not register the primitives (its registry builder has no task or store
-  in scope at its four call sites), so a workflow that calls one fails there as unregistered.
+- The CLI was left out of this step and wired afterwards — see "After the steps" below.
 
 **Step 3 (2026-09-19).** `shared/remoteSettlement.ts` is the mapping, pure (`now` is an argument);
 `runtime/remoteWatch.ts` is the `RemoteEventSource` seam, `PollingSource` and `RemoteWatcher`;
@@ -459,8 +458,8 @@ the runtime reads it through are in `shared/forge.ts`, because runtime cannot im
 - The probe cursor is composed per connection from its rows (earliest `since`, every ETag) and
   written back to each, so it survives the process. A project that opens with requests still awaited
   probes at once.
-- **Not built:** the focus-after-five-minutes and machine-wake probes (`kickRemotes()` is the one
-  entry point they will call), and GitHub's `/notifications` shortcut.
+- The focus-after-five-minutes and machine-wake probes arrived with step 6; `kickRemotes()` is the
+  one entry point they call.
 
 **Steps 4–5 (2026-09-19).** `app/src/main/remoteReview.ts` is the two-door gate; `RemotePrimitives
 .adopt` is the merge sequence; `changesetReviewLoopFiles({ remote })` carries the request by name.
@@ -483,7 +482,7 @@ the runtime reads it through are in `shared/forge.ts`, because runtime cannot im
   note written in JaiRA as an inline thread (its line found from the words it quotes), a change's
   comment and the review's comment as general comments, then one closing line. A note that came FROM
   the forge carries `source` and is not posted back; it also carries `thread`, so a later state can
-  reply on it with `remote_comment`. Automatic per-thread replies by the responder are not built.
+  reply on it with `remote_comment`. (Replies by the responder came afterwards — below.)
 - **Dirty means the person's work.** The "is `<target>` checked out dirty?" test excludes `.jaira/`,
   which is the recorder's own writing and would otherwise make a checked-out target look dirty
   almost always. A task with no worktree of its own is not reset — that checkout is the person's.
@@ -510,8 +509,46 @@ because the renderer has no DOM test infrastructure; `remoteStripView.tsx` only 
 - The mockup's literal pixel sizes became ratios of the two voices, like the rest of `styles.css`, so
   the Appearance size control reaches them.
 - The window regaining focus after five minutes away, and the machine waking, both probe at once.
-- **Not built:** replying to a forge thread from the reviewer while the gate is open (notes reach the
-  forge when the gate settles locally), and a component-gallery entry for a gate with a remote.
+
+**After the steps (2026-09-19).** The five things the steps above left out.
+
+- **The CLI has remotes** (`cli/src/remoteWiring.ts`), in the DURABLE run only — `jaira task start`,
+  and `jaira run` in a project. The ad-hoc modes have no task for a request to be remembered on,
+  which is the reason they get no file tools either. It gets the primitives; `remote.publish` asked
+  at the terminal when one is attached and refused with a sentence when not; and `on_remote_event`
+  with a watcher that lives exactly as long as the run, because a CLI run is a process that is alive
+  while it waits.
+- **The two-door wrapper moved to `runtime/remoteReview.ts`**, parameterized on HOW THE GATE IS
+  ASKED. The app parks it on the hub, which the forge's settlement can be submitted to. A terminal
+  cannot be answered from outside, so the CLI also supplies the forge's settlement as a promise and
+  the two are raced; the loser is withdrawn through an `AbortSignal` the terminal reviewer now
+  honours, so a prompt the forge beat does not sit waiting for a reply nobody needs.
+- **A revise round replies on the threads it addressed.** In the built-in loop the gate takes
+  `addressed` — the responder's edits — and after the revision is pushed, every UNRESOLVED forge
+  thread on a revised file gets that edit's `reason` as a reply, resolved when the reason's FIRST
+  word is `fixed` (`threadReplies`, pure). A thread whose last word is already JaiRA's is left
+  alone, which is what makes this safe on every park: a resumed run re-reaches the gate. The
+  responder is told, in its prompt, that its reason is now a public reply and what `fixed` does.
+- **Replying here posts there.** A reply to a note that came from the forge goes to `remote:reply`
+  and is posted on that thread at once, as the connection's account, with `Reply & resolve` beside
+  it; what the reviewer then shows is the forge's own copy, re-read. The words stay in the box until
+  the forge has them. It needs no second publish question — the thread exists because the task was
+  allowed to publish — and it cannot settle the gate or restart its window, because JaiRA's own
+  comments are never events. NEW notes are still posted when the gate settles: a draft a person may
+  yet delete should not be public the moment it is typed.
+- **GitHub's `/notifications`**, for a classic token watching SEVERAL requests: one conditional call
+  (`If-Modified-Since` from the stamp on the row) says whether anything moved, and only the requests
+  it names get their own probe. A request with no ETag yet is always probed. A fine-grained token
+  lists no scopes and is never asked; a token the endpoint refuses is asked once. A notification the
+  person muted is what the 30-minute backstop is for. One watched request gains nothing from it and
+  does not use it.
+- **A provider is kept per connection across ticks** (the app's `forgeFor`, the CLI's map), dropped
+  on a settings write or a stored secret. It remembers what cost a request to learn — who the token
+  is, whether it may read notifications, which commenters can write — and a fresh one per tick
+  would re-learn them every minute.
+- **The gallery has a `remote` variant** on both components it touches — the gate with its second
+  door, and the `confirm_action` question that door asks — sharing ONE new word in the variant
+  vocabulary, since they are one knob. The config schemas gained `remote`, `details` and `options`.
 
 Fixtures are of two kinds and each says which in `_source`: recorded from the public API with an
 unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both

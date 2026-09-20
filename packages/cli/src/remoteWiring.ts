@@ -108,11 +108,17 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
   // What each parked gate is deciding, and who to tell when the forge settles it.
   const gates = new Map<string, { changeset?: Changeset; options: string[]; settle: (value: JsonValue) => void }>();
 
+  const forges = new Map<string, ReturnType<typeof forgeForHost>>();
   const target: WatchTarget = {
     key: "cli",
     handles: project.remotes,
     settleAfter: config.integrations.review.settleAfter,
-    provider: (host) => forgeForHost(config.integrations, host, forgeOptions),
+    // One provider per host for the life of the run: it remembers what cost a request to learn.
+    provider: (host) => {
+      let provider = forges.get(host);
+      if (provider === undefined) forges.set(host, (provider = forgeForHost(config.integrations, host, forgeOptions)));
+      return provider;
+    },
   };
   const source = new PollingSource({ targets: () => [target], onError: (connection, error) => options.log(`could not check ${connection}: ${error.message}`) });
   const events = new RemoteEventHub({ onWaiting: () => source.kick() });

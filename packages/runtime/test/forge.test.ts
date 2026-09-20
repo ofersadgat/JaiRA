@@ -301,6 +301,58 @@ describe("GitHub", () => {
       expect(probe.cursor.etags).toEqual({});
     });
 
+    describe("the /notifications shortcut, for a classic token watching several requests", () => {
+      const STAMP = "Sat, 19 Sep 2026 10:00:00 GMT";
+      const paths = (): string[] => replay.seen.map((r) => new URL(r.url).pathname);
+      const known = { [pr(14462).id]: ETAG, [pr(14466).id]: '"seen-before"' };
+
+      it("asks ONCE whether anything moved, and probes only the requests a notification names", async () => {
+        const probe = await github().probe([pr(14462), pr(14466)], { etags: known });
+        // 14466 was named by nothing, so it was never asked about — it would have answered 404.
+        expect(paths()).toEqual(["/user", "/notifications", "/repos/cli/cli/pulls/14462"]);
+        // The one that WAS named is confirmed the free way; its ETag still matches, so it did not move.
+        expect(probe.moved).toEqual([]);
+        expect(probe.cursor).toEqual({ etags: known, notifiedAt: STAMP });
+        expect(probe.pollAfterSeconds).toBe(60);
+      });
+
+      it("sends the stamp back, and a 304 means NO request is probed at all", async () => {
+        const provider = github();
+        await provider.whoami();
+        replay.seen.length = 0;
+        const probe = await provider.probe([pr(14462), pr(14466)], { etags: known, notifiedAt: STAMP });
+        expect(paths()).toEqual(["/notifications"]);
+        expect(replay.seen[0]!.headers["If-Modified-Since"]).toBe(STAMP);
+        expect(probe).toEqual({ moved: [], cursor: { etags: known, notifiedAt: STAMP }, pollAfterSeconds: 60 });
+      });
+
+      it("always probes a request it has never seen — there is nothing to compare a notification against", async () => {
+        const probe = await github().probe([pr(14462), pr(14466)], { etags: { [pr(14466).id]: '"seen-before"' }, notifiedAt: STAMP });
+        expect(paths()).toContain("/repos/cli/cli/pulls/14462");
+        expect(probe.moved).toEqual([pr(14462).id]);
+      });
+
+      it("is not asked of a fine-grained token, which cannot read it: every request is probed directly", async () => {
+        const probe = await github("finegrained").probe([pr(14462), pr(14466)], { etags: known });
+        expect(paths()).not.toContain("/notifications");
+        expect(probe.moved).toEqual([pr(14466).id]); // gone: that is news
+        expect(probe.cursor.notifiedAt).toBeUndefined();
+      });
+
+      it("falls back when the token is refused it, and does not ask again", async () => {
+        const provider = github("sso");
+        await provider.probe([pr(14462), pr(14466)], { etags: known });
+        await provider.probe([pr(14462), pr(14466)], { etags: known });
+        expect(paths().filter((p) => p === "/notifications")).toHaveLength(1);
+        expect(paths().filter((p) => p === "/repos/cli/cli/pulls/14466")).toHaveLength(2);
+      });
+
+      it("is not used for ONE watched request, whose own conditional probe is already a single free call", async () => {
+        await github().probe([pr(14462)], { etags: { [pr(14462).id]: ETAG } });
+        expect(paths()).toEqual(["/repos/cli/cli/pulls/14462"]);
+      });
+    });
+
     it("stops at a 429 with the forge's Retry-After, for the poller to obey", async () => {
       const error = (await github().probe([pr(14465)], {}).catch((e: unknown) => e)) as ForgeError;
       expect(error.status).toBe(429);

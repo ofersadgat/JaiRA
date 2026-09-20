@@ -404,6 +404,8 @@ export interface ProbeCursor {
   since?: string;
   /** GitHub: the ETag of each watched request, by handle id. */
   etags?: Record<string, string>;
+  /** GitHub, classic tokens: the `Last-Modified` of the last `/notifications` answer — sent back as `If-Modified-Since`. */
+  notifiedAt?: string;
 }
 
 export interface Probe {

@@ -272,6 +272,8 @@ import {
   FORGE_LABELS,
   resultOfSettlement,
   REVIEW_NOTE_ARTIFACT,
+  handleOfRow,
+  type ForgeProvider,
   type RemoteStatusView,
   validateComponentResult,
   WORKFLOW_JSON,
@@ -1150,12 +1152,30 @@ export class AppService {
       key: session.key,
       handles: session.project.remotes,
       settleAfter: session.project.config.integrations.review.settleAfter,
-      provider: (host: string) =>
-        forgeForHost(session.project.config.integrations, host, {
-          secrets: this.secretResolver(session),
-          ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
-        }),
+      provider: (host: string) => this.forgeFor(session, host),
     }));
+  }
+
+  /**
+   * One provider per (project, host), kept across polling ticks.
+   *
+   * A provider REMEMBERS things that cost a request to learn — who the token is, whether it may read
+   * `/notifications`, which commenters can write — and a fresh one per tick would re-learn them every
+   * minute, which is the budget this whole design exists to protect. Dropped whenever what it was
+   * built from may have changed: a settings write, a stored secret.
+   */
+  private readonly forges = new Map<string, ForgeProvider>();
+  private forgeFor(session: ProjectSession, host: string): ForgeProvider {
+    const key = JSON.stringify([session.key, host]);
+    let provider = this.forges.get(key);
+    if (provider === undefined) {
+      provider = forgeForHost(session.project.config.integrations, host, {
+        secrets: this.secretResolver(session),
+        ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+      });
+      this.forges.set(key, provider);
+    }
+    return provider;
   }
 
   /**
@@ -1232,6 +1252,27 @@ export class AppService {
       await Promise.all(session.project.remotes.forTask(taskId).filter((row) => row.awaiting).map((row) => watcher.check(target, row)));
     }
     return this.remoteStatus(taskId, project);
+  }
+
+  /**
+   * Reply on a forge thread from the reviewer (decision 0004: "replying here posts there").
+   *
+   * An outward act, and not a new kind of one: the task has already been allowed to publish — the
+   * request this thread lives on exists because it was — and a reply on it is the same conversation.
+   * So it is refused only for a request this task never opened. The reply is JaiRA's own voice on the
+   * forge (`own`), which the settlement mapping never treats as an event: replying does not restart
+   * the quiet window and cannot settle the gate.
+   */
+  async replyRemote(request: { taskId: string; key: string; thread: string; body: string; resolve?: boolean; project?: string }): Promise<RemoteStatusView[]> {
+    const session = this.session(request.project);
+    const row = session.project.remotes.get(request.taskId, request.key);
+    const handle = row === undefined ? undefined : handleOfRow(row);
+    if (row === undefined || handle === undefined) throw this.refusal("run", `task '${request.taskId}' has no open merge request '${request.key}' to reply on`);
+    const body = request.body.trim();
+    if (body.length === 0) throw this.refusal("run", "a reply needs words");
+    const target = this.watchTargets().find((t) => t.key === session.key)!;
+    await target.provider(row.host).reply(handle, request.thread, body, request.resolve === true);
+    return this.checkRemotes(request.taskId, request.project);
   }
 
   /** The forge settled a request: hand the settlement to whatever is waiting on it. */
@@ -5495,6 +5536,7 @@ export class AppService {
    * project it was just configured with, which is the one failure a settings screen must not cause.
    */
   writeConfig(request: WriteConfigRequest): ConfigView {
+    this.forges.clear();
     const base = jairaBasePaths(this.baseDir);
     // Before validating, not after: a document reported field by field and THEN refused for having
     // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
@@ -5793,6 +5835,8 @@ export class AppService {
    * committed `.env`, and it cannot set a variable in someone else's shell.
    */
   setSecret(request: SetSecretRequest): { name: string; target: SecretTargetOf } {
+    // A provider holds the token it was built with; a new one must not keep answering as the old.
+    this.forges.clear();
     if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(request.name)) {
       throw this.refusal("config", `'${request.name}' is not a usable secret name`);
     }

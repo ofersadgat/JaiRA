@@ -285,6 +285,16 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
     document: configSchema("confirm_action", "one irreversible-looking step, confirmed or not", {
       confirmLabel: str("confirmLabel", "the affirmative button; absent ⇒ Confirm"),
       cancelLabel: str("cancelLabel", "the other one; absent ⇒ Cancel"),
+      details: {
+        type: "array",
+        title: "details",
+        description: "what EXACTLY is being confirmed, as label/value rows under the prompt — for an action whose consequences are not in its name",
+        items: { type: "object", properties: { label: str("label"), value: str("value") }, required: ["label", "value"], additionalProperties: false },
+      },
+      options: {
+        ...OPTIONS,
+        description: "other ways of saying YES, each a button between confirm and cancel; choosing one answers `confirmed: true` with `choice` set to its value",
+      },
     }),
     expected: ["prompt"],
   },
@@ -305,6 +315,32 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
         description: "the review-level decision beside the per-change ones; absent ⇒ one Submit and the changes carry the answer",
       },
       decisions: { ...OPTIONS, title: "decisions", description: "an alias for options — it reads better in a review state" },
+      // The gate's second door (decision 0004). Usually not written here at all: a root state makes one
+      // the default for every review below it, under `environment.functions.review_artifacts.args`.
+      remote: {
+        type: ["object", "null"],
+        title: "remote",
+        description:
+          "also open this review as a merge request, and let whichever side settles first answer the state. `null` opts out of a remote the environment would otherwise supply. `{ \"$ref\": \"review\", … }` carries the same request across a loop's rounds (NAMES.md)",
+        properties: {
+          to: str("to", "which git remote to push to; its host picks the connection. Absent ⇒ the project's only remote"),
+          target: str("target", "the branch the request asks to merge into. Absent ⇒ the task's base branch"),
+          settle_after: str("settle_after", "the quiet window after a comment — 10m, 2h, 0. Absent ⇒ Settings → Integrations"),
+          draft: bool("draft", "open the request as a draft"),
+          title: str("title", "what the request is called. Absent ⇒ the task's title"),
+          description: str("description", "what the request says. Absent ⇒ the prompt and what is in the set"),
+          workspace: str("workspace", "which worktree is pushed. Absent ⇒ the state's own"),
+          // Filled in by the host once the gate has parked — where the request lives.
+          provider: str("provider"),
+          host: str("host"),
+          project: str("project"),
+          branch: str("branch"),
+          number: { type: "number", title: "number" },
+          url: str("url"),
+          id: str("id"),
+          key: str("key"),
+        },
+      },
     }),
     expected: ["prompt", "tree"],
   },
@@ -559,6 +595,9 @@ export const GALLERY_VARIANT_ORDER: readonly string[] = [
   "editable",
   "routed",
   "base",
+  // A review that is also a merge request (decision 0004), seen from the two components it touches:
+  // the gate with its second door, and the question that door asks before anything is published.
+  "remote",
   "input",
   "empty",
 ];
@@ -819,6 +858,23 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
         note: "With no labels the buttons read Confirm and Cancel, and with no prompt the heading is the component's own.",
         sample: {},
       },
+      {
+        id: "remote",
+        title: "Before anything leaves the machine",
+        note: "`details` says what EXACTLY is being confirmed, and `options` adds other ways of saying yes. This is the question `remote.publish` asks once per task (decision 0004): the confirm button is the filled one because it has alternatives beside it, and `Always for this project` answers `confirmed: true, choice: \"always\"`.",
+        sample: {
+          prompt: "Push this review to GitLab and open a merge request?",
+          confirmLabel: "Push and open",
+          cancelLabel: "Review here only",
+          details: [
+            { label: "to", value: "origin · gitlab.com/mistlabs/jaira" },
+            { label: "branch", value: "jaira/t-qfr49rm80m/review → main" },
+            { label: "commits as", value: "Ofer Sadgat (git config)" },
+            { label: "request opened by", value: "@ofer (the GitLab connection's token)" },
+          ],
+          options: [{ value: "always", label: "Always for this project" }],
+        },
+      },
     ],
   },
   {
@@ -853,6 +909,29 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
         title: "A sync against the base",
         note: "`tree: base` — the edits exist only as data, so the files column reads the other way round: `merged` is the write and `reverted` leaves the tree alone.",
         sample: { prompt: "Review the sync.", tree: "base" },
+        inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
+      },
+      {
+        id: "remote",
+        title: "Also open on the forge",
+        note: "`remote` gives the gate a second door (decision 0004): the review is pushed, a merge request is opened, and whichever side settles first answers the state. The strip under the base line says where the request lives. This is the gate AS PARKED — the host has already filled in the request's number and link. Here nothing is watching a forge, so the strip has no commenters, no deadline and no Check now.",
+        sample: {
+          prompt: "Review the probe cache before it merges.",
+          tree: "proposal",
+          decisions: ["approve", "revise", { value: "cut", tone: "danger" }],
+          remote: {
+            to: "origin",
+            target: "main",
+            settle_after: "10m",
+            provider: "gitlab",
+            host: "gitlab.com",
+            project: "mistlabs/jaira",
+            branch: "jaira/t-qfr49rm80m/review",
+            number: 41,
+            url: "https://gitlab.com/mistlabs/jaira/-/merge_requests/41",
+            key: "review",
+          },
+        },
         inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
       },
     ],

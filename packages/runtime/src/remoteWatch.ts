@@ -196,6 +196,12 @@ export class PollingSource implements RemoteEventSource {
       const cursor: ProbeCursor = {
         ...(sinces.every((s): s is string => s !== undefined) ? { since: [...sinces].sort()[0]! } : {}),
         etags: Object.assign({}, ...rows.map((row) => row.cursor.etags ?? {})) as Record<string, string>,
+        // The connection's one notifications stamp: the EARLIEST any row remembers, so a row that
+        // joined later cannot make the others skip what they have not yet been told.
+        ...(() => {
+          const stamps = rows.map((row) => row.cursor.notifiedAt).filter((s): s is string => s !== undefined);
+          return stamps.length === rows.length && stamps.length > 0 ? { notifiedAt: stamps.sort((a, b) => Date.parse(a) - Date.parse(b))[0]! } : {};
+        })(),
       };
       const probe = await target.provider(group.host).probe(handles, cursor);
       moved = probe.moved;
@@ -203,7 +209,11 @@ export class PollingSource implements RemoteEventSource {
         const id = handleOfRow(row)?.id;
         const etag = id !== undefined ? probe.cursor.etags?.[id] : undefined;
         target.handles.update(row.taskId, row.key, {
-          cursor: { ...(probe.cursor.since !== undefined ? { since: probe.cursor.since } : {}), ...(etag !== undefined && id !== undefined ? { etags: { [id]: etag } } : {}) },
+          cursor: {
+            ...(probe.cursor.since !== undefined ? { since: probe.cursor.since } : {}),
+            ...(etag !== undefined && id !== undefined ? { etags: { [id]: etag } } : {}),
+            ...(probe.cursor.notifiedAt !== undefined ? { notifiedAt: probe.cursor.notifiedAt } : {}),
+          },
         });
       }
       state.failures = 0;
