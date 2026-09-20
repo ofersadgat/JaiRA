@@ -1,7 +1,7 @@
 # Design note: scoped names
 
-**Status:** the upstream half (§11, `declarative-ai`) is built, reviewed and tested (2026-09-19), uncommitted;
-the JaiRA half is not started, and JaiRA's authored workflows still use the pre-`$` spellings. It extends
+**Status:** the upstream half (§11, `declarative-ai`) is built, reviewed and tested (2026-09-19, `08dae7e`);
+the JaiRA half is not started beyond the `$`-spellings, which the repo and `~/.jaira` now use throughout. It extends
 [REFERENCES.md](REFERENCES.md) — same rule, one more reading of it — and generalizes what
 `@declarative-ai/hw`'s `session.ts` does for one field so that it holds for any position.
 Decision [0004](docs/engineering/decisions/0004-remote-review.md) (remote review) is its first consumer, and
