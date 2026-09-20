@@ -1,0 +1,219 @@
+{
+  "label": "Correctness and the next maintainer",
+  "inputs": {
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "patterns": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "components": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "paths": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings_a": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings_a"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings_a"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Review this feature for correctness and for the next maintainer.\n\n## The feature\n\n{{.inputs.feature}}\n\n## What it is built from\n\nPatterns: {{.inputs.patterns}}\n\nComponents: {{.inputs.components}}\n\nUnits: {{.inputs.units}}\n\n## The changes\n\n{{.inputs.changes}}\n\n## The tests\n\n{{.inputs.tests}}\n\n## The docs\n\n{{.inputs.paths}}\n\nFind what is wrong: a path that fails, an invariant the code can break, a name that will mislead, a doc that no longer matches the code.\n\n## What to produce\n\n`findings_a`: each `{ severity: blocker | significant | minor | note, claim, evidence, layer }`.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings_a": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "findings_a"
+        ]
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.patterns": {
+      "optional": true,
+      "description": "The patterns this feature uses, reused and new alike."
+    },
+    "inputs.components": {
+      "optional": true,
+      "description": "The components this feature uses, reused and new alike."
+    },
+    "inputs.units": {
+      "optional": true,
+      "description": "The units this feature uses, reused and new alike."
+    },
+    "inputs.changes": {
+      "optional": true
+    },
+    "inputs.tests": {
+      "optional": true
+    },
+    "inputs.paths": {
+      "optional": true
+    }
+  }
+}

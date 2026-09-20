@@ -1,0 +1,959 @@
+{
+  "label": "acceptance confidence",
+  "description": "How far this step can be trusted to proceed without a person. No operation: each output is a call into $BASE/functions/confidence.ts.",
+  "inputs": {
+    "max_severity_rank": {
+      "kind": "json",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "threshold_rank": {
+      "kind": "json",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "iteration": {
+      "kind": "json",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "max_iterations": {
+      "kind": "json",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "runner_up_margin": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      }
+    },
+    "mandatory_margin": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      }
+    },
+    "target": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "has_irreversible": {
+      "kind": "json",
+      "schema": {
+        "type": "boolean"
+      }
+    },
+    "has_amendment": {
+      "kind": "json",
+      "schema": {
+        "type": "boolean"
+      }
+    },
+    "ask_below": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      }
+    }
+  },
+  "outputs": {
+    "score": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "user:C:/Users/Ofer/.jaira/functions/confidence.ts#confidence.score",
+          "input": {
+            "maxSeverityRank": {
+              "kind": "json",
+              "index": 0,
+              "schema": {
+                "type": "number"
+              }
+            },
+            "iteration": {
+              "kind": "json",
+              "index": 1,
+              "schema": {
+                "type": "number"
+              }
+            },
+            "maxIterations": {
+              "kind": "json",
+              "index": 2,
+              "schema": {
+                "type": "number"
+              }
+            },
+            "runnerUpMargin": {
+              "kind": "json",
+              "index": 3,
+              "schema": {
+                "type": "number"
+              },
+              "binding": {
+                "json": 1
+              }
+            },
+            "mandatoryMargin": {
+              "kind": "json",
+              "index": 4,
+              "schema": {
+                "type": "number"
+              },
+              "binding": {
+                "json": 1
+              }
+            }
+          },
+          "output": {
+            "name": "result",
+            "kind": "json",
+            "schema": {
+              "type": "number"
+            }
+          }
+        },
+        "parameters": {
+          "maxSeverityRank": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "max_severity_rank"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "iteration": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "iteration"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "maxIterations": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "max_iterations"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "runnerUpMargin": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "runner_up_margin"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "mandatoryMargin": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "mandatory_margin"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "name": "score"
+    },
+    "reasons": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "user:C:/Users/Ofer/.jaira/functions/confidence.ts#confidence.reasons",
+          "input": {
+            "maxSeverityRank": {
+              "kind": "json",
+              "index": 0,
+              "schema": {
+                "type": "number"
+              }
+            },
+            "thresholdRank": {
+              "kind": "json",
+              "index": 1,
+              "schema": {
+                "type": "number"
+              }
+            },
+            "iteration": {
+              "kind": "json",
+              "index": 2,
+              "schema": {
+                "type": "number"
+              }
+            },
+            "runnerUpMargin": {
+              "kind": "json",
+              "index": 3,
+              "schema": {
+                "type": "number"
+              },
+              "binding": {
+                "json": 1
+              }
+            },
+            "mandatoryMargin": {
+              "kind": "json",
+              "index": 4,
+              "schema": {
+                "type": "number"
+              },
+              "binding": {
+                "json": 1
+              }
+            }
+          },
+          "output": {
+            "name": "result",
+            "kind": "json",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "parameters": {
+          "maxSeverityRank": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "max_severity_rank"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "thresholdRank": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "threshold_rank"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "iteration": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "iteration"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "runnerUpMargin": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "runner_up_margin"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "mandatoryMargin": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "mandatory_margin"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "name": "reasons"
+    },
+    "must_ask": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "user:C:/Users/Ofer/.jaira/functions/confidence.ts#confidence.mustAsk",
+          "input": {
+            "hasIrreversible": {
+              "kind": "json",
+              "index": 0,
+              "schema": {
+                "type": "boolean"
+              }
+            },
+            "hasAmendment": {
+              "kind": "json",
+              "index": 1,
+              "schema": {
+                "type": "boolean"
+              }
+            },
+            "target": {
+              "kind": "text",
+              "index": 2,
+              "schema": {
+                "type": "string"
+              }
+            },
+            "iteration": {
+              "kind": "json",
+              "index": 3,
+              "schema": {
+                "type": "number"
+              }
+            },
+            "maxIterations": {
+              "kind": "json",
+              "index": 4,
+              "schema": {
+                "type": "number"
+              }
+            }
+          },
+          "output": {
+            "name": "result",
+            "kind": "json",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "parameters": {
+          "hasIrreversible": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "has_irreversible"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "hasAmendment": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "has_amendment"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "target": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "target"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "iteration": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "iteration"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "maxIterations": {
+            "kind": "json",
+            "binding": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "context.get",
+                        "input": {
+                          "name": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "inputs"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "max_iterations"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "name": "must_ask"
+    },
+    "ask_below": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "scope.get",
+          "input": {
+            "scope": {
+              "kind": "text",
+              "binding": {
+                "text": "inputs"
+              }
+            },
+            "name": {
+              "kind": "text",
+              "binding": {
+                "text": "ask_below"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "ask_below"
+    }
+  },
+  "slotMeta": {
+    "inputs.max_severity_rank": {
+      "default": 0
+    },
+    "inputs.threshold_rank": {
+      "default": 2
+    },
+    "inputs.iteration": {
+      "default": 0
+    },
+    "inputs.max_iterations": {
+      "default": 2
+    },
+    "inputs.runner_up_margin": {
+      "default": 1
+    },
+    "inputs.mandatory_margin": {
+      "default": 1
+    },
+    "inputs.target": {
+      "default": "draft"
+    },
+    "inputs.has_irreversible": {
+      "default": false
+    },
+    "inputs.has_amendment": {
+      "default": false
+    },
+    "inputs.ask_below": {
+      "default": 0.8
+    }
+  }
+}

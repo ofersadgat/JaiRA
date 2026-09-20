@@ -1,0 +1,216 @@
+{
+  "label": "Write the acceptance tests",
+  "inputs": {
+    "prompt": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    }
+  },
+  "outputs": {
+    "acceptance_tests": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "acceptance_tests"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "acceptance_tests"
+    },
+    "responses": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "responses"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "responses"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "{{.inputs.prompt}}",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "acceptance_tests": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "responses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "claim",
+                "disposition"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string"
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string"
+                },
+                "disposition": {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "rejected",
+                    "blocked"
+                  ]
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "acceptance_tests",
+          "responses"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": {
+      "name": "acceptance",
+      "in": "feature/acceptance"
+    }
+  },
+  "scopeSession": {
+    "name": "acceptance",
+    "in": "feature/acceptance"
+  },
+  "slotMeta": {
+    "outputs.responses": {
+      "optional": true
+    }
+  }
+}

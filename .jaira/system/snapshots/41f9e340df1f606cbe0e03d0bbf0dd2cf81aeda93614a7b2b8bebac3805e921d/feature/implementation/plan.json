@@ -1,0 +1,344 @@
+{
+  "label": "Plan the changes",
+  "description": "Reads the units, components and patterns the feature builds against and the code they land in, and writes the change list: the order that keeps the tree green, what hides behind a flag, what is deleted, and whether anything is irreversible.",
+  "inputs": {
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "patterns": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "components": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "returned_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "plan": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "plan"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "plan"
+    },
+    "has_irreversible": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "has_irreversible"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "has_irreversible"
+    },
+    "recovery": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "recovery"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "recovery"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Plan the changes that build this feature.\n\n## The feature\n\n{{.inputs.feature}}\n\n## What it is built from\n\nUnits: {{.inputs.units}}\n\nComponents: {{.inputs.components}}\n\nPatterns: {{.inputs.patterns}}\n\n## What came back\n\n{{.inputs.returned_findings}}\n\n## What to do\n\nOpen the unit, component and pattern docs with `read_file`, then the code they land in. Write the change list: the smallest change that lands safely on its own first, then the order that keeps the tree green, what hides behind a flag until the rest arrives, what is deleted, and what \"done\" means for each change as an observable.\n\n## What to produce\n\n`plan`: `{ changes: [{ what, depends_on, done_when, doc_updates }] }`.\n\n`has_irreversible`: true when any change runs a migration, deletes data, or publishes a contract.\n\n`recovery`: how an irreversible change is recovered from, when there is one.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "object"
+          },
+          "has_irreversible": {
+            "type": "boolean"
+          },
+          "recovery": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan",
+          "has_irreversible",
+          "recovery"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ],
+    "permissions": {
+      "profile": "read-only",
+      "tools": {
+        "read_file": "allow"
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.patterns": {
+      "optional": true,
+      "description": "The patterns this feature uses, reused and new alike."
+    },
+    "inputs.components": {
+      "optional": true,
+      "description": "The components this feature uses, reused and new alike."
+    },
+    "inputs.units": {
+      "optional": true,
+      "description": "The units this feature uses, reused and new alike."
+    },
+    "inputs.returned_findings": {
+      "optional": true,
+      "description": "What a later phase found wrong with this one. Absent on the way down."
+    },
+    "outputs.recovery": {
+      "optional": true
+    }
+  }
+}

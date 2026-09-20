@@ -1,0 +1,451 @@
+{
+  "label": "Critique the features",
+  "description": "One independent pass over the draft. Runs on its own conversation.",
+  "inputs": {
+    "features": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "feature_docs": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "standing_amendment": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "issue": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "doc_paths": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings"
+    },
+    "max_severity": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity"
+    },
+    "max_severity_rank": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity_rank"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity_rank"
+    },
+    "target": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "target"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "target"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Judge these features. Structure is checked by the machine; judge coverage and substance.\n\n## The issue\n\n{{.inputs.issue}}\n\n## The features\n\n{{.inputs.features}}\n\n## The docs\n\n{{.inputs.feature_docs}}\n\n## The paths\n\n{{.inputs.doc_paths}}\n\n## The amendment submitted\n\n{{.inputs.standing_amendment}}\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n## The previous pass\n\n{{.inputs.prior_findings}}\n\nEach carries the draft's disposition. `fixed`: check it. `rejected`: read the note and let it go if it holds. `blocked`: decide whether a person has to answer; if so, `target: ask`.\n\n## What to check\n\n- Each feature is high level: an outcome a customer would name, true under any redesign of the screens. \"Work at a glance\" is a feature; \"you can see the tasks in a menu\" is a pattern that delivers it. A doc that describes a list, an order, a row, a click, a menu, a panel, a surface or a depth describes a UX pattern, and that is a blocker: name the feature the pattern belongs to.\n- The body of each doc is at the feature's altitude, not only its title. A sentence that says what the product does (groups, orders, ranks, remembers, notifies, keeps asking, lets the person choose an arrangement) is behaviour, and behaviour is a pattern: blocker, quote the sentence. A reader who had never seen the issue must not be able to tell from the docs which mechanisms it asked for.\n- The count fits the issue. One issue is usually one feature, sometimes two. Three or more from one issue, or two a marketing page could not tell apart, means the split was by interface: significant, and name the one feature they are.\n- Every goal in the issue is delivered by a feature. Every feature delivers a goal in the issue.\n- Each feature is the smallest marketable unit, measured in outcomes and never in interface. Two outcomes a customer would name as one are one feature; one that a customer would name as two is two; a slice of a screen is neither.\n- No two stories are the same story in different words.\n- Each story's value is something the person wanted before the feature existed.\n- Each metric moves only if the value is delivered, not merely if the feature is used.\n- The `1.0` features alone are worth shipping.\n- The docs follow the writing standard: headings state conclusions, nothing is process, nothing names code, nothing is a question, nothing is argued.\n- Departures from the principles are stated in a line, or absent.\n\n## What to produce\n\n`findings`: each `{ severity: blocker | significant | minor | note, claim, evidence, target_id }`. `evidence` quotes the doc.\n\n`max_severity` and `max_severity_rank` (blocker 3, significant 2, minor 1, note 0). No findings: `note`, 0.\n\n`target`: `draft` when the framing holds and the execution does not; `explore` when the framing is wrong; `upstream` when the issue itself is the problem; `ask` when a person has to decide.\n\nA finding costs a pass. Raise only what changes what gets built.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "max_severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "significant",
+              "minor",
+              "note"
+            ]
+          },
+          "max_severity_rank": {
+            "type": "integer"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "explore",
+              "upstream",
+              "ask"
+            ]
+          }
+        },
+        "required": [
+          "findings",
+          "max_severity",
+          "max_severity_rank",
+          "target"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": null,
+    "tools": [
+      "read_file"
+    ],
+    "permissions": {
+      "profile": "read-only",
+      "tools": {
+        "read_file": "allow"
+      },
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        }
+      ]
+    }
+  },
+  "scopeSession": null,
+  "slotMeta": {
+    "inputs.features": {
+      "optional": true
+    },
+    "inputs.feature_docs": {
+      "optional": true
+    },
+    "inputs.standing_amendment": {
+      "optional": true
+    },
+    "inputs.severity_threshold": {
+      "default": "significant"
+    },
+    "inputs.prior_findings": {
+      "optional": true
+    },
+    "inputs.working_set": {
+      "optional": true
+    },
+    "inputs.doc_paths": {
+      "optional": true
+    }
+  }
+}

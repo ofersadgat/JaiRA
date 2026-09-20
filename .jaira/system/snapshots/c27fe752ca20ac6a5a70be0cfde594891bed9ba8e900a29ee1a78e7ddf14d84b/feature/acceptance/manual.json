@@ -1,0 +1,156 @@
+{
+  "label": "Manual procedures",
+  "inputs": {
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "unverified": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "manual_procedures": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "manual_procedures"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "manual_procedures"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Write a manual procedure for each claim no test reaches.\n\n## The feature\n\n{{.inputs.feature}}\n\n## The unverified claims\n\n{{.inputs.unverified}}\n\n## What to produce\n\n`manual_procedures`: one per claim: `{ claim, steps, expected }`. Steps are what a person does; expected is what they see when the claim holds.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "manual_procedures": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "manual_procedures"
+        ]
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.unverified": {
+      "optional": true
+    }
+  }
+}

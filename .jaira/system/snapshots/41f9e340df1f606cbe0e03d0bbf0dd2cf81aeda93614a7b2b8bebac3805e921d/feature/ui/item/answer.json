@@ -1,0 +1,187 @@
+{
+  "label": "Answer the questions",
+  "description": "The questions the draft could not settle from the docs, put to the person one at a time with the draft's reading pre-picked. A passed question means the draft's reading stands. The person may allow follow-up questions: the component then asks a model whether the answers opened anything else only a person can settle, asks that too, and returns every round's answers together. Entered only when the draft raised any.",
+  "inputs": {
+    "questions": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "question",
+            "options"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "header": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "default": {
+              "type": "string"
+            },
+            "custom": {
+              "type": "boolean"
+            },
+            "optional": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spec": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "brief"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The doc id under docs/, e.g. ux/patterns/grouped-list."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Which template: pattern | component | surface | unit | contract."
+          },
+          "brief": {
+            "type": "string",
+            "description": "What this concept is and what the feature needs from it, in a few sentences."
+          }
+        }
+      }
+    },
+    "doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    }
+  },
+  "outputs": {
+    "answers": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      },
+      "name": "answers"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "choose_option",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "The component draft could not settle these from the docs. Each shows the reading it took. Confirm it, pick another, say it in your own words, or pass to keep the reading."
+        }
+      },
+      "follow_up": {
+        "kind": "json",
+        "binding": {
+          "json": true
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.questions": {
+      "default": []
+    },
+    "inputs.feature": {
+      "optional": true,
+      "description": "Context for follow-up questions: the feature this concept serves."
+    },
+    "inputs.spec": {
+      "optional": true,
+      "description": "Context for follow-up questions: the concept being written."
+    },
+    "inputs.doc": {
+      "optional": true,
+      "description": "Context for follow-up questions: the draft the questions came from."
+    },
+    "outputs.answers": {
+      "description": "One key per question, by name — the follow-up questions' too. An absent key is a passed question: the draft's default stands."
+    }
+  }
+}

@@ -1,0 +1,452 @@
+{
+  "label": "Critique the acceptance suite",
+  "inputs": {
+    "acceptance_tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "results": {
+      "kind": "json",
+      "schema": {}
+    },
+    "diagnosability": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "covered": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings"
+    },
+    "max_severity": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity"
+    },
+    "max_severity_rank": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity_rank"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity_rank"
+    },
+    "target": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "target"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "target"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Judge the acceptance suite.\n\n## The tests\n\n{{.inputs.acceptance_tests}}\n\n## The results\n\n{{.inputs.results}}\n\n## What breaking the feature showed\n\n{{.inputs.diagnosability}}\n\n## The feature\n\n{{.inputs.feature}}\n\n## What the unit tests cover\n\n{{.inputs.covered}}\n\n## The previous pass\n\n{{.inputs.prior_findings}}\n\n## What to check\n\n- Every claim in the story and the metrics has a test, or is named as unverified.\n- Each test asserts the success signal, not an intermediate.\n- Each test drives the system the way the person does.\n- Nothing re-asserts a unit invariant.\n- Every mutation was caught, and the failure said what broke.\n\n## What to produce\n\n`findings`: each `{ severity, claim, evidence, target_id }`.\n\n`max_severity`, `max_severity_rank` (blocker 3, significant 2, minor 1, note 0).\n\n`target`: `draft` when the tests should change; `upstream` when the feature or a pattern is wrong; `ask` when a person has to decide.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "max_severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "significant",
+              "minor",
+              "note"
+            ]
+          },
+          "max_severity_rank": {
+            "type": "integer"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "explore",
+              "upstream",
+              "ask"
+            ]
+          }
+        },
+        "required": [
+          "findings",
+          "max_severity",
+          "max_severity_rank",
+          "target"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": null
+  },
+  "scopeSession": null,
+  "slotMeta": {
+    "inputs.acceptance_tests": {
+      "optional": true
+    },
+    "inputs.results": {
+      "optional": true
+    },
+    "inputs.diagnosability": {
+      "optional": true
+    },
+    "inputs.covered": {
+      "optional": true
+    },
+    "inputs.severity_threshold": {
+      "default": "significant"
+    },
+    "inputs.prior_findings": {
+      "optional": true
+    }
+  }
+}

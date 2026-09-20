@@ -1,0 +1,1502 @@
+{
+  "label": "Review",
+  "description": "Does what was built match what each layer said it would be? A conformance pass per layer, two independent lenses, merged findings, a disposition, a person's verdict, and corrections. A revise names the failing layer and the feature's build re-enters it.",
+  "limits": {
+    "max_iterations": 3
+  },
+  "inputs": {
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "patterns": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "components": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "paths": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "ask_below": {
+      "kind": "json",
+      "schema": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    }
+  },
+  "outputs": {
+    "verdict": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "verify"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "decision"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "verdict"
+    },
+    "failing_layer": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "merge"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "failing_layer"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "failing_layer"
+    },
+    "findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "merge"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings"
+    },
+    "layer_verdicts": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "conformance"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "layer_verdicts"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "layer_verdicts"
+    },
+    "disposition": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "dispose"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "disposition"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "disposition"
+    },
+    "shipped": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "dispose"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "shipped"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "shipped"
+    },
+    "corrections": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "correct"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "corrections"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "corrections"
+    },
+    "paths": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "correct"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "paths"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "paths"
+    },
+    "follow_ups": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "merge"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "follow_ups"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "follow_ups"
+    }
+  },
+  "children": {
+    "conformance": {
+      "state": "feature/review/conformance",
+      "inputs": {
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "patterns": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "patterns"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "components": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "components"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "units": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "units"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "changes": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "changes"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "paths": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "paths"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "lens_a": {
+      "state": "feature/review/lens_a",
+      "inputs": {
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "patterns": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "patterns"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "components": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "components"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "units": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "units"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "changes": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "changes"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "paths": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "paths"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "async": true
+    },
+    "lens_b": {
+      "state": "feature/review/lens_b",
+      "inputs": {
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "patterns": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "patterns"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "components": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "components"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "units": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "units"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "changes": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "changes"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "paths": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "paths"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "async": true
+    },
+    "merge": {
+      "state": "feature/review/merge",
+      "inputs": {
+        "layer_verdicts": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "conformance"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "layer_verdicts"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "findings_a": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "lens_a"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "findings_a"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "findings_b": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "lens_b"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "findings_b"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "changes": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "changes"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "dispose": {
+      "state": "feature/review/dispose",
+      "inputs": {
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "findings": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "merge"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "findings"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "confidence": {
+      "state": "feature/review/confidence",
+      "inputs": {
+        "iteration": {
+          "op": {
+            "kind": "function",
+            "functionRef": "op.member",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": {
+                    "kind": "function",
+                    "functionRef": "context.get",
+                    "input": {
+                      "name": {
+                        "kind": "text",
+                        "binding": {
+                          "text": "run"
+                        }
+                      }
+                    },
+                    "output": {
+                      "name": "value",
+                      "kind": "json"
+                    }
+                  }
+                }
+              },
+              "prop": {
+                "kind": "text",
+                "binding": {
+                  "text": "iteration"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "max_iterations": {
+          "op": {
+            "kind": "function",
+            "functionRef": "op.member",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": {
+                    "kind": "function",
+                    "functionRef": "context.get",
+                    "input": {
+                      "name": {
+                        "kind": "text",
+                        "binding": {
+                          "text": "limits"
+                        }
+                      }
+                    },
+                    "output": {
+                      "name": "value",
+                      "kind": "json"
+                    }
+                  }
+                }
+              },
+              "prop": {
+                "kind": "text",
+                "binding": {
+                  "text": "max_iterations"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "ask_below": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "ask_below"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "verify": {
+      "state": "feature/review/verify",
+      "inputs": {
+        "findings": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "merge"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "findings"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "disposition": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "dispose"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "disposition"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "failing_layer": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "merge"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "failing_layer"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "ask_below": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "ask_below"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "score": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "confidence"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "score"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "reasons": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "confidence"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "reasons"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "must_ask": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "confidence"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "must_ask"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "correct": {
+      "state": "feature/review/correct",
+      "inputs": {
+        "findings": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "merge"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "findings"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "disposition": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "dispose"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "disposition"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "verdict": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "verify"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "decision"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    }
+  },
+  "sequence": [
+    "conformance",
+    "lens_a",
+    "lens_b",
+    "merge",
+    "dispose",
+    "confidence",
+    "verify",
+    "correct"
+  ],
+  "sequenceAuthored": false,
+  "slotMeta": {
+    "inputs.patterns": {
+      "optional": true,
+      "description": "The patterns this feature uses, reused and new alike."
+    },
+    "inputs.components": {
+      "optional": true,
+      "description": "The components this feature uses, reused and new alike."
+    },
+    "inputs.units": {
+      "optional": true,
+      "description": "The units this feature uses, reused and new alike."
+    },
+    "inputs.changes": {
+      "optional": true
+    },
+    "inputs.tests": {
+      "optional": true
+    },
+    "inputs.paths": {
+      "optional": true
+    },
+    "inputs.ask_below": {
+      "default": 0.8
+    },
+    "outputs.failing_layer": {
+      "optional": true
+    },
+    "outputs.follow_ups": {
+      "optional": true
+    }
+  },
+  "fanOut": [
+    "conformance\u0000layer_verdicts",
+    "dispose\u0000disposition",
+    "merge\u0000failing_layer",
+    "merge\u0000findings",
+    "verify\u0000decision"
+  ]
+}

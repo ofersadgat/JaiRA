@@ -1,0 +1,127 @@
+{
+  "label": "Correct what the sweep found",
+  "inputs": {
+    "stale": {
+      "kind": "json",
+      "schema": {}
+    }
+  },
+  "outputs": {
+    "corrections": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "corrections"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "corrections"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Correct the docs the lint found stale.\n\n## The report\n\n{{.inputs.stale}}\n\nOpen each doc named, correct the statement that is stale, and change nothing else.\n\n## What to produce\n\n`corrections`: one row per doc: `{ path, was, now }`.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "corrections": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "corrections"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "write_file"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "write_file": "allow"
+      },
+      "scopes": [
+        {
+          "path": "docs/**",
+          "tools": {
+            "read_file": "allow",
+            "write_file": "allow"
+          }
+        }
+      ]
+    }
+  },
+  "slotMeta": {
+    "inputs.stale": {
+      "optional": true
+    }
+  }
+}
