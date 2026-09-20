@@ -183,7 +183,7 @@ const FORM_FIELD: SchemaDoc = {
     enum: { type: "array", title: "choices", description: "enum fields only", items: { type: "string" } },
     optional: bool("optional", "an empty answer is allowed"),
     multiline: bool("multiline", "string fields only: render a textarea"),
-    custom: bool("custom", "enum fields only: end the list in Custom…, which opens a text box; what is typed is the answer"),
+    custom: bool("custom", "enum fields only: the values are suggestions — the box offers them and takes any other text"),
     default: { title: "default", description: "the value the control starts on" },
   },
   required: ["name"],
@@ -781,7 +781,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       {
         id: "custom",
         title: "An enum with a way out",
-        note: "`custom: true` on an enum field ends its list in Custom…, which opens a text box; what is typed there is the answer, and the contract accepts any non-empty string on that field.",
+        note: "`custom: true` on an enum field makes its values suggestions: the box offers them and takes any other text, and the contract accepts any non-empty string on that field.",
         sample: {
           prompt: "Where should the cache live?",
           fields: [

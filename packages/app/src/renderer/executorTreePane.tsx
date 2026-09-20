@@ -487,7 +487,9 @@ function StepStack({
                     schema={spec.schema}
                     value={steps?.[name]}
                     onChange={(next) => ctx.set(at(name), next ?? {})}
-                    ctx={{ path: at(name), disabled: ctx.locked, isSet: (p) => ctx.pinned(p) }}
+                    // Each field is pinned at its own path: `value` is the RESOLVED step, and pinning a
+                    // rebuilt step would pin every derived field of it along with the one that changed.
+                    ctx={{ path: at(name), disabled: ctx.locked, isSet: (p) => ctx.pinned(p), setAt: (p, v) => ctx.set(p, v) }}
                   />
                 </div>
               ) : null}

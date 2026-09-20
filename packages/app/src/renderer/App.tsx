@@ -1124,10 +1124,9 @@ export default function App(): JSX.Element {
         : state.projects.find((p) => p.kind === "shared")?.project;
     return {
       fields: runFields,
-      // Declared defaults underneath, what has been typed over the top. See `AppState.runValues`:
-      // the map is sparse, so a box nobody has touched shows its default and a box someone
-      // emptied stays empty.
-      values: { ...initialRunValues(runFields ?? []), ...(state.runValues[doc.stateId] ?? {}) },
+      // The form as it was left, or its declared shape when nobody has changed it. See
+      // `AppState.runValues`.
+      values: state.runValues[doc.stateId] ?? initialRunValues(runFields ?? []),
       target,
       targetDir: dir,
       exists: doc.exists,
@@ -1136,7 +1135,7 @@ export default function App(): JSX.Element {
       // The target's task list, so "started here" is read out of the database the button writes to.
       tasks: target.project === undefined ? state.tasks : state.sharedTasks,
       selected: state.selected,
-      onChange: (name, text) => actions.setRunValue(doc.stateId ?? "", name, text),
+      onChange: (values) => actions.setRunValues(doc.stateId ?? "", values),
       onRun: (title, inputs) => void actions.runState(doc.stateId ?? "", title, inputs, target.project),
       onSelectTask: actions.select,
     };
@@ -1178,10 +1177,8 @@ export default function App(): JSX.Element {
     const called = run?.inputs;
     return {
       fields,
-      values: {
-        ...(called !== undefined ? runValuesOf(fields ?? [], called) : initialRunValues(fields ?? [])),
-        ...(state.runValues[stateId] ?? {}),
-      },
+      values:
+        state.runValues[stateId] ?? (called !== undefined ? runValuesOf(fields ?? [], called) : initialRunValues(fields ?? [])),
       target: {
         ...(project !== null && project !== state.at ? { project } : {}),
         label: summary?.label ?? projectName(project),
@@ -1195,7 +1192,7 @@ export default function App(): JSX.Element {
       busy: state.busy,
       tasks: summary?.kind === "shared" ? state.sharedTasks : state.tasks,
       selected: state.selected,
-      onChange: (name, text) => actions.setRunValue(stateId, name, text),
+      onChange: (values) => actions.setRunValues(stateId, values),
       onRun: (title, inputs) => void actions.runState(stateId, title, inputs, project ?? undefined),
       onSelectTask: actions.select,
     };
@@ -1787,7 +1784,7 @@ export default function App(): JSX.Element {
                       values={state.runValues}
                       busy={state.busy}
                       onPick={actions.pickWorkflow}
-                      onChange={actions.setRunValue}
+                      onChange={actions.setRunValues}
                       onCreate={(workflow, inputs) => void actions.createTask(workflow, inputs)}
                     />
                   ) : null}

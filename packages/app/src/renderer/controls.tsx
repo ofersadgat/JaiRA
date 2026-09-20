@@ -19,7 +19,7 @@
  * convention and its two themes are variable-driven — an inline `#fff` is a light-mode assumption
  * that dark mode cannot override.
  */
-import { useState, type JSX, type ReactNode } from "react";
+import { useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 
 /**
  * One setting: what it is called, what it writes, what it means, and the control.
@@ -40,20 +40,34 @@ export function Field({
   param,
   hint,
   set = false,
+  lead,
+  after,
+  mono = false,
+  error,
   children,
 }: {
   label: string;
-  param?: string;
+  param?: string | undefined;
   hint?: ReactNode;
   set?: boolean;
+  /** Before the label — the switch that decides whether an optional member is set at all. */
+  lead?: ReactNode;
+  /** After the label, on the same line — a required mark, what the value may be, a choice of shape. */
+  after?: ReactNode;
+  /** The label is a NAME something else chose (a slot, a key), so it is set in data voice. */
+  mono?: boolean;
+  /** What is wrong with the value, under the control that holds it. */
+  error?: string | undefined;
   children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="cfg-field">
+    <div className={`cfg-field${error !== undefined ? " bad" : ""}`}>
       <div className="cfg-field-say">
         <span className="cfg-field-head">
-          <span className="cfg-label">{label}</span>
+          {lead}
+          <span className={`cfg-label${mono ? " mono" : ""}`}>{label}</span>
           {set ? <span className="cfg-set" title="set in the layer you are editing">set here</span> : null}
+          {after}
         </span>
         {hint !== undefined || param !== undefined ? (
           <span className="cfg-hint">
@@ -62,7 +76,10 @@ export function Field({
           </span>
         ) : null}
       </div>
-      <div className="cfg-control">{children}</div>
+      <div className="cfg-control">
+        {children}
+        {error !== undefined ? <div className="reason cfg-error">{error}</div> : null}
+      </div>
     </div>
   );
 }
@@ -184,19 +201,33 @@ export function NumInput({
   );
 }
 
-/** A plain text box. Its own component only so every control in a form is reached the same way. */
+/**
+ * A plain text box. Its own component only so every control in a form is reached the same way.
+ *
+ * `list` names a `<datalist>` of suggestions — the platform's own autocomplete, which is what the
+ * link and state pickers already use, so a choice box here drops down the same way they do.
+ */
 export function TextInput({
   value,
   onChange,
   placeholder,
   disabled,
   mono = false,
+  list,
+  label,
+  onBlur,
+  onKeyDown,
 }: {
   value: string;
   onChange: (v: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
+  placeholder?: string | undefined;
+  disabled?: boolean | undefined;
   mono?: boolean;
+  list?: string | undefined;
+  /** For a box with no visible label of its own — a map row's key. */
+  label?: string | undefined;
+  onBlur?: (() => void) | undefined;
+  onKeyDown?: ((e: KeyboardEvent<HTMLInputElement>) => void) | undefined;
 }): JSX.Element {
   return (
     <input
@@ -204,28 +235,71 @@ export function TextInput({
       value={value}
       placeholder={placeholder}
       disabled={disabled}
+      list={list}
+      aria-label={label}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
+      onKeyDown={onKeyDown}
     />
   );
 }
 
-/** A multi-line box — argv, environment, a JSON block, a list of patterns. */
+/**
+ * A number box that keeps what you TYPED.
+ *
+ * {@link NumInput} reports `undefined` for anything that is not a number, which is right for a
+ * setting where empty means inherit. A form whose fields are switched on and off has already said
+ * whether there is a value; what it needs from the box is the text, so `1.5x` can come back as
+ * "'1.5x' is not a number" under the box rather than silently becoming nothing. The draft is the same
+ * trick `NumInput` uses, so `0.` survives long enough to become `0.5`.
+ */
+export function NumberText({
+  value,
+  onChange,
+  disabled,
+}: {
+  /** The number, or the raw text a box holds while it is not one. */
+  value: number | string | undefined;
+  onChange: (text: string) => void;
+  disabled?: boolean | undefined;
+}): JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (value === undefined ? "" : String(value));
+  return (
+    <input
+      className="cfg-input mono num"
+      value={shown}
+      disabled={disabled}
+      inputMode="decimal"
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={() => setDraft(null)}
+    />
+  );
+}
+
+/** A multi-line box — argv, environment, a JSON block, a list of patterns, or prose. */
 export function TextArea({
   value,
   onChange,
   placeholder,
   disabled,
   rows = 3,
+  mono = true,
 }: {
   value: string;
   onChange: (v: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
+  placeholder?: string | undefined;
+  disabled?: boolean | undefined;
   rows?: number;
+  /** Off for prose — an issue or a note reads in the app's own face, not as code. */
+  mono?: boolean;
 }): JSX.Element {
   return (
     <textarea
-      className="cfg-input mono"
+      className={`cfg-input${mono ? " mono" : ""}`}
       value={value}
       rows={rows}
       placeholder={placeholder}

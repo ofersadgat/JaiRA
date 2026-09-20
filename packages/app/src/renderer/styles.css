@@ -7385,7 +7385,7 @@ button.link.change-path {
 }
 .cfg-field-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -7437,6 +7437,8 @@ button.link.change-path {
 }
 .cfg-control {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 3px;
   min-width: 0;
 }
 /* A nested form inside a field's control, told to GROW — without which it is zero pixels wide.
@@ -8451,8 +8453,8 @@ textarea.cfg-input {
 /* A card's own heading is the VARIATION: smaller than the row's, and its note in the same voice. */
 .gallery-card .gallery-head h4 { font-size: calc(var(--size-app) * 12.5 / 12.5); }
 
-/* --- a question's description, and a form field's own answer ---
-   The line under a question saying why it is asked; the box under an enum's Custom… entry. */
+/* --- a question's description ---
+   The line under a question saying why it is asked. */
 .question-desc {
   margin: -4px 0 8px;
   color: var(--dim);
@@ -8460,7 +8462,6 @@ textarea.cfg-input {
   line-height: 1.5;
   max-width: 80ch;
 }
-.field .field-custom { margin-top: 4px; }
 
 /* --- an array in a schema-driven form ---
    A row per item, the item's own controls on the left and what you can do to the ROW on the right.
@@ -8486,6 +8487,144 @@ textarea.cfg-input {
 .cfg-list-acts button { padding: 2px 7px; }
 .cfg-list-add { display: flex; }
 
+/* --- the rest of a schema-driven form ---
+   The switch before a name says whether an optional member is set at all; the chips after it choose
+   only the value's shape. A switched-off member holds a dashed note where its control would be — an
+   outline of a box, because it is the place a value would go, not a value. */
+.cfg-label.mono {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+  font-weight: 500;
+}
+/* What the schema allows, before anything is typed. Data voice: it quotes the schema. */
+.sf-type {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.sf-req {
+  color: var(--bad);
+  font-weight: 700;
+}
+/* The chips sit in a well of their own so they read as ONE choice rather than three buttons. */
+.sf-pick {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--bg);
+}
+.sf-pick .cfg-chip {
+  padding: 0 8px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  line-height: 18px;
+  border-radius: 5px;
+}
+.sf-union {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.sf-union > .sf-pick {
+  align-self: flex-start;
+}
+.sf-absent {
+  flex: 1 1 auto;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+  padding: 5px 9px;
+  border: 1px dashed var(--line);
+  border-radius: var(--control-radius);
+  overflow-wrap: anywhere;
+}
+.sf-bool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+/* A complaint under the control it is about. Its own line whatever the control's row is doing. */
+.cfg-error {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+.cfg-field.bad > .cfg-control > .cfg-input,
+.cfg-field.bad > .cfg-control > textarea.cfg-input {
+  border-color: var(--bad);
+}
+/* A list row that opens and closes: a caret, its index, and — closed — what it holds in one line. */
+.sf-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 6px;
+}
+.sf-row-head.closed {
+  margin-bottom: 0;
+}
+.sf-row-head .ellip {
+  white-space: nowrap;
+  min-width: 0;
+}
+.sf-row-head > .cfg-list-acts {
+  margin-left: auto;
+}
+/* An object's fields, indented under the name that holds them. The rule is the one job a left edge
+   still has in this app — saying what is INSIDE what — and it is on the fields, not on a card. A list
+   row's own item is not indented again: the row's border already says it. */
+.cfg-control > .cfg-fields {
+  border-left: 2px solid var(--line);
+  padding-left: 11px;
+  margin-left: 3px;
+}
+button.sf-caret {
+  padding: 0 4px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
+  line-height: 18px;
+}
+button.sf-caret:disabled {
+  opacity: 1;
+  color: var(--bad);
+}
+.sf-index {
+  flex: none;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
+  color: var(--dim);
+}
+/* A map: the author's key, its value, and removing it. A value that is itself an object takes the
+   whole next line, because a nested form beside a key box is a nested form six characters wide. */
+.sf-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.sf-map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto;
+  gap: 6px;
+  align-items: start;
+}
+.sf-map-row.block {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.sf-map-row.block > .sf-map-value {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+}
+.sf-map-value {
+  min-width: 0;
+}
+
 /* --- running a state from the inspector --- */
 /* The two sections sit at the top of a 220–680px column, so everything here is fighting for width:
    labels above boxes rather than beside them, and one row per previous run. */
@@ -8499,26 +8638,17 @@ textarea.cfg-input {
   font-size: calc(var(--size-data) * 11 / 12);
   color: var(--text);
 }
-.run-field .req {
-  color: var(--bad);
-}
-/* The box, not the label, carries the fault — the message below it names the field already. */
-.run-field.bad .cfg-input {
-  border-color: var(--bad);
-}
-.run-field .sub.ellip {
-  font-size: calc(var(--size-app) * 10.5 / 12.5);
+/* The run form itself is the schema form; these rows are the slots it does not ask for. */
+.run-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 .run-fixed {
   font-family: var(--font-data);
   font-size: calc(var(--size-data) * 10.5 / 12);
   overflow-wrap: anywhere;
-}
-.run-bool {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
 }
 .run-actions {
   margin-top: 2px;

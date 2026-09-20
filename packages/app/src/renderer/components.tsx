@@ -7,7 +7,7 @@
  * main re-validates every submission, so this layer is free to be purely about
  * presentation.
  */
-import { Suspense, useEffect, useRef, useState, type JSX } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   artifactOf,
   isComponentName,
@@ -23,6 +23,7 @@ import {
   type ComponentName,
   type ConfirmActionConfig,
   type EditArtifactConfig,
+  fillFormSchema,
   type FillFormConfig,
   type FormField,
   type ApprovalScope,
@@ -46,6 +47,10 @@ import { SchemaJsonEditor } from "./schemaEditor";
 import { answerOf, answersOfValue, ChoiceList, ChoiceSteps, EMPTY_ANSWER, initialAnswers, submitsOnClick, type Answer } from "./choices";
 import { mountChangesetReview, rendererServices, type ComponentServices } from "./changesetReview";
 import { ValueView } from "./valueView";
+import { SchemaForm } from "./schemaForm/SchemaForm";
+import { useSchemaCheck, useTouched } from "./schemaForm/check";
+import { checkBlocker, seedFor } from "./schemaForm/model";
+import type { Schema } from "./schemaForm/types";
 import {
   NoteComposer,
   NoteList,
@@ -621,146 +626,56 @@ function EditArtifact({
   );
 }
 
-/** Initial value for a field: its authored default, else an empty-ish value. */
-function seedValue(field: FormField): unknown {
-  if (field.default !== undefined) return field.default;
-  switch (field.type) {
-    case "boolean":
-      return false;
-    case "enum":
-      return field.enum?.[0] ?? "";
-    case "number":
-      return "";
-    default:
-      return "";
-  }
-}
-
 /**
- * The `<select>` value that stands for "none of these" on an enum field with `custom: true`.
+ * What a `fill_form` opens holding: every field with a `default` pre-answered with it, every other
+ * required field at an empty value of its type, and the optional ones without a default not set.
  *
- * A sentinel rather than a real value, so an author's own option can never collide with it: the
- * separator makes it unspellable as a JSON string an author would write, and it never leaves the
- * form — what is submitted is the text typed under it.
+ * A gate's `default` is not the run's. On a state's input, a default is what the engine sends when
+ * nothing is; on a gate, nothing fills a field the person did not answer, so the default is the
+ * ANSWER the form starts on — "answering is confirming or overruling", and submitting untouched sends
+ * it.
  */
-const CUSTOM_CHOICE = "\u0000custom";
+function formStartsWith(fields: readonly FormField[], schema: Schema): Record<string, unknown> {
+  const out = seedFor(schema) as Record<string, unknown>;
+  for (const field of fields) if (field.default !== undefined) out[field.name] = structuredClone(field.default);
+  return out;
+}
 
 function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>): JSX.Element {
   const readOnly = settled !== undefined;
-  const recorded = recordOf(settled);
-  // Settled: what was submitted, field by field; a field the record does not name is drawn empty
-  // rather than at its default, because a default the person never saw sent is not their answer.
-  const [values, setValues] = useState<Record<string, unknown>>(() =>
-    Object.fromEntries(config.fields.map((f) => [f.name, settled !== undefined ? (recorded[f.name] ?? "") : seedValue(f)])),
+  const schema = useMemo(() => fillFormSchema(config.fields) as Schema, [config.fields]);
+  // Settled: what was submitted, and nothing else — a field the record does not name is drawn NOT SET,
+  // because a default the person never saw sent is not their answer.
+  const [value, setValue] = useState<Record<string, unknown>>(() =>
+    readOnly ? { ...recordOf(settled) } : formStartsWith(config.fields, schema),
   );
-  // Which enum fields are on their Custom… entry. Held apart from the value, because the value is
-  // the typed text — and a typed text that happens to equal a declared option is still typed.
-  // Seeded from a default the list does not contain, which is the one way a form can start there —
-  // or, settled, from an answer the list does not contain, which is the one way it can end there.
-  const [custom, setCustom] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(
-      config.fields
-        .filter((f) => {
-          if (f.type !== "enum" || f.custom !== true) return false;
-          const at = settled !== undefined ? recorded[f.name] : f.default;
-          return at !== undefined && !(f.enum ?? []).includes(String(at));
-        })
-        .map((f) => [f.name, true]),
-    ),
-  );
-  const set = (name: string, value: unknown): void => setValues((v) => ({ ...v, [name]: value }));
+  const { touched, touch } = useTouched("fill_form");
+  const check = useSchemaCheck(readOnly ? [] : [{ path: "", schema, value: value as JsonValue }]);
+  const blocked = readOnly ? null : checkBlocker(check);
 
   return (
     <>
-      {config.fields.map((field) => (
-        <label className="field" key={field.name}>
-          <span>
-            {field.label ?? field.name}
-            {field.optional ? " (optional)" : ""}
-          </span>
-          {field.type === "boolean" ? (
-            <input
-              type="checkbox"
-              checked={values[field.name] === true}
-              disabled={readOnly}
-              onChange={(e) => set(field.name, e.target.checked)}
-            />
-          ) : field.type === "enum" ? (
-            <>
-              <select
-                value={custom[field.name] === true ? CUSTOM_CHOICE : String(values[field.name] ?? "")}
-                disabled={readOnly}
-                onChange={(e) => {
-                  if (e.target.value === CUSTOM_CHOICE) {
-                    // Opening the box clears the pick: the text is the answer from here on, and an
-                    // untouched box reads as "not answered" — never as the option that was showing.
-                    setCustom((c) => ({ ...c, [field.name]: true }));
-                    set(field.name, "");
-                  } else {
-                    setCustom((c) => ({ ...c, [field.name]: false }));
-                    set(field.name, e.target.value);
-                  }
-                }}
-              >
-                {(field.enum ?? []).map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-                {field.custom === true ? <option value={CUSTOM_CHOICE}>Custom…</option> : null}
-              </select>
-              {custom[field.name] === true ? (
-                <input
-                  className="field-custom"
-                  data-testid={`custom-${field.name}`}
-                  autoFocus={!readOnly}
-                  placeholder={readOnly ? "" : "Type your own answer…"}
-                  value={String(values[field.name] ?? "")}
-                  readOnly={readOnly}
-                  onChange={(e) => set(field.name, e.target.value)}
-                />
-              ) : null}
-            </>
-          ) : field.multiline ? (
-            <textarea
-              rows={4}
-              value={String(values[field.name] ?? "")}
-              readOnly={readOnly}
-              onChange={(e) => set(field.name, e.target.value)}
-            />
-          ) : (
-            <input
-              type={field.type === "number" ? "number" : "text"}
-              value={String(values[field.name] ?? "")}
-              readOnly={readOnly}
-              onChange={(e) => set(field.name, e.target.value)}
-            />
-          )}
-          {field.description ? <small>{field.description}</small> : null}
-        </label>
-      ))}
+      <SchemaForm
+        schema={schema}
+        value={value}
+        onChange={(next) => setValue(next as Record<string, unknown>)}
+        ctx={{
+          path: "",
+          hidePaths: true,
+          disabled: readOnly,
+          errors: check.errors,
+          touched,
+          touch,
+          unsetNote: () => (readOnly ? "not answered" : "not set — left out of the answer"),
+        }}
+      />
       {readOnly ? null : (
-      <div className="options">
-        <button
-          onClick={() => {
-            // Coerce number fields once, here: an <input type="number"> hands back a
-            // string, and main validates types strictly.
-            const payload: Record<string, unknown> = {};
-            for (const field of config.fields) {
-              const raw = values[field.name];
-              if (field.type === "number") {
-                if (raw === "" || raw === undefined) continue;
-                payload[field.name] = typeof raw === "number" ? raw : Number(raw);
-              } else {
-                payload[field.name] = raw;
-              }
-            }
-            onSubmit(payload);
-          }}
-        >
-          Submit
-        </button>
-      </div>
+        <div className="options">
+          <button className="primary" disabled={blocked !== null} title={blocked ?? undefined} onClick={() => onSubmit(value)}>
+            Submit
+          </button>
+          {blocked !== null && blocked.length > 0 ? <span className="sub ellip">{blocked}</span> : null}
+        </div>
       )}
     </>
   );

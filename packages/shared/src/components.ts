@@ -211,11 +211,59 @@ export interface FormField {
   /** `string` fields only: render a textarea. */
   multiline?: boolean;
   /**
-   * `enum` fields only: the list ends in a "Custom…" entry that opens a text box, and what is typed
-   * there is the answer. The declared values are then the common answers rather than the only ones,
-   * and the contract accepts any non-empty string on the field.
+   * `enum` fields only: the declared values are the common answers rather than the only ones — the
+   * box suggests them and takes any other text — and the contract accepts any non-empty string on the
+   * field.
    */
   custom?: boolean;
+}
+
+/**
+ * A `fill_form`'s fields as the JSON Schema the app's one form renderer draws, and checks, them with.
+ *
+ * The conversion is the contract in {@link validateComponentResult}, restated in schema keywords so
+ * the form refuses exactly what the gate would:
+ *
+ *  - a field that is not `optional` is `required`, and a required text answer is `minLength: 1`
+ *    because the contract reads `""` as not answered;
+ *  - `enum` is `enum`; with `custom` it is `examples` — suggested, not insisted on — plus the same
+ *    non-empty rule;
+ *  - `multiline` asks for room to write (`contentMediaType: "text/plain"`), and `label` is `title`.
+ */
+export function fillFormSchema(fields: readonly FormField[]): Record<string, JsonValue> {
+  const properties: Record<string, JsonValue> = {};
+  for (const field of fields) {
+    const schema: Record<string, JsonValue> = {};
+    switch (field.type) {
+      case "number":
+        schema["type"] = "number";
+        break;
+      case "boolean":
+        schema["type"] = "boolean";
+        break;
+      case "enum":
+        schema["type"] = "string";
+        if (field.custom === true) schema["examples"] = [...(field.enum ?? [])];
+        else schema["enum"] = [...(field.enum ?? [])];
+        if (field.optional !== true) schema["minLength"] = 1;
+        break;
+      case "string":
+      default:
+        schema["type"] = "string";
+        if (field.multiline === true) schema["contentMediaType"] = "text/plain";
+        if (field.optional !== true) schema["minLength"] = 1;
+        break;
+    }
+    if (field.label !== undefined) schema["title"] = field.label;
+    if (field.description !== undefined) schema["description"] = field.description;
+    if (field.default !== undefined) schema["default"] = field.default;
+    properties[field.name] = schema;
+  }
+  return {
+    type: "object",
+    properties,
+    required: fields.filter((field) => field.optional !== true).map((field) => field.name),
+  };
 }
 
 /**

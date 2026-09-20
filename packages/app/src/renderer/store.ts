@@ -318,18 +318,18 @@ export interface AppState {
   editorTabLast: EditorTab;
 
   /**
-   * What has been typed into a state's run form, keyed by STATE ID then by input name.
+   * What a state's run form holds, keyed by STATE ID — the whole form once anything in it has changed.
    *
    * Keyed by state id rather than by `layer:path` — the two layers hold two copies of one state, but
    * a run names the id and gets whichever copy the search path resolves, so remembering the boxes
    * per file would split one form's contents across two keys that run the same thing.
    *
-   * SPARSE, and that is what makes it work: a name absent here falls back to the slot's `default`,
-   * so opening a state shows its declared defaults without this map ever being seeded, while a box
-   * someone deliberately CLEARED is stored as `""` and stays cleared. Held here rather than in the
+   * A state with no entry opens at its declared shape — required slots at a value, the rest NOT SET —
+   * and the first change stores the whole form, because "not set" is a key's ABSENCE: a sparse overlay
+   * could not tell a slot someone switched off from one nobody touched. Held here rather than in the
    * panel for the reason the drafts are: the inspector unmounts on the next click in the tree.
    */
-  runValues: Record<string, Record<string, string>>;
+  runValues: Record<string, Record<string, JsonValue>>;
 
   /**
    * Every workflow ROOT that can be started here, as the picker lists them.
@@ -4384,14 +4384,9 @@ export function useApp() {
       setEditorTab: (key: string, tab: EditorTab) =>
         patch({ editorTab: { ...ref.current.editorTab, [key]: tab }, editorTabLast: tab }),
 
-      /** Hold one box of a state's run form. See {@link AppState.runValues} on why `""` is stored. */
-      setRunValue: (stateId: string, name: string, text: string) =>
-        patch({
-          runValues: {
-            ...ref.current.runValues,
-            [stateId]: { ...(ref.current.runValues[stateId] ?? {}), [name]: text },
-          },
-        }),
+      /** Hold a state's run form, whole. See {@link AppState.runValues} on why it is not a per-box overlay. */
+      setRunValues: (stateId: string, values: Record<string, JsonValue>) =>
+        patch({ runValues: { ...ref.current.runValues, [stateId]: values } }),
 
       /**
        * Start a run of the open state, from the Files view's inspector.

@@ -54,8 +54,24 @@ const common = {
   define: { "process.env.NODE_ENV": '"production"' },
 };
 
+/**
+ * `import.meta.url` for the MAIN bundle, which is CJS and so has no `import.meta` of its own.
+ *
+ * esbuild empties it and warns, and empty is the dangerous half: `createRequire(import.meta.url)`
+ * already crashed the `sdk` executor probe this way (see `executors.ts`), and `agents-cli`'s bridge
+ * host still defaults its worker file with `new URL(…, import.meta.url)` — dead here only because
+ * `service.ts` names the file. So rather than silence the warning, every read gets the bundle's own
+ * URL, which is what an ES module in its place would have seen. Main only: a sandboxed preload has no
+ * `node:url` to require, and nothing it bundles reads `import.meta`.
+ */
+const importMetaUrl = {
+  define: { ...common.define, "import.meta.url": "__jairaImportMetaUrl" },
+  banner: { js: 'const __jairaImportMetaUrl = require("node:url").pathToFileURL(__filename).href;' },
+};
+
 await build({
   ...common,
+  ...importMetaUrl,
   entryPoints: { main: "src/main/index.ts" },
   outdir,
   outExtension: { ".js": ".cjs" },

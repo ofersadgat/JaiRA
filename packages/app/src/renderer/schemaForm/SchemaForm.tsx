@@ -1,150 +1,122 @@
 /**
- * The generic recursive renderer. Ported from findmyprompt's `schemaForm/SchemaForm.tsx`.
+ * The generic recursive renderer — the ONE form every typed value in the app is filled in through.
+ *
+ * Ported from findmyprompt's `schemaForm/SchemaForm.tsx`, and since grown into what the Run panel,
+ * the New-task popover, the `fill_form` gate and Settings all draw with, so that none of them keeps a
+ * form of its own. Two renderings of one slot were two places for a type to be read wrongly; the Run
+ * panel's own form is the one that did it, drawing a JSON box for any schema richer than a bare type
+ * and then refusing `significant` for not being valid JSON.
  *
  * Resolution per node, in order:
  *
- *  1. a `$type` registry hit renders with that dedicated widget, which owns its own labels and layout;
- *  2. an object/class flattens `allOf` and recurses over `properties`;
- *  3. an array renders its items as rows, each recursing;
- *  4. a primitive maps to a number / enum / boolean / text control.
+ *  1. a node that may take more than one SHAPE (`anyOf`, `oneOf`, a `type` array) draws a chip per
+ *     shape and the chosen shape beneath it;
+ *  2. a `$type` registry hit renders with that dedicated widget, which owns its own labels and layout;
+ *  3. an object recurses over its members, each drawn as a {@link Member};
+ *  4. a list draws a row per item, and a row holding more than one line opens and closes;
+ *  5. anything else is one control, chosen in `model.leafControlOf`.
  *
- * Labels and tooltips come from the presentation map (resolved against the IMMEDIATE container's
- * `$type`), never from the renderer. What differs from the original is only the styling seam: this
- * one emits JaiRA's `Field`/`FieldGrid` classes instead of inline styles, because the app has two
- * themes and an inline `#fff` is a light-mode assumption dark mode cannot override.
+ * A member that is not required carries a SWITCH before its name. That is the whole model of
+ * optional: `oneOf(value, not set)`, chosen out loud, never inferred from an empty box — so `""` is a
+ * string here, and whether a string may be empty is the schema's `minLength` to say. The chips after
+ * the name choose only among the value's own shapes (text, none, path + line).
  *
- * The property this earns is the one that matters: a step that gains a field in
- * `@jaira/shared`'s `executorStack.ts` gains a control here, with its label, its hint and its
- * validation, without anyone editing a form.
+ * Every decision with a rule in it is in `model.ts`, where a test without a DOM can reach it. What is
+ * left here is which element draws it.
  */
-import type { JSX } from "react";
-import { Field, FieldGrid, NumInput, SelectInput, TextInput } from "../controls";
+import { useId, useState, type JSX, type KeyboardEvent } from "react";
+import { Chip, Field, FieldGrid, NumberText, Switch, TextArea, TextInput } from "../controls";
+import { jsonTextOf, jsonValueOf } from "../jsonText";
+import {
+  branchesOf,
+  branchIndexFor,
+  branchLabels,
+  childPath,
+  deref,
+  fitsBranch,
+  flatten,
+  isArraySchema,
+  isComposite,
+  isObjectSchema,
+  isWithin,
+  itemPath,
+  leafControlOf,
+  mapSchema,
+  numberFromText,
+  seedFor,
+  shortText,
+  singleShapeOf,
+  suggestionsOf,
+  summaryOf,
+  typeHintOf,
+} from "./model";
 import { presentationFor } from "./presentation";
 import { widgetFor } from "./registry";
 import type { Schema, SchemaFormContext } from "./types";
 
-function isObjectSchema(s: Schema): boolean {
-  return s["type"] === "object" || s["properties"] !== undefined || s["allOf"] !== undefined;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** A node with its references followed and a one-shape union unwrapped. */
+const resolve = (schema: Schema, root: Schema | undefined): Schema => singleShapeOf(deref(schema, root), root);
+
+/** The context a LIST ITEM gets: no dotted-path writer and no layer, because neither reaches `[2]`. */
+function itemContext(ctx: SchemaFormContext, path: string): SchemaFormContext {
+  const { setAt: _setAt, isSet: _isSet, ...rest } = ctx;
+  return { ...rest, path };
 }
 
-function isArraySchema(s: Schema): boolean {
-  return s["type"] === "array" || s["items"] !== undefined;
+/** The complaint a field shows under itself, if it has one and has been touched. */
+function errorAt(ctx: SchemaFormContext, path: string): string | undefined {
+  if (ctx.reading === true) return undefined;
+  if (ctx.touched !== undefined && !ctx.touched(path)) return undefined;
+  return ctx.errors?.find((e) => e.path === path)?.message;
 }
 
-/**
- * Follow a local `$ref` to the node the document declares it as.
- *
- * Ported code renders schemas somebody wrote FOR a form — flat objects of scalars, with every shape
- * spelled out where it is used. The schemas in `shared/schemas.ts` are not those: they are written
- * for an editor's completion and for validation, so a shape used twice is declared once under
- * `definitions` and referred to. Three hundred `$ref`s in the state schema alone, and without this
- * every one of them was an object with no properties — which the form drew as a heading with
- * nothing under it.
- *
- * Local pointers only (`#/definitions/x`, `#/$defs/x`). A `$ref` to another document is a fetch, and
- * a form that quietly fetched would be a form that renders differently depending on the network.
- * Anything it cannot follow comes back unchanged, which is the same "draw what you can" this whole
- * renderer is built on.
- *
- * Siblings beside the `$ref` WIN, which is 2019-09's rule and also the useful one: a member written
- * `{$ref: "#/definitions/slot", description: "the issue to work"}` means the shared shape with that
- * description, and a reader is owed the one written at the point of use.
- */
-function deref(schema: Schema, root: Schema | undefined, depth = 0): Schema {
-  const ref = schema["$ref"];
-  // Eight is far past anything real and stops a document that refers to itself from hanging the
-  // renderer — a cycle is a bug in the schema, not a reason for the window to stop responding.
-  if (typeof ref !== "string" || root === undefined || depth > 8 || !ref.startsWith("#/")) return schema;
-  let at: unknown = root;
-  for (const step of ref.slice(2).split("/")) {
-    const key = decodeURIComponent(step).replace(/~1/g, "/").replace(/~0/g, "~");
-    if (at === null || typeof at !== "object") return schema;
-    at = (at as Record<string, unknown>)[key];
-  }
-  if (at === null || typeof at !== "object" || Array.isArray(at)) return schema;
-  const rest = Object.fromEntries(Object.entries(schema).filter(([key]) => key !== "$ref"));
-  return deref({ ...(at as Schema), ...rest }, root, depth + 1);
+/** What a switched-off member says where its control would be. */
+function unsetNoteOf(ctx: SchemaFormContext, path: string, schema: Schema, value: unknown): string {
+  if (ctx.unsetNote !== undefined) return ctx.unsetNote(path, schema, value);
+  if (ctx.isSet !== undefined) return value !== undefined ? `not set here — inherits ${shortText(value)}` : "not set";
+  if (schema["default"] !== undefined) return `not set — the default applies: ${shortText(schema["default"])}`;
+  return "not set";
 }
 
 /**
- * The schema every OTHER key of a map answers to, when the document declares one.
+ * Which shape a union holds, remembering one somebody PICKED.
  *
- * `additionalProperties: true` and `false` are not schemas and mean the opposite things about
- * whether extra keys are allowed; neither says what one would LOOK like, so neither produces fields.
+ * The value usually says which branch it is in, and that is the default. But a shape just chosen may
+ * hold a value that does not show it yet — a number branch whose box is still empty holds `""`, which
+ * reads as text — so the pick is kept for as long as the value can still belong to it.
  */
-function mapSchema(schema: Schema, root: Schema | undefined): Schema | undefined {
-  const extra = schema["additionalProperties"];
-  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return undefined;
-  return deref(extra as Schema, root);
+function useShape(branches: readonly Schema[] | undefined, value: unknown, root: Schema | undefined): [number, (i: number) => void] {
+  const [picked, setPicked] = useState<number | undefined>(undefined);
+  if (branches === undefined) return [0, setPicked];
+  const held = picked !== undefined && picked < branches.length && (value === undefined || fitsBranch(branches[picked]!, value));
+  return [held ? picked! : branchIndexFor(branches, value, root), setPicked];
 }
 
-/**
- * A branch of an `anyOf`/`oneOf`, chosen by what the value ALREADY is.
- *
- * The alternative — a discriminator control, "is this a string or an object?" — asks the reader
- * about a distinction the format has deliberately made invisible: a `choose_option` option may be
- * written as a bare string or as a labelled object, and both are the same option. So the value
- * decides, an absent value takes the first branch (the spelling the schema puts first is the one it
- * recommends), and nothing here can silently retype a value the author wrote the other way.
- */
-function variantFor(schema: Schema, value: unknown): Schema {
-  const branches = (schema["anyOf"] ?? schema["oneOf"]) as Schema[] | undefined;
-  if (branches === undefined || branches.length === 0) return schema;
-  const actual =
-    value === null || value === undefined
-      ? undefined
-      : Array.isArray(value)
-        ? "array"
-        : typeof value === "object"
-          ? "object"
-          : typeof value;
-  const hit =
-    actual === undefined
-      ? undefined
-      : branches.find((b) => {
-          if (actual === "array") return isArraySchema(b);
-          if (actual === "object") return isObjectSchema(b);
-          return b["type"] === actual;
-        });
-  return hit ?? branches[0]!;
-}
-
-/** What a newly added array item starts as — empty of content, right in shape. */
-function seedFor(schema: Schema): unknown {
-  const variant = variantFor(schema, undefined);
-  if (isArraySchema(variant)) return [];
-  if (isObjectSchema(variant)) return {};
-  if (variant["type"] === "boolean") return false;
-  if (variant["type"] === "number") return 0;
-  if (Array.isArray(variant["enum"])) return (variant["enum"] as string[])[0] ?? "";
-  return "";
-}
-
-/**
- * Merge `allOf` (inlined object schemas) + own `properties` — base first, own overrides — while
- * tracking the `$type` that DECLARED each member, so a base-defined member resolves its presentation
- * under that base (define-once) rather than under the flattened leaf type.
- */
-function flatten(
-  schema: Schema,
-  declaringType?: string,
-  root?: Schema,
-): { properties: Record<string, Schema>; declaredBy: Record<string, string | undefined> } {
-  const myType = (schema["$type"] as string | undefined) ?? declaringType;
-  let properties: Record<string, Schema> = {};
-  let declaredBy: Record<string, string | undefined> = {};
-  // A base written as `{$ref: …}` is the ordinary way to say "and everything that one has", so the
-  // members it contributes have to be found before they can be flattened in.
-  for (const member of (schema["allOf"] as Schema[] | undefined) ?? []) {
-    const f = flatten(deref(member, root), undefined, root);
-    properties = { ...properties, ...f.properties };
-    declaredBy = { ...declaredBy, ...f.declaredBy };
-  }
-  for (const [key, sub] of Object.entries((schema["properties"] as Record<string, Schema> | undefined) ?? {})) {
-    properties[key] = sub;
-    declaredBy[key] = myType;
-  }
-  return { properties, declaredBy };
+/** The chips that choose a value's shape. */
+function ShapeChips({
+  branches,
+  index,
+  disabled,
+  onPick,
+}: {
+  branches: readonly Schema[];
+  index: number;
+  disabled: boolean;
+  onPick: (i: number) => void;
+}): JSX.Element {
+  const labels = branchLabels(branches);
+  return (
+    <span className="sf-pick" role="group" aria-label="shape">
+      {labels.map((label, i) => (
+        <Chip key={i} active={i === index} disabled={disabled} onClick={() => onPick(i)}>
+          {label}
+        </Chip>
+      ))}
+    </span>
+  );
 }
 
 export function SchemaForm({
@@ -159,235 +131,566 @@ export function SchemaForm({
   onChange: (v: unknown) => void;
   ctx: SchemaFormContext;
   /** The `$type` of the schema declaring THIS node, for presentation lookup of its members. */
-  containerType?: string;
+  containerType?: string | undefined;
 }): JSX.Element {
   /**
    * The document, for following a `$ref` — this node's own schema at the top, the context's below.
-   *
-   * The top-level caller passes a whole document and no root, so the schema it hands over IS the
-   * root; every recursion carries it down on the context. That is why nothing else in this file had
-   * to change to gain reference resolution.
+   * The top-level caller passes a whole document and no root, so the schema it hands over IS the root.
    */
   const root = ctx.root ?? declared;
   /**
-   * A reference already expanded on the way here — see {@link SchemaFormContext.refs}.
-   *
-   * Drawn as NOTHING rather than as an unresolved node, because the alternative was worse than
-   * either: the node's own `$ref` object has no `type` and no `properties`, so it falls through to
-   * the primitive control at the bottom of this file and a nested object becomes a text box reading
-   * `[object Object]`. The label and the description still come from the parent's `Field`, so what
-   * the reader loses is one level of a shape that describes itself — and the source below the form
-   * is where anybody reading that would go anyway.
+   * A reference already expanded on the way here — see {@link SchemaFormContext.refs}. Drawn as
+   * NOTHING rather than as an unresolved node: a node that is only a `$ref` has no type, and would fall
+   * through to a text box reading `[object Object]`.
    */
   const ref = typeof declared["$ref"] === "string" ? (declared["$ref"] as string) : undefined;
   const seen = ctx.refs ?? [];
+  const at: SchemaFormContext = { ...ctx, root, refs: ref === undefined ? seen : [...seen, ref] };
+  const node = resolve(declared, root);
+  const branches = branchesOf(node, root, false);
+  const [index, pick] = useShape(branches === undefined ? undefined : branchesOf(node, root), value, root);
   if (ref !== undefined && seen.includes(ref)) return <></>;
-  const at = { ...ctx, root, refs: ref === undefined ? seen : [...seen, ref] };
-  // Followed FIRST, then resolved against the value it holds: a node may be a reference to a choice
-  // of shapes, and a choice of shapes may have references for branches — so both directions happen.
-  const schema = deref(variantFor(deref(declared, root), value), root);
-  const $type = schema["$type"] as string | undefined;
 
-  // 1) A registered widget owns its own labels and layout.
-  const Widget = widgetFor($type);
-  if (Widget) return <Widget schema={schema} value={value} onChange={onChange} ctx={at} />;
-
-  // 2) Object / class → recurse over the flattened properties.
-  if (isObjectSchema(schema)) {
-    const { properties, declaredBy } = flatten(schema, containerType, root);
-    const obj = (value ?? {}) as Record<string, unknown>;
-    /**
-     * A MAP's members — `inputs`, `outputs`, `env`: the keys are the author's, not the schema's.
-     *
-     * Rendered from the VALUE rather than from the schema, because that is the only place the names
-     * exist. Without this a map was drawn as a heading with nothing under it, which is how a state
-     * file's whole input and output list came to be invisible in a form built from its own schema.
-     * Only the keys `properties` does not already claim, so a document that declares some members
-     * and allows others does not draw the declared ones twice.
-     */
-    const every = mapSchema(schema, root);
-    const spare = every === undefined ? [] : Object.keys(obj).filter((key) => properties[key] === undefined);
-    // Reading a document: only what it STATES — see `SchemaFormContext.reading`. A state file says
-    // four things and its schema declares thirty, so the unfiltered form buries the document in its
-    // own possibilities; and every one of those empty branches is a subtree this renderer would
-    // otherwise walk and draw.
-    const shown = ctx.reading === true ? Object.entries(properties).filter(([key]) => obj[key] !== undefined) : Object.entries(properties);
+  if (branches !== undefined) {
+    // A union with no field head of its own — a list item, a map value, the top of a form. The chips
+    // go above the shape they choose. A READING draws the shape the value is in and no chips: it is
+    // not asking which one.
+    const branch = branches[index]!;
+    const body = <SchemaForm schema={branch} value={value} onChange={onChange} ctx={at} containerType={containerType} />;
+    if (ctx.reading === true) return body;
+    const resolved = branchesOf(node, root)!;
     return (
-      <FieldGrid>
-        {shown.map(([key, sub]) => {
-          const path = ctx.path.length > 0 ? `${ctx.path}.${key}` : key;
-          const set = (next: unknown): void => {
-            // An UNSET member is REMOVED rather than written as undefined: an empty box means "this
-            // layer says nothing", and a key with an undefined value is neither that nor a value.
-            const nextObj = { ...obj };
-            if (next === undefined) delete nextObj[key];
-            else nextObj[key] = next;
-            onChange(nextObj);
-          };
-          const subType = sub["$type"] as string | undefined;
-          const pres = presentationFor(declaredBy[key], key, sub);
-          const field = (
-            <Field
-              key={key}
-              label={pres.label}
-              param={path}
-              {...(pres.tooltip !== undefined ? { hint: pres.tooltip } : {})}
-              set={ctx.isSet?.(path) ?? obj[key] !== undefined}
-            >
-              <SchemaForm
-                schema={sub}
-                value={obj[key]}
-                onChange={set}
-                ctx={{ ...at, path }}
-                containerType={subType}
-              />
-            </Field>
-          );
-          // A nested object, a list or a widget member is a full-width block; primitives are grid
-          // cells. A list gets the stacked treatment on top of that: its rows carry their own
-          // controls, and squeezing them into the right-hand rail of a two-column field leaves the
-          // label column empty and the rows unreadable.
-          const held = deref(variantFor(deref(sub, root), obj[key]), root);
-          if (widgetFor(subType) || isObjectSchema(held) || isArraySchema(held)) {
-            return (
-              <div key={key} className={isArraySchema(held) ? "cfg-span cfg-block" : "cfg-span"}>
-                {field}
-              </div>
-            );
-          }
-          return field;
-        })}
-        {spare.map((key) => {
-          const path = ctx.path.length > 0 ? `${ctx.path}.${key}` : key;
-          const set = (next: unknown): void => {
-            const nextObj = { ...obj };
-            if (next === undefined) delete nextObj[key];
-            else nextObj[key] = next;
-            onChange(nextObj);
-          };
-          return (
-            // The KEY is the label, with no presentation lookup: these names were written by whoever
-            // wrote the document, and there is nothing for a table of ours to say about `plan_doc`.
-            // Full width, because what a map holds is nearly always an object.
-            <div key={`+${key}`} className="cfg-span">
-              <Field label={key} param={path} set={ctx.isSet?.(path) ?? true}>
-                <SchemaForm schema={every!} value={obj[key]} onChange={set} ctx={{ ...at, path }} />
-              </Field>
-            </div>
-          );
-        })}
-      </FieldGrid>
-    );
-  }
-
-  // 3) Array → a row per item, each recursing.
-  //
-  // Without this an array fell through to the text control, which showed an empty box for a list of
-  // five options and replaced the whole list with a string the moment anybody typed in it. The
-  // controls are add / remove / reorder because order is part of what an array MEANS here: options
-  // are buttons left to right, and fields are a form top to bottom.
-  if (isArraySchema(schema)) {
-    const items = ((schema["items"] as Schema | undefined) ?? {}) as Schema;
-    const list = Array.isArray(value) ? (value as unknown[]) : [];
-    const write = (next: unknown[]): void => onChange(next);
-    const swap = (i: number, j: number): void => {
-      const next = [...list];
-      [next[i], next[j]] = [next[j], next[i]];
-      write(next);
-    };
-    return (
-      <div className="cfg-list">
-        {list.map((item, i) => (
-          // Index-keyed, and it has to be: the items have no identity of their own, and a key
-          // derived from content would remount the row being typed in on every keystroke.
-          <div className="cfg-list-row" key={i}>
-            <div className="cfg-list-body">
-              <SchemaForm
-                schema={items}
-                value={item}
-                onChange={(next) =>
-                  // An emptied primitive comes back `undefined`, which JSON would write as `null` in
-                  // an array. A hole is not what "I cleared this box" means, so it reseeds instead.
-                  write(list.map((held, j) => (j === i ? (next === undefined ? seedFor(items) : next) : held)))
-                }
-                ctx={{ ...at, path: `${ctx.path}[${i}]` }}
-                containerType={items["$type"] as string | undefined}
-              />
-            </div>
-            <div className="cfg-list-acts">
-              <button className="ghost" title="move up" disabled={ctx.disabled === true || i === 0} onClick={() => swap(i, i - 1)}>
-                ↑
-              </button>
-              <button
-                className="ghost"
-                title="move down"
-                disabled={ctx.disabled === true || i === list.length - 1}
-                onClick={() => swap(i, i + 1)}
-              >
-                ↓
-              </button>
-              <button
-                className="ghost"
-                title="remove"
-                disabled={ctx.disabled === true}
-                onClick={() => write(list.filter((_, j) => j !== i))}
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        ))}
-        <div className="cfg-list-add">
-          <button className="ghost" disabled={ctx.disabled === true} onClick={() => write([...list, seedFor(items)])}>
-            + add
-          </button>
-        </div>
+      <div className="sf-union">
+        <ShapeChips
+          branches={resolved}
+          index={index}
+          disabled={ctx.disabled === true}
+          onPick={(i) => {
+            pick(i);
+            ctx.touch?.(ctx.path);
+            onChange(fitsBranch(resolved[i]!, value) ? value : seedFor(resolved[i]!, root));
+          }}
+        />
+        {body}
       </div>
     );
   }
 
-  // 4) Primitives.
-  if (Array.isArray(schema["enum"])) {
+  const Widget = widgetFor(node["$type"] as string | undefined);
+  if (Widget) return <Widget schema={node} value={value} onChange={onChange} ctx={at} />;
+  if (isObjectSchema(node)) return <ObjectNode schema={node} value={value} onChange={onChange} ctx={at} containerType={containerType} />;
+  if (isArraySchema(node)) return <ListNode schema={node} value={value} onChange={onChange} ctx={at} />;
+  return <Leaf schema={node} value={value} onChange={onChange} ctx={at} />;
+}
+
+// --- an object -----------------------------------------------------------------------
+
+function ObjectNode({
+  schema,
+  value,
+  onChange,
+  ctx,
+  containerType,
+}: {
+  schema: Schema;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  ctx: SchemaFormContext;
+  containerType?: string | undefined;
+}): JSX.Element {
+  const root = ctx.root;
+  const { properties, declaredBy, required } = flatten(schema, containerType, root);
+  const obj = isRecord(value) ? value : {};
+  /**
+   * A MAP's members — `inputs`, `env`: the keys are the author's, not the schema's. Rendered from the
+   * VALUE, because that is the only place the names exist; only the keys `properties` does not
+   * already claim, so a document that declares some members and allows others draws neither twice.
+   */
+  const every = mapSchema(schema, root);
+  const spare = every === undefined ? [] : Object.keys(obj).filter((key) => properties[key] === undefined);
+  // Reading a document: only what it STATES — see `SchemaFormContext.reading`.
+  const shown = ctx.reading === true ? Object.entries(properties).filter(([key]) => obj[key] !== undefined) : Object.entries(properties);
+  // A layer requires nothing: the MERGE is what has to be complete, and a layer that leaves a field to
+  // the one beneath it is doing its job.
+  const layered = ctx.isSet !== undefined;
+
+  const write = (key: string, next: unknown): void => {
+    const path = childPath(ctx.path, key);
+    ctx.touch?.(path);
+    if (ctx.setAt !== undefined) {
+      ctx.setAt(path, next);
+      return;
+    }
+    // An UNSET member is REMOVED rather than written as undefined: a key holding undefined is neither
+    // "not set" nor a value.
+    const nextObj = { ...obj };
+    if (next === undefined) delete nextObj[key];
+    else nextObj[key] = next;
+    onChange(nextObj);
+  };
+
+  return (
+    <FieldGrid>
+      {shown.map(([key, sub]) => (
+        <Member
+          key={key}
+          name={key}
+          schema={sub}
+          value={obj[key]}
+          required={!layered && required.has(key)}
+          declaredBy={declaredBy[key]}
+          ctx={ctx}
+          onSet={(next) => write(key, next)}
+        />
+      ))}
+      {every !== undefined ? (
+        <MapRows every={every} keys={spare} obj={obj} ctx={ctx} onChange={(next) => { ctx.touch?.(ctx.path); onChange(next); }} />
+      ) : null}
+    </FieldGrid>
+  );
+}
+
+/**
+ * One member of an object: whether it is set, what it is called, what it may be, and its control.
+ *
+ * Its own component because it holds state — which shape was picked — and a loop over members cannot.
+ */
+function Member({
+  name,
+  schema: declared,
+  value,
+  required,
+  declaredBy,
+  ctx,
+  onSet,
+}: {
+  name: string;
+  schema: Schema;
+  value: unknown;
+  required: boolean;
+  declaredBy: string | undefined;
+  ctx: SchemaFormContext;
+  onSet: (next: unknown) => void;
+}): JSX.Element {
+  const root = ctx.root;
+  const path = childPath(ctx.path, name);
+  const node = resolve(declared, root);
+  const shapes = branchesOf(node, root);
+  const [index, pick] = useShape(shapes, value, root);
+  const reading = ctx.reading === true;
+  const disabled = ctx.disabled === true;
+  const on = reading || required ? true : ctx.isSet !== undefined ? ctx.isSet(path) : value !== undefined;
+  // The cycle guard has to see a reference this member expands ITSELF — a union's branch is handed on
+  // without it, and a schema that refers to itself through a union would otherwise never stop.
+  const ref = typeof declared["$ref"] === "string" ? (declared["$ref"] as string) : undefined;
+  const seen = ctx.refs ?? [];
+  if (shapes !== undefined && ref !== undefined && seen.includes(ref)) return <></>;
+
+  const held = shapes === undefined ? node : shapes[index]!;
+  const body = shapes === undefined ? declared : branchesOf(node, root, false)![index]!;
+  const bodyCtx: SchemaFormContext =
+    shapes !== undefined && ref !== undefined ? { ...ctx, path, refs: [...seen, ref] } : { ...ctx, path };
+  const pres =
+    ctx.labels === "keys"
+      ? { label: name, ...(typeof node["description"] === "string" ? { tooltip: node["description"] as string } : {}) }
+      : presentationFor(declaredBy, name, node);
+  const hint = reading ? "" : typeHintOf(held, root);
+
+  const field = (
+    <Field
+      label={pres.label}
+      mono={ctx.labels === "keys"}
+      param={ctx.labels === "keys" || ctx.hidePaths === true ? undefined : path}
+      {...(pres.tooltip !== undefined ? { hint: pres.tooltip } : {})}
+      error={on ? errorAt(ctx, path) : undefined}
+      lead={
+        !required && !reading ? (
+          // In a layered form this switch IS the "set here" mark — it says whether this layer states
+          // the value — so the tag is not drawn beside it as well.
+          <Switch
+            on={on}
+            label={
+              ctx.isSet !== undefined
+                ? on
+                  ? `${name} is set here — switch off to inherit it`
+                  : `set ${name} here`
+                : on
+                  ? `leave ${name} out`
+                  : `set ${name}`
+            }
+            disabled={disabled}
+            // On: the value it already shows — an inherited one is pinned as it stands — or a fresh
+            // one, which is the declared default when there is one. Off: not set at all.
+            onChange={(next) => onSet(next ? (value !== undefined ? value : seedFor(declared, root)) : undefined)}
+          />
+        ) : undefined
+      }
+      after={
+        <>
+          {required && !reading ? (
+            <b className="sf-req" title="required">
+              *
+            </b>
+          ) : null}
+          {hint.length > 0 ? <span className="sf-type">{hint}</span> : null}
+          {shapes !== undefined && on && !reading ? (
+            <ShapeChips
+              branches={shapes}
+              index={index}
+              disabled={disabled}
+              onPick={(i) => {
+                pick(i);
+                onSet(fitsBranch(shapes[i]!, value) ? value : seedFor(shapes[i]!, root));
+              }}
+            />
+          ) : null}
+        </>
+      }
+    >
+      {!on ? (
+        <div className="sf-absent">{unsetNoteOf(ctx, path, node, value)}</div>
+      ) : (
+        <SchemaForm schema={body} value={value} onChange={onSet} ctx={bodyCtx} containerType={node["$type"] as string | undefined} />
+      )}
+    </Field>
+  );
+
+  // A nested object, a list, a widget or a box with room in it is a full-width block, with its name
+  // above it: squeezed into the right-hand rail of a two-column field, its rows are unreadable.
+  const block =
+    widgetFor(node["$type"] as string | undefined) !== undefined ||
+    (on && (isObjectSchema(held) || isArraySchema(held) || leafControlOf(held) === "multiline"));
+  if (!block) return field;
+  return <div className={isArraySchema(held) || leafControlOf(held) === "multiline" ? "cfg-span cfg-block" : "cfg-span"}>{field}</div>;
+}
+
+// --- a map ---------------------------------------------------------------------------
+
+/**
+ * The author's own keys, as rows of key and value.
+ *
+ * A key is renamed in place — its row keeps its position — and only when you leave the box or press
+ * Enter, because renaming on every keystroke would move the value through `p`, `pa` and `pat` on the
+ * way to `path`, colliding with whatever those already name.
+ */
+function MapRows({
+  every,
+  keys,
+  obj,
+  ctx,
+  onChange,
+}: {
+  every: Schema;
+  keys: string[];
+  obj: Record<string, unknown>;
+  ctx: SchemaFormContext;
+  onChange: (next: Record<string, unknown>) => void;
+}): JSX.Element {
+  const root = ctx.root;
+  if (ctx.reading === true) {
     return (
-      <SelectInput
-        value={(value as string | undefined) ?? ""}
-        disabled={ctx.disabled === true}
-        options={[["— inherit", ""], ...(schema["enum"] as string[]).map((o): [string, string] => [o, o])]}
-        onChange={(v) => onChange(v === "" ? undefined : v)}
-      />
+      <>
+        {keys.map((key) => {
+          const path = childPath(ctx.path, key);
+          return (
+            // The KEY is the label, with no presentation lookup: these names were written by whoever
+            // wrote the document, and there is nothing for a table of ours to say about `plan_doc`.
+            <div key={`+${key}`} className="cfg-span">
+              <Field label={key} param={path}>
+                <SchemaForm schema={every} value={obj[key]} onChange={() => undefined} ctx={itemContext(ctx, path)} />
+              </Field>
+            </div>
+          );
+        })}
+      </>
     );
   }
-  if (schema["type"] === "boolean") {
-    // A tri-state as a select, not a checkbox. A checkbox has two states and this has three: on, off,
-    // and "say nothing and inherit" — and an unchecked box that silently means `false` is how a layer
-    // ends up overriding a shared default nobody meant to override.
-    return (
-      <SelectInput
-        value={value === undefined ? "" : value === true ? "yes" : "no"}
-        disabled={ctx.disabled === true}
-        options={[
-          ["— inherit", ""],
-          ["yes", "yes"],
-          ["no", "no"],
-        ]}
-        onChange={(v) => onChange(v === "" ? undefined : v === "yes")}
-      />
-    );
-  }
-  if (schema["type"] === "number") {
-    return (
-      <NumInput
-        value={typeof value === "number" ? value : undefined}
-        disabled={ctx.disabled === true}
-        onChange={onChange}
-      />
-    );
-  }
+
+  const rename = (from: string, to: string): boolean => {
+    if (to === from) return true;
+    if (to.length === 0 || obj[to] !== undefined) return false;
+    onChange(Object.fromEntries(Object.entries(obj).map(([k, v]) => [k === from ? to : k, v])));
+    return true;
+  };
+  const composite = isComposite(every, root);
+  return (
+    <div className="cfg-span sf-map">
+      {keys.map((key) => {
+        const path = childPath(ctx.path, key);
+        return (
+          <div key={key} className={`sf-map-row${composite ? " block" : ""}`}>
+            <KeyBox name={key} disabled={ctx.disabled === true} onRename={(to) => rename(key, to)} />
+            <div className="sf-map-value">
+              <SchemaForm
+                schema={every}
+                value={obj[key]}
+                onChange={(next) => onChange({ ...obj, [key]: next === undefined ? seedFor(every, root) : next })}
+                ctx={itemContext(ctx, path)}
+              />
+              {errorAt(ctx, path) !== undefined ? <div className="reason cfg-error">{errorAt(ctx, path)}</div> : null}
+            </div>
+            <button
+              type="button"
+              className="quiet"
+              title={`remove ${key}`}
+              disabled={ctx.disabled === true}
+              onClick={() => onChange(Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key)))}
+            >
+              ✕
+            </button>
+          </div>
+        );
+      })}
+      <div className="cfg-list-add">
+        <button
+          type="button"
+          className="ghost"
+          disabled={ctx.disabled === true}
+          onClick={() => {
+            let name = "key";
+            for (let n = 2; obj[name] !== undefined; n++) name = `key${n}`;
+            onChange({ ...obj, [name]: seedFor(every, root) });
+          }}
+        >
+          + add key
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function KeyBox({ name, disabled, onRename }: { name: string; disabled: boolean; onRename: (to: string) => boolean }): JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = (): void => {
+    if (draft === null) return;
+    // A name that is empty or already taken is not applied; the box goes back to the key it names.
+    onRename(draft.trim());
+    setDraft(null);
+  };
   return (
     <TextInput
-      value={typeof value === "string" ? value : ""}
-      disabled={ctx.disabled === true}
-      onChange={(v) => onChange(v === "" ? undefined : v)}
+      value={draft ?? name}
+      mono
+      label="key"
+      disabled={disabled}
+      onChange={setDraft}
+      onBlur={commit}
+      onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") setDraft(null);
+      }}
     />
   );
+}
+
+// --- a list --------------------------------------------------------------------------
+
+/**
+ * A row per item, with add / remove / reorder, because order is part of what a list MEANS here.
+ *
+ * A row that holds more than one line — an object, a nested list — opens and closes, and a closed row
+ * reads as its first couple of values. Rows that were already there when the form opened start
+ * closed; a row you add starts open, because you are about to fill it in; and a row with a complaint
+ * in it is open whatever it was, because a problem you cannot see is one you cannot fix.
+ */
+function ListNode({
+  schema,
+  value,
+  onChange,
+  ctx,
+}: {
+  schema: Schema;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  ctx: SchemaFormContext;
+}): JSX.Element {
+  const root = ctx.root;
+  const items = (isRecord(schema["items"]) ? schema["items"] : {}) as Schema;
+  const list = Array.isArray(value) ? (value as unknown[]) : [];
+  const composite = isComposite(items, root);
+  const [open, setOpen] = useState<ReadonlySet<number>>(() => (ctx.reading === true ? new Set(list.map((_, i) => i)) : new Set()));
+  const disabled = ctx.disabled === true;
+
+  const write = (next: unknown[], nextOpen?: ReadonlySet<number>): void => {
+    ctx.touch?.(ctx.path);
+    if (nextOpen !== undefined) setOpen(nextOpen);
+    onChange(next);
+  };
+  const moved = (i: number, j: number): ReadonlySet<number> => {
+    const next = new Set([...open].filter((k) => k !== i && k !== j));
+    if (open.has(i)) next.add(j);
+    if (open.has(j)) next.add(i);
+    return next;
+  };
+  const swap = (i: number, j: number): void => {
+    const next = [...list];
+    [next[i], next[j]] = [next[j], next[i]];
+    write(next, moved(i, j));
+  };
+  const remove = (i: number): void =>
+    write(
+      list.filter((_, j) => j !== i),
+      new Set([...open].filter((k) => k !== i).map((k) => (k > i ? k - 1 : k))),
+    );
+
+  return (
+    <div className="cfg-list">
+      {list.map((item, i) => {
+        const path = itemPath(ctx.path, i);
+        const troubled = (ctx.errors ?? []).some((e) => isWithin(e.path, path)) && ctx.reading !== true;
+        const isOpen = !composite || open.has(i) || troubled;
+        // What you can do to the ROW. On a row that opens and closes it sits in the row's own head line,
+        // so the fields beneath get the row's whole width; a one-line row keeps it beside the value.
+        const acts =
+          ctx.reading === true ? null : (
+            <div className="cfg-list-acts">
+              <button type="button" className="quiet" title="move up" disabled={disabled || i === 0} onClick={() => swap(i, i - 1)}>
+                ↑
+              </button>
+              <button type="button" className="quiet" title="move down" disabled={disabled || i === list.length - 1} onClick={() => swap(i, i + 1)}>
+                ↓
+              </button>
+              <button type="button" className="quiet" title="remove" disabled={disabled} onClick={() => remove(i)}>
+                ✕
+              </button>
+            </div>
+          );
+        return (
+          // Index-keyed, and it has to be: items have no identity of their own, and a key derived from
+          // content would remount the row being typed in on every keystroke.
+          <div className="cfg-list-row" key={i}>
+            <div className="cfg-list-body">
+              {composite ? (
+                <div className={`sf-row-head${isOpen ? "" : " closed"}`}>
+                  <button
+                    type="button"
+                    className="quiet sf-caret"
+                    aria-expanded={isOpen}
+                    title={troubled ? "this row has a problem in it" : isOpen ? "close this row" : "open this row"}
+                    disabled={troubled}
+                    onClick={() => {
+                      const next = new Set(open);
+                      if (next.has(i)) next.delete(i);
+                      else next.add(i);
+                      setOpen(next);
+                    }}
+                  >
+                    {isOpen ? "▾" : "▸"}
+                  </button>
+                  <span className="sf-index">[{i}]</span>
+                  {!isOpen ? <span className="sub ellip">{summaryOf(items, item, root)}</span> : null}
+                  {acts}
+                </div>
+              ) : null}
+              {isOpen ? (
+                <SchemaForm
+                  schema={items}
+                  value={item}
+                  onChange={(next) => {
+                    ctx.touch?.(path);
+                    // An emptied item comes back `undefined`, which JSON would write as `null` in a list.
+                    // A hole is not what "I cleared this" means, so it reseeds instead.
+                    onChange(list.map((held, j) => (j === i ? (next === undefined ? seedFor(items, root) : next) : held)));
+                  }}
+                  ctx={itemContext(ctx, path)}
+                  containerType={items["$type"] as string | undefined}
+                />
+              ) : null}
+              {!composite && errorAt(ctx, path) !== undefined ? <div className="reason cfg-error">{errorAt(ctx, path)}</div> : null}
+            </div>
+            {composite ? null : acts}
+          </div>
+        );
+      })}
+      {ctx.reading === true ? null : (
+        <div className="cfg-list-add">
+          <button
+            type="button"
+            className="ghost"
+            disabled={disabled}
+            onClick={() => write([...list, seedFor(items, root)], new Set([...open, list.length]))}
+          >
+            + add
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- one value -----------------------------------------------------------------------
+
+function Leaf({
+  schema,
+  value,
+  onChange,
+  ctx,
+}: {
+  schema: Schema;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  ctx: SchemaFormContext;
+}): JSX.Element {
+  const id = useId();
+  const disabled = ctx.disabled === true;
+  switch (leafControlOf(schema)) {
+    case "boolean":
+      // A checkbox, not a switch: the switch before a name already means "is this set at all", and two
+      // of them side by side would be two answers to what looks like one question.
+      return (
+        <label className="sf-bool">
+          <input type="checkbox" checked={value === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+          <span className="sub">{value === true ? "yes" : "no"}</span>
+        </label>
+      );
+    case "number":
+    case "integer":
+      return (
+        <NumberText
+          value={typeof value === "number" || typeof value === "string" ? value : undefined}
+          disabled={disabled}
+          onChange={(text) => onChange(numberFromText(text))}
+        />
+      );
+    case "choice": {
+      // A box that suggests. `enum` insists on its values, and the validator is what says so; `examples`
+      // only offers them. Either way the box takes typing, which a `<select>` never could.
+      const { values } = suggestionsOf(schema);
+      const listId = `${id}-choices`;
+      return (
+        <>
+          <TextInput value={typeof value === "string" ? value : jsonTextOf(value)} mono list={listId} disabled={disabled} onChange={onChange} />
+          <datalist id={listId}>
+            {values.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </>
+      );
+    }
+    case "multiline":
+      return <TextArea value={typeof value === "string" ? value : ""} rows={4} mono={false} disabled={disabled} onChange={onChange} />;
+    case "json":
+      // No type at all: any value. Read leniently — `significant` is the string, `3` the number — and
+      // an emptied box is the empty string, because "not set" is the switch's to say.
+      return (
+        <TextInput
+          value={value === "" ? "" : jsonTextOf(value)}
+          mono
+          disabled={disabled}
+          onChange={(text) => onChange(jsonValueOf(text) ?? "")}
+        />
+      );
+    case "none":
+      return <div className="sf-absent">{schema["const"] !== undefined ? `sends ${JSON.stringify(schema["const"])}` : "sends null"}</div>;
+    case "text":
+    default:
+      return (
+        <TextInput
+          value={typeof value === "string" ? value : value === undefined || value === null ? "" : String(value)}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
+  }
 }

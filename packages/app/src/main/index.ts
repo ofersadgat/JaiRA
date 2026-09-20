@@ -441,6 +441,7 @@ const handlers: Record<IpcChannel, Handler> = {
     service.deleteWorkflow(request)) as Handler,
   "schema:validate": ((request: Parameters<typeof service.validateSchema>[0]) =>
     service.validateSchema(request)) as Handler,
+  "schema:check": ((request: Parameters<typeof service.checkValues>[0]) => service.checkValues(request)) as Handler,
   "schema:detect": ((request: { text: string }) => service.detectSchema(request.text)) as Handler,
   "file:read": ((request: Parameters<typeof service.readFile>[0]) => service.readFile(request)) as Handler,
   "file:check": ((request: Parameters<typeof service.checkFile>[0]) => service.checkFile(request)) as Handler,

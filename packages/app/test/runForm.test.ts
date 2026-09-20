@@ -1,10 +1,12 @@
 /**
  * Running a state from the Files inspector — what the form asks for and what it sends.
  *
- * The property under test throughout is that a box's TEXT and a slot's VALUE are different things,
- * and the mapping between them is decided by the slot's schema. Getting it wrong is silent in the
- * worst way: `"3"` where a number was declared, or `""` where the slot has a default that would have
- * been perfectly good, produces a run that starts, does the wrong thing, and reports success.
+ * The form is the app's one schema form, and it holds JSON VALUES: nothing in this module parses a
+ * box any more. So the properties under test are the ones that are still decisions — which slots are
+ * required, what the form opens holding, that NOT SET is an absent key rather than an empty value,
+ * that what is sent is exactly what is held, and that the check goes out against the schema the slot
+ * declares (so its verdict is the run's). What the form used to get wrong silently was the parsing:
+ * a JSON box for any schema richer than a bare type, which refused `significant` in an enum slot.
  */
 import { describe, expect, it } from "vitest";
 import type { BoardCard, SessionRef, StateView, TaskSummary, WorkflowEntry } from "@jaira/shared/browser";
@@ -13,11 +15,14 @@ import {
   initialRunValues,
   instanceAt,
   isFilled,
+  missingOf,
   newestRunOf,
   runBlocker,
+  runChecksOf,
   runFieldsOf,
   runHistoryOf,
   runInputsOf,
+  runSchemaOf,
   runTargetOf,
   runTitle,
   runValuesOf,
@@ -27,6 +32,7 @@ import {
   type RunField,
 } from "../src/renderer/runForm";
 import { WORKFLOW_JSON, WORKFLOW_YAML } from "@jaira/shared/browser";
+import { leafControlOf, settledCheck } from "../src/renderer/schemaForm/model";
 
 /** A state using each shape the form has to render, in one document. */
 const PLAN = {
@@ -63,23 +69,37 @@ describe("reading a state's inputs", () => {
     ]);
   });
 
-  it("picks the control from the slot's schema", () => {
-    const control = Object.fromEntries(fieldsOf(PLAN).map((f) => [f.name, f.control]));
-    expect(control).toMatchObject({
-      // An artifact is content with a media type — usually a paragraph, so a multi-line box.
-      issue: "multiline",
-      depth: "number",
-      strict: "boolean",
-      // A list, and a schema with `properties` — both outside what a single typed control can hold.
-      tags: "json",
-      shape: "json",
-      loose: "json",
-    });
+  it("draws each slot with its declared schema, and the member says its description and default", () => {
+    const issue = byName(PLAN, "issue");
+    expect(issue.schema).toEqual({ type: "string", contentMediaType: "text/markdown", description: "what to do" });
+    // What is CHECKED is exactly what the slot declares — nothing folded in — so the verdict is the run's.
+    expect(issue.declared).toEqual({ type: "string", contentMediaType: "text/markdown" });
+    expect(byName(PLAN, "depth").schema).toEqual({ type: "integer", default: 3 });
+    // No schema at all takes anything, and says so as an empty schema rather than a guess.
+    expect(byName(PLAN, "loose").schema).toEqual({});
   });
 
-  it("treats a slot with a default as satisfied, and prefills the box with it", () => {
-    expect(byName(PLAN, "depth")).toMatchObject({ required: false, initial: "3" });
-    expect(byName(PLAN, "issue")).toMatchObject({ required: true, initial: "" });
+  it("picks each slot's control from its schema — a list and an object are fields, not JSON boxes", () => {
+    expect(leafControlOf(byName(PLAN, "issue").schema)).toBe("multiline");
+    expect(leafControlOf(byName(PLAN, "depth").schema)).toBe("integer");
+    expect(leafControlOf(byName(PLAN, "strict").schema)).toBe("boolean");
+    // The case this whole rework is about: an enum is a choice box that takes typing.
+    const severity = runFieldsOf(
+      JSON.stringify({ inputs: { severity: { schema: { type: "string", enum: ["blocker", "significant"] }, default: "significant" } } }),
+      WORKFLOW_JSON,
+    )![0]!;
+    expect(leafControlOf(severity.schema)).toBe("choice");
+  });
+
+  it("makes the run form one object schema, requiring only the slots with no default and no switch", () => {
+    const schema = runSchemaOf(fieldsOf(PLAN));
+    expect(Object.keys(schema["properties"] as object)).toEqual(["issue", "depth", "strict", "tags", "shape", "loose"]);
+    expect(schema["required"]).toEqual(["issue"]);
+  });
+
+  it("treats a slot with a default as satisfied", () => {
+    expect(byName(PLAN, "depth")).toMatchObject({ required: false, default: 3 });
+    expect(byName(PLAN, "issue").required).toBe(true);
     expect(byName(PLAN, "strict").required).toBe(false);
   });
 
@@ -96,7 +116,7 @@ describe("reading a state's inputs", () => {
 
   it("reads a YAML state as readily as a JSON one", () => {
     const fields = runFieldsOf("inputs:\n  issue:\n    schema:\n      type: string\n", WORKFLOW_YAML);
-    expect(fields?.map((f) => [f.name, f.control])).toEqual([["issue", "text"]]);
+    expect(fields?.map((f) => [f.name, f.schema])).toEqual([["issue", { type: "string" }]]);
   });
 
   it("answers null for a document that does not parse — not an empty form", () => {
@@ -106,75 +126,70 @@ describe("reading a state's inputs", () => {
     expect(runFieldsOf('{"label":"x"}', WORKFLOW_JSON)).toEqual([]);
   });
 
-  it("opens every box at its declared default", () => {
-    expect(initialRunValues(fieldsOf(PLAN))).toMatchObject({ issue: "", depth: "3", strict: "" });
+  it("opens with every required slot at a value of its shape, and everything else NOT SET", () => {
+    // Not the defaults: a slot with a default starts switched off, which is what sends the default.
+    // And not `""` for the optional ones — an absent key is what not set IS.
+    expect(initialRunValues(fieldsOf(PLAN))).toEqual({ issue: "" });
   });
 
   /**
    * The form describing a run that ALREADY happened — what the workflow link in a conversation's
-   * gutter opens. The round trip is the property: what a run was called with, put in the boxes, has
+   * gutter opens. The round trip is the property: what a run was called with, put in the form, has
    * to read back as the same inputs.
    */
-  it("fills the boxes with what one run was actually called with", () => {
+  it("fills the form with what one run was actually called with", () => {
     const fields = fieldsOf(PLAN);
     const called = { issue: "fix the parser", depth: 7, strict: true, tags: ["a", "b"] };
     const values = runValuesOf(fields, called);
-    // Prose as prose. Quoting it would put a pair of quotes in a textarea somebody is about to edit.
-    expect(values["issue"]).toBe("fix the parser");
-    expect(values["depth"]).toBe("7");
-    expect(values["strict"]).toBe("true");
-    expect(values["tags"]).toBe('["a","b"]');
-    // A slot the run carried nothing for keeps its default — which is what actually applied.
-    expect(values["shape"]).toBe("");
-    expect(runInputsOf(fields, values).inputs).toEqual(called);
+    expect(values).toEqual(called);
+    // A slot the run carried nothing for is not set — which is what "its default applied" looks like.
+    expect("shape" in values).toBe(false);
+    expect(runInputsOf(fields, values)).toEqual(called);
   });
 });
 
-describe("reading the boxes back", () => {
-  const read = (values: Record<string, string>): ReturnType<typeof runInputsOf> =>
-    runInputsOf(fieldsOf(PLAN), { issue: "fix the parser", ...values });
+describe("what the form sends", () => {
+  const fields = fieldsOf(PLAN);
 
-  it("sends a string slot's text verbatim, digits and all", () => {
-    // The trap this guards: a helpful JSON parse here would send the NUMBER 123 into a slot the
-    // state declared as a string, and the mismatch would surface as a type error mid-run.
-    expect(read({ issue: "123" }).inputs["issue"]).toBe("123");
+  it("sends what it holds, as it holds it — digits in a text slot stay text", () => {
+    // The trap the old text boxes had to dodge by hand: a helpful JSON parse would send the NUMBER 123
+    // into a slot declared as a string. There is no parse any more to be helpful with.
+    expect(runInputsOf(fields, { issue: "123", depth: 5, strict: false, tags: ["a"] })).toEqual({
+      issue: "123",
+      depth: 5,
+      strict: false,
+      tags: ["a"],
+    });
   });
 
-  it("sends a number slot as a number, and refuses text that is not one", () => {
-    expect(read({ depth: "5" }).inputs["depth"]).toBe(5);
-    expect(read({ depth: "deep" }).bad).toEqual([{ name: "depth", reason: "'deep' is not a number" }]);
-    expect(read({ depth: "2.5" }).bad).toEqual([{ name: "depth", reason: "must be a whole number" }]);
-  });
-
-  it("sends a boolean slot as a boolean", () => {
-    expect(read({ strict: "true" }).inputs["strict"]).toBe(true);
-    expect(read({ strict: "false" }).inputs["strict"]).toBe(false);
-  });
-
-  it("parses a JSON box strictly, so a typo is refused rather than sent as a string", () => {
-    expect(read({ tags: '["a","b"]' }).inputs["tags"]).toEqual(["a", "b"]);
-    expect(read({ tags: "[a,b]" }).bad.map((b) => b.name)).toEqual(["tags"]);
-  });
-
-  it("reads an unschema'd slot leniently — it has no type to disappoint", () => {
-    expect(read({ loose: "hello" }).inputs["loose"]).toBe("hello");
-    expect(read({ loose: "7" }).inputs["loose"]).toBe(7);
-  });
-
-  it("treats an empty box as absent, never as an empty value", () => {
-    const result = read({ depth: "", strict: "" });
-    expect("depth" in result.inputs).toBe(false);
-    expect("strict" in result.inputs).toBe(false);
-    // `depth` has a default, so clearing it is legal and the engine supplies 3.
-    expect(result.missing).toEqual([]);
-  });
-
-  it("reports a required slot left empty", () => {
-    expect(read({ issue: "  " }).missing).toEqual(["issue"]);
+  it("sends nothing for a slot that is not set, and an empty string for one set to empty text", () => {
+    const sent = runInputsOf(fields, { issue: "" });
+    expect(sent).toEqual({ issue: "" });
+    expect("depth" in sent).toBe(false);
   });
 
   it("sends nothing for a slot the state binds itself", () => {
-    expect("wired" in read({ wired: "ignored" }).inputs).toBe(false);
+    expect("wired" in runInputsOf(fields, { issue: "x", wired: "ignored" })).toBe(false);
+  });
+
+  it("asks for a check of every set slot against the schema it DECLARES", () => {
+    const checks = runChecksOf(fields, { issue: "", depth: "deep", wired: "ignored" });
+    expect(checks).toEqual([
+      { path: "issue", schema: { type: "string", contentMediaType: "text/markdown" }, value: "" },
+      // Raw text in a number slot is sent as the text, and comes back "'deep' is not a number".
+      { path: "depth", schema: { type: "integer" }, value: "deep" },
+    ]);
+  });
+
+  it("leaves a linked type to the run, which has it expanded", () => {
+    const linked = fieldsOf({ inputs: { plan: { schema: "$/types/plan" } } });
+    expect(linked[0]).toMatchObject({ typeRef: "$/types/plan" });
+    expect(runChecksOf(linked, { plan: { steps: [] } })).toEqual([]);
+  });
+
+  it("reports a required slot with no value at all", () => {
+    expect(missingOf(fields, {})).toEqual([{ path: "issue", message: "required" }]);
+    expect(missingOf(fields, { issue: "" })).toEqual([]);
   });
 });
 
@@ -226,7 +241,7 @@ describe("whether it can run", () => {
       ...patch,
     }) as StateView;
 
-  const ok = { inputs: {}, missing: [], bad: [] };
+  const ok = settledCheck();
   const here = runTargetOf("project", "/home/me/repo");
   const shared = runTargetOf("base", null);
   const ctx = (patch: Partial<RunContext> = {}): RunContext => ({
@@ -234,7 +249,7 @@ describe("whether it can run", () => {
     target: here,
     exists: true,
     fields: [],
-    inputs: ok,
+    check: ok,
     busy: false,
     ...patch,
   });
@@ -247,7 +262,7 @@ describe("whether it can run", () => {
     const blocked = runBlocker(
       ctx({
         target: runTargetOf("project", null),
-        inputs: { inputs: {}, missing: ["issue"], bad: [] },
+        check: settledCheck([{ path: "issue", message: "required" }]),
       }),
     );
     expect(blocked).toBe("open a project to run this");
@@ -276,13 +291,25 @@ describe("whether it can run", () => {
     expect(runBlocker(ctx({ state: state({ issues }) }))).toBeNull();
   });
 
-  it("names the missing inputs, then the first unreadable one", () => {
-    expect(runBlocker(ctx({ inputs: { inputs: {}, missing: ["issue", "goal"], bad: [] } }))).toBe(
-      "issue, goal are required",
-    );
+  it("names the first complaint with its path, and how many there are", () => {
+    expect(runBlocker(ctx({ check: settledCheck([{ path: "issue", message: "can't be empty" }]) }))).toBe("issue: can't be empty");
     expect(
-      runBlocker(ctx({ inputs: { inputs: {}, missing: [], bad: [{ name: "depth", reason: "'deep' is not a number" }] } })),
-    ).toBe("depth: 'deep' is not a number");
+      runBlocker(
+        ctx({
+          check: settledCheck([
+            { path: "criteria[1].id", message: "must match ^AC-[0-9]+$" },
+            { path: "ask_below", message: "must be at most 1" },
+          ]),
+        }),
+      ),
+    ).toBe("2 problems — criteria[1].id: must match ^AC-[0-9]+$");
+  });
+
+  it("waits for a check, saying so only before the first answer", () => {
+    // Before anything has answered there is nothing to show, so it says what it is doing. After, a
+    // re-check of a form that was fine keeps the button off without flashing text on every keystroke.
+    expect(runBlocker(ctx({ check: { pending: true, answered: false, errors: [] } }))).toBe("checking…");
+    expect(runBlocker(ctx({ check: { pending: true, answered: true, errors: [] } }))).toBe("");
   });
 });
 
@@ -438,9 +465,9 @@ describe("starting a run with nothing open", () => {
   it("parses a YAML workflow into the same boxes as its JSON twin", () => {
     const yaml = "inputs:\n  issue:\n    description: what to do\n  depth:\n    schema:\n      type: integer\n    default: 3\n";
     const fields = runFieldsOf(yaml, WORKFLOW_YAML);
-    expect(fields?.map((f) => [f.name, f.control, f.required])).toEqual([
-      ["issue", "json", true],
-      ["depth", "number", false],
+    expect(fields?.map((f) => [f.name, f.schema, f.required])).toEqual([
+      ["issue", { description: "what to do" }, true],
+      ["depth", { type: "integer", default: 3 }, false],
     ]);
   });
 
@@ -448,7 +475,7 @@ describe("starting a run with nothing open", () => {
     createBlocker({
       workflow: "feature/plan",
       fields: [],
-      inputs: { inputs: {}, missing: [], bad: [] },
+      check: settledCheck(),
       busy: false,
       ...over,
     });
@@ -465,14 +492,11 @@ describe("starting a run with nothing open", () => {
     expect(blockerFor({ fields: null })).toBe("that workflow's file does not parse");
   });
 
-  it("names the required inputs that are still empty, and the first bad one", () => {
-    expect(blockerFor({ inputs: { inputs: {}, missing: ["issue"], bad: [] } })).toBe("issue is required");
-    expect(blockerFor({ inputs: { inputs: {}, missing: ["issue", "depth"], bad: [] } })).toBe(
-      "issue, depth are required",
+  it("names the first complaint about the inputs", () => {
+    expect(blockerFor({ check: settledCheck([{ path: "issue", message: "required" }]) })).toBe("issue: required");
+    expect(blockerFor({ check: settledCheck([{ path: "depth", message: "'x' is not a number" }]) })).toBe(
+      "depth: 'x' is not a number",
     );
-    expect(
-      blockerFor({ inputs: { inputs: {}, missing: [], bad: [{ name: "depth", reason: "'x' is not a number" }] } }),
-    ).toBe("depth: 'x' is not a number");
   });
 
   it("lets a workflow with no inputs through, and refuses one mid-create", () => {
@@ -484,8 +508,7 @@ describe("starting a run with nothing open", () => {
     // Deliberate, and the opposite of `runBlocker`: this form has no state view to read issues from,
     // and a workflow with errors starts here exactly as it always did — failing where it fails.
     const errored = { workflow: "feature/plan", fields: fieldsOf(PLAN), busy: false };
-    const filled = { issue: "ship it", depth: "3", wired: "ignored" };
-    expect(createBlocker({ ...errored, inputs: runInputsOf(errored.fields, filled) })).toBeNull();
+    expect(createBlocker({ ...errored, check: settledCheck() })).toBeNull();
   });
 
   it("numbers the title from the runs this workflow has already had", () => {

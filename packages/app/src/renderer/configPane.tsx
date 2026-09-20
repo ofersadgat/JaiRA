@@ -103,7 +103,9 @@ export function ConfigPane({ config, layer, busy, editable, onSave, children }: 
             schema={section.schema as Schema}
             value={effective[section.key]}
             onChange={(next) => set(section.key, next)}
-            ctx={{ path: section.key, disabled: locked, isSet: stated }}
+            // `setAt` writes each field at its own path. `value` is the MERGED section, and handing a
+            // rebuilt section back would pin every inherited sibling into this layer with the one edit.
+            ctx={{ path: section.key, disabled: locked, isSet: stated, setAt: set }}
           />
         </section>
       ))}

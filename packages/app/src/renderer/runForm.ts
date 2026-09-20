@@ -4,19 +4,25 @@
  * The Files view could open, lint and edit a state without ever offering to run one, so the loop
  * "change it, try it, read what happened" went through the Tasks view and a state id typed from
  * memory. This module is the half of closing that loop which can be tested: what a state declares it
- * needs, what the boxes hold, what that becomes as `task:create` inputs, and why a run is refused.
+ * needs, what the form holds, what that becomes as `task:create` inputs, and why a run is refused.
  *
- * Two rules shape the whole thing.
+ * Three rules shape the whole thing.
  *
  * **The saved file is what runs.** Fields are read from `doc.text`, never from a draft. A run pins a
  * snapshot of what is on disk (DESIGN §5.3), so a form built from unsaved typing would be a form
  * describing inputs the run will not have. The panel says so when the two differ rather than quietly
  * offering the wrong boxes.
  *
- * **A box's type comes from the slot's schema, and only where the schema is small enough to trust.**
- * {@link slotTypeOf} answers `null` for anything richer than the vocabulary — `properties`, an
- * `enum`, a bound — and those slots get a JSON box rather than a control that could only round the
- * value down. Same refusal the slot table makes, for the same reason.
+ * **The form is the schema form.** A state's inputs become one object schema — a member per slot —
+ * drawn by `SchemaForm`, the same renderer Settings and a `fill_form` gate use. The form holds JSON
+ * VALUES, not text: `significant` in an enum slot is the string, `0.8` in a number slot is the number,
+ * and nothing here parses a box. That is what this module used to do, and it drew a JSON box for any
+ * schema richer than a bare type and then refused `significant` for not being valid JSON.
+ *
+ * **Not set is an answer.** A slot that is optional, or has a default, starts NOT SET — the switch
+ * before its name is off, and the run gets the default. A required slot has no switch and starts
+ * with a value of the right shape, which for text is `""`: whether that may be empty is the slot's
+ * `minLength` to say, and the run checks it, not this module.
  */
 import { parse as parseYaml } from "yaml";
 import type { JsonValue } from "@declarative-ai/json";
@@ -26,32 +32,37 @@ import {
   WORKFLOW_YAML,
   type BoardCard,
   type SessionRef,
-  type SlotType,
   type StateView,
   type TaskSummary,
   type WorkflowEntry,
   type WorkflowLayer,
 } from "@jaira/shared/browser";
-import { jsonValueOf } from "./jsonText";
-import { slotsOf, type SlotRow } from "./slotForm";
+import { checkBlocker, seedFor, type FieldError, type FormCheck } from "./schemaForm/model";
+import type { CheckItem } from "./schemaForm/check";
+import type { Schema } from "./schemaForm/types";
+import { slotRowOf } from "./slotForm";
 
 // --- what the state asks for -------------------------------------------------
 
-/** How a field is typed in, once its schema has been read. */
-export type RunControl = "text" | "multiline" | "number" | "boolean" | "json";
-
-/** One box in the run form: a slot the state declares, as something a person fills in. */
+/** One declared input, as a member of the run form. */
 export interface RunField {
   name: string;
-  /** The slot's type, or `null` when its schema is richer than the vocabulary. */
-  type: SlotType | null;
-  /** Which control to render. Derived from {@link type}; see {@link controlFor}. */
-  control: RunControl;
+  /**
+   * The schema the form DRAWS the slot with: the declared schema, with the slot's `description` and
+   * `default` folded in so the member can say them. `{}` for a slot with no schema — it takes anything.
+   */
+  schema: Schema;
+  /**
+   * The schema the value is CHECKED against — exactly what the slot declares, nothing folded in, so
+   * the verdict is the run's. Absent when the slot names a linked type the loader expands and this
+   * module cannot: that value is checked when the run starts.
+   */
+  declared?: Schema;
   /** SPEC §4.1: a slot is required unless it says `optional` or carries a `default`. */
   required: boolean;
   description: string;
-  /** What the box starts at — the slot's `default`, as text. Empty when it declares none. */
-  initial: string;
+  /** The declared default, when there is one. */
+  default?: JsonValue;
   /**
    * The slot binds itself, so nothing is asked for it.
    *
@@ -63,52 +74,52 @@ export interface RunField {
   /**
    * A `name*` spread (§3.5): N slots republished from a child, not one slot.
    *
-   * There is no single value to type, so it is listed and not filled — the same thing the slot table
-   * does with the type picker on a spread row.
+   * There is no single value to type, so it is listed and not filled.
    */
   spread?: boolean;
+  /** The slot's schema is a LINK to a named type (`"schema": "$/types/plan"`). */
+  typeRef?: string;
 }
 
-/** The text in each box, keyed by slot name. What the panel holds and hands back. */
-export type RunValues = Record<string, string>;
+/** What the form holds: a value per slot that is set. An absent key is a slot left NOT SET. */
+export type RunValues = Record<string, JsonValue>;
 
-function controlFor(type: SlotType | null): RunControl {
-  if (type === null) return "json";
-  if (type.list) return "json";
-  switch (type.name) {
-    case "boolean":
-      return "boolean";
-    case "number":
-    case "integer":
-    case "datetime":
-      return "number";
-    case "artifact":
-      // Content with a media type — a paragraph of markdown far more often than a word, and a
-      // one-line box for it is the difference between pasting an issue and retyping it.
-      return "multiline";
-    case "text":
-    case "url":
-    case "file":
-      return "text";
-    case "object":
-    case "any":
-      return "json";
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+function fieldOf(name: string, raw: unknown): RunField {
+  const row = slotRowOf(name, raw);
+  const decl = isRecord(raw) ? raw : {};
+  const fallback = decl["default"] as JsonValue | undefined;
+  let schema: Schema;
+  let declared: Schema | undefined;
+  if (row.typeRef !== undefined) {
+    // A linked type is expanded by the loader, and the renderer does not have it. The form still says
+    // what it is, and the value still reaches the run — which checks it against the real thing.
+    schema = row.type?.list === true ? { type: "array" } : {};
+    declared = undefined;
+  } else {
+    declared = isRecord(decl["schema"]) ? (decl["schema"] as Schema) : {};
+    schema = { ...declared };
   }
-}
-
-function fieldOf(row: SlotRow): RunField {
-  const type = row.typeRef !== undefined ? null : row.type;
+  const description =
+    row.typeRef !== undefined
+      ? [row.description, `a ${row.typeRef} — checked when the run starts`].filter((s) => s.length > 0).join(" · ")
+      : row.description;
+  if (description.length > 0 && typeof schema["description"] !== "string") schema["description"] = description;
+  if (fallback !== undefined) schema["default"] = fallback;
   return {
-    name: row.name,
-    type,
-    control: controlFor(type),
-    // A `default` satisfies the slot as surely as `optional` does, so it is not required even though
-    // the box it prefills can be cleared — clearing it sends nothing, and the default applies.
-    required: !row.optional && row.default.length === 0,
+    name,
+    schema,
+    ...(declared !== undefined ? { declared } : {}),
+    // A `default` satisfies the slot as surely as `optional` does: the run applies it to a slot that
+    // was not set.
+    required: !row.optional && fallback === undefined,
     description: row.description,
-    initial: row.default,
+    ...(fallback !== undefined ? { default: fallback } : {}),
     ...(row.binding.length > 0 || row.structured === true ? { binding: row.binding } : {}),
     ...(row.spread === true ? { spread: true } : {}),
+    ...(row.typeRef !== undefined ? { typeRef: row.typeRef } : {}),
   };
 }
 
@@ -117,16 +128,14 @@ function parseState(text: string, mime: string): Record<string, unknown> | null 
   if (text.trim().length === 0) return null;
   try {
     const parsed: unknown = mime === WORKFLOW_YAML ? parseYaml(text) : JSON.parse(text);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
 }
 
 /**
- * The boxes a state's `inputs` asks for, in declaration order.
+ * The slots a state's `inputs` declares, in declaration order.
  *
  * `null` means the document does not parse — genuinely different from a state with no inputs, and
  * the panel says so rather than showing an empty form under a Run button that would fail.
@@ -134,116 +143,86 @@ function parseState(text: string, mime: string): Record<string, unknown> | null 
 export function runFieldsOf(text: string, mime: string): RunField[] | null {
   const doc = parseState(text, mime);
   if (doc === null) return null;
-  return slotsOf(doc["inputs"]).map(fieldOf);
+  return Object.entries(isRecord(doc["inputs"]) ? doc["inputs"] : {}).map(([name, raw]) => fieldOf(name, raw));
 }
 
-/** Every box at its starting value — what the form opens showing. */
-export function initialRunValues(fields: RunField[]): RunValues {
-  const values: RunValues = {};
-  for (const field of fields) values[field.name] = field.initial;
-  return values;
-}
-
-/**
- * The boxes filled with what one run was actually CALLED with.
- *
- * The inverse of {@link runInputsOf}, and it has to be: the form is text, an instance's inputs are
- * JSON, and a panel describing a run that has already happened should show the values that run had
- * rather than the defaults the slots declare. A field the run carried nothing for keeps its
- * starting value — absent is what "the default applied" looks like from here, and blanking the box
- * would state the opposite.
- *
- * A string is written as itself and everything else as JSON, which is the same pair of rules
- * `readField` reads back: `text` and `artifact` slots hold prose that would be unreadable quoted,
- * and a number, a flag or an object is exactly its JSON.
- */
-export function runValuesOf(fields: RunField[], inputs: Record<string, JsonValue>): RunValues {
-  const values = initialRunValues(fields);
-  for (const field of fields) {
-    const value = inputs[field.name];
-    if (value === undefined) continue;
-    values[field.name] = typeof value === "string" ? value : JSON.stringify(value);
-  }
-  return values;
-}
-
-/** True when a field takes no value from the person running it. */
+/** True when a field takes a value from the person running it. */
 export function isFilled(field: RunField): boolean {
   return field.binding === undefined && field.spread !== true;
 }
 
-// --- what the boxes become ---------------------------------------------------
-
-/** One box that cannot be read as the type its slot declares. */
-export interface RunFieldError {
-  name: string;
-  reason: string;
+/**
+ * The run form as ONE object schema: a member per slot a person fills in.
+ *
+ * `required` lists the slots with no switch. Everything else is optional in the form's sense — it may
+ * be left not set — which for a slot with a default means "the run uses the default".
+ */
+export function runSchemaOf(fields: readonly RunField[]): Schema {
+  const filled = fields.filter(isFilled);
+  return {
+    type: "object",
+    properties: Object.fromEntries(filled.map((field) => [field.name, field.schema])),
+    required: filled.filter((field) => field.required).map((field) => field.name),
+  };
 }
 
-/** The boxes, read. `inputs` is what `task:create` takes; the other two are why it may not be sent. */
-export interface RunInputs {
-  inputs: Record<string, JsonValue>;
-  /** Required slots left empty. Refused here rather than at the first state of the run. */
-  missing: string[];
-  bad: RunFieldError[];
+/** What the form opens holding: every required slot at a value of its shape, everything else not set. */
+export function initialRunValues(fields: readonly RunField[]): RunValues {
+  const values: RunValues = {};
+  for (const field of fields) {
+    if (isFilled(field) && field.required) values[field.name] = seedFor(field.schema) as JsonValue;
+  }
+  return values;
 }
 
 /**
- * One box's text as the value its slot declares — or the reason it is not one.
+ * The form filled with what one run was actually CALLED with.
  *
- * The `text` case is the one worth stating: a string slot takes the text VERBATIM. Typing `123` into
- * a text box means the three characters, not the number, and running it through a JSON parse "for
- * convenience" would retype it silently. `any` is the opposite case and gets the lenient reading
- * from {@link jsonValueOf}, because a slot with no schema really will take either.
+ * A panel describing a run that has already happened should show the values that run had rather than
+ * the defaults the slots declare. A slot the run carried nothing for is NOT SET — absent is what "the
+ * default applied" looks like from here — and a required one it somehow lacks opens at a fresh value.
  */
-function readField(field: RunField, text: string): { value: JsonValue } | { reason: string } {
-  const trimmed = text.trim();
-  switch (field.control) {
-    case "text":
-    case "multiline":
-      return { value: text };
-    case "boolean":
-      if (trimmed === "true") return { value: true };
-      if (trimmed === "false") return { value: false };
-      return { reason: "must be true or false" };
-    case "number": {
-      const value = Number(trimmed);
-      if (!Number.isFinite(value)) return { reason: `'${trimmed}' is not a number` };
-      if (field.type?.name === "integer" && !Number.isInteger(value)) return { reason: "must be a whole number" };
-      return { value };
-    }
-    case "json":
-      // `any` has no schema to disappoint, so `hello` is the string `hello`. Everything else here —
-      // an object, a list, a schema outside the vocabulary — is asking for JSON, and the fallback to
-      // "it is a string then" would turn a typo into a value the run accepts and misreads.
-      if (field.type?.name === "any" && field.type.list === false) return { value: jsonValueOf(text) as JsonValue };
-      try {
-        return { value: JSON.parse(trimmed) as JsonValue };
-      } catch (e) {
-        return { reason: (e as Error).message };
-      }
-  }
-}
-
-/** Read the whole form: the inputs to send, and everything standing in the way of sending them. */
-export function runInputsOf(fields: RunField[], values: RunValues): RunInputs {
-  const inputs: Record<string, JsonValue> = {};
-  const missing: string[] = [];
-  const bad: RunFieldError[] = [];
+export function runValuesOf(fields: readonly RunField[], inputs: Record<string, JsonValue>): RunValues {
+  const values = initialRunValues(fields);
   for (const field of fields) {
     if (!isFilled(field)) continue;
-    const text = values[field.name] ?? "";
-    if (text.trim().length === 0) {
-      // Empty is ABSENT, never `""`. A slot with a default then gets its default, and a required one
-      // is reported — which is the whole difference between the two.
-      if (field.required) missing.push(field.name);
-      continue;
-    }
-    const read = readField(field, text);
-    if ("reason" in read) bad.push({ name: field.name, reason: read.reason });
-    else inputs[field.name] = read.value;
+    const value = inputs[field.name];
+    if (value !== undefined) values[field.name] = value;
   }
-  return { inputs, missing, bad };
+  return values;
+}
+
+/** The values to send to the main process's check: every slot that is set and has a schema to meet. */
+export function runChecksOf(fields: readonly RunField[], values: RunValues): CheckItem[] {
+  const out: CheckItem[] = [];
+  for (const field of fields) {
+    const value = values[field.name];
+    if (!isFilled(field) || value === undefined || field.declared === undefined) continue;
+    out.push({ path: field.name, schema: field.declared, value });
+  }
+  return out;
+}
+
+/**
+ * The complaints the form knows without asking: a required slot with no value.
+ *
+ * Rare, because a required slot opens with one and has no switch to take it away — but the run would
+ * refuse it (`required input missing`), so it is said here rather than there.
+ */
+export function missingOf(fields: readonly RunField[], values: RunValues): FieldError[] {
+  return fields
+    .filter((field) => isFilled(field) && field.required && values[field.name] === undefined)
+    .map((field) => ({ path: field.name, message: "required" }));
+}
+
+/** What `task:create` takes: the slots that are set, as they are. */
+export function runInputsOf(fields: readonly RunField[], values: RunValues): Record<string, JsonValue> {
+  const inputs: Record<string, JsonValue> = {};
+  for (const field of fields) {
+    const value = values[field.name];
+    if (isFilled(field) && value !== undefined) inputs[field.name] = value;
+  }
+  return inputs;
 }
 
 // --- where it runs -----------------------------------------------------------
@@ -291,7 +270,8 @@ export interface RunContext {
   /** The state's own file exists on disk — a never-saved draft has nothing to snapshot. */
   exists: boolean;
   fields: RunField[] | null;
-  inputs: RunInputs;
+  /** The verdict on the form's values — see `useSchemaCheck`. */
+  check: FormCheck;
   busy: boolean;
 }
 
@@ -310,15 +290,15 @@ export interface RunContext {
  * Warnings are also not here. A state with three warnings runs; refusing would make the distinction
  * between a warning and an error meaningless at the one moment it matters.
  */
-export function runBlocker({ state, target, exists, fields, inputs, busy }: RunContext): string | null {
+export function runBlocker({ state, target, exists, fields, check, busy }: RunContext): string | null {
   if (state === null) return "select a state to run";
   if (!target.open) return "open a project to run this";
   if (!exists) return "save this file before running it";
   if (fields === null) return "this file does not parse";
   const errors = state.issues.filter((issue) => issue.severity === "error").length;
   if (errors > 0) return `${errors} validation error${errors === 1 ? "" : "s"} — fix them first`;
-  if (inputs.missing.length > 0) return `${inputs.missing.join(", ")} ${inputs.missing.length === 1 ? "is" : "are"} required`;
-  if (inputs.bad.length > 0) return `${inputs.bad[0]!.name}: ${inputs.bad[0]!.reason}`;
+  const form = checkBlocker(check);
+  if (form !== null) return form;
   if (busy) return "busy";
   return null;
 }
@@ -449,7 +429,7 @@ export interface CreateContext {
    * file. `null` is that file, read and refused.
    */
   fields: RunField[] | null | undefined;
-  inputs: RunInputs;
+  check: FormCheck;
   busy: boolean;
 }
 
@@ -462,13 +442,12 @@ export interface CreateContext {
  * ones a picker can be wrong about. Lint is left to the panel that has a state view to read it
  * from; a workflow with errors can be started here and will fail where it always did.
  */
-export function createBlocker({ workflow, fields, inputs, busy }: CreateContext): string | null {
+export function createBlocker({ workflow, fields, check, busy }: CreateContext): string | null {
   if (workflow.trim().length === 0) return "choose a workflow";
   if (fields === undefined) return "reading its inputs";
   if (fields === null) return "that workflow's file does not parse";
-  if (inputs.missing.length > 0)
-    return `${inputs.missing.join(", ")} ${inputs.missing.length === 1 ? "is" : "are"} required`;
-  if (inputs.bad.length > 0) return `${inputs.bad[0]!.name}: ${inputs.bad[0]!.reason}`;
+  const form = checkBlocker(check);
+  if (form !== null) return form;
   if (busy) return "busy";
   return null;
 }

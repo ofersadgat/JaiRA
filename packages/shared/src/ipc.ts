@@ -528,6 +528,51 @@ export interface ValidateSchemaResult {
 }
 
 /**
+ * Check VALUES against schemas a form is drawn from — a state's input slots, a gate's fields.
+ *
+ * The sibling of `schema:validate`, for the other question: not "is this document a state" but "would
+ * the run accept this value". So it answers with the same validator configuration the run itself
+ * uses (ajv, `allErrors`, `strict: false` — `@declarative-ai/validate`'s), and a form built on it
+ * cannot refuse what the run would take or take what the run would refuse. The errors come back
+ * whole rather than collapsed to one string, because a form puts each one under the field it names.
+ *
+ * Batched, because a Run form is one check per slot: a slot's schema is its own document (a local
+ * `$ref` in it points into THAT schema), so slots cannot be folded into one object schema and checked
+ * as one.
+ */
+export interface SchemaCheckRequest {
+  checks: SchemaCheckItem[];
+}
+
+export interface SchemaCheckItem {
+  /** The caller's name for this check — a slot name — echoed on its result. */
+  key: string;
+  schema: JsonValue;
+  value: JsonValue;
+}
+
+/** One complaint, exactly as ajv reports it. */
+export interface SchemaCheckError {
+  instancePath: string;
+  schemaPath: string;
+  keyword: string;
+  params: Record<string, JsonValue>;
+  message?: string;
+}
+
+export interface SchemaCheckResult {
+  key: string;
+  ok: boolean;
+  errors: SchemaCheckError[];
+  /** The schema itself could not be compiled — an external `$ref`, an unknown meta-schema. The run would throw on it too. */
+  compileError?: string;
+}
+
+export interface SchemaCheckResponse {
+  results: SchemaCheckResult[];
+}
+
+/**
  * Which schema a document already satisfies, so opening a file selects it (DESIGN §11.1).
  *
  * The picker was a menu you had to know the answer to. Every schema in it is `additionalProperties:
@@ -1594,6 +1639,8 @@ export interface IpcContract {
   "availability:refresh": { request: void; response: AvailabilitySnapshot };
   /** Check a document against a registered schema — see {@link ValidateSchemaRequest}. */
   "schema:validate": { request: ValidateSchemaRequest; response: ValidateSchemaResult };
+  /** Check values against the schemas a form is drawn from — see {@link SchemaCheckRequest}. */
+  "schema:check": { request: SchemaCheckRequest; response: SchemaCheckResponse };
   /** Which registered schema a document already satisfies — see {@link DetectSchemaResult}. */
   "schema:detect": { request: { text: string }; response: DetectSchemaResult };
   /** Read any file under a layer root as text. Refuses types that are not text. */
@@ -1795,6 +1842,7 @@ export const IPC_CHANNELS = [
   "workflow:sync",
   "workflow:syncCancel",
   "schema:validate",
+  "schema:check",
   "schema:detect",
   "file:read",
   "file:check",

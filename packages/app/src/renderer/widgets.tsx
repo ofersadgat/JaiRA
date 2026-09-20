@@ -9,7 +9,7 @@ import { useState, type JSX } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type { HistorySize, WorkflowEntry } from "@jaira/shared/browser";
 import { SelectInput } from "./controls";
-import { InputRow } from "./runPanel";
+import { RunInputsForm, useRunCheck } from "./runPanel";
 import {
   createBlocker,
   initialRunValues,
@@ -18,6 +18,7 @@ import {
   type RunField,
   type RunValues,
 } from "./runForm";
+import { useTouched } from "./schemaForm/check";
 import type { PruneReport } from "./store";
 
 /**
@@ -64,12 +65,12 @@ export function NewTask({
    * not render as "this file does not parse". See {@link createBlocker}.
    */
   forms: Record<string, RunField[] | null>;
-  /** What has been typed, by state id then by input name — see `AppState.runValues`. */
+  /** What each workflow's form holds, by state id — see `AppState.runValues`. */
   values: Record<string, RunValues>;
   busy: boolean;
   /** A workflow was picked: read its inputs. */
   onPick: (stateId: string) => void;
-  onChange: (stateId: string, name: string, text: string) => void;
+  onChange: (stateId: string, values: RunValues) => void;
   onCreate: (workflow: string, inputs: Record<string, JsonValue>) => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -78,13 +79,13 @@ export function NewTask({
   const picked = workflows.find((entry) => entry.rootId === workflow);
   const errors = picked?.issues.filter((issue) => issue.severity === "error").length ?? 0;
   const fields = workflow.length === 0 ? undefined : forms[workflow];
-  // Declared defaults underneath, what has been typed over the top — the same sparse merge the Files
-  // view's run form does, against the same map, so one workflow's boxes hold one set of answers
-  // wherever they are filled in.
-  const boxes: RunValues = { ...initialRunValues(fields ?? []), ...(values[workflow] ?? {}) };
-  const read = runInputsOf(fields ?? [], boxes);
-  const blocked = createBlocker({ workflow, fields, inputs: read, busy });
-  const bad = new Map(read.bad.map((box) => [box.name, box.reason]));
+  // What the form opens holding until something is changed, and then what was changed — against the
+  // same map the Files view's run form uses, so one workflow's form holds one set of answers wherever
+  // it is filled in.
+  const form: RunValues = values[workflow] ?? initialRunValues(fields ?? []);
+  const check = useRunCheck(fields, form);
+  const { touched, touch } = useTouched(workflow);
+  const blocked = createBlocker({ workflow, fields, check, busy });
   const filled = (fields ?? []).filter(isFilled);
 
   const pick = (stateId: string): void => {
@@ -103,7 +104,7 @@ export function NewTask({
           onSubmit={(e) => {
             e.preventDefault();
             if (blocked !== null) return;
-            onCreate(workflow, read.inputs);
+            onCreate(workflow, runInputsOf(fields ?? [], form));
             // The picked workflow stays. Creating one task from a workflow is the strongest available
             // evidence about which workflow the next one comes from, and the boxes are held in the
             // store per state id, so re-opening the form finds what was typed.
@@ -150,15 +151,14 @@ export function NewTask({
             <div className="sub">This workflow declares no inputs.</div>
           ) : (
             <div className="new-task-fields">
-              {fields.map((field) => (
-                <InputRow
-                  key={field.name}
-                  field={field}
-                  value={boxes[field.name] ?? ""}
-                  error={bad.get(field.name)}
-                  onChange={(text) => onChange(workflow, field.name, text)}
-                />
-              ))}
+              <RunInputsForm
+                fields={fields}
+                values={form}
+                check={check}
+                touched={touched}
+                touch={touch}
+                onChange={(next) => onChange(workflow, next)}
+              />
             </div>
           )}
 
@@ -167,7 +167,7 @@ export function NewTask({
               type="submit"
               className="primary"
               disabled={blocked !== null}
-              title={blocked ?? `creates ${workflow}`}
+              title={blocked !== null && blocked.length > 0 ? blocked : `creates ${workflow}`}
             >
               Create
             </button>
@@ -177,7 +177,7 @@ export function NewTask({
             {/* Why it is off, in the place the Run form says it — and the count of boxes when it is
                 not, which is the one thing a form with no title left to read says about itself. */}
             {blocked !== null ? (
-              <span className="sub ellip">{blocked}</span>
+              blocked.length > 0 ? <span className="sub ellip">{blocked}</span> : null
             ) : filled.length > 0 ? (
               <span className="sub ellip">
                 {filled.length} input{filled.length === 1 ? "" : "s"}

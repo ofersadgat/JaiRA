@@ -13,6 +13,7 @@
  * and the composition.
  */
 import type { ComponentType } from "react";
+import type { FieldError } from "./model";
 
 /** A JSON Schema node. Self-contained: nothing here resolves a `$ref`. */
 export type Schema = Record<string, unknown>;
@@ -65,8 +66,48 @@ export interface SchemaFormContext {
    * or "what could be set here" becomes unanswerable the moment a layer is read-only.
    */
   reading?: boolean;
-  /** True when the layer being edited states this value itself, rather than inheriting it. */
+  /**
+   * True when the layer being edited states this value itself, rather than inheriting it.
+   *
+   * Its presence is what makes a form LAYERED: every member is optional there (a layer requires
+   * nothing — the merge does), and a member's on/off switch reads this rather than whether the merged
+   * value happens to hold something.
+   */
   isSet?: (path: string) => boolean;
+  /**
+   * Write ONE member at its dotted path, instead of rebuilding its parent and handing that up.
+   *
+   * For a form drawn over a MERGED document but saved into one layer of it. Rebuilding the parent
+   * spreads every inherited sibling into the object that gets written, so editing one field would
+   * pin all the others into the layer. Not passed down into list items: a path with `[2]` in it is
+   * not somewhere a dotted-path writer can reach, so a list is written whole.
+   */
+  setAt?: (path: string, value: unknown) => void;
+  /**
+   * How a member names itself. `presentation` (the default) is a label for a reader of settings;
+   * `keys` is the member's own name in data voice — a state's input slots, whose names are what the
+   * prompt and the wiring call them.
+   */
+  labels?: "presentation" | "keys";
+  /**
+   * Leave out the dotted path beside each label. It names where a SETTING is written, which a person
+   * answering a gate has no file to connect it to — there it reads as a stray word after the hint.
+   */
+  hidePaths?: boolean;
+  /** Complaints placed on the form by path — see `model.fieldErrorsOf`. */
+  errors?: readonly FieldError[];
+  /**
+   * Whether a field has been edited. An untouched field keeps its complaint to itself (the host says
+   * it beside the button instead); absent, every field shows its own.
+   */
+  touched?: (path: string) => boolean;
+  /** Called with a field's path whenever someone changes it. */
+  touch?: (path: string) => void;
+  /**
+   * What a switched-off member says where its control would be. The default names the declared
+   * `default` for an ordinary form and the inherited value for a layered one.
+   */
+  unsetNote?: (path: string, schema: Schema, value: unknown) => string;
   disabled?: boolean;
 }
 

@@ -78,11 +78,125 @@ describe("a form built from one of this app's own schemas", () => {
     expect(reading.length).toBeLessThan(whole.length);
   });
 
+  it("draws no switches and no shape chips in a READING — it is not asking anything", () => {
+    const html = draw(STATE, DOC, { reading: true });
+    expect(html).not.toContain('role="switch"');
+    expect(html).not.toContain("sf-pick");
+  });
+
   it("keeps drawing the whole shape where the form is a form", () => {
     // `reading` is NOT `disabled`. A locked settings pane — a project layer you may look at but not
     // edit — is disabled and still has to answer "what could be set here", so hiding unset members
     // there would be hiding the thing somebody opened it to find out.
     const locked = draw(STATE, {}, { disabled: true });
     expect(locked).toContain("transitions");
+  });
+});
+
+/**
+ * A form somebody fills in — a state's inputs, as the Run panel draws them.
+ *
+ * The real `feature` inputs, because they are the ones that broke: an `enum` slot drawn as a JSON box
+ * refused `significant`, and a bounded number was never checked against its bounds.
+ */
+describe("a form somebody fills in", () => {
+  const FEATURE: Schema = {
+    type: "object",
+    properties: {
+      issue: { type: "string", contentMediaType: "text/markdown", minLength: 1 },
+      severity_threshold: { type: "string", enum: ["blocker", "significant", "minor", "note"], default: "significant" },
+      threshold_rank: { type: "integer", default: 2 },
+      ask_below: { type: "number", minimum: 0, maximum: 1, default: 0.8 },
+    },
+    required: ["issue"],
+  };
+  const keys = { labels: "keys" as const };
+
+  it("puts a switch before every member that may be left out, and none before a required one", () => {
+    const html = draw(FEATURE, { issue: "" }, keys);
+    expect(html.match(/role="switch"/g)).toHaveLength(3);
+    expect(html).toContain('aria-label="set severity_threshold"');
+    expect(html).not.toContain('aria-label="set issue"');
+  });
+
+  it("says what a switched-off member gets instead of drawing a box for it", () => {
+    const html = draw(FEATURE, { issue: "" }, keys);
+    expect(html).toContain("not set — the default applies: significant");
+    expect(html).toContain("not set — the default applies: 0.8");
+  });
+
+  it("draws a switched-on enum as a box with the allowed values to pick from, not a JSON box", () => {
+    const html = draw(FEATURE, { issue: "", severity_threshold: "minor" }, keys);
+    expect(html).toContain("<datalist");
+    for (const option of ["blocker", "significant", "minor", "note"]) expect(html).toContain(`value="${option}"`);
+    expect(html).toContain('value="minor"');
+    expect(html).toContain("one of 4");
+  });
+
+  it("says what a bounded number allows beside its name", () => {
+    expect(draw(FEATURE, { issue: "", ask_below: 1.5 }, keys)).toContain("number · 0 to 1");
+  });
+
+  it("shows a complaint under its field once the field has been touched, and not before", () => {
+    const errors = [{ path: "ask_below", message: "must be at most 1" }];
+    const untouched = draw(FEATURE, { issue: "", ask_below: 1.5 }, { ...keys, errors, touched: () => false });
+    const touched = draw(FEATURE, { issue: "", ask_below: 1.5 }, { ...keys, errors, touched: (p) => p === "ask_below" });
+    expect(untouched).not.toContain("must be at most 1");
+    expect(touched).toContain("must be at most 1");
+  });
+
+  it("draws a choice of shapes as chips after the name, with the chosen shape's fields under it", () => {
+    const schema: Schema = {
+      type: "object",
+      properties: {
+        anchor: {
+          anyOf: [
+            { title: "path", type: "string" },
+            { title: "path + line", type: "object", required: ["path", "line"], properties: { path: { type: "string" }, line: { type: "integer" } } },
+            { type: "null" },
+          ],
+        },
+      },
+    };
+    const html = draw(schema, { anchor: { path: "runForm.ts", line: 221 } }, keys);
+    expect(html).toContain("sf-pick");
+    expect(html).toContain(">path + line<");
+    expect(html).toContain(">none<");
+    expect(html).toContain('value="runForm.ts"');
+    expect(draw(schema, { anchor: null }, keys)).toContain("sends null");
+  });
+
+  it("opens a list at closed rows that read as their first values — unless a row has a problem in it", () => {
+    const schema: Schema = {
+      type: "object",
+      properties: {
+        criteria: { type: "array", items: { type: "object", properties: { id: { type: "string" }, statement: { type: "string" } } } },
+      },
+      required: ["criteria"],
+    };
+    const value = { criteria: [{ id: "AC-1", statement: "Pause survives an app restart" }, { id: "AC2", statement: "" }] };
+    const html = draw(schema, value, { ...keys, errors: [{ path: "criteria[1].id", message: "must match ^AC-\d+$" }] });
+    expect(html).toContain("AC-1 · Pause survives an app restart");
+    // Row 1 is troubled, so it is open: its box is drawn rather than its summary.
+    expect(html).toContain('value="AC2"');
+    expect(html).not.toContain('value="AC-1"');
+  });
+
+  it("draws a free-key object as key and value rows you can add to", () => {
+    const schema: Schema = { type: "object", properties: { env: { type: "object", additionalProperties: { type: "string" } } }, required: ["env"] };
+    const html = draw(schema, { env: { NODE_OPTIONS: "--max-old-space-size=4096" } }, keys);
+    expect(html).toContain('value="NODE_OPTIONS"');
+    expect(html).toContain('value="--max-old-space-size=4096"');
+    expect(html).toContain("+ add key");
+  });
+
+  it("reads a LAYER's switch from what the layer states, and names what a switched-off field inherits", () => {
+    const settings: Schema = { type: "object", properties: { enabled: { type: "boolean" }, path: { type: "string" } } };
+    const html = draw(settings, { enabled: true, path: "workflows" }, { path: "memo", isSet: (p) => p === "memo.enabled" });
+    expect(html).toContain('aria-label="enabled is set here — switch off to inherit it"');
+    expect(html).toContain('aria-label="set path here"');
+    // The switch IS the mark: the "set here" tag is not drawn beside it as well.
+    expect(html).not.toContain("cfg-set");
+    expect(html).toContain("not set here — inherits workflows");
   });
 });

@@ -14,92 +14,76 @@ import { type JSX } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type { BoardCard, StateView, TaskSummary } from "@jaira/shared/browser";
 import { Badge } from "./board";
-import { TextArea, TextInput } from "./controls";
 import {
   isFilled,
+  missingOf,
   runBlocker,
+  runChecksOf,
   runHistoryOf,
   runInputsOf,
+  runSchemaOf,
   runTitle,
   type RunField,
   type RunHistory,
   type RunTarget,
   type RunValues,
 } from "./runForm";
+import { SchemaForm } from "./schemaForm/SchemaForm";
+import { useSchemaCheck, useTouched } from "./schemaForm/check";
+import type { FormCheck } from "./schemaForm/model";
 
 /**
- * One declared input, as the control its schema earns.
+ * A workflow's declared inputs, as the one schema form.
  *
- * The boxes are never disabled, `busy` or not — only the button is. A run takes as long as it takes,
+ * The form is never disabled, `busy` or not — only the button is. A run takes as long as it takes,
  * and the useful thing to do while one is going is to set up the next one with an input changed;
  * greying the form out for the duration would take that away for no safety in return.
  *
- * Exported because the New-task popover asks for the same thing: a workflow's declared inputs, as
- * boxes. Two renderings of one slot would be two places for a `number` box to disagree about what
- * `""` means, which is the class of bug this whole module exists to keep out of the run.
+ * Exported because the New-task popover asks for the same thing. Two renderings of one slot would be
+ * two places for a `number` box to disagree about what `""` means, which is the class of bug this
+ * whole module exists to keep out of the run.
  */
-export function InputRow({
-  field,
-  value,
-  error,
+export function RunInputsForm({
+  fields,
+  values,
+  check,
+  touched,
+  touch,
   onChange,
 }: {
-  field: RunField;
-  value: string;
-  error: string | undefined;
-  onChange: (text: string) => void;
+  fields: readonly RunField[];
+  values: RunValues;
+  check: FormCheck;
+  touched: (path: string) => boolean;
+  touch: (path: string) => void;
+  onChange: (values: RunValues) => void;
 }): JSX.Element {
-  const label = (
-    <span>
-      {field.name}
-      {field.required ? <b className="req" title="required"> *</b> : null}
-    </span>
-  );
-
-  // Nothing to fill: the value is wired, or the name stands for N slots. Both are shown rather than
-  // hidden — "why is this input not in the form" is a question the form should answer itself.
-  if (!isFilled(field)) {
-    return (
-      <div className="field run-field" title={field.description}>
-        {label}
-        <div className="sub run-fixed">
-          {field.spread === true ? "a spread — republished from a child" : `bound to ${field.binding}`}
-        </div>
-      </div>
-    );
-  }
-
+  const fixed = fields.filter((field) => !isFilled(field));
   return (
-    <div className={`field run-field${error !== undefined ? " bad" : ""}`} title={field.description}>
-      {label}
-      {field.control === "boolean" ? (
-        <label className="run-bool">
-          <input
-            type="checkbox"
-            checked={value.trim() === "true"}
-            onChange={(e) => onChange(e.target.checked ? "true" : "false")}
-          />
-          <span className="sub">{value.trim() === "true" ? "true" : "false"}</span>
-        </label>
-      ) : field.control === "multiline" || field.control === "json" ? (
-        <TextArea
-          value={value}
-          rows={field.control === "json" ? 2 : 3}
-          placeholder={field.control === "json" ? "JSON" : field.type?.mediaType}
-          onChange={onChange}
-        />
-      ) : (
-        <TextInput
-          value={value}
-          mono={field.control === "number"}
-          {...(field.type !== null && field.type.name !== "text" ? { placeholder: field.type.name } : {})}
-          onChange={onChange}
-        />
-      )}
-      {error !== undefined ? <div className="reason">{error}</div> : null}
-      {field.description.length > 0 ? <div className="sub ellip">{field.description}</div> : null}
+    <div className="run-inputs">
+      {/* Nothing to fill: the value is wired, or the name stands for N slots. Both are shown rather than
+          hidden — "why is this input not in the form" is a question the form should answer itself. */}
+      {fixed.map((field) => (
+        <div key={field.name} className="field run-field" title={field.description}>
+          <span>{field.name}</span>
+          <div className="sub run-fixed">
+            {field.spread === true ? "a spread — republished from a child" : `bound to ${field.binding}`}
+          </div>
+        </div>
+      ))}
+      <SchemaForm
+        schema={runSchemaOf(fields)}
+        value={values}
+        onChange={(next) => onChange(next as RunValues)}
+        ctx={{ path: "", labels: "keys", errors: check.errors, touched, touch }}
+      />
     </div>
   );
+}
+
+/** The check a run form's values get: the run's own validator per slot, plus a required slot with nothing in it. */
+export function useRunCheck(fields: readonly RunField[] | null | undefined, values: RunValues): FormCheck {
+  return useSchemaCheck(runChecksOf(fields ?? [], values), missingOf(fields ?? [], values));
 }
 
 /**
@@ -121,6 +105,7 @@ export interface RunSurface {
    * and so the parse happens once per file opened, not once per keystroke in a box.
    */
   fields: RunField[] | null;
+  /** What the form holds — a value per slot that is set. */
   values: RunValues;
   /**
    * Which project the run goes to, decided by the file's layer — see {@link runTargetOf}.
@@ -147,7 +132,7 @@ export interface RunSurface {
   tasks: TaskSummary[];
   /** The task the rest of the app has selected, so the row for it reads as current. */
   selected: string | null;
-  onChange: (name: string, text: string) => void;
+  onChange: (values: RunValues) => void;
   /** Create the task and start it. The title is generated; see {@link runTitle}. */
   onRun: (title: string, inputs: Record<string, JsonValue>) => void;
   /**
@@ -172,9 +157,9 @@ export function RunSection({
   startedHere: number;
 }): JSX.Element {
   const { fields, values, target, targetDir, exists, dirty, busy, onChange, onRun } = run;
-  const read = runInputsOf(fields ?? [], values);
-  const blocked = runBlocker({ state, target, exists, fields, inputs: read, busy });
-  const errors = new Map(read.bad.map((bad) => [bad.name, bad.reason]));
+  const check = useRunCheck(fields, values);
+  const { touched, touch } = useTouched(state?.stateId ?? "");
+  const blocked = runBlocker({ state, target, exists, fields, check, busy });
   const filled = (fields ?? []).filter(isFilled);
 
   return (
@@ -201,16 +186,11 @@ export function RunSection({
             // why the button is here — but which of the two runs must not be a guess.
             <div className="notice warn">Unsaved edits — the run uses the last saved file.</div>
           ) : null}
-          {fields.length === 0 ? <div className="sub">This state declares no inputs.</div> : null}
-          {fields.map((field) => (
-            <InputRow
-              key={field.name}
-              field={field}
-              value={values[field.name] ?? ""}
-              error={errors.get(field.name)}
-              onChange={(text) => onChange(field.name, text)}
-            />
-          ))}
+          {fields.length === 0 ? (
+            <div className="sub">This state declares no inputs.</div>
+          ) : (
+            <RunInputsForm fields={fields} values={values} check={check} touched={touched} touch={touch} onChange={onChange} />
+          )}
         </>
       )}
 
@@ -218,12 +198,12 @@ export function RunSection({
         <button
           className="primary"
           disabled={blocked !== null}
-          title={blocked ?? `starts ${runTitle(state?.stateId ?? "", startedHere)}`}
-          onClick={() => onRun(runTitle(state?.stateId ?? "", startedHere), read.inputs)}
+          title={blocked !== null && blocked.length > 0 ? blocked : `starts ${runTitle(state?.stateId ?? "", startedHere)}`}
+          onClick={() => onRun(runTitle(state?.stateId ?? "", startedHere), runInputsOf(fields ?? [], values))}
         >
           Run
         </button>
-        {blocked !== null ? <span className="sub ellip">{blocked}</span> : null}
+        {blocked !== null && blocked.length > 0 ? <span className="sub ellip">{blocked}</span> : null}
       </div>
     </section>
   );

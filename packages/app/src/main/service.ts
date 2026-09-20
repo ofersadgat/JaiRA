@@ -378,6 +378,9 @@ import type {
   DetectSchemaResult,
   ValidateSchemaRequest,
   ValidateSchemaResult,
+  SchemaCheckRequest,
+  SchemaCheckResponse,
+  SchemaCheckError,
   TaskDetail,
   TaskStatus,
   TaskSummary,
@@ -894,6 +897,13 @@ export class AppService {
    */
   private ajv?: Ajv;
   private readonly schemaValidators = new Map<string, ValidateFunction>();
+  /**
+   * The validator a FORM's values are checked with — see {@link checkValues}. Its own instance, not
+   * the editor's: an author's slot schema may carry an `$id`, and sharing one registry with the static
+   * editor schemas is how two unrelated documents come to collide over it.
+   */
+  private valueAjv?: Ajv;
+  private readonly valueValidators = new Map<string, ValidateFunction>();
   /** What the app has said about itself — see {@link Diagnostics}. */
   private readonly diagnostics: Diagnostics;
   /** This service's sink, held so {@link close} can tell whether it is still the installed one. */
@@ -5633,6 +5643,60 @@ export class AppService {
     const validate = this.schemaValidator(entry.id, entry.document);
     if (validate(value)) return { schemaId: entry.id, violations: [] };
     return { schemaId: entry.id, violations: collapseErrors(validate.errors ?? []) };
+  }
+
+  /**
+   * Check the values a form holds against the schemas the form was drawn from.
+   *
+   * The configuration is the RUN's, deliberately and exactly: `@declarative-ai/validate`'s
+   * `SchemaValidator` is `new Ajv({ allErrors: true, strict: false })`, and so is this. What differs is
+   * only the shape of the answer — that wrapper joins every error into one string for an error
+   * artifact, and a form needs them apart, each with the path it is about. Same keywords, same
+   * verdicts: a form cannot refuse a value the run would take, or take one it would refuse.
+   *
+   * A schema that will not compile is reported rather than thrown. The run WOULD throw on it, so it is
+   * a real problem worth showing, but one broken slot must not stop the others from being checked.
+   */
+  checkValues(request: SchemaCheckRequest): SchemaCheckResponse {
+    return {
+      results: request.checks.map(({ key, schema, value }) => {
+        // `true` and `{}` constrain nothing — the run skips them without compiling anything either.
+        if (schema === true || (schema !== null && typeof schema === "object" && !Array.isArray(schema) && Object.keys(schema).length === 0)) {
+          return { key, ok: true, errors: [] };
+        }
+        let validate: ValidateFunction;
+        try {
+          validate = this.valueValidator(schema);
+        } catch (e) {
+          return { key, ok: false, errors: [], compileError: (e as Error).message };
+        }
+        if (validate(value)) return { key, ok: true, errors: [] };
+        const errors: SchemaCheckError[] = (validate.errors ?? []).map((error) => ({
+          instancePath: error.instancePath,
+          schemaPath: error.schemaPath,
+          keyword: error.keyword,
+          params: JSON.parse(JSON.stringify(error.params ?? {})) as SchemaCheckError["params"],
+          ...(error.message !== undefined ? { message: error.message } : {}),
+        }));
+        return { key, ok: false, errors };
+      }),
+    };
+  }
+
+  /** Compiled, keyed by the schema's text. A form re-checks on every pause in typing, and compiling is the slow half. */
+  private valueValidator(schema: unknown): ValidateFunction {
+    const id = JSON.stringify(schema);
+    const cached = this.valueValidators.get(id);
+    if (cached) return cached;
+    // Bounded by starting over: a long session opens many states, and a registry that only grows would
+    // also keep every `$id` it has ever seen reserved.
+    if (this.valueValidators.size > 500 || this.valueAjv === undefined) {
+      this.valueValidators.clear();
+      this.valueAjv = new Ajv({ allErrors: true, strict: false });
+    }
+    const compiled = this.valueAjv.compile(schema as object);
+    this.valueValidators.set(id, compiled);
+    return compiled;
   }
 
   /**
