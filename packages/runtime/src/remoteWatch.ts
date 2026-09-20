@@ -273,7 +273,8 @@ export class RemoteWatcher {
   private readonly clock: WatchClock;
   private readonly subscriptions: Disposable[] = [];
   private readonly windows = new Map<string, unknown>();
-  private readonly reading = new Set<string>();
+  /** Reads in flight, by handle key — so a second asker waits for the first read instead of starting another. */
+  private readonly reading = new Map<string, Promise<SettleStep | undefined>>();
 
   constructor(private readonly options: WatcherOptions) {
     this.clock = options.clock ?? realClock;
@@ -302,12 +303,24 @@ export class RemoteWatcher {
     await Promise.all(rows.map((row) => this.check(target, row)));
   }
 
-  /** Read one request and act on what it says. Public: "Check now" is exactly this. */
-  async check(target: WatchTarget, stale: RemoteHandleRow): Promise<SettleStep | undefined> {
+  /**
+   * Read one request and act on what it says. Public: "Check now" is exactly this.
+   *
+   * One read per request at a time. A check that arrives while one is in flight gets THAT read's
+   * answer — "Check now" pressed a moment after a probe must not report "nothing new" because it
+   * declined to look.
+   */
+  check(target: WatchTarget, stale: RemoteHandleRow): Promise<SettleStep | undefined> {
     const id = handleKeyOf(target.key, stale);
-    if (this.reading.has(id)) return undefined;
-    this.reading.add(id);
-    try {
+    const inFlight = this.reading.get(id);
+    if (inFlight !== undefined) return inFlight;
+    const read = this.read(target, stale, id).finally(() => this.reading.delete(id));
+    this.reading.set(id, read);
+    return read;
+  }
+
+  private async read(target: WatchTarget, stale: RemoteHandleRow, id: string): Promise<SettleStep | undefined> {
+    {
       // Re-read the row: a hint can outlive the wait it was for.
       const row = target.handles.get(stale.taskId, stale.key);
       const handle = row === undefined ? undefined : handleOfRow(row);
@@ -353,8 +366,6 @@ export class RemoteWatcher {
       this.armWindow(target.key, waiting);
       this.options.onProgress?.({ target: target.key, row: waiting, state, step });
       return step;
-    } finally {
-      this.reading.delete(id);
     }
   }
 

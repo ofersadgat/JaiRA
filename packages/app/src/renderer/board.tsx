@@ -15,6 +15,7 @@ import { useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent a
 import type { BoardCard, BoardView, InstanceStatus, TaskStatus } from "@jaira/shared/browser";
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
+import { cardRemoteWord } from "./remoteStrip";
 import { canDrag, requestFor, NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
 import { TaskName } from "./taskName";
 
@@ -472,6 +473,9 @@ export function endedLabel(at: number, now: number = Date.now()): string {
  * said what it is.
  */
 export function waitingKindOf(card: BoardCard): string | undefined {
+  // The question is open on a FORGE (decision 0004): say where, rather than "gate" — the person
+  // looking at this board is not necessarily who is being waited on.
+  if (card.inReview !== undefined) return cardRemoteWord(card.inReview);
   if (card.activeStatus === "waiting_for_user") return "gate";
   if (card.activeStatus === "blocked") return "blocked";
   // Holding for a dependency (decision 0003): a queued task whose `requires` are not done yet.

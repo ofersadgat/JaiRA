@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, powerMonitor, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import {
   ARTIFACT_SCHEME,
@@ -425,6 +425,8 @@ const handlers: Record<IpcChannel, Handler> = {
     service.submitApproval(request.requestId, request.decision, request.scope)) as Handler,
   "userEvent:pending": (() => service.pendingUserEvents()) as Handler,
   "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
+  "remote:status": ((request: { taskId: string; project?: string }) => service.remoteStatus(request.taskId, request.project)) as Handler,
+  "remote:check": ((request: { taskId: string; project?: string }) => service.checkRemotes(request.taskId, request.project)) as Handler,
   "question:pending": (() => service.pendingQuestions()) as Handler,
   "question:submit": ((request: { requestId: string; answers?: Record<string, string | string[]> }) =>
     service.submitQuestion(request.requestId, request.answers)) as Handler,
@@ -850,6 +852,21 @@ void app.whenReady().then(async () => {
   }
   window = await createWindow();
   service.recordApp("info", "the window is up");
+
+  // Merge requests somebody is waiting on (decision 0004): look NOW at the two moments a poller's
+  // own cadence is wrong by construction. A machine that slept has timers that fire late or not at
+  // all; a window left for a while is one whose person is about to read a stale strip. Five minutes
+  // is the threshold the decision names — a glance at another app should not cost a request.
+  // Starting is covered by the service: opening a project with requests still awaited probes at once.
+  powerMonitor.on("resume", () => service.kickRemotes());
+  let leftAt: number | undefined;
+  app.on("browser-window-blur", () => {
+    leftAt = Date.now();
+  });
+  app.on("browser-window-focus", () => {
+    if (leftAt !== undefined && Date.now() - leftAt >= 5 * 60_000) service.kickRemotes();
+    leftAt = undefined;
+  });
 
   const capture = process.env["JAIRA_CAPTURE"];
   if (capture) void captureAndExit(window, capture);

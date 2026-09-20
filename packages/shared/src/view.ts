@@ -235,6 +235,8 @@ export interface BoardCard {
   heading?: TaskHeading;
   /** The dependencies still unfinished — non-empty means the card is holding. See {@link Holding}. */
   waitingFor?: Holding[];
+  /** Where the question is open when it is open on a FORGE — see {@link InReview}. */
+  inReview?: InReview;
   /** How a fan-out made this task, when one did — the word the card's origin line uses. */
   origin?: TaskOrigin;
   updatedAt: number;
@@ -251,6 +253,18 @@ export interface BoardCard {
 }
 
 /** One column of a board level: a declared child of the level's state. */
+/**
+ * A task whose question is open on a forge (decision 0004).
+ *
+ * What the board card says instead of "waiting for you": the person running JaiRA is not necessarily
+ * who is being waited on, and a card that claims they are is a card they learn to ignore.
+ */
+export interface InReview {
+  provider: string;
+  number: number;
+  url: string;
+}
+
 export interface BoardColumn {
   /** The parent's `children` key — the column's identity. */
   key: string;
@@ -1041,6 +1055,8 @@ export interface TaskSummary {
   origin?: TaskOrigin;
   /** The dependencies still unfinished — non-empty means the task is holding. See {@link Holding}. */
   waitingFor?: Holding[];
+  /** A merge request this task is waiting on (decision 0004) — see {@link InReview}. */
+  inReview?: InReview;
   createdAt: string;
   updatedAt: number;
 }

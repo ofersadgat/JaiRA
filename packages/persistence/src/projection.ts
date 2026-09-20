@@ -26,6 +26,7 @@ import type {
   BoardCrumb,
   BoardView,
   Holding,
+  InReview,
   InstanceAddress,
   InstanceNode,
   InstanceStatus,
@@ -512,6 +513,8 @@ export interface TaskProjection {
   origin?: TaskOrigin;
   /** The dependencies still unfinished — non-empty means the task is holding. */
   waitingFor?: Holding[];
+  /** A merge request the task is waiting on (decision 0004). */
+  inReview?: InReview;
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);
@@ -548,6 +551,7 @@ function cardOf(
     ...(heading !== undefined ? { heading } : {}),
     ...(task.origin !== undefined ? { origin: task.origin } : {}),
     ...(task.waitingFor !== undefined && task.waitingFor.length > 0 ? { waitingFor: task.waitingFor } : {}),
+    ...(task.inReview !== undefined ? { inReview: task.inReview } : {}),
     updatedAt: task.updatedAt,
   };
 }

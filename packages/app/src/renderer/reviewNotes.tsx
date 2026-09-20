@@ -23,8 +23,8 @@
  * quote, and clicking a row re-selects the passage.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type RefObject } from "react";
-import { anchorNotes, shortQuote, type ReviewNote } from "@jaira/shared/browser";
-import { Icon } from "./icons";
+import { FORGE_LABELS, anchorNotes, decisionWordOf, shortQuote, type ForgeProviderKind, type ReviewNote } from "@jaira/shared/browser";
+import { BrandIcon, Icon } from "./icons";
 import { invoke } from "./store";
 
 /** A live selection inside the artifact, in the terms a note is written in. */
@@ -606,6 +606,21 @@ export function NoteList({
   );
 }
 
+/**
+ * Where a message was written, when that is not here (decision 0004) — once, beside its author.
+ *
+ * A mark and a word rather than a colour: the note is the same kind of thing whoever wrote it, and
+ * what the reader needs is only to know that replying to it is replying on the forge.
+ */
+export function SourceMark({ source }: { source: string }): JSX.Element {
+  const label = FORGE_LABELS[source as ForgeProviderKind]?.name ?? source;
+  return (
+    <span className="note-src" title={`written on ${label}`}>
+      <BrandIcon name={source} /> {label}
+    </span>
+  );
+}
+
 function NoteThread({
   note,
   author,
@@ -645,7 +660,8 @@ function NoteThread({
         >
           {orphan ? "text changed" : shortQuote(note.quote)}
         </button>
-        {onRemove === undefined ? null : (
+        {/* A thread that lives on the forge cannot be deleted from here: this is a view of it. */}
+        {onRemove === undefined || note.source !== undefined ? null : (
         <button className="ghost note-row-remove" title="delete this thread" onClick={onRemove}>
           <Icon name="cross" />
         </button>
@@ -653,9 +669,12 @@ function NoteThread({
       </div>
 
       {messages.map((message, i) => (
-        <div className="note-msg" key={`${message.at}-${i}`}>
+        // A message whose whole body is a decision word IS that decision (decision 0004), so it is
+        // drawn as one rather than as a remark that happens to be short.
+        <div className={`note-msg${note.source !== undefined && decisionWordOf(message.body) !== undefined ? " is-word" : ""}`} key={`${message.at}-${i}`}>
           <div className="note-msg-by">
             <Icon name="comment" className="note-icon" /> {message.author}
+            {note.source === undefined ? null : <SourceMark source={note.source} />}
           </div>
           <div className="note-msg-body">{message.body}</div>
         </div>

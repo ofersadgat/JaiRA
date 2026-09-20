@@ -58,6 +58,8 @@ export function taskSummaries(project: Project): TaskSummary[] {
     const meta = project.tasks.tryRead(row.taskId);
     const origin = taskOriginOf(project, row, meta);
     const waitingFor = meta !== undefined ? holdingOf(project, meta) : [];
+    // The request the task is parked on, when it is parked on one — the oldest, if there are several.
+    const awaited = project.remotes.forTask(row.taskId).find((r) => r.awaiting && r.number !== undefined && r.url !== undefined);
     return {
       taskId: row.taskId,
       title: meta?.title ?? "(missing task file)",
@@ -68,6 +70,7 @@ export function taskSummaries(project: Project): TaskSummary[] {
       ...(meta?.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
       ...(origin !== undefined ? { origin } : {}),
       ...(waitingFor.length > 0 ? { waitingFor } : {}),
+      ...(awaited !== undefined ? { inReview: { provider: awaited.provider, number: awaited.number!, url: awaited.url! } } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
     };

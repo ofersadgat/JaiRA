@@ -37,6 +37,9 @@ import {
   monacoGrammarOf,
   reviewSettled,
   baselineOf,
+  REVIEW_NOTE_ARTIFACT,
+  type RemoteStatusView,
+  type ReviewNote,
   type BaselineFile,
   type Change,
   type Changeset,
@@ -51,6 +54,8 @@ import {
 } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { ImageDiff, type ImageLayout } from "./imageDiff";
+import { mergeForgeNotes } from "./remoteStrip";
+import { RemoteStrip, ReviewThread, SettledBy } from "./remoteStripView";
 import {
   NoteComposer,
   NoteList,
@@ -96,6 +101,15 @@ export interface ComponentServices {
   checkFile?(request: { path: string; text: string; baseline?: BaselineFile[] }): Promise<FileCheck>;
   /** Withdraw a buffer this reviewer had checked — see `CheckFileRequest`'s note on `file:release`. */
   releaseFile?(path: string): void;
+  /**
+   * The gate's SECOND DOOR (decision 0004): what the forge has said about this review, and a way to
+   * go and look now. Supplied by a host that can reach main; absent, the strip still draws where the
+   * request lives — from the gate's own `remote` — and simply has nothing live to add.
+   */
+  remote?: {
+    status(): Promise<RemoteStatusView[]>;
+    check(): Promise<RemoteStatusView[]>;
+  };
   /**
    * Who a note is signed as (decision 0002).
    *
@@ -257,6 +271,48 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
     readOnly && typeof recorded["comments"] === "string" ? recorded["comments"] : "",
   );
   const [selected, setSelected] = useState<string | undefined>(undefined);
+
+  // --- the second door (decision 0004) ---------------------------------------------------------
+  const remote = ctx.config.remote?.number !== undefined ? ctx.config.remote : undefined;
+  const [remoteStatus, setRemoteStatus] = useState<RemoteStatusView | undefined>(undefined);
+  const [checking, setChecking] = useState(false);
+  const watch = ctx.services.remote;
+  useEffect(() => {
+    if (remote === undefined || watch === undefined || readOnly) return;
+    let live = true;
+    const mine = (rows: RemoteStatusView[]): void => {
+      if (live) setRemoteStatus(rows.find((row) => row.key === remote.key) ?? rows[0]);
+    };
+    const read = (): void => void watch.status().then(mine).catch(() => undefined);
+    read();
+    // Main does the polling; this only re-reads what main already knows, which costs nothing.
+    const timer = setInterval(read, 10_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remote?.key, remote?.number, readOnly]);
+  // A thread on the forge appears here as the note it is — laid over the person's own notes, which
+  // are never touched. Replaced wholesale each read: a thread gains replies and gets resolved there.
+  useEffect(() => {
+    const theirs = remoteStatus?.notes;
+    if (theirs === undefined || readOnly) return;
+    setDrafts((held) => {
+      const next: Drafts = { ...held };
+      const ids = new Set([...Object.keys(held), ...Object.keys(theirs)]);
+      for (const id of ids) {
+        if (id === REVIEW_NOTE_ARTIFACT) continue;
+        const merged = mergeForgeNotes(held[id]?.notes, theirs[id]);
+        if (merged.length === 0 && held[id]?.notes === undefined) continue;
+        next[id] = { ...(held[id] ?? {}), notes: merged };
+      }
+      return next;
+    });
+  }, [remoteStatus, readOnly]);
+  const generalNotes: ReviewNote[] = readOnly
+    ? ((Array.isArray(recorded["notes"]) ? recorded["notes"] : []) as unknown as ReviewNote[])
+    : ((remoteStatus?.notes?.[REVIEW_NOTE_ARTIFACT] ?? []) as ReviewNote[]);
   /**
    * Which changes were actually put on screen.
    *
@@ -369,6 +425,28 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
       <div className="review-head">
         against <code>{changeset.source}</code>
       </div>
+      {/* Under the base line, above the chooser: it is about the whole set. */}
+      {remote === undefined ? null : (
+        <RemoteStrip
+          remote={remote}
+          status={remoteStatus}
+          busy={checking}
+          onCheck={
+            readOnly || watch === undefined
+              ? undefined
+              : () => {
+                  setChecking(true);
+                  void watch
+                    .check()
+                    .then((rows) => setRemoteStatus(rows.find((row) => row.key === remote.key) ?? rows[0]))
+                    .catch(() => undefined)
+                    .finally(() => setChecking(false));
+                }
+          }
+        />
+      )}
+      <ReviewThread notes={generalNotes} />
+      {readOnly ? <SettledBy recorded={recorded} /> : null}
 
       <div className="review-body">
         <div className="review-chooser" data-testid="review-chooser">

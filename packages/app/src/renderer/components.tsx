@@ -774,12 +774,19 @@ export function ChangesetGate({
   services,
   mountKey,
   settled,
+  gate,
 }: ComponentProps<ReviewArtifactsConfig> & {
   about?: string | undefined;
   project?: string | undefined;
   services?: Partial<ComponentServices> | undefined;
   /** The request id — what makes this a DIFFERENT review. See {@link MountHost}. */
   mountKey: string;
+  /**
+   * The task that PARKED this gate, and its project — whose merge request the remote strip is about
+   * (decision 0004). Not `about`: that is the task under review, which for a review run in JaiRA's
+   * own project is a different task in a different project.
+   */
+  gate?: { taskId: string; project?: string | undefined } | undefined;
 }): JSX.Element {
   // The identity is resolved HERE and passed in, because §8.2 says a self-mounting component gets
   // its capabilities rather than reaching for the bridge — and because a hook cannot live inside a
@@ -801,6 +808,15 @@ export function ChangesetGate({
               ...(project !== undefined ? { project } : {}),
             }),
             author,
+            // The second door, for a gate that has one and a host that can reach main.
+            ...(gate !== undefined && config.remote?.number !== undefined
+              ? {
+                  remote: {
+                    status: () => invoke("remote:status", { taskId: gate.taskId, ...(gate.project !== undefined ? { project: gate.project } : {}) }),
+                    check: () => invoke("remote:check", { taskId: gate.taskId, ...(gate.project !== undefined ? { project: gate.project } : {}) }),
+                  },
+                }
+              : {}),
             ...(services ?? {}),
           },
           onSubmit,
@@ -957,6 +973,7 @@ export function GateSurface({
             services={services}
             mountKey={pending.requestId}
             settled={settled}
+            gate={{ taskId: pending.taskId, project: pending.project }}
           />
         );
       default:

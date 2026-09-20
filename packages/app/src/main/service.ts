@@ -154,6 +154,7 @@ import {
   forgeForHost,
   type WatchTarget,
   type RemoteSettled,
+  type RemoteProgress,
   type PublishAnswer,
   type PublishRequest,
   type ForgeHttp,
@@ -269,6 +270,8 @@ import {
   SHARED_SESSION,
   FORGE_LABELS,
   resultOfSettlement,
+  REVIEW_NOTE_ARTIFACT,
+  type RemoteStatusView,
   validateComponentResult,
   WORKFLOW_JSON,
   unnamedRouteOf,
@@ -1174,12 +1177,61 @@ export class AppService {
         sources: [this.remoteSource],
         subjectOf: (target, row) => this.remoteSubject(target, row.requestId),
         onSettled: (event) => this.remoteSettled(event),
-        onProgress: (event) => this.publish({ type: "store:invalidate", scope: "task", taskId: event.row.taskId, project: this.refOf(event.target) }),
+        onProgress: (event) => {
+          this.remoteHeard.set(JSON.stringify([event.target, event.row.taskId, event.row.key]), event);
+          this.publish({ type: "store:invalidate", scope: "task", taskId: event.row.taskId, project: this.refOf(event.target) });
+        },
       });
       this.remoteWatcher = { watcher, dispose: watcher.start().dispose };
       return; // `start` kicks.
     }
     this.remoteSource.kick();
+  }
+
+  /** What the last read of each request found — in memory only: it is a drawing aid, and the row is the record. */
+  private readonly remoteHeard = new Map<string, RemoteProgress>();
+
+  /** A task's merge requests, as the gate's remote strip draws them. Touches nothing but the database. */
+  remoteStatus(taskId: string, project?: string): RemoteStatusView[] {
+    const session = this.session(project);
+    return session.project.remotes.forTask(taskId).map((row) => {
+      const heard = this.remoteHeard.get(JSON.stringify([session.key, taskId, row.key]));
+      const said = heard?.state === undefined ? [] : [...heard.state.comments, ...heard.state.threads.flatMap((t) => t.comments)].filter((c) => !c.own).sort((a, b) => a.at.localeCompare(b.at));
+      const notes: Record<string, unknown[]> = {};
+      if (heard?.step !== undefined) {
+        const step = heard.step.kind === "settled" ? heard.step.settlement : heard.step;
+        for (const decision of step.decisions) if (decision.notes !== undefined) notes[decision.id] = decision.notes;
+        if (step.notes.length > 0) notes[REVIEW_NOTE_ARTIFACT] = step.notes;
+      }
+      return {
+        key: row.key,
+        provider: row.provider,
+        host: row.host,
+        project: row.project,
+        branch: row.branch,
+        target: row.target,
+        ...(row.number !== undefined ? { number: row.number } : {}),
+        ...(row.url !== undefined ? { url: row.url } : {}),
+        awaiting: row.awaiting,
+        ...(row.settleAt !== undefined ? { settleAt: row.settleAt } : {}),
+        ...(row.checkedAt !== undefined ? { checkedAt: row.checkedAt } : {}),
+        ...(row.lastError !== undefined ? { error: row.lastError } : {}),
+        commenters: [...new Set(said.map((c) => c.who))],
+        ...(Object.keys(notes).length > 0 ? { notes } : {}),
+      };
+    });
+  }
+
+  /** "Check now" on the gate: read the forge for this task's awaited requests, and say what was found. */
+  async checkRemotes(taskId: string, project?: string): Promise<RemoteStatusView[]> {
+    const session = this.session(project);
+    this.kickRemotes();
+    const watcher = this.remoteWatcher?.watcher;
+    const target = this.watchTargets().find((t) => t.key === session.key);
+    if (watcher !== undefined && target !== undefined) {
+      await Promise.all(session.project.remotes.forTask(taskId).filter((row) => row.awaiting).map((row) => watcher.check(target, row)));
+    }
+    return this.remoteStatus(taskId, project);
   }
 
   /** The forge settled a request: hand the settlement to whatever is waiting on it. */

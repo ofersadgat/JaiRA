@@ -16,6 +16,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import type { BaselineFile, Changeset } from "./changeset";
 import type { Choice, ComponentConfig } from "./components";
 import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
+import type { RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
 import type { UserEventRequest } from "./userEvents";
@@ -1600,6 +1601,10 @@ export interface IpcContract {
   "userEvent:pending": { request: void; response: PendingUserEvent[] };
   /** The gesture happened — the card was dropped where this wait was offering. */
   "userEvent:deliver": { request: { requestId: string }; response: { requestId: string; delivered: boolean } };
+  /** A task's merge requests, for the gate's remote strip (decision 0004). Reads nothing from the forge. */
+  "remote:status": { request: { taskId: string; project?: ProjectRef }; response: RemoteStatusView[] };
+  /** "Check now": read the forge for this task's awaited requests, then answer as `remote:status` does. */
+  "remote:check": { request: { taskId: string; project?: ProjectRef }; response: RemoteStatusView[] };
   "workflow:browse": { request: { project?: ProjectRef } | void; response: WorkflowBrowser };
   "workflow:read": { request: ReadWorkflowRequest; response: WorkflowSource };
   "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
@@ -1833,6 +1838,8 @@ export const IPC_CHANNELS = [
   "question:submit",
   "userEvent:pending",
   "userEvent:deliver",
+  "remote:status",
+  "remote:check",
   "workflow:browse",
   "workflow:read",
   "workflow:write",

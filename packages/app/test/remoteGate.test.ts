@@ -135,6 +135,22 @@ describe("the gate parks exactly as today, and the same request lives on the for
     expect(rig.git(rig.bare, "show", `jaira/${taskId}/review:app.txt`)).toContain("two, revised");
     // What the request says about itself: the prompt, then what is in the set.
     expect(replay.seen.find((r) => r.method === "POST")!.body).toMatchObject({ title: "Review the implementation", description: expect.stringContaining("`app.txt` — update") });
+    // What the strip draws from, and what the board card says instead of "waiting for you".
+    expect(service.remoteStatus(taskId)).toMatchObject([{ key: "review", provider: "gitlab", number: 7430, awaiting: true, commenters: [] }]);
+    expect(service.listTasks().find((t) => t.taskId === taskId)?.inReview).toEqual({ provider: "gitlab", number: 7430, url: "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7430" });
+  });
+
+  it("\"Check now\" reads the forge on demand and reports what it found", async () => {
+    await boot();
+    const { taskId } = await parked();
+    release();
+    const rows = await service.checkRemotes(taskId);
+    // The fixture's request is merged, so the look settles it: nothing is awaited any more, and the
+    // person who spoke there is named.
+    expect(rows).toMatchObject([{ number: 7430, awaiting: false, commenters: ["mara"] }]);
+    expect(rows[0]!.checkedAt).toBeGreaterThan(0);
+    await until(() => finished(taskId), "the run to finish");
+    expect(service.listTasks().find((t) => t.taskId === taskId)?.inReview).toBeUndefined();
   });
 
   it("is the plain local gate with no remote, and with remote: null", async () => {

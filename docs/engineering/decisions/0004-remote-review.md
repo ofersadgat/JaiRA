@@ -494,6 +494,25 @@ the runtime reads it through are in `shared/forge.ts`, because runtime cannot im
   change `approved`, which is neither settled nor a comment). What happens to the request afterwards
   is the caller's to say.
 
+**Step 6 (2026-09-19).** `renderer/remoteStrip.ts` is what the second door SAYS — pure, and tested,
+because the renderer has no DOM test infrastructure; `remoteStripView.tsx` only places the words.
+
+- The strip sits under the reviewer's base line. It draws from the gate's own `remote` (where the
+  request lives) plus `remote:status`, which reads only the database and what the last read found;
+  main does the polling. `remote:check` is "Check now", and a check that arrives while a read is in
+  flight gets THAT read's answer rather than declining to look.
+- A deadline nobody can currently hear about is not shown: when the forge is unreachable the strip
+  says so, and that the gate is still answerable here.
+- A forge thread is laid over the person's own notes — which are never touched — and REPLACED each
+  read, because a thread gains replies and gets resolved there. It cannot be deleted from here.
+- The board card says `in review on GitLab !41` from `TaskSummary.inReview` (the task's oldest
+  awaited request), instead of `gate`.
+- The mockup's literal pixel sizes became ratios of the two voices, like the rest of `styles.css`, so
+  the Appearance size control reaches them.
+- The window regaining focus after five minutes away, and the machine waking, both probe at once.
+- **Not built:** replying to a forge thread from the reviewer while the gate is open (notes reach the
+  forge when the gate settles locally), and a component-gallery entry for a gate with a remote.
+
 Fixtures are of two kinds and each says which in `_source`: recorded from the public API with an
 unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both
 `401`s), and built from the documented shapes for what needs a token (every write, GitLab's

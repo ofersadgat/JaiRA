@@ -509,6 +509,32 @@ export interface RemoteHandlePatch {
   lastError?: string | null;
 }
 
+/**
+ * One of a task's merge requests, as the gate's remote strip draws it: where it lives, whether the
+ * forge can be reached, who has spoken there, and — only while one is running — when the quiet
+ * window closes.
+ */
+export interface RemoteStatusView {
+  key: string;
+  provider: ForgeProviderKind;
+  host: string;
+  project: string;
+  branch: string;
+  target: string;
+  number?: number;
+  url?: string;
+  awaiting: boolean;
+  /** Epoch ms. Present only while a window is running. */
+  settleAt?: number;
+  checkedAt?: number;
+  /** Why the last read failed. The gate is still answerable here; the forge just cannot be heard. */
+  error?: string;
+  /** Who has commented there, other than the token's own account — in order of first appearance. */
+  commenters: string[];
+  /** What the forge has said so far, as the notes a settlement would carry: by change id. */
+  notes?: Record<string, unknown[]>;
+}
+
 /** What the primitives and the poller need of the store. `@jaira/persistence` implements it. */
 export interface RemoteHandlePort {
   get(taskId: string, key: string): RemoteHandleRow | undefined;

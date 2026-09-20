@@ -13180,3 +13180,158 @@ fieldset.reading {
   flex: none;
   color: var(--dim);
 }
+
+/* --- a review with a second door (decision 0004) ----------------------------
+   The gate's remote strip sits under `.review-head` and above the chooser, because it is about the
+   whole set: where the request lives, who has spoken there, and — only while one is running — when
+   the quiet window closes. Sizes are ratios of the two voices like everything else in this file, so
+   the Appearance size control reaches them. */
+.review-remote {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  margin: 0 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel-2);
+  font-size: var(--size-app);
+}
+.review-remote .rr-forge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.review-remote .rr-forge svg {
+  width: 14px;
+  height: 14px;
+}
+.review-remote a,
+.rr-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--font-data);
+  font-size: var(--size-data);
+}
+.review-remote a:hover {
+  text-decoration: underline;
+}
+.review-remote .rr-branch {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  color: var(--dim);
+}
+.review-remote .rr-grow {
+  flex: 1 1 auto;
+}
+.review-remote .rr-who {
+  color: var(--dim);
+}
+/* The window is a DEADLINE, so its figures must not dance as the minute changes. */
+.review-remote .rr-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+.review-remote .rr-window svg {
+  width: 13px;
+  height: 13px;
+}
+.review-remote .rr-checked {
+  color: var(--dim);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+}
+/* The forge cannot be heard. The edge says so and the words say the gate is still answerable here —
+   an unreachable host is a fact about the network, not a failure of the review. */
+.review-remote.is-error {
+  border-color: color-mix(in srgb, var(--bad) 50%, var(--line));
+}
+.review-remote.is-error .rr-window {
+  color: var(--bad);
+}
+
+/* A message that came from the forge says so, once, beside its author. A mark and a word rather than
+   a colour on the note: it is the same kind of thing whoever wrote it. */
+.note-src {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-family: var(--font-data);
+  font-weight: 500;
+  font-size: calc(var(--size-data) * 10.5 / 12);
+  line-height: 1.5;
+}
+.note-src svg {
+  width: 10px;
+  height: 10px;
+}
+/* A comment whose whole body is a decision word IS that decision, and is drawn as one. */
+.note-msg.is-word .note-msg-body {
+  font-family: var(--font-data);
+  color: var(--ok);
+}
+
+/* General comments on the request: about the set, so they sit with the review-level comment. */
+.review-thread {
+  margin: 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* How a gate answered elsewhere says so. */
+.gate-settled-by {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--ok) 9%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line));
+  font-size: var(--size-app);
+}
+.gate-settled-by svg {
+  width: 14px;
+  height: 14px;
+  color: var(--ok);
+  flex: none;
+  margin-top: 2px;
+}
+.gate-settled-by ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--dim);
+}
+.gate-settled-by .warned {
+  color: var(--warn);
+}
+
+/* What EXACTLY is being confirmed — the publish question's rows (`confirm_action.details`). */
+.publish-what {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: var(--size-app);
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+}
+.publish-what dt {
+  color: var(--dim);
+}
+.publish-what dd {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--size-data);
+  overflow-wrap: anywhere;
+}
