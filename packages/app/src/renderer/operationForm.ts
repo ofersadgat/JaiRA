@@ -25,6 +25,7 @@
  */
 import { jsonTextOf, jsonValueOf, listOf, listTextOf } from "./jsonText";
 import { applySlotRow, applySlots, slotRowOf, slotsOf, type SlotRow } from "./slotForm";
+import { applyToolsField, showsToolsField, toolsFieldOf, type ToolsFieldForm } from "./toolsFieldForm";
 
 /** Authored keys the document holds as something other than the value this form edits. */
 export type StructuredFields = Record<string, true>;
@@ -108,6 +109,8 @@ export interface PermissionsForm {
   tools: PermissionToolRow[];
 }
 
+export type { ToolsFieldForm };
+
 export interface ReasoningForm {
   effort: string;
   budgetTokens: string;
@@ -144,6 +147,15 @@ export interface OperationFieldsForm {
   structured: StructuredFields;
   /** See {@link RefFields}. Only {@link SimpleField.linkable} fields ever appear here. */
   refs: RefFields;
+  /**
+   * `tools` as ONE field — a toolset and the lines written over it (decision 0007 §6).
+   *
+   * Present only for a block this form may edit that way: `undefined` is an UNMIGRATED block — a
+   * `tools` LIST, or an old `permissions` block — which keeps the two separate fields it has always
+   * had, unchanged. See `toolsFieldForm.ts` `showsToolsField`; which of the two a state means is
+   * chosen when it is migrated (0007 step 7), never by opening it in a form.
+   */
+  toolsField?: ToolsFieldForm;
 }
 
 export const EMPTY_OPERATION_FIELDS: OperationFieldsForm = {
@@ -246,9 +258,17 @@ export function operationFieldsOf(raw: unknown): OperationFieldsForm {
   }
 
   const reasoning = asRecord(op["reasoning"]);
+  // The ONE Tools field, where this block is one it may edit that way. Its `tools` is then the
+  // field's, so the list box above must not claim it too — see {@link OperationFieldsForm.toolsField}.
+  const toolsField = showsToolsField(op) ? toolsFieldOf(op["tools"]) : undefined;
+  if (toolsField !== undefined) {
+    delete structured["tools"];
+    fields["tools"] = "";
+  }
   return {
     fields,
     json,
+    ...(toolsField !== undefined ? { toolsField } : {}),
     fork: op["fork"] === true,
     input: slotsOf(op["input"]),
     // A map like `input`: the row's name column IS the key, so nothing names itself twice.
@@ -287,6 +307,9 @@ function clear(op: Record<string, unknown>, spec: SimpleField): void {
 function applySimple(op: Record<string, unknown>, form: OperationFieldsForm): void {
   for (const spec of SIMPLE_FIELDS) {
     if (form.structured[spec.name] === true) continue;
+    // `tools` belongs to the ONE field while it is showing — the empty list box beside it is not a
+    // statement that the state has no tools, and writing one would delete the toolset it names.
+    if (spec.name === "tools" && form.toolsField !== undefined) continue;
     // Linked wins over whatever the literal box holds. The two are kept side by side so that
     // toggling the link is not destructive (see {@link RefFields}), which means exactly one of them
     // has to be the one written, and the toggle is what says which.
@@ -394,6 +417,15 @@ function applyReasoning(op: Record<string, unknown>, reasoning: ReasoningForm): 
 export function applyOperationFields(previous: unknown, form: OperationFieldsForm): Record<string, unknown> {
   const op: Record<string, unknown> = { ...asRecord(previous) };
   applySimple(op, form);
+
+  // The ONE Tools field: a bare reference, `$ref` plus the lines written over it, or a map of lines
+  // alone — whichever is the plain spelling of what it holds. `undefined` is a state that names none
+  // and writes none, which is no `tools` key at all.
+  if (form.toolsField !== undefined) {
+    const tools = applyToolsField(op["tools"], form.toolsField);
+    if (tools === undefined) delete op["tools"];
+    else op["tools"] = tools;
+  }
 
   if (form.fork) op["fork"] = true;
   else delete op["fork"];

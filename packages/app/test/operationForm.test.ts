@@ -183,13 +183,25 @@ describe("links", () => {
 });
 
 describe("lists", () => {
-  it("round-trips tools", () => {
+  it("round-trips tools through the list box — the UNMIGRATED reading", () => {
     expect(operationFieldsOf({ tools: ["a", "b"] }).fields["tools"]).toBe("a, b");
-    expect(withFields({}, { tools: "read_file, run_command" })["tools"]).toEqual(["read_file", "run_command"]);
+    expect(withFields({ tools: ["a"] }, { tools: "read_file, run_command" })["tools"]).toEqual(["read_file", "run_command"]);
   });
 
   it("drops the key when the box is emptied", () => {
     expect(withFields({ tools: ["a"] }, { tools: "" })).toEqual({});
+  });
+
+  /**
+   * A block that says NOTHING about tools has nothing to migrate, so it gets the one Tools field
+   * (decision 0007 §6) and draws no list box at all. Typing into a box that is not there writes
+   * nothing — which is the point: an empty list beside a toolset picker would be a second, silent
+   * way to say "no tools".
+   */
+  it("gives a block that says nothing the ONE Tools field, and no list box", () => {
+    expect(operationFieldsOf({}).toolsField).toEqual({ reference: "", lines: {}, unread: {} });
+    expect(operationFieldsOf({ tools: ["a"] }).toolsField).toBeUndefined();
+    expect(withFields({}, { tools: "read_file, run_command" })).toEqual({});
   });
 });
 

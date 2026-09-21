@@ -13,39 +13,45 @@
  * Rendering only; every write goes through the store and is validated in the main process.
  */
 import { useState, type JSX } from "react";
-import { CONFIG_JSON, SETTINGS_FILE_NAME, type ConfigLayer, type ConfigView, type FileSource } from "@jaira/shared/browser";
+import { CONFIG_JSON, SETTINGS_FILE_NAME, type ConfigLayer, type ConfigView, type FileSource, type WorkflowLayer } from "@jaira/shared/browser";
 import type { Drafts, SetDraft } from "./drafts";
 import { ConfigEdit, ConfigEffectiveView } from "./fileSurfaces";
 import type { FileSurfaceContext, FileSurfaceProps } from "./fileTypes";
-import { LAYER_LABELS } from "./layerLabels";
+import { BUILT_IN_LABEL, LAYER_LABELS } from "./layerLabels";
 
 export type { ConfigLayer };
 
-/** A two-way layer switch, used wherever a write has to name where it lands. */
-export function LayerPicker({
+const LAYER_TITLES: Record<WorkflowLayer, string> = {
+  project: "this project only",
+  base: "the shared root — changes here affect every project that has not overridden them",
+  system: "what ships with JaiRA — read-only; it is changed by overriding it in one of the other two",
+};
+
+/**
+ * The layer switch, used wherever a write has to name where it lands.
+ *
+ * Two segments for a pane whose values live in `settings.json`, which the built-in layer does not
+ * have. A pane that holds something JaiRA SHIPS passes `layers` with `system` in it and gets the
+ * third, read-only segment — "Built in" (decision 0006) — and leaves `project` out when no project
+ * is open, which is what used to be a sentence in place of the switch.
+ */
+export function LayerPicker<L extends WorkflowLayer = ConfigLayer>({
   value,
   onChange,
   disabled,
+  layers,
 }: {
-  value: ConfigLayer;
-  onChange: (layer: ConfigLayer) => void;
+  value: L;
+  onChange: (layer: L) => void;
   disabled?: boolean;
+  /** The segments, in order. Absent ⇒ the two writable layers. */
+  layers?: readonly L[];
 }): JSX.Element {
   return (
     <div className="layer-picker" role="group" aria-label="Configuration layer">
-      {(["project", "base"] as ConfigLayer[]).map((layer) => (
-        <button
-          key={layer}
-          className={value === layer ? "layer-on" : "ghost"}
-          onClick={() => onChange(layer)}
-          disabled={disabled}
-          title={
-            layer === "base"
-              ? "the shared root — changes here affect every project that has not overridden them"
-              : "this project only"
-          }
-        >
-          {LAYER_LABELS[layer]}
+      {(layers ?? (["project", "base"] as L[])).map((layer) => (
+        <button key={layer} className={value === layer ? "layer-on" : "ghost"} onClick={() => onChange(layer)} disabled={disabled} title={LAYER_TITLES[layer]}>
+          {layer === "system" ? BUILT_IN_LABEL : LAYER_LABELS[layer as ConfigLayer]}
         </button>
       ))}
     </div>

@@ -140,6 +140,11 @@ import {
   type LayerSource,
   addToToolset,
   toolsetWriteTargets,
+  readToolsetLayers,
+  resetToolset,
+  toolsetLayers,
+  toolsetUsers,
+  writeToolset,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -281,6 +286,7 @@ import {
   type ToolsetAddition,
   jairaBasePaths,
   jairaBuiltInPaths,
+  baseAsProjectPaths,
   DEFAULT_EXECUTOR,
   mergeConfigDocuments,
   mimeOfPath,
@@ -463,6 +469,10 @@ import type {
   WriteConfigRequest,
   WriteFileRequest,
   SaveToolsetRequest,
+  WriteToolsetRequest,
+  WriteToolsetResult,
+  ResetToolsetRequest,
+  ToolsetsView,
   WriteWorkflowRequest,
   InstanceNode,
   ChatBranch,
@@ -7260,6 +7270,61 @@ export class AppService {
       ...(request.project !== undefined ? { project: request.project } : {}),
     });
     return { id: `${request.bucket}/${request.name}`, bucket: request.bucket, name: request.name, layer: request.layer, decl: request.toolset };
+  }
+
+  /**
+   * The layers Settings → Toolsets reads and writes: the named project's, or — with nothing open —
+   * the shared root standing as its own project, which has no `project` layer at all.
+   *
+   * Computed and never OPENED: `baseAsProjectPaths` is arithmetic on a directory name, where the
+   * shared session would create a database for the sake of listing eight files.
+   */
+  private toolsetPaths(project?: string): JairaPaths {
+    return project !== undefined || this.hasProject ? this.requireProject(project).paths : baseAsProjectPaths(this.baseDir);
+  }
+
+  /**
+   * Every toolset, layer by layer, with which states name each — what Settings → Toolsets draws.
+   *
+   * `usedBy: false` skips the scan of every state file, for a caller that wants the toolsets alone.
+   */
+  readToolsetSettings(request: { project?: string; usedBy?: boolean } = {}): ToolsetsView {
+    const paths = this.toolsetPaths(request.project);
+    return {
+      records: readToolsetLayers(paths),
+      usedBy: request.usedBy === false ? {} : toolsetUsers(paths),
+      tools: AppService.gateableTools(),
+      layers: toolsetLayers(paths).map((layer) => layer.layer),
+    };
+  }
+
+  /**
+   * Save a whole toolset into a layer (decision 0007 §6). What kind of write that is — an edit, an
+   * override that keeps following, a file that stops — is `writeToolset`'s to decide and to say.
+   */
+  writeToolsetSettings(request: WriteToolsetRequest): WriteToolsetResult {
+    this.writable(request.layer);
+    let written: { file: string; kind: WriteToolsetResult["kind"] };
+    try {
+      written = writeToolset(this.toolsetPaths(request.project), request.id, request.layer, request.toolset);
+    } catch (e) {
+      throw this.refusal("file", (e as Error).message);
+    }
+    this.publish({ type: "store:invalidate", scope: "workflows" });
+    return written;
+  }
+
+  /** "Reset to built in": delete a layer's override of a toolset, and nothing that is not one. */
+  resetToolsetSettings(request: ResetToolsetRequest): { file: string } {
+    this.writable(request.layer);
+    let removed: { file: string };
+    try {
+      removed = resetToolset(this.toolsetPaths(request.project), request.id, request.layer);
+    } catch (e) {
+      throw this.refusal("file", (e as Error).message);
+    }
+    this.publish({ type: "store:invalidate", scope: "workflows" });
+    return removed;
   }
 
   /**

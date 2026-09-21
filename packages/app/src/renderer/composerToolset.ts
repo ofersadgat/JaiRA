@@ -192,6 +192,65 @@ export function withCommand(toolset: Toolset, subject: string): Toolset {
   return withSubject(toolset, subject, group !== undefined ? groupModeOf(toolset, group) : shellFallbackOf(toolset));
 }
 
+// --- a toolset on the page: what a section does not hold yet --------------------
+//
+// The composer lists every tool and ticks the held ones. Settings → Toolsets and the state editor's
+// Tools field list what a toolset HOLDS, and reach the rest through each section's last line
+// (decision 0007 §6). These say what that line's menu offers, and what its minus takes away.
+
+/** The tools of a section the toolset does not hold, in the section's own order. */
+export function addableTools(toolset: Toolset, category: ToolCategoryId, offered?: readonly string[]): string[] {
+  const known = offered === undefined ? undefined : new Set(offered);
+  return toolsInCategory(category)
+    .map((spec) => spec.name)
+    .filter((name) => (known === undefined || known.has(name)) && !holdsTool(toolset, name));
+}
+
+/** `script`, when the toolset has no line for it — Execution's one subject that is neither tool nor command. */
+export function addableScript(toolset: Toolset): boolean {
+  return !Object.hasOwn(toolset.entries, SCRIPT_SUBJECT);
+}
+
+/**
+ * The subcommands people give a line of their own, for the programs they most often name.
+ *
+ * SUGGESTIONS and nothing else: the menu's last row takes anything typed, no entry here means a
+ * program is known or allowed, and a program that is not listed simply opens on the box. Kept short
+ * on purpose — a menu of forty `git` verbs is a list nobody reads.
+ */
+export const COMMON_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
+  git: ["status", "log", "diff", "show", "add", "commit", "push", "pull", "fetch", "checkout", "rm"],
+  npm: ["install", "ci", "test", "run", "publish"],
+  pnpm: ["install", "test", "run", "publish"],
+  yarn: ["install", "test", "run"],
+  docker: ["ps", "build", "run", "exec", "push"],
+  gh: ["pr", "issue", "repo", "api"],
+  cargo: ["build", "test", "run", "publish"],
+  terraform: ["plan", "apply", "destroy"],
+  kubectl: ["get", "describe", "apply", "delete"],
+};
+
+/** The suggested subcommands of a program the toolset has no line for yet, as whole subjects. */
+export function suggestedSubcommands(toolset: Toolset, program: string): string[] {
+  return (COMMON_SUBCOMMANDS[program] ?? []).map((sub) => `${program} ${sub}`).filter((subject) => !Object.hasOwn(toolset.entries, subject));
+}
+
+/** The programs worth offering by name that the toolset names no command of. */
+export function suggestedPrograms(toolset: Toolset): string[] {
+  const named = new Set(commandGroupsOf(toolset).map((group) => group.program));
+  return Object.keys(COMMON_SUBCOMMANDS).filter((program) => !named.has(program));
+}
+
+/** Take a whole PROGRAM out: its own line and every subcommand under it — the group's minus. */
+export function withoutProgram(toolset: Toolset, program: string): Toolset {
+  const entries: Record<string, ToolsetEntry> = {};
+  for (const [subject, entry] of Object.entries(toolset.entries)) {
+    if (entry.kind === "command" && subject.split(" ")[0] === program) continue;
+    entries[subject] = entry;
+  }
+  return edited(toolset, entries);
+}
+
 // --- sections -----------------------------------------------------------------
 
 /** Every line a section's own mode button reads and writes, as `[subject, mode]`. */

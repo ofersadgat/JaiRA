@@ -28,6 +28,7 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
+import { toolsetChoicesAt, toolsetsAt } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
@@ -37,6 +38,7 @@ import type {
   PendingQuestion,
   ProjectSummary,
   ProjectTask,
+  ToolsetsView as ToolsetsData,
   WorkflowLayer,
 } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
@@ -107,6 +109,8 @@ import { GalleryPane } from "./galleryPane";
 import { ProvidersPane } from "./providersPane";
 import { IntegrationsPane } from "./integrationsPane";
 import { ExecutorsPane } from "./executorsPane";
+import { ToolsetsPane, type ToolsetsChannel } from "./toolsetsPane";
+import { ToolsFieldProvider, type ToolsFieldData } from "./toolsField";
 import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf, settledMarkOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView, TaskContext } from "./runViews";
@@ -211,6 +215,8 @@ function SettingsHeader({
   checkedAt,
   onLayer,
   onRecheck,
+  builtIn,
+  onBuiltIn,
 }: {
   section: SettingsSection;
   layer: ConfigLayer;
@@ -220,6 +226,9 @@ function SettingsHeader({
   checkedAt: number;
   onLayer: (layer: ConfigLayer) => void;
   onRecheck: () => void;
+  /** The section is showing what SHIPS — only ever true where the section holds a built-in value. */
+  builtIn: boolean;
+  onBuiltIn: (on: boolean) => void;
 }): JSX.Element | null {
   const meta = SECTIONS.find((s) => s.id === section);
   const observed = section === "providers" || section === "executors" || section === "integrations";
@@ -227,7 +236,19 @@ function SettingsHeader({
   return (
     <div className="settings-head">
       {meta.layered ? (
-        hasProject ? (
+        meta.builtIn === true ? (
+          // The third, read-only segment (decision 0006) — here because this section holds something
+          // JaiRA ships. With no project open there is still a choice to make, so the switch stays.
+          <LayerPicker<WorkflowLayer>
+            value={builtIn ? "system" : layer}
+            layers={hasProject ? ["project", "base", "system"] : ["base", "system"]}
+            disabled={busy}
+            onChange={(next) => {
+              onBuiltIn(next === "system");
+              if (next !== "system") onLayer(next);
+            }}
+          />
+        ) : hasProject ? (
           <LayerPicker value={layer} onChange={onLayer} disabled={busy} />
         ) : (
           <span className="sub">
@@ -339,9 +360,12 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
  * "prompts go to Anthropic" are different facts, and one row with one checkbox was being asked to
  * mean both.
  */
-const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; needsProject?: boolean }> = [
+const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; needsProject?: boolean; builtIn?: boolean }> = [
   { id: "providers", label: "Providers", layered: true },
   { id: "executors", label: "Executors", layered: true },
+  // Beside Executors, because it is the other half of "what may a state's agent do". `builtIn`: the
+  // one section whose values JaiRA SHIPS, so the one whose layer switch has the third segment.
+  { id: "toolsets", label: "Toolsets", layered: true, builtIn: true },
   // Observed like the two above it: a connection is checked by asking its host who the token is.
   { id: "integrations", label: "Integrations", layered: true },
   { id: "config", label: "Configuration", layered: true },
@@ -503,6 +527,52 @@ export default function App(): JSX.Element {
   const [runFocus, setRunFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
   /** The state the middle column's conversation is scrolled to — see `FileSurfaceContext.runHere`. */
   const [runHere, setRunHere] = useState<string | undefined>(undefined);
+  /**
+   * Settings → Toolsets is showing the BUILT-IN layer (decision 0006).
+   *
+   * Beside `configLayer` rather than in it: that one names a `settings.json` to write, which what
+   * ships does not have, and every other section reads it as one of two. Session-scoped — a window
+   * that reopened on a read-only layer would open looking as if nothing could be changed.
+   */
+  const [toolsetsBuiltIn, setToolsetsBuiltIn] = useState(false);
+  const toolsetsProject = state.at;
+  const toolsetsChannel = useMemo<ToolsetsChannel>(() => {
+    const project = toolsetsProject !== null ? { project: toolsetsProject } : {};
+    return {
+      read: () => invoke("toolsets:read", { ...project }),
+      write: (request) => invoke("toolsets:write", { ...request, ...project }),
+      reset: (request) => invoke("toolsets:reset", { ...request, ...project }),
+    };
+  }, [toolsetsProject]);
+  /**
+   * The toolsets a STATE can name, for the editor's one Tools field — the winner of each id, which
+   * is what a bare `$/toolsets/…` reference finds.
+   *
+   * Read here, once per project, and handed down by context: the field is five components inside the
+   * state editor, and every host of that editor would otherwise have to carry a prop it has no use
+   * for. `usedBy: false` because only the Settings pane asks who uses one, and that scan reads every
+   * state file in every layer. A read that fails leaves the field's picker offering what the state
+   * already names and "none", which is what it can prove.
+   */
+  const [toolsetsRead, setToolsetsRead] = useState<ToolsetsData | null>(null);
+  useEffect(() => {
+    let live = true;
+    void invoke("toolsets:read", { ...(toolsetsProject !== null ? { project: toolsetsProject } : {}), usedBy: false }).then(
+      (found) => live && setToolsetsRead(found),
+      () => live && setToolsetsRead(null),
+    );
+    return () => void (live = false);
+    // …and again when the TREE is refetched, which is what a `workflows` invalidate does — the scope
+    // every toolset write publishes. A toolset added in Settings is a file in that tree, so the two
+    // refresh together and the picker never lists a toolset that is not there.
+  }, [toolsetsProject, state.tree]);
+  const toolsFieldData = useMemo<ToolsFieldData>(
+    () =>
+      toolsetsRead === null
+        ? { toolsets: [], tools: [] }
+        : { toolsets: toolsetChoicesAt(toolsetsAt(toolsetsRead.records, toolsetsRead.layers[0] ?? "project")), tools: toolsetsRead.tools },
+    [toolsetsRead],
+  );
   /**
    * Which of the sidebar drawers is currently showing its FIND field (SHELL.md §5.1).
    *
@@ -1701,6 +1771,10 @@ export default function App(): JSX.Element {
        see `valuePanel.ts` on why this is a context and not six more props. */
     <ValuePanelContext.Provider value={valuePanel}>
     <MessageTypeContext.Provider value={messageTypes}>
+    {/* What the state editor's one Tools field completes against — see `toolsField.tsx`. A context
+        because that field is deep inside the editor, and every host of the editor would otherwise
+        carry a prop it has no use for. */}
+    <ToolsFieldProvider value={toolsFieldData}>
     <div
       className="app"
       style={{ "--sidebar": `${sidebarShut ? SIDEBAR_RAIL : sidebarWidth}px` } as CSSProperties}
@@ -2277,7 +2351,23 @@ export default function App(): JSX.Element {
                   checkedAt={state.availability.checkedAt}
                   onLayer={actions.setConfigLayer}
                   onRecheck={actions.recheckAvailability}
+                  builtIn={toolsetsBuiltIn}
+                  onBuiltIn={setToolsetsBuiltIn}
                 />
+                {state.section === "toolsets" ? (
+                  <ToolsetsPane
+                    // A different project is a different set of files: start clean rather than show
+                    // one project's unsaved lines over another's toolsets.
+                    key={state.at ?? "shared"}
+                    channel={toolsetsChannel}
+                    layer={toolsetsBuiltIn ? "system" : state.configLayer}
+                    onLayer={(next) => {
+                      setToolsetsBuiltIn(next === "system");
+                      if (next !== "system") actions.setConfigLayer(next);
+                    }}
+                    busy={state.busy}
+                  />
+                ) : null}
                 {state.section === "config" ? (
                   <ConfigPane
                     config={state.config}
@@ -2451,6 +2541,7 @@ export default function App(): JSX.Element {
         </div>
       ) : null}
     </div>
+    </ToolsFieldProvider>
     </MessageTypeContext.Provider>
     </ValuePanelContext.Provider>
   );

@@ -96,7 +96,17 @@ export interface RailItem {
   mono?: boolean;
   className?: string;
   title?: string;
+  /**
+   * A HEADING between tabs and not a tab: a bucket's name over its toolsets. It is drawn in the
+   * rail's order, takes no focus and is skipped by the arrows — `label` and `summary` are unused.
+   */
+  heading?: ReactNode;
+  /** How many steps in this row hangs — a bucket inside a bucket, and what it holds. */
+  indent?: number;
 }
+
+/** One step of {@link RailItem.indent}, in pixels. */
+const RAIL_INDENT = 12;
 
 /**
  * A rail of tabs: each a name over a one-line summary, one of them chosen.
@@ -140,7 +150,8 @@ export function TabRail({
     }
     const tabs = Array.from(rail.querySelectorAll<HTMLElement>('[role="tab"]'));
     const next = railStep(tabs.indexOf(document.activeElement as HTMLElement), tabs.length, move);
-    const item = items[next];
+    // Headings are in `items` and not among the tabs, so the nth TAB is the nth item that is one.
+    const item = items.filter((one) => one.heading === undefined)[next];
     if (item === undefined) return;
     event.preventDefault();
     onSelect(item.id);
@@ -148,26 +159,36 @@ export function TabRail({
   };
 
   // With nothing chosen the first tab holds the rail's one tab stop, or the rail could not be reached.
-  const stop = items.some((item) => item.id === selected) ? selected : items[0]?.id;
+  const tabItems = items.filter((item) => item.heading === undefined);
+  const stop = tabItems.some((item) => item.id === selected) ? selected : tabItems[0]?.id;
+  const hang = (item: RailItem): { style: { marginLeft: number } } | undefined =>
+    item.indent !== undefined && item.indent > 0 ? { style: { marginLeft: item.indent * RAIL_INDENT } } : undefined;
 
   return (
     <nav className={`llm-rail${className ? ` ${className}` : ""}`} role="tablist" aria-label={label} aria-orientation="vertical" onKeyDown={onKeyDown}>
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          role="tab"
-          className={`llm-rail-item${item.className ? ` ${item.className}` : ""}${item.id === selected ? " on" : ""}`}
-          aria-selected={item.id === selected}
-          aria-controls={panelId}
-          tabIndex={item.id === stop ? 0 : -1}
-          title={item.title}
-          onClick={() => onSelect(item.id)}
-        >
-          {item.label !== undefined ? <span className={`llm-rail-label${item.mono ? " mono" : ""}`}>{item.label}</span> : null}
-          <span className="llm-rail-summary">{item.summary}</span>
-        </button>
-      ))}
+      {items.map((item) =>
+        item.heading !== undefined ? (
+          <div key={item.id} role="presentation" className={`set-rail-label${item.className ? ` ${item.className}` : ""}`} title={item.title} {...hang(item)}>
+            {item.heading}
+          </div>
+        ) : (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            className={`llm-rail-item${item.className ? ` ${item.className}` : ""}${item.id === selected ? " on" : ""}`}
+            aria-selected={item.id === selected}
+            aria-controls={panelId}
+            tabIndex={item.id === stop ? 0 : -1}
+            title={item.title}
+            {...hang(item)}
+            onClick={() => onSelect(item.id)}
+          >
+            {item.label !== undefined ? <span className={`llm-rail-label${item.mono ? " mono" : ""}`}>{item.label}</span> : null}
+            <span className="llm-rail-summary">{item.summary}</span>
+          </button>
+        ),
+      )}
     </nav>
   );
 }

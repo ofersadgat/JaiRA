@@ -795,7 +795,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "providers" | "executors" | "integrations" | "files" | "appearance" | "conversation" | "config" | "history";
+export type SettingsSection = "providers" | "executors" | "toolsets" | "integrations" | "files" | "appearance" | "conversation" | "config" | "history";
 
 const EMPTY: AppState = {
   at: null,

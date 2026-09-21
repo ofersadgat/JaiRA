@@ -26,6 +26,7 @@ import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { CommandApproval } from "./commandParts";
 import type { ToolsetChoice } from "./toolsetBuckets";
 import type { ToolsetDecl } from "./toolsets";
+import type { ToolsetsView, ToolsetWriteKind } from "./toolsetSettings";
 import type {
   BoardView,
   ChatThreadView,
@@ -1006,6 +1007,37 @@ export interface SaveToolsetRequest {
   toolset: ToolsetDecl;
 }
 
+/**
+ * Save a toolset from Settings → Toolsets (decision 0007 §6): the WHOLE map, into one layer.
+ *
+ * What the write is depends on what the layer holds, and the answer says which it was
+ * ({@link WriteToolsetResult.kind}): an edit in place, format kept; an override that keeps following
+ * the nearest lower layer's file, holding only the lines that differ; or — when a line the lower
+ * layer holds was taken out, which an override has no way to say — the whole map, no longer
+ * following. The built-in layer is refused.
+ */
+export interface WriteToolsetRequest {
+  /** `<bucket>/<name>`. */
+  id: string;
+  layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
+  toolset: ToolsetDecl;
+}
+
+export interface WriteToolsetResult {
+  /** The file written, as a person reads it. */
+  file: string;
+  kind: ToolsetWriteKind;
+}
+
+/** "Reset to built in": delete a layer's override, so the layer below answers again. */
+export interface ResetToolsetRequest {
+  id: string;
+  layer: WorkflowLayer;
+  project?: ProjectRef;
+}
+
 /** Delete a file or a directory under a layer root. A directory takes everything in it. */
 export interface DeleteFileRequest {
   layer: WorkflowLayer;
@@ -1850,6 +1882,18 @@ export interface IpcContract {
   "file:write": { request: WriteFileRequest; response: FileSource };
   /** Keep a map as a new toolset file in a bucket — see {@link SaveToolsetRequest}. */
   "toolset:save": { request: SaveToolsetRequest; response: ToolsetChoice };
+  /**
+   * Every toolset, layer by layer, and which states name each — what Settings → Toolsets draws.
+   *
+   * `usedBy: false` leaves out the "used by" scan, which reads every state file under every layer:
+   * the state editor's Tools field wants the toolsets and nothing else, and pays for a directory
+   * walk of the toolsets alone.
+   */
+  "toolsets:read": { request: { project?: ProjectRef; usedBy?: boolean }; response: ToolsetsView };
+  /** Save a whole toolset into a layer — see {@link WriteToolsetRequest}. */
+  "toolsets:write": { request: WriteToolsetRequest; response: WriteToolsetResult };
+  /** Delete a layer's override of a toolset — see {@link ResetToolsetRequest}. */
+  "toolsets:reset": { request: ResetToolsetRequest; response: { file: string } };
   /** Create a plain file or a directory under a layer root, addressed by path. */
   "file:create": { request: CreateFileRequest; response: { file: string } };
   /** Rename or move a file or directory within a layer root. Refuses when it would break referrers. */
@@ -2032,6 +2076,9 @@ export const IPC_CHANNELS = [
   "changeset:reviewSync",
   "file:write",
   "toolset:save",
+  "toolsets:read",
+  "toolsets:write",
+  "toolsets:reset",
   "file:create",
   "file:rename",
   "file:delete",
