@@ -222,7 +222,10 @@ export interface PermissionsDecl {
    * (`"git commit": "allow"`). A map-form state reaches the engine as a list and this block, and
    * these are the entries neither has a place for.
    *
-   * ⚠️ Carried, not enforced — nothing judges a shell line against them yet (decision 0007 §4).
+   * What a shell line's PARTS are judged against (decision 0007 §4). The shell's own entry is here
+   * too — `bash`, the mode for any command nothing else names — because `tools.bash` is lowered as
+   * `smart` so that the line is read before anything answers for the tool. Its presence is also what
+   * tells a lowered toolset from an unmigrated block, whose shell answers as it always did.
    */
   subjects?: Record<string, PermissionMode>;
   /** WRITTEN BY LOWERING, never authored: a toolset entry's `implementation`, by tool. */

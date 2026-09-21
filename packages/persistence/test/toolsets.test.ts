@@ -64,7 +64,9 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "glob", "bash"],
-      permissions: { tools: { read_file: "allow", glob: "allow", bash: "deny" }, other: "deny", subjects: { "git status": "allow" } },
+      // The shell is offered and its LINES are judged: the gate is handed `smart` for it, and the
+      // `deny` its author wrote is the answer for any command no entry names (decision 0007 §4).
+      permissions: { tools: { read_file: "allow", glob: "allow", bash: "smart" }, other: "deny", subjects: { bash: "deny", "git status": "allow" } },
     });
   });
 
@@ -73,7 +75,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask", bash: "smart" } }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "bash", "write_file"],
-      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "ask" }, other: "deny" },
+      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "ask" }, other: "deny", subjects: { bash: "smart" } },
     });
   });
 
@@ -119,10 +121,17 @@ describe("a toolset, referenced from a state", () => {
 
 describe("legacy equivalence", () => {
   it("the same state in old and new form loads to the same environment, and an old one is untouched", () => {
-    const legacy = { tools: ["read_file", "bash"], permissions: { tools: { read_file: "allow", bash: "ask" }, other: "deny" } };
+    const legacy = { tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "ask" }, other: "deny" } };
     write(project.paths.workflowsDir, "old.json", state(legacy));
-    write(project.paths.workflowsDir, "new.json", state({ tools: { read_file: "allow", bash: "ask", other: "deny" } }));
+    write(project.paths.workflowsDir, "new.json", state({ tools: { read_file: "allow", glob: "ask", other: "deny" } }));
     expect(environmentOf("new")).toEqual(environmentOf("old"));
+    // The shell is the one tool the two forms load differently, on purpose: an old `bash: "ask"` is a
+    // mode for the TOOL and asks before every line, as it always did; the map's is the answer for any
+    // command nothing else names, on a line that is taken apart (decision 0007 §4).
+    write(project.paths.workflowsDir, "oldsh.json", state({ tools: ["bash"], permissions: { tools: { bash: "ask" } } }));
+    write(project.paths.workflowsDir, "newsh.json", state({ tools: { bash: "ask" } }));
+    expect(environmentOf("oldsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "ask" } } });
+    expect(environmentOf("newsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "smart" }, subjects: { bash: "ask" } } });
     // Through the door and around it: the wrapper changes nothing about a state in the old form.
     const files = readWorkflowFiles(project.paths.workflowsDir);
     const direct = loadBundle(files, "old", workflowLoadOptions(project.paths));

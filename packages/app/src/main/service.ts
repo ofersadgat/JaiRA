@@ -780,6 +780,7 @@ function pendingApprovalOf(request: ApprovalRequest, project: string): PendingAp
     tool: request.tool,
     ...(request.command !== undefined ? { command: request.command } : {}),
     ...(request.reason !== undefined ? { reason: request.reason } : {}),
+    ...(request.parts !== undefined ? { parts: request.parts } : {}),
     input: request.input as Record<string, JsonValue>,
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
     project,
@@ -3523,6 +3524,9 @@ export class AppService {
       // The size a produced artifact has to exceed before somebody is asked about it. The number is
       // artifact configuration; turning it into an escalation is the policy's job.
       askAboveBytes: config.artifacts.askAboveBytes,
+      // What a person answers "for this run" about the PARTS of a shell line (decision 0007 §4) —
+      // the hub writes it when an approval is submitted with `remember`, the policy reads it here.
+      grants: open.approvals.grants(taskId),
     });
     // OPEN THE GATE. A previous run of this task may have shut it on the way out (`stop`), and a
     // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
@@ -4237,6 +4241,7 @@ export class AppService {
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       askAboveBytes: config.artifacts.askAboveBytes,
       toolset,
+      grants: open.approvals.grants(request.taskId),
     });
     // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
     // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
@@ -5290,12 +5295,12 @@ export class AppService {
    * Answer a parked approval. `scope` is how long the answer applies — the reason
    * a user is not asked the same question on every tool call.
    */
-  submitApproval(requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once"): { requestId: string } {
+  submitApproval(requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once", remember?: readonly string[]): { requestId: string } {
     // Routed by OWNER rather than to the focused project. A request id is all the renderer sends, and
     // answering it against the wrong session would deny a call nobody asked about while the one that
     // is actually parked waits forever.
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
-    if (owner === undefined || !owner.approvals.decide(requestId, decision, scope)) {
+    if (owner === undefined || !owner.approvals.decide(requestId, decision, scope, remember)) {
       throw this.refusal("run", `no pending approval '${requestId}'`);
     }
     return { requestId };

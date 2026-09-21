@@ -34,7 +34,9 @@ import {
   normalizePath,
   offeredTools,
   permissionsOfToolset,
+  resolveScope,
   resolveScopes,
+  resolveUrlScope,
   scopeModeOf,
   TOOL_PROFILES,
   TOOL_SPEC_BY_NAME,
@@ -54,8 +56,8 @@ import { registerWebTools, type WebToolOptions } from "./webTools";
 import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
-import { commandWords, isDeniedPath } from "./policy";
-import { parseCommand } from "./command";
+import { commandNarrowingOf, commandWords, isDeniedPath } from "./policy";
+import { takeApart } from "./command";
 import { dialectFor, interpreterFor, type ExecEnv } from "./paths";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -282,9 +284,10 @@ export function gateTools(options: {
    *
    * When absent it is folded from `names` and `authored`, which is the legacy reader: a listed tool
    * takes `authored.tools[name] ?? authored.default`, and `default` answers as `other` for a name
-   * nothing here registered. Only TOOL entries are read. A toolset's command subjects and `script`
-   * are carried on the block handed to the gate and are NOT enforced yet — a shell line still
-   * answers to the `bash` entry and the project's command policy (decision 0007 §4 is a later task).
+   * nothing here registered. Only TOOL entries are read HERE. A toolset's command subjects and
+   * `script` ride on the block handed to the gate and to each wrapped tool, where the policy's
+   * narrowing reads them to judge a shell line part by part (decision 0007 §4) — which is also why
+   * the shell's own mode reaches both as `smart`: see `gateToolModes`.
    */
   toolset?: Toolset | undefined;
   /** What a relative scope glob and a relative call path are resolved against. */
@@ -307,7 +310,19 @@ export function gateTools(options: {
   if (toolset.profile !== undefined) ledger.seedProfile(options.sessionId, toolset.profile);
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
-  const scopeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
+  const placeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
+  // A shell line is taken apart and judged part by part against this turn's toolset (decision 0007
+  // §4). That judgement is the policy's, and it has to NARROW rather than only advise: an "allow for
+  // this turn" remembered against the whole tool must not wave through the next line's asking parts.
+  const lineNarrowing = commandNarrowingOf(options.policy);
+  const scopeNarrowing: ScopeNarrowing | undefined =
+    placeNarrowing === undefined || lineNarrowing === undefined
+      ? (placeNarrowing ?? lineNarrowing)
+      : (tool, input, block) => {
+          const where = placeNarrowing(tool, input, block);
+          const what = lineNarrowing(tool, input, block);
+          return where === undefined || what === undefined ? (where ?? what) : strictestOf(where, what);
+        };
   /** One gate over the SAME ledger, so a decision made at either end is remembered at both. */
   const gate = createToolGate({
     ledger,
@@ -329,13 +344,18 @@ export function gateTools(options: {
     if (tool === undefined) throw refusal(log, `tool '${name}' is not registered`);
     // OWN entries only. The map is keyed by TOOL NAME, so a tool called `constructor` would
     // otherwise resolve its mode — and its smart rule — to a prototype member.
-    const authoredMode = Object.hasOwn(toolset.entries, name) ? toolset.entries[name]!.mode : undefined;
+    // Read off the LOWERED block where there is one, so the wrapper and the gate resolve one mode:
+    // the shell's entry is `smart` there, its authored mode being what a line's parts fall to.
+    const lowered = authored?.tools !== undefined && Object.hasOwn(authored.tools, name) ? authored.tools[name] : undefined;
+    const authoredMode = lowered ?? (Object.hasOwn(toolset.entries, name) ? toolset.entries[name]!.mode : undefined);
     out[name] = withPermission(tool, {
       ledger,
       sessionId: options.sessionId,
       toolName: name,
       approve,
       ...(authoredMode !== undefined ? { authoredMode } : {}),
+      // The block itself, so the narrowing sees the toolset's command subjects at the moment of decision.
+      ...(authored !== undefined ? { authored } : {}),
       ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
       profiles: options.policy?.profiles ?? profileRules(),
       // The SAME narrowing the gate applies. A wrapped tool and a delegated one are two routes to one
@@ -695,11 +715,15 @@ export function commandSubjects(
   cwd: string,
   execEnv: ExecEnv = "windows",
 ): { paths: string[]; unparsed: boolean } {
-  const parsed = parseCommand(command, dialectFor(execEnv));
+  const parsed = takeApart(command, dialectFor(execEnv));
   if (parsed.unparsed) return { paths: [cwd], unparsed: true };
   const paths = new Set<string>([cwd]);
   let here = cwd;
-  for (const one of parsed.commands) {
+  for (const request of parsed.requests) {
+    // A redirect's target is a place the line is about, as much as any argument is.
+    if (request.kind === "redirect") paths.add(resolveAgainst(here, request.target));
+    if (request.kind !== "command") continue;
+    const one = request.command;
     const words = commandWords(one);
     if (one.program === "cd" || one.program === "pushd") {
       const target = words[0];
@@ -716,6 +740,36 @@ export function commandSubjects(
     }
   }
   return { paths: [...paths], unparsed: false };
+}
+
+/**
+ * What the scope tables say about ONE PART of a shell line, by the standard tool the part is
+ * (decision 0007 §4): `rm x` and `> x` are asked about as `write_file` at `x`, `curl <url>` as
+ * `web_fetch` at the url — so a table written for the tools binds the shell exactly as it binds them.
+ *
+ * Layered as every other narrowing here is: the floor and the state's table each resolved on their
+ * own, the stricter kept, the state's silent where it says nothing under a floor. `undefined` with no
+ * table at all.
+ */
+export function partScopeFor(
+  scopes: readonly Scope[] | undefined,
+  workspaceRoot: string | undefined,
+  floor?: readonly Scope[] | undefined,
+): ((tool: string, place: { path?: string; url?: string }) => PermissionMode | undefined) | undefined {
+  const hasFloor = floor !== undefined && floor.length > 0;
+  const hasScopes = scopes !== undefined && scopes.length > 0;
+  if (!hasFloor && !hasScopes) return undefined;
+  const options: ScopeOptions = { ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}) };
+  return (tool, place) => {
+    const resolve = (table: readonly Scope[], layer: ScopeOptions): PermissionMode | undefined =>
+      (place.path !== undefined ? resolveScope(table, tool, place.path, layer) : place.url !== undefined ? resolveUrlScope(table, tool, place.url, layer) : undefined) as
+        | PermissionMode
+        | undefined;
+    const fromFloor = hasFloor ? resolve(floor, options) : undefined;
+    const fromState = hasScopes ? resolve(scopes, { ...options, unmatched: hasFloor ? "silent" : "deny" }) : undefined;
+    if (fromFloor === undefined || fromState === undefined) return fromFloor ?? fromState;
+    return strictestOf(fromFloor, fromState);
+  };
 }
 
 /** One argument, resolved against the directory the command runs in. */
