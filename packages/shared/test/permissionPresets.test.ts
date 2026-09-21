@@ -10,6 +10,14 @@
  * claim of this file is that the shipped files say what those functions wrote — for every tool a
  * conversation can be handed, and for the name no preset had ever heard of, which is what `other` is.
  * Which toolset a map IS — the old `presetOf` — is `matchToolset`, in `toolsetBuckets.test.ts`.
+ *
+ * ## The workflow tools joined the `chat` bucket (decision 0005 step 6)
+ *
+ * A session holds the project's tools AND the workflow tools, so the four `chat` files grew eight
+ * entries the four functions had never seen. The frozen functions are therefore held to the tools
+ * they were written about — the nine a conversation had then — and the eight new ones are held to a
+ * rule instead: **a `chat/<name>` gives a workflow tool whatever `chat_control/<name>` gives it**.
+ * One bucket, said twice, is one bucket that can drift; this is the assertion that it has not.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,18 +39,25 @@ const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: 
   { id: "full", file: "full", modeFor: () => "allow" },
 ];
 
-/** Every tool a conversation can be HANDED — what the composer offered the presets. */
+/** The workflow tools (decision 0005 §3) — all of what `chat_control` holds, and part of `chat`. */
+const WORKFLOW_TOOLS = ["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"];
+
+/** Every tool a conversation can be HANDED today — the nine the presets knew, and the eight since. */
 const CONVERSATION_TOOLS = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true && spec.unserved !== true).map((spec) => spec.name);
 
-/** The workflow tools (decision 0005 §3) — all of what `chat_control` holds. */
-const WORKFLOW_TOOLS = ["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"];
+/** The tools the frozen FUNCTIONS were written about: everything a conversation held before step 6. */
+const PRESET_TOOLS = CONVERSATION_TOOLS.filter((name) => !WORKFLOW_TOOLS.includes(name));
 
 describe("the chat bucket is the four presets, written down", () => {
   it.each(FROZEN_PRESETS)("chat/$file writes EXACTLY the map the `$id` preset wrote", ({ file, modeFor }) => {
     const { toolset, issues } = parseToolset(shipped(`chat/${file}`));
+    const control = parseToolset(shipped(`chat_control/${file}`)).toolset;
     expect(issues).toEqual([]);
-    // The map the preset wrote: a mode for every offered tool, and nothing else.
-    expect(toolModes(toolset)).toEqual(Object.fromEntries(CONVERSATION_TOOLS.map((name) => [name, modeFor(name)])));
+    // The map the preset wrote for the tools it knew, and `chat_control`'s own answer for the rest.
+    expect(toolModes(toolset)).toEqual({
+      ...Object.fromEntries(PRESET_TOOLS.map((name) => [name, modeFor(name)])),
+      ...toolModes(control),
+    });
     // Every line is HELD — a preset never unticked anything, and a toolset's line is its tick.
     expect(heldTools(toolset).sort()).toEqual([...CONVERSATION_TOOLS].sort());
     // …with nobody's implementation chosen, because a preset never chose one.
@@ -53,7 +68,9 @@ describe("the chat bucket is the four presets, written down", () => {
 
   it("read-only allows exactly the frozen list, and that list is still in the vocabulary", () => {
     const { toolset } = parseToolset(shipped("chat/read-only"));
-    const allowed = Object.entries(toolModes(toolset)).filter(([, mode]) => mode === "allow").map(([name]) => name);
+    const allowed = Object.entries(toolModes(toolset))
+      .filter(([name, mode]) => mode === "allow" && !WORKFLOW_TOOLS.includes(name))
+      .map(([name]) => name);
     expect(allowed.sort()).toEqual([...READ_ONLY_PRESET_TOOLS].sort());
     expect(READ_ONLY_PRESET_TOOLS.every((name) => TOOL_SPEC_BY_NAME.has(name))).toBe(true);
   });
@@ -79,12 +96,16 @@ describe("chat_control has its OWN versions of the same names", () => {
     expect(toolset.other).toBe("deny");
   });
 
-  it("holds them and HANDS NOBODY anything: they are named, and not served yet", () => {
+  it("holds them and HANDS THEM OVER: they are named, and served since step 6", () => {
     const { toolset } = parseToolset(shipped("chat_control/full"));
     expect(heldTools(toolset).sort()).toEqual([...WORKFLOW_TOOLS].sort());
-    // What lowering writes into the engine's `tools` list, and what an agent plan calls held.
-    expect(offeredTools(toolset)).toEqual([]);
-    for (const name of WORKFLOW_TOOLS) expect(TOOL_SPEC_BY_NAME.get(name)).toMatchObject({ category: "tasks", unserved: true });
+    // What lowering writes into the engine's `tools` list, and what an agent plan calls held. It was
+    // empty while the eight carried `unserved`; deleting that mark was the whole of serving them.
+    expect(offeredTools(toolset).sort()).toEqual([...WORKFLOW_TOOLS].sort());
+    for (const name of WORKFLOW_TOOLS) {
+      expect(TOOL_SPEC_BY_NAME.get(name)).toMatchObject({ category: "tasks" });
+      expect(TOOL_SPEC_BY_NAME.get(name)!.unserved).toBeUndefined();
+    }
   });
 
   it("read-only may look and may not steer", () => {

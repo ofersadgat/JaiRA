@@ -194,6 +194,13 @@ export class ProjectSession {
    * that can is not going to claim a position at all.
    */
   readonly chatDone = new Map<string, Promise<void>>();
+
+  /**
+   * What a conversation asked for while an engine held its task (decision 0005 step 6): a `start`
+   * whose new document version a running engine cannot see. Taken when that run ends well, by the
+   * run-end handler, the way a move left on the port is; dropped when the run is stopped or fails.
+   */
+  readonly afterRun = new Map<string, Array<() => Promise<unknown>>>();
   /**
    * How to write down what a task's live turn holds RIGHT NOW, by task id.
    *

@@ -92,6 +92,8 @@ import {
   registerFileTools,
   registerSearchTools,
   registerWebTools,
+  registerWorkflowTools,
+  noWorkflowHost,
   type ArtifactStore,
   type ExecObserver,
   defaultExecutorTree,
@@ -500,6 +502,9 @@ function buildRunEnvironment(
   // surface exists to rule out.
   registerSearchTools(registry, {});
   registerWebTools(registry, {});
+  // The workflow tools need the app (it holds the conversation and the hubs): here they RESOLVE, so a
+  // state that holds them loads and runs, and every call answers that the CLI does not serve them.
+  registerWorkflowTools(registry, noWorkflowHost("by the CLI"));
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.

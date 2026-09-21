@@ -25,6 +25,8 @@ import type { JsonValue } from "@declarative-ai/json";
 // puts it back here, with no restatement to drift.
 import { renderToolResult } from "@declarative-ai/llm/entry";
 import {
+  workflowToolOf,
+  workflowToolSummary,
   writingPath,
   type ConversationTurn,
   type InstanceNode,
@@ -231,7 +233,7 @@ export function blocksOf(entries: readonly TranscriptEntry[]): TranscriptBlock[]
  * Declared here rather than beside the paths, because this is a fact about the transcript and not
  * about SVG: `icons.tsx` imports it and will not compile until it can draw every member.
  */
-export type WorkIconName = "terminal" | "read" | "write" | "web" | "search" | "agent" | "tool" | "think" | "note" | "alert";
+export type WorkIconName = "terminal" | "read" | "write" | "web" | "search" | "agent" | "tool" | "think" | "note" | "alert" | "workflow";
 
 /**
  * Which family of thing a tool name belongs to.
@@ -246,6 +248,11 @@ export type WorkIconName = "terminal" | "read" | "write" | "web" | "search" | "a
  * search family after it. Likewise `NotebookEdit` is a write before it is anything else.
  */
 function toolIconOf(name: string): WorkIconName {
+  // The WORKFLOW tools first, and by exact name (decision 0005 §3): they are eight known names, not
+  // a family to be guessed at, and three of them — `tasks`, `move`, `release` — would otherwise be
+  // read by the patterns below as an agent, a write and a write. They draw as the forking path the
+  // `made` and `entered` notes use, because that is what they do: they move work about.
+  if (workflowToolOf(name) !== undefined) return "workflow";
   const n = name.toLowerCase();
   if (/task|agent|spawn|delegate|dispatch/.test(n)) return "agent";
   if (/web|http|url|browser|fetch|navigate/.test(n)) return "web";
@@ -390,7 +397,11 @@ export function messagePartsOf(parts: JsonValue | undefined): MessagePart[] {
     out.push({
       kind: "tool",
       name: kind === "other" ? type : toolNameOf(p, type),
-      summary: firstArgOf(args),
+      // A workflow tool says what it was CALLED WITH, in its own words: the first string argument
+      // of `start` is a state id and of `move` a task id, neither of which is the line a reader
+      // wants. See `workflowToolSummary`, which is shared so a record read a year from now draws the
+      // same line.
+      summary: summaryOfCall(kind === "other" ? type : toolNameOf(p, type), args),
       ...(typeof callId === "string" ? { callId } : {}),
       ...(args === undefined ? {} : { args: args as JsonValue }),
     });
@@ -442,6 +453,12 @@ export function resultValueOf(raw: JsonValue): JsonValue {
     // the common case, and showing the text beats showing nothing.
     return text;
   }
+}
+
+/** What a call's collapsed line says: a workflow tool's own sentence, else the first argument. */
+function summaryOfCall(name: string, args: unknown): string {
+  const workflow = workflowToolOf(name);
+  return workflow !== undefined ? workflowToolSummary(workflow, args) : firstArgOf(args);
 }
 
 /** The one argument worth putting on a collapsed line: a path, a command, the first string there is. */

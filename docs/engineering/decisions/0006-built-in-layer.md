@@ -148,7 +148,7 @@ person owns.
    third segment of the layer picker.
 4. The editor bar, the Workflows pane's layer mark, the Tools chip.
 5. With 0005 step 6 and 0007 step 4: `chat/session`, `chat/control`, and
-   the toolsets they name.
+   the toolsets they name. *Built 2026-09-21* — see below.
 
 ## Built
 
@@ -249,6 +249,34 @@ layer" finally had something to show. What the build settled:
   override and switch the pane to that layer, opened on the same toolset — the shipped one is read,
   and the copy is what can be changed.
 
+**Step 5 (2026-09-21).** `chat/session` and `chat/control` are files under
+`packages/shared/builtin/workflows/chat/`, each naming its toolset by the
+reference form this decision chose — `$/toolsets/chat/ask-first` and
+`$/toolsets/chat_control/ask-first`. The Chat view starts `chat/session`
+(`CHAT_SESSION` in `chatWorkflow.ts`) and `CONNECT_CONVERSATION` is
+`chat/control`; `chat/agent` and `chat/assistant` stay, so a conversation
+already started as one keeps running. What the build settled:
+
+- **The toolset reference sits on `operation`, not `environment`.** A dynamic
+  workflow's root is a state with an operation and children, and `environment`
+  is the default for every child it starts ([0005](0005-connect.md) §3, "What
+  step 4 settled") — so a control conversation whose tools were written there
+  would hand the workflow tools to the states it steers. The loader resolves an
+  operation's execution-environment fields into the state's own resolved
+  `environment`, so everything downstream reads them exactly as before while
+  nothing is inherited. The `$/…` reference is followed at `operation.tools`
+  because lowering already visited that block.
+- **`chat/control` declares one required string input**, the sentence saying
+  what the person did. It is what [0005](0005-connect.md)'s step 5 fills by
+  schema and never by name, and it is what makes the generated document lint
+  with the conversation as its root. The conversation does not SAY it — a
+  control starts idle — but the task records it, with provenance `bound`.
+- **Neither names a model**, as `chat/agent` and `chat/assistant` do not: a
+  conversation that pinned one would ignore the machine it runs on, and the
+  run's start-time route check would refuse it on a machine set up differently.
+- **Nothing was added to `SUPERSEDED`.** These two files are new, and that list
+  is for a shipped file that CHANGED: it holds the versions earlier builds
+  installed into `~/.jaira`, and no build ever installed either of these.
 ## Revisit when
 
 Overrides of built-ins go stale often enough that people are running old

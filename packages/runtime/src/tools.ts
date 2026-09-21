@@ -51,6 +51,7 @@ import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
+import { registerWorkflowTools, type WorkflowToolHost } from "./workflowTools";
 import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
@@ -161,12 +162,13 @@ export function registerTools(registry: { tools: Map<string, Tool> }, options: T
  */
 export function registerAllTools(
   registry: { tools: Map<string, Tool> },
-  options: ToolOptions & { files: FileToolOptions; web?: WebToolOptions },
+  options: ToolOptions & { files: FileToolOptions; web?: WebToolOptions; /** Who serves the workflow tools. Absent ⇒ nobody: they resolve, and answer that. */ workflows?: WorkflowToolHost },
 ): void {
   registerTools(registry, options);
   registerFileTools(registry, options.files);
   registerSearchTools(registry, { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) });
   registerWebTools(registry, options.web ?? {});
+  registerWorkflowTools(registry, options.workflows);
 }
 
 /** The registry name a workflow state uses to run a command directly. */

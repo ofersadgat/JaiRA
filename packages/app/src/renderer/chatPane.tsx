@@ -48,7 +48,7 @@ import { Composer } from "./composer";
 import { projectName } from "./projects";
 import { ForkMark, OriginMark, ZigDefs } from "./sessionPanels";
 import { useStickToBottom } from "./stickToBottom";
-import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
+import { CHAT_SESSION, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, pointOf, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
 import { DayChip, LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface } from "./transcriptView";
@@ -409,6 +409,15 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatSurface;
                     {task.origin !== undefined ? <Icon name="choice" className="chat-row-fork" /> : null}
                     {task.title}
                   </span>
+                  {/* A conversation that is CONTROLLING work says so (decision 0005): a dynamic
+                      workflow is a row in this list and not a column of its own, so the only place
+                      it can say how much work stands in it is here. A count, not the titles — what
+                      each task is doing is the conversation's to say, and it does. */}
+                  {(task.controls ?? 0) > 0 ? (
+                    <span className="prov" title={`${task.controls} ${task.controls === 1 ? "task stands" : "tasks stand"} under this conversation`}>
+                      {task.controls} {task.controls === 1 ? "task" : "tasks"}
+                    </span>
+                  ) : null}
                   {/* Only on a row that carries its own project, which is only at the ROOT: inside
                       one project every row is the same project and a chip on each would be a column
                       of identical marks. The hue is the one that project wears everywhere else. */}
@@ -504,7 +513,7 @@ function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
    */
   useEffect(() => {
     let live = true;
-    void invoke("chat:startPlan", { stateId: CHAT_AGENT, overrides, ...(project !== undefined ? { project } : {}) })
+    void invoke("chat:startPlan", { stateId: CHAT_SESSION, overrides, ...(project !== undefined ? { project } : {}) })
       .then((next) => live && setPlan(next))
       .catch(() => live && setPlan(null));
     return () => {

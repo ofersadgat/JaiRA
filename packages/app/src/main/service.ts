@@ -195,6 +195,8 @@ import {
   registerGenericAgents,
   registerTools,
   registerWebTools,
+  registerWorkflowTools,
+  type WorkflowToolHost,
   gateTools,
   claudePermissionSettings,
   compileClaudeScopeRules,
@@ -364,6 +366,7 @@ let installed: LogSink | undefined;
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
+import { createWorkflowHost } from "./workflowHost";
 import { identicalTo, SUPERSEDED } from "./shippedStates";
 import type {
   Scope,
@@ -2879,7 +2882,9 @@ export class AppService {
     const out: ProjectTask[] = [];
     for (const session of this.sessions.values()) {
       for (const task of taskSummaries(session.project)) {
-        if (wanted !== undefined && !wanted.has(task.workflow)) continue;
+        // An entry ending in `/` is a NAMESPACE: `dynamic/` is every dynamic workflow's task, whose
+        // root ids are minted and cannot be listed ahead of time (decision 0005: each is a conversation).
+        if (wanted !== undefined && !wanted.has(task.workflow) && ![...wanted].some((w) => w.endsWith("/") && task.workflow.startsWith(w))) continue;
         out.push({ ...task, project: session.dir });
       }
     }
@@ -3362,6 +3367,9 @@ export class AppService {
     });
     registerSearchTools(registry, { cwd: workspace.root });
     registerWebTools(registry, {});
+    // The workflow tools (decision 0005 §3), over this task's own conversation: a dynamic workflow's
+    // root runs its conversation AS a run, so the opening turn of a session reaches them here.
+    registerWorkflowTools(registry, this.workflowHostFor(open, taskId));
 
     // The run's half of `ToolSpec.alwaysGranted` — the chat path gets it inside `planAgentTools`,
     // and a run resolves `environment.tools` through the engine instead, so it has to be folded in
@@ -3807,6 +3815,19 @@ export class AppService {
         // not running is — by reopening. Not for a run that was stopped: a stop is the later word.
         // Only for a run that COMPLETED: a run that failed before its engine ever attached still
         // holds the move it was reopened with, and taking that again would reopen it forever.
+        // What a conversation asked for while its own engine held the task (decision 0005 step 6):
+        // a `start` whose new document version the running engine could not see. Taken here, the
+        // same way and for the same reason as a move left on the port, and dropped otherwise —
+        // a run that was stopped or failed is the later word about what should happen next.
+        const queuedStarts = open.afterRun.get(taskId);
+        open.afterRun.delete(taskId);
+        if (queuedStarts !== undefined && endedCompleted) {
+          void (async () => {
+            for (const run of queuedStarts) await run();
+          })().catch((e: unknown) => {
+            this.log({ level: "warn", source: "run", message: `what the conversation started while ${taskId} ran was not taken: ${(e as Error).message}`, project: open.key, taskId });
+          });
+        }
         const leftover = directed.queued().at(-1);
         if (leftover !== undefined && endedCompleted) {
           void this.moveTask({
@@ -4340,6 +4361,9 @@ export class AppService {
     });
     registerSearchTools(registry, { cwd: workspaceRoot });
     registerWebTools(registry, {});
+    // The workflow tools (decision 0005 §3), bound to THIS conversation: a typed turn is how a
+    // person steers work, and it is the path both `chat/session` and `chat/control` are held on.
+    registerWorkflowTools(registry, this.workflowHostFor(open, request.taskId));
     const approve = open.approvals.approver({ taskId: request.taskId });
     /**
      * The project policy with THIS message's per-tool modes folded into its baseline.
@@ -5281,6 +5305,49 @@ export class AppService {
   }
 
   /**
+   * The host behind the WORKFLOW TOOLS, bound to one conversation (decision 0005 §3, step 6).
+   *
+   * It lends `workflowHost.ts` this service's own operations and nothing more. The list is the
+   * point: `connectTask` and `moveTask` (so a drop, the CLI and a conversation's `move` are one
+   * path), the two PENDING lists a question can be on, and the three lifecycle verbs the board's
+   * gestures call. The APPROVAL hub is deliberately not among them, which is what makes "`answer`
+   * can never reach an approval" a property of the wiring rather than a check somebody remembers.
+   *
+   * Takes a project REF rather than a session, so a test can drive the eight operations the way a
+   * model would — going through a registered tool and a scripted transport to do it would be
+   * testing the transport.
+   */
+  workflowHostFor(project: string | ProjectSession | undefined, taskId: string): WorkflowToolHost {
+    const open = typeof project === "object" && project !== undefined ? project : this.session(project);
+    return createWorkflowHost({
+      project: open.project,
+      projectRef: open.dir,
+      taskId,
+      connect: (request) => this.connectTask(request),
+      move: (request) => this.moveTask(request),
+      isLive: (id) => open.live.has(id),
+      afterRun: (id, run) => {
+        const queued = open.afterRun.get(id) ?? [];
+        queued.push(run);
+        open.afterRun.set(id, queued);
+      },
+      browse: () => this.browseWorkflowsIn(open),
+      pendingInteractions: () => this.pendingInteractions(),
+      pendingQuestions: () => this.pendingQuestions(),
+      submitInteraction: (requestId, value) => this.submitInteraction(requestId, value),
+      submitQuestion: (requestId, answers) => this.submitQuestion(requestId, answers),
+      cancel: (id) => this.cancelTaskIn(open, id),
+      resume: (id) => this.resumeTask({ taskId: id, project: open.dir }),
+      startTask: (id) => this.startTask({ taskId: id, project: open.dir }),
+      resumable: (id) => this.resumable(id, open.dir),
+      invalidate: () => {
+        this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+        this.publishFor(open, { type: "store:invalidate", scope: "board" });
+      },
+    });
+  }
+
+  /**
    * Take a connect back ("task:connectUndo"), with the token the connect handed out.
    *
    *  - An ADOPTION is undone by cutting the parent's journal at the mirror row, which un-adopts
@@ -5855,11 +5922,13 @@ export class AppService {
     const at = { project: open.key, taskId };
     const row = open.project.runtime.get(taskId);
     if (row === undefined) throw this.refusal("run", `cannot move unknown task '${taskId}'`, at);
+    // What the asker hands over goes to the LAST state named: `toState`, or the end of `path`.
+    const descends = request.path !== undefined && request.path.length > 0;
     const move: DirectedTransition = {
       to: request.toState,
       by: request.by ?? "person",
       ...(request.instanceId !== undefined ? { instanceId: request.instanceId } : {}),
-      ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
+      ...(request.inputs !== undefined && !descends ? { inputs: request.inputs } : {}),
       ...(request.skip === true ? { skip: true } : {}),
     };
 
@@ -5872,7 +5941,7 @@ export class AppService {
       const outcome = live.directed.direct(move);
       if (outcome.status === "refused") throw this.refusal("run", `cannot move task '${taskId}' to '${move.to}': ${outcome.reason}`, at);
       if (request.path !== undefined && request.path.length > 0) {
-        live.descents.push(descentFollower(live.directed, { parentInstanceId: move.instanceId ?? row.rootInstanceId, key: move.to }, request.path, move));
+        live.descents.push(descentFollower(live.directed, { parentInstanceId: move.instanceId ?? row.rootInstanceId, key: move.to }, request.path, move, request.inputs));
       }
       // `queued` is a run whose engine has not attached yet, or has just let go: the port keeps the
       // move, a starting engine claims it, and the run-end handler reopens for one left behind.
@@ -5925,7 +5994,7 @@ export class AppService {
       answers: load.answers,
       directed: port,
       ...(request.path !== undefined && request.path.length > 0
-        ? { descents: [descentFollower(port, { parentInstanceId: owner.id, key: move.to }, request.path, move)] }
+        ? { descents: [descentFollower(port, { parentInstanceId: owner.id, key: move.to }, request.path, move, request.inputs)] }
         : {}),
       reopen: true,
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),

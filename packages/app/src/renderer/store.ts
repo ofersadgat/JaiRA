@@ -121,7 +121,7 @@ import {
 } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
-import { CHAT_AGENT, CHAT_STATES, titleOf } from "./chatWorkflow";
+import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
 import { applyAppearance } from "./appearance";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
@@ -1514,7 +1514,7 @@ export function useApp() {
    */
   const refreshAllConversations = useCallback(async () => {
     try {
-      patch({ allConversations: await invoke("task:all", { workflows: [...CHAT_STATES] }) });
+      patch({ allConversations: await invoke("task:all", { workflows: [...CHAT_LIST_WORKFLOWS] }) });
     } catch {
       // Quiet: a project closing under a refresh already in flight, and an empty list is the honest
       // answer to that until the next one lands.
@@ -3138,7 +3138,7 @@ export function useApp() {
             // Always the working conversation — see `chatWorkflow.ts` on why the view stopped asking.
             // `chat/assistant` still ships beside it: it is what conversations already started as one
             // continue to run under.
-            workflow: CHAT_AGENT,
+            workflow: CHAT_SESSION,
             inputs: { message: text },
             project,
           });

@@ -38,6 +38,9 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   search: ["M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z", "m21 21-4.3-4.3"],
   agent: ["M5 8h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z", "M12 8V4", "M9 13v2", "M15 13v2"],
   tool: ["M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"],
+  // The workflow tools (decision 0005 §3) — the same forking path a `made` or `entered` note draws,
+  // because a row that starts or moves work is the same kind of fact as the note it leaves behind.
+  workflow: ["M6 3v6a3 3 0 0 0 3 3h7", "M6 21v-6", "m13 9 3 3-3 3"],
   think: ["m12 3 1.8 4.4L18 9.2l-4.2 1.8L12 15.4l-1.8-4.4L6 9.2l4.2-1.8Z", "M18.5 15.5 19.4 18l2.1.9-2.1.9-.9 2.2-.9-2.2-2.1-.9 2.1-.9Z"],
   note: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 11v5", "M12 8h.01"],
   alert: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 8v5", "M12 16.5h.01"],

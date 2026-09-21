@@ -85,6 +85,10 @@ function madeBatchOf(project: Project, taskId: string, event: Extract<EngineEven
         title: meta?.title ?? run.title,
         status: row?.status ?? "queued",
         holding: meta !== undefined ? holdingOf(project, meta).length : 0,
+        // A generated split makes its tasks HELD and confirms nothing (decision 0005 §3): the line
+        // has to say so, or three tasks that are waiting to be asked for read as three that are
+        // merely queued behind something.
+        ...(meta?.origin?.kind === "split" && meta.origin.start === "manual" && row?.status === "queued" ? { held: true } : {}),
         self: run.runId === taskId,
         waitsFor: waits.has(run.runId),
       };

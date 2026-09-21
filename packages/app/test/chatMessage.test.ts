@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, chatInstanceIdOf, isChatInstance } from "@jaira/runtime";
-import { READ_ONLY_PRESET_TOOLS, type ChatSettings, type InstanceNode, type PushMessage, type ToolsetDecl } from "@jaira/shared";
+import { READ_ONLY_PRESET_TOOLS, type ChatSettings, type InstanceNode, type PushMessage, type PermissionMode, type ToolsetDecl } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
@@ -137,11 +137,12 @@ describe("the settings a message would run under", () => {
     const { edit: _edit, ...unticked } = shipped("chat/read-only") as Record<string, ToolsetDecl[string]>;
     expect(posture({ toolset: unticked })).toBe("custom");
 
-    // The same map in the three legacy fields is the same toolset: built FROM the vocabulary rather
-    // than hand-listed, since a toolset covers every tool a conversation holds.
-    const readOnly = Object.fromEntries(JAIRA_TOOLS.map((t) => [t.name, READ_ONLY_PRESET_TOOLS.includes(t.name) ? "allow" : "deny"] as const));
+    // The same map in the three legacy fields is the same toolset: read FROM the shipped file rather
+    // than derived, because the file is what the match is against and the modes it gives the workflow
+    // tools (decision 0005 step 6) are its own — `READ_ONLY_PRESET_TOOLS` predates them.
+    const readOnly = shipped("chat/read-only") as Record<string, PermissionMode>;
     expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: { ...readOnly }, other: "deny" } })).toBe("read-only");
-    // A map naming three of the nine is not that toolset — it is a map with six tools unticked.
+    // A map naming three of the seventeen is not that toolset — it is a map with the rest unticked.
     expect(posture({ tools: ["read_file", "bash", "write_file"], permissions: { tools: { ...readOnly }, other: "deny" } })).toBe("custom");
 
     // The card opens on the bucket whose toolset the map is, and the label is that bucket's.
@@ -155,7 +156,7 @@ describe("the settings a message would run under", () => {
       ["full", "project"],
       ["read-only", "project"],
     ]);
-    // The workflow tools are offered a line, though nothing serves them yet.
+    // The workflow tools are offered a line, and since step 6 something answers when one is called.
     expect(control.available.tools.map((t) => t.name)).toEqual(expect.arrayContaining(["workflows", "start", "stop"]));
   });
 

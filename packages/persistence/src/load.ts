@@ -70,6 +70,21 @@
  * stand-in operation's value; `withAdoptedStandIns` puts the matching state into the bundle the run
  * is handed. A mirror still OPEN — the adopted task has not completed — blocks the load: continued
  * live, the engine would run the child a second time, inside the parent.
+ *
+ * ## A conversation starts idle (decision 0005 §3, step 6)
+ *
+ * A dynamic workflow's root is a state with an operation — a conversation — AND children. When a
+ * MOVE makes one (a new document for a finished task, a real workflow's copy given a conversation),
+ * the root has an operation it never ran, and an instance loaded with an operation it never ran
+ * dispatches it: a model call made by a drop, saying nothing anybody asked. So the root of a task
+ * that stands in a DOCUMENT, whose state has a PROMPT operation and children, and whose operation
+ * never started, is loaded with that operation SETTLED and nothing said (`IDLE_CONVERSATION_VALUE`).
+ * A prompt and not any operation: a conversation is what may be left unsaid, and a root that runs a
+ * function is running something, which is not this rule's to skip. The
+ * engine goes straight to what the move asked for. The conversation exists all the same: typed
+ * turns run as the synthetic child `chat:<root>` (`chat-turns`), which the engine never sees, and
+ * the first of them is whatever the person types. A root whose operation DID run — a `chat/session`
+ * that grew a child — is read from its record like any other.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { hashOperation, scopedOperationId, type Failure, type ResolvedValue } from "@declarative-ai/exec";
@@ -173,7 +188,10 @@ interface RecordRow {
 }
 
 /** The shape of the pinned definition the fold needs: which child keys form each state's sequence. */
-export type SequenceShape = Record<string, { sequence?: readonly string[] } | undefined>;
+export type SequenceShape = Record<string, { sequence?: readonly string[]; operation?: { kind?: string } | undefined; children?: unknown } | undefined>;
+
+/** What an idle conversation's never-run operation is loaded as having said — see the header. */
+export const IDLE_CONVERSATION_VALUE = "";
 
 /**
  * Free the identities of calls that never happened remotely (Identity and Resume §05).
@@ -559,6 +577,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
 
   /** Adopted tasks whose mirror is still open — see the header. */
   const awaited: string[] = [];
+  const inDocument = project.runtime.get(taskId)?.documentId !== undefined;
+  const hasChildren = (children: unknown): boolean => children !== null && typeof children === "object" && Object.keys(children as object).length > 0;
 
   const emit = (node: FoldNode, live: boolean, occurrence: number, prefix: InstanceAddress): LoadedInstance => {
     const address: InstanceAddress =
@@ -615,7 +635,9 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     // outputs are recomputed from the value); a failed instance's own record is not — it re-runs.
     const stateHasOp = node.opStarted || node.opCompleted !== undefined;
     const required = live || node.terminated?.outcome === "success";
-    const operation = stateHasOp ? operationOf(node, required) : undefined;
+    // A conversation a move made starts idle — see the header.
+    const idle = !stateHasOp && node === root && inDocument && shape[node.stateId]?.operation?.kind === "prompt" && hasChildren(shape[node.stateId]?.children);
+    const operation = stateHasOp ? operationOf(node, required) : idle ? { value: IDLE_CONVERSATION_VALUE as ResolvedValue } : undefined;
 
     if (live && !anyChildLive) {
       frontier.push({

@@ -54,7 +54,7 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, type AgentQuestion } from "@jaira/shared/browser";
+import { choicesOfQuestions, workflowToolOf, type AgentQuestion } from "@jaira/shared/browser";
 import { answersOfAnsweredText, answersOfValue, ChoiceList, ChoiceSteps, type Answer } from "./choices";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
@@ -506,6 +506,63 @@ function AskedQuestions({ questions, answers }: { questions: AgentQuestion[]; an
   );
 }
 
+/**
+ * What a `move` or a `start` DID, under the row that did it (decision 0005 "What draws").
+ *
+ * The decision's line — "adopted into **feature** as `product` · standing at `ux`" — is a fact about
+ * the work, not about the call, so it is drawn as the note it is: the same glyph, verb and monospace
+ * ending a `made` or `entered` note uses on the rail. It renders INLINE, under the tool row, because
+ * that is where the caller put it and a component has no opinion about its place; nothing here reads
+ * a task or a journal, only what the tool answered.
+ *
+ * `null` for a call that was refused, or one that only looked: a refusal is already the row's `bad`
+ * mark plus its result, and saying it twice in different words is worse than saying it once.
+ */
+function WorkflowOutcome({ result }: { result: JsonValue }): JSX.Element | null {
+  // A tool result reaches a transcript as whatever the provider wrote down: our own object, or
+  // the JSON text of it in a `tool_result` block. Both are the same answer, so both are read.
+  const parsed: JsonValue | undefined =
+    typeof result === "string" && result.trimStart().startsWith("{")
+      ? ((): JsonValue | undefined => {
+          try {
+            return JSON.parse(result) as JsonValue;
+          } catch {
+            return undefined;
+          }
+        })()
+      : result;
+  if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const r = parsed as Record<string, JsonValue>;
+  if (r["ok"] !== true) return null;
+  const standsAt = typeof r["standsAt"] === "string" ? r["standsAt"] : undefined;
+  const key = typeof r["key"] === "string" ? r["key"] : undefined;
+  const workflow = typeof r["workflow"] === "string" ? r["workflow"] : undefined;
+  const adoptedAs = typeof r["adoptedAs"] === "string" ? r["adoptedAs"] : undefined;
+  const where = standsAt ?? key;
+  if (where === undefined) return null;
+  // `start` says what was mounted and how; `move` says which of the three resolutions happened, and
+  // an adoption says what the task became in the workflow that took it.
+  const verb =
+    adoptedAs !== undefined ? "adopted into" : r["resolution"] === "modify" ? "connected to" : r["resolution"] === "move" ? "moved to" : "entered";
+  const held = r["mount"] === "split";
+  return (
+    <div className="sb-note step sb-connected" role="note">
+      <Icon name="workflow" className="sb-note-icon" />
+      <span className="sb-note-verb">{verb}</span>
+      {adoptedAs !== undefined && workflow !== undefined ? (
+        <span className="sb-note-text">
+          <b>{workflow}</b> as <span className="mono">{adoptedAs}</span> · standing at
+        </span>
+      ) : held ? (
+        <span className="sb-note-text">one task per element, held · standing at</span>
+      ) : null}
+      <span className="sb-note-state mono ellip" title={where}>
+        {where}
+      </span>
+    </div>
+  );
+}
+
 function Tool({
   entry,
   sidechainOf,
@@ -534,7 +591,9 @@ function Tool({
       preview={entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary}
       tone={entry.ok === false ? "bad" : "plain"}
       mark={entry.ok === undefined ? "waiting" : entry.ok ? "ok" : "bad"}
-      {...(asked !== undefined
+      {...(workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false
+        ? { shown: <WorkflowOutcome result={entry.result} /> }
+        : asked !== undefined
         ? {
             // The question the agent put to the person, and their answer, drawn under the line
             // without being asked for: it is the one call in a transcript whose arguments a person

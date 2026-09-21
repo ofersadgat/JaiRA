@@ -74,7 +74,16 @@ function files(): Record<string, JsonValue> {
     // A SECOND workflow holding `product` and `ux`: a target of `feat/ux` is ambiguous.
     other: { label: "Other", children: { product: { state: "feat/product" }, ux: { state: "feat/ux", inputs: { flag: ".children.product.output.confirmed" } } }, sequence: ["product", "ux"] },
     // Rule 3: states no workflow relates to anything.
-    "conv/standin": gate("talk"),
+    // The conversation a move makes. A PROMPT with a required opening line and no outputs, which is
+    // the shape `chat/control` ships as — and the shape the idle rule is about (decision 0005 step 6):
+    // a root loaded with an operation it never ran would otherwise dispatch it, and a drop would
+    // spend a model call on a message nobody sent.
+    "conv/standin": {
+      label: "Talk",
+      inputs: { opening: { schema: { type: "string" }, description: "What the person did, in a sentence." } },
+      // No model, as the shipped conversations declare none: the machine it runs on answers.
+      operation: { kind: "prompt", prompt: "{{.inputs.opening}}" },
+    },
     "lib/second": gate("second", flag),
     "lib/third": gate("third", flag),
     "lib/needs": gate("needs", { text: { schema: { type: "string", minLength: 3 }, description: "What to call it." } }),
@@ -366,9 +375,10 @@ describe("rule 3 — the workflow is modified", () => {
     expect(documents()).toHaveLength(1);
     expect(metaOf(product)?.origin).toMatchObject({ kind: "adopt", taskId: parent, key: "product" });
     expect(done.plan.adopt?.adopted).toMatchObject([{ taskId: product, childKey: "product" }]);
-    // The conversation that controls it has its turn first; then the move is taken.
-    expect(await answer()).toBe("talk");
+    // The conversation that controls it STARTS IDLE (step 6): the drop dispatches no model call at
+    // all, and the run goes straight to the state the person asked for.
     expect(await parked()).toMatchObject({ state: "second", inputs: { flag: true } });
+    expect(journal(parent).filter((e) => e.type === "operation.started" && e.op === "prompt")).toEqual([]);
     expect(journal(parent).filter((e) => e.type === "transition.taken")).toMatchObject([{ to: "second", by: "person" }]);
 
     // AUGMENTED: the task already stands in a document, which gains a child — never a wrapper.
@@ -391,7 +401,6 @@ describe("rule 3 — the workflow is modified", () => {
     const product = await ran("feat/product", 1);
     const done = ok(await service.connectTask({ taskId: product, target: "lib/second" }));
     const parent = done.taskId!;
-    expect(await answer()).toBe("talk");
     await parked();
     await service.cancelTask(parent);
     await until(() => statusOf(parent) === "canceled", "the document's task to stop");
@@ -410,14 +419,15 @@ describe("rule 3 — the workflow is modified", () => {
     const product = await ran("feat/product", 1);
     expect(ok(await service.connectTask({ taskId: product, target: "lib/second", dryRun: true })).plan.modification).toBe("new");
 
-    const done = ok(await service.connectTask({ taskId: product, target: "lib/second", fake: [{ promptIncludes: "was moved to", output: "noted" }] }));
+    const done = ok(await service.connectTask({ taskId: product, target: "lib/second" }));
     const parent = metaOf(done.taskId!)!;
     expect(read((p) => p.runtime.get(parent.id)!.documentId)).toBeDefined();
-    // The conversation declares one required input that takes a string. It was given the sentence.
+    // `chat/control` declares one required input that takes a string. It was given the sentence.
     expect(Object.values(parent.inputs ?? {})).toEqual([`"Ran feat/product" was moved to lib/second.`]);
     expect(Object.values(parent.inputProvenance ?? {})).toEqual([{ via: "bound" }]);
-    // Its turn is had (the scripted model), and then the move is taken.
+    // And says nothing: no model route was even configured here, which a dispatched turn would need.
     expect(await parked()).toMatchObject({ state: "second", inputs: { flag: true } });
+    expect(journal(done.taskId!).filter((e) => e.type === "operation.started" && e.op === "prompt")).toEqual([]);
   });
 
   it("CLONED: a task standing inside a real workflow has its copy diverge — and UNDO puts it back under its pin", async () => {

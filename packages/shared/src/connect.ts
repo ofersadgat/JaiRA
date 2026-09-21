@@ -58,9 +58,31 @@ export interface TaskConnectRequest {
    * take starts one regardless. Absent ⇒ start.
    */
   start?: boolean;
+  /**
+   * Values a conversation hands the target (§4 "Inputs"), by the target's OWN declared input names,
+   * each with who settled it: `inferred` from what had been said, or `asked` of the person in words.
+   * They win over a wire. On a move within a workflow they ride the directed transition; on a
+   * modified workflow they are literals on the generated mount, provenance beside the value.
+   */
+  supplied?: Record<string, ConnectSupplied>;
+  /**
+   * What a DROP says (step 6): where a modified workflow leaves required inputs open, do not refuse —
+   * make the conversation that controls the work anyway, with the target not yet mounted, and answer
+   * `asking`. The host then has that conversation ask, in words, and the conversation's own `start`
+   * mounts the target with what it was told. Ignored by a dry run, which still says what is missing.
+   */
+  askAfter?: boolean;
   /** Scripted gate answers and prompt rules for a run this starts (tests/demos). */
   interactions?: Record<string, JsonValue[]>;
   fake?: JsonValue;
+}
+
+/** One value a conversation supplied, and how it came by it. */
+export interface ConnectSupplied {
+  value: JsonValue;
+  via: "inferred" | "asked";
+  /** How sure the conversation was of an `inferred` value, 0–1. */
+  confidence?: number;
 }
 
 export type ConnectResolution = "move" | "adopt" | "modify";
@@ -194,6 +216,11 @@ export type TaskConnectResult =
       /** How the move landed, when there was one to make. */
       moved?: TaskMoveResult["status"];
       undo?: ConnectUndo;
+      /**
+       * `askAfter`: the conversation exists and the task has NOT moved — these required inputs are
+       * what its conversation is about to ask for. `taskId` is the task that conversation is.
+       */
+      asking?: ConnectMissingInput[];
     }
   | { ok: false; dryRun: boolean; refusal: ConnectRefusal; /** How far the resolution got, for a preview that explains the refusal. */ plan?: ConnectPlan };
 

@@ -290,10 +290,12 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
     }
   });
 
-  it("reaches the engine as the list and block the map lowers to — and a tool nothing serves is in NEITHER list", () => {
+  it("reaches the engine as the list and block the map lowers to — the workflow tools among them", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
     expect(environmentOf("plan")).toEqual({
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search"],
+      // The nine a conversation has always held, then the eight of decision 0005, served since its
+      // step 6 — before that they carried `unserved` and lowering left them out of this list.
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -305,6 +307,14 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
           bash: "smart",
           web_fetch: "allow",
           web_search: "allow",
+          workflows: "allow",
+          start: "deny",
+          move: "deny",
+          tasks: "allow",
+          answer: "deny",
+          hold: "deny",
+          release: "deny",
+          stop: "deny",
           ...TOOLSET_MARKERS,
         },
         other: "deny",
@@ -313,11 +323,12 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
         source: "$/toolsets/chat/read-only",
       },
     });
-    // `chat_control` holds only the workflow tools, which are named and not served yet: the engine is
-    // handed NO tool to resolve against its registry, and the modes still travel.
+    // `chat_control` holds the workflow tools and NOTHING of the project: the engine resolves those
+    // eight against its registry, and a project tool is not on the list to be handed over at all.
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat_control/ask-first" }));
     const control = environmentOf("plan") as { tools: string[]; permissions: { tools: Record<string, string>; other: string } };
-    expect(control.tools).toEqual([]);
+    expect(control.tools).toEqual(["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"]);
+    expect(control.tools).not.toContain("bash");
     expect(control.permissions.other).toBe("deny");
     expect(control.permissions.tools).toMatchObject({ workflows: "ask", start: "ask", stop: "ask" });
   });

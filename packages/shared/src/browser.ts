@@ -40,6 +40,7 @@ export * from "./grammars";
 export * from "./userEvents";
 export * from "./adopt";
 export * from "./connect";
+export * from "./workflowTools";
 export * from "./toolVocabulary";
 export * from "./agentTools";
 export * from "./toolsets";

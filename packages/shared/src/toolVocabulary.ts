@@ -47,7 +47,7 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "files", label: "File permissions", hint: "reading, searching and changing files in the workspace" },
   { id: "execution", label: "Execution", hint: "running commands on this machine" },
   { id: "web", label: "Web", hint: "reaching the network" },
-  // The workflow tools of decision 0005 §3 — what `chat_control/*` holds, and nothing else does yet.
+  // The workflow tools of decision 0005 §3 — all of what `chat_control/*` holds, and part of `chat/*`.
   { id: "tasks", label: "Tasks & workflows", hint: "starting, moving and answering tasks" },
   { id: "mcp", label: "MCP", hint: "tools served by connected MCP servers" },
 ];
@@ -103,7 +103,8 @@ export interface ToolSpec {
    * Its MODE still travels — a mode for a name nothing calls is inert — so the day the tool is
    * implemented, deleting this mark is the whole change.
    *
-   * The workflow tools of decision 0005 §3 carry it until they are built.
+   * The workflow tools of decision 0005 §3 carried it until step 6 built them. Nothing carries it
+   * today; the mechanism stays for the next tool that is named before it is served.
    */
   unserved?: true;
 }
@@ -191,16 +192,17 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     hint: "search the web",
   },
   // The workflow tools (decision 0005 §3): the host's own operations, offered to a conversation.
-  // NAMED here so a toolset can hold them — `chat_control/*` holds nothing else — and NOT YET
-  // SERVED: see {@link ToolSpec.unserved}.
-  { name: "workflows", label: "workflows", category: "tasks", unserved: true, hint: "list workflows, and what a state takes and produces" },
-  { name: "start", label: "start", category: "tasks", unserved: true, hint: "start a task in a workflow, from this conversation" },
-  { name: "move", label: "move", category: "tasks", unserved: true, hint: "move a task to another state — forward, backward or across workflows" },
-  { name: "tasks", label: "tasks", category: "tasks", unserved: true, hint: "what was started here, where each stands and what it produced" },
-  { name: "answer", label: "answer", category: "tasks", unserved: true, hint: "settle a question a task is asking" },
-  { name: "hold", label: "hold", category: "tasks", unserved: true, hint: "hold a task where it stands" },
-  { name: "release", label: "release", category: "tasks", unserved: true, hint: "release a held task" },
-  { name: "stop", label: "stop", category: "tasks", unserved: true, hint: "stop a task" },
+  // `chat_control/*` holds nothing else; `chat/*` holds them beside the project's tools. Served since
+  // step 6 (`runtime/workflowTools.ts`, over the host the app lends) — the `unserved` mark they
+  // carried until then is gone, and deleting it was the whole change here.
+  { name: "workflows", label: "workflows", category: "tasks", hint: "list workflows, and what a state takes and produces" },
+  { name: "start", label: "start", category: "tasks", hint: "start a task in a workflow, from this conversation" },
+  { name: "move", label: "move", category: "tasks", hint: "move a task to another state — forward, backward or across workflows" },
+  { name: "tasks", label: "tasks", category: "tasks", hint: "what was started here, where each stands and what it produced" },
+  { name: "answer", label: "answer", category: "tasks", hint: "settle a question a task is asking" },
+  { name: "hold", label: "hold", category: "tasks", hint: "hold a task where it stands" },
+  { name: "release", label: "release", category: "tasks", hint: "release a held task" },
+  { name: "stop", label: "stop", category: "tasks", hint: "stop a task" },
 ];
 
 /** By logical name — the lookup every consumer wants. */
