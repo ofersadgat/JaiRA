@@ -42,6 +42,12 @@ import {
   RunOwner,
   sessionStoreFor,
   loadWorkflowBundle,
+  loadLayeredConfig,
+  planToolsetMigration,
+  renderToolsetMigration,
+  applyToolsetMigration,
+  isUnderSharedRoot,
+  unprovenOf,
   standaloneLoadOptions,
   workflowDigest,
   workflowLoadOptions,
@@ -53,6 +59,7 @@ import {
   defaultConfig,
   BASE_DIR_ENV,
   takeHomeFlag,
+  baseAsProjectPaths,
   jairaBasePaths,
   jairaPaths,
   parseJsonText,
@@ -63,6 +70,7 @@ import {
   type BoardCard,
   type BoardView,
   type JairaConfig,
+  type JairaPaths,
   type ModuleApproval,
 } from "@jaira/shared";
 import {
@@ -94,6 +102,8 @@ import {
   parseFakeRules,
   parseInteractionScript,
   policyCanEscalate,
+  type JairaPolicy,
+  type ToleratedDifference,
   enabledAdapters,
   enabledGenericAgents,
   registerAgentRuntimes,
@@ -190,6 +200,8 @@ const USAGE = `usage:
   jaira prune [--older-than <days>] [--apply] [--project <dir>]
   jaira workflow list [--json] [--project <dir>]
   jaira workflow lint [--json] [--project <dir>]
+  jaira workflow migrate-toolsets [--project <dir> | --base] [--write [--shared-root]]
+            [--accept unlisted-shell]... [--max-lines <n>] [--json]   dry run unless --write
   jaira functions list [--json] [--project <dir>]
   jaira functions approve <file>... [--project <dir>]
   jaira functions revoke <file>... [--project <dir>]
@@ -299,6 +311,8 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
           return cmdWorkflowList(wfRest, io);
         case "lint":
           return cmdWorkflowLint(wfRest, io);
+        case "migrate-toolsets":
+          return cmdWorkflowMigrateToolsets(wfRest, io);
         case "check":
           return cmdWorkflowCheck(wfRest, io);
         default:
@@ -1312,6 +1326,81 @@ function renderWorkflows(browser: WorkflowBrowser): string {
   }
   if (lines.length === 0) lines.push("no workflows under .jaira/workflows/");
   return lines.join("\n") + "\n";
+}
+
+/**
+ * The old `tools` list and `permissions` block, rewritten as toolsets (decision 0007 step 7).
+ *
+ * A DRY RUN by default, and a dry run is the whole point: the rewrite is not mechanical — a map is
+ * strict where a list was a grant — so what each state DOES is measured before and after, and the
+ * report says which of the three forms each block took and what could not be proven. `--write` is
+ * the consent to change files; a target inside the shared root takes `--shared-root` beside it, and
+ * backs `workflows/` up itself before the first byte.
+ *
+ * Exits non-zero when anything was refused or left unproven, so a dry run is a check as well.
+ */
+async function cmdWorkflowMigrateToolsets(argv: string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      project: { type: "string" },
+      base: { type: "boolean" },
+      write: { type: "boolean" },
+      "shared-root": { type: "boolean" },
+      accept: { type: "string", multiple: true },
+      "max-lines": { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  const accept = (values.accept ?? []) as ToleratedDifference[];
+  for (const kind of accept) {
+    if (kind !== "unlisted-shell") throw new UsageError(`--accept takes 'unlisted-shell'; '${kind}' is not a difference this migration can be told to accept`);
+  }
+  const maxLines = values["max-lines"] === undefined ? undefined : Number(values["max-lines"]);
+  if (maxLines !== undefined && !Number.isInteger(maxLines)) throw new UsageError("--max-lines takes a whole number");
+
+  // The shared root is read WITHOUT opening it as a project: opening one creates its layout, and a
+  // dry run of somebody's `~/.jaira` must not write so much as a directory into it.
+  let paths: JairaPaths;
+  let config: JairaConfig;
+  let project: Project | undefined;
+  if (values.base === true) {
+    if (values.project !== undefined) throw new UsageError("--base migrates the shared root, so it takes no --project");
+    paths = baseAsProjectPaths(jairaBasePaths().baseDir);
+    config = loadLayeredConfig(paths);
+  } else {
+    project = await openWithRecoveryNote(projectDirOf(values, io), io);
+    paths = project.paths;
+    config = project.config;
+  }
+  try {
+    const plan = await planToolsetMigration({
+      paths,
+      policy: config.policy as JairaPolicy,
+      ...(maxLines !== undefined ? { maxLines } : {}),
+      ...(accept.length > 0 ? { accept } : {}),
+    });
+    if (values.json === true) io.stdout(JSON.stringify(plan, null, 2) + "\n");
+    else io.stdout(renderToolsetMigration(plan));
+
+    const refused = plan.blocks.filter((block) => block.outcome === "refused").length;
+    const unproven = unprovenOf(plan).length;
+    if (values.write !== true) {
+      io.stdout(
+        plan.files.length === 0
+          ? "\nnothing to write.\n"
+          : `\nthis was a DRY RUN. Nothing was written. Pass --write to rewrite ${plan.files.length} file(s)` +
+              `${isUnderSharedRoot(plan.workflowsDir, paths) ? ", with --shared-root beside it" : ""}.\n`,
+      );
+      return refused + unproven === 0 ? 0 : 1;
+    }
+    const written = applyToolsetMigration(plan, { paths, ...(values["shared-root"] === true ? { sharedRoot: true } : {}) });
+    if (written.backup !== undefined) io.stdout(`\nbacked up to ${written.backup}\n`);
+    io.stdout(`${written.written.length} file(s) written.\n`);
+    return refused + unproven === 0 ? 0 : 1;
+  } finally {
+    project?.close();
+  }
 }
 
 /** Lint only, exiting non-zero when something would block a task start (§5.2). */
