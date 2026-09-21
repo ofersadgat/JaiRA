@@ -46,6 +46,7 @@ export * from "./toolsets";
 export * from "./toolsetBuckets";
 export * from "./commandParts";
 export * from "./toolsetEdit";
+export * from "./toolsetSettings";
 export * from "./scopes";
 export * from "./hiddenPaths";
 export * from "./refusal";

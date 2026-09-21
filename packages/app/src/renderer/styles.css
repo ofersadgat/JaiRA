@@ -13923,3 +13923,167 @@ fieldset.reading {
 .cx-cat.open .cx-cat.cx-sub:not(.open) > .cx-cat-head .cx-cat-chev {
   transform: none;
 }
+
+/* ---- Settings → Toolsets, and a toolset anywhere on the page (decision 0007 §6) -------------------
+   Moved over from the approved mockup's sheet (docs/engineering/decisions/0005-assets/proposed.css).
+   The rows themselves are the composer's and are already styled above; these are the four things a
+   toolset standing STILL needs that one inside a popover does not. */
+
+/* Set in the layer being edited — the accent, because it is the one a person can change here. */
+.cfg-status.here {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.cfg-status.here .cfg-dot {
+  background: var(--accent);
+}
+
+/* A toolset's card outside a popover: the same panel, without being one. */
+.set-card {
+  max-width: 560px;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+/* A row that is READ, not pressed: a toolset lists what it holds, so the name is text and the minus
+   at its start is what takes the line out. The grant's metrics, without being a button. */
+.set-card span.cx-tool-grant,
+.set-config span.cx-tool-grant {
+  display: flex;
+  align-items: center;
+  cursor: default;
+}
+/* Out of the toolset: a red minus, at the very start of the line. */
+.set-minus {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin: 0 2px 0 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bad);
+  box-shadow: none;
+  color: #fff;
+  font: 700 13px/1 var(--font-app);
+  cursor: pointer;
+}
+.set-minus span {
+  margin-top: -2px;
+}
+.set-minus:hover {
+  filter: brightness(1.08);
+}
+/* A command GROUP's minus sits in the head, before the fold, and takes the program with it. */
+.cx-cat.cx-sub > .cx-cat-head > .set-minus {
+  margin-left: 0;
+}
+/* What ships, read: the same rows, inert. aria-disabled says it; this stops the pointer too. */
+.set-readonly .cx-tool-mode,
+.set-readonly .cx-tool-impl {
+  pointer-events: none;
+}
+/* The same rows outside a section: no rule down the left, no indent. */
+.cx-cat-body.set-flat {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* The rail is the bucket hierarchy, so it is wider than a rail of section names. */
+.llm-config.set-config {
+  grid-template-columns: 212px minmax(0, 1fr);
+  /* An add-menu opens past the card's edge. */
+  overflow: visible;
+}
+.set-config .llm-rail {
+  border-radius: 0 0 0 7px;
+}
+.set-config .llm-detail {
+  min-height: 330px;
+}
+.set-config .llm-rail-item {
+  padding: 5px 9px;
+}
+/* A bucket's name over its toolsets: a heading in the rail, not a tab. */
+.set-rail-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 8px 3px;
+  font: 600 calc(var(--size-app) * 11.5 / 12.5) / 1.3 var(--font-data);
+  color: var(--text);
+}
+.set-rail-label:first-child {
+  padding-top: 3px;
+}
+.set-rail-label .cx-chip-icon svg {
+  width: 13px;
+  height: 13px;
+  color: var(--tok-hint);
+}
+.set-rail-label .cx-src {
+  margin-left: auto;
+}
+/* The path, then where its value comes from — one line, the pills after the name. */
+.set-config .llm-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.set-config .llm-detail .pane-actions {
+  margin-top: auto;
+}
+/* The card fills the pane between the head and the buttons, and scrolls if it must. */
+.set-config .llm-detail .cx-cats {
+  margin-top: 2px;
+}
+
+/* What a save will DO, where it is not what the button says — a file that stops following. */
+.cfg-hint.set-note {
+  max-width: 560px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn, #b8860b) 10%, transparent);
+  color: var(--text);
+}
+
+/* "Compare with what ships": one row per line the two disagree on. */
+.set-compare {
+  display: grid;
+  gap: 1px;
+  max-width: 560px;
+  margin-top: 4px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.set-compare-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+.set-compare-head {
+  color: var(--tok-hint);
+  font-size: calc(var(--size-app) * 10 / 12.5);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+/* A line one side does not have at all — said, and said quietly. */
+.set-compare-none {
+  color: var(--tok-hint);
+  font-style: italic;
+}
+
+/* The state editor's ONE Tools field: the picker, then the lines written over what it names. */
+.set-tools-field .set-card {
+  margin-top: 6px;
+}

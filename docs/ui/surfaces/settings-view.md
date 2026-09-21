@@ -8,7 +8,7 @@ realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/checked-status-wit
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects, product/agents-act-only-where-allowed, product/read-comfortably, product/keep-history-within-bounds]
 components: [ui/components/settings-header]
 mockups: [ui/assets/settings-view/in-a-project.html, ui/assets/settings-view/no-project.html, ui/assets/settings-view/unlayered.html]
-siblings: [ui/surfaces/sidebar, ui/surfaces/app-window, ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/settings-appearance, ui/surfaces/settings-conversation, ui/surfaces/settings-history, ui/surfaces/inbox-strip]
+siblings: [ui/surfaces/sidebar, ui/surfaces/app-window, ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-toolsets, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/settings-appearance, ui/surfaces/settings-conversation, ui/surfaces/settings-history, ui/surfaces/inbox-strip]
 ---
 
 # Settings view
@@ -19,7 +19,7 @@ The Settings room: one scrolling column right of the [sidebar](sidebar.md) that 
 
 - **Column.** On `--bg` with 14px of padding above and below and 16px at the sides, scrolling up and down and never sideways.
 - **Header.** The [settings-header](../components/settings-header.md), when the section has one: the layer switch or the no-project sentence at the left, and on Providers and Executors the age of the checks and `Re-check` at the far right, over a 1px `--line` rule.
-- **Section.** Under the header, left-aligned: [Providers](settings-providers.md), [Executors](settings-executors.md), [Configuration](settings-configuration.md), [Files](settings-files.md), [Appearance](settings-appearance.md), [Conversation](settings-conversation.md) or [History](settings-history.md). A section of grouped settings is at most 780px wide, and Appearance at most 1040px.
+- **Section.** Under the header, left-aligned: [Providers](settings-providers.md), [Executors](settings-executors.md), [Toolsets](settings-toolsets.md), [Configuration](settings-configuration.md), [Files](settings-files.md), [Appearance](settings-appearance.md), [Conversation](settings-conversation.md) or [History](settings-history.md). A section of grouped settings is at most 780px wide, and Appearance at most 1040px.
 - **Inbox strip.** The [inbox strip](inbox-strip.md) stays at the foot of the room while anything waits.
 
 | Section | Header |
