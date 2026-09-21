@@ -27,6 +27,7 @@ import type { WorkIconName } from "./transcript";
  */
 export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs" | "comment" | "choice" | "files" | "form"
   | "sigma" | "clock" | "fold" | "unfold"
+  | "folder" | "script"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia", string[]> = {
@@ -49,6 +50,10 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // hard it thinks. Each sits beside its own word, never alone — see the module header.
   model: ["m12 3 8 4.5v9L12 21l-8-4.5v-9Z", "M12 12l8-4.5", "M12 12v9", "M12 12 4 7.5"],
   shield: ["M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"],
+  // The composer's toolset cards (decision 0007 §5): a folder is a BUCKET of toolsets, and a sheet
+  // with a turned corner is `script` — running a file, as against a command typed on a line.
+  folder: ["M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"],
+  script: ["M6 3h8l4 4v14H6Z", "M14 3v4h4"],
   // The permission postures, each drawn as what it MEANS rather than as a rank. A shut lock is
   // "ask me every time"; the same lock with its shackle open is "go ahead"; a star is the approver
   // deciding per call; an eye reads and cannot write; a pencil writes without asking; a ruled page

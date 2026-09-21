@@ -1,0 +1,11 @@
+{
+  "workflows": "ask",
+  "start": "ask",
+  "move": "ask",
+  "tasks": "ask",
+  "answer": "ask",
+  "hold": "ask",
+  "release": "ask",
+  "stop": "ask",
+  "other": "deny"
+}

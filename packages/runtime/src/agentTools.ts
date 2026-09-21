@@ -268,6 +268,9 @@ export function planAgentTools(
     view.held(standard) ?? (TOOL_SPEC_BY_NAME.get(standard)?.alwaysGranted === true ? "app" : undefined);
 
   for (const spec of TOOL_SPECS) {
+    // Named and not yet served (`ToolSpec.unserved`): nothing to inject and no agent's built-in to
+    // keep or remove, whatever the toolset says about it.
+    if (spec.unserved === true) continue;
     const natives = nativesOfStandard(declaration, spec.name);
     const implementation = holds(spec.name);
     if (implementation === undefined) {

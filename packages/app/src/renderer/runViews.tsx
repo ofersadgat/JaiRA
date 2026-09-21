@@ -1357,6 +1357,7 @@ function ChatComposer({
         onOverrides={setOverrides}
         onSend={send}
         onStop={stop}
+        onSaveToolset={(request) => invoke("toolset:save", { ...request, ...(project !== undefined ? { project } : {}) })}
         {...(disabled !== undefined ? { disabled } : {})}
       />
     </>

@@ -1,0 +1,11 @@
+{
+  "workflows": "smart",
+  "start": "smart",
+  "move": "smart",
+  "tasks": "smart",
+  "answer": "smart",
+  "hold": "smart",
+  "release": "smart",
+  "stop": "smart",
+  "other": "deny"
+}

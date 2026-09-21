@@ -128,6 +128,7 @@ import {
   taskSummaries,
   workflowRoots,
   bundleFor,
+  readToolsets,
   projectRun,
   eventsOf,
   type DescriptionBoundary,
@@ -302,12 +303,17 @@ import {
   validateComponentResult,
   WORKFLOW_JSON,
   unnamedRouteOf,
-  PERMISSION_PRESETS,
-  presetOf,
   ALWAYS_GRANTED_TOOLS,
+  bucketOf,
   declaresTools,
-  toolModes,
+  matchToolset,
+  parseToolset,
+  TOOL_SPECS,
+  toolsetBucketProblem,
+  toolsetLabel,
+  toolsetNameProblem,
   toolsetOfSettings,
+  type ToolsetChoice,
   withAlwaysGranted,
   isTerminalStatus,
   ApprovalRequired,
@@ -456,6 +462,7 @@ import type {
   SyncDirection,
   WriteConfigRequest,
   WriteFileRequest,
+  SaveToolsetRequest,
   WriteWorkflowRequest,
   InstanceNode,
   ChatBranch,
@@ -3841,6 +3848,7 @@ export class AppService {
       routes?: Record<string, JairaPromptNode>;
     };
     const tools = AppService.gateableTools();
+    const toolsets = readToolsets(open.project.paths);
     return {
       ...plan,
       live,
@@ -3850,20 +3858,26 @@ export class AppService {
         plan,
         this.modelOfRecord(open, request.taskId, context.position),
         tools,
+        toolsets,
       ),
-      available: this.availableFor(open, router, tools),
+      available: this.availableFor(open, router, tools, toolsets, plan.settings),
     };
   }
 
   /**
-   * The gateable tool set, named once — see JAIRA_TOOLS.
+   * Every tool a toolset can hold a line for, named once — the standard list, less what only an
+   * agent has.
+   *
+   * WIDER than `JAIRA_TOOLS` by the tools that are named and not yet served (`ToolSpec.unserved`, the
+   * workflow tools): the composer draws a line for each and a toolset may hold it, and nothing hands
+   * one to anybody — `offeredTools` and `planAgentTools` leave them out.
    *
    * Each carries what every agent route calls ITS OWN tool doing that job, read off the executors'
    * declarations — which is what lets the composer offer "the agent's own `Read`" on a route that
    * has one, and not on a route that does not.
    */
   private static gateableTools(): ToolChoice[] {
-    return JAIRA_TOOLS.map((t) => {
+    return TOOL_SPECS.filter((spec) => spec.nativeOnly !== true).map((t) => {
       const natives = nativeNamesByRoute(t.name);
       return { name: t.name, ...(Object.keys(natives).length > 0 ? { natives } : {}) };
     });
@@ -3874,8 +3888,18 @@ export class AppService {
     open: ProjectSession,
     router: { routes?: Record<string, JairaPromptNode> },
     tools: readonly ToolChoice[],
+    toolsets: readonly ToolsetChoice[],
+    settings: ChatSettings,
   ): ChatPlanView["available"] {
     return {
+      // The buckets the Permissions card draws its rows from, and the one it opens on: the bucket
+      // holding a toolset this conversation's map exactly is, `chat` otherwise (decision 0007 §5).
+      toolsets: [...toolsets],
+      bucket: bucketOf(
+        toolsetOfSettings(settings).toolset,
+        toolsets,
+        tools.map((tool) => tool.name),
+      ),
       // Provider routes AND agent routes, as peers. `claude-cli` and `anthropic` are two different
       // answers to "who answers this" — one is a program on this machine running on a subscription,
       // the other is the API — so they are sibling rows rather than one folded into the other.
@@ -3923,11 +3947,12 @@ export class AppService {
       routes?: Record<string, JairaPromptNode>;
     };
     const tools = AppService.gateableTools();
+    const toolsets = readToolsets(open.project.paths);
     return {
       ...plan,
       live: "idle",
-      effective: this.effectiveOf(open, router, plan, undefined, tools),
-      available: this.availableFor(open, router, tools),
+      effective: this.effectiveOf(open, router, plan, undefined, tools, toolsets),
+      available: this.availableFor(open, router, tools, toolsets, plan.settings),
     };
   }
 
@@ -3987,6 +4012,7 @@ export class AppService {
      */
     lastModel: string | undefined,
     tools: readonly ToolChoice[],
+    toolsets: readonly ToolsetChoice[],
   ): ChatPlanView["effective"] {
     // What ANSWERED this conversation last. It beats everything below it: a state that named no
     // model, or named a route that picks its own, was still answered by something, and the record is
@@ -4010,20 +4036,9 @@ export class AppService {
       // No project-level default to read: a call with no `reasoning` gets the model's own. Naming
       // the decider beats printing a value we invented.
       reasoning: plan.settings.reasoning?.effort ?? "the model's default",
-      // The per-tool MAP, named as the preset it matches — see `postureOf`. The map is what the
-      // executor is handed, so it is the only honest thing to report.
-      // The posture is worded off the per-tool modes, and a message that carries a TOOLSET has them
-      // in the map rather than in the block (decision 0007) — so they are read from wherever they are.
-      permissions: postureOf(
-        open.project.config,
-        tools,
-        plan.settings.toolset === undefined
-          ? plan.settings.permissions
-          : (() => {
-              const { toolset } = toolsetOfSettings(plan.settings);
-              return { tools: toolModes(toolset), ...(toolset.other !== undefined ? { default: toolset.other } : {}) };
-            })(),
-      ),
+      // The MAP, named as the toolset it exactly is — see `postureOf`. The map is what the executor
+      // is handed, so it is the only honest thing to report.
+      permissions: postureOf(open.project.config, tools, toolsets, plan.settings),
     };
   }
 
@@ -4311,7 +4326,7 @@ export class AppService {
      */
     //
     // ONE map is read for all of it (decision 0007): the message's toolset, or the list, the
-    // `permissions` block and the implementations the composer still writes, folded into one.
+    // `permissions` block and the implementations a state's own declaration arrives as, folded into one.
     const { toolset } = toolsetOfSettings(plan.settings);
     const policy: ExecPolicy = compilePolicy(config.policy, {
       execEnv: config.execEnvironment,
@@ -7213,6 +7228,41 @@ export class AppService {
   }
 
   /**
+   * Keep a map as a NEW toolset in a bucket — the composer's `+` (decision 0007 §5).
+   *
+   * Everything is checked BEFORE the path is resolved, in the order a person would want to hear it:
+   * the layer (what ships is read-only — the same sentence every write surface says), the bucket and
+   * the name (one folder path, one file name, nothing a reference could not carry and nothing that
+   * climbs), the map (it must parse as a toolset with no error, so a file this writes is one the
+   * loader will take), and that the chosen layer does not already hold that id — `+` adds. The write
+   * is {@link writeFile}'s, so containment, the invalidation and the sync note are its too.
+   */
+  saveToolset(request: SaveToolsetRequest): ToolsetChoice {
+    this.writable(request.layer);
+    const problem = toolsetBucketProblem(request.bucket) ?? toolsetNameProblem(request.name);
+    if (problem !== undefined) throw this.refusal("file", problem);
+    const parsed = parseToolset(request.toolset);
+    const broken = parsed.issues.find((issue) => issue.severity === "error");
+    if (broken !== undefined) throw this.refusal("file", `that is not a toolset — ${broken.message}`);
+    // `writeFile` takes the FILES VIEW's address — relative to the checkout for a project, so the
+    // layer's own prefix (`.jaira`, measured rather than assumed) goes in front; see `treeFile`.
+    const layered = `toolsets/${request.bucket}/${request.name}.json`;
+    const paths = request.layer === "project" ? this.requireProject(request.project).paths : undefined;
+    const prefix = paths === undefined ? "" : relative(paths.projectDir, paths.jairaDir).split(sep).join("/");
+    const path = prefix.length === 0 ? layered : `${prefix}/${layered}`;
+    if (existsSync(this.treeFile(path, request.layer, request.project))) {
+      throw this.refusal("file", `'${request.bucket}/${request.name}' already exists there — pick another name`);
+    }
+    this.writeFile({
+      layer: request.layer,
+      path,
+      text: `${JSON.stringify(request.toolset, null, 2)}\n`,
+      ...(request.project !== undefined ? { project: request.project } : {}),
+    });
+    return { id: `${request.bucket}/${request.name}`, bucket: request.bucket, name: request.name, layer: request.layer, decl: request.toolset };
+  }
+
+  /**
    * The state id a root-relative path defines, if it defines one.
    *
    * The same derivation the tree uses (`stateViews.walkDir`) rather than a second one: a path that
@@ -8877,37 +8927,30 @@ function sessionOf(position: string): string {
 /**
  * The permission posture a call runs under, worded as the control that sets it.
  *
- * The per-tool MAP is the answer, because the map is what reaches the executor — `gateTools` reads a
- * mode per tool out of it. So this names the preset those modes correspond to, and says `custom`
- * when they are nobody's. A reader comparing the chip against the tool list sees the same fact
- * twice, which is the point.
+ * A LABEL IS A MATCH, NEVER A MEMORY (decision 0007 §5). The map is what reaches the executor, so
+ * this names the toolset that map exactly IS — the same tools held, the same mode and implementation
+ * on each, the same command subjects, the same `other` — in the bucket the conversation opens on, and
+ * says `custom` when it is nobody's. A reader comparing the chip against the Tools card sees the same
+ * fact twice, which is the point. The composer asks the same question again for whichever bucket the
+ * person picks; both go through `matchToolset`.
  *
- * A PROFILE can still narrow it, and is reported when one is in force. It is never something the
- * composer wrote — it can only be inherited from the state or compiled from the project policy — but
- * it gates ahead of every mode, so omitting it would understate what will happen. `full` is left
- * unsaid: it excludes nothing, and a posture line that always ends in the same word teaches nothing.
+ * There is no profile to report any more: an old `read-only` is folded into the map as the denies it
+ * meant (`toolsetOfSettings`), so it shows up as lines of the map like everything else.
  *
- * Compiled rather than read off the raw config, so what is reported is what would be enforced:
- * `compilePolicy` folds the authored rules into a baseline.
+ * A call that declares no tools at all has no map to match. It names what decides instead — the
+ * compiled baseline's default, which is where every tool falls — because `custom` there would claim
+ * somebody had customised something.
  */
-function postureOf(
-  config: JairaConfigOf,
-  tools: readonly ToolChoice[],
-  authored?: { profile?: string; default?: PermissionMode; tools?: Record<string, PermissionMode> },
-): string {
-  const { baseline } = compilePolicy(config.policy, { execEnv: config.execEnvironment });
-  const preset = presetOf(authored?.tools, tools);
-  const modes =
-    preset?.label ??
-    (authored?.tools !== undefined && Object.keys(authored.tools).length > 0
-      ? "custom"
-      : // Nothing per-tool was set, so every tool falls to the default — which is a preset by another
-        // name, and `ask` is where the ledger itself ends up.
-        (PERMISSION_PRESETS.find((p) => p.id === (authored?.default ?? baseline?.default ?? "ask"))?.label ??
-          `${authored?.default ?? baseline?.default ?? "ask"} by default`));
-  // The ledger's own fallback, mirrored: `resolveProfile` ends at `full`, which narrows nothing.
-  const profile = authored?.profile ?? baseline?.profile ?? "full";
-  return profile === "full" ? modes : `${profile} · ${modes}`;
+function postureOf(config: JairaConfigOf, tools: readonly ToolChoice[], toolsets: readonly ToolsetChoice[], settings: ChatSettings): string {
+  const { toolset } = toolsetOfSettings(settings);
+  if (Object.keys(toolset.entries).length === 0) {
+    const { baseline } = compilePolicy(config.policy, { execEnv: config.execEnvironment });
+    const mode = toolset.other ?? baseline?.default ?? "ask";
+    return `${mode === "smart" ? "auto" : mode} by default`;
+  }
+  const registered = tools.map((tool) => tool.name);
+  const match = matchToolset(toolset, toolsets, bucketOf(toolset, toolsets, registered), registered);
+  return match === undefined ? "custom" : toolsetLabel(match);
 }
 
 

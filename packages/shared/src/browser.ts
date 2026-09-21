@@ -42,6 +42,7 @@ export * from "./adopt";
 export * from "./toolVocabulary";
 export * from "./agentTools";
 export * from "./toolsets";
+export * from "./toolsetBuckets";
 export * from "./commandParts";
 export * from "./toolsetEdit";
 export * from "./scopes";

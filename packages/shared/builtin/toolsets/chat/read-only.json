@@ -1,0 +1,12 @@
+{
+  "read_file": "allow",
+  "glob": "allow",
+  "grep": "allow",
+  "edit": "deny",
+  "write_file": "deny",
+  "show_artifact": "allow",
+  "bash": "deny",
+  "web_fetch": "allow",
+  "web_search": "allow",
+  "other": "deny"
+}

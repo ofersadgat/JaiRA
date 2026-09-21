@@ -24,6 +24,8 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { CommandApproval } from "./commandParts";
+import type { ToolsetChoice } from "./toolsetBuckets";
+import type { ToolsetDecl } from "./toolsets";
 import type {
   BoardView,
   ChatThreadView,
@@ -982,6 +984,28 @@ export interface WriteFileRequest {
   text: string;
 }
 
+/**
+ * Keep a map as a NEW toolset in a bucket — the composer's `+` (decision 0007 §5).
+ *
+ * Checked before it lands, which is why this is not a bare `file:write`: the map must parse as a
+ * toolset with no error, the name must be one a reference can carry, and an id the chosen layer
+ * already holds is refused rather than replaced — `+` adds, and replacing a toolset other states
+ * name is a different act with a different surface. The write itself is `file:write`'s, so the
+ * read-only `system` layer is refused by the same sentence it is everywhere else.
+ */
+export interface SaveToolsetRequest {
+  /** The bucket path, `/`-separated — `chat`, `feature/implementation`. */
+  bucket: string;
+  /** The file's name, without an extension. */
+  name: string;
+  /** "in this project" or "for all projects". `system` is refused. */
+  layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
+  /** The map to keep: subject → mode. */
+  toolset: ToolsetDecl;
+}
+
 /** Delete a file or a directory under a layer root. A directory takes everything in it. */
 export interface DeleteFileRequest {
   layer: WorkflowLayer;
@@ -1824,6 +1848,8 @@ export interface IpcContract {
   "changeset:reviewSync": { request: ReviewSyncRequest; response: ReviewChangesResult };
   /** Write any file under a layer root. Unparsed — see {@link WriteFileRequest}. */
   "file:write": { request: WriteFileRequest; response: FileSource };
+  /** Keep a map as a new toolset file in a bucket — see {@link SaveToolsetRequest}. */
+  "toolset:save": { request: SaveToolsetRequest; response: ToolsetChoice };
   /** Create a plain file or a directory under a layer root, addressed by path. */
   "file:create": { request: CreateFileRequest; response: { file: string } };
   /** Rename or move a file or directory within a layer root. Refuses when it would break referrers. */
@@ -2005,6 +2031,7 @@ export const IPC_CHANNELS = [
   "changeset:review",
   "changeset:reviewSync",
   "file:write",
+  "toolset:save",
   "file:create",
   "file:rename",
   "file:delete",

@@ -10,12 +10,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { testHome } from "@jaira/testing";
+import { shippedLayer, testHome } from "@jaira/testing";
 import { TOOLSET_MARKERS } from "@jaira/shared";
 import { loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
-import { listToolsets, loadWorkflowBundle } from "../src/toolsets";
+import { listToolsets, loadWorkflowBundle, readToolsets } from "../src/toolsets";
 import { browseWorkflows } from "../src/workflows";
 import { workflowLoadOptions } from "../src/workflowRefs";
 
@@ -253,5 +253,94 @@ describe("buckets", () => {
     } finally {
       rmSync(third, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the toolsets that SHIP (decision 0007 step 4)", () => {
+  // The suite runs over an EMPTY built-in layer; these are about what ships, so they ask for it —
+  // and reopen the project, whose paths were resolved before they could.
+  beforeEach(() => {
+    shippedLayer();
+    project.close();
+    project = openProject(dir, { baseDir: testHome() });
+  });
+
+  it("are listed from the built-in layer: two buckets, the same four names in each", () => {
+    const listed = listToolsets(project.paths.roots);
+    expect(listed.map((t) => t.id)).toEqual([
+      "chat/ask-first",
+      "chat/auto",
+      "chat/full",
+      "chat/read-only",
+      "chat_control/ask-first",
+      "chat_control/auto",
+      "chat_control/full",
+      "chat_control/read-only",
+    ]);
+    expect(listed.every((t) => t.root === project.paths.builtIn.dir && !t.overrides)).toBe(true);
+  });
+
+  it("LINT CLEAN — every one loads through a state that names it, with no issue and no warning", () => {
+    for (const toolset of listToolsets(project.paths.roots)) {
+      write(project.paths.workflowsDir, "plan.json", state({ tools: toolset.reference }));
+      const entry = browseWorkflows(project).workflows.find((w) => w.rootId === "plan")!;
+      expect(entry.loadError, toolset.id).toBeUndefined();
+      expect(entry.issues, toolset.id).toEqual([]);
+      expect(() => load("plan"), toolset.id).not.toThrow();
+    }
+  });
+
+  it("reaches the engine as the list and block the map lowers to — and a tool nothing serves is in NEITHER list", () => {
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
+    expect(environmentOf("plan")).toEqual({
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search"],
+      permissions: {
+        tools: {
+          read_file: "allow",
+          glob: "allow",
+          grep: "allow",
+          edit: "deny",
+          write_file: "deny",
+          show_artifact: "allow",
+          bash: "smart",
+          web_fetch: "allow",
+          web_search: "allow",
+          ...TOOLSET_MARKERS,
+        },
+        other: "deny",
+        subjects: { bash: "deny" },
+      },
+    });
+    // `chat_control` holds only the workflow tools, which are named and not served yet: the engine is
+    // handed NO tool to resolve against its registry, and the modes still travel.
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat_control/ask-first" }));
+    const control = environmentOf("plan") as { tools: string[]; permissions: { tools: Record<string, string>; other: string } };
+    expect(control.tools).toEqual([]);
+    expect(control.permissions.other).toBe("deny");
+    expect(control.permissions.tools).toMatchObject({ workflows: "ask", start: "ask", stop: "ask" });
+  });
+
+  it("are READ for the composer with the layer that supplied each, a project's file winning and a `$ref` followed", () => {
+    write(project.paths.jairaDir, "toolsets/chat/read-only.json", { $ref: "$SYSTEM/toolsets/chat/read-only", bash: "ask" });
+    write(testHome(), "toolsets/feature/implementation/writes-asking.json", { write_file: "ask", other: "deny" });
+    write(project.paths.jairaDir, "toolsets/chat/broken.json", { read_file: "sometimes" });
+    const read = readToolsets(project.paths);
+    expect(read.map((t) => [t.id, t.layer])).toEqual([
+      ["chat/ask-first", "system"],
+      ["chat/auto", "system"],
+      ["chat/full", "system"],
+      ["chat/read-only", "project"],
+      ["chat_control/ask-first", "system"],
+      ["chat_control/auto", "system"],
+      ["chat_control/full", "system"],
+      ["chat_control/read-only", "system"],
+      ["feature/implementation/writes-asking", "base"],
+    ]);
+    // The override is offered as the map it RESOLVES to — what picking its row would write.
+    const overridden = read.find((t) => t.id === "chat/read-only")!.decl;
+    expect(overridden).toMatchObject({ read_file: "allow", edit: "deny", bash: "ask", other: "deny" });
+    expect(overridden).not.toHaveProperty("$ref");
+    // A toolset nobody could read is left out rather than offered as half of itself.
+    expect(read.some((t) => t.id === "chat/broken")).toBe(false);
   });
 });

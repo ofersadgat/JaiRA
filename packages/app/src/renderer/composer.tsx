@@ -33,28 +33,82 @@
  * inherited tool is dropped. Which is why the boxes start ticked at what the state inherited: an
  * empty box beside an operation carrying `bash` would offer to add a tool the call already has, and
  * would silently disarm it if the person sent without touching anything.
+ *
+ * ## Permissions and Tools are two views of one TOOLSET
+ *
+ * What a message may do is one map from a subject to a mode (decision 0007). The Permissions card
+ * picks a whole one — its rows are the toolsets of a BUCKET, a folder of them on the layered search
+ * path — and the Tools card changes a line of it. Either way what is sent is the whole map, as
+ * `ChatSettings.toolset`; the list, the block and the implementations map are only what a state's
+ * own declaration still arrives as, and `toolsetOfSettings` reads both into the one shape drawn here.
+ *
+ * A label is a MATCH, never a memory. The Permissions chip reads a toolset's name while the map is
+ * exactly that toolset's, and `custom` the moment a line differs; nothing records where a map began.
+ * Every edit is a pure function in `composerToolset.ts`, which is where the tests are.
  */
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import {
+  declaresTools,
+  declOfToolset,
+  DEFAULT_TOOLSET_BUCKET,
+  heldTools,
+  holdsTool,
+  matchToolset,
+  MODE_WHEN_UNSET,
+  parseToolset,
   PERMISSION_MODES,
-  PERMISSION_PRESETS,
-  presetModes,
-  presetOf,
   REASONING_EFFORTS,
+  SCRIPT_SUBJECT,
+  SHELL_TOOL,
+  toolsetBuckets,
+  toolsetGlyph,
+  toolsetHint,
+  toolsetsOfBucket,
+  toolsetLabel,
+  toolsetNameProblem,
+  toolsetOfSettings,
+  TOOLSET_LAYER_LABELS,
   type ChatPlanView,
   type ChatSettings,
   type PermissionMode,
   type ReasoningEffort,
+  type SaveToolsetRequest,
   type SettingOrigin,
   type ToolCategory,
   type ToolChoice,
   type ToolImplementation,
+  type Toolset,
+  type ToolsetBucket,
+  type ToolsetChoice,
   type ToolSpec,
-  categoryModeOf,
+  type WritableLayer,
   TOOL_CATEGORIES,
   TOOL_SPEC_BY_NAME,
 } from "@jaira/shared/browser";
+import {
+  commandGroupsOf,
+  commandSubjectOf,
+  groupModeOf,
+  groupSentence,
+  groupSummary,
+  sectionCountOf,
+  sectionModeOf,
+  toolImplementationOf,
+  toolModeOf,
+  withCommand,
+  withOther,
+  withoutSubject,
+  withSectionMode,
+  withSubject,
+  withSubjectMode,
+  withToolHeld,
+  withToolImplementation,
+  type CommandGroup,
+  type Parked,
+} from "./composerToolset";
 import { BrandIcon, Icon } from "./icons";
+import { SchemaForm } from "./schemaForm/SchemaForm";
+import type { Schema } from "./schemaForm/types";
 
 /**
  * A file going with the message — dropped on the composer, picked from its clip, or `@`-mentioned.
@@ -158,6 +212,10 @@ const TOOL_ICONS: Record<string, Parameters<typeof Icon>[0]["name"]> = {
   write_file: "write",
 };
 
+/** What the shell's line says in the Tools card: it is also where every unnamed command lands. */
+const SHELL_HINT = "the shell — and the mode for any command not named below";
+const SCRIPT_HINT = "running a file — ./x.sh, npm run, python x.py, make";
+
 /**
  * One option in a picker: a name, the sentence that explains it, and a tick when it is in force.
  *
@@ -209,9 +267,6 @@ const MODE_META: Record<PermissionMode, { icon: Parameters<typeof Icon>[0]["name
   allow: { icon: "unlocked", label: "allow", hint: "goes ahead without asking" },
   deny: { icon: "shield", label: "deny", hint: "refused every time" },
 };
-
-/** The mode a tool nothing has spoken for ends up in — the ledger's own last resort. */
-const MODE_WHEN_UNSET: PermissionMode = "ask";
 
 /** A model as the picker sees it — the id, and what it can be given and produce. */
 interface PickModel {
@@ -700,16 +755,20 @@ function ToolRow({
   // What the ANSWERING agent calls its own tool doing this job — off that executor's declaration, by
   // route. Absent ⇒ that agent has no built-in to pick instead, so there is no choice to draw.
   const native = cliRoute !== undefined ? tool.natives?.[cliRoute] : undefined;
+  // The shell's line is more than a tool's: it is where every command with no line of its own lands.
+  // And a tool that is named and not served yet says so, because ticking it hands nobody anything.
+  const hint =
+    tool.name === SHELL_TOOL ? SHELL_HINT : spec?.unserved === true ? `${spec.hint} · not served yet` : (spec?.hint ?? tool.name);
   return (
     <div className={`cx-tool${granted ? " on" : ""}`}>
-      <button type="button" className="cx-tool-grant" title={spec?.hint ?? tool.name} onClick={onGrant}>
+      <button type="button" className="cx-tool-grant" title={hint} onClick={onGrant}>
         <span className="cx-tick">{granted ? "✓" : ""}</span>
         <span className="cx-chip-icon">
           <Icon name={TOOL_ICONS[tool.name] ?? "tool"} />
         </span>
         <span className="cx-opt-text">
           <span className="cx-opt-name ellip">{spec?.label ?? tool.name}</span>
-          <span className="cx-opt-hint ellip">{spec?.hint ?? tool.name}</span>
+          <span className="cx-opt-hint ellip">{hint}</span>
         </span>
       </button>
       {native !== undefined ? <ImplPicker value={impl} native={native} onPick={onImpl} /> : null}
@@ -765,6 +824,313 @@ function CategoryRow({
 }
 
 /**
+ * A line of Execution that is not a tool: a command the toolset names (`git commit`), or `script`.
+ *
+ * Drawn as a tool's line is — tick, glyph, name, mode — because it IS one line of the same map, and
+ * answers to the same four modes. It has no implementation: nobody's code is being chosen, a part of
+ * a shell line is being judged. Unticking a command takes its line out of the map, which is the only
+ * way a map has of not naming something.
+ */
+function SubjectRow({
+  subject,
+  hint,
+  held,
+  mode,
+  onHeld,
+  onMode,
+}: {
+  subject: string;
+  hint?: string;
+  held: boolean;
+  mode: PermissionMode;
+  onHeld: () => void;
+  onMode: (next: PermissionMode) => void;
+}): JSX.Element {
+  const script = subject === SCRIPT_SUBJECT;
+  return (
+    <div className={`cx-tool${held ? " on" : ""}`}>
+      <button type="button" className="cx-tool-grant" title={hint ?? subject} onClick={onHeld}>
+        <span className="cx-tick">{held ? "✓" : ""}</span>
+        <span className="cx-chip-icon">
+          <Icon name={script ? "script" : "terminal"} />
+        </span>
+        <span className="cx-opt-text">
+          <span className="cx-opt-name ellip">{script ? subject : <span className="mono">{subject}</span>}</span>
+          <span className="cx-opt-hint ellip">{hint ?? ""}</span>
+        </span>
+      </button>
+      <ModePicker mode={mode} title={`${subject}: ${MODE_META[mode].hint}`} onMode={onMode} />
+    </div>
+  );
+}
+
+/**
+ * The last line of a group or of Execution: add a subcommand, or a command.
+ *
+ * One string, asked through the schema form like every other typed input. What comes back from
+ * `onAdd` is what was wrong with it, said under the box — a tool's name, `other`, something that
+ * does not read as a program — or nothing, and the line closes.
+ */
+function AddLine({ label, example, onAdd }: { label: string; example: string; onAdd: (typed: string) => string | undefined }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const schema: Schema = {
+    type: "object",
+    properties: { command: { type: "string", title: label, minLength: 1, description: `like ${example}` } },
+    required: ["command"],
+  };
+  const add = (): void => {
+    const wrong = onAdd(typed);
+    setProblem(wrong ?? null);
+    if (wrong !== undefined) return;
+    setTyped("");
+    setOpen(false);
+  };
+  return (
+    <div className="cx-tool set-add-line">
+      {open ? (
+        <div className="cx-set-line-form">
+          <SchemaForm
+            schema={schema}
+            value={{ command: typed }}
+            onChange={(next) => setTyped(String((next as { command?: unknown } | undefined)?.command ?? ""))}
+            ctx={{ path: "", hidePaths: true }}
+          />
+          {problem !== null ? <p className="sub warn-text">{problem}</p> : null}
+          <div className="cx-set-new-foot">
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setOpen(false);
+                setProblem(null);
+              }}
+            >
+              Cancel
+            </button>
+            <button type="button" className="primary" onClick={add}>
+              Add
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="set-add" aria-expanded={false} onClick={() => setOpen(true)}>
+          <span className="set-plus" aria-hidden>
+            +
+          </span>
+          <span className="cx-opt-hint">{label}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One PROGRAM under Execution: a fold over the subcommands the toolset names.
+ *
+ * It looks like a section and differs from one in the way that matters: its mode is NOT derived. It
+ * is the entry for the bare program (`"git": …`), which stands for any other `git` — so setting it
+ * writes that one line and leaves `git status` and `git commit` saying what they said. With no such
+ * entry the button shows what any other `git` answers to today, the shell's line, and picking a mode
+ * is what writes one.
+ */
+function CommandGroupRow({
+  group,
+  toolset,
+  open,
+  onOpen,
+  onMode,
+  children,
+}: {
+  group: CommandGroup;
+  toolset: Toolset;
+  open: boolean;
+  onOpen: () => void;
+  onMode: (next: PermissionMode) => void;
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className={`cx-cat cx-sub${open ? " open" : ""}`}>
+      <div className="cx-cat-head">
+        <button type="button" className="cx-cat-fold" aria-expanded={open} onClick={onOpen}>
+          <span className="cx-more cx-cat-chev">›</span>
+          <span className="cx-chip-icon">
+            <Icon name="terminal" />
+          </span>
+          <span className="cx-opt-text">
+            <span className="cx-opt-name ellip">
+              <span className="mono">{group.program}</span>
+            </span>
+            <span className="cx-opt-hint ellip">{open ? groupSentence(toolset, group) : groupSummary(toolset, group)}</span>
+          </span>
+          {group.subs.length > 0 ? <span className="cx-cat-count">{group.subs.length}</span> : null}
+        </button>
+        <ModePicker mode={groupModeOf(toolset, group)} title={`${group.program}: any ${group.program} command not named under it`} onMode={onMode} />
+      </div>
+      {open ? <div className="cx-cat-body">{children}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * Where the Permissions head said where the value came from, it now says which BUCKET the rows are —
+ * and opens the hierarchy of them: each bucket, what it holds, and the layer that defines it.
+ *
+ * The card's own `cx-submenu`, so it floats over the rows rather than moving them. A bucket inside
+ * another is indented under it; a folder that only holds buckets is listed so the indent has
+ * something to hang from, and picking it shows no rows, which is what it has.
+ */
+function BucketPicker({
+  buckets,
+  bucket,
+  onPick,
+  startOpen,
+}: {
+  buckets: readonly ToolsetBucket[];
+  bucket: string;
+  onPick: (path: string) => void;
+  startOpen?: boolean | undefined;
+}): JSX.Element {
+  const [open, setOpen] = useState(startOpen === true);
+  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
+  return (
+    <div className="cx-origin-wrap" ref={box}>
+      <button type="button" className="cx-origin cx-origin-pick cx-bucket" aria-expanded={open} title="Which bucket of toolsets these rows are" onClick={() => setOpen((v) => !v)}>
+        <span className="cx-chip-icon">
+          <Icon name="folder" />
+        </span>
+        {bucket}
+        <span className="cx-more">›</span>
+      </button>
+      {open ? (
+        <div className="cx-submenu">
+          {buckets.map((row) => (
+            <button
+              key={row.path}
+              type="button"
+              className={row.path === bucket ? "on" : undefined}
+              style={{ paddingLeft: 7 + 16 * row.depth }}
+              onClick={() => {
+                onPick(row.path);
+                setOpen(false);
+              }}
+            >
+              <span className="cx-tick">{row.path === bucket ? "✓" : ""}</span>
+              <span className="cx-chip-icon">
+                <Icon name="folder" />
+              </span>
+              <span className="cx-opt-text">
+                <span className="cx-opt-name ellip">
+                  {row.name} <span className="cx-src">{TOOLSET_LAYER_LABELS[row.layer]}</span>
+                </span>
+                <span className="cx-opt-hint ellip">{row.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Where a kept toolset goes, as the form words it. */
+const KEEP_WHERE: Readonly<Record<WritableLayer, string>> = { project: "in this project", base: "for all projects" };
+
+/**
+ * `+` — keep the map on the cards as a NEW toolset in this bucket.
+ *
+ * Dim while there is nothing to keep: the map already IS one of the bucket's toolsets, or it holds
+ * nothing. A name and where it goes, asked through the schema form; the write is the host's
+ * (`toolset:save`), which refuses what ships, a name a reference could not carry, and an id the
+ * layer already holds — and whatever it refuses with is said here rather than swallowed.
+ */
+function KeepToolset({
+  bucket,
+  ready,
+  layers,
+  onKeep,
+  startOpen,
+}: {
+  bucket: string;
+  ready: boolean;
+  layers: readonly WritableLayer[];
+  onKeep: (name: string, layer: WritableLayer) => Promise<void>;
+  startOpen?: boolean | undefined;
+}): JSX.Element {
+  const [open, setOpen] = useState(startOpen === true);
+  const [draft, setDraft] = useState<{ name?: string; where?: string }>({});
+  const [problem, setProblem] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
+  const where = layers.map((layer) => KEEP_WHERE[layer]);
+  const schema: Schema = {
+    type: "object",
+    properties: {
+      name: { type: "string", title: "name", minLength: 1 },
+      where: { type: "string", title: "where", enum: where, default: where[0] },
+    },
+    required: ["name", "where"],
+  };
+  const add = (): void => {
+    const name = (draft.name ?? "").trim();
+    const layer = layers.find((candidate) => KEEP_WHERE[candidate] === (draft.where ?? where[0]));
+    const wrong = toolsetNameProblem(name) ?? (layer === undefined ? "pick where it goes" : undefined);
+    if (wrong !== undefined || layer === undefined) {
+      setProblem(wrong ?? null);
+      return;
+    }
+    setSaving(true);
+    setProblem(null);
+    void onKeep(name, layer).then(
+      () => {
+        setSaving(false);
+        setDraft({});
+        setOpen(false);
+      },
+      (e: unknown) => {
+        setSaving(false);
+        setProblem(e instanceof Error ? e.message : String(e));
+      },
+    );
+  };
+  return (
+    <div className="cx-origin-wrap" ref={box}>
+      <button
+        type="button"
+        className={`cx-set-add${ready ? " ready" : ""}`}
+        aria-expanded={open}
+        disabled={!ready}
+        title={ready ? `Keep these tools and modes as a new toolset in ${bucket}` : "These tools and modes are already a toolset here"}
+        onClick={() => setOpen((v) => !v)}
+      >
+        +
+      </button>
+      {open && ready ? (
+        <div className="cx-submenu cx-set-new">
+          <span className="cx-opt-hint">
+            Keep these tools and modes as a toolset in <b>{bucket}</b>
+          </span>
+          <SchemaForm
+            schema={schema}
+            value={{ where: where[0], ...draft }}
+            onChange={(next) => setDraft((next ?? {}) as { name?: string; where?: string })}
+            ctx={{ path: "", hidePaths: true, disabled: saving }}
+          />
+          {problem !== null ? <p className="sub warn-text">{problem}</p> : null}
+          <div className="cx-set-new-foot">
+            <span className="grow" />
+            <button type="button" className="primary" disabled={saving} onClick={add}>
+              Add
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * One setting: a chip that says what will happen, and a popover that changes it.
  *
  * Closes on an outside click and on Escape, because it sits above a box someone is typing in, and a
@@ -778,6 +1144,9 @@ function Chip({
   origin,
   from,
   onReset,
+  lead,
+  trail,
+  startOpen,
   children,
 }: {
   icon?: "model" | "shield" | "think" | "tool";
@@ -790,9 +1159,18 @@ function Chip({
   from?: string;
   /** Offered only for an override: going back to what the workflow says is a real thing to want. */
   onReset?: () => void;
+  /**
+   * What the head says between the title and the origin, and between the origin and `reset` — the
+   * Permissions card's bucket picker and its `+`. The CALLER's, because the chip does not know what
+   * a bucket is; it only knows its head is one row.
+   */
+  lead?: ReactNode;
+  trail?: ReactNode;
+  /** Draw the card open from the first render — see {@link ComposerOpen}. */
+  startOpen?: boolean;
   children: ReactNode;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen === true);
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -835,7 +1213,9 @@ function Chip({
         <div className="cx-pop">
           <div className="cx-pop-head">
             <span className="cx-pop-title">{label}</span>
+            {lead}
             <Origin origin={origin} from={from} />
+            {trail}
             {onReset !== undefined && origin === "override" ? (
               <button type="button" className="cx-reset" onClick={onReset}>
                 reset
@@ -847,6 +1227,25 @@ function Chip({
       ) : null}
     </div>
   );
+}
+
+/**
+ * What is drawn OPEN from the first render.
+ *
+ * Every card, picker and fold here opens on a click, which is right for a person and leaves nothing
+ * for a still picture to show: a server render has no clicks. This is how a catalog mockup, a static
+ * shot or a test draws the state it is about — the Permissions card with its bucket picker down, the
+ * Tools card with Execution and `git` unfolded — through the real component rather than a copy of
+ * its markup. It sets where the state STARTS and nothing else; every control still works.
+ */
+export interface ComposerOpen {
+  card?: "Thinking" | "Permissions" | "Tools";
+  /** The Permissions head's bucket picker. */
+  buckets?: boolean;
+  /** The Permissions head's `+` form. */
+  keep?: boolean;
+  /** Folds of the Tools card: a category id (`execution`), or `program:<name>` for a command group. */
+  folds?: readonly string[];
 }
 
 export function Composer({
@@ -863,7 +1262,12 @@ export function Composer({
   onValue,
   mentions,
   readMention,
+  onSaveToolset,
+  saveLayers,
+  startOpen,
 }: {
+  /** What is drawn open from the first render — for a still picture. See {@link ComposerOpen}. */
+  startOpen?: ComposerOpen | undefined;
   /** What the message would run under right now — inherited, with any overrides already folded in. */
   plan: ChatPlanView | null;
   /** A turn is in flight — what turns the button into a stop. */
@@ -909,6 +1313,14 @@ export function Composer({
    * this should pass it.
    */
   readMention?: ((path: string) => Promise<string>) | undefined;
+  /**
+   * Keep the map on the cards as a new toolset file — the Permissions card's `+`. The HOST's, because
+   * it is a write and the composer holds no channel of its own; absent ⇒ `+` stays dim, which is the
+   * honest shape for a composer with nothing behind it.
+   */
+  onSaveToolset?: ((request: Omit<SaveToolsetRequest, "project">) => Promise<unknown>) | undefined;
+  /** Where `+` may write. A conversation with no project open has only "for all projects". */
+  saveLayers?: readonly WritableLayer[] | undefined;
 }): JSX.Element {
   const [own, setOwn] = useState("");
   const draft = value ?? own;
@@ -928,23 +1340,34 @@ export function Composer({
    * WHAT the groups are and what each is set to, which the folded rows already do — unfolding all of
    * them puts eight tool rows in front of somebody who came to check one word.
    */
-  const [openCats, setOpenCats] = useState<ReadonlySet<string>>(new Set());
+  const [openCats, setOpenCats] = useState<ReadonlySet<string>>(new Set(startOpen?.folds ?? []));
+  /** Which bucket the Permissions rows are, once the person has picked one. Else the plan's. */
+  const [picked, setPicked] = useState<string | undefined>(undefined);
+  /** What an unticked tool would run under if ticked again — see {@link Parked}. Never sent. */
+  const [parked, setParked] = useState<Parked>({});
   const settings = plan?.settings ?? {};
   const origin = plan?.origin ?? {
     model: "unset" as const,
     reasoning: "unset" as const,
     tools: "unset" as const,
     permissions: "unset" as const,
+    implementations: "unset" as const,
+    toolset: "unset" as const,
   };
-  const tools = settings.tools ?? [];
-  // What this project can gate, and the modes in force over them. The map is what reaches the
-  // executor; the preset is only what to CALL it, and `undefined` there means the modes are nobody's
-  // preset — which is what `custom` says on the chip.
+  // What this project can hold a line for, and THE MAP in force over it: one toolset, read from
+  // wherever the settings keep it — the map an earlier edit here wrote, or the list, block and
+  // implementations a state's own declaration arrives as. The map is what reaches the executor; a
+  // toolset's name is only what to CALL it, and no match means the map is nobody's — `custom`.
   const offered = plan?.available.tools ?? [];
-  const modes = settings.permissions?.tools ?? {};
-  /** Whose code runs each tool — a second axis, kept out of `permissions` on purpose. */
-  const impls = settings.implementations ?? {};
-  const preset = presetOf(modes, offered);
+  const registered = offered.map((tool) => tool.name);
+  const map = toolsetOfSettings(settings).toolset;
+  const tools = heldTools(map);
+  const toolsets: readonly ToolsetChoice[] = plan?.available.toolsets ?? [];
+  const buckets = toolsetBuckets(toolsets);
+  const openedOn = plan?.available.bucket ?? DEFAULT_TOOLSET_BUCKET;
+  const bucket = picked !== undefined && buckets.some((row) => row.path === picked) ? picked : openedOn;
+  const rows = toolsetsOfBucket(toolsets, bucket);
+  const matched = matchToolset(map, toolsets, bucket, registered);
   // Never blank. A control with nothing in it cannot be read as "this is what will happen", which is
   // the only question this row exists to answer.
   const effective = plan?.effective ?? { reasoning: "…", permissions: "…" };
@@ -1039,6 +1462,40 @@ export function Composer({
     onOverrides(next);
   };
 
+  /**
+   * Send the WHOLE map. Every edit on either card ends here: a toolset is one statement, so there is
+   * no writing half of one, and what is written is a map whichever form the state's own declaration
+   * arrived in (`declOfToolset`).
+   */
+  const write = (next: Toolset, nextParked: Parked = parked): void => {
+    setParked(nextParked);
+    set({ toolset: declOfToolset(next) });
+  };
+  /** Both cards reset together, because they are one setting: back to what the state declares. */
+  const resetToolset = (): void => {
+    const next = { ...overrides };
+    delete next.toolset;
+    delete next.tools;
+    delete next.permissions;
+    delete next.implementations;
+    setParked({});
+    // …and to the bucket that declaration opens on: the rows are part of what was chosen here.
+    setPicked(undefined);
+    onOverrides(next);
+  };
+  // One origin for both cards, for the same reason: a map chosen here is the person's choice on
+  // both, and otherwise each says where its half of the state's declaration came from.
+  const chosen = origin.toolset === "override";
+  const permissionsOrigin: SettingOrigin = chosen ? "override" : origin.permissions;
+  const toolsOrigin: SettingOrigin = chosen ? "override" : origin.tools;
+  const toggleCat = (id: string): void =>
+    setOpenCats((was) => {
+      const next = new Set(was);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
     // The disabled state is a fact about the WHOLE composer, not about the box you type in. Marked
     // here so the shell greys as one surface — see `.cx.off` in the stylesheet for what went wrong
@@ -1122,6 +1579,7 @@ export function Composer({
             <Chip
               icon="think"
               label="Thinking"
+              startOpen={startOpen?.card === "Thinking"}
               value={effective.reasoning}
               origin={origin.reasoning}
               from={plan?.from}
@@ -1145,30 +1603,57 @@ export function Composer({
             <Chip
               icon="shield"
               label="Permissions"
-              value={effective.permissions}
-              origin={origin.permissions}
+              // A MATCH, never a memory: the toolset's name while the map is exactly that toolset's,
+              // `custom` the moment a line differs. A call that declares no tools has no map to
+              // match, and says what decides instead — main words that, from the compiled policy.
+              value={plan === null || tools.length === 0 ? effective.permissions : matched !== undefined ? toolsetLabel(matched) : "custom"}
+              origin={permissionsOrigin}
               from={plan?.from}
-              onReset={() => clear("permissions")}
+              onReset={resetToolset}
+              startOpen={startOpen?.card === "Permissions"}
+              lead={<BucketPicker buckets={buckets} bucket={bucket} onPick={setPicked} startOpen={startOpen?.buckets} />}
+              trail={
+                <KeepToolset
+                  bucket={bucket}
+                  startOpen={startOpen?.keep}
+                  // Dim while the map already IS one of this bucket's toolsets, while it holds nothing,
+                  // and where the host gave this composer nowhere to write.
+                  ready={onSaveToolset !== undefined && matched === undefined && Object.keys(map.entries).length > 0}
+                  layers={saveLayers ?? ["project", "base"]}
+                  onKeep={async (name, layer) => {
+                    await onSaveToolset?.({ bucket, name, layer, toolset: declOfToolset(map) });
+                    // The map is now a toolset of this bucket, and only a fresh plan lists it. The
+                    // hosts re-ask whenever the overrides change, so they are handed the SAME
+                    // overrides as a new object: keeping a name must not change what runs.
+                    onOverrides({ ...overrides });
+                  }}
+                />
+              }
             >
               <div className="cx-opts">
-                {PERMISSION_PRESETS.map((choice) => (
-                  <Opt
-                    key={choice.id}
-                    on={preset?.id === choice.id}
-                    icon={MODE_META[choice.modeFor({ name: "" })].icon}
-                    name={choice.label}
-                    hint={choice.hint}
-                    // Spent on the click: it writes a mode for every tool and then has no further
-                    // say. What runs is the map, which is the list under the Tools chip — so the
-                    // reader can see what a preset did and change any part of it.
-                    onPick={() => set({ permissions: { ...settings.permissions, tools: presetModes(choice, offered) } })}
-                  />
-                ))}
+                {rows.map((choice) => {
+                  const toolset = parseToolset(choice.decl).toolset;
+                  return (
+                    <Opt
+                      key={choice.id}
+                      on={matched?.id === choice.id}
+                      icon={MODE_META[toolsetGlyph(choice)].icon}
+                      name={toolsetLabel(choice)}
+                      hint={toolsetHint(choice)}
+                      // Its ticks, implementations and modes, written onto the Tools card whole. What
+                      // runs is the map, which is the list under the Tools chip — so the reader can
+                      // see what a toolset did and change any part of it.
+                      onPick={() => write(toolset, {})}
+                    />
+                  );
+                })}
               </div>
               <p className="cx-hint">
-                {preset === undefined
-                  ? "These modes match no preset — set per tool under Tools."
-                  : "A starting point. Change any tool's mode under Tools and this becomes custom."}
+                {rows.length === 0
+                  ? `No toolsets in ${bucket} yet. + keeps the tools and modes under Tools as the first.`
+                  : matched === undefined && tools.length > 0
+                    ? `These tools and modes match no toolset in ${bucket} — + keeps them as a new one.`
+                    : "A toolset: which tools are offered, and what happens when each is called. Change any of it under Tools and this becomes custom."}
               </p>
             </Chip>
 
@@ -1176,20 +1661,21 @@ export function Composer({
               icon="tool"
               label="Tools"
               // An empty list means two different things and the chip has to say which. On a CLI
-              // route it is the DEFAULT — leave the agent its own tools — and reading "no tools"
-              // beside a ticked "default" row was the chip contradicting the list under it.
+              // route with nothing declared it is the DEFAULT — leave the agent its own tools — and
+              // reading "no tools" there was the chip contradicting what would run.
               value={
                 tools.length === 0
-                  ? cliRoute !== undefined
+                  ? cliRoute !== undefined && !declaresTools(settings)
                     ? "default tools"
                     : "no tools"
                   : tools.length === 1
                     ? tools[0]!
                     : `${tools.length} tools`
               }
-              origin={origin.tools}
+              origin={toolsOrigin}
               from={plan?.from}
-              onReset={() => clear("tools")}
+              onReset={resetToolset}
+              startOpen={startOpen?.card === "Tools"}
             >
               <div className="cx-cats">
                 {TOOL_CATEGORIES.map((category) => {
@@ -1213,48 +1699,112 @@ export function Composer({
                     <CategoryRow
                       key={category.id}
                       category={category}
-                      granted={inCategory.filter((tool) => tools.includes(tool.name)).length}
+                      granted={sectionCountOf(map, category.id)}
                       total={inCategory.length}
-                      mode={categoryModeOf(category.id, (name) => (modes[name] ?? MODE_WHEN_UNSET) as never) as PermissionMode | undefined}
+                      mode={sectionModeOf(map, parked, category.id)}
                       open={openCats.has(category.id)}
-                      onOpen={() =>
-                        setOpenCats((was) => {
-                          const next = new Set(was);
-                          if (next.has(category.id)) next.delete(category.id);
-                          else next.add(category.id);
-                          return next;
-                        })
-                      }
-                      // Cascades: setting a category writes every tool under it, which is what makes
+                      onOpen={() => toggleCat(category.id)}
+                      // Cascades: setting a section writes every line under it, which is what makes
                       // the row's own value derivable next render.
-                      onMode={(next) =>
-                        set({
-                          permissions: {
-                            ...settings.permissions,
-                            tools: { ...modes, ...Object.fromEntries(inCategory.map((tool) => [tool.name, next])) },
-                          },
-                        })
-                      }
+                      onMode={(next) => {
+                        const cascaded = withSectionMode(map, parked, category.id, next);
+                        write(cascaded.toolset, cascaded.parked);
+                      }}
                     >
                       {inCategory.map((tool) => (
                         <ToolRow
                           key={tool.name}
                           tool={tool}
                           spec={TOOL_SPEC_BY_NAME.get(tool.name)}
-                          granted={tools.includes(tool.name)}
-                          mode={modes[tool.name] ?? MODE_WHEN_UNSET}
-                          impl={impls[tool.name] ?? "app"}
+                          granted={holdsTool(map, tool.name)}
+                          mode={toolModeOf(map, parked, tool.name)}
+                          impl={toolImplementationOf(map, parked, tool.name)}
                           cliRoute={cliRoute}
-                          // The WHOLE list every time — see the module header on replacement.
-                          onGrant={() =>
-                            set({ tools: tools.includes(tool.name) ? tools.filter((t) => t !== tool.name) : [...tools, tool.name] })
-                          }
+                          // The WHOLE map every time — see the module header on replacement.
+                          onGrant={() => write(withToolHeld(map, parked, tool.name, !holdsTool(map, tool.name)))}
+                          // A line the map does not hold has nowhere in it to keep a mode, so what an
+                          // unticked row is set to waits beside the map until the row is ticked.
                           onMode={(next) =>
-                            set({ permissions: { ...settings.permissions, tools: { ...modes, [tool.name]: next } } })
+                            holdsTool(map, tool.name)
+                              ? write(withSubjectMode(map, tool.name, next))
+                              : setParked({ ...parked, [tool.name]: { ...parked[tool.name], mode: next } })
                           }
-                          onImpl={(next) => set({ implementations: { ...impls, [tool.name]: next } })}
+                          onImpl={(next) =>
+                            holdsTool(map, tool.name)
+                              ? write(withToolImplementation(map, tool.name, next))
+                              : setParked({ ...parked, [tool.name]: { ...parked[tool.name], implementation: next } })
+                          }
                         />
                       ))}
+                      {category.id === "execution" ? (
+                        // What Execution holds beyond the shell (decision 0007 §4–§5): the commands the
+                        // toolset names, grouped under their program, then `script`, then the line
+                        // that adds a command. A shell line is taken apart, and each part answers to
+                        // its own line here.
+                        <>
+                          {commandGroupsOf(map).map((group) => (
+                            <CommandGroupRow
+                              key={group.program}
+                              group={group}
+                              toolset={map}
+                              open={openCats.has(`program:${group.program}`)}
+                              onOpen={() => toggleCat(`program:${group.program}`)}
+                              onMode={(next) => write(withSubject(map, group.program, next))}
+                            >
+                              {group.subs.map((sub) => (
+                                <SubjectRow
+                                  key={sub.subject}
+                                  subject={sub.subject}
+                                  held
+                                  mode={sub.mode}
+                                  onHeld={() => write(withoutSubject(map, sub.subject))}
+                                  onMode={(next) => write(withSubjectMode(map, sub.subject, next))}
+                                />
+                              ))}
+                              <AddLine
+                                label={`add a ${group.program} subcommand`}
+                                example="push"
+                                onAdd={(typed) => {
+                                  const named = commandSubjectOf(typed, group.program);
+                                  if ("problem" in named) return named.problem;
+                                  write(withCommand(map, named.subject));
+                                  return undefined;
+                                }}
+                              />
+                            </CommandGroupRow>
+                          ))}
+                          <SubjectRow
+                            subject={SCRIPT_SUBJECT}
+                            hint={SCRIPT_HINT}
+                            held={Object.hasOwn(map.entries, SCRIPT_SUBJECT)}
+                            mode={map.entries[SCRIPT_SUBJECT]?.mode ?? parked[SCRIPT_SUBJECT]?.mode ?? MODE_WHEN_UNSET}
+                            onHeld={() =>
+                              write(
+                                Object.hasOwn(map.entries, SCRIPT_SUBJECT)
+                                  ? withoutSubject(map, SCRIPT_SUBJECT)
+                                  : withSubject(map, SCRIPT_SUBJECT, parked[SCRIPT_SUBJECT]?.mode ?? MODE_WHEN_UNSET),
+                              )
+                            }
+                            onMode={(next) =>
+                              Object.hasOwn(map.entries, SCRIPT_SUBJECT)
+                                ? write(withSubjectMode(map, SCRIPT_SUBJECT, next))
+                                : setParked({ ...parked, [SCRIPT_SUBJECT]: { mode: next } })
+                            }
+                          />
+                          <AddLine
+                            label="add a command"
+                            example="git status"
+                            onAdd={(typed) => {
+                              const named = commandSubjectOf(typed);
+                              if ("problem" in named) return named.problem;
+                              write(withCommand(map, named.subject));
+                              // Open the group it landed in, so the line that was just added is on screen.
+                              setOpenCats((was) => new Set([...was, `program:${named.subject.split(" ")[0]!}`]));
+                              return undefined;
+                            }}
+                          />
+                        </>
+                      ) : null}
                     </CategoryRow>
                   );
                 })}
@@ -1268,12 +1818,12 @@ export function Composer({
                   <div className="cx-cat-head">
                     <span className="cx-opt-text">
                       <span className="cx-opt-name ellip">Other</span>
-                      <span className="cx-opt-hint ellip">anything not listed above</span>
+                      <span className="cx-opt-hint ellip">anything not listed above — an agent's own tools with no equal here included</span>
                     </span>
                     <ModePicker
-                      mode={settings.permissions?.other ?? MODE_WHEN_UNSET}
+                      mode={map.other ?? MODE_WHEN_UNSET}
                       title="Anything this project has no name for"
-                      onMode={(next) => set({ permissions: { ...settings.permissions, other: next } })}
+                      onMode={(next) => write(withOther(map, next))}
                     />
                   </div>
                 </div>
@@ -1281,7 +1831,7 @@ export function Composer({
               <p className="cx-hint">
                 {offered.length === 0
                   ? "This project registers no tools."
-                  : "Ticking a tool offers it; the mode beside it is what happens when it is called. Access is always JaiRA's, whichever implementation runs."}
+                  : "Ticking a tool offers it; the mode beside it is what happens when it is called. A shell line is taken apart, and each part answers to its own line here."}
               </p>
             </Chip>
 
