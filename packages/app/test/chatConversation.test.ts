@@ -18,25 +18,22 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
-import { testHome } from "@jaira/testing";
+import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
-import { CHAT_AGENT, CHAT_ASSISTANT, chatWorkflowFiles, titleOf } from "../src/renderer/chatWorkflow";
+import { CHAT_AGENT, CHAT_ASSISTANT, titleOf } from "../src/renderer/chatWorkflow";
 
 let dir: string;
 let service: AppService;
 let pushes: PushMessage[];
 
 beforeEach(async () => {
+  // What really ships, not the empty layer the suite's setup registers — see `shippedLayer`.
+  shippedLayer();
   dir = mkdtempSync(join(tmpdir(), "jaira-convo-"));
-  const paths = initProject(dir, testHome());
-  // The states the Chat view installs, written into the PROJECT rather than into the machine's
-  // shared root: a test must not write to `~/.jaira`, and the loader searches the project first — so
-  // this exercises the same ids through the same resolution the view's install lands in.
-  for (const [stateId, state] of Object.entries(chatWorkflowFiles())) {
-    const file = join(paths.workflowsDir, `${stateId}.json`);
-    mkdirSync(join(file, ".."), { recursive: true });
-    writeFileSync(file, JSON.stringify(state, null, 2), "utf8");
-  }
+  // No state files are written: the chat states SHIP, in the built-in layer at the end of every
+  // project's search path (decision 0006), so an empty project over an empty shared root resolves
+  // them — which is the install step's absence, tested by everything below.
+  initProject(dir, testHome());
   pushes = [];
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
@@ -157,7 +154,7 @@ describe("the settings of a conversation that has not started yet", () => {
     expect(plan.origin.tools).toBe("override");
   });
 
-  it("answers for a state nobody has installed yet — the view writes its files on the first send", () => {
+  it("answers for a state no layer supplies, rather than blanking the composer", () => {
     const plan = service.chatStartPlan({ stateId: "chat/not-installed" });
     expect(plan.from).toBeUndefined();
     expect(plan.origin).toMatchObject({ model: "unset", tools: "unset", permissions: "unset" });
@@ -174,10 +171,12 @@ describe("the settings of a conversation that has not started yet", () => {
     expect(plan.settings.tools).toEqual([]);
     expect(plan.settings.model).toBe("fake/model");
     // And the authored file is untouched — a pick for one conversation is not an edit of what a
-    // conversation IS.
-    const state = JSON.parse(readFileSync(join(initProject(dir, testHome()).workflowsDir, `${CHAT_AGENT}.json`), "utf8")) as {
+    // conversation IS. The SHIPPED file, since nothing installs a copy (decision 0006) — and no copy
+    // appeared because of the pick.
+    const state = JSON.parse(service.readWorkflow({ stateId: CHAT_AGENT, layer: "system" }).text) as {
       environment: { tools: string[] };
     };
+    expect(service.readWorkflow({ stateId: CHAT_AGENT, layer: "project" }).exists).toBe(false);
     expect(state.environment.tools).toEqual(["bash", "read_file", "write_file"]);
   });
 });

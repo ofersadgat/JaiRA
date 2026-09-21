@@ -1,0 +1,26 @@
+{
+  "label": "Check the greeting",
+  "inputs": {
+    "greeting": {
+      "schema": {
+        "type": "string"
+      },
+      "description": "What the previous state's model actually replied."
+    }
+  },
+  "outputs": {
+    "passed": {
+      "schema": {
+        "type": "boolean"
+      }
+    },
+    "verdict": {
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "operation": {
+    "prompt": "Another model was asked to say hello world. Its reply is between the markers below.\n\n---\n{{.inputs.greeting}}\n---\n\nSet `passed` to true only if the text between the markers is a hello-world greeting.\nSet it to false if the text is empty, missing, or says something else.\nSet `verdict` to one short sentence quoting what you saw and saying why you decided that."
+  }
+}

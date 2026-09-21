@@ -7,28 +7,28 @@
  * new one from there, while the original is exactly as it was. Both take the journal position the
  * thread reports for the message (`ChatEditPoint.seq`).
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
-import { testHome } from "@jaira/testing";
+import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
-import { CHAT_ASSISTANT, chatWorkflowFiles, titleOf } from "../src/renderer/chatWorkflow";
+import { CHAT_ASSISTANT, titleOf } from "../src/renderer/chatWorkflow";
 
 let dir: string;
 let service: AppService;
 let pushes: PushMessage[];
 
 beforeEach(async () => {
+  // What really ships, not the empty layer the suite's setup registers — see `shippedLayer`.
+  shippedLayer();
   dir = mkdtempSync(join(tmpdir(), "jaira-chatcut-"));
-  const paths = initProject(dir, testHome());
-  for (const [stateId, state] of Object.entries(chatWorkflowFiles())) {
-    const file = join(paths.workflowsDir, `${stateId}.json`);
-    mkdirSync(join(file, ".."), { recursive: true });
-    writeFileSync(file, JSON.stringify(state, null, 2), "utf8");
-  }
+  // No state files are written: the chat states SHIP, in the built-in layer at the end of every
+  // project's search path (decision 0006), so an empty project over an empty shared root resolves
+  // them — which is the install step's absence, tested by everything below.
+  initProject(dir, testHome());
   pushes = [];
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);

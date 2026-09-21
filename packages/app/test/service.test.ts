@@ -379,7 +379,9 @@ describe("sessions — one process, several projects", () => {
     try {
       await service.open(other);
       const tree = service.filesTree({ project: other });
-      expect(tree.roots.map((r) => r.project)).toEqual([other]);
+      // That project, and what ships behind it (decision 0006) — which belongs to no project.
+      expect(tree.roots.map((r) => r.project)).toEqual([other, undefined]);
+      expect(tree.roots.map((r) => r.layer)).toEqual(["project", "system"]);
     } finally {
       await service.close();
       rmSync(other, { recursive: true, force: true });
@@ -389,7 +391,7 @@ describe("sessions — one process, several projects", () => {
   it("falls back to every project when the address names one that is not open", async () => {
     // A stale address is an address, not a fault: the panel shows the root rather than nothing.
     const tree = service.filesTree({ project: join(tmpdir(), "never-opened") });
-    expect(tree.roots.map((r) => r.project)).toEqual([dir]);
+    expect(tree.roots.filter((r) => r.layer === "project").map((r) => r.project)).toEqual([dir]);
   });
 
   it("lists every project's tasks as one recency-ordered list, each stamped with its project", async () => {

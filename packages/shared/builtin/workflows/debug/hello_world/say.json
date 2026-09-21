@@ -1,0 +1,13 @@
+{
+  "label": "Say hello",
+  "outputs": {
+    "greeting": {
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "operation": {
+    "prompt": "Reply with exactly this and nothing else: Hello, world!"
+  }
+}

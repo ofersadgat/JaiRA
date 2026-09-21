@@ -2,14 +2,14 @@
 id: ui/components/workflow-editor
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/draft-belongs-to-the-file, ux/patterns/problems-marked-where-they-are, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/inherited-unless-set-here]
 serves: [product/author-processes-without-memorising-the-format, product/see-how-a-process-flows, product/share-processes-across-projects, product/complete-record-of-every-run, product/work-runs-the-process-it-started-with]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel, ui/surfaces/settings-appearance]
 reuses: [ui/components/state-form, ui/components/schema-json-editor, ui/components/state-graph, ui/components/editor-chrome, ui/components/issue-mark]
-implemented_by: [packages/app/src/renderer/stateEditor.tsx, packages/app/src/renderer/reading.ts]
-verified_by: [packages/app/test/configPanel.test.ts, packages/app/test/childBindings.test.ts]
-mockups: [ui/assets/workflow-editor/success.html, ui/assets/workflow-editor/new-file.html, ui/assets/workflow-editor/json.html, ui/assets/workflow-editor/graph.html, ui/assets/workflow-editor/error.html, ui/assets/workflow-editor/reading.html]
+implemented_by: [packages/app/src/renderer/stateEditor.tsx, packages/app/src/renderer/builtIn.tsx, packages/app/src/renderer/reading.ts]
+verified_by: [packages/app/test/configPanel.test.ts, packages/app/test/childBindings.test.ts, packages/app/test/builtInStates.test.ts]
+mockups: [ui/assets/workflow-editor/success.html, ui/assets/workflow-editor/new-file.html, ui/assets/workflow-editor/json.html, ui/assets/workflow-editor/graph.html, ui/assets/workflow-editor/error.html, ui/assets/workflow-editor/reading.html, ui/assets/workflow-editor/built-in.html]
 siblings: [ui/components/file-panel, ui/components/schema-json-editor, ui/components/state-inspector, ui/components/schema-form]
 ---
 
@@ -27,6 +27,7 @@ One state file's editing surface: a quiet top line with the file's path cut from
 
 - **Path.** `.app-secondary` in `--dim`, one line, ending in ` · new file` while the file is not on disk. A long path loses its start, so the file name stays in view; the whole path is its tooltip.
 - **Shared copy.** A pill chip with a 1px `--warn` border and `--warn` text at ×0.80, shown when the file is the copy every project shares. Its tooltip says what editing it does.
+- **Layer.** Where JaiRA ships a state of this id, the chip says which side of that the file is on and link buttons in `--accent` data type follow it. A shipped file: a hairline `built in · read-only` chip, then `Override for all projects` and `Override here`, and its path reads `$SYSTEM/workflows/{id}.json` with the real path as the tooltip. A file that overrides one: `overrides built in`, hairline in a project and `--warn` in the shared root, then `Compare with what ships`; a shared copy that JaiRA itself wrote adds ` · identical copy` to the chip and a `Delete this copy` link. The chip and links never shrink or wrap.
 - **Switch.** Three joined buttons at ×0.88 of the app size, 2px by 11px padding. The chosen one is filled `--fill-accent` with `--on-accent` text at weight 600; the others are ghost buttons. The path grows to fill the line; the chip and the switch never shrink.
 - **Body.** Form draws the [state-form](state-form.md), which scrolls on its own. JSON draws the [schema-json-editor](schema-json-editor.md) with `Workflow state` chosen as its schema and no Save row of its own. Graph draws the [state-graph](state-graph.md) filling the body.
 - **Foot.** The [editor-chrome](editor-chrome.md) row, pinned under the body on every tab.
@@ -44,6 +45,7 @@ The Files view and a run's configuration offer all three readings. A configurati
 | success | The Form tab over a saved file: `Save` and `Revert` dimmed and nothing beside them. On the shared layer the chip sits between the path and the switch. | [success.html](../assets/workflow-editor/success.html) |
 | json | The JSON tab: the schema line, the coloured text and its verdict. An edit on either editing tab is one edit to the same document, so the foot reads `unsaved changes` on both. | [json.html](../assets/workflow-editor/json.html) |
 | graph | The Graph tab: the legend and zoom line over the picture. The foot stays, because the picture draws the unsaved text. | [graph.html](../assets/workflow-editor/graph.html) |
+| built in | A shipped file: the form is the inert reading, the JSON tab is the document as read-only text, and there is no foot. An override that a layer already holds is at half opacity, and `Override here` is too with no project open. Over a file that overrides a shipped one, `Compare with what ships` replaces the body with a side-by-side read-only diff, shipped on the left, and reads `Back to the file` while it shows. | [built-in.html](../assets/workflow-editor/built-in.html) |
 | error | The text does not parse. Form and Graph each give one `--bad` sentence naming the parse error and the JSON tab as the place to fix it. The JSON tab keeps the text editable, its chip reads `not JSON` and a `--bad` line gives the parse error. `Save` is dimmed beside `fix the JSON before saving`. | [error.html](../assets/workflow-editor/error.html) |
 | reading | A run's configuration or a type preview: no foot row at all; the switch stays live; the form refuses input and loses its box borders; the JSON tab is a plain read-only document filling the body, with no schema line. | [reading.html](../assets/workflow-editor/reading.html) |
 
@@ -68,6 +70,11 @@ There are no keys for switching tabs or saving.
 | Switch tooltips | `the fields, as controls` · `the document, as text` · `what runs after what, and what makes it` |
 | Path | `{path}`, then ` · new file` when it is not on disk |
 | Chip | `shared copy` · tooltip `Editing the shared copy. Every project that has not overridden this state will see the change.` |
+| Built-in chip | `built in · read-only` · tooltip `This file ships with JaiRA and cannot be edited. Override it to change what runs.` |
+| Override links | `Override for all projects` · `Override here`; tooltips `Copy this file into the shared root (~/.jaira) and open the copy` · `Copy this file into this project's .jaira/ and open the copy` · `The shared root already has a copy of this state, and it is the one that loads` · `This project already has a copy of this state, and it is the one that loads` · `Open a project to override this state for it alone` |
+| Override chip | `overrides built in` · `overrides built in · identical copy`; tooltips `The shared copy of a state JaiRA ships. Every project that has not overridden it runs this file.` · `This project's copy of a state JaiRA ships. It runs here instead of the built-in one.` |
+| Compare | `Compare with what ships` · `Back to the file`; while reading `reading what ships…`; `The built-in file could not be read.` |
+| Delete this copy | `Delete this copy`; tooltips `This file is identical to the built-in one, so it changes nothing. Deleting it goes back to what ships.` · `This file is identical to a version an earlier JaiRA installed. Deleting it goes back to what ships now.`; it asks with the file-tree's `Delete 1 copy of a built-in state?` dialog |
 | Form, unreadable | `This file is not valid JSON ({message}) — fix it on the JSON tab to use the form.` |
 | Graph, unreadable | `This file is not valid JSON ({message}) — fix it on the JSON tab to see the graph.` |
 | JSON, unreadable | `not JSON` · `not valid JSON: {message}` |

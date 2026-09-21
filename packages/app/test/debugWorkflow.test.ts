@@ -6,27 +6,32 @@
  * with the scripted executor: it lints on start (a task start runs the same validation
  * `workflow lint` does), the sequence advances, and — the part that matters — `check` is judged
  * against what `say` actually produced rather than against nothing.
+ *
+ * Nothing is written before it runs. The three states ship in the built-in layer (decision 0006), so
+ * an empty project over an EMPTY shared root resolves them; the install step this file used to
+ * imitate is gone. That also makes this the test that the scripted replies in `debugWorkflow.ts`
+ * still match the prompts in the shipped files — they are matched by text, in two places.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { writeWorkflowFiles } from "@jaira/runtime";
 import type { PushMessage } from "@jaira/shared";
-import { testHome } from "@jaira/testing";
+import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { verdictOf } from "../src/renderer/debugPane";
-import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "../src/renderer/debugWorkflow";
+import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "../src/renderer/debugWorkflow";
 
 let dir: string;
 let service: AppService;
 let pushes: PushMessage[];
 
 beforeEach(async () => {
+  // What really ships, not the empty layer the suite's setup registers — see `shippedLayer`.
+  shippedLayer();
   dir = mkdtempSync(join(tmpdir(), "jaira-debug-"));
-  const paths = initProject(dir, testHome());
-  writeWorkflowFiles(paths.workflowsDir, selfTestFiles());
+  initProject(dir, testHome());
   pushes = [];
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
@@ -46,8 +51,15 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 }
 
 describe("the Debug view's self-test workflow", () => {
-  it("names the three states it installs", () => {
-    expect(Object.keys(selfTestFiles())).toEqual(SELF_TEST_STATES);
+  it("finds all three states in what ships, and installs nothing to find them", () => {
+    for (const stateId of SELF_TEST_STATES) {
+      expect(service.readWorkflow({ stateId, layer: "system" }).exists).toBe(true);
+      expect(service.readWorkflow({ stateId, layer: "base" }).exists).toBe(false);
+      expect(service.readWorkflow({ stateId, layer: "project" }).exists).toBe(false);
+    }
+    // The layout `init` makes is there; no state file is in it.
+    const shared = join(testHome(), "workflows");
+    expect(existsSync(shared) ? readdirSync(shared) : []).toEqual([]);
   });
 
   it("projects a board of the two stages, in order", () => {

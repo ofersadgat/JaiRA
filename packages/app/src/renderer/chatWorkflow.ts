@@ -6,9 +6,13 @@
  * of the app already has then applies to it unchanged: the message is journaled, the reply is a
  * session record, the tool calls go through the policy, an approval parks in the same strip, the
  * transcript is read by the same viewer, and the whole thing is on the board and in the history
- * beside the runs. Nothing here is privileged, which is also why these are ordinary files installed
- * through `workflow:write` — the same route `debugWorkflow.ts` takes, for the same reason: a
- * conversation you can open, read and edit in the Files tree is one you can trust the description of.
+ * beside the runs. Nothing here is privileged, which is also why these are ordinary state FILES: they
+ * ship in the built-in layer (`packages/shared/builtin/workflows/chat/`, decision 0006), where the
+ * Files tree lists them like any others — a conversation you can open and read is one you can trust
+ * the description of, and one you want changed is a copy of that file in `~/.jaira` or the project.
+ * This module used to generate them and the Chat view used to write them into the shared root before
+ * its first message. Neither happens now: nothing is installed, so a machine whose shared root is
+ * empty, repointed or read-only still starts a conversation.
  *
  * ## The first message is the run; the rest are chat turns
  *
@@ -33,7 +37,7 @@
  * The Chat view starts every new conversation as the AGENT one. Asking first was asking a permission
  * question in the shape of an identity question, before the person had typed the thing that would
  * answer it — and the answer costs nothing either way, because a granted tool that is never invoked
- * is indistinguishable from an absent one. `chat/assistant` stays installed and readable: it is what
+ * is indistinguishable from an absent one. `chat/assistant` still ships and is readable: it is what
  * conversations already started as one continue to run, and the composer can still strip the tools
  * off any single message.
  *
@@ -48,14 +52,12 @@
  * position chain and the edit-and-resend below all address a PROMPT op's session. A prompt state
  * whose route is an agent CLI is the same agent, in a conversation this app can continue.
  */
-import type { JsonValue } from "@declarative-ai/json";
-
 /** The plain conversation: a model, and nothing of this machine. */
 export const CHAT_ASSISTANT = "chat/assistant";
 /** The working conversation: the same thread, with the project's tools under the project's policy. */
 export const CHAT_AGENT = "chat/agent";
 
-/** Every state the Chat view installs, in the order its "new conversation" menu lists them. */
+/** Every state a Chat-view conversation can be, plain first. Both ship in the built-in layer. */
 export const CHAT_STATES = [CHAT_ASSISTANT, CHAT_AGENT] as const;
 
 /** Which conversation a task is: the workflow it was created from, or `null` for a task that is not one. */
@@ -64,55 +66,6 @@ export type ChatKind = (typeof CHAT_STATES)[number];
 /** True for a task the Chat view owns — its workflow is one of {@link CHAT_STATES}. */
 export function isChatWorkflow(workflow: string | undefined): workflow is ChatKind {
   return workflow !== undefined && (CHAT_STATES as readonly string[]).includes(workflow);
-}
-
-/**
- * The state files, keyed by state id — the shape `workflow:write` takes.
- *
- * `conversation.mode` is stated rather than left to default because a conversation is the one kind
- * of call where the whole transcript is the point: the default is a fresh stream per operation, and
- * a chat that forgot everything it had said between messages would be a chat in name only.
- */
-export function chatWorkflowFiles(): Record<string, JsonValue> {
-  const message = {
-    message: {
-      schema: { type: "string" },
-      description: "What the person typed to start the conversation.",
-    },
-  };
-  return {
-    [CHAT_ASSISTANT]: {
-      label: "Conversation",
-      description:
-        "A conversation with a model, started from the Chat view. The first message is this state's prompt; the rest continue it. No tools: it reads what you give it and answers.",
-      inputs: message,
-      environment: { kind: "prompt" },
-      operation: { prompt: "{{.inputs.message}}" },
-    },
-
-    [CHAT_AGENT]: {
-      label: "Working conversation",
-      description:
-        "A conversation that works in the project, started from the Chat view. Same thread as the plain conversation, plus JaiRA's tools — so it can read files, write them and run commands, each gated by the project policy.",
-      inputs: message,
-      environment: {
-        kind: "prompt",
-        // The GRANT, and then the fence. On a delegated agent route the list does not take the
-        // agent's own built-ins away (WORKFLOWS.md §5.1) — the profile is what governs those, and
-        // `full` is the honest name for "this conversation may change things", with the project
-        // policy and the approval strip deciding each call underneath it.
-        tools: ["bash", "read_file", "write_file"],
-        // `ask` is STATED rather than left to fall through to it. It is the same mode either way —
-        // an unset default ends at `ask` in the ledger — but this is the file somebody opens to find
-        // out what a conversation is allowed to do, and "every call stops and asks" is the answer,
-        // not something to be inferred from the absence of a line. It is also what makes this the
-        // only kind of conversation the view needs to offer: the tools are here, and nothing uses
-        // one without being told to.
-        permissions: { profile: "full", default: "ask" },
-      },
-      operation: { prompt: "{{.inputs.message}}" },
-    },
-  };
 }
 
 /**

@@ -38,5 +38,15 @@ This directory is the source of truth. `packages/cli/build.mjs` and
 packaged Electron app, `builtin/` beside a bundle, or this directory when running
 from source (tsx, vitest).
 
-It ships empty. The chat states and the self-test move in with step 2 of the
-decision; until then they are still installed into `~/.jaira`.
+## What is in it
+
+| Id | Is |
+| --- | --- |
+| `chat/agent` | what the Chat view starts: a conversation that works in the project, every tool call asking first |
+| `chat/assistant` | a conversation with a model and no tools; kept so conversations started as one keep running |
+| `debug/hello_world`, `/say`, `/check` | the Debug view's self-test. Its scripted replies are in `packages/app/src/renderer/debugWorkflow.ts` and match these prompts by text |
+
+Nothing installs these anywhere. Earlier builds wrote them into `~/.jaira`; such
+a copy still wins, and the app offers to delete one whose value is a version it
+shipped. When a file here changes, add the value it HAD to `SUPERSEDED` in
+`packages/app/src/main/shippedStates.ts`, so copies of it stay recognisable.

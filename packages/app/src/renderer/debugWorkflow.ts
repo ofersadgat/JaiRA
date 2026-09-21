@@ -5,11 +5,12 @@
  * structured output, a sibling binding, a derived output on the root — and it exists so the Debug
  * view can run it on demand and show every part of it working (or not).
  *
- * Authored HERE, in the renderer, rather than in `@jaira/runtime` beside `specPlanningFiles()`: the
- * runtime module reaches for `node:fs` to write its files, and the Debug view installs these through
- * the ordinary `workflow:write` channel instead — the same path the Files tree writes on, so the
- * files it lands are files you can then open, read and edit like any others. Nothing about the
- * self-test is privileged.
+ * The three state files SHIP, in the built-in layer (`packages/shared/builtin/workflows/debug/`,
+ * decision 0006) — ordinary files the Files tree lists under "Built in", so nothing about the
+ * self-test is privileged and nothing has to be installed before it can run. This module used to
+ * generate them and the Debug view used to write them into the shared root; what is left here is
+ * what the VIEW needs to know about them: their ids, and the scripted replies that match their
+ * prompts. A copy in `~/.jaira` or the project still wins, as an override of any built-in does.
  *
  * Two states, and the second is the point:
  *
@@ -30,84 +31,13 @@ export const SELF_TEST_ROOT = "debug/hello_world";
 export const SELF_TEST_STATES = [SELF_TEST_ROOT, `${SELF_TEST_ROOT}/say`, `${SELF_TEST_ROOT}/check`];
 
 /**
- * The phrase `say` is asked for and `check` is asked about.
+ * The phrase `say` is asked for and the scripted `say` answers with.
  *
- * One constant because three places need to agree on it: the two prompts, and the scripted reply
- * below. A self-test whose halves disagree about what it is testing reports its own typo as a
- * provider failure.
+ * It also stands in `debug/hello_world/say.json`, and the two have to agree: a self-test whose
+ * halves disagree about what it is testing reports its own typo as a provider failure.
+ * `debugWorkflow.test.ts` holds them together — it runs this script against the shipped files.
  */
 const PHRASE = "Hello, world!";
-
-/**
- * The state files, keyed by state id — the same shape `writeWorkflowFiles` takes.
- *
- * No `model` anywhere on purpose. Every prompt state inherits `models.default` from the effective
- * configuration, so the self-test asks whatever this machine is actually set up to ask. Pinning a
- * model here would make it a test of a model rather than a test of the installation.
- */
-export function selfTestFiles(): Record<string, JsonValue> {
-  return {
-    [SELF_TEST_ROOT]: {
-      label: "Hello-world self-test",
-      description:
-        "Two prompt states: one says hello world, the next reads what it said and judges it. Run from the Debug view.",
-      // Both children are one structured LLM call, so the kind is declared once here and the leaves
-      // say only what differs (WORKFLOWS.md §5). A pure composite does not inherit an operation, so
-      // this root stays a composite.
-      environment: { kind: "prompt" },
-      outputs: {
-        greeting: { schema: { type: "string" }, binding: ".children.say.output.greeting" },
-        passed: { schema: { type: "boolean" }, binding: ".children.check.output.passed" },
-        verdict: { schema: { type: "string" }, binding: ".children.check.output.verdict" },
-      },
-      children: {
-        say: {},
-        // THE WIRE. `check` declares a required `greeting` input; this is where it comes from.
-        check: { inputs: { greeting: ".children.say.output.greeting" } },
-      },
-      sequence: ["say", "check"],
-    },
-
-    [`${SELF_TEST_ROOT}/say`]: {
-      label: "Say hello",
-      // A produced output: the call must return `{ "greeting": … }`, which is also the structured
-      // output contract the model is held to (WORKFLOWS.md §4.4).
-      outputs: { greeting: { schema: { type: "string" } } },
-      operation: {
-        prompt: `Reply with exactly this and nothing else: ${PHRASE}`,
-      },
-    },
-
-    [`${SELF_TEST_ROOT}/check`]: {
-      label: "Check the greeting",
-      inputs: {
-        greeting: {
-          schema: { type: "string" },
-          description: "What the previous state's model actually replied.",
-        },
-      },
-      outputs: {
-        passed: { schema: { type: "boolean" } },
-        verdict: { schema: { type: "string" } },
-      },
-      operation: {
-        // `{{.inputs.greeting}}` interpolates the value the mount bound — so an empty hole here is
-        // itself a finding, and the judging prompt is written to report it rather than to guess.
-        prompt: [
-          "Another model was asked to say hello world. Its reply is between the markers below.",
-          "",
-          "---",
-          "{{.inputs.greeting}}",
-          "---",
-          "",
-          "Set `passed` to true only if the text between the markers is a hello-world greeting.",
-          "Set it to false if the text is empty, missing, or says something else.",
-          "Set `verdict` to one short sentence quoting what you saw and saying why you decided that.",
-        ].join("\n"),
-      },
-    },
-  };
-}
 
 /**
  * A scripted reply for each state — the `--fake` surface, as the Debug view's "scripted" run uses it.
