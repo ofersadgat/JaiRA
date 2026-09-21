@@ -200,7 +200,7 @@ describe("a produced artifact needs permission like anything else", () => {
 });
 
 /** The workflow tools (decision 0005 §3), served since step 6 — the eight the two frozen lists predate. */
-const WORKFLOW_TOOLS = ["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"];
+const WORKFLOW_TOOLS = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"];
 
 describe("JAIRA_TOOLS — the gateable set", () => {
   /**
@@ -246,7 +246,7 @@ describe("JAIRA_TOOLS — the gateable set", () => {
     // The workflow tools (decision 0005 §3) were served afterwards and say `readOnly` for themselves:
     // the two that only look are readers, the six that steer work are not.
     expect([...LEGACY_NON_READ_ONLY_TOOLS, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
-    for (const name of WORKFLOW_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(name === "workflows" || name === "tasks");
+    for (const name of WORKFLOW_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(name === "list_workflows" || name === "list_tasks");
   });
 
   it("names every tool JaiRA registers — the set is the WHOLE gateable one", () => {

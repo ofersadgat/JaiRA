@@ -70,10 +70,10 @@ const READ_ONLY: ToolsetDecl = { read_file: "allow", write_file: "deny", bash: "
 const TOOLSETS: ToolsetChoice[] = [
   choice("chat/ask-first", ASK_FIRST),
   choice("chat/read-only", READ_ONLY),
-  choice("chat_control/ask-first", { start: "ask", move: "ask", other: "deny" }),
+  choice("chat_control/ask-first", { start_task: "ask", move_task: "ask", other: "deny" }),
   choice("feature/implementation/writes-asking", { write_file: "ask", other: "deny" }, "project"),
 ];
-const TOOLS = ["read_file", "write_file", "bash", "start", "move"].map((name) => ({ name }));
+const TOOLS = ["read_file", "write_file", "bash", "start_task", "move_task"].map((name) => ({ name }));
 
 /** A plan whose toolset is the person's own choice (`toolset`), or what a state declared (the legacy three). */
 const toolsetPlan = (settings: ChatSettings, bucket?: string): ChatPlanView =>
@@ -148,7 +148,7 @@ describe("the Permissions card holds the toolsets of one bucket", () => {
   });
 
   it("opens on the plan's bucket, whose rows are ITS versions of the same names", () => {
-    const control = { start: "ask", move: "ask", other: "deny" } as ToolsetDecl;
+    const control = { start_task: "ask", move_task: "ask", other: "deny" } as ToolsetDecl;
     const html = draw({ plan: toolsetPlan({ toolset: control }, "chat_control"), startOpen: { card: "Permissions" } });
     expect(chipOf(html)).toBe("ask first");
     expect(rowsOf(html)).toEqual(["ask first"]);
@@ -204,8 +204,8 @@ describe("the Tools card", () => {
 
   it("has a Tasks & workflows section, whose tools are drawn like any other now that they are served", () => {
     const tasks = [...TOOLS];
-    const html = draw({ plan: toolsetPlan({ toolset: { start: "ask", other: "deny" } }), startOpen: { card: "Tools", folds: ["tasks"] } });
-    expect(tasks.some((t) => t.name === "start")).toBe(true);
+    const html = draw({ plan: toolsetPlan({ toolset: { start_task: "ask", other: "deny" } }), startOpen: { card: "Tools", folds: ["tasks"] } });
+    expect(tasks.some((t) => t.name === "start_task")).toBe(true);
     expect(html).toContain("Tasks &amp; workflows");
     // The hint alone — the "· not served yet" suffix went with the `unserved` mark (decision 0005
     // step 6), and a tool a conversation can actually call must not still say nothing serves it.

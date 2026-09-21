@@ -1630,7 +1630,7 @@ sends the task there and not on a path the checker could walk:
 If the task is sent to `ui` before `product` produced anything, the entry is refused
 with the input named — what happens after any move that steps over a producer.
 
-**Publishing a move.** A drop on the board — and, later, a conversation's `move`
+**Publishing a move.** A drop on the board — and, later, a conversation's `move_task`
 tool — publishes `task_move { to_state }` for a task (`task:move`). What happens
 is decided in this order:
 

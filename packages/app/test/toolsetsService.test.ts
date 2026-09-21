@@ -64,7 +64,7 @@ describe("toolsets:read", () => {
     expect(view.layers).toEqual(["project", "base", "system"]);
     expect(view.tools.map((t) => t.name)).toContain("read_file");
     // A tool named and not served yet still gets a line — a toolset may hold one (0007 step 4).
-    expect(view.tools.map((t) => t.name)).toContain("start");
+    expect(view.tools.map((t) => t.name)).toContain("start_task");
   });
 
   it("skips the used-by scan when it is not asked for", () => {

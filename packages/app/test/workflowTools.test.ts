@@ -173,7 +173,7 @@ describe("the two conversations", () => {
   it("gives a SESSION the project's tools and the workflow tools, and a CONTROL only the workflow tools", () => {
     const session = service.chatStartPlan({ stateId: "chat/session" });
     const control = service.chatStartPlan({ stateId: "chat/control" });
-    const WORKFLOW = ["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"];
+    const WORKFLOW = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"];
     const PROJECT = ["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search"];
 
     for (const name of [...WORKFLOW, ...PROJECT]) expect(session.settings.tools, name).toContain(name);
@@ -209,7 +209,7 @@ describe("the two conversations", () => {
     expect(plan?.settings.permissions?.other).toBe("deny");
     expect(plan?.settings.permissions?.tools?.["bash"]).toBeUndefined();
     // The eight it DOES hold are all it holds.
-    expect([...(plan?.settings.tools ?? [])].sort()).toEqual(["answer", "hold", "move", "release", "start", "stop", "tasks", "workflows"]);
+    expect([...(plan?.settings.tools ?? [])].sort()).toEqual(["answer_question", "hold_task", "list_tasks", "list_workflows", "move_task", "release_task", "start_task", "stop_task"]);
   });
 });
 
@@ -217,13 +217,13 @@ describe("the two conversations", () => {
 // start
 // ---------------------------------------------------------------------------------------------
 
-describe("start", () => {
+describe("start_task", () => {
   it("asks for what nothing binds, writes nothing, and takes the value the second time — recorded as ASKED", async () => {
     const session = await conversation("chat/session");
     const before = documentOf(session);
 
     // `lib/needs` takes a string nothing in this conversation produces. The first call is the ASK.
-    const asked = (await call(session, "start", { state: "lib/needs" })) as unknown as StartResult;
+    const asked = (await call(session, "start_task", { state: "lib/needs" })) as unknown as StartResult;
     expect(asked).toMatchObject({
       ok: false,
       code: "inputs-missing",
@@ -236,7 +236,7 @@ describe("start", () => {
     expect(statusOf(session)).toBe("completed");
 
     // The conversation asks the person, is told, and calls again naming what THEY answered.
-    const done = (await call(session, "start", { state: "lib/needs", inputs: { text: "the thing" }, asked: ["text"] })) as unknown as StartResult;
+    const done = (await call(session, "start_task", { state: "lib/needs", inputs: { text: "the thing" }, asked: ["text"] })) as unknown as StartResult;
     expect(done).toMatchObject({ ok: true, state: "lib/needs", status: "started", mount: "plain", inputs: [{ name: "text", via: "asked" }] });
     const gate = await parked();
     expect(gate).toMatchObject({ state: "needs", inputs: { text: "the thing" } });
@@ -248,7 +248,7 @@ describe("start", () => {
 
   it("records a value the conversation worked out for itself as INFERRED, with its confidence", async () => {
     const session = await conversation("chat/session");
-    await call(session, "start", { state: "lib/needs", inputs: { text: "what we said" }, confidence: 0.7 });
+    await call(session, "start_task", { state: "lib/needs", inputs: { text: "what we said" }, confidence: 0.7 });
     await parked();
     const supplied = journal(session).find((e) => (e as { type: string }).type === "jaira.supplied") as unknown as { provenance: Record<string, unknown> };
     expect(supplied.provenance).toEqual({ text: { via: "inferred", confidence: 0.7 } });
@@ -257,7 +257,7 @@ describe("start", () => {
   it("STAYS A SESSION: the document it makes is rooted in its own state, never in chat/control", async () => {
     const session = await conversation("chat/session");
     expect(metaOf(session)?.workflow).toBe("chat/session");
-    await call(session, "start", { state: "lib/done" });
+    await call(session, "start_task", { state: "lib/done" });
     await parked();
 
     const documentId = documentOf(session)!;
@@ -272,7 +272,7 @@ describe("start", () => {
   it("dispatches no second model call of its own: what it starts is a CHILD, not another turn", async () => {
     const session = await conversation("chat/session");
     const opening = prompts(session);
-    await call(session, "start", { state: "lib/done" });
+    await call(session, "start_task", { state: "lib/done" });
     await parked();
     expect(prompts(session)).toBe(opening);
   });
@@ -282,11 +282,11 @@ describe("start", () => {
 // move
 // ---------------------------------------------------------------------------------------------
 
-describe("move", () => {
+describe("move_task", () => {
   it("is `connect`, asked by the CONTROL: it adopts into the workflow that relates the two and says where the task stands", async () => {
     const session = await conversation("chat/session");
     const done = await ran("lib/done", 1, "Pause and stop");
-    const moved = (await call(session, "move", { task: done, to: "lib/next" })) as unknown as MoveResult;
+    const moved = (await call(session, "move_task", { task: done, to: "lib/next" })) as unknown as MoveResult;
     expect(moved).toMatchObject({ ok: true, resolution: "adopt", workflow: "feat", adoptedAs: "done", standsAt: "next" });
     // The task the move made is the parent, and the adopted task is filed under it.
     expect(metaOf(done)?.origin).toMatchObject({ kind: "adopt", key: "done" });
@@ -299,13 +299,13 @@ describe("move", () => {
   it("hands back the refusal whole, so the conversation can say what is missing rather than guess", async () => {
     const session = await conversation("chat/session");
     const done = await ran("lib/done", 1);
-    const refused = (await call(session, "move", { task: done, to: "lib/needs" })) as unknown as MoveResult;
+    const refused = (await call(session, "move_task", { task: done, to: "lib/needs" })) as unknown as MoveResult;
     expect(refused).toMatchObject({ ok: false, code: "inputs-missing", missing: [{ name: "text", description: "What to call it." }] });
   });
 
   it("refuses a task it does not know, and says so rather than throwing", async () => {
     const session = await conversation("chat/session");
-    expect(await call(session, "move", { task: "t-nope", to: "lib/next" })).toMatchObject({ ok: false, code: "unknown-task" });
+    expect(await call(session, "move_task", { task: "t-nope", to: "lib/next" })).toMatchObject({ ok: false, code: "unknown-task" });
   });
 });
 
@@ -313,14 +313,14 @@ describe("move", () => {
 // tasks, answer, and the gestures
 // ---------------------------------------------------------------------------------------------
 
-describe("tasks", () => {
+describe("list_tasks", () => {
   it("says what was started here, where it stands, and what it is asking — and nothing of the rest of the project", async () => {
     const session = await conversation("chat/session");
     const stranger = await ran("lib/done", 1, "Somebody else's");
-    await call(session, "start", { state: "lib/done" });
+    await call(session, "start_task", { state: "lib/done" });
     const gate = await parked();
 
-    const listed = (await call(session, "tasks", {})) as unknown as TasksResult;
+    const listed = (await call(session, "list_tasks", {})) as unknown as TasksResult;
     expect(listed.tasks.map((t) => t.task)).toEqual([session]);
     expect(listed.tasks[0]).toMatchObject({ relation: "this", standsAt: expect.any(String) });
     // The gate is an APPROVAL, and `tasks` is where `answer` gets its request ids from — so it is
@@ -329,13 +329,13 @@ describe("tasks", () => {
     expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(true);
     expect(listed.tasks[0]!.asking).toBeUndefined();
     // A task nobody here started is invisible until `all` is asked for.
-    const everything = (await call(session, "tasks", { all: true })) as unknown as TasksResult;
+    const everything = (await call(session, "list_tasks", { all: true })) as unknown as TasksResult;
     expect(everything.tasks.map((t) => t.task)).toContain(stranger);
     expect(everything.tasks.find((t) => t.task === stranger)?.relation).toBeUndefined();
   });
 });
 
-describe("answer", () => {
+describe("answer_question", () => {
   it("can never reach an approval — the gate's own component decides, and the list it reads holds no approvals", async () => {
     // The set is the whole rule, so it is asserted directly: a question and a judgement on a
     // document, and neither `confirm_action` (an approval) nor `review_artifacts` (which merges).
@@ -344,12 +344,12 @@ describe("answer", () => {
     expect(ANSWERABLE_COMPONENTS.has("review_artifacts")).toBe(false);
 
     const session = await conversation("chat/session");
-    await call(session, "start", { state: "lib/done" });
+    await call(session, "start_task", { state: "lib/done" });
     const gate = await parked();
     // It IS on the pending list — the person can answer it — and the tool still refuses it, naming
     // what it is. The gate is left parked, which is the point: nothing was settled behind anyone.
     expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(true);
-    expect(await call(session, "answer", { request: gate.requestId, confidence: 0.9, value: { confirmed: true } })).toMatchObject({
+    expect(await call(session, "answer_question", { request: gate.requestId, confidence: 0.9, value: { confirmed: true } })).toMatchObject({
       ok: false,
       reason: expect.stringContaining("approval"),
     });
@@ -359,12 +359,12 @@ describe("answer", () => {
 
   it("refuses a request nobody is waiting on, and one that belongs to a task this conversation did not start", async () => {
     const session = await conversation("chat/session");
-    expect(await call(session, "answer", { request: "r-nope", confidence: 0.5, value: 1 })).toMatchObject({ ok: false, reason: expect.stringContaining("no question") });
+    expect(await call(session, "answer_question", { request: "r-nope", confidence: 0.5, value: 1 })).toMatchObject({ ok: false, reason: expect.stringContaining("no question") });
 
     const stranger = service.createTask({ title: "Someone else's", workflow: "lib/done" }).taskId;
     await service.startTask({ taskId: stranger });
     const theirs = await parked();
-    expect(await call(session, "answer", { request: theirs.requestId, confidence: 0.5, value: { confirmed: true } })).toMatchObject({
+    expect(await call(session, "answer_question", { request: theirs.requestId, confidence: 0.5, value: { confirmed: true } })).toMatchObject({
       ok: false,
       reason: expect.stringContaining("did not start"),
     });
@@ -372,7 +372,7 @@ describe("answer", () => {
 
   it("leaves a question nobody answered parked DURABLY, across a close and an open", async () => {
     const session = await conversation("chat/session");
-    await call(session, "start", { state: "lib/done" });
+    await call(session, "start_task", { state: "lib/done" });
     const gate = await parked();
     await service.close();
     service = new AppService({ baseDir: testHome(), publish: () => undefined });
@@ -386,21 +386,21 @@ describe("hold, release and stop", () => {
   it("refuses a task this conversation did not start, and says which it was", async () => {
     const session = await conversation("chat/session");
     const stranger = await ran("lib/done", 1, "Not mine");
-    expect(await call(session, "stop", { tasks: [stranger] })).toMatchObject({
+    expect(await call(session, "stop_task", { tasks: [stranger] })).toMatchObject({
       results: [{ task: stranger, ok: false, reason: expect.stringContaining("not started from this conversation") }],
     });
   });
 
   it("stops a running task and RELEASES it again, from where it stood", async () => {
     const session = await conversation("chat/session");
-    await call(session, "start", { state: "lib/done" });
+    await call(session, "start_task", { state: "lib/done" });
     await parked();
-    const child = (await call(session, "tasks", {})) as unknown as TasksResult;
+    const child = (await call(session, "list_tasks", {})) as unknown as TasksResult;
     void child;
     // The conversation's own task is what runs the child, so stopping IT is the gesture that lands.
-    expect(await call(session, "stop", { tasks: [session] })).toMatchObject({ results: [{ task: session, ok: true, did: "stopped" }] });
+    expect(await call(session, "stop_task", { tasks: [session] })).toMatchObject({ results: [{ task: session, ok: true, did: "stopped" }] });
     await until(() => statusOf(session) === "canceled", "the task to stop");
-    expect(await call(session, "release", { tasks: [session] })).toMatchObject({ results: [{ task: session, ok: true }] });
+    expect(await call(session, "release_task", { tasks: [session] })).toMatchObject({ results: [{ task: session, ok: true }] });
     await until(() => fresh() !== undefined || statusOf(session) === "running", "it to pick up again");
   });
 });
@@ -416,7 +416,7 @@ describe("a generated split", () => {
     await service.startTask({ taskId: source, fake: RULES as unknown as JsonValue });
     await until(() => statusOf(source) === "completed", "the list");
     // The source is taken under the conversation first, and then the element-wise target is started.
-    const moved = (await call(session, "move", { task: source, to: "lib/piece" })) as unknown as MoveResult;
+    const moved = (await call(session, "move_task", { task: source, to: "lib/piece" })) as unknown as MoveResult;
     if (!moved.ok) throw new Error(`refused: ${(moved as { reason: string }).reason}`);
     expect(moved).toMatchObject({ mount: "split" });
     const parent = moved.task;
@@ -430,9 +430,9 @@ describe("a generated split", () => {
       expect(statusOf(task.id)).toBe("queued");
     }
     // `tasks` says so in words, and `release` is what starts one.
-    const listed = (await call(parent, "tasks", {})) as unknown as TasksResult;
+    const listed = (await call(parent, "list_tasks", {})) as unknown as TasksResult;
     expect(listed.tasks.filter((t) => t.held === true).map((t) => t.task).sort()).toEqual(made.map((t) => t.id).sort());
-    expect(await call(parent, "release", { tasks: [made[0]!.id] })).toMatchObject({ results: [{ task: made[0]!.id, ok: true }] });
+    expect(await call(parent, "release_task", { tasks: [made[0]!.id] })).toMatchObject({ results: [{ task: made[0]!.id, ok: true }] });
     await until(() => statusOf(made[0]!.id) !== "queued", "the released task to start");
     // …and the one that was not named is still standing where it was.
     expect(statusOf(made[0]!.id)).not.toBe("queued");
@@ -443,17 +443,17 @@ describe("a generated split", () => {
 // what `workflows` answers
 // ---------------------------------------------------------------------------------------------
 
-describe("workflows", () => {
+describe("list_workflows", () => {
   it("lists the workflows, then ONE state at a time with its schemas and what it mounts", async () => {
     const session = await conversation("chat/session");
-    const all = (await call(session, "workflows", {})) as unknown as WorkflowsResult;
+    const all = (await call(session, "list_workflows", {})) as unknown as WorkflowsResult;
     expect("workflows" in all && all.workflows.map((w) => w.id)).toContain("feat");
 
-    const one = (await call(session, "workflows", { state: "feat" })) as unknown as WorkflowsResult;
+    const one = (await call(session, "list_workflows", { state: "feat" })) as unknown as WorkflowsResult;
     if (!("state" in one)) throw new Error("expected a state");
     expect(one.state).toMatchObject({ id: "feat", label: "Feature", children: [{ key: "done", state: "lib/done" }, { key: "next", state: "lib/next" }] });
     // A level at a time: the child's own inputs are asked for separately, by naming it.
-    const child = (await call(session, "workflows", { state: "lib/next" })) as unknown as WorkflowsResult;
+    const child = (await call(session, "list_workflows", { state: "lib/next" })) as unknown as WorkflowsResult;
     if (!("state" in child)) throw new Error("expected a state");
     expect(child.state.inputs).toMatchObject({ flag: { schema: BOOL, description: "Whether the step before was confirmed.", required: true } });
     expect(child.state.outputs).toMatchObject({ confirmed: { schema: BOOL } });
@@ -461,6 +461,6 @@ describe("workflows", () => {
 
   it("says so rather than throwing when the state is not on the path", async () => {
     const session = await conversation("chat/session");
-    expect(await call(session, "workflows", { state: "nope/at/all" })).toMatchObject({ error: expect.stringContaining("nope/at/all") });
+    expect(await call(session, "list_workflows", { state: "nope/at/all" })).toMatchObject({ error: expect.stringContaining("nope/at/all") });
   });
 });

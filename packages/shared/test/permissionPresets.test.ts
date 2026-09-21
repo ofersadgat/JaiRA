@@ -40,7 +40,7 @@ const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: 
 ];
 
 /** The workflow tools (decision 0005 §3) — all of what `chat_control` holds, and part of `chat`. */
-const WORKFLOW_TOOLS = ["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"];
+const WORKFLOW_TOOLS = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"];
 
 /** Every tool a conversation can be HANDED today — the nine the presets knew, and the eight since. */
 const CONVERSATION_TOOLS = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true && spec.unserved !== true).map((spec) => spec.name);
@@ -110,14 +110,14 @@ describe("chat_control has its OWN versions of the same names", () => {
 
   it("read-only may look and may not steer", () => {
     expect(toolModes(parseToolset(shipped("chat_control/read-only")).toolset)).toEqual({
-      workflows: "allow",
-      tasks: "allow",
-      start: "deny",
-      move: "deny",
-      answer: "deny",
-      hold: "deny",
-      release: "deny",
-      stop: "deny",
+      list_workflows: "allow",
+      list_tasks: "allow",
+      start_task: "deny",
+      move_task: "deny",
+      answer_question: "deny",
+      hold_task: "deny",
+      release_task: "deny",
+      stop_task: "deny",
     });
   });
 });

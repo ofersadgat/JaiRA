@@ -49,12 +49,12 @@ The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered.
 | `web_fetch` | true | `registerWebTools` | `url` | `WebFetch` |
 | `web_search` | true | `registerWebTools` | none; the tool checks its endpoint itself | `WebSearch` |
 | `run_command` | false, a host function on `registry.functions` | `registerCommandFunction` | none | none |
-| `workflows` | true | `registerWorkflowTools` | none | none |
-| `start` | false | `registerWorkflowTools` | none | none |
-| `move` | false | `registerWorkflowTools` | none | none |
-| `tasks` | true | `registerWorkflowTools` | none | none |
-| `answer` | false | `registerWorkflowTools` | none | none |
-| `hold`, `release`, `stop` | false | `registerWorkflowTools` | none | none |
+| `list_workflows` | true | `registerWorkflowTools` | none | none |
+| `start_task` | false | `registerWorkflowTools` | none | none |
+| `move_task` | false | `registerWorkflowTools` | none | none |
+| `list_tasks` | true | `registerWorkflowTools` | none | none |
+| `answer_question` | false | `registerWorkflowTools` | none | none |
+| `hold_task`, `release_task`, `stop_task` | false | `registerWorkflowTools` | none | none |
 
 The last eight are the **workflow tools** ([0005](../decisions/0005-connect.md) §3), and they are the tools of a
 CONVERSATION rather than of a workspace: none of them names a place, so no scope table narrows one, and no
@@ -121,38 +121,38 @@ A path has its backslashes turned into `/` and a leading `./` and leading slashe
 
 ### The workflow tools steer work, and every refusal is part of the answer
 
-Each is the host's own operation, not a second implementation of it: `move` is `task:connect`, `start` is
+Each is the host's own operation, not a second implementation of it: `move_task` is `task:connect`, `start_task` is
 the document generator plus a `task_move`, the three gestures are what the board's are. A call that cannot
-be made answers `{ok: false, …}` and does nothing; only `workflows` answers `{error}`, as the other reading
+be made answers `{ok: false, …}` and does nothing; only `list_workflows` answers `{error}`, as the other reading
 tools do.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `workflows` in `state` | string | no | a state id; absent lists the workflows |
-| `workflows` out `workflows` | array of `{id, label?, description?}` | one of the three | every workflow root that loads |
-| `workflows` out `state` | `{id, label?, description?, inputs, outputs, children}` | one of the three | one level: each slot is `{schema, description?, required?}`, each child `{key, state, label?, description?}` |
-| `workflows` out `error` | string | one of the three | no state of that id is on the workflow path |
-| `start` in `state` | string | yes | the state to start as a child of this conversation |
-| `start`, `move` in `inputs` | object | no | values for the TARGET state's own declared inputs, by its names |
-| `start`, `move` in `asked` | string array | no | which names in `inputs` a person answered; every other supplied value is `inferred` |
-| `start`, `move` in `confidence` | number 0–1 | no | how sure the conversation is of what it inferred |
-| `start` out `ok: true` | `{task, key, state, status, mount, inputs}` | on success | `status` is `started`, `queued` (an engine holds the task) or `held`; `mount` is `plain` or `split`; `inputs` is `{name, via, from?}` per input, `via` one of `bound`, `inferred`, `asked`, `default` |
-| `move` in `task` | string | no | the task to move; absent means this conversation's own |
-| `move` in `to` | string | yes | the target state id |
-| `move` in `workflow` | string | no | which workflow the target is meant in, when more than one holds it |
-| `move` in `skip` | boolean | no | go directly, recording what is stepped over as `skipped` |
-| `move` out `ok: true` | `{task, resolution, modification?, workflow, standsAt, adoptedAs?, mount?, moved?}` | on success | `resolution` is `move`, `adopt` or `modify`; `moved` is how the transition landed |
-| `start`, `move` out `inputs-missing` | `{ok: false, code, reason, missing, schema, filled}` | on a required input nothing binds | NOTHING was done. `missing` is `{state, name, schema?, description?, reason}` each; `schema` is the target's whole input schema; `filled` is what the host settled itself. Supply the values and call again |
-| `move` out `candidates` | array of `{workflow, label?, childKey, targetKey?}` | on `ambiguous-workflow` | call again naming one |
-| `tasks` in `all` | boolean | no | every task of the project, shortly, instead of what was started here |
-| `tasks` out `tasks` | array | yes | `{task, title, status, workflow, relation?, standsAt?, held?, waitsFor?, asking?, outputs?}`; `asking` holds the `request` ids `answer` takes |
-| `answer` in `request` | string | yes | a `request` id from `tasks` |
-| `answer` in `value` | any | one of the two | a gate's answer, in the shape its component asks for |
-| `answer` in `answers` | object | one of the two | an agent's questions: question text → the chosen label, or labels |
-| `answer` in `confidence` | number 0–1 | yes | recorded with the answer; without it nothing is settled |
-| `answer` out | `{ok: true, request, settled_by: {via: "control", confidence}}` | on success | also journaled on the task that asked, as `jaira.answered` |
-| `hold`, `release`, `stop` in `tasks` | string array | yes | task ids, from `tasks`; a bare `task` string is read as a list of one |
-| `hold`, `release`, `stop` out `results` | array of `{task, ok, did?, reason?}` | yes | one entry per task named, in order |
+| `list_workflows` in `state` | string | no | a state id; absent lists the workflows |
+| `list_workflows` out `workflows` | array of `{id, label?, description?}` | one of the three | every workflow root that loads |
+| `list_workflows` out `state` | `{id, label?, description?, inputs, outputs, children}` | one of the three | one level: each slot is `{schema, description?, required?}`, each child `{key, state, label?, description?}` |
+| `list_workflows` out `error` | string | one of the three | no state of that id is on the workflow path |
+| `start_task` in `state` | string | yes | the state to start as a child of this conversation |
+| `start_task`, `move_task` in `inputs` | object | no | values for the TARGET state's own declared inputs, by its names |
+| `start_task`, `move_task` in `asked` | string array | no | which names in `inputs` a person answered; every other supplied value is `inferred` |
+| `start_task`, `move_task` in `confidence` | number 0–1 | no | how sure the conversation is of what it inferred |
+| `start_task` out `ok: true` | `{task, key, state, status, mount, inputs}` | on success | `status` is `started`, `queued` (an engine holds the task) or `held`; `mount` is `plain` or `split`; `inputs` is `{name, via, from?}` per input, `via` one of `bound`, `inferred`, `asked`, `default` |
+| `move_task` in `task` | string | no | the task to move; absent means this conversation's own |
+| `move_task` in `to` | string | yes | the target state id |
+| `move_task` in `workflow` | string | no | which workflow the target is meant in, when more than one holds it |
+| `move_task` in `skip` | boolean | no | go directly, recording what is stepped over as `skipped` |
+| `move_task` out `ok: true` | `{task, resolution, modification?, workflow, standsAt, adoptedAs?, mount?, moved?}` | on success | `resolution` is `move`, `adopt` or `modify`; `moved` is how the transition landed |
+| `start_task`, `move_task` out `inputs-missing` | `{ok: false, code, reason, missing, schema, filled}` | on a required input nothing binds | NOTHING was done. `missing` is `{state, name, schema?, description?, reason}` each; `schema` is the target's whole input schema; `filled` is what the host settled itself. Supply the values and call again |
+| `move_task` out `candidates` | array of `{workflow, label?, childKey, targetKey?}` | on `ambiguous-workflow` | call again naming one |
+| `list_tasks` in `all` | boolean | no | every task of the project, shortly, instead of what was started here |
+| `list_tasks` out `tasks` | array | yes | `{task, title, status, workflow, relation?, standsAt?, held?, waitsFor?, asking?, outputs?}`; `asking` holds the `request` ids `answer_question` takes |
+| `answer_question` in `request` | string | yes | a `request` id from `list_tasks` |
+| `answer_question` in `value` | any | one of the two | a gate's answer, in the shape its component asks for |
+| `answer_question` in `answers` | object | one of the two | an agent's questions: question text → the chosen label, or labels |
+| `answer_question` in `confidence` | number 0–1 | yes | recorded with the answer; without it nothing is settled |
+| `answer_question` out | `{ok: true, request, settled_by: {via: "control", confidence}}` | on success | also journaled on the task that asked, as `jaira.answered` |
+| `hold_task`, `release_task`, `stop_task` in `tasks` | string array | yes | task ids, from `list_tasks`; a bare `task` string is read as a list of one |
+| `hold_task`, `release_task`, `stop_task` out `results` | array of `{task, ok, did?, reason?}` | yes | one entry per task named, in order |
 
 **An approval is not reachable through `answer`.** Only a question or a judgement on a document can be
 settled by a conversation ([0005](../decisions/0005-connect.md) §4), and that holds in two places at once:

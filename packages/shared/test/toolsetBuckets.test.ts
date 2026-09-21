@@ -33,11 +33,11 @@ const ASK_FIRST: ToolsetDecl = { read_file: "ask", bash: "ask", other: "ask" };
 const CHOICES: ToolsetChoice[] = [
   choice("chat/ask-first", ASK_FIRST),
   choice("chat/read-only", READ_ONLY),
-  choice("chat_control/ask-first", { start: "ask", move: "ask", other: "deny" }),
+  choice("chat_control/ask-first", { start_task: "ask", move_task: "ask", other: "deny" }),
   choice("feature/implementation/writes-asking", { write_file: "ask", other: "deny" }, "project"),
 ];
 
-const REGISTERED = ["read_file", "write_file", "bash", "start", "move"];
+const REGISTERED = ["read_file", "write_file", "bash", "start_task", "move_task"];
 const of = (decl: ToolsetDecl) => parseToolset(decl).toolset;
 
 describe("which toolset a map is", () => {
@@ -115,7 +115,7 @@ describe("which toolset a map is", () => {
 describe("the bucket a conversation opens on", () => {
   it("is the bucket of the toolset its map is, `chat` tried first", () => {
     expect(bucketOf(of(READ_ONLY), CHOICES, REGISTERED)).toBe("chat");
-    expect(bucketOf(of({ start: "ask", move: "ask", other: "deny" }), CHOICES, REGISTERED)).toBe("chat_control");
+    expect(bucketOf(of({ start_task: "ask", move_task: "ask", other: "deny" }), CHOICES, REGISTERED)).toBe("chat_control");
     expect(bucketOf(of({ write_file: "ask", other: "deny" }), CHOICES, REGISTERED)).toBe("feature/implementation");
   });
 

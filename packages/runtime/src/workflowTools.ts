@@ -100,7 +100,7 @@ function tasksOf(args: Record<string, unknown>): string[] | undefined {
 
 const GESTURE_SCHEMA = {
   type: "object",
-  properties: { tasks: { type: "array", items: { type: "string" }, minItems: 1, description: "Task ids, from `tasks`." } },
+  properties: { tasks: { type: "array", items: { type: "string" }, minItems: 1, description: "Task ids, from `list_tasks`." } },
   required: ["tasks"],
 } as const;
 
@@ -120,7 +120,7 @@ function gestureTool(description: string, call: (input: TaskGestureInput) => Pro
 /** The eight tools over one host, by name. */
 export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool> {
   return {
-    workflows: {
+    list_workflows: {
       description:
         "List the project's workflows, or — given `state` — say what one state is: its label and description, the inputs it takes and the outputs it produces (each with its schema and description), and the states it mounts, ONE level down. Ask again with a child's `state` to go further.",
       inputSchema: { type: "object", properties: { state: { type: "string", description: "A state id, e.g. `feature` or `feature/ux`. Absent lists the workflows." } } },
@@ -130,7 +130,7 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
         return (await host.workflows(typeof state === "string" && state.length > 0 ? { state } : {})) as unknown as JsonValue;
       },
     },
-    start: {
+    start_task: {
       description:
         "Start a state as a child of this conversation. `inputs` are the TARGET STATE'S own inputs. The host binds what the workflow wires itself; if a required input is still open the call does nothing and answers `ok: false` with `missing` (each open input, its schema and description) and `schema` (the target's input schema) — supply the values, or ask the person in words and name what they answered in `asked`, then call again.",
       inputSchema: { type: "object", properties: { state: { type: "string", description: "The state to start, e.g. `feature/product`." }, ...SUPPLIED_PROPERTIES }, required: ["state"] } as unknown as Tool["inputSchema"],
@@ -143,13 +143,13 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
         return (await host.start({ state: args["state"], ...supplied })) as unknown as JsonValue;
       },
     },
-    move: {
+    move_task: {
       description:
-        "Move a task to another state — forward, backward, or across workflows. The host finds or makes the workflow that relates the two. `task` absent means the task this conversation is. `skip: true` goes there directly instead of running what lies between. `inputs` works as in `start`: a call that leaves a required input open does nothing and answers `missing`.",
+        "Move a task to another state — forward, backward, or across workflows. The host finds or makes the workflow that relates the two. `task` absent means the task this conversation is. `skip: true` goes there directly instead of running what lies between. `inputs` works as in `start_task`: a call that leaves a required input open does nothing and answers `missing`.",
       inputSchema: {
         type: "object",
         properties: {
-          task: { type: "string", description: "The task id, from `tasks`. Absent: this conversation's own task." },
+          task: { type: "string", description: "The task id, from `list_tasks`. Absent: this conversation's own task." },
           to: { type: "string", description: "The target state id, e.g. `feature/ux`." },
           workflow: { type: "string", description: "The workflow the target is meant in, when the answer said more than one holds it." },
           skip: { type: "boolean", description: "Go directly; what is stepped over is recorded as skipped." },
@@ -172,16 +172,16 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
         })) as unknown as JsonValue;
       },
     },
-    tasks: {
+    list_tasks: {
       description:
-        "What was started from this conversation: each task, where it stands, whether it is held or waiting for another, what it is asking a person (with the `request` id `answer` takes), and what it produced. `all: true` lists every task of the project, shortly.",
+        "What was started from this conversation: each task, where it stands, whether it is held or waiting for another, what it is asking a person (with the `request` id `answer_question` takes), and what it produced. `all: true` lists every task of the project, shortly.",
       inputSchema: { type: "object", properties: { all: { type: "boolean" } } },
       readOnly: true,
       run: async (input) => (await host.tasks(record(input)["all"] === true ? { all: true } : {})) as unknown as JsonValue,
     },
-    answer: {
+    answer_question: {
       description:
-        "Settle a QUESTION a task is asking a person — a choice, a form, an agent's question, a judgement on a document — on the person's behalf, from what has been said here. Never an approval: a permission, a publish, a push or a merge is not yours to give and cannot be reached with this. `request` is the id from `tasks`; `value` is the gate's answer in the shape it asks for, or `answers` maps an agent's question text to the chosen label. Say how sure you are in `confidence`.",
+        "Settle a QUESTION a task is asking a person — a choice, a form, an agent's question, a judgement on a document — on the person's behalf, from what has been said here. Never an approval: a permission, a publish, a push or a merge is not yours to give and cannot be reached with this. `request` is the id from `list_tasks`; `value` is the gate's answer in the shape it asks for, or `answers` maps an agent's question text to the chosen label. Say how sure you are in `confidence`.",
       inputSchema: {
         type: "object",
         properties: {
@@ -195,7 +195,7 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
       readOnly: false,
       run: async (input) => {
         const args = record(input);
-        if (typeof args["request"] !== "string" || args["request"].length === 0) return { ok: false, reason: "name the request: `request`, from `tasks`" };
+        if (typeof args["request"] !== "string" || args["request"].length === 0) return { ok: false, reason: "name the request: `request`, from `list_tasks`" };
         const confidence = args["confidence"];
         if (typeof confidence !== "number" || !(confidence >= 0 && confidence <= 1)) return { ok: false, reason: "`confidence` is a number from 0 to 1, and an answer is not recorded without it" };
         const answers = args["answers"];
@@ -209,9 +209,9 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
         })) as unknown as JsonValue;
       },
     },
-    hold: gestureTool("Hold tasks where they stand: a queued task is kept from starting on its own, a running one is stopped where it is and can be released later.", (input) => host.hold(input)),
-    release: gestureTool("Release held tasks: start the ones named — a task made held, one that was held, or one that was stopped — from where each stands.", (input) => host.release(input)),
-    stop: gestureTool("Stop tasks that are running. A stopped task keeps its place and can be released later.", (input) => host.stop(input)),
+    hold_task: gestureTool("Hold tasks where they stand: a queued task is kept from starting on its own, a running one is stopped where it is and can be released later.", (input) => host.hold(input)),
+    release_task: gestureTool("Release held tasks: start the ones named — a task made held, one that was held, or one that was stopped — from where each stands.", (input) => host.release(input)),
+    stop_task: gestureTool("Stop tasks that are running. A stopped task keeps its place and can be released later.", (input) => host.stop(input)),
   };
 }
 

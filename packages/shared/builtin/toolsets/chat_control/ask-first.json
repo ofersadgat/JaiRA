@@ -1,11 +1,11 @@
 {
-  "workflows": "ask",
-  "start": "ask",
-  "move": "ask",
-  "tasks": "ask",
-  "answer": "ask",
-  "hold": "ask",
-  "release": "ask",
-  "stop": "ask",
+  "list_workflows": "ask",
+  "start_task": "ask",
+  "move_task": "ask",
+  "list_tasks": "ask",
+  "answer_question": "ask",
+  "hold_task": "ask",
+  "release_task": "ask",
+  "stop_task": "ask",
   "other": "deny"
 }

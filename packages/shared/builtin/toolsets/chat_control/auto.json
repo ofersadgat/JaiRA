@@ -1,11 +1,11 @@
 {
-  "workflows": "smart",
-  "start": "smart",
-  "move": "smart",
-  "tasks": "smart",
-  "answer": "smart",
-  "hold": "smart",
-  "release": "smart",
-  "stop": "smart",
+  "list_workflows": "smart",
+  "start_task": "smart",
+  "move_task": "smart",
+  "list_tasks": "smart",
+  "answer_question": "smart",
+  "hold_task": "smart",
+  "release_task": "smart",
+  "stop_task": "smart",
   "other": "deny"
 }
