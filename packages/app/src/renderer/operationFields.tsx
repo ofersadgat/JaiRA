@@ -29,6 +29,7 @@ import { ReadValue } from "./readValue";
 import { LinkPreview } from "./linkPreview";
 import { emptySlotRow } from "./slotForm";
 import { SlotTable, SlotTypePicker } from "./slotTable";
+import { ToolsFieldControl, useToolsFieldData } from "./toolsField";
 
 export const REF_HINT = "a referenced value — edit it on the JSON tab";
 
@@ -384,6 +385,7 @@ export function OperationFieldsEditor({
 }): JSX.Element {
   const readOnly = useReadOnly();
   const reading = useRunReading();
+  const toolsFieldData = useToolsFieldData();
   const setField = (name: string, value: string): void =>
     onChange({ ...form, fields: { ...form.fields, [name]: value } });
   const setJson = (name: string, value: string): void =>
@@ -399,7 +401,10 @@ export function OperationFieldsEditor({
   };
 
   const visible = (spec: SimpleField): boolean =>
-    (spec.name !== "prompt" || show.prompt) && (spec.name !== "functionRef" || show.function);
+    (spec.name !== "prompt" || show.prompt) &&
+    (spec.name !== "functionRef" || show.function) &&
+    // A migrated block says its tools ONCE, in the field below — see {@link ToolsFieldControl}.
+    (spec.name !== "tools" || form.toolsField === undefined);
 
   // The block's OWN anchor, so a diagnostic against `operation` has somewhere to scroll to and
   // something to say in a tooltip. It is not marked in colour — the boxes below are.
@@ -419,6 +424,21 @@ export function OperationFieldsEditor({
             onLink={setRef}
           />
         ))}
+
+      {/* ONE Tools field, where the block is written the way decision 0007 says: the toolset it
+          starts from, and the lines it writes over that. It stands where the `tools` list box stood,
+          and the Permissions control below is not drawn at all — the two of them said one thing
+          between them, and this is that thing. An UNMIGRATED block gets neither and keeps both. */}
+      {form.toolsField !== undefined ? (
+        <ToolsFieldControl
+          value={form.toolsField}
+          toolsets={toolsFieldData.toolsets}
+          tools={toolsFieldData.tools}
+          readOnly={readOnly}
+          {...(path !== undefined ? { block: path } : {})}
+          onChange={(toolsField) => onChange({ ...form, toolsField })}
+        />
+      ) : null}
 
       {/* The model-group fields that are not knobs — see `SimpleField.prominent`. WHO ANSWERS is
           part of what the block says, not a setting to go looking for, and on an `environment`
@@ -490,7 +510,10 @@ export function OperationFieldsEditor({
       )}
 
       <ConversationControl value={form.conversation} onChange={(conversation) => onChange({ ...form, conversation })} />
-      <PermissionsControl value={form.permissions} onChange={(permissions) => onChange({ ...form, permissions })} />
+      {/* The old baseline, for an UNMIGRATED block only. A migrated one says all of it above. */}
+      {form.toolsField === undefined ? (
+        <PermissionsControl value={form.permissions} onChange={(permissions) => onChange({ ...form, permissions })} />
+      ) : null}
 
       {/* Thirteen empty boxes when nothing is tuned, which is nearly always. A fold hides them from
           an author; a reading should not carry them at all — and when it does carry them, it opens

@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0007-toolsets
 type: decision
-status: proposed
+status: accepted
 updated: 2026-09-21
 decides_for: [engineering/units/tool-policy, engineering/units/host-tools, engineering/units/agent-executors, engineering/units/executor-tree, engineering/units/chat-turns, engineering/contracts/host-tool-vocabulary, engineering/contracts/settings-json]
 ---
@@ -356,10 +356,115 @@ preset that is a function.
    and an id the layer already holds. The name, the place and a new
    command are asked through the schema form, so the `+` form is taller
    than the mockup's single line.
-6. **Settings → Toolsets.**
+6. **Settings → Toolsets.** *Built 2026-09-21*
+   ([settings-toolsets](../../ui/surfaces/settings-toolsets.md),
+   [toolset-card](../../ui/components/toolset-card.md),
+   [tools-field](../../ui/components/tools-field.md)): the rail is the bucket
+   hierarchy, the detail is the toolset drawn as the composer's Tools card is,
+   and the layer picker gained the third segment 0006 left for it. What the
+   build settled:
+   - **The rows are the composer's, moved out and not copied.** `toolsetRows.tsx`
+     holds `ToolRow`, `CategoryRow`, `SubjectRow`, `CommandGroupRow`,
+     `ModePicker`, `ImplPicker`, `AddLine` and the mode and icon tables;
+     `composer.tsx` imports them. Two props carry the whole difference between
+     the hosts: `held` (the card lists what the toolset HOLDS, so the name is
+     text and a red minus starts the line, where the composer lists every tool
+     and ticks it) and `readOnly`. A third piece, `AddMenu`, is new, because a
+     card that lists only what it holds needs a way back to what it does not.
+   - **A section's mode button is not drawn on a toolset being edited.** It
+     cascades onto every line under it, which in the composer includes unticked
+     ones; on a file, the lines ARE the statement and a head that re-moded them
+     is a second way to do what each line's own button does.
+   - **A reading leaves an empty section out** rather than drawing a heading
+     over nothing — the opposite of the composer, where an empty category is a
+     fact about the project worth stating.
+   - **What a save IS depends on the layer**, and is chosen by the writer and
+     named in the answer (`ToolsetWriteKind`): `edit` in place, format kept;
+     `override` holding only the lines that differ, by the lower layer's explicit
+     root; `create`; and `detach` — because a line LEFT OUT of an override means
+     "as the lower layer says", so a draft that drops one cannot be written as
+     an override at all. The pane says which before the save, not after.
+   - **"Override here" writes `{ "$ref": … }` and nothing else.** An override
+     that says nothing is still an override: it is how a person takes a shipped
+     toolset into a layer they own without freezing today's version of it.
+   - **Reset is refused where there is nothing below.** Deleting a toolset that
+     states name is the Files view's act, with its own question about referrers.
+   - **"Used by" is a best-effort SCAN and says so**: every `workflows/**` file
+     under `paths.roots`, first layer winning per state id, searched for a
+     `tools` key naming `…/toolsets/<id>`. It does not see a relative reference,
+     one reached through another toolset's `$ref`, or a state that inherits its
+     tools from an ancestor's `environment` — the ancestor is listed, its
+     descendants are not.
+   - **`ToolsetLayerFile.decl` is the RESOLVED map**, references followed, which
+     is why an override's decl always contains what it follows. `overridesOf`
+     is what turns a whole map back into siblings.
+   - **The state editor's one field is chosen by the DOCUMENT, never inferred**:
+     `showsToolsField` says yes for a `tools` that is a reference, a `$ref` with
+     siblings, or a map, and only where no old `permissions` block carries a
+     profile, a default or a tool map. An unmigrated state keeps both old fields
+     and is untouched, which is what leaves step 7 the only place a state
+     changes meaning.
+   - **A sibling the field cannot read is carried through**, not dropped, and
+     said under the card: the linter reports it, and a form that deleted what it
+     could not draw would be deleting the evidence.
+   - **Lines over a toolset never write `other`.** `declOfToolset` always does,
+     because a whole toolset should say what happens to everything it does not
+     name; a state's lines say only what they CHANGE, and a written catch-all
+     would override the toolset's own on every state ever opened in the form.
+   - **The field's toolsets arrive by context**, read once per project with
+     `usedBy: false` — the pane's "used by" scan reads every state file, and the
+     field wants the toolsets alone.
 7. **Migration**: `"profile": "read-only"` → a reference to a read-only
    toolset; `permissions.tools` / `default` → entries and `other`. A
    mechanical rewrite of authored workflows, `~/.jaira` included.
+   *Built 2026-09-21* ([tool-policy](../units/tool-policy.md),
+   [jaira-cli](../contracts/jaira-cli.md)):
+   `jaira workflow migrate-toolsets [--project <dir> | --base]`, a dry run
+   unless `--write`. **It is not a mechanical rewrite, and could not be.** A
+   list is a grant and a map is a fence, so rewriting what a state SAYS takes
+   claude's own `Glob`, `Grep`, `WebFetch` and `WebSearch` off every read-only
+   state in the tree. What the migration writes is derived from what the state
+   **does**: `handedToClaude` runs one effective block through the engine, the
+   agent wrapper and the upstream executor to the options a real `claude` would
+   be spawned with, and every rewrite is held to that measurement — per state,
+   per chain, per level, before and after. A file any state fails under is taken
+   back out and the rest measured again, so what is written is what passed.
+   What was decided while building:
+   - **The two things a map cannot say about the shell**, each refused until it
+     is named, because migrating is where a state's author chooses.
+     `unlisted-shell`: the list never granted `bash` and claude kept its own,
+     which no map can hold, so the map takes the shell away. `shell-judged`: the
+     list pinned the shell to a mode of its own and asked before every line,
+     which a RUN cannot be told — lowering puts the authored mode in
+     `permissions.subjects` and `literalPermissions` hands the policy a state's
+     `tools`, `default`, `other` and `scopes` and drops the rest, so the line is
+     judged by the project's command policy. The second is §4's own destination
+     and still opt-in, since it may run what a person used to be asked about.
+   - **A map's `bash` is the one entry not read off the measurement.** It is the
+     answer for "any other command", not a mode for the tool, and `smart` there
+     means "the policy decides" — which is what a list that named the shell and
+     gave it no mode got from the baseline. So it is the mode the legacy reading
+     resolved, `smart` where nothing said, and the measurement then says whether
+     that preserved anything.
+   - **`chat/read-only` is no base for a state with no shell.** It holds
+     `"bash": "deny"`, and a held entry is a door: the tool is offered and
+     lowers as `smart`. A line cannot take a subject out of a map, so such a
+     state gets an inline map instead. The shipped file is the preset's map and
+     is held to it by invariant 17; this is that trap, met from the other side.
+   - **Equality is of reach and decision**, not of mechanism: claude's `Glob`
+     under the gate and JaiRA's `glob` at the same mode are one grant, a way in
+     that is refused is not a way in, a shell every line of which is refused is
+     not a shell, and a native removed up front and one refused at the callback
+     are one answer.
+   - **`--base` never opens the shared root as a project**, because opening one
+     creates its layout; `--write` there takes `--shared-root` beside it and
+     copies `workflows/` to a timestamped backup before the first byte.
+   - The dry run for `~/.jaira` is
+     [0007-assets/migration-dry-run.txt](0007-assets/migration-dry-run.txt): 33
+     blocks in 33 files, 2 as a reference plus lines and 19 inline, 12 refused
+     for the shell alone, 0 unproven; with both consents, all 33 migrate. 19 of
+     them are the same map, which wants a toolset file of its own. Nothing under
+     `~/.jaira` was written.
 
 ## Open
 

@@ -188,8 +188,9 @@ What the build settled that the text above left open:
 states are files under `packages/shared/builtin/workflows/`. `chatWorkflowFiles`, `selfTestFiles`,
 the `chat.installed` flag, the Chat view's write before its first message and the Debug pane's
 `Install missing` / `Reinstall` are gone. The tree, the editor bar and the cleanup offer are built;
-the layer picker's third segment and "Reset to built in" are not, because no Settings pane holds a
-value the layer ships (it has no `settings.json`, and the Toolsets pane is 0007 step 6). Tests:
+the layer picker's third segment and "Reset to built in" were not, because no Settings pane held a
+value the layer ships (it has no `settings.json`). **Both landed with 0007 step 6 (2026-09-21)**, in
+the pane that gave them something to show — see the note at the end of this file. Tests:
 `packages/app/test/builtInStates.test.ts`. What the build settled:
 
 - **The cleanup offer covers the shared root only.** That is the only place the install steps
@@ -225,6 +226,29 @@ value the layer ships (it has no `settings.json`, and the Toolsets pane is 0007 
 - **Not changed:** the self-test still records its run in the shared root's own project, so a
   read-only shared root runs a conversation from an open checkout but not the self-test.
 
+**The third segment (2026-09-21), with [0007](0007-toolsets.md) step 6.** The Toolsets pane is the
+first Settings section holding a value the layer ships, so it is where "Settings shows the third
+layer" finally had something to show. What the build settled:
+
+- **The segment is a property of the SECTION, not of the layer.** `SECTIONS` in `App.tsx` carries
+  `builtIn`, and only Toolsets has it; the other layered sections read `settings.json`, which the
+  built-in layer does not have, and would gain a segment that showed an empty file.
+- **It is not a `ConfigLayer`.** `configLayer` names a `settings.json` to write and is read as one
+  of two everywhere else, so "showing what ships" is a separate boolean beside it and the pane is
+  handed a `WorkflowLayer`. `LayerPicker` grew a `layers` prop and a type parameter; with no
+  `layers` it is the two-segment switch every other section draws.
+- **It is session-scoped**, and leaving the section returns to the layer chosen before: a window that
+  reopened on a read-only layer would open looking as though nothing could be changed.
+- **With no project open the switch STAYS** on such a section and drops `This project`, where every
+  other layered section replaces the whole switch with a sentence. `Built in` is still a choice
+  worth making with nothing open.
+- **"Reset to built in" is the lower layer's name, not a constant.** A project's override of a
+  SHARED toolset resets to the shared one, so the button reads `Reset to shared` and the link beside
+  it `Compare with the shared one`. It is offered only where a lower layer holds the file.
+- **The two overrides write and then MOVE.** `Override for all projects` / `Override here` write the
+  override and switch the pane to that layer, opened on the same toolset — the shipped one is read,
+  and the copy is what can be changed.
+
 **Step 5 (2026-09-21).** `chat/session` and `chat/control` are files under
 `packages/shared/builtin/workflows/chat/`, each naming its toolset by the
 reference form this decision chose — `$/toolsets/chat/ask-first` and
@@ -253,7 +277,6 @@ already started as one keeps running. What the build settled:
 - **Nothing was added to `SUPERSEDED`.** These two files are new, and that list
   is for a shipped file that CHANGED: it holds the versions earlier builds
   installed into `~/.jaira`, and no build ever installed either of these.
-
 ## Revisit when
 
 Overrides of built-ins go stale often enough that people are running old

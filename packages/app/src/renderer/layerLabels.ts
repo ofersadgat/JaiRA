@@ -10,3 +10,6 @@ export const LAYER_LABELS: Record<ConfigLayer, string> = {
   project: "This project",
   base: "Shared (all projects)",
 };
+
+/** The third, read-only layer — what ships (decision 0006). Not a `ConfigLayer`: it has no `settings.json`. */
+export const BUILT_IN_LABEL = "Built in";

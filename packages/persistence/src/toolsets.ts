@@ -21,7 +21,7 @@
  * list), `./` means what it means elsewhere, and the file lands in the snapshot closure through the
  * same `onReferencedFile`.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   loadBundle,
@@ -38,9 +38,14 @@ import {
   INLINE_TOOLSET,
   isWritableLayer,
   lowerStateToolsets,
+  newToolsetText,
+  overridesOf,
   overrideToolsetText,
   parseToolset,
   resolveToolsetDecl,
+  setToolsetText,
+  toolsetBucketProblem,
+  toolsetNameProblem,
   toolsetTextFollows,
   type JairaPaths,
   type StateToolsetIssue,
@@ -48,7 +53,10 @@ import {
   type ToolsetChoice,
   type ToolsetDecl,
   type ToolsetIssue,
+  type ToolsetLayerFile,
   type ToolsetReader,
+  type ToolsetRecord,
+  type ToolsetWriteKind,
   type WorkflowLayer,
   type WritableLayer,
 } from "@jaira/shared";
@@ -386,4 +394,212 @@ export function addToToolset(
   }
   writeFileSync(target.path, addToToolsetText(readFileSync(target.path, "utf8"), entries), "utf8");
   return { file: target.path, created: false };
+}
+
+// --- Settings → Toolsets (decision 0007 §6) -------------------------------------
+
+/**
+ * Every toolset id, with EVERY layer's file for it, nearest layer first.
+ *
+ * {@link readToolsets} answers with the winner of each id, which is what a conversation can name.
+ * A settings pane edits one layer, so it needs the files kept apart. Each is read through the layer's
+ * explicit root (`$BASE/toolsets/chat/read-only`) — the same resolver, so an override's `$ref` is
+ * followed exactly as a run would follow it — and a file that cannot be read is LISTED, with why,
+ * rather than left out: a pane that hid a broken file would offer to create the one that is there.
+ */
+export function readToolsetLayers(paths: JairaPaths): ToolsetRecord[] {
+  const read = toolsetReader(workflowLoadOptions(paths, { tolerant: true }));
+  const byId = new Map<string, ToolsetRecord>();
+  for (const layer of toolsetLayers(paths)) {
+    for (const found of listToolsets([layer.root])) {
+      const record = byId.get(found.id) ?? { id: found.id, bucket: found.bucket, name: found.name, files: [] };
+      byId.set(found.id, record);
+      const format = found.file.endsWith(".json") ? ("json" as const) : ("yaml" as const);
+      const ext = found.file.slice(found.file.lastIndexOf("."));
+      const entry: ToolsetLayerFile = { layer: layer.layer, file: `${layer.label}/${TOOLSETS_DIR_NAME}/${found.id}${ext}`, format };
+      try {
+        const own: unknown = parseReferencedFile(found.file, readFileSync(found.file, "utf8"));
+        if (own !== null && typeof own === "object" && !Array.isArray(own) && typeof (own as Record<string, unknown>)["$ref"] === "string") {
+          entry.follows = (own as Record<string, string>)["$ref"]!;
+        }
+        const issues: ToolsetIssue[] = [];
+        const resolved = resolveToolsetDecl(`${layer.token}/${TOOLSETS_DIR_NAME}/${found.id}`, read, "", issues);
+        const broken = issues.find((issue) => issue.severity === "error") ?? (resolved === undefined ? undefined : parseToolset(resolved).issues.find((issue) => issue.severity === "error"));
+        if (resolved === undefined || broken !== undefined) entry.problem = broken?.message ?? "this file is not a toolset";
+        else entry.decl = resolved as ToolsetDecl;
+      } catch (e) {
+        entry.problem = (e as Error).message;
+      }
+      record.files.push(entry);
+    }
+  }
+  return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+function checkedToolsetId(id: string): void {
+  const at = id.lastIndexOf("/");
+  const problem = at <= 0 ? "a toolset lives in a bucket" : (toolsetBucketProblem(id.slice(0, at)) ?? toolsetNameProblem(id.slice(at + 1)));
+  if (problem !== undefined) throw new Error(problem);
+}
+
+/**
+ * Save a WHOLE toolset into one layer.
+ *
+ *  - the layer holds the file → it is edited in place, format kept (`setToolsetText`). A file that
+ *    starts from another keeps doing so, and holds only the lines that differ from it;
+ *  - it does not, and a lower layer does → an override that keeps following the nearest lower one by
+ *    its explicit root, holding only the lines that differ;
+ *  - either way, a line the followed file holds that `next` does NOT is something `$ref` plus siblings
+ *    cannot say — absent means "as below" — so the whole map is written and the file stops following
+ *    (`detach`);
+ *  - no layer holds it → a new file.
+ *
+ * Throws, having written nothing, for the built-in layer, a layer this project does not have, a YAML
+ * file, an id a reference could not carry, and a map that does not parse as a toolset.
+ */
+export function writeToolset(paths: JairaPaths, id: string, layer: WorkflowLayer, next: ToolsetDecl): { file: string; kind: ToolsetWriteKind } {
+  if (!isWritableLayer(layer)) throw new Error("what ships with JaiRA is read-only: override it in this project or in the shared root");
+  checkedToolsetId(id);
+  const broken = parseToolset(next).issues.find((issue) => issue.severity === "error");
+  if (broken !== undefined) throw new Error(`that is not a toolset — ${broken.message}`);
+  const layers = toolsetLayers(paths);
+  const index = layers.findIndex((candidate) => candidate.layer === layer);
+  if (index < 0) throw new Error(`there is no ${layer} layer here to write a toolset into`);
+  const target = layers[index]!;
+  const read = toolsetReader(workflowLoadOptions(paths, { tolerant: true }));
+  const baseOf = (reference: string): ToolsetDecl => {
+    const issues: ToolsetIssue[] = [];
+    const resolved = resolveToolsetDecl(reference, read, "", issues);
+    const wrong = issues.find((issue) => issue.severity === "error");
+    if (resolved === undefined || wrong !== undefined) throw new Error(`${reference} could not be read, so nothing was written over it — ${wrong?.message ?? "it is not a toolset"}`);
+    return resolved as ToolsetDecl;
+  };
+
+  const own = toolsetFileIn(target.root, id);
+  if (own !== undefined) {
+    if (!own.endsWith(".json")) throw new Error(`${id} is a YAML file here, and JaiRA only edits a JSON toolset`);
+    const text = readFileSync(own, "utf8");
+    const parsed: unknown = parseReferencedFile(own, text);
+    const follows = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>)["$ref"] : undefined;
+    if (typeof follows === "string") {
+      const over = overridesOf(baseOf(follows), next);
+      if (over.dropped.length === 0) {
+        writeFileSync(own, setToolsetText(text, over.siblings, follows), "utf8");
+        return { file: own, kind: "edit" };
+      }
+      writeFileSync(own, setToolsetText(text, next), "utf8");
+      return { file: own, kind: "detach" };
+    }
+    writeFileSync(own, setToolsetText(text, next), "utf8");
+    return { file: own, kind: "edit" };
+  }
+
+  const file = join(target.root, TOOLSETS_DIR_NAME, `${id}.json`);
+  const lower = layers.find((candidate, at) => at > index && toolsetFileIn(candidate.root, id) !== undefined);
+  mkdirSync(dirname(file), { recursive: true });
+  // `wx` throughout: a file that appeared since the pane was drawn is somebody's, and is not replaced.
+  if (lower === undefined) {
+    writeFileSync(file, newToolsetText(next), { encoding: "utf8", flag: "wx" });
+    return { file, kind: "create" };
+  }
+  const follows = `${lower.token}/${TOOLSETS_DIR_NAME}/${id}`;
+  const over = overridesOf(baseOf(follows), next);
+  if (over.dropped.length === 0) {
+    writeFileSync(file, newToolsetText(over.siblings, follows), { encoding: "utf8", flag: "wx" });
+    return { file, kind: "override" };
+  }
+  writeFileSync(file, newToolsetText(next), { encoding: "utf8", flag: "wx" });
+  return { file, kind: "detach" };
+}
+
+/**
+ * "Reset to built in": delete a layer's OVERRIDE, so the layer below answers again.
+ *
+ * Refused where there is nothing below — that is deleting a toolset states may name, which is the
+ * Files view's act, with its own question about who refers to it — and for the built-in layer.
+ */
+export function resetToolset(paths: JairaPaths, id: string, layer: WorkflowLayer): { file: string } {
+  if (!isWritableLayer(layer)) throw new Error("what ships with JaiRA is read-only, so there is nothing of it to reset");
+  checkedToolsetId(id);
+  const layers = toolsetLayers(paths);
+  const index = layers.findIndex((candidate) => candidate.layer === layer);
+  const own = index < 0 ? undefined : toolsetFileIn(layers[index]!.root, id);
+  if (own === undefined) throw new Error(`${id} is not overridden in the ${layer} layer`);
+  if (!layers.some((candidate, at) => at > index && toolsetFileIn(candidate.root, id) !== undefined)) {
+    throw new Error(`${id} overrides nothing — no layer below holds it, so resetting it would delete it`);
+  }
+  unlinkSync(own);
+  return { file: own };
+}
+
+/** Every string a `tools` key holds anywhere in a state file — a bare reference, or a `$ref`. */
+function toolsReferencesIn(node: unknown, out: string[]): void {
+  if (Array.isArray(node)) {
+    for (const item of node) toolsReferencesIn(item, out);
+    return;
+  }
+  if (node === null || typeof node !== "object") return;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "tools") {
+      if (typeof value === "string") out.push(value);
+      else if (value !== null && typeof value === "object" && !Array.isArray(value) && typeof (value as Record<string, unknown>)["$ref"] === "string") {
+        out.push((value as Record<string, string>)["$ref"]!);
+      }
+    }
+    toolsReferencesIn(value, out);
+  }
+}
+
+/**
+ * Which states name each toolset: toolset id → state ids, sorted.
+ *
+ * A BEST-EFFORT scan, and deliberately not a load: every state file under every layer's
+ * `workflows/`, first layer winning per state id (a shadowed copy is not what runs), read as data and
+ * searched for a `tools` key — on the operation, the `environment`, a child's per-mount environment —
+ * holding a reference whose path is `…/toolsets/<id>`, by a bare `$` or an explicit root. What it does
+ * not see: a relative reference (`./`), a toolset reached only through another toolset's `$ref`, and
+ * a state that inherits its `tools` from an ancestor's `environment` (the ancestor is listed, the
+ * descendants are not). A file that does not parse is skipped — the linter is where that is said.
+ */
+export function toolsetUsers(paths: JairaPaths): Record<string, string[]> {
+  const seen = new Set<string>();
+  const users = new Map<string, Set<string>>();
+  for (const root of paths.roots) {
+    const workflows = join(root, "workflows");
+    const walk = (dir: string, prefix: string[]): void => {
+      let entries;
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (entry.name.startsWith(".")) continue;
+        if (entry.isDirectory()) {
+          walk(join(dir, entry.name), [...prefix, entry.name]);
+          continue;
+        }
+        const match = /^(.+)\.(jsonc?|ya?ml)$/.exec(entry.name);
+        if (!entry.isFile() || match === null) continue;
+        const stateId = [...prefix, match[1]!].join("/");
+        if (seen.has(stateId)) continue;
+        seen.add(stateId);
+        const references: string[] = [];
+        try {
+          toolsReferencesIn(parseReferencedFile(join(dir, entry.name), readFileSync(join(dir, entry.name), "utf8")), references);
+        } catch {
+          continue;
+        }
+        for (const reference of references) {
+          const named = /^\$[A-Z]*\/toolsets\/(.+?)(?:\.(?:json|ya?ml))?$/.exec(reference.trim());
+          if (named === null) continue;
+          const set = users.get(named[1]!) ?? new Set<string>();
+          users.set(named[1]!, set);
+          set.add(stateId);
+        }
+      }
+    };
+    walk(workflows, []);
+  }
+  return Object.fromEntries([...users].map(([id, set]) => [id, [...set].sort()]));
 }

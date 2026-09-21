@@ -1,0 +1,1500 @@
+THE SHARED ROOT (~/.jaira/workflows), DRY RUN — READ ONLY. Nothing was written.
+
+Produced 2026-09-21 on the worktree for decision 0007 step 7, with:
+
+    jaira workflow migrate-toolsets --base
+    jaira workflow migrate-toolsets --base --accept shell-judged --accept unlisted-shell
+
+`--base` reads the shared root WITHOUT opening it as a project, because opening one creates its
+layout; the run holds no database open and writes nothing. The person runs the real migration
+themselves, with --write --shared-root, which backs workflows/ up first, timestamped.
+
+Two passes are recorded. The FIRST is the default, which assumes nothing: 12 of the 33 blocks are
+refused, every one of them because of the shell, and each refusal names the consent that would go
+on. The SECOND is the same run with both consents given, which migrates all 33.
+
+WHAT THE CONSENTS MEAN, because they are the whole decision the person is being asked to make:
+
+  unlisted-shell  The state never granted `bash`, and claude kept its own Bash, every line of it
+                  put to a person. No map can hold a tool the list never granted, so the map takes
+                  the shell away. TIGHTENS: the state loses a shell it never asked for.
+
+  shell-judged    The state pinned the shell to a mode of its own, so every line was put to a
+                  person. A map cannot say that in a RUN: its shell entry is the answer for any
+                  other command on a line taken apart, and the engine hands the policy a state's
+                  tools, default, other and scopes only — `permissions.subjects`, which the
+                  authored mode travels in, never arrives. The line is judged by the project's
+                  command policy instead. MAY LOOSEN: a line a person used to be asked about can
+                  now run. That judgement is what decision 0007 §4 is FOR, but it is a change, so
+                  it is said yes to rather than assumed.
+
+In this root the two coincide: each of the 12 refused blocks both never granted the shell AND had
+every line asked about, so `--accept unlisted-shell` alone settles all 12 — the shell is taken
+away, and there are then no lines left to judge. The second pass below passes both anyway.
+
+====================================================================================================
+PASS 1 — the default: nothing accepted
+====================================================================================================
+toolset migration — C:\Users\Ofer\.jaira\workflows
+
+--- chat\agent.json
++++ chat\agent.json
+@@ line 13 @@
+   "environment": {
+     "kind": "prompt",
+-    "tools": [
+-      "bash",
+-      "read_file",
+-      "write_file"
+-    ],
+-    "permissions": {
+-      "profile": "full"
++    "tools": {
++      "$ref": "$/toolsets/chat/ask-first",
++      "bash": "smart"
+     }
+   },
+
+--- explore\brief.json
++++ explore\brief.json
+@@ line 43 @@
+       "$ref": "$/prompts/explore/brief.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- explore\candidates.json
++++ explore\candidates.json
+@@ line 46 @@
+       "$ref": "$/prompts/explore/candidates.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\acceptance\mutate.json
++++ feature\acceptance\mutate.json
+@@ line 33 @@
+       "$ref": "$/prompts/feature/acceptance/mutate.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file",
+-      "bash"
+-    ],
++    "tools": {
++      "$ref": "$/toolsets/chat/ask-first",
++      "bash": "smart"
++    },
+     "output": {
+       "diagnosability": {
+
+--- feature\documentation\draft.json
++++ feature\documentation\draft.json
+@@ line 33 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\engineering\item\critique.json
++++ feature\engineering\item\critique.json
+@@ line 151 @@
+       "$ref": "$/prompts/feature/item/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\engineering\item\draft.json
++++ feature\engineering\item\draft.json
+@@ line 50 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\engineering\plan.json
++++ feature\engineering\plan.json
+@@ line 180 @@
+       "$ref": "$/prompts/feature/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\implementation\classify.json
++++ feature\implementation\classify.json
+@@ line 39 @@
+       "$ref": "$/prompts/feature/implementation/classify.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\implementation\critique.json
++++ feature\implementation\critique.json
+@@ line 84 @@
+       "$ref": "$/prompts/feature/implementation/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\implementation\plan.json
++++ feature\implementation\plan.json
+@@ line 105 @@
+       "$ref": "$/prompts/feature/implementation/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\product\context.json
++++ feature\product\context.json
+@@ line 55 @@
+       "$ref": "$/prompts/feature/context.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\product\critique.json
++++ feature\product\critique.json
+@@ line 92 @@
+       "$ref": "$/prompts/feature/product/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\product\draft.json
++++ feature\product\draft.json
+@@ line 55 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\review\conformance.json
++++ feature\review\conformance.json
+@@ line 114 @@
+       "$ref": "$/prompts/feature/review/conformance.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\ui\item\critique.json
++++ feature\ui\item\critique.json
+@@ line 160 @@
+       "$ref": "$/prompts/feature/item/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ui\item\draft.json
++++ feature\ui\item\draft.json
+@@ line 50 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ui\plan.json
++++ feature\ui\plan.json
+@@ line 169 @@
+       "$ref": "$/prompts/feature/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ux\item\critique.json
++++ feature\ux\item\critique.json
+@@ line 151 @@
+       "$ref": "$/prompts/feature/item/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ux\item\draft.json
++++ feature\ux\item\draft.json
+@@ line 50 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ux\plan.json
++++ feature\ux\plan.json
+@@ line 156 @@
+       "$ref": "$/prompts/feature/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+blocks
+
+  chat/agent (environment): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+  explore/brief (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  explore/candidates (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/acceptance/link (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/acceptance/mutate (operation): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+  feature/documentation/correct (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/documentation/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/documentation/publish (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/engineering/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/engineering/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/engineering/item/publish (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/engineering/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/classify (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/implement (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/implementation/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/sync_docs (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/implementation/unit_tests (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/product/context (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/product/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/product/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/product/publish (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/review/conformance (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/review/correct (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/ui/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ui/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ui/item/publish (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/ui/item/render (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/ui/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ux/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ux/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ux/item/publish (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/ux/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+
+summary
+
+  state files read        90
+  blocks in the old form  33  (in 33 files)
+    → by reference        0
+    → reference + lines   2
+    → inline map          19
+    → refused             12
+  already toolsets        0
+  files that would change 21
+  measurements            156 (every state, every chain, every level, before and after)
+  unproven                0
+
+differences no map can avoid (each is listed on the block it applies to)
+
+  profile-unknown-name: a tool name nobody declared was put to a person under the old profile and is refused by `other: deny` (tightened; `ask` would hand back Task, Agent and SlashCommand)
+
+the same inline map, more than once — save it as toolsets/<bucket>/<name>.json and run again to get references
+
+  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+    19 blocks: explore/brief (operation), explore/candidates (operation), feature/documentation/draft (operation), feature/engineering/item/critique (operation), feature/engineering/item/draft (operation), feature/engineering/plan (operation), feature/implementation/classify (operation), feature/implementation/critique (operation), feature/implementation/plan (operation), feature/product/context (operation), feature/product/critique (operation), feature/product/draft (operation), feature/review/conformance (operation), feature/ui/item/critique (operation), feature/ui/item/draft (operation), feature/ui/plan (operation), feature/ux/item/critique (operation), feature/ux/item/draft (operation), feature/ux/plan (operation)
+
+this was a DRY RUN. Nothing was written. Pass --write to rewrite 21 file(s), with --shared-root beside it.
+
+
+====================================================================================================
+PASS 2 — the same run with --accept shell-judged --accept unlisted-shell
+====================================================================================================
+toolset migration — C:\Users\Ofer\.jaira\workflows
+
+--- chat\agent.json
++++ chat\agent.json
+@@ line 13 @@
+   "environment": {
+     "kind": "prompt",
+-    "tools": [
+-      "bash",
+-      "read_file",
+-      "write_file"
+-    ],
+-    "permissions": {
+-      "profile": "full"
++    "tools": {
++      "$ref": "$/toolsets/chat/ask-first",
++      "bash": "smart"
+     }
+   },
+
+--- explore\brief.json
++++ explore\brief.json
+@@ line 43 @@
+       "$ref": "$/prompts/explore/brief.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- explore\candidates.json
++++ explore\candidates.json
+@@ line 46 @@
+       "$ref": "$/prompts/explore/candidates.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\acceptance\link.json
++++ feature\acceptance\link.json
+@@ line 79 @@
+       "$ref": "$/prompts/feature/acceptance/link.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\acceptance\mutate.json
++++ feature\acceptance\mutate.json
+@@ line 33 @@
+       "$ref": "$/prompts/feature/acceptance/mutate.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file",
+-      "bash"
+-    ],
++    "tools": {
++      "$ref": "$/toolsets/chat/ask-first",
++      "bash": "smart"
++    },
+     "output": {
+       "diagnosability": {
+
+--- feature\documentation\correct.json
++++ feature\documentation\correct.json
+@@ line 18 @@
+       "$ref": "$/prompts/feature/documentation/correct.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\documentation\draft.json
++++ feature\documentation\draft.json
+@@ line 33 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\documentation\publish.json
++++ feature\documentation\publish.json
+@@ line 73 @@
+       "$ref": "$/prompts/feature/publish.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\engineering\item\critique.json
++++ feature\engineering\item\critique.json
+@@ line 151 @@
+       "$ref": "$/prompts/feature/item/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\engineering\item\draft.json
++++ feature\engineering\item\draft.json
+@@ line 50 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\engineering\item\publish.json
++++ feature\engineering\item\publish.json
+@@ line 61 @@
+       "$ref": "$/prompts/feature/publish_one.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\engineering\plan.json
++++ feature\engineering\plan.json
+@@ line 180 @@
+       "$ref": "$/prompts/feature/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\implementation\classify.json
++++ feature\implementation\classify.json
+@@ line 39 @@
+       "$ref": "$/prompts/feature/implementation/classify.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\implementation\critique.json
++++ feature\implementation\critique.json
+@@ line 84 @@
+       "$ref": "$/prompts/feature/implementation/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\implementation\implement.json
++++ feature\implementation\implement.json
+@@ line 39 @@
+     "model": "claude-cli/default",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "ask",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "output": {
+       "changes": {
+
+--- feature\implementation\plan.json
++++ feature\implementation\plan.json
+@@ line 105 @@
+       "$ref": "$/prompts/feature/implementation/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\implementation\sync_docs.json
++++ feature\implementation\sync_docs.json
+@@ line 99 @@
+       "$ref": "$/prompts/feature/implementation/sync_docs.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "ask",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "output": {
+       "docs_touched": {
+
+--- feature\implementation\unit_tests.json
++++ feature\implementation\unit_tests.json
+@@ line 37 @@
+       "$ref": "$/prompts/feature/implementation/unit_tests.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "ask",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "output": {
+       "unit_tests": {
+
+--- feature\product\context.json
++++ feature\product\context.json
+@@ line 55 @@
+       "$ref": "$/prompts/feature/context.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\product\critique.json
++++ feature\product\critique.json
+@@ line 92 @@
+       "$ref": "$/prompts/feature/product/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\product\draft.json
++++ feature\product\draft.json
+@@ line 55 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\product\publish.json
++++ feature\product\publish.json
+@@ line 73 @@
+       "$ref": "$/prompts/feature/publish.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\review\conformance.json
++++ feature\review\conformance.json
+@@ line 114 @@
+       "$ref": "$/prompts/feature/review/conformance.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
+-    "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      }
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
+     },
+     "output": {
+
+--- feature\review\correct.json
++++ feature\review\correct.json
+@@ line 39 @@
+       "$ref": "$/prompts/feature/review/correct.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "ask",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "output": {
+       "corrections": {
+
+--- feature\ui\item\critique.json
++++ feature\ui\item\critique.json
+@@ line 160 @@
+       "$ref": "$/prompts/feature/item/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ui\item\draft.json
++++ feature\ui\item\draft.json
+@@ line 50 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ui\item\publish.json
++++ feature\ui\item\publish.json
+@@ line 70 @@
+       "$ref": "$/prompts/feature/publish_one.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ui\item\render.json
++++ feature\ui\item\render.json
+@@ line 45 @@
+       "$ref": "$/prompts/feature/ui/render.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ui\plan.json
++++ feature\ui\plan.json
+@@ line 169 @@
+       "$ref": "$/prompts/feature/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ux\item\critique.json
++++ feature\ux\item\critique.json
+@@ line 151 @@
+       "$ref": "$/prompts/feature/item/critique.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ux\item\draft.json
++++ feature\ux\item\draft.json
+@@ line 50 @@
+     "kind": "prompt",
+     "prompt": "{{.inputs.prompt}}",
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ux\item\publish.json
++++ feature\ux\item\publish.json
+@@ line 61 @@
+       "$ref": "$/prompts/feature/publish_one.md"
+     },
+-    "tools": [
+-      "read_file",
+-      "write_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "allow",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
++    },
+     "permissions": {
+-      "tools": {
+-        "read_file": "allow",
+-        "write_file": "allow"
+-      },
+       "scopes": [
+         {
+
+--- feature\ux\plan.json
++++ feature\ux\plan.json
+@@ line 156 @@
+       "$ref": "$/prompts/feature/plan.md"
+     },
+-    "tools": [
+-      "read_file"
+-    ],
++    "tools": {
++      "read_file": "allow",
++      "glob": "ask",
++      "grep": "ask",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "deny"
++    },
+     "permissions": {
+-      "profile": "read-only",
+-      "tools": {
+-        "read_file": "allow"
+-      },
+       "scopes": [
+         {
+
+blocks
+
+  chat/agent (environment): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+  explore/brief (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  explore/candidates (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/acceptance/link (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/acceptance/mutate (operation): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+  feature/documentation/correct (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/documentation/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/documentation/publish (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/engineering/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/engineering/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/engineering/item/publish (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/engineering/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/classify (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/implement (operation): an inline map  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/implementation/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/implementation/sync_docs (operation): an inline map  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/implementation/unit_tests (operation): an inline map  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/product/context (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/product/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/product/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/product/publish (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/review/conformance (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/review/correct (operation): an inline map  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/ui/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ui/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ui/item/publish (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/ui/item/render (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/ui/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ux/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ux/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+  feature/ux/item/publish (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: bash: reachable, judged by line → not reachable
+  feature/ux/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+      differs, unavoidably: other: ask → deny
+
+summary
+
+  state files read        90
+  blocks in the old form  33  (in 33 files)
+    → by reference        0
+    → reference + lines   2
+    → inline map          31
+    → refused             0
+  already toolsets        0
+  files that would change 33
+  measurements            156 (every state, every chain, every level, before and after)
+  unproven                0
+
+differences no map can avoid (each is listed on the block it applies to)
+
+  profile-unknown-name: a tool name nobody declared was put to a person under the old profile and is refused by `other: deny` (tightened; `ask` would hand back Task, Agent and SlashCommand)
+  unlisted-shell: ACCEPTED BY FLAG: the list never named `bash` and claude kept its own, which no map can hold — the shell is taken away (tightened)
+
+the same inline map, more than once — save it as toolsets/<bucket>/<name>.json and run again to get references
+
+  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
+    19 blocks: explore/brief (operation), explore/candidates (operation), feature/documentation/draft (operation), feature/engineering/item/critique (operation), feature/engineering/item/draft (operation), feature/engineering/plan (operation), feature/implementation/classify (operation), feature/implementation/critique (operation), feature/implementation/plan (operation), feature/product/context (operation), feature/product/critique (operation), feature/product/draft (operation), feature/review/conformance (operation), feature/ui/item/critique (operation), feature/ui/item/draft (operation), feature/ui/plan (operation), feature/ux/item/critique (operation), feature/ux/item/draft (operation), feature/ux/plan (operation)
+  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
+    8 blocks: feature/acceptance/link (operation), feature/documentation/correct (operation), feature/documentation/publish (operation), feature/engineering/item/publish (operation), feature/product/publish (operation), feature/ui/item/publish (operation), feature/ui/item/render (operation), feature/ux/item/publish (operation)
+  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","web_fetch":"ask","web_search":"ask","other":"ask"}
+    4 blocks: feature/implementation/implement (operation), feature/implementation/sync_docs (operation), feature/implementation/unit_tests (operation), feature/review/correct (operation)
+
+this was a DRY RUN. Nothing was written. Pass --write to rewrite 33 file(s), with --shared-root beside it.

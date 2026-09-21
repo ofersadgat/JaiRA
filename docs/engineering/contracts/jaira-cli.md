@@ -71,6 +71,7 @@ The `jaira` command line: its commands, flags, environment variables, what each 
 | `workflow list` | `--json`, `--project` | text health list, or `WorkflowBrowser` JSON |
 | `workflow lint` | `--json`, `--project` | text health list, or `{errors, unreadable, unreachable}` |
 | `workflow check [<description.md>]` | `--workflow <root>` repeatable, `--model <id>`, `--json`, `--fake`, `--repair-turns`, `--project` | text conformance report, or `{description, workflows, verdict, requirements, findings, extras, cost}`; with no file, `./workflow.md` then `.jaira/workflows/workflow.md` |
+| `workflow migrate-toolsets` | `--project <dir>` or `--base`, `--write`, `--shared-root`, `--accept unlisted-shell\|shell-judged` repeatable, `--max-lines <n>` default 3, `--json` | the old `tools` list and `permissions` block rewritten as toolsets ([0007](../decisions/0007-toolsets.md) step 7). **A DRY RUN unless `--write`**: a diff per file, what each block became (`reference`, `reference+lines`, `inline`, `refused`), and the proof's tally, or the `ToolsetMigrationPlan` as JSON. Exit 1 when anything is refused or unproven, so a dry run is a check. `--base` reads `~/.jaira` without opening it as a project, so it creates no layout and holds no database |
 | `functions list` | `--json`, `--project` | text `<state> <file>` lines, or `[{file, hash, current, state}]` where `state` is `approved`, `CHANGED` or `missing` |
 | `functions approve <file>...` | `--all`, `--project` | text `first approval: <file>` or `re-approval (content changed): <file>` per file, then `approved N file(s)` |
 | `functions revoke <file>...` | `--project` | text `revoked N file(s)` |
@@ -95,6 +96,9 @@ The `--fake` and `--interactions` documents are [fake-rules-format](fake-rules-f
 | `worktree remove` meets uncommitted work | exit 1 with `reason`, and a stderr hint to re-run with `--force` | commit, or `--force` |
 | `task cancel` on a task already ended | exit 1, `task '<id>' is already <status>` | nothing |
 | `task move` refused | exit 1, the `TaskConnectResult` on stdout and `refused: <message>` on stderr | `--skip` for a forward move, `--workflow` for an ambiguous one, or supply what is missing another way |
+| `workflow migrate-toolsets --write` on a workflows directory inside the shared root, without `--shared-root` | exit 1 having written **nothing**, naming the directory and saying it is not a git repository | read the dry run, then pass `--shared-root`; `workflows/` is copied to `workflows.backup-<stamp>` before the first byte |
+| `workflow migrate-toolsets --write` when a file changed since the plan was made, or anything is unproven | exit 1 having written **nothing** | run it again |
+| A block whose shell no map can say | it is `refused` in the report, with the `--accept` that would carry it in the reason | say yes to that consent, or leave the block in the list form, which still runs |
 
 ## A renamed flag, a reshaped report or a changed exit code breaks scripts at once, and no deprecation path exists
 

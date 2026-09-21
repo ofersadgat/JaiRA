@@ -27,6 +27,9 @@ export * from "./approval";
 export * from "./questions";
 export * from "./agents";
 export * from "./agentTools";
+// What a claude agent is handed under one effective environment, MEASURED through the real chain —
+// the proof a list-to-toolset migration is held to (decision 0007 step 7).
+export * from "./agentHanded";
 export * from "./tools";
 export * from "./sessionServices";
 // The agent's own on-disk session file, captured into the record at operation close — the lines
