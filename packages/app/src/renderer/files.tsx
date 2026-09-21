@@ -96,6 +96,9 @@ type MoveRequest = MoveWorkflowRequest;
 const LAYER_LABEL: Record<WorkflowLayer, string> = {
   project: "this project",
   base: "shared",
+  // What ships (decision 0006). The tree does not draw this root yet, so the label is reached only
+  // by a state opened from the workflow listing.
+  system: "built in",
 };
 
 /** What each file kind looks like in the tree. Glyphs, not colour, so the meaning survives a theme. */

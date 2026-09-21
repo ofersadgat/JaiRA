@@ -29,10 +29,11 @@ The JaiRA layout is where a project's `.jaira/` and the shared root keep what a 
 | --- | --- | --- | --- |
 | `<project>/.jaira/` | directory | yes | the project's layer; a directory without it is not a project |
 | shared root | directory | yes | `--home <dir>`, then `JAIRA_HOME`, then `baseDir` in the shared root's `user-settings.json` as the app reads it, then `~/.jaira`; the CLI does not read the saved `baseDir` |
-| layer roots | ordered list | yes | `[<project>/.jaira, <shared root>]`, deduplicated; the shared root opened as a project has itself alone |
-| state search path | ordered list | yes | `<root>/workflows` then `<root>/functions` for each layer root in order |
+| built-in layer | directory | no | what JaiRA ships, `$SYSTEM` in a reference: `workflows/`, `prompts/`, `functions/` and `toolsets/`, read-only, with no `system/` and no settings. Found by `defaultBuiltInDir`: [project-layout](../units/project-layout.md). Absent reads as empty |
+| layer roots | ordered list | yes | `[<project>/.jaira, <shared root>, <built-in layer>]`, deduplicated; the shared root opened as a project has itself and then the built-in layer |
+| state search path | ordered list | yes | `<root>/workflows` then `<root>/functions` for each layer root in order; `workflows.path` replaces every entry but the built-in layer's two, which stay last |
 
-The shared root has no `.jaira/` inside it. Every path below is relative to a layer root, so `system/` is `<project>/.jaira/system/` in a project and `<shared root>/system/` in the shared root.
+The shared root has no `.jaira/` inside it, and the built-in layer is not a root a person owns: nothing below is ever written into it. Every path below is relative to a layer root, so `system/` is `<project>/.jaira/system/` in a project and `<shared root>/system/` in the shared root.
 
 ### Beside system/ is what a person authors
 

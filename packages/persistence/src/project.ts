@@ -261,9 +261,9 @@ export function initBase(baseDir?: string): JairaBasePaths {
  *
  * So the config is parsed directly: there is no layer behind the base, because it IS the layer.
  */
-export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string }): Project {
+export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string; builtInDir?: string }): Project {
   const base = initBase(opts?.baseDir);
-  const paths = baseAsProjectPaths(base.baseDir);
+  const paths = baseAsProjectPaths(base.baseDir, opts?.builtInDir);
   const doc = existsSync(paths.settingsFile) ? readJsonFile(paths.settingsFile) : undefined;
   return openAt(paths, doc === undefined ? defaultConfig() : parseConfig(doc), "shared", opts);
 }
@@ -299,9 +299,9 @@ export function loadLayeredConfig(paths: JairaPaths): JairaConfig {
 
 export function openProject(
   projectDir: string,
-  opts?: { now?: () => number; staleMs?: number; baseDir?: string },
+  opts?: { now?: () => number; staleMs?: number; baseDir?: string; builtInDir?: string },
 ): Project {
-  const paths = jairaPaths(projectDir, opts?.baseDir);
+  const paths = jairaPaths(projectDir, opts?.baseDir, opts?.builtInDir);
   if (!existsSync(paths.jairaDir)) {
     throw refusal(log, `${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
   }

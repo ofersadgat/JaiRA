@@ -40,9 +40,15 @@ function writeState(id: string, doc: unknown, layer = "project"): void {
   writeFileSync(file, JSON.stringify(doc), "utf8");
 }
 
-/** Only `paths.roots` is read — see the module header. */
+/** Only `paths.roots` is read — and `paths.builtIn.dir`, which the tree leaves out of it (decision 0006). */
 const projectOf = (): Project =>
-  ({ paths: { projectDir: join(dir, "project"), roots: [join(dir, "project"), join(dir, "base")] } }) as unknown as Project;
+  ({
+    paths: {
+      projectDir: join(dir, "project"),
+      builtIn: { dir: join(dir, "builtin") },
+      roots: [join(dir, "project"), join(dir, "base"), join(dir, "builtin")],
+    },
+  }) as unknown as Project;
 
 /** A browser result naming which states were reachable and what was found wrong with them. */
 function browserOf(

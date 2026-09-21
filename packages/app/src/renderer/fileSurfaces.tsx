@@ -17,6 +17,7 @@ import {
   WORKFLOW_JSON,
   WORKFLOW_YAML,
   delimiterOf,
+  isWritableLayer,
   hasGrammar,
   mimeOfPath,
   monacoGrammarOf,
@@ -824,6 +825,13 @@ export function ConfigEdit({ doc, busy, context }: FileSurfaceProps): JSX.Elemen
       return;
     }
     setParseError(null);
+    // The built-in layer has no settings and takes no writes (decision 0006). Nothing opens this
+    // surface on it today — the tree does not draw that root — so this is the type saying what the
+    // service would say anyway.
+    if (!isWritableLayer(doc.layer)) {
+      setParseError("what ships with JaiRA is read-only");
+      return;
+    }
     context.onSaveConfig(doc.layer, parsed);
   };
 

@@ -353,6 +353,11 @@ export interface JairaWorkflowConfig {
    * `jairaPaths().roots` by `workflowSearchPath`. Setting it is an override for a project that
    * needs something the layer model does not express — and it replaces the generated list rather
    * than extending it, so a project that sets it takes on naming every root it wants.
+   *
+   * With one exception it cannot make: the built-in layer's `$SYSTEM/workflows` and
+   * `$SYSTEM/functions` (decision 0006) close the path whatever is written here, and an entry
+   * naming them earlier is moved to the end. What ships is never ahead of a person's file and never
+   * missing.
    */
   path?: string[];
 }
@@ -364,7 +369,8 @@ export interface JairaWorkflowConfig {
  * hand-maintained constant behind.
  *
  * This constant remains only as the SPELLING of that default, for a UI that wants to show a user
- * what they are overriding. Nothing resolves against it.
+ * what they are overriding. Nothing resolves against it. The built-in layer's two directories are
+ * deliberately absent: they are not part of what a project overrides — see `path` above.
  */
 export const DEFAULT_WORKFLOW_PATH_SPELLING = [
   "$JAIRA/workflows",

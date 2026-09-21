@@ -76,8 +76,26 @@ Two consequences, and they are the point of the whole arrangement:
 An id is the same string whichever layer supplies it, so nothing about a state
 file changes when you move it between the two.
 
+**Behind both sits a third layer you never write: what JaiRA ships** (`$SYSTEM`,
+[decision 0006](docs/engineering/decisions/0006-built-in-layer.md)). It has the
+same shape — `workflows/`, `prompts/`, `functions/`, `toolsets/` — and it is
+always searched last, whatever `workflows.path` says:
+
+```text
+.jaira/workflows/chat/control.json       ← wins here
+~/.jaira/workflows/chat/control.json     ← wins on this machine
+$SYSTEM/workflows/chat/control.json      ← what ships
+```
+
+It is read-only: you change a built-in by putting a file with the same id in one
+of your two layers, exactly as a project overrides the shared root. A `.ts`
+function that ships there runs without the approval your own modules need (§9.1);
+your copy of one is yours, and is approved like any other. A task pins whatever
+it resolved, from whichever layer, so upgrading JaiRA does not change a task that
+already started.
+
 **`$` layers too, and that is what you'll type most.** A `$/…` reference is
-resolved against the same two roots, project first:
+resolved against the same roots, project first:
 
 ```jsonc
 "prompt":    { "$ref": "$/prompts/critique.md" },   // yours if you have one,
@@ -90,9 +108,17 @@ exactly like a shared state, and you override one the same way: drop a file at
 the same path under your project's `.jaira/`.
 
 When you mean one layer specifically, name it: `$JAIRA/lib/review` is always this
-project's, `$BASE/lib/review` is always the shared one.
+project's, `$BASE/lib/review` is always the shared one, and
+`$SYSTEM/prompts/review.md` is always the copy that shipped. That pins a
+*document*. It does not pin a *state*: a state's id is its identity, so
+`$SYSTEM/workflows/review` and `$BASE/workflows/review` both fold back to the id
+`review` (§2.1), and the first layer that has one supplies it.
 
-The app's **Workflows** pane lists both layers, marks a shared file the project
+⚠️ `$SYSTEM` in an **artifact destination** (§10) is a different word: there it is
+a root's generated `system/` directory. A destination template is not a reference,
+so the two never meet.
+
+The app's **Workflows** pane lists every layer, marks a file another layer
 overrides, and has an "Override here" button that creates the project copy for
 you.
 
@@ -1601,6 +1627,10 @@ as harsh and is the only version that works: the rule has to be *an unknown file
 unapproved file*, because a NEW file earlier on the search path changes which module a name
 resolves to without touching anything that already existed. Editing an approved file puts
 it back in that state until it is approved again.
+
+The one exemption is by location: a module under the built-in layer (`$SYSTEM`, §1) is
+JaiRA's own code and is never put to the gate. A copy of one in your project or in
+`~/.jaira` is a different file, and yours — it is approved like any other.
 
 #### You are asked, not just told
 

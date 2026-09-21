@@ -7,7 +7,8 @@
  * `electron` and native modules stay external.
  */
 import { build } from "esbuild";
-import { rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { cp, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const outdir = "dist";
@@ -82,6 +83,12 @@ await build({
   entryPoints: { preload: "src/main/preload.ts" },
   outdir,
   outExtension: { ".js": ".cjs" },
+  // The preload imports two constants from `@jaira/shared`, whose index also re-exports `paths.ts`
+  // — and `defaultBuiltInDir` there reads `import.meta.url` on its ESM branch. esbuild warns while
+  // PARSING the module and then tree-shakes all of it away (the bundle holds no `node:` require at
+  // all), so the warning describes code that is not in the output. Silenced here and only here: the
+  // main and worker bundles below keep the code and get a real URL instead.
+  logOverride: { "empty-import-meta": "silent" },
 });
 
 // The type-check worker: its own bundle because `new Worker(file)` needs a file. It lands beside
@@ -92,6 +99,8 @@ await build({
   entryPoints: { tsProjectWorker: "src/main/tsProjectWorker.ts" },
   outdir,
   outExtension: { ".js": ".cjs" },
+  // As for the preload: `paths.ts` is parsed on the way to a constant and shaken out entirely.
+  logOverride: { "empty-import-meta": "silent" },
 });
 
 // The MCP bridge worker: the one listener every CLI agent run registers on, kept off the main loop
@@ -105,4 +114,17 @@ await build({
   outExtension: { ".js": ".cjs" },
 });
 
-console.log("built dist/main.cjs, dist/preload.cjs, dist/tsProjectWorker.cjs and dist/mcpBridgeWorker.cjs");
+// The built-in layer (`$SYSTEM`, decision 0006) — see the same step in `packages/cli/build.mjs`. It
+// lands beside main.cjs, which is where `defaultBuiltInDir` looks from inside this bundle, under
+// `electron .` and in a packaged app alike. A packager that wraps `dist/` in an asar should ship this
+// directory as an extra resource instead (`<resources>/builtin`, the first place that function
+// looks): the layer is read with plain `node:fs` from worker threads and by the TypeScript compiler
+// host, and a real directory is the one thing all of them can read.
+//
+// Removed first, and only it: a file deleted from the layer must not live on in `dist/`, and
+// clearing the rest of `dist/` is what the note at the top of this file is about.
+const builtIn = fileURLToPath(new URL("../shared/builtin", import.meta.url));
+await rm(`${outdir}/builtin`, { recursive: true, force: true });
+if (existsSync(builtIn)) await cp(builtIn, `${outdir}/builtin`, { recursive: true });
+
+console.log("built dist/main.cjs, dist/preload.cjs, dist/tsProjectWorker.cjs, dist/mcpBridgeWorker.cjs and dist/builtin/");

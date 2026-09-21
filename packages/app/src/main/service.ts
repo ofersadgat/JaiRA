@@ -255,7 +255,9 @@ import {
   changesetInputOf,
   type Changeset,
   parseChangesetSource,
+  isWritableLayer,
   jairaBasePaths,
+  jairaBuiltInPaths,
   DEFAULT_EXECUTOR,
   mergeConfigDocuments,
   mimeOfPath,
@@ -408,6 +410,7 @@ import type {
   TaskSummary,
   WorkflowBrowser,
   WorkflowLayer,
+  WritableLayer,
   WorkflowMutationResult,
   WorkflowSource,
   WorkflowSyncEdit,
@@ -2522,7 +2525,12 @@ export class AppService {
    */
   stateSlots(stateIds: string[], project?: string): Record<string, StateSlots> {
     const open = this.sessionOf(project);
-    const roots = open !== undefined ? workflowRoots(open.project) : [jairaBasePaths(this.baseDir).workflowsDir];
+    // With no project open the shared root is the only layer a person has — and what ships is still
+    // behind it (decision 0006), so a slot declared by a built-in state is found in both modes.
+    const roots =
+      open !== undefined
+        ? workflowRoots(open.project)
+        : [jairaBasePaths(this.baseDir).workflowsDir, jairaBuiltInPaths().workflowsDir];
     return stateSlots(roots, stateIds);
   }
 
@@ -5885,6 +5893,7 @@ export class AppService {
    * surface already reports what is wrong with it.
    */
   writeWorkflow(request: WriteWorkflowRequest): WorkflowSource {
+    this.writable(request.layer);
     try {
       JSON.parse(request.text);
     } catch (e) {
@@ -5909,6 +5918,10 @@ export class AppService {
    * and reports who. Duplicating and overriding break nothing and are never refused.
    */
   moveWorkflow(request: MoveWorkflowRequest): WorkflowMutationResult {
+    // The destination always; the source only when it would be REMOVED. Copying out of the built-in
+    // layer is the override itself (decision 0006) — the one thing this surface must keep allowing.
+    this.writable(request.toLayer);
+    if (request.copy !== true) this.writable(request.layer);
     const from = this.workflowFile(request.stateId, request.layer, request.project);
     const to = this.workflowFile(request.to, request.toLayer, request.project);
     if (!existsSync(from)) throw this.refusal("file", `'${request.stateId}' does not exist in the ${request.layer} layer`);
@@ -5936,6 +5949,7 @@ export class AppService {
    * names the referrers so there is something to act on.
    */
   deleteWorkflow(request: { stateId: string; layer: WorkflowLayer; force?: boolean; project?: string }): WorkflowMutationResult {
+    this.writable(request.layer);
     const file = this.workflowFile(request.stateId, request.layer, request.project);
     if (!existsSync(file)) throw this.refusal("file", `'${request.stateId}' does not exist in the ${request.layer} layer`);
     const referencedBy = this.referrersOf(request.stateId, request.project);
@@ -6164,6 +6178,7 @@ export class AppService {
    */
   private checkRoot(request: CheckTarget): string {
     if (request.taskId === undefined) {
+      if (request.layer === "system") return jairaBuiltInPaths().dir;
       return request.layer === "base"
         ? jairaBasePaths(this.baseDir).baseDir
         : this.requireProject(request.project).paths.projectDir;
@@ -6612,6 +6627,7 @@ export class AppService {
    * depends on the untrusted half of the boundary choosing correctly is not a check at all.
    */
   writeFile(request: WriteFileRequest): FileSource {
+    this.writable(request.layer);
     // How the LAYER spells this file, which is what everything below keys on: the mime that decides
     // whether it is a state, the state id echoed back, and the sync baseline. A file outside the
     // layer keeps its own path — it is none of those things, and `mimeOfPath` reads it by extension.
@@ -6659,6 +6675,7 @@ export class AppService {
    * file" that quietly emptied an existing one is the worst possible reading of the verb.
    */
   createFile(request: CreateFileRequest): { file: string } {
+    this.writable(request.layer);
     const file = this.treeFile(request.path, request.layer, request.project);
     if (existsSync(file)) throw this.refusal("file", `'${request.path}' already exists`);
     if (request.kind === "directory") {
@@ -6683,6 +6700,7 @@ export class AppService {
    * question a state rename asks, applied to the whole set: who outside it names something inside?
    */
   renameFile(request: RenameFileRequest): FileMutationResult {
+    this.writable(request.layer);
     const from = this.treeFile(request.path, request.layer, request.project);
     const to = this.treeFile(request.to, request.layer, request.project);
     if (!existsSync(from)) throw this.refusal("file", `'${request.path}' does not exist in the ${request.layer} root`);
@@ -6712,6 +6730,7 @@ export class AppService {
    * that named them would only report it at load time.
    */
   deleteFile(request: DeleteFileRequest): FileMutationResult {
+    this.writable(request.layer);
     const file = this.treeFile(request.path, request.layer, request.project);
     if (!existsSync(file)) throw this.refusal("file", `'${request.path}' does not exist in the ${request.layer} root`);
 
@@ -6747,6 +6766,21 @@ export class AppService {
    * opening a file and an exception there is a blank surface with no explanation on it.
    */
   syncStatus(request: { layer: WorkflowLayer; path: string; text?: string; project?: string }): WorkflowSyncStatus {
+    // A sync AUTHORS in its layer, and nothing is authored into what ships (decision 0006). Said as a
+    // `blocked` line rather than thrown, for the reason this method gives about every other obstacle.
+    if (!isWritableLayer(request.layer)) {
+      return {
+        layer: request.layer,
+        path: request.path,
+        exists: false,
+        synced: false,
+        documentChanged: false,
+        statesChanged: false,
+        changedStates: [],
+        suggested: null,
+        blocked: "what ships with JaiRA is read-only, so there is nothing to sync into it",
+      };
+    }
     const base = {
       layer: request.layer,
       path: request.path,
@@ -6880,6 +6914,7 @@ export class AppService {
   }
 
   async runSync(request: WorkflowSyncRequest): Promise<WorkflowSyncResult> {
+    this.writable(request.layer);
     const source = this.syncSource(request.layer, request.project);
     const owner = this.syncHolder(request.layer);
     if (owner.syncTask !== undefined) throw this.refusal("sync", "a sync is already running");
@@ -7193,6 +7228,7 @@ export class AppService {
   async reviewSyncChangeset(request: ReviewSyncRequest): Promise<ReviewChangesResult> {
     const changeset = changesetOf(request.changeset);
     if (changeset.changes.length === 0) throw this.refusal("review", "the proposal has no changes to review");
+    this.writable(request.layer);
     const root = request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(request.project).paths.jairaDir;
 
     const system = this.sessionOf(SHARED_SESSION);
@@ -7712,7 +7748,8 @@ export class AppService {
    * it stop being a workflow.
    */
   private layerPathOf(path: string, layer: WorkflowLayer, project?: string): string | undefined {
-    if (layer === "base") return path;
+    // The shared root and the built-in layer ARE their layer roots, so a path in either is already spelled the layer's way.
+    if (layer === "base" || layer === "system") return path;
     const paths = this.requireProject(project).paths;
     const prefix = relative(paths.projectDir, paths.jairaDir).split(sep).join("/");
     if (prefix.length === 0) return path;
@@ -7740,14 +7777,44 @@ export class AppService {
    * containment check is how two of them stay right and the third quietly does not.
    */
   private treeFile(path: string, layer: WorkflowLayer, project?: string): string {
+    // The built-in layer (decision 0006) IS its layer root, as the shared one is, so both address
+    // spaces name the same directory for it.
     const root =
-      layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(project).paths.projectDir;
+      layer === "system"
+        ? jairaBuiltInPaths().dir
+        : layer === "base"
+          ? jairaBasePaths(this.baseDir).baseDir
+          : this.requireProject(project).paths.projectDir;
     return this.contained(root, path, layer);
   }
 
   private layerFile(path: string, layer: WorkflowLayer, project?: string): string {
-    const root = layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(project).paths.jairaDir;
+    const root =
+      layer === "system"
+        ? jairaBuiltInPaths().dir
+        : layer === "base"
+          ? jairaBasePaths(this.baseDir).baseDir
+          : this.requireProject(project).paths.jairaDir;
     return this.contained(root, path, layer);
+  }
+
+  /**
+   * Refuse a write into the built-in layer (decision 0006).
+   *
+   * What ships is the app's, and the app never writes there: an "override" is a copy UP into the
+   * shared root or the project, which is a write to one of THOSE. Called at the top of every surface
+   * that takes a layer and changes a file — before the path is even resolved — so the rule is one
+   * sentence in one place rather than a property each path helper has to remember. Until this
+   * existed a `system` layer fell through every `layer === "base" ? … : …` below as `project`, which
+   * is not a write into the app but is not what anybody asked for either.
+   */
+  private writable(layer: WorkflowLayer): asserts layer is WritableLayer {
+    if (!isWritableLayer(layer)) {
+      throw this.refusal(
+        "file",
+        "what ships with JaiRA is read-only — copy it into the shared root or into this project to change it",
+      );
+    }
   }
 
   /**
@@ -7762,9 +7829,11 @@ export class AppService {
    */
   private workflowFile(stateId: string, layer: WorkflowLayer, project?: string): string {
     const root =
-      layer === "base"
-        ? jairaBasePaths(this.baseDir).workflowsDir
-        : this.requireProject(project).paths.workflowsDir;
+      layer === "system"
+        ? jairaBuiltInPaths().workflowsDir
+        : layer === "base"
+          ? jairaBasePaths(this.baseDir).workflowsDir
+          : this.requireProject(project).paths.workflowsDir;
     const file = resolvePath(root, `${stateId}.json`);
     const rel = relative(root, file);
     if (rel.startsWith("..") || rel.length === 0 || isAbsolute(rel) || resolvePath(root, rel) !== file) {
