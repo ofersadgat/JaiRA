@@ -1,8 +1,8 @@
 ---
 id: engineering/decisions/0006-built-in-layer
 type: decision
-status: proposed
-updated: 2026-09-20
+status: built
+updated: 2026-09-21
 decides_for: [engineering/units/project-layout, engineering/units/workflow-snapshots, engineering/units/workflow-browser, engineering/units/tool-policy, engineering/units/chat-turns]
 ---
 

@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0007-toolsets
 type: decision
-status: accepted
+status: built
 updated: 2026-09-21
 decides_for: [engineering/units/tool-policy, engineering/units/host-tools, engineering/units/agent-executors, engineering/units/executor-tree, engineering/units/chat-turns, engineering/contracts/host-tool-vocabulary, engineering/contracts/settings-json]
 ---
