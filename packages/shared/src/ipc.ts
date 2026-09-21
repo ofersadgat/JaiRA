@@ -22,6 +22,7 @@ import type { SchemaViolation } from "./schemas";
 import type { UserEventRequest } from "./userEvents";
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
+import type { CommandApproval } from "./commandParts";
 import type {
   BoardView,
   ChatThreadView,
@@ -137,6 +138,12 @@ export interface PendingApproval {
   command?: string;
   /** Why policy escalated. */
   reason?: string;
+  /**
+   * A shell line as the requests it is made of (decision 0007 §4): per part its span in
+   * {@link command}, the span of the words that matched, its subject, its path or url, its verdict
+   * and the toolset entry that decided it. Absent for a tool that takes no command line.
+   */
+  parts?: CommandApproval;
   input: Record<string, JsonValue>;
   taskId?: string;
   /**
@@ -159,6 +166,13 @@ export interface SubmitApprovalRequest {
   decision: "allow" | "deny";
   /** Defaults to `once` — the narrowest answer. */
   scope?: ApprovalScope;
+  /**
+   * "For this run", for a shell line: the widths chosen for its asking PARTS — one of each part's
+   * `widths` (`"git commit"`, or `"git"`). `[]` takes each part's narrowest. It is the parts that are
+   * remembered, never the line, so `scope` is not also applied. Writing the entry into a toolset
+   * file ("add to the toolset") is a separate act.
+   */
+  remember?: string[];
 }
 
 /** One choice a {@link PendingQuestion}'s question offers. */

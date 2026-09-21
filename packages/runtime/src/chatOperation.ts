@@ -46,7 +46,7 @@
 import type { ExecEnvironmentDecl, LoadedState } from "@declarative-ai/hw";
 import type { InlineFamily, NamedParameter, PromptOp } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
-import { ALWAYS_GRANTED_TOOLS, declaresTools, lowerToolset, permissionsOfToolset, toolsetOfSettings } from "@jaira/shared";
+import { ALWAYS_GRANTED_TOOLS, SHELL_TOOL, declaresTools, lowerToolset, permissionsOfToolset, toolsetOfSettings } from "@jaira/shared";
 import type { ChatPlanView, ChatSettings, PermissionsDecl, SettingOrigin, ToolImplementation, UnresolvedSetting } from "@jaira/shared";
 import type { ReasoningSpec } from "@declarative-ai/llm";
 import { claudePermissionSettings, compileClaudeScopeRules, planAgentTools } from "./tools";
@@ -149,7 +149,15 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
   const model = inherited<string>("model", config["model"]);
   const reasoning = inherited<ReasoningSpec>("reasoning", config["reasoning"]);
   const tools = inherited<readonly string[]>("tools", host?.environment?.tools);
-  const permissions = inherited<PermissionsDecl>("permissions", host?.environment?.permissions);
+  const lowered = inherited<PermissionsDecl>("permissions", host?.environment?.permissions);
+  // The shell's entry lowers as `smart`, with the mode its author wrote carried in `subjects`
+  // (decision 0007 §4). A composer shows and edits the AUTHORED mode, so it is put back here; sending
+  // lowers it again, and `toolsetOfEnvironment` reads either spelling as the same toolset.
+  const shellMode = lowered?.subjects?.[SHELL_TOOL];
+  const permissions =
+    lowered !== undefined && shellMode !== undefined && lowered.tools?.[SHELL_TOOL] !== undefined
+      ? { ...lowered, tools: { ...lowered.tools, [SHELL_TOOL]: shellMode } }
+      : lowered;
 
   const passthrough: Record<string, JsonValue> = {};
   for (const [key, value] of Object.entries(config)) {
@@ -254,7 +262,13 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
       // The WHOLE list, as everywhere else — `[]` is how the composer says "no tools", and merging
       // it with what the file declared would make that the one instruction it cannot give.
       ...(settings.tools !== undefined ? { tools: [...settings.tools] } : {}),
-      ...(settings.permissions !== undefined ? { permissions: settings.permissions } : {}),
+      // A block that carries `subjects` came from a toolset (inherited, the shell's mode shown as
+      // authored), so it is lowered again; a block written the old way goes in as it was written.
+      ...(settings.permissions?.subjects !== undefined
+        ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions.scopes) }
+        : settings.permissions !== undefined
+          ? { permissions: settings.permissions }
+          : {}),
     },
   };
 }
@@ -315,8 +329,11 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
       // policy with the same primitive the engine uses. Declaring them without that would be worse
       // than dropping them: the model would be told about tools nothing had gated.
       ...tools.environment,
-      // A toolset travels as the block it lowers to; the legacy block travels as it was written.
-      ...(settings.toolset !== undefined
+      // A toolset travels as the block it lowers to; the legacy block travels as it was written. A
+      // block INHERITED from a state that wrote a toolset carries its `subjects`, and is a toolset in
+      // the old clothes: it is lowered again, which puts the shell's entry back to the `smart` the
+      // plan showed as its authored mode (decision 0007 §4).
+      ...(settings.toolset !== undefined || settings.permissions?.subjects !== undefined
         ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions?.scopes) }
         : settings.permissions !== undefined
           ? { permissions: settings.permissions }

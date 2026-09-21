@@ -40,6 +40,7 @@ export * from "./grammars";
 export * from "./userEvents";
 export * from "./toolVocabulary";
 export * from "./toolsets";
+export * from "./commandParts";
 export * from "./scopes";
 export * from "./hiddenPaths";
 export * from "./refusal";

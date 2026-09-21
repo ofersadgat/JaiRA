@@ -5,9 +5,9 @@
 import { describe, expect, it } from "vitest";
 import type { Approver } from "@declarative-ai/permissions";
 import type { LoadedState } from "@declarative-ai/hw";
-import { parseToolset, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
+import { lowerToolset, parseToolset, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, stateWithChatSettings } from "../src/chatOperation";
-import { compilePolicy } from "../src/policy";
+import { commandDecisionOf, compilePolicy } from "../src/policy";
 import { gateTools, planAgentTools, registerAllTools } from "../src/tools";
 import { newRegistry } from "../src/wiring";
 
@@ -32,7 +32,9 @@ describe("compilePolicy", () => {
 
   it("folds the call's modes OVER the project's, and leaves the project's alone where it says nothing", () => {
     const { baseline } = compilePolicy({ tools: { glob: "allow", read_file: "deny" } }, { toolset: mapToolset });
-    expect(baseline?.tools).toMatchObject({ glob: "allow", read_file: "allow", bash: "ask", write_file: "deny", run_command: "smart" });
+    // The shell folds as `smart` whatever its entry says: `bash: "ask"` is the answer for any command
+    // nothing else names, on a line that is taken apart — not a mode for the tool (decision 0007 §4).
+    expect(baseline?.tools).toMatchObject({ glob: "allow", read_file: "allow", bash: "smart", write_file: "deny", run_command: "smart" });
   });
 
   it("is what it always was with no toolset", () => {
@@ -40,13 +42,43 @@ describe("compilePolicy", () => {
     expect(compilePolicy({}).baseline?.tools?.["bash"]).toBe("smart");
   });
 
-  it("CARRIES a command subject without enforcing it — a shell line still answers to the command policy", () => {
-    const toolset = parseToolset({ bash: "smart", "git push": "allow" }).toolset;
+  it("JUDGES a shell line against the toolset's command subjects — and keeps the floor above them", () => {
+    const toolset = parseToolset({ bash: "smart", "git push": "allow", "git reset": "allow" }).toolset;
     const policy = compilePolicy({}, { toolset });
+    const smart = (command: string) => policy.smart!["bash"]!({ tool: "bash", input: { command }, sessionId: "s" } as never);
     // Not folded into the baseline: `git push` is not a tool, and nothing there would read it.
     expect(policy.baseline?.tools?.["git push"]).toBeUndefined();
-    // …and the built-in ask for a push still stands, whatever the toolset says (decision 0007 §4 is later).
-    expect(policy.smart!["bash"]!({ tool: "bash", input: { command: "git push" }, sessionId: "s" } as never)).toBe("ask");
+    // An entry that NAMES the command replaces the built-in ask it stood in for…
+    expect(smart("git push")).toBe("allow");
+    // …and with no such entry the built-in ask still stands.
+    expect(compilePolicy({}, { toolset: parseToolset({ bash: "smart" }).toolset }).smart!["bash"]!({ tool: "bash", input: { command: "git push" }, sessionId: "s" } as never)).toBe("ask");
+    // The destructive floor is above every toolset: naming the command does not open it.
+    expect(smart("git push --force")).toBe("deny");
+    expect(smart("git reset --hard")).toBe("deny");
+  });
+
+  it("reads a STATE's command subjects off the lowered block, at the moment of decision", () => {
+    // A run compiles one policy for the project; each state's toolset arrives on its own block.
+    const policy = compilePolicy({});
+    const block = lowerToolset(parseToolset({ bash: "deny", "git status": "allow", read_file: "allow", other: "deny" }).toolset).permissions;
+    expect(block).toMatchObject({ tools: { bash: "smart" }, subjects: { bash: "deny", "git status": "allow" } });
+    const narrowed = (command: string) => {
+      const input = { command };
+      const mode = policy.scopeOf!({ name: "bash" }, input as never, block as never);
+      // What the narrowing found is what the approver and the approval are handed, by the same input.
+      return { mode, smart: policy.smart!["bash"]!({ tool: "bash", input, sessionId: "s" } as never), parts: commandDecisionOf(input)?.parts.parts.map((p) => `${p.subject}:${p.verdict}`) };
+    };
+    // `"bash": "deny", "git status": "allow"` — the decision's own read-only toolset.
+    expect(narrowed("git status")).toEqual({ mode: undefined, smart: "allow", parts: ["git status:allowed"] });
+    expect(narrowed("git commit -m x")).toMatchObject({ mode: "deny", parts: ["git commit:denied"] });
+    expect(narrowed("cd src && cat a.ts")).toMatchObject({ mode: undefined, smart: "allow", parts: ["read_file:allowed"] });
+    expect(narrowed("cat a.ts > b.ts")).toMatchObject({ mode: "deny", parts: ["read_file:allowed", "write_file:denied"] });
+    // An unmigrated block says nothing about parts: only a deny narrows, and the approver decides as it did.
+    const legacy = { tools: { bash: "allow" } };
+    expect(policy.scopeOf!({ name: "bash" }, { command: "git push" } as never, legacy as never)).toBeUndefined();
+    expect(policy.scopeOf!({ name: "bash" }, { command: "git reset --hard" } as never, legacy as never)).toBe("deny");
+    // …and an agent's own shell is the same tool under another name.
+    expect(policy.scopeOf!({ name: "Bash" }, { command: "git commit -m x" } as never, block as never)).toBe("deny");
   });
 });
 
@@ -135,6 +167,14 @@ describe("a conversation turn", () => {
     expect(plan.settings.implementations).toEqual({ read_file: "native" });
     expect(plan.origin.implementations).toBe("inherited");
     expect(chatOperationOf(plan, { message: "hi", session: { id: "s@1" } }).environment.tools).toEqual(["show_artifact"]);
+  });
+
+  it("shows the composer the shell's AUTHORED mode, not the `smart` it was lowered as", () => {
+    const lowered = lowerToolset(parseToolset({ bash: "deny", "git status": "allow" }).toolset);
+    const plan = chatPlanFor([host({ tools: lowered.tools, permissions: lowered.permissions as never })]);
+    expect(plan.settings.permissions).toMatchObject({ tools: { bash: "deny" }, subjects: { bash: "deny", "git status": "allow" } });
+    // …and sending it lowers it again, to the same block the state held.
+    expect(chatOperationOf(plan, { message: "hi", session: { id: "s@1" } }).environment.permissions).toEqual(lowered.permissions);
   });
 
   it("writes a toolset into a state as what it lowers to", () => {

