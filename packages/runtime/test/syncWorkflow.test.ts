@@ -78,22 +78,24 @@ describe("syncWorkflowFiles", () => {
     expect(JSON.stringify(compiled)).toContain("assessment");
   });
 
-  it("authors the read-only contract where the engine can enforce it, on every state", () => {
+  it("authors the read-only contract as the toolset, on every state, and hands the engine no profile", () => {
     // "A sync must not touch disk" lived in a comment beside the tool registry, and the registry is
     // only half the statement: a delegated agent answering these states runs its own loop with its
     // own built-ins, and a real run used `Bash` and `Glob` under nothing but its transport's
-    // defaults. The `read-only` profile is what the gate and every adapter act on; `read_file` is
-    // pre-approved because it is the one tool the states declare and it is read-only.
+    // defaults. It is authored as the TOOLSET now (decision 0007): three readers held and
+    // pre-approved, the three tools that change anything refused, `other` refused — and NO profile,
+    // which is no longer a concept and which nothing JaiRA generates may hand the engine.
     for (const direction of [SYNC_DOCUMENT_ID, SYNC_STATES_ID]) {
       const bundle = loadBundle(syncWorkflowFiles(), direction);
       // Every state that RUNS something — the composite root only sequences its children.
       const leaves = Object.entries(bundle.states).filter(([id]) => id !== direction);
       expect(leaves.length).toBeGreaterThanOrEqual(3);
       for (const [id, state] of leaves) {
-        const env = (state as { environment?: { tools?: string[]; permissions?: { profile?: string; tools?: Record<string, string> } } }).environment;
-        expect(env?.tools, id).toEqual(["read_file"]);
-        expect(env?.permissions?.profile, id).toBe("read-only");
-        expect(env?.permissions?.tools?.["read_file"], id).toBe("allow");
+        const env = (state as { environment?: { tools?: string[]; permissions?: { profile?: string; other?: string; tools?: Record<string, string> } } }).environment;
+        expect(env?.tools, id).toEqual(["read_file", "glob", "grep"]);
+        expect(env?.permissions?.profile, id).toBeUndefined();
+        expect(env?.permissions?.other, id).toBe("deny");
+        expect(env?.permissions?.tools, id).toEqual({ read_file: "allow", glob: "allow", grep: "allow", edit: "deny", write_file: "deny", bash: "deny" });
       }
     }
   });

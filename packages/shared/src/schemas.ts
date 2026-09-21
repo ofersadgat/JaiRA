@@ -29,7 +29,6 @@
 import {
   CONVERSATION_MODES,
   PERMISSION_MODES,
-  PERMISSION_PROFILES,
   JSON_FIELDS,
   SIMPLE_FIELDS,
   fieldAppliesTo,
@@ -342,7 +341,10 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
     permissions: leaf({
       type: "object",
       properties: {
-        profile: { type: "string", description: `a named profile — ${PERMISSION_PROFILES.join(", ")}, or a custom one` },
+        profile: {
+          type: "string",
+          description: "LEGACY, still read: `read-only` means every tool that could change anything is `deny` and `other` is `deny`; write those entries in a toolset instead (decision 0007)",
+        },
         default: {
           type: "string",
           enum: [...PERMISSION_MODES],

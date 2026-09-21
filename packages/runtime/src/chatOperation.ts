@@ -49,7 +49,8 @@ import type { JsonValue } from "@declarative-ai/json";
 import { ALWAYS_GRANTED_TOOLS, declaresTools, lowerToolset, permissionsOfToolset, toolsetOfSettings } from "@jaira/shared";
 import type { ChatPlanView, ChatSettings, PermissionsDecl, SettingOrigin, ToolImplementation, UnresolvedSetting } from "@jaira/shared";
 import type { ReasoningSpec } from "@declarative-ai/llm";
-import { claudePermissionSettings, compileClaudeScopeRules, planAgentTools } from "./tools";
+import { planAgentTools } from "./agentTools";
+import { claudePermissionSettings, compileClaudeScopeRules } from "./tools";
 
 
 /**
@@ -338,12 +339,11 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
  * Absent `tools` means the message said nothing about them, so nothing is written — the state's own
  * declaration stands, which is what an untouched composer should leave alone.
  *
- * `denyNatives` is deliberately NOT emitted here yet, though the plan computes it. Denying the
- * built-ins of every ungranted tool is the honest reading of an unticked box, and it is also a
- * material change to how every existing workflow behaves: the sync states declare `read_file` alone
- * and lean on the agent's own `Glob` and `Grep` to read the tree. Turning that off is a decision
- * about what a tool list MEANS, not a wiring detail to slip in behind a dropdown — so it waits for
- * scoped permissions, which is where "may it act, and where" gets answered properly.
+ * Only what is INJECTED is decided here. Which of the agent's own tools are removed, which are kept
+ * and which must ask depends on WHICH agent answers, and that is not known until the route is — so
+ * `withAgentToolset` does it, at the executor, from that executor's own declaration and the toolset
+ * the caller publishes on the services bundle (`TOOLSET_SERVICE`). An unticked box removes the
+ * built-in (decision 0007 §3): an agent is never handed a tool its toolset does not hold.
  */
 function agentToolWiring(settings: ChatSettings): {
   environment: { tools?: string[] };
@@ -362,11 +362,7 @@ function agentToolWiring(settings: ChatSettings): {
   const scoped = settings.permissions?.scopes === undefined
     ? { allow: [], ask: [], deny: [] }
     : compileClaudeScopeRules(settings.permissions.scopes);
-  const rules = claudePermissionSettings({
-    allow: scoped.allow,
-    ask: [...plan.askNatives, ...scoped.ask],
-    deny: scoped.deny,
-  });
+  const rules = claudePermissionSettings({ allow: scoped.allow, ask: scoped.ask, deny: scoped.deny });
   return {
     environment: { tools: plan.inject },
     config: Object.keys(rules).length > 0 ? { providerOptions: rules as unknown as JsonValue } : {},

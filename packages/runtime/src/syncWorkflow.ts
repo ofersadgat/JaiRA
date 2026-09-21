@@ -314,12 +314,10 @@ export interface SyncWorkflowOptions {
   /**
    * Make a delegated Claude agent put its OWN read tools to JaiRA's gate — see {@link claudeAskSettings}.
    *
-   * Off by default, and the default is a judgement rather than an oversight. These states are
-   * `read-only`, the transport denies the write-capable built-ins up front, and the human gate that
-   * matters in this flow is the changeset review at the end — so what asking buys is a prompt per
-   * read (twenty in a real run) for calls that could not have changed anything. On for anyone who
-   * wants every file the agent touched to have been touched with their knowledge, which is a
-   * legitimate thing to want and not something to decide on their behalf.
+   * Off by default. ⚠️ Largely MOOT since decision 0007 §3: these states hold `read_file`, `glob`
+   * and `grep` as JaiRA's own tools, which displace the agent's `Read`, `Glob` and `Grep`, and its
+   * web readers are removed because the toolset does not hold them — so there is no native reader
+   * left to ask about. Kept because the rule it writes is harmless and a caller may still pass it.
    */
   askNativeReads?: boolean;
 }
@@ -343,25 +341,26 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   // A tool set also turns the prompt states into a bounded tool LOOP, which is what makes the same
   // wiring work whether a provider model or a delegated agent is answering.
   //
-  // "Must not touch disk" is AUTHORED, not just narrated. The tool list alone never said it: a
-  // delegated agent answering these states runs its own loop with its own built-ins, and a real run
-  // did exactly that — `Bash`, `Glob`, its own `Read` — under nothing but its transport's defaults.
-  // The `read-only` profile is the vocabulary the engine and every adapter enforce: the provider path
-  // wraps the declared tools, claude is denied its write-capable built-ins up-front and gated per
-  // call, codex maps it onto `--sandbox read-only`, and a transport that can hold the agent to none
-  // of it refuses the state. `read_file` is `allow` so the one declared tool runs without a human
-  // click per read — it is read-only, which is precisely what the profile admits.
+  // "Must not touch disk" is AUTHORED, not just narrated, and it is authored as the TOOLSET (decision
+  // 0007): the state holds `read_file`, `glob` and `grep` — JaiRA's own, each `allow`, so a read costs
+  // no human click — refuses the three tools that change anything, and answers `deny` for every name
+  // it has not listed. An agent gets that and nothing else: the provider path wraps the declared
+  // tools, claude loses the built-in of every tool not held (its own `Read`, `Glob` and `Grep` are
+  // displaced by ours, `Bash`, `Edit` and `Write` are removed, a sub-agent is refused by `other`),
+  // codex is left in its read-only sandbox because nothing here unlocks the writing one, and a
+  // transport that can hold the agent to none of it refuses the state.
   //
-  // What the profile could NOT reach, until it was asked to: a delegated agent's own `Read`, `Glob`
-  // and `Grep`. `read-only` denies the write-capable built-ins and says nothing about the readers,
-  // and Claude Code's default policy auto-allows those without ever consulting the permission
-  // callback — so a run under this environment read twenty files with no prompt. `askNativeReads`
-  // is the switch that routes them through the gate; see {@link claudeAskSettings} for why it is a
-  // switch rather than the default.
+  // This block used to say `profile: "read-only"` over `tools: ["read_file"]`, and leaned on the
+  // agent's own `Glob` and `Grep` to find anything — ungoverned, since Claude Code auto-allows its
+  // readers without consulting the callback. `glob` and `grep` are held now because a tool the
+  // toolset does not hold is a tool the agent does not have.
   const environment = {
     kind: "prompt",
-    tools: ["read_file"],
-    permissions: { profile: "read-only", tools: { read_file: "allow" } },
+    tools: ["read_file", "glob", "grep"],
+    permissions: {
+      tools: { read_file: "allow", glob: "allow", grep: "allow", edit: "deny", write_file: "deny", bash: "deny" },
+      other: "deny",
+    },
     ...(options.askNativeReads === true ? { providerOptions: claudeAskSettings(CLAUDE_NATIVE_READ_TOOLS) } : {}),
     ...(model !== undefined ? { model } : {}),
   };

@@ -13,7 +13,6 @@ import {
   CONVERSATION_MODES,
   JSON_FIELDS,
   PERMISSION_MODES,
-  PERMISSION_PROFILES,
   SIMPLE_FIELDS,
   type ConversationForm,
   type OperationFieldsForm,
@@ -57,11 +56,6 @@ export function OperationDataLists({ functions }: { functions: Array<{ name: str
       <datalist id="operation-functions">
         {functions.map((fn) => (
           <option key={fn.name} value={fn.name} label={fn.note} />
-        ))}
-      </datalist>
-      <datalist id="permission-profiles">
-        {PERMISSION_PROFILES.map((profile) => (
-          <option key={profile} value={profile} />
         ))}
       </datalist>
     </>
@@ -306,10 +300,9 @@ function PermissionsControl({
       <div className="row-controls">
         <input
           value={value.profile}
-          list="permission-profiles"
-          placeholder="profile — which effects are in scope"
+          placeholder="profile (legacy)"
           spellCheck={false}
-          title="read-only, plan, full — or a custom profile this host registers"
+          title="Legacy, still read: read-only means edit, write_file and bash are denied and any other tool is denied. Write those modes instead — a profile is no longer a concept (decision 0007)."
           onChange={(e) => onChange({ ...value, profile: e.target.value })}
         />
         <select

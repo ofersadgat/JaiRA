@@ -176,7 +176,9 @@ import {
   claudePermissionSettings,
   compileClaudeScopeRules,
   grantAlwaysGrantedTools,
+  nativeNamesByRoute,
   planAgentTools,
+  withToolsetService,
   functionNamesOf,
   InteractionHub,
   UserEventHub,
@@ -3726,12 +3728,15 @@ export class AppService {
   /**
    * The gateable tool set, named once — see JAIRA_TOOLS.
    *
-   * Each carries `readOnly`, which is what lets a preset assign a mode by asking what the tool DOES
-   * rather than by knowing its name. A CLI route also offers "default", which means its OWN tools
-   * rather than any of these.
+   * Each carries what every agent route calls ITS OWN tool doing that job, read off the executors'
+   * declarations — which is what lets the composer offer "the agent's own `Read`" on a route that
+   * has one, and not on a route that does not.
    */
   private static gateableTools(): ToolChoice[] {
-    return JAIRA_TOOLS.map((t) => ({ name: t.name, readOnly: t.readOnly }));
+    return JAIRA_TOOLS.map((t) => {
+      const natives = nativeNamesByRoute(t.name);
+      return { name: t.name, ...(Object.keys(natives).length > 0 ? { natives } : {}) };
+    });
   }
 
   /** What this machine can offer a composer: who can answer, what can be gated, which models exist. */
@@ -3886,7 +3891,7 @@ export class AppService {
           ? plan.settings.permissions
           : (() => {
               const { toolset } = toolsetOfSettings(plan.settings);
-              return { tools: toolModes(toolset), ...(toolset.other !== undefined ? { default: toolset.other } : {}), ...(toolset.profile !== undefined ? { profile: toolset.profile } : {}) };
+              return { tools: toolModes(toolset), ...(toolset.other !== undefined ? { default: toolset.other } : {}) };
             })(),
       ),
     };
@@ -4187,9 +4192,9 @@ export class AppService {
     });
     // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
     // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
-    // own, and what makes it answerable is the ask-rule `chatOperationOf` writes plus the gate
-    // below, which decides by logical name whichever implementation called. Wrapping it here as
-    // well would build a tool nothing would ever call.
+    // own, and what makes it answerable is the ask-rule `withAgentToolset` writes at the executor
+    // plus the gate below, asked about the native by its standard name. Wrapping it here as well
+    // would build a tool nothing would ever call.
     const wiring = planAgentTools(toolset);
     const { tools, gate } = gateTools({
       registry,
@@ -4277,7 +4282,8 @@ export class AppService {
          *    command ran in whatever directory the app was launched from. The run's own root — read,
          *    never ensured (see above).
          */
-        services: {
+        services: withToolsetService(
+          {
           tools,
           gate,
           workspace: { root: workspaceRoot },
@@ -4288,7 +4294,12 @@ export class AppService {
           // The same signal a run hands its calls. Without it there was nothing between "sent" and
           // "the provider is done", however long that took.
           abortSignal: abort.signal,
-        } as ExecServices,
+          } as ExecServices,
+          // The toolset ITSELF, for the agent executor that ends up answering: what it removes, keeps
+          // and asks about is its own declaration applied to this map (decision 0007 §3). Only when
+          // the message declared tools — otherwise the state's declaration stands and says nothing.
+          declaresTools(plan.settings) ? toolset : undefined,
+        ),
       },
       {
         instance: {
@@ -6905,10 +6916,16 @@ export class AppService {
    *
    * The registry is HALF the statement. It bounds what a provider-served loop can call; a DELEGATED
    * agent answering the same states runs its own loop with its own built-ins, which no registry
-   * reaches. The other half is authored on the workflow itself: the sync states carry
-   * `permissions: { profile: "read-only" }` (`syncWorkflowFiles`), which the engine hands the agent
-   * transport as its gate — claude loses its write-capable built-ins up-front, codex runs
-   * `--sandbox read-only`, and a transport that can enforce neither refuses the state.
+   * reaches. The other half is authored on the workflow itself: the sync states' TOOLSET holds
+   * `read_file`, `glob` and `grep`, refuses the three tools that change anything and answers `deny`
+   * for `other` (`syncWorkflowFiles`) — and an agent gets its toolset and nothing else (decision 0007
+   * §3): claude loses the built-in of every tool not held, codex is left in its read-only sandbox,
+   * and a transport that can enforce neither refuses the state.
+   *
+   * `glob` and `grep` are HELD for that reason. The states used to lean on the agent's OWN `Glob`
+   * and `Grep`, which a toolset that does not hold them now removes; ours are registered by
+   * `startRun` for every run, scoped to the run's workspace — the workflows directory `read_file`
+   * is scoped to.
    */
   private syncCapabilities(
     registry: ReturnType<typeof newRegistry>,

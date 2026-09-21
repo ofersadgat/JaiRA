@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, chatInstanceIdOf, isChatInstance } from "@jaira/runtime";
-import type { InstanceNode, PushMessage } from "@jaira/shared";
+import { READ_ONLY_PRESET_TOOLS, type InstanceNode, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
@@ -92,16 +92,20 @@ describe("the settings a message would run under", () => {
     expect(plan.origin.model).toBe("override");
   });
 
-  it("offers each gateable tool with what it can DO, which is what a preset reads", async () => {
-    // `readOnly` per tool is how `read-only` assigns a mode without knowing tool names — so a tool
-    // added later is classified by what it does rather than by somebody remembering a list.
+  it("offers each gateable tool with what each agent route calls ITS OWN, off the executors' declarations", async () => {
+    // The vocabulary holds no agent's names (decision 0007 §3): which built-in is which standard tool
+    // is what an executor declares, and the composer is handed it per route — so the implementation
+    // is a choice only where an agent has a built-in to choose. `readOnly` is gone; a preset names
+    // the tools it lets through.
     const { taskId, instanceId } = await ranTask();
     const offered = planOf({ taskId, instanceId }).available.tools;
     expect(offered).toEqual(
       expect.arrayContaining([
-        { name: "bash", readOnly: false },
-        { name: "read_file", readOnly: true },
-        { name: "write_file", readOnly: false },
+        { name: "bash", natives: { "claude-code": "Bash", "claude-cli": "Bash" } },
+        { name: "read_file", natives: { "claude-code": "Read", "claude-cli": "Read" } },
+        { name: "write_file", natives: { "claude-code": "Write", "claude-cli": "Write" } },
+        // No agent has a built-in doing this job, so there is nothing to pick.
+        { name: "show_artifact" },
       ]),
     );
   });
@@ -116,7 +120,7 @@ describe("the settings a message would run under", () => {
     // A preset's modes are reported by the preset's name. Built FROM the vocabulary rather than
     // hand-listed: a preset covers every offered tool, so a map naming three of eight is not that
     // preset — it is a map with five tools missing, and the chip should say `custom` for it.
-    const readOnly = Object.fromEntries(JAIRA_TOOLS.map((t) => [t.name, t.readOnly ? "allow" : "deny"] as const));
+    const readOnly = Object.fromEntries(JAIRA_TOOLS.map((t) => [t.name, READ_ONLY_PRESET_TOOLS.includes(t.name) ? "allow" : "deny"] as const));
     expect(posture({ permissions: { tools: { ...readOnly } } })).toBe("read-only");
     // …and one tool changed makes it nobody's preset, which is what `custom` says.
     expect(posture({ permissions: { tools: { ...readOnly, bash: "ask" } } })).toBe("custom");

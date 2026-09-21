@@ -823,16 +823,43 @@ the same rule.
   (`reed_file`, `Glob`) is a **warning** — nothing is offered under it, and a call
   by that name answers to `other`.
 
+  **An agent gets its toolset and nothing else.** Each agent executor declares
+  its own tools and which standard tool each one is — claude's `Read` is
+  `read_file`; `Edit`, `MultiEdit` and `NotebookEdit` are all `edit` — and on a
+  delegated agent, per standard tool:
+
+  | The toolset… | What the agent gets |
+  | --- | --- |
+  | does not hold the tool | its built-in is **removed** (claude: `--disallowedTools`; codex: the sandbox switch left off) |
+  | holds it (the default, `"app"`) | JaiRA's implementation, served over the bridge; the built-in is removed so the model cannot reach past it |
+  | holds it as `"implementation": "native"` | the built-in stays, and is forced through the permission callback, so the **entry's mode still decides** — asked about as `read_file`, not as `Read` |
+  | says nothing, and the built-in has no standard tool (`Task`, `Agent`, `SlashCommand`) | it answers to **`other`**: `deny` removes it up front, anything else is what the callback answers with. It is never removed merely for having no entry |
+
+  So `"tools": ["read_file"]` on a claude state means the agent has `read_file`
+  (and `show_artifact`, which every prompt state holds) and **not** its own
+  `Glob`, `Grep`, `Bash`, `Edit`, `Write` or web tools. A state that searches holds
+  `glob` and `grep`; JaiRA serves both. ⚠️ A state that declares **no tools at
+  all** is not an empty toolset — it said nothing, and the agent keeps what it has,
+  each call asked about by its standard name. Only an explicit `deny`, or an
+  `other` of `deny`, removes anything from such a state.
+
+  | Transport | How a toolset reaches it |
+  | --- | --- |
+  | provider route | the held tools are the only tools there are, each permission-wrapped |
+  | `claude-code` / `claude-cli` | the deny list up front, an ask rule for a kept built-in, and the permission callback underneath |
+  | `codex-cli` | its sandbox, and nothing finer: `workspace-write` when the toolset holds `write_file`, `edit` or `bash` with a mode that is not `deny`, `read-only` otherwise |
+  | `generic-cli` | nothing — so a toolset that **denies** anything is **refused** there, naming what it denies |
+
   ⚠️ **Three things a toolset says that are not enforced yet.** A **command
   subject** and **`script`** are accepted, checked and carried with the state,
   and nothing judges a shell line against them: a line still answers to the `bash`
   entry and the project's command policy (`policy` in settings), so `"git push": "allow"`
   does not yet spare a push its approval. `"implementation": "native"` is honoured
   by a **conversation turn** and not by a **run**, which injects JaiRA's
-  implementation — the governed choice. And on a delegated agent an absent tool is
-  *not offered* rather than *removed*: the agent keeps its own built-ins beside
-  what you offer until the executors declare them, which is why the older
-  `permissions.profile` (below) still exists.
+  implementation — the governed choice: the engine hands an executor a state's
+  resolved tools and its gate, and neither says whose code an entry chose. And a
+  run's `"other": "ask"` does not *force* `Task` and its kind to the callback (a
+  conversation turn's does); write `"other": "deny"` to remove them.
 
   ⚠️ **Across layers a toolset replaces the offered TOOLS, and only those.** It
   reaches the engine as a list and a `permissions` block, and the block merges per
@@ -853,29 +880,32 @@ the same rule.
   caught too.
 - **`permissions`** — **where** tools may act (`scopes`), and the older home of
   what a toolset now says: per-tool modes (`tools`), a `default` for unlisted
-  tools, an `other` for a tool nothing registers, and a `profile` (`read-only` |
-  `plan` | `full`). Beside a toolset map, `permissions.tools`, `default` and
-  `other` are **ignored with a lint warning** — a mode is an entry of the map —
-  while `scopes` and `profile` still apply.
+  tools, and an `other` for a tool nothing registers. Beside a toolset map,
+  `permissions.tools`, `default` and `other` are **ignored with a lint warning** —
+  a mode is an entry of the map — while `scopes` still apply.
 
-  **`profile` is how a restriction survives delegation**, and each transport
-  enforces it through the channel it actually has:
+  **There is no `profile` any more** (decision 0007). `read-only` | `plan` |
+  `full` was a second way to say what a toolset says, and "read-only" is now a
+  toolset: the tools that change anything are `deny`, and so is `other`. An old
+  `"profile": "read-only"` is still **read**, as exactly that map:
 
-  | Transport | What a `read-only` profile does |
+  | An old block says | It is read as |
   | --- | --- |
-  | provider route | the declared tools are permission-wrapped; a mutating tool is denied on its way through |
-  | `claude-code` / `claude-cli` | the agent's write-capable built-ins (`Bash`, `Edit`, `Write`, `Task`, …) go on `--disallowedTools` up front; everything else answers to the permission callback, where an unclassifiable tool escalates rather than passing |
-  | `codex-cli` | `--sandbox read-only` — the sandbox is its only channel, and the mapping is exact |
-  | `generic-cli` | **refused**: it enforces nothing (`policyEnforcement: "none"`), so running would be a restriction in the workflow and none in the process |
+  | `"profile": "read-only"` (or `"plan"`) | `edit`, `write_file` and `bash` are `deny` and not offered, whatever the list granted and whatever mode sat beside them; `other` is `deny` |
+  | `"profile": "full"`, or none | nothing |
 
-  A `plan` profile maps to claude's own `--permission-mode plan` (and codex's
-  read-only sandbox) instead of the deny list — plan mode still reads with those
-  tools, and denying them would be a different restriction than the one authored.
-  The sync workflow is the worked example: its states declare
-  `"tools": ["read_file"], "permissions": {"profile": "read-only", "tools": {"read_file": "allow"}}` —
-  the tool so a clipped digest can be re-read, the profile so "returns text for a
+  Beside a toolset **map** the profile is folded into the map with a lint warning
+  and is not handed to the engine. A state still in the **list** form reaches the
+  engine as written, profile included, so the engine's own handling of it (claude's
+  write-capable built-ins denied up front, codex's read-only sandbox, a
+  `generic-cli` refusal) still applies on top — the two agree. Write the entries.
+
+  The sync workflow is the worked example: its states hold
+  `"tools": ["read_file", "glob", "grep"]` with each `allow`, deny `edit`,
+  `write_file` and `bash`, and set `"other": "deny"` — the readers so a clipped
+  digest can be re-read and the tree searched, the denies so "returns text for a
   person to accept and must not touch disk" is enforced rather than narrated, and
-  the `allow` so the one declared tool runs without a human click per read.
+  the `allow`s so a read costs no human click.
   ⚠️ The enforcement rides on the run's approval wiring: a run with no approver
   builds no gate, and a delegated agent then runs under its transport's own
   defaults — the documented "without an approver, tools are handed over
@@ -2465,9 +2495,12 @@ Every one of these fails **silently or misleadingly**:
 12. Models must be route-prefixed (`anthropic/claude-sonnet-5`).
 13. `contentMediaType` is what makes a slot an artifact; there is no
     `"type": "artifact"`.
-14. `tools` is what subjects an agent's commands to the policy — and it is a
-    grant, not a fence: a delegated agent keeps its own built-ins beside it. A
-    state that must not write declares `permissions.profile: "read-only"` too.
+14. `tools` is what subjects an agent's commands to the policy — and it is the
+    WHOLE grant: a delegated agent loses the built-in of every standard tool the
+    state does not hold, so a state listing only `read_file` cannot `Glob` or
+    `Grep` either. Hold `glob` and `grep`. A state that declares no tools at all
+    keeps the agent's own. There is no `profile`; a state that must not write
+    does not hold `edit`, `write_file` or `bash`, and says `"other": "deny"`.
 15. A `generic-cli` state is refused outright while the policy can escalate to a
     human — which `policy.builtins: false` alone does not settle: a `default` or a
     rule of `require_approval` keeps it escalating.

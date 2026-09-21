@@ -30,8 +30,14 @@
  * line against them yet: taking a line apart into requests is decision 0007 §4 and a later task. Until
  * it lands, a shell line answers to the `bash` entry and the project's command policy, exactly as
  * before. The same goes for `implementation: "native"` on a state the ENGINE runs — the chat path
- * honours it through `planAgentTools`; a run injects ours, which is the governed choice, until the
- * executors declare their natives (§3).
+ * honours it through `planAgentTools`; a run injects ours, which is the governed choice, because the
+ * engine hands an executor a state's tool LIST and a gate, and neither can say whose code was chosen.
+ *
+ * ## There is no profile
+ *
+ * `permissions.profile` (`read-only` | `plan` | `full`) is gone as a concept (decision 0007 §1): what
+ * it restrained is said by `deny` entries and `other`. An old block that still carries one is READ —
+ * {@link applyLegacyProfile} turns it into the entries it used to mean — and nothing here writes one.
  */
 import { PERMISSION_MODES, type ChatSettings, type PermissionMode, type PermissionsDecl, type ToolImplementation } from "./operationVocabulary";
 import type { Scope } from "./scopes";
@@ -77,8 +83,6 @@ export interface Toolset {
   entries: Record<string, ToolsetEntry>;
   /** The mode for everything no entry names. Legacy: `permissions.other ?? permissions.default`. */
   other?: PermissionMode;
-  /** LEGACY ONLY: `permissions.profile`, still honoured. A later task removes profiles (0007 §1). */
-  profile?: string;
 }
 
 export interface ToolsetIssue {
@@ -257,6 +261,37 @@ export function resolveToolsetDecl(
 // --- the legacy reader -------------------------------------------------------
 
 /**
+ * FROZEN — the tools `ToolSpec.readOnly` called NOT read-only on the day that flag was removed.
+ *
+ * Read by {@link applyLegacyProfile} and by nothing else, and never to be extended: it is a record of
+ * what `"profile": "read-only"` MEANT when the states that still say it were written, not a fact
+ * about tools. A tool registered after this was frozen was never covered by a profile, and a state
+ * that wants it refused writes `deny`, or leaves it out of its toolset.
+ */
+export const LEGACY_NON_READ_ONLY_TOOLS: readonly string[] = ["edit", "write_file", "bash"];
+
+/** FROZEN — the profile names that narrowed. `full` excluded nothing; any other name was custom. */
+export const LEGACY_NARROWING_PROFILES: readonly string[] = ["read-only", "plan"];
+
+/**
+ * An old `permissions.profile`, as the MAP it used to mean (decision 0007 §1).
+ *
+ * `read-only` — and `plan`, which narrowed identically and which nothing authored — refused every tool
+ * that could change anything, whatever the list granted and whatever mode sat beside it, and had no
+ * opinion a person could rely on about a name it had never heard of. As a toolset that is: every tool
+ * in {@link LEGACY_NON_READ_ONLY_TOOLS} is `deny` and NOT offered, and `other` is `deny`. `full` and
+ * an absent profile change nothing. A custom name changes nothing either: JaiRA never registered one.
+ *
+ * Returns the SAME object when there is nothing to apply.
+ */
+export function applyLegacyProfile(toolset: Toolset, profile: string | undefined): Toolset {
+  if (profile === undefined || !LEGACY_NARROWING_PROFILES.includes(profile)) return toolset;
+  const entries: Record<string, ToolsetEntry> = { ...toolset.entries };
+  for (const name of LEGACY_NON_READ_ONLY_TOOLS) entries[name] = { kind: "tool", mode: "deny", offered: false };
+  return { entries, other: "deny" };
+}
+
+/**
  * The old LIST form of `tools` and the old `permissions` block, as the same {@link Toolset}.
  *
  *  - every listed tool is an offered entry, with `permissions.tools[name] ?? permissions.default` as
@@ -264,7 +299,7 @@ export function resolveToolsetDecl(
  *  - a `permissions.tools` name the list did NOT grant is kept as an un-offered entry: its mode
  *    still reaches the baseline a delegated agent builds its deny floor from;
  *  - `default` becomes `other` (`permissions.other` wins where both were written);
- *  - `profile` rides along, still honoured.
+ *  - `profile` becomes the entries it used to mean — see {@link applyLegacyProfile}.
  *
  * `implementations` is the composer's third map, folded onto the entries it names.
  */
@@ -286,11 +321,7 @@ export function toolsetOfLegacy(
     entries[name] = { kind: "tool", mode, offered: false };
   }
   const other = permissions?.other ?? permissions?.default;
-  return {
-    entries,
-    ...(other !== undefined ? { other } : {}),
-    ...(permissions?.profile !== undefined ? { profile: permissions.profile } : {}),
-  };
+  return applyLegacyProfile({ entries, ...(other !== undefined ? { other } : {}) }, permissions?.profile);
 }
 
 // --- what consumers read -----------------------------------------------------
@@ -345,7 +376,6 @@ export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[]
   const subjects = shellSubjects(toolset);
   const implementations = toolImplementations(toolset);
   return {
-    ...(toolset.profile !== undefined ? { profile: toolset.profile } : {}),
     ...(Object.keys(tools).length > 0 ? { tools } : {}),
     ...(toolset.other !== undefined ? { other: toolset.other } : {}),
     ...(Object.keys(subjects).length > 0 ? { subjects } : {}),
@@ -385,15 +415,14 @@ export interface LoweredToolset {
 /**
  * One toolset, as `tools: string[]` and a `permissions` block.
  *
- * `rest` is the block's OWN `permissions`, of which only what a toolset does not say survives:
- * `scopes`, and a legacy `profile`.
+ * `rest` is the block's OWN `permissions`, of which only what a toolset does not say survives: its
+ * `scopes`. A legacy `profile` beside the map is folded INTO the map ({@link applyLegacyProfile}) and
+ * is not written out — the engine is never handed one by a lowering.
  */
 export function lowerToolset(toolset: Toolset, rest?: PermissionsDecl | undefined): LoweredToolset {
-  const permissions = permissionsOfToolset(
-    { ...toolset, ...(toolset.profile === undefined && rest?.profile !== undefined ? { profile: rest.profile } : {}) },
-    rest?.scopes,
-  );
-  return { tools: offeredTools(toolset), ...(Object.keys(permissions).length > 0 ? { permissions } : {}) };
+  const narrowed = applyLegacyProfile(toolset, rest?.profile);
+  const permissions = permissionsOfToolset(narrowed, rest?.scopes);
+  return { tools: offeredTools(narrowed), ...(Object.keys(permissions).length > 0 ? { permissions } : {}) };
 }
 
 /** An issue against one state file, with the path where it was written. */
@@ -466,6 +495,13 @@ export function lowerStateToolsets(
       found.push({ path: "", message: "a toolset cannot sit beside a bound or referenced `permissions` — write its modes as entries", severity: "error" });
     } else if (own !== undefined) {
       rest = own as PermissionsDecl;
+      if (rest.profile !== undefined) {
+        found.push({
+          path: "",
+          message: `permissions.profile beside a toolset map is read as the entries it used to mean — ${LEGACY_NON_READ_ONLY_TOOLS.join(", ")} and 'other' as 'deny' under '${LEGACY_NARROWING_PROFILES.join("' or '")}', nothing otherwise — and is no longer handed to the engine; write those entries`,
+          severity: "warning",
+        });
+      }
       const folded = (["tools", "default", "other"] as const).filter((key) => rest?.[key] !== undefined);
       if (folded.length > 0) {
         found.push({
@@ -526,8 +562,7 @@ export function declaresTools(settings: ToolSettings): boolean {
 export function toolsetOfSettings(settings: ToolSettings): { toolset: Toolset; issues: ToolsetIssue[] } {
   if (settings.toolset !== undefined) {
     const parsed = parseToolset(settings.toolset);
-    const profile = settings.permissions?.profile;
-    return profile === undefined ? parsed : { ...parsed, toolset: { ...parsed.toolset, profile } };
+    return { ...parsed, toolset: applyLegacyProfile(parsed.toolset, settings.permissions?.profile) };
   }
   return { toolset: toolsetOfEnvironment(settings.tools, settings.permissions, settings.implementations), issues: [] };
 }

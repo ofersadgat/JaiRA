@@ -154,9 +154,6 @@ export const CONVERSATION_MODES = ["full_history", "summary", "fresh", "selected
 
 /** DESIGN §5.1. `smart` defers to an approver that inspects the call rather than just the tool name. */
 export const PERMISSION_MODES = ["allow", "deny", "ask", "smart"] as const;
-/** The built-in profiles. Any other string is a custom profile the host resolves, so this is a
- *  suggestion list and not a closed set — the control accepts free text. */
-export const PERMISSION_PROFILES = ["read-only", "plan", "full"] as const;
 
 /** True when a field is authorable on an operation of this kind. */
 export function fieldAppliesTo(field: { kinds?: readonly string[] }, kind: "prompt" | "function"): boolean {
@@ -189,13 +186,18 @@ export interface ReasoningDecl {
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /**
- * The authored permission baseline: a profile, a default, and per-tool overrides.
+ * The authored permission baseline: a default, and per-tool overrides.
  *
  * ⚠️ The LEGACY shape, and the shape the upstream engine takes. What an author writes now is a
- * toolset in `tools` (`toolsets.ts`, decision 0007); `tools`, `default` and `profile` here are still
- * read, and every consumer reads both forms through the one `Toolset` they fold into.
+ * toolset in `tools` (`toolsets.ts`, decision 0007); `tools` and `default` here are still read, and
+ * every consumer reads both forms through the one `Toolset` they fold into.
  */
 export interface PermissionsDecl {
+  /**
+   * LEGACY, read and never written. A profile is no longer a concept (decision 0007 §1): an old
+   * `"read-only"` is read as the `deny` entries and the `other` it used to mean — `applyLegacyProfile`
+   * in `toolsets.ts` — and no lowering hands one to the engine.
+   */
   profile?: string;
   default?: PermissionMode;
   tools?: Record<string, PermissionMode>;
@@ -229,20 +231,27 @@ export interface PermissionsDecl {
   implementations?: Record<string, ToolImplementation>;
 }
 
-/** A tool a caller may be granted, and whether it can change anything. */
+/** A tool a caller may be granted. */
 export interface ToolChoice {
   name: string;
-  readOnly: boolean;
+  /**
+   * What each agent route calls ITS OWN tool doing this job, by route (`{ "claude-cli": "Read" }`) —
+   * read off the executors' declarations (`agentTools.ts`) by whoever lists the tools. Absent for a
+   * route ⇒ that agent has no built-in to choose instead, so the implementation is not a choice there.
+   */
+  natives?: Record<string, string>;
 }
 
 /**
  * A named starting point for the per-tool modes — a PRESET, not a setting of its own.
  *
- * This is the composer's whole permission model, and it is deliberately not the engine's `profile`.
- * A profile is a scope FILTER resolved at call time: it runs ahead of the mode, refuses anything it
- * excludes, and — for a name nothing recognises — refuses everything. A preset is the opposite kind
- * of thing. It is spent the moment it is clicked: it writes a mode for every tool and then has no
- * further say, so what runs is the map, which is also what the reader can see and edit.
+ * This is the composer's whole permission model. A preset is spent the moment it is clicked: it
+ * writes a mode for every tool and then has no further say, so what runs is the map, which is also
+ * what the reader can see and edit.
+ *
+ * ⚠️ An EXPLICIT LIST for now. `read-only` used to ask each tool whether it was `readOnly`; that flag
+ * is gone (decision 0007 §1), so the preset names the tools it lets through. The four become shipped
+ * toolset FILES in a later step (0007 §2), and this table goes then.
  *
  * Two consequences worth stating, because they are why it is built this way:
  *
@@ -261,9 +270,18 @@ export interface PermissionPreset {
   id: string;
   label: string;
   hint: string;
-  /** The mode this preset assigns a tool. Asked of the TOOL, so a newly registered one is covered. */
-  modeFor: (tool: ToolChoice) => PermissionMode;
+  /** The mode this preset assigns a tool, by NAME. A name the preset has never heard of gets its strictest. */
+  modeFor: (tool: Pick<ToolChoice, "name">) => PermissionMode;
 }
+
+/**
+ * The tools the `read-only` preset lets through — written down, where it used to be derived.
+ *
+ * Exactly the tools `ToolSpec.readOnly` was true for on the day it was removed, so the preset writes
+ * the map it always wrote. A tool added to the vocabulary later is `deny` under this preset until it
+ * is named here.
+ */
+export const READ_ONLY_PRESET_TOOLS: readonly string[] = ["read_file", "glob", "grep", "show_artifact", "web_fetch", "web_search"];
 
 export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
   { id: "ask", label: "ask first", hint: "stop and ask before every call", modeFor: () => "ask" },
@@ -271,7 +289,7 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
     id: "read-only",
     label: "read-only",
     hint: "reading goes ahead, anything that writes is refused",
-    modeFor: (tool) => (tool.readOnly ? "allow" : "deny"),
+    modeFor: (tool) => (READ_ONLY_PRESET_TOOLS.includes(tool.name) ? "allow" : "deny"),
   },
   { id: "auto", label: "auto", hint: "each call decided by the approver", modeFor: () => "smart" },
   { id: "full", label: "full access", hint: "anything, without asking", modeFor: () => "allow" },

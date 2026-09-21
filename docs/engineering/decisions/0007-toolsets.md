@@ -2,7 +2,7 @@
 id: engineering/decisions/0007-toolsets
 type: decision
 status: proposed
-updated: 2026-09-20
+updated: 2026-09-21
 decides_for: [engineering/units/tool-policy, engineering/units/host-tools, engineering/units/agent-executors, engineering/units/executor-tree, engineering/units/chat-turns, engineering/contracts/host-tool-vocabulary, engineering/contracts/settings-json]
 ---
 
@@ -254,7 +254,19 @@ preset that is a function.
    subjects, `script` and a run's `native` are carried and not enforced.
 2. **Executors declare natives** and coarse switches; `planAgentTools`
    reads them; `other` for unmapped natives. `readOnly` and the profiles
-   go when nothing reads them.
+   go when nothing reads them. *Built 2026-09-21*
+   ([tool-policy](../units/tool-policy.md),
+   [agent-executors](../units/agent-executors.md)): the declarations sit
+   beside the executors and `withAgentToolset` applies the plan at each
+   agent route, through the two fields the upstream executor already
+   builds its deny list from. An old `profile` is read as the map it meant
+   and no lowering writes one; a list-form file still reaches the engine
+   with its profile in it, until the migration (7). Three things it does
+   not do, because the engine hands an executor a state's resolved tools
+   and gate and not its block: a run's `implementation: "native"` still
+   injects ours, a run cannot tell a written `other: "ask"` from the
+   gate's last resort, and a state holding only `show_artifact` reads as
+   one that declared no tools.
 3. **Shell**: redirects, substitutions and the embedder list in
    `parseCommand`; the utility → standard-tool table; `script`; parts as
    requests, and the approval that lists them.

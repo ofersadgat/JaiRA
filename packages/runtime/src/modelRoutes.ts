@@ -49,6 +49,7 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
+import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, withAgentToolset } from "./agentTools";
 import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
 import type { Exec } from "./exec";
@@ -217,29 +218,48 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     });
   const query = options.query;
 
+  // EVERY agent route is held to the toolset of each call it answers (decision 0007 §3): the
+  // executor's own declaration says which natives it has and what channel a toolset reaches it by,
+  // and `withAgentToolset` applies the plan where the route is finally known.
   if (adapters.includes("sdk")) {
-    bind(AGENT_SDK, new AgentApiExecutor({ ...(query !== undefined ? { query } : {}) }) );
+    bind(AGENT_SDK, withAgentToolset(CLAUDE_TOOLS, new AgentApiExecutor({ ...(query !== undefined ? { query } : {}) }), { label: AGENT_SDK }));
   }
   if (adapters.includes("cli")) {
     bind(
       AGENT_CLI,
-      new AgentCliExecutor({
-        spawn,
-        ...(agents.claudeCli?.command !== undefined ? { command: agents.claudeCli.command } : {}),
-        ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
-        ...(query !== undefined ? { query } : {}),
-      }),
+      withAgentToolset(
+        CLAUDE_TOOLS,
+        new AgentCliExecutor({
+          spawn,
+          ...(agents.claudeCli?.command !== undefined ? { command: agents.claudeCli.command } : {}),
+          ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
+          ...(query !== undefined ? { query } : {}),
+        }),
+        { label: AGENT_CLI },
+      ),
     );
   }
   if (adapters.includes("codex")) {
-    bind(
-      AGENT_CODEX,
+    // Codex's one channel is its sandbox, and the sandbox is fixed when the executor is built — so
+    // there is one executor per setting of the switch, and the toolset picks. `permissionMode: "plan"`
+    // is nothing but `--sandbox read-only` on this transport (`sandboxFor`), and an explicit mode
+    // outranks everything else the executor would read.
+    const codex = (readOnly: boolean): AgentCodexExecutor =>
       new AgentCodexExecutor({
         spawn,
         ...(agents.codex?.command !== undefined ? { command: agents.codex.command } : {}),
         ...(agents.codex?.sandbox !== undefined ? { sandbox: agents.codex.sandbox } : {}),
         ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
         ...(query !== undefined ? { query } : {}),
+        ...(readOnly ? { permissionMode: "plan" as const } : {}),
+      });
+    const writing = codex(false);
+    const reading = codex(true);
+    bind(
+      AGENT_CODEX,
+      withAgentToolset(CODEX_TOOLS, writing, {
+        label: AGENT_CODEX,
+        switched: (switches) => (switches[CODEX_WRITE_SWITCH] === false ? reading : writing),
       }),
     );
   }
@@ -253,17 +273,23 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     // is its runtime half: there is no channel to route an approver through, so one must not be built.
     bind(
       spec.name ?? AGENT_GENERIC_CLI,
-      new AgentCliExecutor({
-        label: spec.name ?? AGENT_GENERIC_CLI,
-        capabilities: GENERIC_CLI_CAPS,
-        approvalCallback: false,
-        query:
-          query ??
-          createGenericCliQuery(spec, {
-            ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
-            ...(options.exec !== undefined ? { exec: options.exec } : {}),
-          }),
-      }),
+      // It declares no tools and no channel, so a toolset that refuses anything is refused here —
+      // what the engine's own rule did for a narrowing profile, now that there is no profile.
+      withAgentToolset(
+        GENERIC_CLI_TOOLS,
+        new AgentCliExecutor({
+          label: spec.name ?? AGENT_GENERIC_CLI,
+          capabilities: GENERIC_CLI_CAPS,
+          approvalCallback: false,
+          query:
+            query ??
+            createGenericCliQuery(spec, {
+              ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+              ...(options.exec !== undefined ? { exec: options.exec } : {}),
+            }),
+        }),
+        { label: spec.name ?? AGENT_GENERIC_CLI },
+      ),
     );
   }
   return routes;

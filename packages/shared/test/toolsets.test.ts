@@ -6,7 +6,9 @@ import { Ajv } from "ajv";
 import { describe, expect, it } from "vitest";
 import { operationSchema, toolsSchema } from "../src/schemas";
 import {
+  applyLegacyProfile,
   declaresTools,
+  LEGACY_NON_READ_ONLY_TOOLS,
   lowerStateToolsets,
   lowerToolset,
   offeredTools,
@@ -176,7 +178,7 @@ describe("references", () => {
 
 describe("the legacy reader", () => {
   it("folds the list and the permissions block into the same map", () => {
-    const toolset = toolsetOfLegacy(["read_file", "bash"], { tools: { read_file: "allow", write_file: "deny" }, default: "ask", profile: "read-only" });
+    const toolset = toolsetOfLegacy(["read_file", "bash"], { tools: { read_file: "allow", write_file: "deny" }, default: "ask", profile: "full" });
     expect(toolset.entries).toEqual({
       read_file: { kind: "tool", mode: "allow" },
       // No mode of its own, so it takes the block's `default`.
@@ -186,8 +188,44 @@ describe("the legacy reader", () => {
     });
     // `default` → `other`.
     expect(toolset.other).toBe("ask");
-    expect(toolset.profile).toBe("read-only");
+    // `full` excluded nothing, so it leaves nothing behind — and a toolset has no profile to carry.
+    expect(Object.keys(toolset)).not.toContain("profile");
     expect(offeredTools(toolset)).toEqual(["read_file", "bash"]);
+  });
+
+  it("reads an old `profile: \"read-only\"` as the MAP it meant: every writer denied, `other` deny", () => {
+    // The 19 authored states that still say it. `bash` is LISTED here and refused anyway, which is
+    // what the profile did: it ran ahead of the mode and no `allow` beside it rescued a writer.
+    const toolset = toolsetOfLegacy(["read_file", "bash"], { profile: "read-only", tools: { read_file: "allow", bash: "allow" }, default: "ask" });
+    expect(toolset).toEqual({
+      entries: {
+        read_file: { kind: "tool", mode: "allow" },
+        bash: { kind: "tool", mode: "deny", offered: false },
+        edit: { kind: "tool", mode: "deny", offered: false },
+        write_file: { kind: "tool", mode: "deny", offered: false },
+      },
+      other: "deny",
+    });
+    expect(offeredTools(toolset)).toEqual(["read_file"]);
+    // `plan` narrowed identically; a custom name was never registered by JaiRA and changes nothing.
+    expect(toolsetOfLegacy(["bash"], { profile: "plan" }).entries["bash"]).toEqual({ kind: "tool", mode: "deny", offered: false });
+    expect(toolsetOfLegacy(["bash"], { profile: "search" })).toEqual({ entries: { bash: { kind: "tool" } } });
+  });
+
+  it("freezes what `readOnly` said, for that reader alone", () => {
+    expect(LEGACY_NON_READ_ONLY_TOOLS).toEqual(["edit", "write_file", "bash"]);
+    expect(applyLegacyProfile({ entries: {} }, undefined)).toEqual({ entries: {} });
+    expect(applyLegacyProfile({ entries: {} }, "full")).toEqual({ entries: {} });
+  });
+
+  it("never LOWERS a profile: a map beside one takes its denies, and the engine is handed none", () => {
+    const { toolset } = parseToolset({ read_file: "allow", bash: "allow" });
+    const lowered = lowerToolset(toolset, { profile: "read-only" });
+    expect(lowered.tools).toEqual(["read_file"]);
+    expect(lowered.permissions).toEqual({
+      tools: { read_file: "allow", bash: "deny", edit: "deny", write_file: "deny" },
+      other: "deny",
+    });
   });
 
   it("lets an authored `other` win over `default`, and leaves a mode absent when nothing said one", () => {
@@ -231,10 +269,14 @@ describe("legacy equivalence", () => {
     expect(toolsetOfEnvironment(lowered.tools, lowered.permissions)).toEqual(authored);
   });
 
-  it("keeps `scopes` and a legacy `profile` beside a toolset, and never writes `default`", () => {
+  it("keeps `scopes` beside a toolset, folds a legacy `profile` INTO it, and never writes `default` or a profile", () => {
     const scopes = [{ path: "app/**", default: "allow" as const }];
     const lowered = lowerToolset(parseToolset({ read_file: "allow" }).toolset, { scopes, profile: "read-only", default: "ask" });
-    expect(lowered.permissions).toEqual({ profile: "read-only", tools: { read_file: "allow" }, scopes });
+    expect(lowered.permissions).toEqual({
+      tools: { read_file: "allow", edit: "deny", write_file: "deny", bash: "deny" },
+      other: "deny",
+      scopes,
+    });
     expect(permissionsOfToolset(toolsetOfLegacy(["bash"], { default: "ask" }))).toEqual({ tools: { bash: "ask" }, other: "ask" });
   });
 });
