@@ -66,6 +66,15 @@ export interface TaskMoveRequest {
   inputs?: Record<string, JsonValue>;
   /** The composite whose child `toState` is, by instance id. Absent ⇒ the task's root instance. */
   instanceId?: string;
+  /**
+   * Child keys entered BENEATH `toState`, in order — a target nested deeper than a sibling
+   * (decision 0005 §1). Each is a directed transition handed to the composite above it the moment
+   * that composite enters, so it goes straight to the named child instead of starting at its first.
+   */
+  path?: string[];
+  /** Scripted gate answers and prompt rules for a run this REOPENS (tests/demos) — as `StartRunRequest`'s. */
+  interactions?: Record<string, JsonValue[]>;
+  fake?: JsonValue;
 }
 
 /**

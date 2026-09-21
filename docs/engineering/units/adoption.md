@@ -34,7 +34,7 @@ It deliberately does not own:
 
 - Reading the rows back: [run-load](run-load.md) emits an adopted node as history under a stand-in state, and `withAdoptedStandIns` adds that state to the bundle a loaded run is handed.
 - Holding, release and the start refusals: [task-lifecycle](task-lifecycle.md). Cutting a journal: [rewind-and-fork](rewind-and-fork.md). Filing: [board-projection](board-projection.md).
-- Finding the workflow that relates two states, modifying a frozen workflow, and the board's drop: decision 0005 steps 4 and 5.
+- Finding the workflow that relates two states and composing an adoption with a move or a generated document: `connectTask` in `persistence/connect.ts`, behind `task:connect` ([task-channels](../contracts/task-channels.md)). Modifying a frozen workflow: [workflow-snapshots](workflow-snapshots.md). The board's drop and the card filed beneath its parent: [task-board](../../ui/components/task-board.md).
 
 ## Adoption is service code between the task store and the load, and asks the host for one thing
 

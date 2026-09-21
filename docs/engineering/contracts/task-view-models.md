@@ -126,6 +126,7 @@ The task view models are the JSON shapes in `@jaira/shared` `view.ts` that task 
 | `BoardCard.hasSubBoard` | boolean | yes | the path goes below the card's column; on the roots board whenever the path is non-empty |
 | `BoardCard.labels`, `heading`, `waitingFor`, `origin` | as above | no | copied from the summary and the heading |
 | `BoardCard.updatedAt` | number | yes | the row's clock |
+| `BoardCard.under` | string | no | the task this card files beneath: the task that adopted it. A board draws it indented under that card when both are in one column, which the root listing always arranges |
 | `BoardCard.endedAt` | number | no | the last instance termination, only for an ended task |
 
 ### A task detail is the tree, the timeline and the one run summary

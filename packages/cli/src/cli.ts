@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { formatRecord, setLogSink } from "@declarative-ai/log";
-import { loadBundle, validateBundle, moduleHash as moduleHashOf } from "@declarative-ai/hw";
+import { DirectedTransitions, loadBundle, validateBundle, moduleHash as moduleHashOf, type DirectedTransition, type EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { registerCliChangesetReviewer } from "./changesetReviewer";
 import { wireRemotes } from "./remoteWiring";
@@ -28,6 +28,9 @@ import {
   initProject,
   lintErrors,
   openProject,
+  adoptTaskIn,
+  connectTask,
+  descentFollower,
   prepareUserModules,
   resetUserModules,
   resolveUserFunctions,
@@ -64,6 +67,7 @@ import {
   type BoardView,
   type JairaConfig,
   type ModuleApproval,
+  type TaskMoveRequest,
 } from "@jaira/shared";
 import {
   buildPromptExecutor,
@@ -182,6 +186,8 @@ const USAGE = `usage:
   jaira task list [--project <dir>]
   jaira task status <taskId> [--events <n>] [--project <dir>]
   jaira task cancel <taskId> [--project <dir>]
+  jaira task move <taskId> --to <stateId> [--workflow <rootStateId>] [--skip] [--dry-run]
+            [--interactions <json|@file>] [--fake <json|@file>] [--project <dir>]
   jaira board [--level <stateId>] [--json] [--project <dir>]
   jaira worktree list [--project <dir>]
   jaira worktree remove <taskId> [--force] [--project <dir>]
@@ -338,6 +344,8 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
           return cmdTaskStatus(taskRest, io);
         case "cancel":
           return cmdTaskCancel(taskRest, io);
+        case "move":
+          return cmdTaskMove(taskRest, io);
         default:
           throw new UsageError(`unknown task subcommand '${sub ?? ""}'`);
       }
@@ -893,6 +901,73 @@ async function beginTaskRunAsking(
   }
 }
 
+/**
+ * `jaira task move <taskId> --to <state>` — `connect(task, target)` from the command line
+ * (decision 0005 §1): the verb a board drop and a conversation's `move` tool are, spelled for a shell.
+ *
+ * `--dry-run` prints which of the three resolutions it is, where the task will stand, what would be
+ * asked and the refusal if any, and changes nothing. Without it the connect is made and — where a
+ * move has to be TAKEN — the task is run here to take it, exactly as `task start` runs one: the CLI
+ * has no engine waiting in the background, so the move rides the run that loads with it.
+ *
+ * One verb, not `task create --from`: a move is something done TO a task that exists, and a connect
+ * only sometimes makes one.
+ */
+async function cmdTaskMove(argv: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: {
+      to: { type: "string" },
+      workflow: { type: "string" },
+      skip: { type: "boolean" },
+      "dry-run": { type: "boolean" },
+      interactions: { type: "string" },
+      fake: { type: "string" },
+      "repair-turns": { type: "string" },
+      project: { type: "string" },
+      ...APPROVAL_OPTIONS,
+    },
+  });
+  const taskId = positionals[0];
+  if (taskId === undefined) throw new UsageError("task move requires a task id");
+  if (values.to === undefined) throw new UsageError("task move requires --to <stateId>");
+  const wiring = runWiringOf(values, io.cwd);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    // The move a connect ends in is not taken by a service here: it is kept, and handed to the run below.
+    let pending: TaskMoveRequest | undefined;
+    const result = await connectTask(
+      project,
+      { taskId, target: values.to, ...(values.workflow !== undefined ? { workflow: values.workflow } : {}), ...(values.skip === true ? { skip: true } : {}), ...(values["dry-run"] === true ? { dryRun: true } : {}) },
+      {
+        running: (id) => project.jobs.liveRunJob(id, Date.now()) !== undefined,
+        adopt: (request) => adoptTaskIn(project, request),
+        move: async (request) => {
+          pending = request;
+          return { taskId: request.taskId, status: "reopened" };
+        },
+      },
+    );
+    const move = pending as TaskMoveRequest | undefined;
+    const runs = result.ok && !result.dryRun ? (move?.taskId ?? (result.taskId !== taskId ? result.taskId : undefined)) : undefined;
+    // stdout is ONE document: the connect's answer, or — where a run follows — that run's report,
+    // with what the connect resolved to said on stderr first.
+    if (runs === undefined) io.stdout(JSON.stringify(result, null, 2) + "\n");
+    if (!result.ok) {
+      io.stderr(`refused: ${result.refusal.message}\n`);
+      return 1;
+    }
+    if (runs === undefined) return 0;
+    const plan = result.plan;
+    io.stderr(`connect: ${plan.resolution}${plan.modification !== undefined ? ` (${plan.modification})` : ""} — ${runs} will stand at '${plan.standsAt.path.join("/") || plan.workflow}' in '${plan.workflow}'\n`);
+    // An adoption whose target comes next anyway has no move to take: the task it made is started the ordinary way.
+    return await runTaskNow(project, runs, wiring, io, approvalGateOf(values), move);
+  } finally {
+    project.close();
+  }
+}
+
 /** Whether these files may run: the flag, or the person, or neither. */
 async function answerApproval(pending: readonly ModuleApproval[], gate: ApprovalGate, io: CliIo): Promise<boolean> {
   if (gate.approveFunctions) return true;
@@ -930,6 +1005,11 @@ async function runTaskNow(
   wiring: RunWiring,
   io: CliIo,
   gate: ApprovalGate = { nonInteractive: false, approveFunctions: false },
+  /**
+   * A MOVE this run is started to take (decision 0005): it waits on the run's port for the instance
+   * it names, which the loaded engine claims as it builds it. A finished task is REOPENED for it.
+   */
+  move?: TaskMoveRequest,
 ): Promise<number> {
   // Declared out here so `finally` can release the claim however the run ends.
   let owner: RunOwner | undefined;
@@ -960,7 +1040,8 @@ async function runTaskNow(
     // mirror rows — and is loaded too. Asked of the adopted tasks' provenance rather than of the
     // journal: a split copy is also `queued` with history, and the CLI has no fan-out host to load it.
     const adopts = runtime?.status === "queued" && project.tasks.list().some((meta) => meta.origin?.kind === "adopt" && meta.origin.taskId === taskId);
-    if (runtime !== undefined && (runtime.status !== "queued" || adopts) && runtime.snapshotHash !== undefined) {
+    // A task made IN a document names it before it has pinned a version of it (decision 0005 §3).
+    if (runtime !== undefined && (runtime.status !== "queued" || adopts) && (runtime.snapshotHash !== undefined || runtime.documentId !== undefined)) {
       // §05, before the fold reads the store: a failed call that consumed no provider sequence
       // never happened remotely — deleting its record frees the identity and the seat, and the
       // continuing run makes the call fresh. A cut call's record is kept and reopened.
@@ -990,13 +1071,31 @@ async function runTaskNow(
         resume = { loaded: load.loaded, answers: load.answers };
       }
     }
+    if (move !== undefined && resume === undefined) throw new Error(`task '${taskId}' has never run, so it stands nowhere to be moved from — start it instead`);
     const started = await beginTaskRunAsking(
       project,
       taskId,
-      { functions: probe.functions, ...(resume !== undefined ? { continues: true } : {}) },
+      { functions: probe.functions, ...(resume !== undefined ? { continues: true } : {}), ...(move !== undefined ? { reopen: true } : {}) },
       gate,
       io,
     );
+    // The port, already holding the move — and the way DOWN from it, when the target is nested.
+    // Nothing is running in a task that is not running: a state it stopped in is stepped past.
+    const directed = move !== undefined ? new DirectedTransitions() : undefined;
+    const recorder = project.events.recorder(taskId);
+    let follow: ((event: EngineEvent) => void) | undefined;
+    if (move !== undefined && directed !== undefined) {
+      const asked: DirectedTransition = {
+        to: move.toState,
+        by: move.by ?? "person",
+        ...(move.instanceId !== undefined ? { instanceId: move.instanceId } : {}),
+        ...(move.skip === true || runtime?.status !== "completed" ? { skip: true } : {}),
+      };
+      directed.direct(asked);
+      if (move.path !== undefined && move.path.length > 0) {
+        follow = descentFollower(directed, { parentInstanceId: move.instanceId ?? resume!.loaded.id, key: move.toState }, move.path, asked);
+      }
+    }
     // Artifact placement (DESIGN §7.6), assembled once and shared by the file tools
     // and the post-run sink so both put files in the same place.
     const artifacts = artifactWiring({
@@ -1071,7 +1170,8 @@ async function runTaskNow(
       registry,
       prompt,
       session,
-      persistence: project.events.recorder(taskId),
+      persistence: follow === undefined ? recorder : { record: (event, atMs) => (recorder.record(event, atMs), follow!(event)) },
+      ...(directed !== undefined ? { directed } : {}),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       // Merged: SIGINT here, or a cancel another process requested through the job.
       abortSignal: stop.signal,

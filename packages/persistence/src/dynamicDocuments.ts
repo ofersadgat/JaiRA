@@ -157,6 +157,12 @@ export interface GenerateVersionRequest {
   producers?: readonly Producer[];
   /** The registry's `functions` facet, so validation resolves every function ref — as `beginTaskRun` takes it. */
   functions?: ReadonlyMap<string, FunctionCapabilities>;
+  /**
+   * Say which resolution this WOULD be and what it would wire, and write nothing: no snapshot, no
+   * document, no pin. What `connect`'s dry run asks while a card hovers. The document is not lowered
+   * or linted either — a generated document that fails lint is the generator's bug, not an answer.
+   */
+  dryRun?: boolean;
   nowMs?: number;
 }
 
@@ -257,6 +263,7 @@ export async function generateDocumentVersion(project: Project, request: Generat
       ...(request.supplied !== undefined ? { supplied: request.supplied } : {}),
     });
     if (!generated.ok) return { resolution: "unsettled", generated };
+    if (request.dryRun === true) return { resolution: "new", generated };
     const id = `d-${uuidv7(nowMs)}`;
     const rootId = `${DYNAMIC_ROOT_PREFIX}${id}`;
     const bundle = carryOver(loadLive(project, rootId, { [`${rootId}.json`]: generated.document! }), previous);
@@ -285,6 +292,7 @@ export async function generateDocumentVersion(project: Project, request: Generat
     });
     if (!generated.ok) return { resolution: "unsettled", generated };
     if (generated.existing) return { resolution: "existing", generated, document: existing!, version: from };
+    if (request.dryRun === true) return { resolution: "augmented", generated, document: existing! };
     const bundle = carryOver(loadLive(project, existing!.rootId, { [`${existing!.rootId}.json`]: generated.document! }), previous);
     lintOrRefuse(bundle, `version ${from.version + 1} of the dynamic workflow '${existing!.id}'`, request.functions);
     const snap = await snapshotWithModules(project, bundle);
@@ -315,6 +323,7 @@ export async function generateDocumentVersion(project: Project, request: Generat
     ...(request.supplied !== undefined ? { supplied: request.supplied } : {}),
   });
   if (!generated.ok) return { resolution: "unsettled", generated };
+  if (request.dryRun === true) return { resolution: existing !== undefined ? "augmented" : "cloned", generated, ...(existing !== undefined ? { document: existing } : {}) };
 
   const bundle = graft(project, previous, generated);
   lintOrRefuse(bundle, `the diverged copy of '${sourceStateId(previous.rootId)}'`, request.functions);
