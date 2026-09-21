@@ -20,8 +20,8 @@
  *  - **Sampling XOR reasoning.** `parseLlmConfig` upstream rejects a config carrying both, so the
  *    form refuses to produce one: turning reasoning on retires the sampling knobs, and says why.
  */
-import { useMemo, useState, type JSX } from "react";
-import { Disclosure, Field, FieldGrid, NumInput, SelectInput, TextArea, TextInput } from "./controls";
+import { useId, useMemo, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { Field, FieldGrid, NumInput, SelectInput, TextArea, TextInput } from "./controls";
 
 /** The config as a plain document — what a preset or an executor's `models.config` holds. */
 export type LlmConfigDoc = Record<string, unknown>;
@@ -44,7 +44,133 @@ const EFFORTS: Array<[string, string]> = [
 ];
 
 /** The categories, their fields, and how each summarises itself when collapsed. */
-type CategoryKey = "sampling" | "reasoning" | "limits" | "advanced";
+export type CategoryKey = "sampling" | "reasoning" | "limits" | "advanced";
+
+// --- the rail ------------------------------------------------------------------------
+
+/** What a key pressed on a rail tab asks for. `in` and `out` cross to the rail beside this one. */
+export type RailMove = "prev" | "next" | "first" | "last" | "in" | "out";
+
+/**
+ * Read an arrow key against the way the rail is LAID OUT.
+ *
+ * A rail is a column of tabs until the window is narrow, where it becomes a row of them. The keys
+ * that run ALONG the rail move the selection; the pair that runs ACROSS it steps to the rail beside
+ * it — the presets' sections from the presets, and back — so two nested rails are one keyboard
+ * surface instead of two tab stops with nothing between them. Turned into a row, the pairs swap,
+ * because "the next tab" has to be the one the eye finds next.
+ */
+export function railMoveOf(key: string, row: boolean): RailMove | undefined {
+  switch (key) {
+    case "ArrowDown":
+      return row ? "in" : "next";
+    case "ArrowUp":
+      return row ? "out" : "prev";
+    case "ArrowRight":
+      return row ? "next" : "in";
+    case "ArrowLeft":
+      return row ? "prev" : "out";
+    case "Home":
+      return "first";
+    case "End":
+      return "last";
+    default:
+      return undefined;
+  }
+}
+
+/** The tab a move lands on. It wraps: a rail is short, and its ends are one key apart. */
+export function railStep(index: number, count: number, move: "prev" | "next" | "first" | "last"): number {
+  if (count <= 0) return -1;
+  if (move === "first") return 0;
+  if (move === "last") return count - 1;
+  const from = index < 0 ? (move === "next" ? -1 : 0) : index;
+  return (from + (move === "next" ? 1 : -1) + count) % count;
+}
+
+export interface RailItem {
+  id: string;
+  label?: ReactNode;
+  summary: ReactNode;
+  /** The label names something a person chose (a preset), so it is set in the data face. */
+  mono?: boolean;
+  className?: string;
+  title?: string;
+}
+
+/**
+ * A rail of tabs: each a name over a one-line summary, one of them chosen.
+ *
+ * A tablist rather than a column of pressed buttons, because that is what it is — one panel beside
+ * it, and the rail decides which. The whole rail is ONE tab stop (the chosen tab), arrows move
+ * within it, and selection follows focus: there is nothing to confirm about looking at Reasoning.
+ */
+export function TabRail({
+  label,
+  items,
+  selected,
+  onSelect,
+  panelId,
+  className,
+}: {
+  /** What the rail lists, for a screen reader: "Presets", "Sections". */
+  label: string;
+  items: readonly RailItem[];
+  selected: string | undefined;
+  onSelect: (id: string) => void;
+  /** The panel these tabs control. */
+  panelId?: string | undefined;
+  className?: string | undefined;
+}): JSX.Element {
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const rail = event.currentTarget;
+    const move = railMoveOf(event.key, getComputedStyle(rail).flexDirection.startsWith("row"));
+    if (move === undefined) return;
+    if (move === "in" || move === "out") {
+      // The rail beside this one, in the same box. Nothing there is not an error — a lone rail
+      // simply has no "across" — and the key is left alone so the page can still scroll with it.
+      const rails = Array.from(rail.closest(".llm-config")?.querySelectorAll<HTMLElement>('[role="tablist"]') ?? []);
+      const other = rails[rails.indexOf(rail) + (move === "in" ? 1 : -1)];
+      const target = other?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? other?.querySelector<HTMLElement>('[role="tab"]');
+      if (target == null) return;
+      event.preventDefault();
+      target.focus();
+      return;
+    }
+    const tabs = Array.from(rail.querySelectorAll<HTMLElement>('[role="tab"]'));
+    const next = railStep(tabs.indexOf(document.activeElement as HTMLElement), tabs.length, move);
+    const item = items[next];
+    if (item === undefined) return;
+    event.preventDefault();
+    onSelect(item.id);
+    tabs[next]?.focus();
+  };
+
+  // With nothing chosen the first tab holds the rail's one tab stop, or the rail could not be reached.
+  const stop = items.some((item) => item.id === selected) ? selected : items[0]?.id;
+
+  return (
+    <nav className={`llm-rail${className ? ` ${className}` : ""}`} role="tablist" aria-label={label} aria-orientation="vertical" onKeyDown={onKeyDown}>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          role="tab"
+          className={`llm-rail-item${item.className ? ` ${item.className}` : ""}${item.id === selected ? " on" : ""}`}
+          aria-selected={item.id === selected}
+          aria-controls={panelId}
+          tabIndex={item.id === stop ? 0 : -1}
+          title={item.title}
+          onClick={() => onSelect(item.id)}
+        >
+          {item.label !== undefined ? <span className={`llm-rail-label${item.mono ? " mono" : ""}`}>{item.label}</span> : null}
+          <span className="llm-rail-summary">{item.summary}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
 
 function num(doc: LlmConfigDoc, key: string): number | undefined {
   const value = doc[key];
@@ -74,13 +200,47 @@ export function LlmConfigForm({
   disabled = false,
   /** Shown under the header — what this particular configuration is FOR. */
   hint,
+  section,
+  onSection,
+  footer,
+  unframed = false,
+  marks = true,
 }: {
   value: LlmConfigDoc;
   onChange: (next: LlmConfigDoc) => void;
   disabled?: boolean;
   hint?: string;
+  /**
+   * The chosen category, when the HOST keeps it. A host that swaps the value under one form — the
+   * presets, which draw one editor for whichever preset is chosen — keeps it so that looking at
+   * Reasoning in one preset and then the next stays on Reasoning. Absent, the form keeps its own.
+   */
+  section?: CategoryKey | undefined;
+  onSection?: ((next: CategoryKey) => void) | undefined;
+  /** Drawn at the end of the detail pane — a host's actions and notes about the value as a whole. */
+  footer?: ReactNode;
+  /**
+   * Draw the rail and the detail pane WITHOUT the box around them. The box is a place, and a place
+   * is the caller's: the presets put a rail of their own in it first, and that rail has to stay
+   * mounted while this form is swapped for the next preset's — or a tab reached with an arrow key
+   * would lose the focus it was just given.
+   */
+  unframed?: boolean;
+  /**
+   * Whether a stated value carries the `set here` tag. It means "the layer you are editing states
+   * this", which is false of every value in a document shown from ANOTHER layer — an inherited
+   * preset — however many of them it states.
+   */
+  marks?: boolean;
 }): JSX.Element {
-  const [active, setActive] = useState<CategoryKey>("sampling");
+  const here = (stated: unknown): boolean => marks && stated !== undefined;
+  const [own, setOwn] = useState<CategoryKey>("sampling");
+  const active = section ?? own;
+  const setActive = (next: CategoryKey): void => {
+    setOwn(next);
+    onSection?.(next);
+  };
+  const panelId = useId();
   const reasoning = reasoningOf(value);
   const reasoningOn = reasoning !== undefined;
 
@@ -135,23 +295,16 @@ export function LlmConfigForm({
   ];
 
   return (
-    <div className="llm-config">
-      <nav className="llm-rail">
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat.key}
-            type="button"
-            className={`llm-rail-item${cat.key === active ? " on" : ""}`}
-            aria-pressed={cat.key === active}
-            onClick={() => setActive(cat.key)}
-          >
-            <span className="llm-rail-label">{cat.label}</span>
-            <span className="llm-rail-summary">{summaries[cat.key]}</span>
-          </button>
-        ))}
-      </nav>
+    <Frame unframed={unframed}>
+      <TabRail
+        label="Sections"
+        items={CATEGORIES.map((cat) => ({ id: cat.key, label: cat.label, summary: summaries[cat.key] }))}
+        selected={active}
+        onSelect={(id) => setActive(id as CategoryKey)}
+        panelId={panelId}
+      />
 
-      <div className="llm-detail">
+      <div className="llm-detail" id={panelId} role="tabpanel" aria-label={CATEGORIES.find((c) => c.key === active)!.label}>
         <div className="llm-detail-head">
           <span className="llm-detail-title">{CATEGORIES.find((c) => c.key === active)!.label}</span>
           <span className="cfg-hint">{CATEGORIES.find((c) => c.key === active)!.hint}</span>
@@ -170,7 +323,7 @@ export function LlmConfigForm({
                 label="Temperature"
                 param="temperature"
                 hint="Higher is more varied, lower more repeatable. Empty inherits the provider's default."
-                set={value["temperature"] !== undefined}
+                set={here(value["temperature"])}
               >
                 <NumInput value={num(value, "temperature")} disabled={disabled} onChange={(n) => set("temperature", n)} />
               </Field>
@@ -178,7 +331,7 @@ export function LlmConfigForm({
                 label="Top-p"
                 param="topP"
                 hint="Nucleus sampling: consider only the most likely tokens adding up to this probability mass (0–1)."
-                set={value["topP"] !== undefined}
+                set={here(value["topP"])}
               >
                 <NumInput value={num(value, "topP")} disabled={disabled} onChange={(n) => set("topP", n)} />
               </Field>
@@ -186,7 +339,7 @@ export function LlmConfigForm({
                 label="Top-k"
                 param="topK"
                 hint="Consider only the k most likely tokens. Provider-dependent; empty inherits."
-                set={value["topK"] !== undefined}
+                set={here(value["topK"])}
               >
                 <NumInput value={num(value, "topK")} disabled={disabled} onChange={(n) => set("topK", n)} />
               </Field>
@@ -194,7 +347,7 @@ export function LlmConfigForm({
                 label="Presence penalty"
                 param="presencePenalty"
                 hint="Discourages tokens that already appeared at all."
-                set={value["presencePenalty"] !== undefined}
+                set={here(value["presencePenalty"])}
               >
                 <NumInput
                   value={num(value, "presencePenalty")}
@@ -206,7 +359,7 @@ export function LlmConfigForm({
                 label="Frequency penalty"
                 param="frequencyPenalty"
                 hint="Discourages tokens in proportion to how often they already appeared."
-                set={value["frequencyPenalty"] !== undefined}
+                set={here(value["frequencyPenalty"])}
               >
                 <NumInput
                   value={num(value, "frequencyPenalty")}
@@ -218,7 +371,7 @@ export function LlmConfigForm({
                 label="Seed"
                 param="seed"
                 hint="Fixes the sampler so an identical call draws an identical answer, where the provider supports it."
-                set={value["seed"] !== undefined}
+                set={here(value["seed"])}
               >
                 <NumInput value={num(value, "seed")} disabled={disabled} onChange={(n) => set("seed", n)} />
               </Field>
@@ -232,7 +385,7 @@ export function LlmConfigForm({
               label="Effort"
               param="reasoning.effort"
               hint="A level rather than a number of tokens, so it means the same thing across providers. A provider that tops out lower clamps rather than refusing."
-              set={reasoning?.effort !== undefined}
+              set={here(reasoning?.effort)}
             >
               <SelectInput
                 value={reasoning?.effort ?? ""}
@@ -250,7 +403,7 @@ export function LlmConfigForm({
               label="Thinking budget"
               param="reasoning.budgetTokens"
               hint="A token ceiling on the thinking itself, for the models that take one instead of a level."
-              set={reasoning?.budgetTokens !== undefined}
+              set={here(reasoning?.budgetTokens)}
             >
               <NumInput
                 value={reasoning?.budgetTokens}
@@ -292,7 +445,7 @@ export function LlmConfigForm({
               label="Max output tokens"
               param="maxOutputTokens"
               hint="A ceiling on the answer's length — the main lever on the cost of one call. Empty means the model's own maximum."
-              set={value["maxOutputTokens"] !== undefined}
+              set={here(value["maxOutputTokens"])}
             >
               <NumInput
                 value={num(value, "maxOutputTokens")}
@@ -304,7 +457,7 @@ export function LlmConfigForm({
               label="Max tool steps"
               param="maxSteps"
               hint="How many model→tool→model round trips one call may take before it is stopped."
-              set={value["maxSteps"] !== undefined}
+              set={here(value["maxSteps"])}
             >
               <NumInput value={num(value, "maxSteps")} disabled={disabled} onChange={(n) => set("maxSteps", n)} />
             </Field>
@@ -312,7 +465,7 @@ export function LlmConfigForm({
               label="Stop sequences"
               param="stopSequences"
               hint="Comma-separated strings that end generation as soon as they appear."
-              set={value["stopSequences"] !== undefined}
+              set={here(value["stopSequences"])}
             >
               <TextInput
                 value={stops.join(", ")}
@@ -328,9 +481,14 @@ export function LlmConfigForm({
         ) : null}
 
         {active === "advanced" ? <AdvancedJson value={value} known={KNOWN_KEYS} disabled={disabled} onChange={onChange} /> : null}
+        {footer}
       </div>
-    </div>
+    </Frame>
   );
+}
+
+function Frame({ unframed, children }: { unframed: boolean; children: ReactNode }): JSX.Element {
+  return unframed ? <>{children}</> : <div className="llm-config">{children}</div>;
 }
 
 /**

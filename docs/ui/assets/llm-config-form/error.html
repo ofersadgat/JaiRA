@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="doc" content="ui/components/llm-config-form">
 <meta name="state" content="error">
-<meta name="captured" content="2026-09-13">
+<meta name="captured" content="2026-09-21">
 <meta name="reflects" content="shipped">
 <title>llm-config-form · error</title>
 <link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
@@ -18,13 +18,13 @@
     <div class="cfg-pane">
       <section class="cfg-group">
         <div class="llm-config">
-          <nav class="llm-rail">
-            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">provider defaults</span></button>
-            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
-            <button type="button" class="llm-rail-item" aria-pressed="false"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
-            <button type="button" class="llm-rail-item on" aria-pressed="true"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">1 extra</span></button>
+          <nav class="llm-rail" role="tablist" aria-label="Sections" aria-orientation="vertical">
+            <button type="button" role="tab" class="llm-rail-item" aria-selected="false" tabindex="-1"><span class="llm-rail-label">Sampling</span><span class="llm-rail-summary">provider defaults</span></button>
+            <button type="button" role="tab" class="llm-rail-item" aria-selected="false" tabindex="-1"><span class="llm-rail-label">Reasoning</span><span class="llm-rail-summary">off</span></button>
+            <button type="button" role="tab" class="llm-rail-item" aria-selected="false" tabindex="-1"><span class="llm-rail-label">Output limits</span><span class="llm-rail-summary">no limits</span></button>
+            <button type="button" role="tab" class="llm-rail-item on" aria-selected="true" tabindex="0"><span class="llm-rail-label">Advanced</span><span class="llm-rail-summary">1 extra</span></button>
           </nav>
-          <div class="llm-detail">
+          <div class="llm-detail" role="tabpanel">
             <div class="llm-detail-head">
               <span class="llm-detail-title">Advanced</span>
               <span class="cfg-hint">Anything this form has no dedicated control for. Editable as JSON so a setting is never silently dropped.</span>

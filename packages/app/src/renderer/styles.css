@@ -7648,6 +7648,49 @@ textarea.cfg-input {
 .llm-detail-head > .cfg-hint {
   max-width: 70ch;
 }
+/* A rail is a tablist: one tab stop, arrows inside it. The ring is drawn INSIDE the item, because
+   the box clips its overflow and an outset ring on the first and last tab would lose an edge. */
+.llm-rail-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Presets: two rails — the presets, then the open preset's sections — then the detail. The outer
+   rail is a step darker, so the two read as nested rather than as one long list. */
+.llm-config.preset-config {
+  grid-template-columns: 172px 146px minmax(0, 1fr);
+}
+.llm-config.preset-config.preset-new {
+  grid-template-columns: 172px minmax(0, 1fr);
+}
+.llm-rail.preset-rail {
+  --preset-rail-ground: color-mix(in srgb, var(--text) 5%, var(--panel-2));
+  background: var(--preset-rail-ground);
+}
+/* The dot a preset carries when the layer being edited states it — the rail's "set here". */
+.set-here-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.llm-rail-item.set-rail-add .llm-rail-summary {
+  color: var(--tok-hint);
+}
+/* Save, Revert and Remove close the detail pane at its foot however short the section above them
+   is, so they do not move as the sections are walked. */
+.preset-config .llm-detail .pane-actions {
+  margin-top: auto;
+}
+.preset-config .llm-detail .notice .pane-actions {
+  margin-top: 6px;
+}
+.preset-note {
+  margin: 8px 2px 0;
+}
 
 /* Narrow drawer: the rail would leave the detail pane unusable, so it becomes a row of tabs. */
 @media (max-width: 720px) {
@@ -7662,6 +7705,28 @@ textarea.cfg-input {
   }
   .llm-rail-item {
     flex: none;
+  }
+  /* Two rails become two ROWS, the presets over the open preset's sections, each scrolling sideways
+     by itself. Stacked, the darker band on top still reads as the outer of the two — which a single
+     merged row, or a rail kept beside a row, would not — and the detail pane keeps the whole width. */
+  .llm-config.preset-config,
+  .llm-config.preset-config.preset-new {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .preset-rail .llm-rail-item {
+    max-width: 200px;
+  }
+  /* `+ preset` closes the row, and a long row would scroll it out of sight — so it stays pinned to
+     the row's end, over whatever scrolls under it. */
+  .preset-rail .llm-rail-item.set-rail-add {
+    position: sticky;
+    right: 0;
+    justify-content: center;
+    background: var(--preset-rail-ground);
+    box-shadow: -8px 0 8px -4px var(--preset-rail-ground);
+  }
+  .preset-rail .llm-rail-item.set-rail-add.on {
+    background: var(--panel);
   }
 }
 

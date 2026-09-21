@@ -2,13 +2,13 @@
 id: ui/components/llm-config-form
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/refuse-with-the-reason-and-the-fix]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects]
 surfaces: [ui/surfaces/settings-configuration, ui/surfaces/settings-executors]
 reuses: [ui/components/settings-field]
 implemented_by: [packages/app/src/renderer/llmConfigForm.tsx, packages/app/src/renderer/schemaForm/widgets/LlmConfigWidget.tsx]
-verified_by: [packages/app/test/llmConfigForm.test.ts]
+verified_by: [packages/app/test/llmConfigForm.test.ts, packages/app/test/presetTabs.test.ts]
 mockups: [ui/assets/llm-config-form/empty.html, ui/assets/llm-config-form/set.html, ui/assets/llm-config-form/reasoning-on.html, ui/assets/llm-config-form/conflict.html, ui/assets/llm-config-form/error.html, ui/assets/llm-config-form/disabled.html]
 siblings: [ui/components/schema-form, ui/components/executor-tree, ui/components/settings-field]
 ---
@@ -19,16 +19,17 @@ A bordered two-pane box: a grey rail at the left listing `Sampling`, `Reasoning`
 
 ## The form edits the settings a model call is made with, one category at a time
 
-**Use when.** A place stores provider-neutral call settings: sampling, reasoning effort or budget, output limits, and passthrough keys. It is drawn under Configuration's default environment, under the executor tree's default call settings and each route's call settings, and inside each preset row on Executors. A schema that declares a value of this kind draws the same form.
+**Use when.** A place stores provider-neutral call settings: sampling, reasoning effort or budget, output limits, and passthrough keys. It is drawn under Configuration's default environment, under the executor tree's default call settings and each route's call settings, and as the editor of the chosen preset on Executors, where it is drawn without its box inside the presets' own. A schema that declares a value of this kind draws the same form.
 
 **Do not use when.** The value is the model id itself: that is a separate field above the form. The settings are an executor's retry, memoize, rate-limit or deadline layers: those are [schema-form](schema-form.md) cards in [executor-tree](executor-tree.md). A single setting stands alone: use [settings-field](settings-field.md).
 
 ## The rail summarises every category and the detail pane edits the chosen one
 
 - **Box.** 1px `--line` border, 8px corners, `--panel` ground; a 168px rail beside the detail pane.
-- **Rail.** `--panel-2` ground with a `--line` rule on its right, 6px padding, items 2px apart. Each item is the category's name at 550 in `--dim` over its summary at a small size in `--dim`, ellipsised. The chosen item takes a `--panel` ground and a `--line` outline, and its name turns `--text`.
+- **Rail.** A list of tabs beside the one panel they choose. `--panel-2` ground with a `--line` rule on its right, 6px padding, items 2px apart. Each item is the category's name at 550 in `--dim` over its summary at a small size in `--dim`, ellipsised. The chosen item takes a `--panel` ground and a `--line` outline, and its name turns `--text`.
 - **Detail.** 13px by 15px padding and 12px gaps: the category's title at 600, its hint in `--dim`, then [settings-field](settings-field.md) rows, each ending its hint with the key it writes and carrying a `SET HERE` tag when the value is stated.
 - **Unset.** An empty box means the setting is not stated and the provider's own default applies; number boxes show `—` and are at most 120px wide.
+- **Host's parts.** A host may draw the rail and the detail pane without the box, inside a box of its own that holds something else first; may put its own notes and actions at the foot of the detail pane; may keep the chosen category itself; and may switch the `SET HERE` tags off for a value that belongs to another layer. The presets on [Settings executors](../surfaces/settings-executors.md) do all four.
 - **Notice.** A `--tint-warn` block with `--warn` text, 7px by 9px, where a category cannot be used or holds keys it must not.
 
 ## Every state keeps the rail and changes the summaries and the detail pane
@@ -50,13 +51,15 @@ A bordered two-pane box: a grey rail at the left listing `Sampling`, `Reasoning`
 | --- | --- | --- |
 | Pointer over a rail item | Nothing | A `--line` outline |
 | Click a rail item | Shows that category | The item takes the chosen ground and the detail pane swaps |
+| `↑` `↓` `Home` `End` on a rail item | Chooses the previous, next, first or last category, wrapping, and moves the focus with it | As a click. Where the rail is a row, `←` and `→` do this instead |
+| `→` `←` on a rail item | Moves the focus to the chosen item of the rail beside this one in the same box, when a host has put one there | Nothing, with no other rail. Where the rails are rows, `↓` and `↑` do this instead |
 | Type in a number box | Writes the number into the value; an emptied box removes the key | `SET HERE` appears or goes and the rail summary follows. `0.` stays while typing; text that is not a number writes nothing and the box empties when it loses focus |
 | Choose an effort | States the effort; `— inherit` removes it | The Sampling summary turns to `not applicable — reasoning is on` |
 | Type stop sequences | Splits the text on commas into the list; empty removes it | The limits summary counts them. The box redraws from the list, so a comma typed at its end disappears at once |
 | Click `Clear the sampling knobs` | Removes every sampling key | The notice goes |
 | Type in `Other settings` | A JSON object replaces every key the form has no control for; empty removes them all | A problem shows `not saved — {reason}` under the box |
 
-Configuration and the executor tree write each change to the layer as it is made. A preset row holds the change as a draft until its own `Save`. The chosen category is not kept: the form opens on `Sampling` each time it is drawn.
+Configuration and the executor tree write each change to the layer as it is made. The presets hold the change as a draft, one per preset, until `Save`. The chosen category is not kept: the form opens on `Sampling` each time it is drawn, unless its host keeps the category, as the presets do across the presets they show.
 
 ## The copy says what each knob does and why a category is closed
 
@@ -78,7 +81,7 @@ Configuration and the executor tree write each change to the layer as it is made
 
 - Resize: the box takes its host's width. In a window narrower than 720px the rail becomes one horizontally scrolling row of items above the detail pane; the rule follows the window, so a narrow host in a wide window keeps the side rail. Setting rows stack into one column in a detail pane narrower than 380px. Summaries ellipsise.
 - Theme: grounds, outlines and the notice are tokens in both themes.
-- Focus: the four rail items, each announcing whether it is pressed, then the chosen category's controls in order.
+- Focus: the rail is one stop, on the chosen item; its items are tabs announcing which is selected, and the detail pane is their panel. Then the chosen category's controls in order. A focused item is ringed in `--accent` inside its edge, because the box clips what is drawn outside it.
 - Long or missing content: a long summary ellipsises in the rail; a stated key the form has no control for is never dropped and is counted under `Advanced`.
 
 ## The rail departs from the type registers

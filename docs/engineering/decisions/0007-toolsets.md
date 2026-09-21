@@ -226,7 +226,8 @@ Beside this decision and not part of it, the same folder has
 `presets-tabs.html`: Settings → Executors → **Presets** redrawn as nested
 vertical tabs — a rail of presets to the left of the rail of sections that
 ships, then the detail — so that two presets are no longer two editors
-stacked.
+stacked. That one is built: what ships is described in
+[ui/surfaces/settings-executors](../../ui/surfaces/settings-executors.md).
 
 ## Consequences
 
