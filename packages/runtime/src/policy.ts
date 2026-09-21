@@ -29,7 +29,7 @@
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, SmartVerdict } from "@declarative-ai/permissions";
 import { describeCommand, parseCommand, type CommandDialect, type ParsedCommand } from "./command";
 import { dialectFor, type ExecEnv } from "./paths";
-import { DEFAULT_ASK_ABOVE_BYTES, type Scope } from "@jaira/shared";
+import { DEFAULT_ASK_ABOVE_BYTES, toolModes, type Scope, type Toolset } from "@jaira/shared";
 import { scopeNarrowingFor } from "./tools";
 
 /** What a rule does when it matches — DESIGN §10.1's vocabulary. */
@@ -305,6 +305,24 @@ export interface CompilePolicyOptions {
    * size into an escalation. `0` turns it off; absent takes the shared default.
    */
   askAboveBytes?: number;
+  /**
+   * The toolset of the ONE call this policy is compiled for — a conversation turn's, whose modes
+   * were picked in the composer or inherited from the state it continues (decision 0007).
+   *
+   * Its per-tool modes are folded OVER the project's in `baseline.tools`: the call's own statement
+   * is the narrower, later one. The fold is for a DELEGATED agent, which builds its deny floor —
+   * the tools it is never even offered — from `ctx.policy.baseline.tools`, and would otherwise read
+   * the project's table and be handed a tool the message had set to `deny`.
+   *
+   * Only TOOL entries fold. `other` does not: the baseline has no such field, and the gate reads it
+   * off the authored block. Command subjects and `script` do not either — ⚠️ they are carried on the
+   * toolset and NOT enforced yet; a shell line is still judged by `rules` and the built-ins below,
+   * whatever the toolset says about `git commit` (decision 0007 §4 is a later task).
+   *
+   * A run does not pass one: the engine hands each state's own block to the gate at the moment of
+   * decision, so a run's policy stays the project's.
+   */
+  toolset?: Toolset;
 }
 
 export interface PolicyAuditEntry {
@@ -394,6 +412,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       // about, and its size is a reason to ask harder rather than a reason to stop asking.
       ...Object.fromEntries([...COMMAND_TOOLS].map((tool) => [tool, "smart" as PermissionMode])),
       ...policy.tools,
+      ...(options.toolset !== undefined ? toolModes(options.toolset) : {}),
     },
     ...(policy.profile !== undefined ? { profile: policy.profile } : {}),
   };

@@ -283,6 +283,9 @@ import {
   PERMISSION_PRESETS,
   presetOf,
   ALWAYS_GRANTED_TOOLS,
+  declaresTools,
+  toolModes,
+  toolsetOfSettings,
   withAlwaysGranted,
   isTerminalStatus,
   ApprovalRequired,
@@ -3874,7 +3877,18 @@ export class AppService {
       reasoning: plan.settings.reasoning?.effort ?? "the model's default",
       // The per-tool MAP, named as the preset it matches — see `postureOf`. The map is what the
       // executor is handed, so it is the only honest thing to report.
-      permissions: postureOf(open.project.config, tools, plan.settings.permissions),
+      // The posture is worded off the per-tool modes, and a message that carries a TOOLSET has them
+      // in the map rather than in the block (decision 0007) — so they are read from wherever they are.
+      permissions: postureOf(
+        open.project.config,
+        tools,
+        plan.settings.toolset === undefined
+          ? plan.settings.permissions
+          : (() => {
+              const { toolset } = toolsetOfSettings(plan.settings);
+              return { tools: toolModes(toolset), ...(toolset.other !== undefined ? { default: toolset.other } : {}), ...(toolset.profile !== undefined ? { profile: toolset.profile } : {}) };
+            })(),
+      ),
     };
   }
 
@@ -4160,33 +4174,38 @@ export class AppService {
      *
      * The message's own choice wins over the project's: it is the narrower, later statement.
      */
-    const compiled = compilePolicy(config.policy, {
+    //
+    // ONE map is read for all of it (decision 0007): the message's toolset, or the list, the
+    // `permissions` block and the implementations the composer still writes, folded into one.
+    const { toolset } = toolsetOfSettings(plan.settings);
+    const policy: ExecPolicy = compilePolicy(config.policy, {
       execEnv: config.execEnvironment,
       ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       askAboveBytes: config.artifacts.askAboveBytes,
+      toolset,
     });
-    const authoredModes = plan.settings.permissions?.tools;
-    const policy: ExecPolicy =
-      authoredModes === undefined
-        ? compiled
-        : { ...compiled, baseline: { ...compiled.baseline, tools: { ...compiled.baseline?.tools, ...authoredModes } } };
     // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
     // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
     // own, and what makes it answerable is the ask-rule `chatOperationOf` writes plus the gate
     // below, which decides by logical name whichever implementation called. Wrapping it here as
     // well would build a tool nothing would ever call.
-    const wiring = planAgentTools(plan.settings.tools ?? [], plan.settings.implementations ?? {});
+    const wiring = planAgentTools(toolset);
     const { tools, gate } = gateTools({
       registry,
       // `tools === undefined` means the message said nothing and the STATE's declaration stands, so
       // the plan is not what runs and its injections must not be wrapped. The always-granted set is
       // the exception, and has to be: a conversation with no tools at all is exactly the one that
       // reaches for a mockup, and `chat/assistant.json` declares none.
-      names: plan.settings.tools === undefined ? [...ALWAYS_GRANTED_TOOLS] : wiring.inject,
+      names: declaresTools(plan.settings) ? wiring.inject : [...ALWAYS_GRANTED_TOOLS],
       sessionId: sessionOf(context.position),
       policy,
       approve,
+      // A message that carries a toolset hands it over as it is. One that carries the legacy block
+      // leaves the fold to `gateTools`, which folds it over the names actually INJECTED — so an
+      // always-granted tool the list never mentioned still takes the block's `default`, as it did.
+      // `authored` goes either way, for its `scopes`: where a tool may act is not part of a toolset.
+      ...(plan.settings.toolset !== undefined ? { toolset } : {}),
       ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
       // What a relative scope glob and a relative call path resolve against — see `scopeNarrowingFor`.
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),

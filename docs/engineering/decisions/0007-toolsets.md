@@ -248,7 +248,10 @@ preset that is a function.
 ## Build order
 
 1. **The map**: `tools` as subject → mode, `$ref` + siblings, `other`;
-   the reader for the old list and `permissions` block.
+   the reader for the old list and `permissions` block. *Built 2026-09-20*
+   ([tool-policy](../units/tool-policy.md)): a map-form state is lowered
+   to the list and block the engine takes before it loads; command
+   subjects, `script` and a run's `native` are carried and not enforced.
 2. **Executors declare natives** and coarse switches; `planAgentTools`
    reads them; `other` for unmapped natives. `readOnly` and the profiles
    go when nothing reads them.

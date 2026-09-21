@@ -289,7 +289,8 @@ as `environment` inheritance (§5.2). Key order is ignored:
 ```
 
 A **fragment** — a file holding reusable blocks rather than a state — lives
-outside `workflows/`, conventionally `$/lib/`, `$/prompts/`, `$/types/`. That
+outside `workflows/`, conventionally `$/lib/`, `$/prompts/`, `$/types/`, and
+`$/toolsets/<bucket>/` for a toolset (§5.1). That
 keeps it out of directory inference (§6) and out of the workflow browser's root
 derivation, so nothing there can be mistaken for a state that runs.
 
@@ -775,23 +776,87 @@ the same rule.
   (`"impl": { "from": "main" }`). Separate from `session` on purpose: many sessions
   may share one workspace, and one session may cross several. It cannot be
   computed (`$expr`), because a bundle is fixed when its instance is created.
-- **`tools`** — logical tool names the operation may call mid-loop, resolved
-  through `registry.tools`. JaiRA registers `bash`. **Listing a tool here is what
-  puts an agent's commands under the policy at all.**
-  ⚠️ On a delegated agent it is a *grant*, not a fence: the agent keeps its own
-  built-ins (`Bash`, `Read`, …) beside the tools you declare, and a declared
-  `read_file` does not take its `Bash` away. The fence is `permissions.profile`
-  (below) — a sync-style "may read, must not write" state declares **both** the
-  tool and the profile.
+- **`tools`** — what the operation may do, as a **toolset**: a map from a
+  *subject* to a *mode* (decision 0007). **Offering a tool here is what puts an
+  agent's commands under the policy at all.**
+
+  ```jsonc
+  "tools": {
+    "read_file": "allow", "glob": "allow", "grep": "allow",
+    "web_fetch": "ask",
+    "write_file": { "mode": "ask", "implementation": "native" },
+    "bash": "deny",
+    "git status": "allow", "git log": "allow",
+    "other": "deny"
+  }
+  ```
+
+  - **Present means offered, with that mode. Absent means not offered.** The
+    modes are `allow`, `ask`, `deny` and `smart` (decided per call by the
+    approver).
+  - A **subject** is a standard tool (`read_file`, `glob`, `grep`, `edit`,
+    `write_file`, `show_artifact`, `bash`, `web_fetch`, `web_search`), a
+    **command** (`git commit`, or `git` for every command of that program),
+    **`script`** (running a file — `./x.sh`, `npm run build`), or **`other`**:
+    everything no entry names.
+  - A value may be an object when whose code runs the tool is chosen too:
+    `"implementation": "native"` keeps the agent's own built-in and still holds it
+    to the entry's mode; `"app"`, the default, injects JaiRA's.
+  - **A state usually names one** rather than writing it out — a bare string in an
+    object position is a reference (§2.2):
+    `"tools": "$/toolsets/chat/read-only"`. It may start from one and say more,
+    sibling keys overriding per subject:
+    `{ "$ref": "$/toolsets/chat/read-only", "write_file": "ask" }`. A toolset
+    *file* starts from another the same way. A reference cycle is a lint error
+    naming the cycle.
+  - **Toolsets live in buckets**: `toolsets/<bucket>/<name>.json` under each layer
+    root, so the project's `.jaira/toolsets/chat/read-only.json` overrides the
+    shared root's file of the same path. A bucket is a folder — a place with its
+    own versions of the same names — and may nest
+    (`toolsets/feature/implementation/build.json`).
+  - An override replaces the **entry** whole: `"write_file": "allow"` over
+    `{ "mode": "ask", "implementation": "native" }` leaves no implementation
+    behind.
+
+  The linter resolves the reference and checks every line: a mode that is not one
+  of the four is an **error** at the entry; a tool name nothing knows
+  (`reed_file`, `Glob`) is a **warning** — nothing is offered under it, and a call
+  by that name answers to `other`.
+
+  ⚠️ **Three things a toolset says that are not enforced yet.** A **command
+  subject** and **`script`** are accepted, checked and carried with the state,
+  and nothing judges a shell line against them: a line still answers to the `bash`
+  entry and the project's command policy (`policy` in settings), so `"git push": "allow"`
+  does not yet spare a push its approval. `"implementation": "native"` is honoured
+  by a **conversation turn** and not by a **run**, which injects JaiRA's
+  implementation — the governed choice. And on a delegated agent an absent tool is
+  *not offered* rather than *removed*: the agent keeps its own built-ins beside
+  what you offer until the executors declare them, which is why the older
+  `permissions.profile` (below) still exists.
+
+  ⚠️ **Across layers a toolset replaces the offered TOOLS, and only those.** It
+  reaches the engine as a list and a `permissions` block, and the block merges per
+  key (§5.2) — so a child that writes its own toolset without an `other` still
+  inherits its parent's, and a mode the parent gave a tool the child no longer
+  offers rides along, inert. Say `other` in a toolset that means to stand alone.
+
+  **The older form still loads, unchanged**: a list of tool names
+  (`"tools": ["read_file"]`) with the modes in `permissions`. A state written that
+  way is handed to the engine exactly as it was written. Everything that reads a
+  grant and its modes folds the two forms into one map first —
+  `permissions.tools` become entries, `default` becomes `other`.
 - **`conversation.mode`** — `full_history` | `summary` | `fresh` |
   `selected_artifacts` (the last takes `artifacts: [names]`).
   ⚠️ `summary` is **per session, not per state**: one session has one transcript,
   so a session mixing `summary` and `full_history` is summarized for both. The
   lint surface warns — and it reads the *effective* mode, so an inherited one is
   caught too.
-- **`permissions`** — the definition-authored baseline, beneath the project
-  policy: per-tool modes (`allow`/`deny`/`ask`/`smart`), a `default` for unlisted
-  tools, and a `profile` (`read-only` | `plan` | `full`).
+- **`permissions`** — **where** tools may act (`scopes`), and the older home of
+  what a toolset now says: per-tool modes (`tools`), a `default` for unlisted
+  tools, an `other` for a tool nothing registers, and a `profile` (`read-only` |
+  `plan` | `full`). Beside a toolset map, `permissions.tools`, `default` and
+  `other` are **ignored with a lint warning** — a mode is an entry of the map —
+  while `scopes` and `profile` still apply.
 
   **`profile` is how a restriction survives delegation**, and each transport
   enforces it through the channel it actually has:
@@ -857,7 +922,7 @@ state and both ways out — never at the first call, four layers down.
 | `args` | **deep merge** per key |
 | `input` | merged per slot name; within a slot, per field |
 | `input.<slot>.schema`, `input.<slot>.binding`, `output.…` | **replaced whole** |
-| `tools`, `conversation.artifacts` | **replaced** — `"tools": []` is how you drop an inherited tool |
+| `tools`, `conversation.artifacts` | **replaced** — `"tools": []` (or `{}`) is how you drop an inherited tool. A toolset replaces the offered tools; its modes and `other` travel as `permissions`, below |
 | `conversation` | merged per field |
 | `permissions` | merged, with `permissions.tools` merged per tool name |
 

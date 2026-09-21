@@ -32,15 +32,21 @@ import {
   logicalOfNative,
   withAlwaysGranted,
   normalizePath,
+  offeredTools,
+  permissionsOfToolset,
   resolveScopes,
   scopeModeOf,
   TOOL_PROFILES,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
+  toolImplementations,
+  toolsetOfEnvironment,
+  toolsetOfLegacy,
   type PermissionsDecl,
   type Scope,
   type ScopeOptions,
   type ToolImplementation,
+  type Toolset,
 } from "@jaira/shared";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
@@ -265,8 +271,22 @@ export function gateTools(options: {
   sessionId: string;
   policy?: ExecPolicy | undefined;
   approve?: Approver | undefined;
-  /** The operation's own `permissions` block: a profile, a default mode, per-tool modes, scopes. */
+  /**
+   * The operation's own `permissions` block, in the LEGACY shape: a profile, a default mode,
+   * per-tool modes, scopes. Folded into a toolset with `names` as the grant — see {@link toolset}.
+   * Its `scopes` are read either way: where a tool may act is not part of a toolset.
+   */
   authored?: PermissionsDecl | undefined;
+  /**
+   * The toolset this turn runs under — the ONE map the modes are read from (decision 0007).
+   *
+   * When absent it is folded from `names` and `authored`, which is the legacy reader: a listed tool
+   * takes `authored.tools[name] ?? authored.default`, and `default` answers as `other` for a name
+   * nothing here registered. Only TOOL entries are read. A toolset's command subjects and `script`
+   * are carried on the block handed to the gate and are NOT enforced yet — a shell line still
+   * answers to the `bash` entry and the project's command policy (decision 0007 §4 is a later task).
+   */
+  toolset?: Toolset | undefined;
   /** What a relative scope glob and a relative call path are resolved against. */
   workspaceRoot?: string | undefined;
   /**
@@ -278,7 +298,13 @@ export function gateTools(options: {
   scopeFloor?: readonly Scope[] | undefined;
 }): { tools: Record<string, Tool>; gate: ToolGate } {
   const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
-  if (options.authored?.profile !== undefined) ledger.seedProfile(options.sessionId, options.authored.profile);
+  const toolset = options.toolset ?? toolsetOfEnvironment(options.names, options.authored);
+  // The block the upstream gate takes, written FROM the map — so a legacy block and a toolset reach
+  // the gate as the same thing. Absent when nothing was authored at all, as before.
+  const authored =
+    options.toolset === undefined && options.authored === undefined ? undefined : permissionsOfToolset(toolset, options.authored?.scopes);
+  // Still honoured, from the legacy block only — a toolset has no profile (decision 0007 §1).
+  if (toolset.profile !== undefined) ledger.seedProfile(options.sessionId, toolset.profile);
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
   const scopeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
@@ -288,7 +314,7 @@ export function gateTools(options: {
     sessionId: options.sessionId,
     approve,
     preGated: options.names,
-    ...(options.authored !== undefined ? { authored: options.authored } : {}),
+    ...(authored !== undefined ? { authored } : {}),
     ...(options.policy?.smart !== undefined ? { smart: options.policy.smart } : {}),
     // The vocabulary's tables, unless the caller supplied its own. Registering them under the
     // built-in names is what gives the gate an opinion about an agent's own tools rather than an
@@ -301,12 +327,9 @@ export function gateTools(options: {
   for (const name of options.names) {
     const tool = options.registry.tools.get(name);
     if (tool === undefined) throw refusal(log, `tool '${name}' is not registered`);
-    // OWN entries only. These maps are keyed by TOOL NAME, so a tool called `constructor` would
+    // OWN entries only. The map is keyed by TOOL NAME, so a tool called `constructor` would
     // otherwise resolve its mode — and its smart rule — to a prototype member.
-    const authoredMode =
-      (options.authored?.tools !== undefined && Object.hasOwn(options.authored.tools, name)
-        ? options.authored.tools[name]
-        : undefined) ?? options.authored?.default;
+    const authoredMode = Object.hasOwn(toolset.entries, name) ? toolset.entries[name]!.mode : undefined;
     out[name] = withPermission(tool, {
       ledger,
       sessionId: options.sessionId,
@@ -456,9 +479,15 @@ export interface AgentToolPlan {
  * the opt-out, and it is the one that needs saying.
  */
 export function planAgentTools(
-  granted: readonly string[],
-  implementations: Readonly<Record<string, ToolImplementation>> = {},
+  /** A toolset, or the legacy pair it is folded from: the granted list and the composer's map. */
+  grant: readonly string[] | Toolset,
+  legacyImplementations: Readonly<Record<string, ToolImplementation>> = {},
 ): AgentToolPlan {
+  const toolset: Toolset = isToolList(grant) ? toolsetOfLegacy(grant, undefined, legacyImplementations) : grant;
+  // Only TOOL entries reach an agent. A command subject or `script` is not a tool to hand over; it
+  // is a line of the map a shell request will be checked against once decision 0007 §4 is built.
+  const granted = offeredTools(toolset);
+  const implementations = toolImplementations(toolset);
   const plan: AgentToolPlan = { inject: [], askNatives: [], denyNatives: [] };
   for (const spec of TOOL_SPECS) {
     const native = spec.natives?.claude;
@@ -475,6 +504,10 @@ export function planAgentTools(
     else plan.inject.push(spec.name);
   }
   return plan;
+}
+
+function isToolList(grant: readonly string[] | Toolset): grant is readonly string[] {
+  return Array.isArray(grant);
 }
 
 /**

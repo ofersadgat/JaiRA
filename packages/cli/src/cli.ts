@@ -39,6 +39,7 @@ import {
   runCauses,
   RunOwner,
   sessionStoreFor,
+  loadWorkflowBundle,
   standaloneLoadOptions,
   workflowDigest,
   workflowLoadOptions,
@@ -638,7 +639,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
     const config = tryProjectConfig(projectDir) ?? defaultConfig();
     const files = readWorkflowFiles(workflowsDir);
     if (Object.keys(files).length === 0) throw new Error(`no workflow state files under ${workflowsDir}`);
-    const bundle = loadBundle(files, values.root, standaloneLoadOptions(workflowsDir));
+    const bundle = loadWorkflowBundle(files, values.root, standaloneLoadOptions(workflowsDir));
     const report = validateBundle(bundle);
     if (report.errors.length > 0) {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
@@ -677,7 +678,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
     // module pair. On `standaloneLoadOptions` this validated against a bundle in which no `.ts`
     // callee could resolve, so `jaira run --root` refused every workflow that calls one, saying
     // "'confidence.score' is not a known operation" about a function that is approved and registered.
-    const bundle = loadBundle(files, values.root, workflowLoadOptions(project.paths));
+    const bundle = loadWorkflowBundle(files, values.root, workflowLoadOptions(project.paths));
     const report = validateBundle(bundle);
     if (report.errors.length > 0) {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");

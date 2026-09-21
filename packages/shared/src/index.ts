@@ -29,6 +29,7 @@ export * from "./structured";
 export * from "./unifiedDiff";
 export * from "./grammars";
 export * from "./toolVocabulary";
+export * from "./toolsets";
 export * from "./scopes";
 export * from "./hiddenPaths";
 export * from "./userEvents";
