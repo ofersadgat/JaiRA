@@ -347,6 +347,54 @@ preset that is a function.
 7. **Migration**: `"profile": "read-only"` → a reference to a read-only
    toolset; `permissions.tools` / `default` → entries and `other`. A
    mechanical rewrite of authored workflows, `~/.jaira` included.
+   *Built 2026-09-21* ([tool-policy](../units/tool-policy.md),
+   [jaira-cli](../contracts/jaira-cli.md)):
+   `jaira workflow migrate-toolsets [--project <dir> | --base]`, a dry run
+   unless `--write`. **It is not a mechanical rewrite, and could not be.** A
+   list is a grant and a map is a fence, so rewriting what a state SAYS takes
+   claude's own `Glob`, `Grep`, `WebFetch` and `WebSearch` off every read-only
+   state in the tree. What the migration writes is derived from what the state
+   **does**: `handedToClaude` runs one effective block through the engine, the
+   agent wrapper and the upstream executor to the options a real `claude` would
+   be spawned with, and every rewrite is held to that measurement — per state,
+   per chain, per level, before and after. A file any state fails under is taken
+   back out and the rest measured again, so what is written is what passed.
+   What was decided while building:
+   - **The two things a map cannot say about the shell**, each refused until it
+     is named, because migrating is where a state's author chooses.
+     `unlisted-shell`: the list never granted `bash` and claude kept its own,
+     which no map can hold, so the map takes the shell away. `shell-judged`: the
+     list pinned the shell to a mode of its own and asked before every line,
+     which a RUN cannot be told — lowering puts the authored mode in
+     `permissions.subjects` and `literalPermissions` hands the policy a state's
+     `tools`, `default`, `other` and `scopes` and drops the rest, so the line is
+     judged by the project's command policy. The second is §4's own destination
+     and still opt-in, since it may run what a person used to be asked about.
+   - **A map's `bash` is the one entry not read off the measurement.** It is the
+     answer for "any other command", not a mode for the tool, and `smart` there
+     means "the policy decides" — which is what a list that named the shell and
+     gave it no mode got from the baseline. So it is the mode the legacy reading
+     resolved, `smart` where nothing said, and the measurement then says whether
+     that preserved anything.
+   - **`chat/read-only` is no base for a state with no shell.** It holds
+     `"bash": "deny"`, and a held entry is a door: the tool is offered and
+     lowers as `smart`. A line cannot take a subject out of a map, so such a
+     state gets an inline map instead. The shipped file is the preset's map and
+     is held to it by invariant 17; this is that trap, met from the other side.
+   - **Equality is of reach and decision**, not of mechanism: claude's `Glob`
+     under the gate and JaiRA's `glob` at the same mode are one grant, a way in
+     that is refused is not a way in, a shell every line of which is refused is
+     not a shell, and a native removed up front and one refused at the callback
+     are one answer.
+   - **`--base` never opens the shared root as a project**, because opening one
+     creates its layout; `--write` there takes `--shared-root` beside it and
+     copies `workflows/` to a timestamped backup before the first byte.
+   - The dry run for `~/.jaira` is
+     [0007-assets/migration-dry-run.txt](0007-assets/migration-dry-run.txt): 33
+     blocks in 33 files, 2 as a reference plus lines and 19 inline, 12 refused
+     for the shell alone, 0 unproven; with both consents, all 33 migrate. 19 of
+     them are the same map, which wants a toolset file of its own. Nothing under
+     `~/.jaira` was written.
 
 ## Open
 

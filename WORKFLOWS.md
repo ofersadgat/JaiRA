@@ -851,6 +851,15 @@ the same rule.
   as a map, which is the migration (decision 0007 step 7). An inline map, a
   `$/toolsets/…` reference and a `$ref` with overrides are all maps.
 
+  **`jaira workflow migrate-toolsets` does the rewriting**, and it does not
+  rewrite what a state *says* — it measures what the state **does**, by running
+  its effective block through the engine and the agent wrapper to the options a
+  real `claude` would be spawned with, and writes the map that measures the same.
+  So a read-only list keeps the `Glob`, `Grep`, `WebFetch` and `WebSearch` claude
+  had, at the mode they had, and a rewrite it cannot prove equal is refused
+  rather than written. It is a dry run unless you pass `--write`. See
+  [the CLI contract](docs/engineering/contracts/jaira-cli.md).
+
   | Transport | How a toolset reaches it |
   | --- | --- |
   | provider route | the held tools are the only tools there are, each permission-wrapped |
@@ -966,7 +975,17 @@ the same rule.
   and is not handed to the engine. A state still in the **list** form reaches the
   engine as written, profile included, so the engine's own handling of it (claude's
   write-capable built-ins denied up front, codex's read-only sandbox, a
-  `generic-cli` refusal) still applies on top — the two agree. Write the entries.
+  `generic-cli` refusal) still applies on top — the two agree. Write the entries;
+  `jaira workflow migrate-toolsets` writes them for you, and removes the profile.
+
+  ⚠️ **The one thing a map cannot say is "ask before every shell line."** A
+  toolset's `bash` entry is the answer for *any other command* on a line that is
+  taken apart, not a mode for the tool, and a **run** never sees it: lowering puts
+  it in `permissions.subjects`, and the engine hands the policy a state's `tools`,
+  `default`, `other` and `scopes` and drops the rest. So a line under a map is
+  judged by the project's command policy — which is what §4 of the decision is
+  for, and which is why the migration refuses such a state until you say
+  `--accept shell-judged`.
 
   The sync workflow is the worked example: its states' toolset is the map
   `{ "read_file": "allow", "glob": "allow", "grep": "allow", "other": "deny" }` —

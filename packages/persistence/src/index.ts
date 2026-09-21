@@ -24,6 +24,8 @@ export * from "./workflows";
 export * from "./digest";
 export * from "./workflowRefs";
 export * from "./toolsets";
+// The list-and-block form rewritten as toolsets, each rewrite held to a measurement (decision 0007 step 7).
+export * from "./toolsetMigration";
 // js/ts function modules: the approval store, the process-wide symbol index, and the freeze
 // (SPEC §7.5.5).
 export * from "./userModules";
