@@ -2034,7 +2034,10 @@ export default function App(): JSX.Element {
                           // is an offer only where both ends of it are on screen: the card, and the
                           // column its rule names.
                           dragOffers={dragOffersOf(state.boards[p.project]!, state.userEvents)}
-                          onTaskDrop={(requestId) => void actions.deliverUserEvent(requestId)}
+                          // The drop PUBLISHES `task_move` (decision 0005) rather than answering the
+                          // wait by id: main answers that wait when it is still there, and moves the
+                          // task itself when the run went on while the card was in the air.
+                          onTaskDrop={(_requestId, card, columnKey) => void actions.moveTask(p.project, card.taskId, columnKey)}
                         />
                       ) : (
                         <p className="empty">No board here yet.</p>

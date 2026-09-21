@@ -25,7 +25,7 @@
  * deeper state therefore matches no column here and offers nothing, which is right: dropping a card
  * on a column that is not the one the rule meant would be a gesture the board invented.
  */
-import { TASK_DRAG, type BoardView, type PendingUserEvent } from "@jaira/shared/browser";
+import { MOVE_EVENTS, type BoardView, type PendingUserEvent } from "@jaira/shared/browser";
 
 /**
  * taskId → (column key → the wait a drop there would answer).
@@ -47,7 +47,8 @@ export function dragOffersOf(board: BoardView, requests: readonly PendingUserEve
 
   const offers = new Map<string, Map<string, string>>();
   for (const request of requests) {
-    if (request.event !== TASK_DRAG) continue;
+    // `task_drag` and `task_move` are one vocabulary (decision 0005): either is an offer of a move.
+    if (!MOVE_EVENTS.includes(request.event)) continue;
     const taskId = request.taskId;
     if (taskId === undefined || !shown.has(taskId)) continue;
     const to = request.options.to_state;

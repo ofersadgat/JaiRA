@@ -47,6 +47,18 @@
  * The journal knows exactly which dispatches were deferred (`call.waiting` names them), so their
  * records are excluded from both the answers and the loaded call sites — the re-ask mints a fresh
  * site above `nextSite` and registers a fresh wait, which is the correct meaning of resuming one.
+ *
+ * ## A person's move: `skipped` is an answer, and a directed transition reopens (decision 0005)
+ *
+ * A `transition.taken` row carrying `by` was DIRECTED — injected on somebody's behalf, not fired by
+ * a rule. Three things follow for the fold. What it stepped past ended `skipped`, and `skipped` is
+ * never revived: it is not work interrupted but a decision made, however early in the run's
+ * wind-down the process died. A directed transition on an instance that had already terminated
+ * REOPENS it, and every ancestor with it — the row is the reopening, exactly as a chat turn's
+ * transition reopens its instance — so a task that died after taking a move as a finished task
+ * loads live. And a directed transition whose target never entered is an entry the instance still
+ * OWES (`LoadedInstance.directed`): the run died between the two rows, and the load makes the entry
+ * without journaling the transition again.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { hashOperation, scopedOperationId, type Failure, type ResolvedValue } from "@declarative-ai/exec";
@@ -102,6 +114,10 @@ export interface TaskLoad {
 interface FoldNode {
   id: string;
   stateId: string;
+  /** The instance that entered this one — walked upward when a directed transition reopens a path. */
+  parentId?: string;
+  /** A DIRECTED transition journaled here whose target has not entered since — see the header. */
+  directed?: { to: string; inputs?: Record<string, JsonValue> };
   childKey?: string;
   /** The element of a fanned-out mount this instance is — see `InstanceNode.element`. */
   element?: number;
@@ -332,6 +348,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         const node: FoldNode = {
           id: event.instanceId,
           stateId: event.stateId,
+          ...(event.parentInstanceId !== undefined ? { parentId: event.parentInstanceId } : {}),
           ...(event.childKey !== undefined ? { childKey: event.childKey } : {}),
           ...(event.element !== undefined ? { element: event.element } : {}),
           inputs: (event.inputs ?? {}) as Record<string, JsonValue>,
@@ -351,6 +368,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           parent.children.push(node);
           // Entering a NEW child is the parent acting: whatever finished before this was answered.
           parent.advancedAt = at;
+          // The entry a directed transition owed has been made.
+          if (parent.directed?.to === event.childKey) delete parent.directed;
         } else {
           lastRootId = node.id;
         }
@@ -373,6 +392,14 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           node.index = event.index;
           node.iteration = event.iteration;
           node.advancedAt = at;
+          if (event.by !== undefined) {
+            // DIRECTED (see the header): the target's entry is owed until it is seen, and an
+            // instance that had terminated is live again — with everything above it.
+            node.directed = { to: event.to, ...(event.inputs !== undefined ? { inputs: event.inputs as Record<string, JsonValue> } : {}) };
+            for (let up: FoldNode | undefined = node; up !== undefined; up = up.parentId === undefined ? undefined : nodes.get(up.parentId)) {
+              delete up.terminated;
+            }
+          }
         }
         break;
       }
@@ -532,10 +559,12 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       if (child.superseded) continue;
       // The revival rule (see the header): still-running continues, and an unhandled non-success
       // end — nothing advanced past it — is work interrupted, presented live so it re-enters.
+      // `skipped` is never revived: a person stepped past it, which is an answer and not an
+      // interruption — wherever its row landed relative to the transition that decided it.
       const childLive =
         live &&
         (child.terminated === undefined ||
-          (child.terminated.outcome !== "success" && child.terminated.at > node.advancedAt));
+          (child.terminated.outcome !== "success" && child.terminated.outcome !== "skipped" && child.terminated.at > node.advancedAt));
       if (childLive) anyChildLive = true;
       else if (live && child.terminated !== undefined && child.terminated.outcome === "success" && child.terminated.at > node.advancedAt) {
         // Finished after this instance's last advancement: the round that would have read it never
@@ -590,6 +619,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         : {}),
       ...(sites !== undefined ? { sites } : {}),
       ...(nextSite !== undefined ? { nextSite } : {}),
+      ...(live && node.directed !== undefined ? { directed: node.directed as NonNullable<LoadedInstance["directed"]> } : {}),
       // Settled fields are used verbatim by `loadRun` and never re-evaluated; an absent one is.
       ...(node.fields.size > 0 ? { fields: Object.fromEntries(node.fields) } : {}),
       ...(children.length > 0 ? { children } : {}),

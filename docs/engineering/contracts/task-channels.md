@@ -2,7 +2,7 @@
 id: engineering/contracts/task-channels
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 visibility: internal
 kind: api
 owned_by: [engineering/units/task-lifecycle, engineering/units/rewind-and-fork]
@@ -75,6 +75,27 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `continue` | a frontier entry's cause is `interrupted` |
 | `retry` | every frontier entry's cause is `failed`, or the frontier is empty |
 
+### `task:move` publishes a person's move, and answers how it landed
+
+`task:move` takes `TaskMoveRequest` and answers `TaskMoveResult`, `{taskId: string; status}`. It is `task_move`, published ([decision 0005](../decisions/0005-connect.md)): the board's drop sends it, and a conversation's tool will.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `taskId` | string | yes | the task to move |
+| `toState` | string | yes | a child key of the instance the move is for |
+| `by` | `"person"` or `"control"` | no | who asked, journaled on `transition.taken`; absent reads `"person"` |
+| `skip` | boolean | no | interrupt the running state rather than wait for it to end |
+| `inputs` | `Record<string, JsonValue>` | no | handed to the target over the workflow's own wiring, per input name |
+| `instanceId` | string | no | the composite whose child `toState` is; absent names the task's root instance |
+| `project` | `ProjectRef` | no | as above |
+
+| `status` | When |
+| --- | --- |
+| `answered` | a transition of the task was waiting on `on_user_event('task_move' or 'task_drag', {to_state})` for this state, and now has its answer. Not tried with `skip` or `instanceId` |
+| `taking` | the task runs in this process, has the move, and nothing stands in its way |
+| `held` | the task runs in this process and takes the move when its running state ends |
+| `reopened` | the task was not running and was started again by load with the move waiting; a `completed` task is reopened under its own id, and any other status steps past the state it stopped in |
+
 ### Stopping and deleting take only the task
 
 `task:cancel` and `task:delete` take `{taskId: string; project?}` and answer `{taskId: string}`. A cancel of a run in this process sets `stopping` and answers; `canceled` is written when the run settles.
@@ -124,6 +145,9 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | A model the start-time check cannot serve, a malformed `fake`, or a policy that does not compile | the check's message, after the task was marked `running` | restart the app before trying again |
 | `task:resume` of a running, unstartable or never-pinned task | `task '<id>' is already running`, `… is <status> and cannot be resumed — run it again instead`, or `… has no pinned snapshot to resume against — run it instead` | rerun or start it |
 | `task:resume` of a history that cannot load | `task '<id>' cannot be resumed: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Running it again would repeat them.` | rerun it |
+| `task:move` to a state that is not a child of the instance named, or naming an instance the task does not have | `cannot move task '<id>' to '<state>': '<state>' is not a declared child of '<stateId>'` for a running task, `… it is not a state of '<stateId>'` or `… it has no instance '<instanceId>'` for one that is not; nothing is started | pick a state of that level |
+| `task:move` of a task another process is running, or one that never ran | `task '<id>' is <status> in another process — move it there`, or `task '<id>' has never run, so it stands nowhere to be moved from — start it instead` | move it there, or start it |
+| `task:move` of a history that cannot load | `task '<id>' cannot be moved: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Reopening it would repeat them.` | rerun it |
 | A rewind, fork or delete of a running task | `task '<id>' is running — stop it before rewinding it`, `… forking it`, or `… cancel it before deleting it` | stop it first |
 | A cut the journal cannot take | `has no journal event <seq>`, `nothing in task '<id>' comes after event <seq>`, `… comes before event <seq>`, `has never run, so there is nothing to fork`, `has history in per-run journal files, which a cut cannot address`, or `the journal file holds N events and the table M — refusing to cut a journal that disagrees with its file` | refresh the view, rerun, or reopen the project, as the message says |
 | A chat fork whose copy has no instance that spoke | `the fork of '<id>' holds no conversation to continue`, after the copy exists | delete the copy |

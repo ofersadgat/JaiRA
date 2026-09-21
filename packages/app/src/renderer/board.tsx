@@ -660,7 +660,7 @@ export function Board({
    */
   dragOffers?: DragOffers;
   /** A card was dropped on a column that was offering it a place. The caller answers the wait. */
-  onTaskDrop?: ((requestId: string, card: BoardCard) => void) | undefined;
+  onTaskDrop?: ((requestId: string, card: BoardCard, columnKey: string) => void) | undefined;
 }): JSX.Element {
   /**
    * The card being dragged right now, so the columns can say which of them would take it.
@@ -696,7 +696,7 @@ export function Board({
       accepts: requestId !== undefined,
       onDrop: () => {
         setDragging(null);
-        if (requestId !== undefined) onTaskDrop(requestId, card);
+        if (requestId !== undefined) onTaskDrop(requestId, card, columnKey);
       },
     };
   };

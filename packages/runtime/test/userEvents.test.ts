@@ -510,3 +510,23 @@ describe("hand-advancing a task between phases (the feature workflow's shape)", 
     expect(requests).toHaveLength(0);
   });
 });
+
+describe("a published move answers the wait that was offering it (decision 0005)", () => {
+  it("answers a wait of EITHER event for that task and that state — `task_drag` and `task_move` are one vocabulary", async () => {
+    const { hub, requests, run } = harness();
+    const result = run(3);
+    await settled();
+    expect(requests.map((r) => [r.event, r.options.to_state])).toEqual([[TASK_DRAG, "deploy"]]);
+
+    // Not this task, and not this state: nothing was waiting on either, and nothing is disturbed.
+    expect(hub.answerMove("task-8", "deploy")).toBeUndefined();
+    expect(hub.answerMove("task-7", "elsewhere")).toBeUndefined();
+    expect(hub.list()).toHaveLength(1);
+
+    expect(hub.answerMove("task-7", "deploy")).toBe("event-1");
+    expect(statusOfResult(await result)).toBe("completed");
+    // Answered once: the same move again finds nothing to answer, which is the caller's cue to hand
+    // the run a directed transition instead.
+    expect(hub.answerMove("task-7", "deploy")).toBeUndefined();
+  });
+});

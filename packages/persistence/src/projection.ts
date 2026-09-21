@@ -74,6 +74,8 @@ const OUTCOME_STATUS: Record<string, InstanceStatus> = {
   error: "failed",
   canceled: "canceled",
   timeout: "timeout",
+  // A person's move stepped past it (decision 0005) — not a failure, and not work left to do.
+  skipped: "skipped",
 };
 
 /**
@@ -294,6 +296,16 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
       case "transition.taken": {
         const node = byId.get(event.instanceId);
         if (node) node.index = event.index;
+        // A DIRECTED transition (`by`) on an instance that had ended REOPENS it, and the path above
+        // it: a finished task that took a person's move is somewhere again, and says so until the
+        // reopened instances journal their new ends.
+        if (node && event.by !== undefined) {
+          for (let up: MutableNode | undefined = node; up !== undefined; up = up.parentInstanceId === undefined ? undefined : byId.get(up.parentInstanceId)) {
+            if (isLive(up)) break;
+            up.status = "running";
+            delete up.endedAt;
+          }
+        }
         break;
       }
       case "child.superseded": {

@@ -3186,6 +3186,19 @@ export function useApp() {
         }
       },
       /**
+       * `task_move`, published (decision 0005): this card was dropped on that column. What the
+       * board's drop sends — main answers the transition waiting on exactly this move when one is,
+       * and otherwise moves the task itself. No optimistic move, for the reason above: where the
+       * task stands is the run's to say, and a refusal arrives as one.
+       */
+      moveTask: async (project: string | undefined, taskId: string, toState: string) => {
+        try {
+          await invoke("task:move", { taskId, toState, ...(project !== undefined ? { project } : {}) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
        * Answer a per-command approval. `scope` is why a user is not asked the same
        * question on every tool call (DESIGN §10.2).
        */

@@ -27,10 +27,12 @@ import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import {
+  DirectedTransitions,
   InMemoryPersistence,
   loadBundle,
   moduleHash as moduleHashOf,
   type CallResult,
+  type DirectedTransition,
   type EngineEvent,
   type LoadedInstance,
   type LoadedState,
@@ -376,6 +378,8 @@ import type {
   PendingInteraction,
   PendingQuestion,
   PendingUserEvent,
+  TaskMoveRequest,
+  TaskMoveResult,
   ProbeResult,
   PruneRequest,
   PruneResult,
@@ -3069,6 +3073,14 @@ export class AppService {
       loaded?: LoadedInstance;
       /** Recorded call answers by scoped id — the durable store behind hw's `answers` seam. */
       answers?: (scopedId: string) => CallResult | undefined;
+      /**
+       * The run's move port, ALREADY HOLDING a move (decision 0005) — supplied by `moveTask` when a
+       * task that is not running is reopened to take one: the loaded engine claims it as it builds
+       * the instance it names. Absent ⇒ a fresh port, which every run gets.
+       */
+      directed?: DirectedTransitions;
+      /** This start reopens a COMPLETED task to take that move — `BeginRunOptions.reopen`. */
+      reopen?: boolean;
     },
   ): Promise<{ taskId: string }> {
     const project = open.project;
@@ -3190,6 +3202,7 @@ export class AppService {
       // A start carrying a loaded machine is the continuation `beginTaskRun` otherwise refuses to
       // let a previously-run task make — restarting in place is the conversation-preamble hazard.
       ...(opts.loaded !== undefined ? { continues: true } : {}),
+      ...(opts.reopen === true ? { reopen: true } : {}),
     });
 
     // The workflow's OWN TypeScript functions (SPEC §7.5), merged rather than wrapped: a resolved
@@ -3252,7 +3265,9 @@ export class AppService {
     const abort = new AbortController();
     let settle!: () => void;
     const done = new Promise<void>((resolve) => (settle = resolve));
-    open.live.set(taskId, { taskId, abort, done });
+    const directed = opts.directed ?? new DirectedTransitions();
+    let endedCompleted = false;
+    open.live.set(taskId, { taskId, abort, done, directed });
 
     // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
     // project will see a live heartbeat and leave the task alone instead of
@@ -3544,6 +3559,7 @@ export class AppService {
             log: (level, message, at) => this.log({ level, source: "run", message, project: open.key, ...(at !== undefined ? { taskId: at } : {}) }),
           }),
           ...(started.meta.split !== undefined ? { split: started.meta.split } : {}),
+          directed,
           // Tee the journal: persist, then push the same event to the renderer so
           // the detail view streams live without polling the database.
           persistence: {
@@ -3617,6 +3633,7 @@ export class AppService {
         this.publishFor(open, { type: "run:finished", taskId, status });
         this.settleWaiters(open, taskId);
         if (status === "completed") this.releaseDependents(open, taskId);
+        endedCompleted = status === "completed";
       } catch (e) {
         // A crash between beginTaskRun and finishTaskRun would otherwise leave the
         // task `running` forever (recovery would call it interrupted next open).
@@ -3654,6 +3671,25 @@ export class AppService {
         this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
         this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
         settle();
+        // A move that reached the port after the engine let go of it (decision 0005): the task
+        // ended underneath the person's gesture. It is taken the way any move on a task that is
+        // not running is — by reopening. Not for a run that was stopped: a stop is the later word.
+        // Only for a run that COMPLETED: a run that failed before its engine ever attached still
+        // holds the move it was reopened with, and taking that again would reopen it forever.
+        const leftover = directed.queued().at(-1);
+        if (leftover !== undefined && endedCompleted) {
+          void this.moveTask({
+            project: open.key,
+            taskId,
+            toState: leftover.to,
+            by: leftover.by,
+            ...(leftover.skip === true ? { skip: true } : {}),
+            ...(leftover.instanceId !== undefined ? { instanceId: leftover.instanceId } : {}),
+            ...(leftover.inputs !== undefined ? { inputs: leftover.inputs as Record<string, JsonValue> } : {}),
+          }).catch((e: unknown) => {
+            this.log({ level: "warn", source: "run", message: `a move left waiting when ${taskId} ended was not taken: ${(e as Error).message}`, project: open.key, taskId });
+          });
+        }
       }
     })();
 
@@ -5287,6 +5323,101 @@ export class AppService {
   deliverUserEvent(requestId: string): { requestId: string; delivered: boolean } {
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     return { requestId, delivered: owner?.userEvents.deliver(requestId) ?? false };
+  }
+
+  /**
+   * A person MOVED a task to a state — `task_move`, published (decision 0005 §3–§5).
+   *
+   * One publication, three ways it lands, tried in this order:
+   *
+   *  1. **A transition is already waiting on exactly this** — `on_user_event('task_move' | 'task_drag',
+   *     { to_state })` for this task. It gets its answer, and the workflow's own rule moves the task
+   *     (the engine holds a standing rule's answer until the running state ends). Not tried for a
+   *     `skip`, which means NOW, or for a move aimed below the root, which no board wait names.
+   *  2. **The task is running here** — the move is handed to its engine as a DIRECTED transition:
+   *     journaled `transition.taken` with who asked, held until the running state ends unless it
+   *     says `skip`, and what it steps over recorded `skipped`.
+   *  3. **The task is not running** — it is REOPENED to take it: loaded, like a resume, with the move
+   *     waiting on the port for the instance it names. A `completed` task is reopened under its own
+   *     id, which no other path may do; a stopped or failed one steps past the state it stopped in
+   *     (`skip`), because nothing is running there to wait for.
+   *
+   * A move that cannot be made — an unknown task, a state the target is not a child of, a task
+   * another process is running — is refused with the reason, before anything is started.
+   */
+  async moveTask(request: TaskMoveRequest): Promise<TaskMoveResult> {
+    const open = this.session(request.project);
+    const taskId = request.taskId;
+    const at = { project: open.key, taskId };
+    const row = open.project.runtime.get(taskId);
+    if (row === undefined) throw this.refusal("run", `cannot move unknown task '${taskId}'`, at);
+    const move: DirectedTransition = {
+      to: request.toState,
+      by: request.by ?? "person",
+      ...(request.instanceId !== undefined ? { instanceId: request.instanceId } : {}),
+      ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
+      ...(request.skip === true ? { skip: true } : {}),
+    };
+
+    const live = open.live.get(taskId);
+    if (live !== undefined) {
+      if (move.skip !== true && move.instanceId === undefined && open.userEvents.answerMove(taskId, move.to) !== undefined) {
+        this.log({ level: "info", source: "run", message: `moved ${taskId} to '${move.to}': a transition was waiting on it`, ...at });
+        return { taskId, status: "answered" };
+      }
+      const outcome = live.directed.direct(move);
+      if (outcome.status === "refused") throw this.refusal("run", `cannot move task '${taskId}' to '${move.to}': ${outcome.reason}`, at);
+      // `queued` is a run whose engine has not attached yet, or has just let go: the port keeps the
+      // move, a starting engine claims it, and the run-end handler reopens for one left behind.
+      const status = outcome.status === "taking" ? "taking" : "held";
+      this.log({ level: "info", source: "run", message: `moved ${taskId} to '${move.to}' (${move.by}${move.skip === true ? ", skip" : ""}): ${status}`, ...at });
+      return { taskId, status };
+    }
+
+    if (row.status === "running" || row.status === "stopping") {
+      throw this.refusal("run", `task '${taskId}' is ${row.status} in another process — move it there`, at);
+    }
+    if (row.snapshotHash === undefined) {
+      throw this.refusal("run", `task '${taskId}' has never run, so it stands nowhere to be moved from — start it instead`, at);
+    }
+    releaseUnconsumedFailures(open.project, taskId);
+    const bundle = loadSnapshot(open.project.paths.snapshotsDir, row.snapshotHash);
+    const load = buildTaskLoad(open.project, taskId, bundle.states);
+    if (load.blocked !== undefined || load.loaded === undefined) {
+      throw this.refusal("run", `task '${taskId}' cannot be moved: ${load.blocked ?? "nothing was recorded"}`, at);
+    }
+    if (load.unreadable.length > 0) {
+      const first = load.unreadable[0]!;
+      throw this.refusal(
+        "run",
+        `task '${taskId}' cannot be moved: ${load.unreadable.length} operation(s) have no readable record ` +
+          `(first: ${first.stateId} — ${first.reason}). Reopening it would repeat them.`,
+        at,
+      );
+    }
+    // The target is checked against the PINNED definition before anything starts: the engine drops a
+    // queued move naming no child, and a task reopened for nothing would just finish again.
+    const find = (node: LoadedInstance, id: string): LoadedInstance | undefined =>
+      node.id === id ? node : (node.children ?? []).map((child) => find(child, id)).find((hit) => hit !== undefined);
+    const owner = move.instanceId === undefined ? load.loaded : find(load.loaded, move.instanceId);
+    if (owner === undefined) throw this.refusal("run", `cannot move task '${taskId}': it has no instance '${move.instanceId}'`, at);
+    if (bundle.states[owner.stateId]?.children?.[move.to] === undefined) {
+      throw this.refusal("run", `cannot move task '${taskId}' to '${move.to}': it is not a state of '${owner.stateId}'`, at);
+    }
+    // Nothing is running in a task that is not running, so there is nothing to wait out: a state
+    // the task stopped or failed in is stepped past, not continued first.
+    const port = new DirectedTransitions();
+    port.direct(row.status === "completed" ? move : { ...move, skip: true });
+    this.log({ level: "info", source: "run", message: `reopening ${taskId} (${row.status}) to move it to '${move.to}' (${move.by})`, ...at });
+    await this.startRun(open, taskId, {
+      config: open.project.config,
+      secrets: this.secretResolver(open),
+      loaded: load.loaded,
+      answers: load.answers,
+      directed: port,
+      reopen: true,
+    });
+    return { taskId, status: "reopened" };
   }
 
   /**

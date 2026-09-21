@@ -16,6 +16,7 @@
  */
 import type { FakeRule } from "@jaira/runtime";
 import type { FSWatcher } from "node:fs";
+import type { DirectedTransitions } from "@declarative-ai/hw";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
 import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub, RemoteEventHub, UserEventHub } from "@jaira/runtime";
@@ -26,6 +27,12 @@ import { LiveTurnLog } from "./liveTurns";
 export interface LiveRun {
   taskId: string;
   abort: AbortController;
+  /**
+   * The port a person's MOVE reaches this run's engine through (decision 0005). Held here because
+   * the engine is built inside the executor: a move goes to whichever engine is attached, and one
+   * that arrives before it attaches — or after it has detached — waits on the port.
+   */
+  directed: DirectedTransitions;
   /** Resolves when the run has finished recording and settled its task row. */
   done: Promise<void>;
 }

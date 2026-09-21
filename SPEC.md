@@ -198,6 +198,30 @@ outputs of a child that has started but not yet finished is skipped for that
 evaluation round and becomes eligible again when the child resolves
 (Section 10.4).
 
+**A guard may wait on a person** — `on_user_event(...)`, a deferred call
+(EXPRESSIONS.md §18.2, WORKFLOWS.md §7.4). While its answer is outstanding the
+list stops there, the sequence holds and the state does not terminate: it is a
+decision the state has asked for. A transition marked `"standing": true` waits
+without holding anything (EXPRESSIONS.md §18.3): it is evaluated last, behind
+every other rule; the sequence advances and a state with nothing left to do
+terminates while it stands; and an answer that arrives while a sync child runs is
+held until that child ends. It is what a host generates for "a person may move
+this task there" — `on_user_event('task_move', { to_state })` (decision 0005).
+
+**A directed transition** is one the host injects on somebody's behalf rather
+than one a rule fired: `{ to, inputs, by }`, where `by` is `"person"` or
+`"control"` and is journaled on `transition.taken`. It is taken ahead of every
+rule. Without `skip` it is held while a sync child holds the cursor and taken
+when that child ends; with `skip` the running child is interrupted — and the jump
+is decided, and journaled, BEFORE the interrupt lands, because an interrupted
+operation may complete and its completion would otherwise walk the run into the
+next member. Forward, every sequence member stepped over without being entered is
+recorded `skipped` (§3.6); backward, the target is re-entered as the next
+occurrence with the usual reset. A run that has FINISHED takes one by being
+reopened: loaded with the move waiting, the instance it names — and every
+ancestor — continues as a live one does. The full statement is the upstream
+engine's SPEC §3.3.
+
 ### 3.4 State Instances
 
 Entering a state — including re-entering it via a transition — creates a fresh
@@ -237,6 +261,12 @@ terminate.timeout
 Domain-level results such as "approved" or "needs changes" are ordinary
 schema-validated outputs. Parents branch on `children.<id>.outputs.*` for
 decisions and on `children.<id>.outcome` for failure handling.
+
+A fifth outcome, `skipped`, is one no author can transition to: it is what a
+directed transition (§3.3) records for the running child it interrupted and for
+every sequence member it stepped over. `children.<id>.outcome` reads `"skipped"`
+for such a child, where a child that never ran reads as absent. It is not a
+failure — nothing has to handle it, and a resume never revives it.
 
 A child termination includes:
 
