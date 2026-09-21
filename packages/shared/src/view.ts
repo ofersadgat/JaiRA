@@ -248,6 +248,13 @@ export interface BoardCard {
   inReview?: InReview;
   /** How a fan-out made this task, when one did — the word the card's origin line uses. */
   origin?: TaskOrigin;
+  /**
+   * The task this card files BENEATH (decision 0005 §2): an adopted task, under the task that
+   * adopted it. A board draws it indented under that card when both are in one column — the root
+   * listing always, a level's board when the parent stands in the child's column — and as an
+   * ordinary card otherwise.
+   */
+  under?: string;
   updatedAt: number;
   /**
    * When the run ENDED, from the journal — the last instance of it to terminate.

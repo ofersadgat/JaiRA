@@ -10,6 +10,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type {
   ApprovalScope,
+  ConnectUndo,
+  TaskConnectResult,
   BoardView,
   ConfigLayer,
   ConfigView,
@@ -234,6 +236,12 @@ export interface AppState {
    * affordance appearing on a card somebody was already looking at.
    */
   userEvents: PendingUserEvent[];
+  /**
+   * How to take back what a board drop did, by the task it left standing (decision 0005): the token
+   * `task:connect` handed out. It lives here, for the session — the card it is drawn on is the one
+   * the drop made or moved, and a rewind from the task's own view takes the same thing back later.
+   */
+  connectUndo: Record<string, { project?: string; undo: ConnectUndo }>;
   /** Live event lines for the selected task, newest last. */
   stream: string[];
   /** How much history is stored, for the pruning panel. */
@@ -809,6 +817,7 @@ const EMPTY: AppState = {
   moduleApproval: null,
   questions: [],
   userEvents: [],
+  connectUndo: {},
   stream: [],
   history: null,
   prune: null,
@@ -3215,6 +3224,49 @@ export function useApp() {
       moveTask: async (project: string | undefined, taskId: string, toState: string) => {
         try {
           await invoke("task:move", { taskId, toState, ...(project !== undefined ? { project } : {}) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * What a drop of this card on that column WOULD do (decision 0005 §1) — `task:connect`'s dry
+       * run. Changes nothing, and touches no state here: the board keeps the answer for the length of
+       * one drag, asks once per column, and draws it as the column's light and its preview.
+       */
+      connectPreview: (project: string | undefined, taskId: string, target: string): Promise<TaskConnectResult> =>
+        invoke("task:connect", { taskId, target, dryRun: true, ...(project !== undefined ? { project } : {}) }),
+      /**
+       * THE DROP (decision 0005): `task_move`, published to a column no rule had offered. The same
+       * channel a conversation's `move` tool will use. Nothing is confirmed first; what it did
+       * arrives on the ordinary refresh, and the token that takes it back is kept for the card.
+       *
+       * `start: false`: a task the drop MAKES is left standing where it was put, for the person to
+       * start — a move an engine has to take starts one regardless.
+       */
+      connectTask: async (project: string | undefined, taskId: string, target: string) => {
+        try {
+          const result = await invoke("task:connect", { taskId, target, start: false, ...(project !== undefined ? { project } : {}) });
+          if (!result.ok) {
+            patch({ error: result.refusal.message });
+            return;
+          }
+          const at = result.taskId ?? taskId;
+          if (result.undo !== undefined) {
+            const undo = result.undo;
+            patch({ connectUndo: { ...ref.current.connectUndo, [at]: { ...(project !== undefined ? { project } : {}), undo } } });
+          }
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /** **Undo** on the card a drop made or moved: un-adopt, or rewind to before the move. */
+      undoConnect: async (taskId: string) => {
+        const kept = ref.current.connectUndo[taskId];
+        if (kept === undefined) return;
+        try {
+          await invoke("task:connectUndo", { undo: kept.undo, ...(kept.project !== undefined ? { project: kept.project } : {}) });
+          const { [taskId]: _used, ...rest } = ref.current.connectUndo;
+          patch({ connectUndo: rest });
         } catch (e) {
           fail(e);
         }

@@ -1,49 +1,8 @@
 /* Decision 0005 — the rules these mockups need that styles.css does not have yet. Everything here is
    written in the app's tokens and ratios, so each block can move into styles.css as it stands. */
 
-/* The drop preview: what a drop on the column under the pointer WILL do. It is shown while hovering
-   and has no controls — the drop is the commit. In the New task popover's own box. */
-.connect-pop {
-  width: 300px;
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: var(--lift);
-  font-size: var(--size-app);
-}
-.connect-kind {
-  font: 600 calc(var(--size-app) * 10.5 / 12.5) / 1.3 var(--font-data);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
-.connect-say {
-  margin: 0;
-  line-height: 1.45;
-}
-.connect-facts {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 3px;
-  color: var(--dim);
-  font-size: calc(var(--size-app) * 11.5 / 12.5);
-}
-.connect-facts b {
-  color: var(--text);
-  font-weight: 600;
-}
-.connect-pop {
-  pointer-events: none;
-}
-.connect-drop {
-  font: 600 calc(var(--size-app) * 11 / 12.5) / 1.3 var(--font-data);
-  color: var(--accent);
-}
+/* `.connect-pop`, `.connect-kind`, `.connect-say`, `.connect-facts` and `.connect-drop` moved into
+   styles.css with step 5 (the drop preview). */
 
 /* The connected line is an ordinary step note that is not a failure. */
 .sb-note.sb-connected,
@@ -85,11 +44,7 @@
 
 /* `.prov`, `.prov-inferred` and `.prov-asked` moved into styles.css with steps 2-3. */
 
-/* Board: an adopted task under its parent. */
-.card.card-child {
-  margin-left: 14px;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line));
-}
+/* `.card.card-child` moved into styles.css with step 5 (an adopted task under its parent). */
 
 /* ---- 0006: named sets in Settings ---------------------------------------------------------------
    Everything structural is the Presets pane's (cfg-row, llm-config, pane-actions). These are the

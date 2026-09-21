@@ -8,7 +8,7 @@
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
-import type { ChoiceQuestion, ChooseOptionConfig } from "@jaira/shared";
+import { MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig } from "@jaira/shared";
 import {
   copyFileSync,
   existsSync,
@@ -49,6 +49,8 @@ import {
   beginTaskRun,
   buildTaskLoad,
   adoptedInto,
+  connectTask as connectTaskIn,
+  descentFollower,
   missingInputs,
   pinWorkflow,
   planAdoption,
@@ -396,6 +398,10 @@ import type {
   TaskMoveResult,
   TaskAdoptRequest,
   TaskAdoptResult,
+  TaskConnectRequest,
+  TaskConnectResult,
+  TaskConnectUndoRequest,
+  TaskConnectUndoResult,
   InputProvenance,
   InputSourceOption,
   InputSourcesRequest,
@@ -501,6 +507,12 @@ export interface AppServiceOptions {
   keychain?: KeychainPort;
   /** Override the shared base root. Defaults to the saved setting, then `JAIRA_HOME`, then `~/.jaira`. */
   baseDir?: string;
+  /**
+   * The conversation state a connect roots a NEW dynamic workflow in (decision 0005 §3). Absent ⇒
+   * `CONNECT_CONVERSATION`, the one constant step 6 changes; a seam here so a test can name a state
+   * that needs no model.
+   */
+  connectConversation?: string;
   /**
    * Show a file in the OS file manager, injected by the Electron main process.
    *
@@ -3136,6 +3148,8 @@ export class AppService {
        * the instance it names. Absent ⇒ a fresh port, which every run gets.
        */
       directed?: DirectedTransitions;
+      /** The way DOWN from that move's target, when it is nested deeper — see `LiveRun.descents`. */
+      descents?: Array<(event: EngineEvent) => void>;
       /** This start reopens a COMPLETED task to take that move — `BeginRunOptions.reopen`. */
       reopen?: boolean;
     },
@@ -3328,7 +3342,8 @@ export class AppService {
     const done = new Promise<void>((resolve) => (settle = resolve));
     const directed = opts.directed ?? new DirectedTransitions();
     let endedCompleted = false;
-    open.live.set(taskId, { taskId, abort, done, directed });
+    const descents = opts.descents ?? [];
+    open.live.set(taskId, { taskId, abort, done, directed, descents });
 
     // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
     // project will see a live heartbeat and leave the task alone instead of
@@ -3631,6 +3646,9 @@ export class AppService {
           persistence: {
             record: (event, atMs) => {
               recorder.record(event, atMs);
+              // A move on its way DOWN to a nested target directs its next step here, the moment
+              // the composite above it enters (decision 0005 §1).
+              for (const follow of descents) follow(event);
               this.traceRun(open.key, taskId, event);
               // The record lands when the operation settles — the stored view now holds everything
               // the live tail held, so the tail goes BEFORE the event that makes viewers refetch.
@@ -5156,6 +5174,135 @@ export class AppService {
     return { ok: true, dryRun, plan, taskId: parent.id, started };
   }
 
+  // --- connect (decision 0005 §1) ------------------------------------------------------------------
+
+  /** `browseWorkflows` is a lint of every root; a drag asks once per column, so the answer is kept for the length of one. */
+  private readonly connectBrowsers = new Map<string, { at: number; browser: WorkflowBrowser }>();
+
+  /**
+   * CONNECT ("task:connect"): send a task to a state — see `persistence/connect.ts`, which holds the
+   * three resolutions and the order they are tried in. What this adds is what a service owns: the
+   * validator, the moves transitions are waiting on, whether an engine is running the task, and the
+   * two operations a connect is composed of — `adoptTask` and `moveTask`, each exactly as its own
+   * channel reaches it, so a drop and a conversation's `move` tool are one code path.
+   *
+   * A DRY RUN changes nothing and answers the same shape: the board asks it once per column while a
+   * card hovers. A refusal is an answer, never a rejection.
+   */
+  async connectTask(request: TaskConnectRequest): Promise<TaskConnectResult> {
+    const open = this.session(request.project);
+    const project = open.project;
+    const result = await connectTaskIn(project, { ...request, project: open.dir }, {
+      check: this.valueCheck(),
+      ...(this.options.connectConversation !== undefined ? { conversation: this.options.connectConversation } : {}),
+      offered: (taskId) =>
+        open.userEvents
+          .list()
+          .filter((wait) => wait.taskId === taskId && MOVE_EVENTS.includes(wait.event) && typeof wait.options.to_state === "string")
+          .map((wait) => wait.options.to_state as string),
+      running: (taskId) => open.live.has(taskId) || project.jobs.liveRunJob(taskId, Date.now()) !== undefined,
+      browser: () => {
+        const kept = this.connectBrowsers.get(open.key);
+        if (kept !== undefined && Date.now() - kept.at < 3000) return kept.browser;
+        const browser = this.browseWorkflowsIn(open);
+        this.connectBrowsers.set(open.key, { at: Date.now(), browser });
+        return browser;
+      },
+      adopt: (adopt) => this.adoptTask(adopt),
+      move: (move) => this.moveTask(move),
+    });
+    if (request.dryRun !== true) {
+      this.connectBrowsers.delete(open.key);
+      this.log({
+        level: result.ok ? "info" : "warn",
+        source: "run",
+        message: result.ok
+          ? `connected ${request.taskId} to '${request.target}': ${result.plan.resolution}${result.plan.modification !== undefined ? ` (${result.plan.modification})` : ""}, standing at '${result.plan.standsAt.path.join("/") || result.plan.workflow}'${result.taskId !== undefined && result.taskId !== request.taskId ? ` as ${result.taskId}` : ""}`
+          : `did not connect ${request.taskId} to '${request.target}': ${result.refusal.message}`,
+        project: open.key,
+        taskId: request.taskId,
+      });
+      this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    }
+    return result;
+  }
+
+  /**
+   * Take a connect back ("task:connectUndo"), with the token the connect handed out.
+   *
+   *  - An ADOPTION is undone by cutting the parent's journal at the mirror row, which un-adopts
+   *    (`releaseUnmirroredAdoptions`). Nothing is resumed: the point is that the task is its own
+   *    again, not that the parent now runs the child. A parent the connect MADE that holds nothing
+   *    of its own afterwards is removed — its row and file only, because the worktree it stands in is
+   *    the adopted task's.
+   *  - A MOVE is undone by the ordinary rewind to before it. A cut behind the row that moved a task
+   *    into a document puts it back under its previous pin, which is how a clone is undone; a move
+   *    nothing has journaled yet only has its pin put back.
+   *
+   * Refused while the task runs, as a rewind is.
+   */
+  async undoConnect(request: TaskConnectUndoRequest): Promise<TaskConnectUndoResult> {
+    const open = this.session(request.project);
+    const project = open.project;
+    const undo = request.undo;
+    const running = (taskId: string): boolean => open.live.has(taskId) || project.jobs.liveRunJob(taskId, Date.now()) !== undefined;
+    const invalidate = (): void => {
+      this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    };
+    if (undo.kind === "adopt") {
+      const { parentTaskId, adoptedTaskId } = undo;
+      const parent = project.tasks.tryRead(parentTaskId);
+      if (parent === undefined || project.runtime.get(parentTaskId) === undefined) throw this.refusal("run", `unknown task '${parentTaskId}'`);
+      if (running(parentTaskId)) throw this.refusal("run", `'${parent.title}' is running — stop it before taking the move back`);
+      const mirror = project.events.list(parentTaskId).find((row) => row.event.type === "instance.entered" && row.event.instanceId === adoptedTaskId);
+      if (mirror === undefined) throw this.refusal("run", `'${parent.title}' no longer holds the task it adopted — there is nothing to take back`);
+      for (const [requestId, owner] of open.requestTask) {
+        if (owner === parentTaskId) open.hub.reject(requestId, "the move that made this task was taken back");
+      }
+      open.questions.dismissFor(parentTaskId);
+      // What the parent has done of its OWN since: anything it entered that is not a mirror row.
+      // Everything it ran comes AFTER the mirror, so the cut takes it too — which is what rewinding
+      // past the mirror means — but a task that has done work is kept, to be looked at or resumed.
+      const own = project.events
+        .list(parentTaskId)
+        .some((row) => row.seq > mirror.seq && row.event.type === "instance.entered" && (row.event as { adopted?: boolean }).adopted !== true);
+      cutTaskJournal(project, parentTaskId, mirror.seq);
+      releaseUnmirroredAdoptions(project, parentTaskId);
+      let removed: string | undefined;
+      if (undo.made && !own) {
+        // Its worktree is the adopted task's (`writeAdoption`), so the row lets go of it rather than removing it.
+        project.runtime.clearWorktree(parentTaskId, Date.now());
+        deleteTask(project, parentTaskId);
+        removed = parentTaskId;
+      }
+      this.log({ level: "info", source: "run", message: `took back the adoption of ${adoptedTaskId} into ${parentTaskId}${removed !== undefined ? ", and removed the task it had made" : ""}`, project: open.key, taskId: adoptedTaskId });
+      invalidate();
+      return { taskId: adoptedTaskId, ...(removed !== undefined ? { removed } : {}) };
+    }
+    const { taskId } = undo;
+    const row = project.runtime.get(taskId);
+    if (row === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
+    if (running(taskId)) throw this.refusal("run", `task '${taskId}' is running — stop it before taking the move back`);
+    const moved = project.events.list(taskId).some((stored) => stored.seq > undo.after);
+    if (moved) {
+      await this.rewindTask({ taskId, at: undo.after + 1, project: open.dir });
+      // A task that had FINISHED goes back to having finished: the cut took away everything since.
+      if (undo.wasCompleted === true && !open.live.has(taskId)) {
+        project.runtime.endTask(taskId, "success", Date.now());
+        project.runtime.setStatus(taskId, "completed", Date.now());
+      }
+    }
+    const now = project.runtime.get(taskId)!;
+    if (undo.pin !== undefined && (now.snapshotHash !== undo.pin.snapshotHash || now.documentId !== undo.pin.documentId)) {
+      project.runtime.setPin(taskId, undo.pin.snapshotHash, undo.pin.documentId ?? null, Date.now());
+    }
+    this.log({ level: "info", source: "run", message: `took back the move of ${taskId}`, project: open.key, taskId });
+    invalidate();
+    return { taskId };
+  }
+
   /**
    * "From a task…" ("task:inputSources"): for each slot, the outputs of earlier tasks that FIT it.
    *
@@ -5646,6 +5793,9 @@ export class AppService {
       }
       const outcome = live.directed.direct(move);
       if (outcome.status === "refused") throw this.refusal("run", `cannot move task '${taskId}' to '${move.to}': ${outcome.reason}`, at);
+      if (request.path !== undefined && request.path.length > 0) {
+        live.descents.push(descentFollower(live.directed, { parentInstanceId: move.instanceId ?? row.rootInstanceId, key: move.to }, request.path, move));
+      }
       // `queued` is a run whose engine has not attached yet, or has just let go: the port keeps the
       // move, a starting engine claims it, and the run-end handler reopens for one left behind.
       const status = outcome.status === "taking" ? "taking" : "held";
@@ -5656,14 +5806,16 @@ export class AppService {
     if (row.status === "running" || row.status === "stopping") {
       throw this.refusal("run", `task '${taskId}' is ${row.status} in another process — move it there`, at);
     }
-    if (row.snapshotHash === undefined) {
+    // A task made IN a document (decision 0005 §3) names it before it has ever pinned a version of
+    // it, and may already stand somewhere: an adoption wrote its root and a mirror row.
+    if (row.snapshotHash === undefined && row.documentId === undefined) {
       throw this.refusal("run", `task '${taskId}' has never run, so it stands nowhere to be moved from — start it instead`, at);
     }
     releaseUnconsumedFailures(open.project, taskId);
     const bundle = loadPinnedBundle(open.project, row);
     const load = buildTaskLoad(open.project, taskId, bundle.states);
     if (load.blocked !== undefined || load.loaded === undefined) {
-      throw this.refusal("run", `task '${taskId}' cannot be moved: ${load.blocked ?? "nothing was recorded"}`, at);
+      throw this.refusal("run", `task '${taskId}' cannot be moved: ${load.blocked ?? "it has never run, so it stands nowhere to be moved from — start it instead"}`, at);
     }
     if (load.unreadable.length > 0) {
       const first = load.unreadable[0]!;
@@ -5694,7 +5846,12 @@ export class AppService {
       loaded: load.loaded,
       answers: load.answers,
       directed: port,
+      ...(request.path !== undefined && request.path.length > 0
+        ? { descents: [descentFollower(port, { parentInstanceId: owner.id, key: move.to }, request.path, move)] }
+        : {}),
       reopen: true,
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
     });
     return { taskId, status: "reopened" };
   }

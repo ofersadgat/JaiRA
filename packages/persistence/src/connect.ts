@@ -1,0 +1,791 @@
+/**
+ * `connect(task, target)` (decision 0005 §1, step 5) — the resolution, and its composition.
+ *
+ * One operation behind the board's drop, a conversation's `move` tool and `jaira task move`. It owns
+ * no mechanism: a move is `task_move` (the host's `move`), an adoption is `adopt.ts`, a modified
+ * workflow is `dynamicDocuments.ts`. What is here is the ORDER they are tried in, the question each
+ * is asked, and the one thing none of them answers on its own — whether the target's inputs will
+ * bind once the task stands there.
+ *
+ * ## Three resolutions, in order
+ *
+ *  1. **The target is in the task's workflow** (`resolveWithin`). The pinned definition is searched
+ *     for a mount of the target; the shared ancestor is the deepest instance the task stands in that
+ *     the path to the target passes through. Behind where it stands is a backward move. Ahead of it
+ *     is a forward one, which the decision makes a FAST-FORWARD by default — step 7's — so until that
+ *     exists a forward move that would step over states is refused unless it says `skip`. A rule of
+ *     the workflow already waiting on exactly this move is answered instead, and steps over nothing.
+ *  2. **A real workflow holds both** (`candidatesFor`): a composite that mounts the task's root state
+ *     and the target as children — or IS the target, and mounts the task's state. One such workflow
+ *     adopts the task into a new task of it, and rule 1 takes that task to the target. More than one
+ *     is returned as candidates: the caller asks, and calls again naming one. Nothing is guessed.
+ *  3. **The workflow is modified** (`generateDocumentVersion`): `new` for a task that finished alone
+ *     — the document is made, its task is made, and the source is ADOPTED into it as the first child,
+ *     which is the composition step 4 left to this one — `augmented` for a task already in a
+ *     document, `cloned` for one standing inside a real workflow. Then the move.
+ *
+ * ## Inputs bind, or the connect is refused
+ *
+ * Every resolution ends by settling the target's inputs, and until the conversations exist (step 6)
+ * only the workflow's own bindings can: a wire whose producers have run, a literal, a slot's own
+ * default. `unboundInputs` decides that statically from the lowered definition and the loaded
+ * machine, for the target and for every ancestor entered on the way down to it. A required input it
+ * cannot bind refuses the connect with the input, its declared schema and description, and why.
+ *
+ * ## §0
+ *
+ * Nothing here reads or writes a workflow's input by name. The conversation state that roots a new
+ * document may declare inputs of its own; they are filled by SCHEMA — a required input that takes
+ * a string is given the sentence that says what the person did — and anything else refuses.
+ */
+import type { FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
+import { sourceStateId, type DirectedTransition, type DirectedTransitions, type EngineEvent, type LoadedInstance, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
+import { createLogger } from "@declarative-ai/log";
+import type {
+  AdoptAsk,
+  AdoptPlan,
+  ConnectCandidate,
+  ConnectInput,
+  ConnectMissingInput,
+  ConnectMove,
+  ConnectPlan,
+  ConnectRefusal,
+  ConnectUndo,
+  InputProvenance,
+  TaskAdoptRequest,
+  TaskAdoptResult,
+  TaskConnectRequest,
+  TaskConnectResult,
+  TaskMoveRequest,
+  TaskMoveResult,
+  WorkflowBrowser,
+} from "@jaira/shared";
+import { ApprovalRequired } from "@jaira/shared";
+import { childrenReadBy, missingInputs, plainInputOf, planAdoption, writeAdoption, type ValueCheck } from "./adopt";
+import { DYNAMIC_ROOT_PREFIX, loadPinnedBundle } from "./documents";
+import { generateDocumentVersion, type GenerateVersionResult } from "./dynamicDocuments";
+import { createTask, pinWorkflow } from "./lifecycle";
+import { buildTaskLoad } from "./load";
+import type { Project } from "./project";
+import { bundleFor } from "./views";
+import { browseWorkflows } from "./workflows";
+import { workflowLoadOptions } from "./workflowRefs";
+
+const log = createLogger("jaira.persistence.connect");
+
+/**
+ * THE conversation a dynamic workflow's root is, until the conversation states ship (step 6).
+ *
+ * `chat/control` — a conversation made by a move, holding only the task and workflow tools — is what
+ * belongs here. It does not exist yet, so the shipped working conversation stands in. This is the
+ * one line step 6 changes.
+ */
+export const CONNECT_CONVERSATION = "chat/agent";
+
+/** What the host lends a connect: its validator, its engine, and what only a running process knows. */
+export interface ConnectHost {
+  /** The run's own validator — adoption's schema fit, and whether a conversation input takes a string. */
+  check?: ValueCheck;
+  functions?: ReadonlyMap<string, FunctionCapabilities>;
+  /** The conversation state a new document is rooted in. Absent ⇒ {@link CONNECT_CONVERSATION}. */
+  conversation?: string;
+  /** The `to_state`s transitions of this task are waiting on right now (`on_user_event`). */
+  offered?: (taskId: string) => readonly string[];
+  /** Whether an engine is running this task — here, or in another process. */
+  running?: (taskId: string) => boolean;
+  /** The workflow roots and their closures — `browseWorkflows`, which a host may have cached. */
+  browser?: () => WorkflowBrowser;
+  /** ADOPT — the host's `task:adopt`. */
+  adopt(request: TaskAdoptRequest): Promise<TaskAdoptResult>;
+  /** `task_move`, published — the host's `task:move`. */
+  move(request: TaskMoveRequest): Promise<TaskMoveResult>;
+}
+
+const refused = (dryRun: boolean, refusal: ConnectRefusal, plan?: ConnectPlan): TaskConnectResult => ({ ok: false, dryRun, refusal, ...(plan !== undefined ? { plan } : {}) });
+
+// ---------------------------------------------------------------------------------------------------
+// the definition, searched
+// ---------------------------------------------------------------------------------------------------
+
+/** Every path of child keys from the bundle's root to a mount of `target`, shortest first. */
+export function pathsTo(bundle: WorkflowBundle, target: string): string[][] {
+  const wanted = sourceStateId(target);
+  const found: string[][] = [];
+  const walk = (stateId: string, keys: string[], above: ReadonlySet<string>): void => {
+    const state = bundle.states[stateId];
+    if (state === undefined || above.has(stateId)) return;
+    const within = new Set(above).add(stateId);
+    for (const [key, child] of Object.entries(state.children ?? {})) {
+      const path = [...keys, key];
+      if (sourceStateId(child.state) === wanted) found.push(path);
+      walk(child.state, path, within);
+    }
+  };
+  walk(bundle.rootId, [], new Set());
+  return found.sort((a, b) => a.length - b.length);
+}
+
+/** The states along a path of child keys, root first: `[root, …, target]`. */
+function statesAlong(bundle: WorkflowBundle, keys: readonly string[]): LoadedState[] {
+  const out: LoadedState[] = [];
+  let state = bundle.states[bundle.rootId];
+  if (state !== undefined) out.push(state);
+  for (const key of keys) {
+    const next: LoadedState | undefined = state !== undefined ? bundle.states[state.children?.[key]?.state ?? ""] : undefined;
+    if (next === undefined) break;
+    out.push(next);
+    state = next;
+  }
+  return out;
+}
+
+/** The latest entry under `node` — where, at this level, the task stands. Elements of one batch read as one. */
+function lastChildOf(node: LoadedInstance): LoadedInstance | undefined {
+  return (node.children ?? []).at(-1);
+}
+
+/** The child keys under `node` that have ended well — what a wire may read. */
+function succeededUnder(node: LoadedInstance | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const child of node?.children ?? []) {
+    if (child.childKey === undefined) continue;
+    if (!child.live && child.outcome === "success") out.add(child.childKey);
+    else out.delete(child.childKey);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// inputs
+// ---------------------------------------------------------------------------------------------------
+
+/** How a lowered wire reads, in words — for the preview, never for a decision. */
+function wireFrom(ref: unknown): { via: ConnectInput["via"]; from?: string } {
+  const plain = plainInputOf(ref);
+  if (plain !== undefined) return { via: "wire", from: `inputs.${plain}` };
+  const reads = [...childrenReadBy(ref)].filter((key) => key !== "*");
+  if (reads.length > 0) return { via: "wire", from: reads.join(", ") };
+  return { via: "literal" };
+}
+
+/**
+ * The inputs of the state mounted at `key` under `parent`, settled statically.
+ *
+ * `available` is what the mount's wires may read: the children of the parent that have ended well
+ * (and the one running now, which a held move waits for). A composite entered fresh on the way down
+ * has none. A required input with no wire, or whose wire reads a child outside `available`, is
+ * MISSING; an optional one is merely something a conversation could still be asked for.
+ */
+export function unboundInputs(
+  bundle: WorkflowBundle,
+  parent: LoadedState,
+  key: string,
+  available: ReadonlySet<string>,
+): { inputs: ConnectInput[]; missing: ConnectMissingInput[]; asks: ConnectMissingInput[] } {
+  const decl = parent.children?.[key];
+  const state = decl !== undefined ? bundle.states[decl.state] : undefined;
+  const inputs: ConnectInput[] = [];
+  const missing: ConnectMissingInput[] = [];
+  const asks: ConnectMissingInput[] = [];
+  if (decl === undefined || state === undefined) return { inputs, missing, asks };
+  // A standing rule to this child states wiring a move carries; the mount's own wins per name.
+  const rule = (parent.transitions ?? []).find((t) => t.standing === true && t.to === key);
+  const axes = new Set(decl.each ?? []);
+  for (const [name, slot] of Object.entries(state.inputs ?? {})) {
+    const meta = state.slotMeta?.[`inputs.${name}`];
+    const required = meta?.optional !== true && meta?.default === undefined && meta?.defaultRef === undefined;
+    const open = (reason: string): void => {
+      (required ? missing : asks).push({
+        state: sourceStateId(state.id),
+        name,
+        ...(slot.schema !== undefined ? { schema: slot.schema as JsonValue } : {}),
+        ...(meta?.description !== undefined ? { description: meta.description } : {}),
+        reason,
+      });
+    };
+    if ((slot as { binding?: unknown }).binding !== undefined) {
+      inputs.push({ name, via: "wire" });
+      continue;
+    }
+    const ref = decl.inputs?.[name] ?? rule?.inputRefs?.[name];
+    if (ref === undefined) {
+      if (axes.has(name) && decl.eachExprs?.[name] !== undefined) inputs.push({ name, via: "wire", from: decl.eachExprs[name]!, each: "split" });
+      else if (!required && (meta?.default !== undefined || meta?.defaultRef !== undefined)) inputs.push({ name, via: "default" });
+      else open("the workflow binds nothing to it");
+      continue;
+    }
+    const unread = [...childrenReadBy(ref)].filter((read) => read !== "*" && !available.has(read));
+    if (unread.length > 0) {
+      open(`its binding reads ${unread.map((k) => `'${k}'`).join(" and ")}, which ${unread.length === 1 ? "has" : "have"} not run`);
+      continue;
+    }
+    inputs.push({ name, ...wireFrom(ref), ...(axes.has(name) ? { each: "split" as const } : {}) });
+  }
+  return { inputs, missing, asks };
+}
+
+const asMissing = (state: string, ask: AdoptAsk): ConnectMissingInput => ({
+  state,
+  name: ask.name,
+  ...(ask.schema !== undefined ? { schema: ask.schema } : {}),
+  ...(ask.description !== undefined ? { description: ask.description } : {}),
+  reason: "the adopted task does not determine it",
+});
+
+/** "'a' (schema), 'b' (schema)" — the refusal's own words for what is missing. */
+export function missingSentence(missing: readonly ConnectMissingInput[]): string {
+  return missing
+    .map((m) => `'${m.name}' of '${m.state}'${m.schema !== undefined ? ` (${JSON.stringify(m.schema)})` : ""} — ${m.reason}`)
+    .join("; ");
+}
+
+// ---------------------------------------------------------------------------------------------------
+// rule 1: within the task's workflow
+// ---------------------------------------------------------------------------------------------------
+
+export interface WithinInput {
+  bundle: WorkflowBundle;
+  /** The machine as recorded — absent for a task with no journal, which stands nowhere. */
+  loaded?: LoadedInstance;
+  /** Child keys from the root to the target. */
+  keys: readonly string[];
+  skip: boolean;
+  /** A task that is not running steps past the state it stopped in; a finished one has nothing running. */
+  running: boolean;
+  /** Children the caller KNOWS will have ended well when the move is taken (an adoption about to be written). */
+  alsoAvailable?: ReadonlySet<string>;
+  /** `to_state`s the workflow's own rules are waiting on. */
+  offered?: readonly string[];
+}
+
+export interface WithinOutcome {
+  move: ConnectMove;
+  inputs: ConnectInput[];
+  missing: ConnectMissingInput[];
+  asks: ConnectMissingInput[];
+}
+
+/**
+ * Where a move to `keys` starts, which way it goes, what it steps over, and whether what it enters
+ * will have its inputs.
+ */
+export function resolveWithin(input: WithinInput): WithinOutcome {
+  const { bundle, keys } = input;
+  // The shared ancestor: down the path for as long as the task STANDS in the composite named next.
+  let node = input.loaded;
+  let depth = 0;
+  while (node !== undefined && depth < keys.length - 1) {
+    const last = lastChildOf(node);
+    if (last === undefined || last.childKey !== keys[depth] || last.element !== undefined || last.outcome === "skipped") break;
+    node = last;
+    depth += 1;
+  }
+  const states = statesAlong(bundle, keys);
+  const parent = states[depth]!;
+  const to = keys[depth]!;
+  const sequence = parent.sequence ?? [];
+  const at = sequence.indexOf(to);
+  const entered = new Set((node?.children ?? []).flatMap((child) => (child.childKey !== undefined ? [child.childKey] : [])));
+  const last = node !== undefined ? lastChildOf(node) : undefined;
+  let from = -1;
+  for (const child of [...(node?.children ?? [])].reverse()) {
+    const index = child.childKey !== undefined ? sequence.indexOf(child.childKey) : -1;
+    if (index >= 0) {
+      from = index;
+      break;
+    }
+  }
+  const answersRule = depth === 0 && keys.length === 1 && !input.skip && (input.offered ?? []).includes(to);
+  const backward = at >= 0 && from >= 0 && at <= from;
+  const passes: string[] = [];
+  if (at >= 0 && !backward && !answersRule) {
+    for (const key of sequence.slice(from + 1, at)) if (!entered.has(key) && input.alsoAvailable?.has(key) !== true) passes.push([...keys.slice(0, depth), key].join("/"));
+  }
+  // Below the ancestor every composite is entered fresh: what comes before the named child is stepped over too.
+  for (let level = depth + 1; level < keys.length; level += 1) {
+    const inner = states[level]?.sequence ?? [];
+    const index = inner.indexOf(keys[level]!);
+    for (const key of inner.slice(0, Math.max(index, 0))) passes.push([...keys.slice(0, level), key].join("/"));
+  }
+  const direction: ConnectMove["direction"] = at < 0 ? "aside" : backward ? "backward" : passes.length > 0 ? "forward" : "next";
+  // A task that is not running and had not finished STOPPED in a state; the move steps past it.
+  const stoppedIn = !input.running && last?.live === true && last.childKey !== undefined ? [...keys.slice(0, depth), last.childKey].join("/") : undefined;
+
+  // What the target's wires may read. A held move waits for the state running now, so that state
+  // counts; a skip steps past it, and a backward move resets what comes after the target.
+  const available = succeededUnder(node);
+  for (const key of input.alsoAvailable ?? []) available.add(key);
+  if (last?.live === true && last.childKey !== undefined && input.running && !input.skip) available.add(last.childKey);
+  if (backward) for (const key of sequence.slice(at)) available.delete(key);
+
+  const inputs: ConnectInput[] = [];
+  const missing: ConnectMissingInput[] = [];
+  const asks: ConnectMissingInput[] = [];
+  for (let level = depth; level < keys.length; level += 1) {
+    const settled = unboundInputs(bundle, states[level]!, keys[level]!, level === depth ? available : new Set());
+    if (level === keys.length - 1) inputs.push(...settled.inputs);
+    missing.push(...settled.missing);
+    asks.push(...settled.asks);
+  }
+  return {
+    move: {
+      direction,
+      ...(node !== undefined && depth > 0 ? { instanceId: node.id } : {}),
+      to,
+      path: keys.slice(depth + 1),
+      passes,
+      ...(stoppedIn !== undefined ? { stepsPast: stoppedIn } : {}),
+      ...(answersRule ? { answersRule: true } : {}),
+    },
+    inputs,
+    missing,
+    asks,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// rule 2: a real workflow that holds both
+// ---------------------------------------------------------------------------------------------------
+
+/** Every composite that mounts `ran` as a child and either IS `target` or mounts it as one too. */
+export function candidatesFor(project: Project, browser: WorkflowBrowser, ran: string, target: string, only?: string): ConnectCandidate[] {
+  const source = sourceStateId(ran);
+  const wanted = sourceStateId(target);
+  const out = new Map<string, ConnectCandidate>();
+  for (const workflow of browser.workflows) {
+    if (workflow.rootId.startsWith(DYNAMIC_ROOT_PREFIX)) continue;
+    const reaches = (id: string): boolean => workflow.rootId === id || workflow.states.includes(id);
+    if (!reaches(source) || !reaches(wanted)) continue;
+    const bundle = bundleFor(project, workflow.rootId);
+    if (bundle === undefined) continue;
+    for (const state of Object.values(bundle.states)) {
+      const id = sourceStateId(state.id);
+      if (out.has(id) || (only !== undefined && sourceStateId(only) !== id)) continue;
+      const mounts = Object.entries(state.children ?? {});
+      const asChild = mounts.filter(([, child]) => sourceStateId(child.state) === source);
+      if (asChild.length === 0) continue;
+      const targetKey = id === wanted ? undefined : mounts.find(([, child]) => sourceStateId(child.state) === wanted)?.[0];
+      if (id !== wanted && targetKey === undefined) continue;
+      out.set(id, { workflow: id, ...(state.label !== undefined ? { label: state.label } : {}), childKey: asChild[0]![0], ...(targetKey !== undefined ? { targetKey } : {}) });
+    }
+  }
+  return [...out.values()].sort((a, b) => a.workflow.localeCompare(b.workflow));
+}
+
+// ---------------------------------------------------------------------------------------------------
+// connect
+// ---------------------------------------------------------------------------------------------------
+
+/** What the person did, in a sentence — what a conversation made by a move is opened with. */
+function moveSentence(title: string, target: string): string {
+  return `"${title}" was moved to ${target}.`;
+}
+
+/**
+ * The inputs of a new document's ROOT — the conversation state's own.
+ *
+ * Filled by schema, never by name (§0): a required input that takes a string is given the sentence
+ * that says what happened, which is what a conversation made by a move is opened with. Anything
+ * else required is returned as missing.
+ */
+function conversationInputs(
+  project: Project,
+  conversation: string,
+  sentence: string,
+  check: ValueCheck | undefined,
+): { inputs: Record<string, JsonValue>; provenance: Record<string, InputProvenance>; missing: ConnectMissingInput[] } {
+  const inputs: Record<string, JsonValue> = {};
+  const provenance: Record<string, InputProvenance> = {};
+  const missing: ConnectMissingInput[] = [];
+  const doc = workflowLoadOptions(project.paths, { path: project.config.workflows.path }).loadState?.(conversation);
+  const declared = doc !== null && typeof doc === "object" && !Array.isArray(doc) ? (doc as { inputs?: unknown }).inputs : undefined;
+  if (declared === null || typeof declared !== "object" || Array.isArray(declared)) return { inputs, provenance, missing };
+  for (const [name, raw] of Object.entries(declared as Record<string, unknown>)) {
+    const slot = (raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as { schema?: JsonValue; optional?: unknown; default?: unknown; binding?: unknown; description?: unknown };
+    if (slot.optional === true || slot.default !== undefined || slot.binding !== undefined) continue;
+    const schema = slot.schema ?? {};
+    const takesText = check !== undefined ? check(schema, sentence) === undefined : (schema as { type?: unknown }).type === undefined || (schema as { type?: unknown }).type === "string";
+    if (takesText) {
+      inputs[name] = sentence;
+      provenance[name] = { via: "bound" };
+    } else {
+      missing.push({ state: conversation, name, schema, ...(typeof slot.description === "string" ? { description: slot.description } : {}), reason: "the conversation that controls the new workflow requires it, and a move supplies only what happened, in words" });
+    }
+  }
+  return { inputs, provenance, missing };
+}
+
+const skipOf = (request: TaskConnectRequest): boolean => request.skip === true || request.forward === "skip";
+
+function fastForwardRefusal(move: ConnectMove): ConnectRefusal {
+  return {
+    code: "fast-forward",
+    message:
+      `'${[move.to, ...move.path].join("/")}' is ahead of where the task stands, past ${move.passes.map((p) => `'${p}'`).join(", ")}. ` +
+      `Running the states between (fast-forward) is not built yet — say skip to go there directly, which records ${move.passes.length === 1 ? "it" : "them"} as skipped`,
+  };
+}
+
+function moveRequest(request: TaskConnectRequest, taskId: string, move: ConnectMove): TaskMoveRequest {
+  return {
+    taskId,
+    toState: move.to,
+    by: request.by ?? "person",
+    ...(request.project !== undefined ? { project: request.project } : {}),
+    ...(move.instanceId !== undefined ? { instanceId: move.instanceId } : {}),
+    ...(move.path.length > 0 ? { path: move.path } : {}),
+    ...(skipOf(request) && move.answersRule !== true ? { skip: true } : {}),
+    ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+    ...(request.fake !== undefined ? { fake: request.fake } : {}),
+  };
+}
+
+/**
+ * Send a task to a state — see the module header. A refusal is an answer; only a broken
+ * installation (a module awaiting approval, a generator bug) rejects.
+ */
+export async function connectTask(project: Project, request: TaskConnectRequest, host: ConnectHost): Promise<TaskConnectResult> {
+  const dryRun = request.dryRun === true;
+  const { taskId } = request;
+  const meta = project.tasks.tryRead(taskId);
+  const row = project.runtime.get(taskId);
+  if (meta === undefined || row === undefined) return refused(dryRun, { code: "unknown-task", message: `unknown task '${taskId}'` });
+  const target = sourceStateId(request.target);
+  const running = host.running?.(taskId) ?? (row.status === "running" || row.status === "stopping");
+  const lastSeq = (): number => project.events.list(taskId).at(-1)?.seq ?? 0;
+  const pinNow = row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash, ...(row.documentId !== undefined ? { documentId: row.documentId } : {}) } : undefined;
+  const moveUndo = (): ConnectUndo => ({ kind: "move", taskId, after: lastSeq(), ...(pinNow !== undefined ? { pin: pinNow } : {}), ...(row.status === "completed" ? { wasCompleted: true } : {}) });
+
+  // ---- rule 1: the target is in the task's workflow ----------------------------------------------
+  const own = sourceStateId(meta.workflow);
+  if (target === own && (request.workflow === undefined || sourceStateId(request.workflow) === own)) {
+    return refused(dryRun, { code: "already-there", message: `'${meta.title}' already runs '${own}'` });
+  }
+  let bundle: WorkflowBundle | undefined;
+  if (row.snapshotHash !== undefined || row.documentId !== undefined) {
+    try {
+      bundle = loadPinnedBundle(project, row);
+    } catch (e) {
+      return refused(dryRun, { code: "unloadable", message: `the workflow '${meta.title}' runs does not load: ${(e as Error).message}` });
+    }
+  }
+  if (bundle !== undefined && (request.workflow === undefined || sourceStateId(request.workflow) === own)) {
+    const paths = pathsTo(bundle, target);
+    if (paths.length > 0) {
+      const load = buildTaskLoad(project, taskId, bundle.states);
+      if (load.loaded === undefined) {
+        return refused(dryRun, { code: load.blocked !== undefined ? "unloadable" : "never-run", message: load.blocked !== undefined ? `'${meta.title}' cannot be moved: ${load.blocked}` : `'${meta.title}' has never run, so it stands nowhere to be moved from — start it instead` });
+      }
+      // The path that shares most with where the task stands; then the shortest.
+      const standing: string[] = [];
+      for (let node: LoadedInstance | undefined = lastChildOf(load.loaded); node?.childKey !== undefined; node = lastChildOf(node)) standing.push(node.childKey);
+      const shared = (keys: readonly string[]): number => {
+        let n = 0;
+        while (n < keys.length && n < standing.length && keys[n] === standing[n]) n += 1;
+        return n;
+      };
+      const keys = [...paths].sort((a, b) => shared(b) - shared(a) || a.length - b.length)[0]!;
+      const within = resolveWithin({ bundle, loaded: load.loaded, keys, skip: skipOf(request), running, offered: host.offered?.(taskId) ?? [] });
+      const states = statesAlong(bundle, keys);
+      const plan: ConnectPlan = {
+        resolution: "move",
+        workflow: own,
+        ...(states[0]?.label !== undefined ? { workflowLabel: states[0].label } : {}),
+        standsAt: { path: [...keys], stateId: target, ...(states.at(-1)?.label !== undefined ? { label: states.at(-1)!.label! } : {}) },
+        move: within.move,
+        inputs: within.inputs,
+        asks: within.asks,
+      };
+      if (within.move.direction === "forward" && !skipOf(request)) return refused(dryRun, fastForwardRefusal(within.move), plan);
+      if (within.missing.length > 0 && within.move.answersRule !== true) {
+        return refused(dryRun, { code: "inputs-missing", message: `moving '${meta.title}' to '${keys.join("/")}' leaves required inputs unbound: ${missingSentence(within.missing)}`, missing: within.missing }, plan);
+      }
+      if (dryRun) return { ok: true, dryRun, plan, taskId };
+      const undo = moveUndo();
+      const moved = await host.move(moveRequest(request, taskId, within.move));
+      return { ok: true, dryRun, plan, taskId, moved: moved.status, undo };
+    }
+  }
+
+  // ---- rule 2: a real workflow holds both ---------------------------------------------------------
+  const inDocument = row.documentId !== undefined;
+  if (!inDocument && meta.origin === undefined) {
+    const browser = host.browser?.() ?? browseWorkflows(project);
+    const candidates = candidatesFor(project, browser, own, target, request.workflow);
+    if (candidates.length > 1) {
+      return refused(dryRun, {
+        code: "ambiguous-workflow",
+        message: `${candidates.map((c) => `'${c.workflow}'`).join(" and ")} each hold both '${own}' and '${target}' — say which workflow '${meta.title}' joins`,
+        candidates,
+      });
+    }
+    const candidate = candidates[0];
+    if (candidate !== undefined) return adoptInto(project, request, host, { title: meta.title, own, target, candidate });
+  }
+
+  // ---- rule 3: the workflow is modified -----------------------------------------------------------
+  if (row.snapshotHash === undefined) {
+    return refused(dryRun, { code: "never-run", message: `'${meta.title}' has never run, so it stands nowhere to be moved from — start it instead` });
+  }
+  if (loadsNothing(project, target)) return refused(dryRun, { code: "unknown-target", message: `no state '${target}' was found on the workflow path` });
+  const finishedWell = row.status === "completed" && (row.outcome === undefined || row.outcome === "success");
+  const modification: NonNullable<ConnectPlan["modification"]> = inDocument ? "augmented" : finishedWell ? "new" : "cloned";
+  if (running) {
+    return refused(dryRun, {
+      code: "running",
+      message: `'${meta.title}' is running, and no workflow relates '${own}' to '${target}': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it`,
+    });
+  }
+  const conversation = host.conversation ?? CONNECT_CONVERSATION;
+  const generate = (dry: boolean): Promise<GenerateVersionResult> =>
+    generateDocumentVersion(project, { taskId, target, conversation, ...(host.functions !== undefined ? { functions: host.functions } : {}), ...(dry ? { dryRun: true } : {}) });
+  let preview: GenerateVersionResult;
+  try {
+    preview = await generate(true);
+  } catch (e) {
+    return refused(dryRun, { code: "generate", message: (e as Error).message });
+  }
+  const generated = preview.generated;
+  const planOf = (workflow: string): ConnectPlan => ({
+    resolution: "modify",
+    modification,
+    workflow,
+    standsAt: { path: [generated.targetKey], stateId: target },
+    move: { direction: "aside", to: generated.targetKey, path: [], passes: [] },
+    mount: generated.mount,
+    inputs: [
+      ...generated.wires.map((wire): ConnectInput => ({ name: wire.input, via: "wire", from: `${wire.from.child}.${wire.from.output}`, ...(wire.each !== undefined ? { each: wire.each } : {}) })),
+      ...generated.literals.map((literal): ConnectInput => ({ name: literal.input, via: "literal" })),
+    ],
+    asks: generated.unsettled.filter((u) => !u.required).map((u): ConnectMissingInput => unsettledAsMissing(target, u)),
+  });
+  const wouldStandIn = modification === "new" ? `${DYNAMIC_ROOT_PREFIX}…` : meta.workflow;
+  if (!generated.ok) {
+    const missing = generated.unsettled.filter((u) => u.required).map((u) => unsettledAsMissing(target, u));
+    return refused(dryRun, { code: "inputs-missing", message: `a move of '${meta.title}' to '${target}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, planOf(wouldStandIn));
+  }
+  const opening = modification === "new" ? conversationInputs(project, conversation, moveSentence(meta.title, target), host.check) : undefined;
+  if (opening !== undefined && opening.missing.length > 0) {
+    return refused(dryRun, { code: "inputs-missing", message: `the conversation '${conversation}' cannot be opened by a move: ${missingSentence(opening.missing)}`, missing: opening.missing }, planOf(wouldStandIn));
+  }
+  if (dryRun) return { ok: true, dryRun, plan: { ...planOf(wouldStandIn), ...(modification === "new" ? { adoptedAs: Object.keys(generated.additions.children)[0] ?? generated.targetKey } : {}) }, ...(modification !== "new" ? { taskId } : {}) };
+
+  // The real thing. Anything past this point has written: the document first, then its task, then
+  // the adoption — each usable on its own if the next refuses, and each said in the refusal.
+  let made: GenerateVersionResult;
+  try {
+    made = await generate(false);
+  } catch (e) {
+    return refused(dryRun, { code: "generate", message: (e as Error).message });
+  }
+  if (made.resolution === "unsettled") return refused(dryRun, { code: "generate", message: `the workflow for '${target}' could not be generated` });
+  const targetKey = made.generated.targetKey;
+
+  if (modification !== "new") {
+    const plan = planOf(meta.workflow);
+    const undo = moveUndo();
+    const moved = await host.move(moveRequest(request, taskId, plan.move!));
+    log.info(`connected ${taskId} to '${target}' by ${made.resolution === "cloned" ? "cloning its workflow" : "augmenting its document"} (${made.document?.id ?? "?"})`);
+    return { ok: true, dryRun, plan, taskId, moved: moved.status, undo };
+  }
+
+  // NEW: the document's task, with the source adopted into it as the first child.
+  const document = made.document!;
+  const sourceKey = Object.entries(made.generated.additions.children).find(([, mount]) => sourceStateId(String(mount["state"])) === own)?.[0];
+  const parent = createTask(project, {
+    title: meta.title,
+    workflow: document.rootId,
+    documentId: document.id,
+    ...(Object.keys(opening!.inputs).length > 0 ? { inputs: opening!.inputs, inputProvenance: opening!.provenance } : {}),
+  });
+  const adopted = await host.adopt({
+    taskId,
+    parentTaskId: parent.id,
+    ...(sourceKey !== undefined ? { childKey: sourceKey } : {}),
+    ...(request.project !== undefined ? { project: request.project } : {}),
+    start: false,
+  });
+  if (!adopted.ok) {
+    return refused(dryRun, { code: "adopt", message: `the workflow was made (${document.id}) and '${parent.title}' (${parent.id}) stands in it, but '${meta.title}' could not be adopted into it: ${adopted.refusal.message}`, adopt: adopted.refusal });
+  }
+  const plan: ConnectPlan = { ...planOf(document.rootId), standsAt: { path: [targetKey], stateId: target }, adopt: adopted.plan, ...(sourceKey !== undefined ? { adoptedAs: sourceKey } : {}), ...(adopted.plan.branch !== undefined ? { branch: adopted.plan.branch } : {}) };
+  const undo: ConnectUndo = { kind: "adopt", parentTaskId: parent.id, adoptedTaskId: taskId, made: true };
+  const moved = await host.move(moveRequest(request, parent.id, plan.move!));
+  log.info(`connected ${taskId} to '${target}' through a new workflow ${document.id}: adopted into ${parent.id} as '${sourceKey ?? "?"}'`);
+  return { ok: true, dryRun, plan, taskId: parent.id, moved: moved.status, undo };
+}
+
+function unsettledAsMissing(target: string, u: { input: string; schema: JsonValue; description?: string; reason: string; candidates?: Array<{ child: string; output: string }> }): ConnectMissingInput {
+  const reason =
+    u.reason === "ambiguous"
+      ? `${(u.candidates ?? []).map((c) => `${c.child}.${c.output}`).join(" and ")} fit it equally, and nothing but their names tells them apart`
+      : u.reason === "second-list"
+        ? "it takes one element of a second list, and one mount splits on one"
+        : "nothing the task produced fits it";
+  return { state: target, name: u.input, schema: u.schema, ...(u.description !== undefined ? { description: u.description } : {}), reason };
+}
+
+function loadsNothing(project: Project, target: string): boolean {
+  const doc = workflowLoadOptions(project.paths, { path: project.config.workflows.path }).loadState?.(target);
+  if (doc !== undefined && doc !== null) return false;
+  return bundleFor(project, target) === undefined;
+}
+
+/** Rule 2, composed: adopt into a new task of the candidate workflow, then rule 1 for that task. */
+async function adoptInto(
+  project: Project,
+  request: TaskConnectRequest,
+  host: ConnectHost,
+  at: { title: string; own: string; target: string; candidate: ConnectCandidate },
+): Promise<TaskConnectResult> {
+  const dryRun = request.dryRun === true;
+  const { candidate, target } = at;
+  const pass = { ...(request.project !== undefined ? { project: request.project } : {}) };
+  const dry = await host.adopt({ taskId: request.taskId, workflow: candidate.workflow, childKey: candidate.childKey, dryRun: true, ...pass });
+  if (!dry.ok) return refused(dryRun, { code: "adopt", message: dry.refusal.message, adopt: dry.refusal });
+  const adoptPlan: AdoptPlan = dry.plan;
+  const bundle = bundleFor(project, candidate.workflow);
+  if (bundle === undefined) return refused(dryRun, { code: "unloadable", message: `workflow '${candidate.workflow}' does not load` });
+  const root = bundle.states[bundle.rootId]!;
+
+  // Rule 1, for the task the adoption makes: it will stand past the adopted child, with that child
+  // — and nothing else — behind it. The target that comes next anyway needs no move at all.
+  const adoptedKeys = new Set(adoptPlan.adopted.filter((child) => !child.pending).map((child) => child.childKey));
+  const stand: LoadedInstance = {
+    id: "",
+    stateId: bundle.rootId,
+    inputs: {},
+    live: true,
+    children: adoptPlan.adopted.map((child) => ({ id: child.taskId, stateId: child.stateId, childKey: child.childKey, inputs: {}, live: child.pending, ...(child.pending ? {} : { outcome: "success" as const }) })),
+  };
+  const within = candidate.targetKey !== undefined ? resolveWithin({ bundle, loaded: stand, keys: [candidate.targetKey], skip: skipOf(request), running: false, alsoAvailable: adoptedKeys }) : undefined;
+  const needsMove = within !== undefined && within.move.direction !== "next";
+  const standsKey = candidate.targetKey ?? adoptPlan.next;
+  const missing: ConnectMissingInput[] = [...adoptPlan.asks.filter((ask) => ask.required).map((ask) => asMissing(candidate.workflow, ask)), ...(within?.missing ?? [])];
+  // Entering what comes next is the workflow's own walk; its inputs are checked the same way, so a
+  // drop never makes a task that blocks on its first state.
+  const nextUp = within === undefined && adoptPlan.next !== undefined ? unboundInputs(bundle, root, adoptPlan.next, adoptedKeys) : undefined;
+  const plan: ConnectPlan = {
+    resolution: "adopt",
+    workflow: candidate.workflow,
+    ...(candidate.label !== undefined ? { workflowLabel: candidate.label } : {}),
+    standsAt: {
+      path: standsKey !== undefined ? [standsKey] : [],
+      stateId: standsKey !== undefined ? sourceStateId(root.children?.[standsKey]?.state ?? target) : candidate.workflow,
+      ...(standsKey !== undefined && bundle.states[root.children?.[standsKey]?.state ?? ""]?.label !== undefined ? { label: bundle.states[root.children![standsKey]!.state]!.label! } : {}),
+    },
+    ...(needsMove ? { move: within!.move } : {}),
+    adopt: adoptPlan,
+    adoptedAs: candidate.childKey,
+    inputs: within?.inputs ?? nextUp?.inputs ?? [],
+    asks: [...adoptPlan.asks.filter((ask) => !ask.required).map((ask) => asMissing(candidate.workflow, ask)), ...(within?.asks ?? nextUp?.asks ?? [])],
+    ...(adoptPlan.branch !== undefined ? { branch: adoptPlan.branch } : {}),
+  };
+  if (needsMove && within!.move.direction === "forward" && !skipOf(request)) return refused(dryRun, fastForwardRefusal(within!.move), plan);
+  if (missing.length > 0) {
+    return refused(dryRun, { code: "inputs-missing", message: `adopting '${at.title}' into '${candidate.workflow}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, plan);
+  }
+  if (dryRun) return { ok: true, dryRun, plan };
+
+  const scripted = { ...(request.interactions !== undefined ? { interactions: request.interactions } : {}), ...(request.fake !== undefined ? { fake: request.fake } : {}) };
+  const adopted = await host.adopt({
+    taskId: request.taskId,
+    workflow: candidate.workflow,
+    childKey: candidate.childKey,
+    // A move is taken by an engine that loads with it waiting, so the parent is not started twice.
+    start: needsMove ? false : request.start !== false,
+    ...scripted,
+    ...pass,
+  });
+  if (!adopted.ok) return refused(dryRun, { code: "adopt", message: adopted.refusal.message, adopt: adopted.refusal }, plan);
+  const parentId = adopted.taskId!;
+  const undo: ConnectUndo = { kind: "adopt", parentTaskId: parentId, adoptedTaskId: request.taskId, made: true };
+  if (!needsMove) return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, undo };
+  const moved = await host.move(moveRequest(request, parentId, within!.move));
+  return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, moved: moved.status, undo };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// the way down
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Take a move's `path` — the child keys beneath its target — as the run enters each composite.
+ *
+ * A directed transition names an instance by id, and an instance that has not entered has none. So
+ * the way down is handed over one level at a time: when the journal says the composite named by the
+ * previous step has entered, the next step is directed at it, by the id it was just given. The
+ * engine registers an instance before it journals its entry and takes a waiting move before it
+ * walks the spine, so the composite goes straight to the named child.
+ *
+ * Returns the observer to feed every journaled event, in order.
+ */
+export function descentFollower(
+  port: Pick<DirectedTransitions, "direct">,
+  first: { parentInstanceId: string | undefined; key: string },
+  path: readonly string[],
+  move: Pick<DirectedTransition, "by" | "skip">,
+): (event: EngineEvent) => void {
+  let waiting: { parentInstanceId: string | undefined; key: string } | undefined = path.length > 0 ? first : undefined;
+  let rest = [...path];
+  return (event) => {
+    if (waiting === undefined || event.type !== "instance.entered" || event.childKey !== waiting.key) return;
+    if (waiting.parentInstanceId !== undefined && event.parentInstanceId !== waiting.parentInstanceId) return;
+    const to = rest[0]!;
+    rest = rest.slice(1);
+    waiting = rest.length > 0 ? { parentInstanceId: event.instanceId, key: to } : undefined;
+    const outcome = port.direct({ instanceId: event.instanceId, to, by: move.by, ...(move.skip === true ? { skip: true } : {}) });
+    if (outcome.status === "refused") log.warn(`the way down to '${to}' was refused: ${outcome.reason}`);
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// adopt, for a host with no service around it
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * ADOPT as `task:adopt` answers it, without starting anything — what the CLI lends `connectTask` as
+ * its `adopt`. The app's `AppService.adoptTask` is the same composition with a service's concerns
+ * around it (a live-run check, logging, starting the parent); the rules are all `adopt.ts`'s.
+ */
+export async function adoptTaskIn(project: Project, request: TaskAdoptRequest, deps: { check?: ValueCheck } = {}): Promise<TaskAdoptResult> {
+  const dryRun = request.dryRun === true;
+  const into = request.parentTaskId !== undefined ? project.runtime.get(request.parentTaskId) : undefined;
+  const intoMeta = request.parentTaskId !== undefined ? project.tasks.tryRead(request.parentTaskId) : undefined;
+  if (request.parentTaskId !== undefined && (into === undefined || intoMeta === undefined)) {
+    return { ok: false, dryRun, refusal: { code: "unknown-task", message: `unknown task '${request.parentTaskId}'` } };
+  }
+  if (request.parentTaskId !== undefined && project.jobs.liveRunJob(request.parentTaskId, Date.now()) !== undefined) {
+    return { ok: false, dryRun, refusal: { code: "parent-state", message: `'${intoMeta!.title}' is running — a task adopts only while it is not` } };
+  }
+  const workflow = intoMeta?.workflow ?? request.workflow;
+  if (workflow === undefined) return { ok: false, dryRun, refusal: { code: "unknown-workflow", message: "an adoption names the workflow that adopts, or the task that does" } };
+  const pinnedAlready = into !== undefined && (into.snapshotHash !== undefined || into.documentId !== undefined);
+  const input = {
+    workflow,
+    ...(request.parentTaskId !== undefined ? { parentTaskId: request.parentTaskId } : {}),
+    targets: [{ taskId: request.taskId, ...(request.childKey !== undefined ? { childKey: request.childKey } : {}) }, ...(request.also ?? [])],
+    ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
+    ...(request.suppliedVia !== undefined ? { suppliedVia: request.suppliedVia } : {}),
+    ...(request.title !== undefined ? { title: request.title } : {}),
+  };
+  let pin: { bundle: WorkflowBundle; hash?: string };
+  try {
+    if (pinnedAlready) pin = { bundle: loadPinnedBundle(project, into!) };
+    else if (dryRun) {
+      const bundle = bundleFor(project, workflow);
+      if (bundle === undefined) return { ok: false, dryRun, refusal: { code: "unknown-workflow", message: `workflow '${workflow}' does not load` } };
+      pin = { bundle };
+    } else pin = await pinWorkflow(project, workflow);
+  } catch (e) {
+    if (e instanceof ApprovalRequired) throw e;
+    return { ok: false, dryRun, refusal: { code: "unknown-workflow", message: (e as Error).message } };
+  }
+  const outcome = planAdoption(project, pin.bundle, input, deps);
+  if (!outcome.ok) return { ok: false, dryRun, refusal: outcome.refusal };
+  if (dryRun) return { ok: true, dryRun, plan: outcome.planned.plan };
+  const missing = missingInputs(outcome.planned.plan);
+  if (missing !== undefined) return { ok: false, dryRun, refusal: missing };
+  const parent = writeAdoption(project, pin, outcome.planned);
+  return { ok: true, dryRun, plan: outcome.planned.plan, taskId: parent.id, started: false };
+}

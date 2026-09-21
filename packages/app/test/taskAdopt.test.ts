@@ -236,14 +236,18 @@ describe("adopting a finished task", () => {
     expect(ux!.inputProvenance).toEqual({ brief: { via: "bound" }, audience: { via: "bound" } });
   });
 
-  it("files the adopted task under its parent: off the roots board, in the child's column of the parent's", async () => {
+  it("files the adopted task under its parent: beneath its card on the roots board, in the child's column of the parent's", async () => {
     const product = await ran("feat/product", { issue: "x" });
     const result = await service.adoptTask({ taskId: product, workflow: "feat", inputs: { audience: "devs" }, fake: RULES as unknown as JsonValue });
     const parent = (result as { taskId: string }).taskId;
     await until(() => statusOf(parent) === "completed", "the parent to complete");
 
     const roots = service.boardRoots();
-    expect(roots.columns.flatMap((c) => c.cards.map((card) => card.taskId))).toEqual([parent]);
+    // In the PARENT's column — the workflow it now belongs to — and marked as filing beneath it
+    // (decision 0005 step 5: the board draws it indented under the parent's card).
+    const feat = roots.columns.find((c) => c.key === "feat")!;
+    expect(feat.cards.map((card) => [card.taskId, card.under])).toEqual(expect.arrayContaining([[parent, undefined], [product, parent]]));
+    expect(roots.columns.flatMap((c) => c.cards).filter((card) => card.taskId === product)).toHaveLength(1);
     const board = service.board({ level: "feat" });
     expect(board.columns.find((c) => c.key === "product")?.cards.map((card) => card.taskId)).toEqual([product]);
   });
