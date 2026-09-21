@@ -309,6 +309,8 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
         },
         other: "deny",
         subjects: { bash: "deny" },
+        // Beside `subjects`: the file they came from, which is what an approval names.
+        source: "$/toolsets/chat/read-only",
       },
     });
     // `chat_control` holds only the workflow tools, which are named and not served yet: the engine is
