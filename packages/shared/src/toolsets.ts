@@ -372,11 +372,63 @@ export function toolsetOfLegacy(
 
 // --- what consumers read -----------------------------------------------------
 
-/** The GRANT: the tools offered, in authored order. Command subjects and `script` are not tools. */
+/**
+ * The GRANT: the tools offered, in authored order. Command subjects and `script` are not tools.
+ *
+ * What is HANDED to somebody — the list lowering writes for the engine to resolve against the
+ * registry, and the set `viewOfToolset` calls held — so a tool that is named and not yet served
+ * (`ToolSpec.unserved`) is never in it. {@link heldTools} is the list a person reads.
+ */
 export function offeredTools(toolset: Toolset): string[] {
-  return Object.entries(toolset.entries)
-    .filter(([, entry]) => entry.kind === "tool" && entry.offered !== false)
-    .map(([name]) => name);
+  return heldTools(toolset).filter((name) => TOOL_SPEC_BY_NAME.get(name)?.unserved !== true);
+}
+
+/**
+ * Does the toolset HOLD this tool — is its line ticked?
+ *
+ * An un-offered entry is the legacy reader's "a mode for a tool the list did not grant", and is not
+ * held. The one exception is a tool nothing serves yet: lowering leaves it out of the `tools` list
+ * (see {@link offeredTools}) and keeps its mode, so a lowered block read back has it un-offered —
+ * and it was held. With no list it could ever be on, its entry is the whole of the statement.
+ */
+export function holdsTool(toolset: Toolset, name: string): boolean {
+  const entry = Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined;
+  if (entry === undefined || entry.kind !== "tool") return false;
+  return entry.offered !== false || TOOL_SPEC_BY_NAME.get(name)?.unserved === true;
+}
+
+/** Every tool the toolset holds, served or not, in authored order — what a person reads and counts. */
+export function heldTools(toolset: Toolset): string[] {
+  return Object.keys(toolset.entries).filter((name) => holdsTool(toolset, name));
+}
+
+/**
+ * The mode a line with none of its own reads as — the permission ledger's own last resort.
+ *
+ * Only the legacy list form can produce such a line (a tool granted with no mode anywhere); it is
+ * what the composer has always drawn for it, and what {@link declOfToolset} writes when the map is
+ * kept.
+ */
+export const MODE_WHEN_UNSET: PermissionMode = "ask";
+
+/**
+ * A {@link Toolset} as the MAP an author would write — the inverse of {@link parseToolset}.
+ *
+ * What the composer sends (`ChatSettings.toolset`) and what `+` keeps as a file. Only what is HELD is
+ * written, because in a map present means offered: a legacy un-offered mode has no spelling here and
+ * is dropped. An implementation is written only where it is the agent's own, since ours is the
+ * default. `other` is always written, so the map a person kept says what happens to everything it
+ * does not name instead of leaving it to whoever reads it next.
+ */
+export function declOfToolset(toolset: Toolset): ToolsetDecl {
+  const out: ToolsetDecl = {};
+  for (const [subject, entry] of Object.entries(toolset.entries)) {
+    if (entry.kind === "tool" && !holdsTool(toolset, subject)) continue;
+    const mode = entry.mode ?? MODE_WHEN_UNSET;
+    out[subject] = entry.kind === "tool" && entry.implementation === "native" ? { mode, implementation: "native" } : mode;
+  }
+  out[OTHER_SUBJECT] = toolset.other ?? MODE_WHEN_UNSET;
+  return out;
 }
 
 /** Every tool entry's mode, offered or not — what shadows the project baseline, per tool. */
@@ -627,7 +679,8 @@ export function declaresTools(settings: ToolSettings): boolean {
 
 /**
  * A message's settings as the one map — from `toolset` when it is there, else folded from the list,
- * the `permissions` block and the `implementations` map the composer still writes.
+ * the `permissions` block and the `implementations` map a state's own declaration arrives as (the
+ * composer writes `toolset` — decision 0007 step 5).
  *
  * A `toolset` that does not parse keeps what could be read; the issues are the caller's to show.
  */

@@ -468,6 +468,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>
     service.reviewSyncChangeset(request)) as Handler,
   "file:write": ((request: Parameters<typeof service.writeFile>[0]) => service.writeFile(request)) as Handler,
+  "toolset:save": ((request: Parameters<typeof service.saveToolset>[0]) => service.saveToolset(request)) as Handler,
   "file:create": ((request: Parameters<typeof service.createFile>[0]) => service.createFile(request)) as Handler,
   "file:rename": ((request: Parameters<typeof service.renameFile>[0]) => service.renameFile(request)) as Handler,
   "file:delete": ((request: Parameters<typeof service.deleteFile>[0]) => service.deleteFile(request)) as Handler,

@@ -45,6 +45,13 @@ from source (tsx, vitest).
 | `chat/agent` | what the Chat view starts: a conversation that works in the project, every tool call asking first |
 | `chat/assistant` | a conversation with a model and no tools; kept so conversations started as one keep running |
 | `debug/hello_world`, `/say`, `/check` | the Debug view's self-test. Its scripted replies are in `packages/app/src/renderer/debugWorkflow.ts` and match these prompts by text |
+| `toolsets/chat/{ask-first, read-only, auto, full}` | the composer's four permission presets, written down: every tool a conversation can be handed, a mode on each, and `other`. `packages/shared/test/permissionPresets.test.ts` holds them to the maps the presets wrote |
+| `toolsets/chat_control/{ask-first, read-only, auto, full}` | its own versions of the same names: only the task and workflow tools (decision 0005 §3), and `other: "deny"`. Those tools are named in `toolVocabulary.ts` and marked `unserved` until they are built |
+
+A toolset file is a map from a subject to a mode and nothing else, so what a
+shipped one is called on the composer's Permissions card, and the sentence under
+it, live in `../src/toolsetBuckets.ts`. When a tool is added to the standard
+list, add it to the four `chat` files, or it answers to their `other`.
 
 Nothing installs these anywhere. Earlier builds wrote them into `~/.jaira`; such
 a copy still wins, and the app offers to delete one whose value is a version it

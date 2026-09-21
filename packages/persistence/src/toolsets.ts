@@ -33,7 +33,19 @@ import {
   type LoadBundleOptions,
   type WorkflowBundle,
 } from "@declarative-ai/hw";
-import { lowerStateToolsets, type StateToolsetIssue, type ToolsetReader } from "@jaira/shared";
+import {
+  lowerStateToolsets,
+  parseToolset,
+  resolveToolsetDecl,
+  type JairaPaths,
+  type StateToolsetIssue,
+  type ToolsetChoice,
+  type ToolsetDecl,
+  type ToolsetIssue,
+  type ToolsetReader,
+  type WorkflowLayer,
+} from "@jaira/shared";
+import { workflowLoadOptions } from "./workflowRefs";
 
 /** The folder toolsets live in, under every layer root. */
 export const TOOLSETS_DIR_NAME = "toolsets";
@@ -131,6 +143,32 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
         }
       : {}),
   });
+}
+
+/**
+ * Every toolset a project can name, READ: which layer supplied it, and its map with references
+ * followed — what the composer's Permissions card is drawn from (decision 0007 §5).
+ *
+ * Read through the same reader a state's `tools` reference goes through, so a toolset file that
+ * starts from another (`{ "$ref": "$/toolsets/chat/read-only", "bash": "ask" }`) is offered as the
+ * map it resolves to — the map picking it would write. A file that cannot be read, or whose
+ * references do not resolve, is LEFT OUT rather than offered as half of itself: a row that writes
+ * something other than what its file says is worse than a missing row, and the linter is where a
+ * broken toolset is reported.
+ */
+export function readToolsets(paths: JairaPaths): ToolsetChoice[] {
+  const read = toolsetReader(workflowLoadOptions(paths, { tolerant: true }));
+  const layerOf = (root: string): WorkflowLayer =>
+    root === paths.builtIn.dir ? "system" : root === paths.base.baseDir ? "base" : "project";
+  const out: ToolsetChoice[] = [];
+  for (const file of listToolsets(paths.roots)) {
+    const issues: ToolsetIssue[] = [];
+    const resolved = resolveToolsetDecl(file.reference, read, "", issues);
+    if (resolved === undefined || issues.some((issue) => issue.severity === "error")) continue;
+    if (parseToolset(resolved).issues.some((issue) => issue.severity === "error")) continue;
+    out.push({ id: file.id, bucket: file.bucket, name: file.name, layer: layerOf(file.root), decl: resolved as ToolsetDecl });
+  }
+  return out;
 }
 
 /** One toolset file, as a layer root holds it. */

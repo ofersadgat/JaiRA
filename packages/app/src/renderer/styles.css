@@ -13436,3 +13436,176 @@ fieldset.reading {
   font-size: var(--size-data);
   overflow-wrap: anywhere;
 }
+
+/* ============================================================================
+   Toolsets in the composer's two cards (decision 0007 §5; composer.tsx)
+
+   Both cards keep their look — every rule above is untouched. These are only what the cards GAINED:
+   the bucket picker and the `+` in the Permissions head, and, under Execution, the commands a
+   toolset names grouped under their program, `script`, and the line that adds one.
+
+   Moved here from the decision's mockup sheet (docs/engineering/decisions/0005-assets/proposed.css),
+   which the approved mockup was drawn with.
+   ============================================================================ */
+
+/* The head's origin becomes a picker: it opens the card's own `cx-submenu`. */
+.cx-origin-wrap {
+  position: relative;
+  flex: none;
+}
+.cx-origin-pick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: -1px -5px;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.cx-origin-pick:hover,
+.cx-origin-pick[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+/* Under the head it hangs from, opening rightward: the head sits at the card's left edge, and the
+   mode pickers' right-aligned menu would open off the card. */
+.cx-origin-wrap .cx-submenu {
+  left: 0;
+  right: auto;
+  min-width: 320px;
+}
+/* The Permissions head names a BUCKET: its glyph and its name, in the title's own weight. */
+.cx-origin-pick.cx-bucket {
+  align-items: center;
+  color: var(--text);
+  font-weight: 600;
+}
+.cx-origin-pick.cx-bucket .cx-chip-icon svg {
+  width: 12px;
+  height: 12px;
+}
+/* The layer that defines a bucket, beside its name. */
+.cx-src {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font: 500 calc(var(--size-app) * 9.5 / 12.5) / 1.5 var(--font-app);
+  color: var(--tok-hint);
+}
+
+/* `+` — keep the map as a new toolset. Dim while it already is one. */
+.cx-set-add {
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel-2);
+  box-shadow: none;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  line-height: 1.5;
+  color: var(--dim);
+  cursor: pointer;
+}
+.cx-set-add.ready {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+.cx-set-add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cx-submenu.cx-set-new {
+  gap: 7px;
+  min-width: 270px;
+  padding: 9px;
+}
+.cx-set-new-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.cx-set-new-foot .cx-input {
+  width: auto;
+  flex: 1 1 auto;
+}
+/* A submenu's buttons are full-width rows; the two that END a small form are ordinary buttons. */
+.cx-submenu.cx-set-new .cx-set-new-foot button,
+.cx-set-line-form .cx-set-new-foot button {
+  flex: none;
+  width: auto;
+  justify-content: center;
+  padding: 4px 13px;
+}
+.cx-submenu.cx-set-new .cx-set-new-foot button.primary,
+.cx-set-line-form .cx-set-new-foot button.primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+/* What the form could not take, under the box it is about. */
+.cx-set-new .warn-text,
+.cx-set-line-form .warn-text {
+  margin: 0;
+  max-width: 300px;
+}
+
+/* Into the toolset: the last line of a group, and of Execution. */
+.cx-tool.set-add-line {
+  background: none;
+}
+.set-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 6px 4px 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.set-add:hover,
+.set-add[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.set-plus {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px dashed var(--tok-hint);
+  border-radius: 50%;
+  color: var(--tok-hint);
+  font: 600 13px/1 var(--font-app);
+}
+/* The line, opened: one box and its two buttons, in the row's own place. */
+.cx-set-line-form {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 4px 6px;
+}
+
+/* A program is a group under Execution; its subcommands hang one step further in. */
+.cx-cat-body > .cx-cat.cx-sub {
+  border: 0;
+  margin: 0;
+}
+.cx-cat.cx-sub > .cx-cat-head {
+  padding: 1px 0;
+}
+.cx-cat.cx-sub > .cx-cat-head .cx-cat-fold {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.cx-cat.cx-sub > .cx-cat-body {
+  margin-left: 18px;
+}
+/* A closed group inside an open section keeps its own chevron. */
+.cx-cat.open .cx-cat.cx-sub:not(.open) > .cx-cat-head .cx-cat-chev {
+  transform: none;
+}

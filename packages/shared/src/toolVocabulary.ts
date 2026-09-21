@@ -33,8 +33,8 @@
  * tool" resolved to the same answer, and one of those deserves to be `deny`.
  */
 
-/** The four groups a permission menu shows. Hard-coded: these are a taxonomy, not data. */
-export type ToolCategoryId = "files" | "execution" | "web" | "mcp";
+/** The groups a permission menu shows. Hard-coded: these are a taxonomy, not data. */
+export type ToolCategoryId = "files" | "execution" | "web" | "tasks" | "mcp";
 
 export interface ToolCategory {
   id: ToolCategoryId;
@@ -47,6 +47,8 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "files", label: "File permissions", hint: "reading, searching and changing files in the workspace" },
   { id: "execution", label: "Execution", hint: "running commands on this machine" },
   { id: "web", label: "Web", hint: "reaching the network" },
+  // The workflow tools of decision 0005 §3 — what `chat_control/*` holds, and nothing else does yet.
+  { id: "tasks", label: "Tasks & workflows", hint: "starting, moving and answering tasks" },
   { id: "mcp", label: "MCP", hint: "tools served by connected MCP servers" },
 ];
 
@@ -90,6 +92,20 @@ export interface ToolSpec {
    * the only thing being overridden here.
    */
   alwaysGranted?: boolean;
+  /**
+   * NAMED, and not yet SERVED: the tool is in the standard list so a toolset can hold it, the menu
+   * can draw it and the linter knows the name — and nothing registers an implementation for it yet.
+   *
+   * Everything that would HAND a tool to somebody skips one marked this way, in one place each:
+   * `offeredTools` (so lowering never writes it into the `tools` list the engine resolves against
+   * the registry, and `viewOfToolset` never sees it held), `planAgentTools` (never injected), and
+   * `JAIRA_TOOLS` in the runtime (never registered, wrapped, or asserted against an implementation).
+   * Its MODE still travels — a mode for a name nothing calls is inert — so the day the tool is
+   * implemented, deleting this mark is the whole change.
+   *
+   * The workflow tools of decision 0005 §3 carry it until they are built.
+   */
+  unserved?: true;
 }
 
 /**
@@ -174,10 +190,27 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "web",
     hint: "search the web",
   },
+  // The workflow tools (decision 0005 §3): the host's own operations, offered to a conversation.
+  // NAMED here so a toolset can hold them — `chat_control/*` holds nothing else — and NOT YET
+  // SERVED: see {@link ToolSpec.unserved}.
+  { name: "workflows", label: "workflows", category: "tasks", unserved: true, hint: "list workflows, and what a state takes and produces" },
+  { name: "start", label: "start", category: "tasks", unserved: true, hint: "start a task in a workflow, from this conversation" },
+  { name: "move", label: "move", category: "tasks", unserved: true, hint: "move a task to another state — forward, backward or across workflows" },
+  { name: "tasks", label: "tasks", category: "tasks", unserved: true, hint: "what was started here, where each stands and what it produced" },
+  { name: "answer", label: "answer", category: "tasks", unserved: true, hint: "settle a question a task is asking" },
+  { name: "hold", label: "hold", category: "tasks", unserved: true, hint: "hold a task where it stands" },
+  { name: "release", label: "release", category: "tasks", unserved: true, hint: "release a held task" },
+  { name: "stop", label: "stop", category: "tasks", unserved: true, hint: "stop a task" },
 ];
 
 /** By logical name — the lookup every consumer wants. */
 export const TOOL_SPEC_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map(TOOL_SPECS.map((spec) => [spec.name, spec]));
+
+/** Is this a standard tool something SERVES today? See {@link ToolSpec.unserved}. */
+export function isServedTool(name: string): boolean {
+  const spec = TOOL_SPEC_BY_NAME.get(name);
+  return spec !== undefined && spec.unserved !== true;
+}
 
 /**
  * The tools a declared list does not get to leave out — see {@link ToolSpec.alwaysGranted}.

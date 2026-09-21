@@ -281,9 +281,46 @@ preset that is a function.
    `smart` with its mode among the subjects. The approval's drawing, and
    writing a remembered line into a toolset file, are not built.
 4. **Buckets** in `$SYSTEM/toolsets/**` (needs 0006): the four `chat`
-   toolsets as data; `chat_control`.
+   toolsets as data; `chat_control`. *Built 2026-09-21*
+   ([tool-policy](../units/tool-policy.md)): eight files under
+   `packages/shared/builtin/toolsets/`. The `chat` four are held by a test
+   to the maps the function presets wrote, and `other` is what each preset
+   gave a name it had never heard of. The `chat_control` four hold the
+   eight workflow tools of [0005](0005-connect.md) §3 and `other: "deny"`.
+   Those tools are not built, so the standard list names them in a new
+   category, Tasks & workflows, with the mark `unserved`: a toolset may
+   hold one and the linter knows it, and lowering, the agent plan and the
+   runtime's registration each leave it out, so nothing is handed a tool
+   nobody serves. Deleting the mark is the whole change when one is built.
+   The function presets are gone; "which preset is this" is
+   `matchToolset`. Two things a file has no place for are kept beside the
+   code instead: the shipped toolsets' labels, hints and glyphs, and the
+   order the four names are listed in. **The tool names shadow command
+   subjects**: `start`, `move` and `stop` read as tools in a toolset, so
+   no entry can name a shell program of those names.
 5. **The composer**: Permissions rows from the bucket, the bucket picker,
-   `+`; Execution's command lines.
+   `+`; Execution's command lines. *Built 2026-09-21*
+   ([composer-setting-chip](../../ui/components/composer-setting-chip.md)):
+   both cards read one `Toolset` and every edit sends the whole map as
+   `ChatSettings.toolset`, so a turn a person touched is a map and is held
+   to it (§3), where an untouched one still inherits its state's list. The
+   plan carries every toolset on the search path, references followed, and
+   the bucket to open on. **That bucket is found by match, not read off
+   the state**: a loaded state holds what its toolset lowered to, and the
+   reference is gone, so the card opens on the first bucket holding a
+   toolset the inherited map exactly is, and on `chat` otherwise. `chat/agent`
+   still declares a list of three tools, which is no shipped toolset, so a
+   new conversation reads `custom` until it names
+   `$/toolsets/chat/ask-first`. A program's mode button is the entry for
+   the bare program and is not derived from its subcommands, which is
+   where the build departs from the mockup's `custom` on `git`. An
+   unticked tool has no line in a map, so the mode its row shows is kept
+   beside the map for as long as the composer lives and is never sent.
+   `+` writes through `toolset:save`, which refuses the built-in layer, a
+   name or bucket a reference could not carry, a map that does not parse,
+   and an id the layer already holds. The name, the place and a new
+   command are asked through the schema form, so the `+` form is taller
+   than the mockup's single line.
 6. **Settings → Toolsets.**
 7. **Migration**: `"profile": "read-only"` → a reference to a read-only
    toolset; `permissions.tools` / `default` → entries and `other`. A

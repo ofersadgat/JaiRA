@@ -7,15 +7,19 @@
  * panel reads from. The failures it exists to catch are the integration ones: a position computed off
  * the wrong row, a snapshot that cannot be found, a child that projects under the wrong parent.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, chatInstanceIdOf, isChatInstance } from "@jaira/runtime";
-import { READ_ONLY_PRESET_TOOLS, type InstanceNode, type PushMessage } from "@jaira/shared";
+import { READ_ONLY_PRESET_TOOLS, type ChatSettings, type InstanceNode, type PushMessage, type ToolsetDecl } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
+
+/** The toolset files that ship — the source of truth the built-in layer is copied from. */
+const SHIPPED_TOOLSETS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "shared", "builtin", "toolsets");
 
 let dir: string;
 let service: AppService;
@@ -110,20 +114,71 @@ describe("the settings a message would run under", () => {
     );
   });
 
-  it("names the permission posture after the per-tool MAP, which is what reaches the executor", async () => {
+  it("names the permission posture after the TOOLSET the map exactly is — a match, never a memory", async () => {
+    // The suite runs over an empty built-in layer, so the toolsets that ship are put where a project
+    // would override them: the match is the same whichever layer supplies the file.
+    for (const name of ["ask-first", "read-only", "auto", "full"]) {
+      for (const bucket of ["chat", "chat_control"]) {
+        const file = join(dir, ".jaira", "toolsets", bucket, `${name}.json`);
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, readFileSync(join(SHIPPED_TOOLSETS, bucket, `${name}.json`), "utf8"));
+      }
+    }
+    const shipped = (id: string): ToolsetDecl => JSON.parse(readFileSync(join(SHIPPED_TOOLSETS, `${id}.json`), "utf8")) as ToolsetDecl;
     const { taskId, instanceId } = await ranTask();
-    const posture = (permissions?: Parameters<typeof service.chatPlan>[0]["overrides"]) =>
-      planOf({ taskId, instanceId, ...(permissions !== undefined ? { overrides: permissions } : {}) }).effective.permissions;
+    const planned = (overrides?: ChatSettings) => planOf({ taskId, instanceId, ...(overrides !== undefined ? { overrides } : {}) });
+    const posture = (overrides?: ChatSettings): string => planned(overrides).effective.permissions;
 
-    // Nothing set: every tool falls to the ledger's own last resort.
-    expect(posture()).toBe("ask first");
-    // A preset's modes are reported by the preset's name. Built FROM the vocabulary rather than
-    // hand-listed: a preset covers every offered tool, so a map naming three of eight is not that
-    // preset — it is a map with five tools missing, and the chip should say `custom` for it.
+    // A toolset's map is reported by the toolset's name…
+    expect(posture({ toolset: shipped("chat/read-only") })).toBe("read-only");
+    expect(posture({ toolset: shipped("chat/full") })).toBe("full access");
+    // …and one line changed makes it nobody's, which is what `custom` says.
+    expect(posture({ toolset: { ...shipped("chat/read-only"), bash: "ask" } })).toBe("custom");
+    const { edit: _edit, ...unticked } = shipped("chat/read-only") as Record<string, ToolsetDecl[string]>;
+    expect(posture({ toolset: unticked })).toBe("custom");
+
+    // The same map in the three legacy fields is the same toolset: built FROM the vocabulary rather
+    // than hand-listed, since a toolset covers every tool a conversation holds.
     const readOnly = Object.fromEntries(JAIRA_TOOLS.map((t) => [t.name, READ_ONLY_PRESET_TOOLS.includes(t.name) ? "allow" : "deny"] as const));
-    expect(posture({ permissions: { tools: { ...readOnly } } })).toBe("read-only");
-    // …and one tool changed makes it nobody's preset, which is what `custom` says.
-    expect(posture({ permissions: { tools: { ...readOnly, bash: "ask" } } })).toBe("custom");
+    expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: { ...readOnly }, other: "deny" } })).toBe("read-only");
+    // A map naming three of the nine is not that toolset — it is a map with six tools unticked.
+    expect(posture({ tools: ["read_file", "bash", "write_file"], permissions: { tools: { ...readOnly }, other: "deny" } })).toBe("custom");
+
+    // The card opens on the bucket whose toolset the map is, and the label is that bucket's.
+    expect(planned({ toolset: shipped("chat/read-only") }).available.bucket).toBe("chat");
+    const control = planned({ toolset: shipped("chat_control/ask-first") });
+    expect(control.available.bucket).toBe("chat_control");
+    expect(control.effective.permissions).toBe("ask first");
+    expect(control.available.toolsets?.filter((t) => t.bucket === "chat_control").map((t) => [t.name, t.layer])).toEqual([
+      ["ask-first", "project"],
+      ["auto", "project"],
+      ["full", "project"],
+      ["read-only", "project"],
+    ]);
+    // The workflow tools are offered a line, though nothing serves them yet.
+    expect(control.available.tools.map((t) => t.name)).toEqual(expect.arrayContaining(["workflows", "start", "stop"]));
+  });
+
+  it("keeps a map as a NEW toolset — in a writable layer, under a name a reference can carry, never over another", async () => {
+    const { taskId, instanceId } = await ranTask();
+    const mine: ToolsetDecl = { read_file: "allow", bash: "ask", "git commit": "allow", other: "deny" };
+    const saved = service.saveToolset({ bucket: "chat", name: "ask-but-commit", layer: "project", toolset: mine });
+    expect(saved).toEqual({ id: "chat/ask-but-commit", bucket: "chat", name: "ask-but-commit", layer: "project", decl: mine });
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "toolsets", "chat", "ask-but-commit.json"), "utf8"))).toEqual(mine);
+    // The next plan lists it, and the map that was kept now reads its name.
+    const plan = planOf({ taskId, instanceId, overrides: { toolset: mine } });
+    expect(plan.available.toolsets?.map((t) => t.id)).toContain("chat/ask-but-commit");
+    expect(plan.effective.permissions).toBe("ask-but-commit");
+
+    // For all projects: the shared root.
+    service.saveToolset({ bucket: "feature/implementation", name: "mine", layer: "base", toolset: mine });
+    expect(existsSync(join(testHome(), "toolsets", "feature", "implementation", "mine.json"))).toBe(true);
+
+    expect(() => service.saveToolset({ bucket: "chat", name: "x", layer: "system", toolset: mine })).toThrow(/read-only/);
+    expect(() => service.saveToolset({ bucket: "chat", name: "ask-but-commit", layer: "project", toolset: mine })).toThrow(/already exists/);
+    expect(() => service.saveToolset({ bucket: "chat", name: "../../escape", layer: "project", toolset: mine })).toThrow(/a name is/);
+    expect(() => service.saveToolset({ bucket: "../up", name: "x", layer: "project", toolset: mine })).toThrow(/not a bucket/);
+    expect(() => service.saveToolset({ bucket: "chat", name: "bad", layer: "project", toolset: { bash: "sometimes" } as never })).toThrow(/not a toolset/);
   });
 
   it("ANSWERS null for a COMPOSITE rather than failing at being asked", async () => {

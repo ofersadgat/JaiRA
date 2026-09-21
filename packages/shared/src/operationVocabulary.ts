@@ -16,6 +16,7 @@
  * thing for the same reason, and the schema reference panel wants exactly these words.
  */
 import type { Scope } from "./scopes";
+import type { ToolsetChoice } from "./toolsetBuckets";
 import type { ToolsetDecl } from "./toolsets";
 
 /**
@@ -246,83 +247,16 @@ export interface ToolChoice {
 }
 
 /**
- * A named starting point for the per-tool modes — a PRESET, not a setting of its own.
+ * FROZEN — the tools the `read-only` preset let through, and so the tools `chat/read-only` allows.
  *
- * This is the composer's whole permission model. A preset is spent the moment it is clicked: it
- * writes a mode for every tool and then has no further say, so what runs is the map, which is also
- * what the reader can see and edit.
- *
- * ⚠️ An EXPLICIT LIST for now. `read-only` used to ask each tool whether it was `readOnly`; that flag
- * is gone (decision 0007 §1), so the preset names the tools it lets through. The four become shipped
- * toolset FILES in a later step (0007 §2), and this table goes then.
- *
- * Two consequences worth stating, because they are why it is built this way:
- *
- *  - Nothing unresolvable can be sent. The composer never writes a profile NAME, so it cannot write
- *    one no registry knows — which is exactly how a permission control came to deny every tool call
- *    while displaying the word the reader had picked.
- *  - Editing one tool does not silently discard the rest. The map keeps every other mode and the
- *    preset simply stops matching, which is what {@link presetOf} reports as `custom`.
- *
- * `plan` is not among them. Plan mode is an escalation — read-only until the agent presents a plan
- * and a human approves the exit — and the exit gate is registered by the engine for the states IT
- * runs, not by the chat path. Offered here it would be `read-only` under a name that promises a door
- * out that nobody has hung.
- */
-export interface PermissionPreset {
-  id: string;
-  label: string;
-  hint: string;
-  /** The mode this preset assigns a tool, by NAME. A name the preset has never heard of gets its strictest. */
-  modeFor: (tool: Pick<ToolChoice, "name">) => PermissionMode;
-}
-
-/**
- * The tools the `read-only` preset lets through — written down, where it used to be derived.
- *
- * Exactly the tools `ToolSpec.readOnly` was true for on the day it was removed, so the preset writes
- * the map it always wrote. A tool added to the vocabulary later is `deny` under this preset until it
- * is named here.
+ * The composer's four presets were functions of a tool (`modeFor`); they are toolset FILES now
+ * (`$SYSTEM/toolsets/chat/*.json`, decision 0007 §2), and "which preset is this" is `matchToolset` in
+ * `toolsetBuckets.ts`. This list is what is left of them: exactly the tools `ToolSpec.readOnly` was
+ * true for on the day that flag was removed, kept so a test can hold the shipped file to the map the
+ * preset always wrote, and the runtime's tools to the facts it was derived from. Nothing reads it to
+ * decide anything.
  */
 export const READ_ONLY_PRESET_TOOLS: readonly string[] = ["read_file", "glob", "grep", "show_artifact", "web_fetch", "web_search"];
-
-export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
-  { id: "ask", label: "ask first", hint: "stop and ask before every call", modeFor: () => "ask" },
-  {
-    id: "read-only",
-    label: "read-only",
-    hint: "reading goes ahead, anything that writes is refused",
-    modeFor: (tool) => (READ_ONLY_PRESET_TOOLS.includes(tool.name) ? "allow" : "deny"),
-  },
-  { id: "auto", label: "auto", hint: "each call decided by the approver", modeFor: () => "smart" },
-  { id: "full", label: "full access", hint: "anything, without asking", modeFor: () => "allow" },
-];
-
-/** The modes a preset assigns over a given tool set — what clicking it writes. */
-export function presetModes(preset: PermissionPreset, tools: readonly ToolChoice[]): Record<string, PermissionMode> {
-  const out: Record<string, PermissionMode> = {};
-  for (const tool of tools) out[tool.name] = preset.modeFor(tool);
-  return out;
-}
-
-/**
- * Which preset a per-tool map corresponds to, or `undefined` for one that is nobody's.
- *
- * The label on the chip, and the reason a preset can be a starting point rather than a mode: edit one
- * tool and this stops matching, so the control reads `custom` instead of going on naming a preset
- * whose modes are no longer in force.
- *
- * Only the tools OFFERED are compared. A map carrying a mode for something this project no longer
- * registers is stale rather than custom, and letting a dead key hold the label at `custom` forever
- * would make the presets un-selectable-looking for no reason the reader could see.
- */
-export function presetOf(
-  modes: Record<string, PermissionMode> | undefined,
-  tools: readonly ToolChoice[],
-): PermissionPreset | undefined {
-  if (modes === undefined || tools.length === 0) return undefined;
-  return PERMISSION_PRESETS.find((preset) => tools.every((tool) => modes[tool.name] === preset.modeFor(tool)));
-}
 
 /**
  * The knobs the composer turns, on top of what the state already inherits.
@@ -357,7 +291,9 @@ export interface ChatSettings {
    *
    * When present it is the whole answer and `tools`, `permissions.tools` / `default` / `other` and
    * `implementations` are not read; `permissions.scopes` still is, because where a tool may act is
-   * not part of a toolset. The composer still writes the three; `toolsetOfSettings` reads either.
+   * not part of a toolset. This is what the composer WRITES — picking a toolset row, ticking a tool
+   * or changing a mode sends the whole map — and the three fields above are what a state's lowered
+   * block still arrives as; `toolsetOfSettings` reads either.
    */
   toolset?: ToolsetDecl;
 }
@@ -427,5 +363,17 @@ export interface ChatPlanView {
    * Tools are what the registry holds for this project. Offering a name it cannot resolve would be a
    * checkbox that fails at send time.
    */
-  available: { routes: string[]; tools: ToolChoice[]; models: Array<{ id: string; input: string[]; output: string[] }> };
+  available: {
+    routes: string[];
+    tools: ToolChoice[];
+    models: Array<{ id: string; input: string[]; output: string[] }>;
+    /**
+     * Every toolset on this project's search path, references followed — what the Permissions card's
+     * rows and its bucket picker are drawn from (decision 0007 §5). Absent from a plan built before
+     * there were any, which a composer reads as "no buckets".
+     */
+    toolsets?: ToolsetChoice[];
+    /** The bucket the card opens on — see `bucketOf` in `toolsetBuckets.ts`. */
+    bucket?: string;
+  };
 }
