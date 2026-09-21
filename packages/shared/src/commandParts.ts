@@ -103,6 +103,30 @@ export interface CommandApproval {
   verdict: CommandPartVerdict;
   /** Why the line (or a payload inside it) could not be taken apart. */
   unparsed?: string;
+  /**
+   * Which toolset judged the line, when one did: the REFERENCE the asking state names it by
+   * (`$/toolsets/feature/implementation/writes-asking`), or {@link INLINE_TOOLSET} when the map is
+   * written on the state itself (or on a message) and there is no file behind it. This is what the
+   * approval's reason line names, and what "add to the toolset" writes into.
+   */
+  toolset?: string;
+}
+
+/** {@link CommandApproval.toolset} for a toolset with no file of its own. */
+export const INLINE_TOOLSET = "inline";
+
+/**
+ * The widths to send as `remember`, one per asking part: the chosen one where `chosen` names one of
+ * the part's own widths, else its narrowest. Parts that offer no width (a line nobody could read)
+ * contribute nothing. Deduplicated, in part order.
+ */
+export function chosenWidths(approval: CommandApproval, chosen: readonly string[] = []): string[] {
+  const out: string[] = [];
+  for (const part of askingParts(approval)) {
+    const width = part.widths.find((w) => chosen.includes(w)) ?? part.widths[0];
+    if (width !== undefined && !out.includes(width)) out.push(width);
+  }
+  return out;
 }
 
 /** The parts a person is actually being asked about. */

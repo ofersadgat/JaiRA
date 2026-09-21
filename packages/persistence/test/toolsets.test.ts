@@ -66,7 +66,9 @@ describe("a toolset, referenced from a state", () => {
       tools: ["read_file", "glob", "bash"],
       // The shell is offered and its LINES are judged: the gate is handed `smart` for it, and the
       // `deny` its author wrote is the answer for any command no entry names (decision 0007 §4).
-      permissions: { tools: { read_file: "allow", glob: "allow", bash: "smart" }, other: "deny", subjects: { bash: "deny", "git status": "allow" } },
+      // `source` rides beside `subjects`: the FILE those subjects came from, which is what an approval
+      // names and what "add to the toolset" writes into.
+      permissions: { tools: { read_file: "allow", glob: "allow", bash: "smart" }, other: "deny", subjects: { bash: "deny", "git status": "allow" }, source: "$/toolsets/chat/read-only" },
     });
   });
 
@@ -75,7 +77,9 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask", bash: "smart" } }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "bash", "write_file"],
-      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "ask" }, other: "deny", subjects: { bash: "smart" } },
+      // A `$ref` that says more is written on the STATE: a sibling is an entry no file holds, so a
+      // line added to the file could be shadowed here, and the source says `inline`.
+      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "ask" }, other: "deny", subjects: { bash: "smart" }, source: "inline" },
     });
   });
 
@@ -131,7 +135,7 @@ describe("legacy equivalence", () => {
     write(project.paths.workflowsDir, "oldsh.json", state({ tools: ["bash"], permissions: { tools: { bash: "ask" } } }));
     write(project.paths.workflowsDir, "newsh.json", state({ tools: { bash: "ask" } }));
     expect(environmentOf("oldsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "ask" } } });
-    expect(environmentOf("newsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "smart" }, subjects: { bash: "ask" } } });
+    expect(environmentOf("newsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "smart" }, subjects: { bash: "ask" }, source: "inline" } });
     // Through the door and around it: the wrapper changes nothing about a state in the old form.
     const files = readWorkflowFiles(project.paths.workflowsDir);
     const direct = loadBundle(files, "old", workflowLoadOptions(project.paths));

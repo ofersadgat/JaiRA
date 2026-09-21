@@ -145,6 +145,11 @@ export interface PendingApproval {
    * and the toolset entry that decided it. Absent for a tool that takes no command line.
    */
   parts?: CommandApproval;
+  /**
+   * The toolset that judged the line, and where a remembered answer could be WRITTEN — what the
+   * answer menu's "add to the toolset" offers. Absent when no toolset judged the call.
+   */
+  toolset?: ApprovalToolset;
   input: Record<string, JsonValue>;
   taskId?: string;
   /**
@@ -157,6 +162,30 @@ export interface PendingApproval {
    */
   project: ProjectRef;
   at: number;
+}
+
+/** One layer an answer can be written into — see {@link ApprovalToolset}. */
+export interface ApprovalToolsetTarget {
+  layer: WritableLayer;
+  /** The file, as a person reads it: `.jaira/toolsets/chat/ask-first.json`, `~/.jaira/toolsets/…`. */
+  file: string;
+  /**
+   * Set when this layer does not hold the toolset yet: the write CREATES an override here that keeps
+   * following the named lower layer's file (`$SYSTEM/toolsets/chat/ask-first`).
+   */
+  follows?: string;
+  /** A nearer layer holds its own copy that does not follow this one, so a line written here is not read in this project. */
+  shadowed?: true;
+}
+
+/** The toolset behind a command approval (decision 0007 §4). */
+export interface ApprovalToolset {
+  /** `<bucket>/<name>` — `feature/implementation/writes-asking`. Absent for a map with no file. */
+  id?: string;
+  /** The layers a line can be written into, nearest first. Empty ⇒ {@link unwritable} says why. */
+  targets: ApprovalToolsetTarget[];
+  /** Why nothing can be written, as a sentence the menu shows. */
+  unwritable?: string;
 }
 
 /** How long an approval answer applies (upstream's PermissionScope). */
@@ -174,6 +203,13 @@ export interface SubmitApprovalRequest {
    * file ("add to the toolset") is a separate act.
    */
   remember?: string[];
+  /**
+   * "Add to the toolset": write the asking parts, at the widths {@link remember} names, into the
+   * toolset file that asked, in this layer — then answer, remembering them for the run as well (a
+   * started task reads its pinned snapshot, so the file alone would not stop this run asking). A
+   * write that fails refuses the submit and leaves the request parked.
+   */
+  addTo?: WritableLayer;
 }
 
 /** One choice a {@link PendingQuestion}'s question offers. */

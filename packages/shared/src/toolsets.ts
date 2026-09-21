@@ -41,6 +41,7 @@
  * path honours it through `planAgentTools`; a run injects ours, which is the governed choice, until
  * the executors declare their natives (§3).
  */
+import { INLINE_TOOLSET } from "./commandParts";
 import { PERMISSION_MODES, type ChatSettings, type PermissionMode, type PermissionsDecl, type ToolImplementation } from "./operationVocabulary";
 import type { Scope } from "./scopes";
 import { TOOL_SPEC_BY_NAME } from "./toolVocabulary";
@@ -511,8 +512,12 @@ export function lowerStateToolsets(
       issues.push({ ...issue, stateId, path: issue.path === "" ? `${at}.tools` : `${at}.tools.${issue.path}` });
     }
     const lowered = lowerToolset(parsed.toolset, rest);
+    // Where the shell's subjects came from, beside them — see `PermissionsDecl.source`. A bare
+    // reference names a FILE; a map, and a `$ref` that says more, are written on the state.
+    const permissions =
+      lowered.permissions?.subjects !== undefined ? { ...lowered.permissions, source: typeof node === "string" ? node : INLINE_TOOLSET } : lowered.permissions;
     const { permissions: _permissions, ...others } = block;
-    return { ...others, tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) };
+    return { ...others, tools: lowered.tools, ...(permissions !== undefined ? { permissions } : {}) };
   };
 
   let out: Record<string, unknown> = def;

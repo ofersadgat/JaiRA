@@ -374,6 +374,8 @@ registerSchema({
       tool: str("tool", "the tool whose call was escalated"),
       command: str("command", "the command line, when the tool takes one"),
       reason: str("reason", "why policy escalated it"),
+      parts: { type: "object", title: "parts", description: "a shell line as the requests it is made of: `CommandApproval`, exactly as the policy produces it (decision 0007 §4)" },
+      toolset: { type: "object", title: "toolset", description: "the toolset that asked and the layers a line could be written into: `ApprovalToolset`" },
       input: { type: "object", title: "input", description: "the call's arguments, shown when there is no command line" },
     },
     required: ["tool"],
@@ -958,13 +960,59 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
     kind: "approval",
     title: "Approve a command",
     blurb:
-      "Not a workflow gate: policy escalated a tool call, so what is judged is a command and the answer carries a SCOPE — the reason you are not asked again on the next call (DESIGN §10.2).",
+      "Not a workflow gate: policy escalated a tool call, so what is judged is a command and the answer carries a REACH — the reason you are not asked again on the next call (DESIGN §10.2). A shell line is drawn as the requests it is made of (decision 0007 §4).",
     schemaId: "gallery-approval",
     variants: [
       {
         id: "basic",
-        title: "A command line",
-        note: "A tool that takes a command shows the command, and the policy's reason under it. The three allows widen left to right; deny sits apart so the destructive-looking choice is not the easy mis-click.",
+        title: "One line, two requests",
+        note: "Each part is tinted in its own hue and only the words that matched the toolset's line are underlined. The arrow beside Allow asks what the answer covers, then how far it reaches — once, this run, or a line written into the toolset.",
+        sample: {
+          tool: "Bash",
+          command: "rm foo.txt && git commit -m wip",
+          parts: {
+            line: "rm foo.txt && git commit -m wip",
+            dialect: "posix",
+            verdict: "asks",
+            toolset: "$/toolsets/feature/implementation/writes-asking",
+            parts: [
+              {
+                span: { start: 0, end: 10 },
+                matched: [{ start: 0, end: 2 }],
+                text: "rm foo.txt",
+                kind: "tool",
+                subject: "write_file",
+                paths: ["foo.txt"],
+                verdict: "allowed",
+                decidedBy: { source: "toolset", entry: "write_file", reason: "the toolset's 'write_file' is allow" },
+                widths: ["rm"],
+              },
+              {
+                span: { start: 14, end: 31 },
+                matched: [{ start: 14, end: 24 }],
+                text: "git commit -m wip",
+                kind: "command",
+                subject: "git commit",
+                verdict: "asks",
+                decidedBy: { source: "toolset", entry: "git commit", reason: "the toolset's 'git commit' is ask" },
+                widths: ["git commit", "git"],
+              },
+            ],
+          },
+          toolset: {
+            id: "feature/implementation/writes-asking",
+            targets: [
+              { layer: "project", file: ".jaira/toolsets/feature/implementation/writes-asking.json" },
+              { layer: "base", file: "~/.jaira/toolsets/feature/implementation/writes-asking.json" },
+            ],
+          },
+          input: { command: "rm foo.txt && git commit -m wip" },
+        },
+      },
+      {
+        id: "empty",
+        title: "A line nobody took apart",
+        note: "A request with no parts shows the command and the policy's reason, and the same two split buttons: once, or for this run.",
         sample: {
           tool: "Bash",
           command: "rm -rf build && npm run build",

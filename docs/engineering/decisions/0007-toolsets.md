@@ -263,8 +263,30 @@ preset that is a function.
    and the floor, and an approval request carries the parts and remembers
    them at a width for the run. What composes how is written there — an
    entry that names the program replaces a built-in ask; `bash` lowers as
-   `smart` with its mode among the subjects. The approval's drawing, and
-   writing a remembered line into a toolset file, are not built.
+   `smart` with its mode among the subjects. *UI half built 2026-09-21*
+   ([command-approval](../../ui/components/command-approval.md)): the
+   line in the colours of its parts, a row per part, the two split
+   buttons, and "add to the toolset". What was decided while building:
+   - **Which toolset asked** is carried, because nothing downstream of
+     lowering knew: lowering writes `permissions.source` beside
+     `subjects`, the reference the state named its toolset by, or
+     `inline`; the policy puts it on the approval. A `$ref` with siblings
+     counts as `inline`, since a sibling is an entry no file holds and
+     would shadow a line written to the file.
+   - **Past four parts** the four hues repeat in source order, and
+     pointing at a row lights its words on the line.
+   - **Several asking parts** get one width choice per distinct set of
+     widths (two `git commit`s are one choice; `script` is listed with
+     nothing to choose), and one reach for all of them.
+   - **The write**: a layer that holds the toolset gets the line added in
+     place, layout kept; a layer that does not gets an override that
+     keeps following the nearest lower layer's by its explicit root,
+     `{ "$ref": "$SYSTEM/toolsets/<bucket>/<name>", "<subject>": "<mode>" }`.
+     Only a bare `$/toolsets/<bucket>/<name>` reference says which file;
+     an inline map, an explicit-root or relative reference, and a YAML
+     file offer once and this run, and say why. The answer also remembers
+     the widths for the run, since a started task reads its pinned
+     snapshot.
 4. **Buckets** in `$SYSTEM/toolsets/**` (needs 0006): the four `chat`
    toolsets as data; `chat_control`.
 5. **The composer**: Permissions rows from the bucket, the bucket picker,
