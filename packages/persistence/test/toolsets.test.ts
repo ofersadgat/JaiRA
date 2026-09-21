@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { testHome } from "@jaira/testing";
+import { TOOLSET_MARKERS } from "@jaira/shared";
 import { loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
@@ -64,7 +65,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "glob", "bash"],
-      permissions: { tools: { read_file: "allow", glob: "allow", bash: "deny" }, other: "deny", subjects: { "git status": "allow" } },
+      permissions: { tools: { read_file: "allow", glob: "allow", bash: "deny", ...TOOLSET_MARKERS }, other: "deny", subjects: { "git status": "allow" } },
     });
   });
 
@@ -73,7 +74,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask", bash: "smart" } }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "bash", "write_file"],
-      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "ask" }, other: "deny" },
+      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "ask", ...TOOLSET_MARKERS }, other: "deny" },
     });
   });
 
@@ -86,7 +87,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/feature/implementation/build" }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "edit"],
-      permissions: { tools: { read_file: "allow", edit: "ask" }, other: "deny", implementations: { edit: "native" } },
+      permissions: { tools: { read_file: "allow", edit: "ask", ...TOOLSET_MARKERS }, other: "deny", implementations: { edit: "native" } },
     });
   });
 
@@ -96,8 +97,8 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
     write(project.paths.workflowsDir, "other.json", state({ tools: "$/toolsets/chat/shared-only" }));
-    expect(environmentOf("plan")).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow" }, other: "deny" } });
-    expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow" } } });
+    expect(environmentOf("plan")).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" } });
+    expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow", ...TOOLSET_MARKERS } } });
   });
 
   it("is inherited by a child exactly as a list is, and a child's own toolset replaces it", () => {
@@ -112,7 +113,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "wf/a.json", leaf);
     write(project.paths.workflowsDir, "wf/b.json", leaf);
     const bundle = load("wf");
-    expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow" }, other: "deny" } });
+    expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" } });
     expect(bundle.states["wf/b"]!.environment?.tools).toEqual(["bash"]);
   });
 });
@@ -122,7 +123,13 @@ describe("legacy equivalence", () => {
     const legacy = { tools: ["read_file", "bash"], permissions: { tools: { read_file: "allow", bash: "ask" }, other: "deny" } };
     write(project.paths.workflowsDir, "old.json", state(legacy));
     write(project.paths.workflowsDir, "new.json", state({ tools: { read_file: "allow", bash: "ask", other: "deny" } }));
-    expect(environmentOf("new")).toEqual(environmentOf("old"));
+    // The same list and the same modes — and the MAP leaves its marks, which is how a run tells it
+    // from the legacy reading: a map is the whole grant on a delegated agent, a list never was.
+    expect(environmentOf("new")).toEqual({
+      tools: legacy.tools,
+      permissions: { ...legacy.permissions, tools: { ...legacy.permissions.tools, ...TOOLSET_MARKERS } },
+    });
+    expect(environmentOf("old")).toEqual(legacy);
     // Through the door and around it: the wrapper changes nothing about a state in the old form.
     const files = readWorkflowFiles(project.paths.workflowsDir);
     const direct = loadBundle(files, "old", workflowLoadOptions(project.paths));
@@ -147,7 +154,7 @@ describe("the snapshot", () => {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "deny", other: "deny" });
     const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
-    expect(pinned.states["plan"]!.environment?.permissions).toEqual({ tools: { read_file: "allow" }, other: "deny" });
+    expect(pinned.states["plan"]!.environment?.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" });
     // …and the edit is a different workflow to the next task.
     expect(snapshotHash(load("plan"))).not.toBe(snap.hash);
   });

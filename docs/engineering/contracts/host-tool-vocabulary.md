@@ -18,7 +18,7 @@ The tools JaiRA registers on `registry.tools` for a model to call, and the `run_
 
 **Use when.** Giving a prompt or agent state governed access to files, search, a shell or the network by offering tools in `environment.tools`, as a toolset (a map from a tool name to `allow`, `ask`, `deny` or `smart`, or a reference such as `$/toolsets/chat/read-only`) or as the older list with modes in `permissions.tools`; narrowing where they act with scope tables; running one command as a state with `function: "run_command"`; reading a tool result in a prompt or a transcript.
 
-**Do not use when.** Expecting an agent to keep a built-in the toolset does not hold. On a claude transport a held tool is served by JaiRA's implementation and displaces the built-in, a `native` choice leaves the built-in running under an ask rule, and the built-in of every standard tool the state does not hold is removed: see [tool-policy](../units/tool-policy.md). Deciding where an artifact's bytes go: [artifact-destination-template](artifact-destination-template.md).
+**Do not use when.** Expecting an agent to keep a built-in the toolset does not hold. Under a toolset map on a claude transport a held tool is served by JaiRA's implementation and displaces the built-in, a `native` choice leaves the built-in running under an ask rule, and the built-in of every standard tool the map does not hold is removed. The older list is the legacy reading and keeps the built-ins it does not mention: see [tool-policy](../units/tool-policy.md). Deciding where an artifact's bytes go: [artifact-destination-template](artifact-destination-template.md).
 
 ## The shape is ten names, each with its arguments and the result it returns
 

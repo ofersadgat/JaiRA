@@ -26,7 +26,7 @@ The runtime half builds executors from a resolved node. `buildPromptTree` makes 
 It deliberately does not own:
 
 - Which provider routes are usable, which agents exist and whose models they serve, the probes, and refusing a run at start: [model-routing](model-routing.md).
-- Building the agent executors a node selects: [agent-executors](agent-executors.md) and `agentPromptRoutes` in [model-routing](model-routing.md). Each arrives already wrapped in `withAgentToolset` with that agent's own tool declaration, so the executor an `agent` node selects removes the built-ins a call's toolset does not hold, sets codex's sandbox from it, and refuses a denying toolset on a generic CLI: [tool-policy](tool-policy.md).
+- Building the agent executors a node selects: [agent-executors](agent-executors.md) and `agentPromptRoutes` in [model-routing](model-routing.md). Each arrives already wrapped in `withAgentToolset` with that agent's own tool declaration, so the executor an `agent` node selects passes a legacy list-form run through untouched and, under a toolset map, removes the built-ins the map does not hold, sets codex's sandbox from it, and refuses a denying toolset on a generic CLI: [tool-policy](tool-policy.md).
 - Parsing `executors` in `settings.json`: [project-config](project-config.md). Compiling the scope table into the floor: [tool-policy](tool-policy.md).
 - The repair loop, the fake and the session layers around the tree: [engine-wiring](engine-wiring.md).
 

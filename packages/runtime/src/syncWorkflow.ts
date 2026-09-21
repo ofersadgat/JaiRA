@@ -28,7 +28,7 @@
  * a model that revises it under the same authoring rules the proposal was written under.
  */
 import { createLogger } from "@declarative-ai/log";
-import { refusal } from "@jaira/shared";
+import { lowerToolset, parseToolset, refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/exec";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -308,6 +308,16 @@ The implementation as it stands:
 
 {{.inputs.implementation}}`;
 
+/**
+ * What a sync state may do — a toolset MAP (decision 0007): three readers, and nothing else.
+ *
+ * `edit`, `write_file` and `bash` are ABSENT rather than `deny`. In a map, present means offered —
+ * the engine would resolve a denied tool against a registry that deliberately does not hold it — and
+ * absent is the stronger statement anyway: a map is the whole grant, so a delegated agent loses the
+ * built-in of every tool not held, and `other: "deny"` answers for whatever turns up by another name.
+ */
+export const SYNC_TOOLSET = { read_file: "allow", glob: "allow", grep: "allow", other: "deny" } as const;
+
 export interface SyncWorkflowOptions {
   /** Model for every state. Absent ⇒ the project's `models.default`, as with the check. */
   model?: string;
@@ -342,25 +352,25 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   // wiring work whether a provider model or a delegated agent is answering.
   //
   // "Must not touch disk" is AUTHORED, not just narrated, and it is authored as the TOOLSET (decision
-  // 0007): the state holds `read_file`, `glob` and `grep` — JaiRA's own, each `allow`, so a read costs
-  // no human click — refuses the three tools that change anything, and answers `deny` for every name
-  // it has not listed. An agent gets that and nothing else: the provider path wraps the declared
-  // tools, claude loses the built-in of every tool not held (its own `Read`, `Glob` and `Grep` are
-  // displaced by ours, `Bash`, `Edit` and `Write` are removed, a sub-agent is refused by `other`),
-  // codex is left in its read-only sandbox because nothing here unlocks the writing one, and a
-  // transport that can hold the agent to none of it refuses the state.
+  // 0007): {@link SYNC_TOOLSET} holds `read_file`, `glob` and `grep` — JaiRA's own, each `allow`, so a
+  // read costs no human click — and answers `deny` for every other name. An agent gets that and
+  // nothing else: the provider path wraps the held tools, claude loses the built-in of every tool
+  // not held (its own `Read`, `Glob` and `Grep` are displaced by ours, `Bash`, `Edit` and `Write` are
+  // removed, a sub-agent is refused by `other`), codex is left in its read-only sandbox because
+  // nothing here unlocks the writing one, and a transport that can hold the agent to none of it
+  // refuses the state.
   //
   // This block used to say `profile: "read-only"` over `tools: ["read_file"]`, and leaned on the
   // agent's own `Glob` and `Grep` to find anything — ungoverned, since Claude Code auto-allows its
-  // readers without consulting the callback. `glob` and `grep` are held now because a tool the
-  // toolset does not hold is a tool the agent does not have.
+  // readers without consulting the callback. `glob` and `grep` are held now because a tool a MAP
+  // does not hold is a tool the agent does not have.
+  //
+  // A MAP, lowered here because these files go to `loadBundle` directly and the engine takes a list
+  // and a block. Lowered by the same function the loader uses, so the block carries the marks that
+  // tell a run it was a map — the legacy reading of a bare list would leave claude its own `Glob`.
   const environment = {
     kind: "prompt",
-    tools: ["read_file", "glob", "grep"],
-    permissions: {
-      tools: { read_file: "allow", glob: "allow", grep: "allow", edit: "deny", write_file: "deny", bash: "deny" },
-      other: "deny",
-    },
+    ...lowerToolset(parseToolset(SYNC_TOOLSET).toolset),
     ...(options.askNativeReads === true ? { providerOptions: claudeAskSettings(CLAUDE_NATIVE_READ_TOOLS) } : {}),
     ...(model !== undefined ? { model } : {}),
   };

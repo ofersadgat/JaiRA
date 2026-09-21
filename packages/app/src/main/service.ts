@@ -7047,10 +7047,9 @@ export class AppService {
    *
    * The registry is HALF the statement. It bounds what a provider-served loop can call; a DELEGATED
    * agent answering the same states runs its own loop with its own built-ins, which no registry
-   * reaches. The other half is authored on the workflow itself: the sync states' TOOLSET holds
-   * `read_file`, `glob` and `grep`, refuses the three tools that change anything and answers `deny`
-   * for `other` (`syncWorkflowFiles`) — and an agent gets its toolset and nothing else (decision 0007
-   * §3): claude loses the built-in of every tool not held, codex is left in its read-only sandbox,
+   * reaches. The other half is authored on the workflow itself: the sync states' toolset is a MAP
+   * that holds `read_file`, `glob` and `grep` and answers `deny` for `other` (`SYNC_TOOLSET`) — and
+   * an agent gets its toolset map and nothing else (decision 0007 §3): claude loses the built-in of every tool not held, codex is left in its read-only sandbox,
    * and a transport that can enforce neither refuses the state.
    *
    * `glob` and `grep` are HELD for that reason. The states used to lean on the agent's OWN `Glob`

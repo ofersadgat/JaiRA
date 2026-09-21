@@ -823,7 +823,7 @@ the same rule.
   (`reed_file`, `Glob`) is a **warning** — nothing is offered under it, and a call
   by that name answers to `other`.
 
-  **An agent gets its toolset and nothing else.** Each agent executor declares
+  **An agent gets its toolset MAP and nothing else.** Each agent executor declares
   its own tools and which standard tool each one is — claude's `Read` is
   `read_file`; `Edit`, `MultiEdit` and `NotebookEdit` are all `edit` — and on a
   delegated agent, per standard tool:
@@ -835,13 +835,21 @@ the same rule.
   | holds it as `"implementation": "native"` | the built-in stays, and is forced through the permission callback, so the **entry's mode still decides** — asked about as `read_file`, not as `Read` |
   | says nothing, and the built-in has no standard tool (`Task`, `Agent`, `SlashCommand`) | it answers to **`other`**: `deny` removes it up front, anything else is what the callback answers with. It is never removed merely for having no entry |
 
-  So `"tools": ["read_file"]` on a claude state means the agent has `read_file`
-  (and `show_artifact`, which every prompt state holds) and **not** its own
-  `Glob`, `Grep`, `Bash`, `Edit`, `Write` or web tools. A state that searches holds
-  `glob` and `grep`; JaiRA serves both. ⚠️ A state that declares **no tools at
-  all** is not an empty toolset — it said nothing, and the agent keeps what it has,
-  each call asked about by its standard name. Only an explicit `deny`, or an
-  `other` of `deny`, removes anything from such a state.
+  So `"tools": { "read_file": "allow" }` on a claude state means the agent has
+  `read_file` (and `show_artifact`, which every prompt state holds) and **not** its
+  own `Glob`, `Grep`, `Bash`, `Edit`, `Write` or web tools. A state that searches
+  holds `glob` and `grep`; JaiRA serves both.
+
+  ⚠️ **That is what a MAP says. The list form is the legacy reading, and keeps
+  what it does not mention.** `"tools": ["read_file"]` — with or without the old
+  `permissions` block — and a state that declares no tools at all run **exactly
+  as they did before toolsets**: on a delegated agent the list is a grant, not a
+  fence, so claude keeps its own `Glob`, `Grep`, `WebFetch`, `WebSearch` and the
+  rest, each under the permission callback as before, and only an old
+  `"profile": "read-only"` takes the writers away. Nothing infers that a list
+  "must have meant" the strict reading: a state **chooses** it by being rewritten
+  as a map, which is the migration (decision 0007 step 7). An inline map, a
+  `$/toolsets/…` reference and a `$ref` with overrides are all maps.
 
   | Transport | How a toolset reaches it |
   | --- | --- |
@@ -900,12 +908,12 @@ the same rule.
   write-capable built-ins denied up front, codex's read-only sandbox, a
   `generic-cli` refusal) still applies on top — the two agree. Write the entries.
 
-  The sync workflow is the worked example: its states hold
-  `"tools": ["read_file", "glob", "grep"]` with each `allow`, deny `edit`,
-  `write_file` and `bash`, and set `"other": "deny"` — the readers so a clipped
-  digest can be re-read and the tree searched, the denies so "returns text for a
-  person to accept and must not touch disk" is enforced rather than narrated, and
-  the `allow`s so a read costs no human click.
+  The sync workflow is the worked example: its states' toolset is the map
+  `{ "read_file": "allow", "glob": "allow", "grep": "allow", "other": "deny" }` —
+  the readers so a clipped digest can be re-read and the tree searched, everything
+  else absent so "returns text for a person to accept and must not touch disk" is
+  enforced rather than narrated (a map is the whole grant), and the `allow`s so a
+  read costs no human click.
   ⚠️ The enforcement rides on the run's approval wiring: a run with no approver
   builds no gate, and a delegated agent then runs under its transport's own
   defaults — the documented "without an approver, tools are handed over
@@ -2566,12 +2574,14 @@ Every one of these fails **silently or misleadingly**:
 12. Models must be route-prefixed (`anthropic/claude-sonnet-5`).
 13. `contentMediaType` is what makes a slot an artifact; there is no
     `"type": "artifact"`.
-14. `tools` is what subjects an agent's commands to the policy — and it is the
-    WHOLE grant: a delegated agent loses the built-in of every standard tool the
-    state does not hold, so a state listing only `read_file` cannot `Glob` or
-    `Grep` either. Hold `glob` and `grep`. A state that declares no tools at all
-    keeps the agent's own. There is no `profile`; a state that must not write
-    does not hold `edit`, `write_file` or `bash`, and says `"other": "deny"`.
+14. `tools` is what subjects an agent's commands to the policy. As a **map** it
+    is the WHOLE grant: a delegated agent loses the built-in of every standard
+    tool the map does not hold, so a map holding only `read_file` cannot `Glob`
+    or `Grep` either — hold `glob` and `grep`. As a **list** it is the legacy
+    reading, a grant and not a fence: the agent keeps the built-ins the list does
+    not mention, exactly as before, until the state is migrated to a map. There
+    is no `profile` to write; a map that must not write does not hold `edit`,
+    `write_file` or `bash`, and says `"other": "deny"`.
 15. A `generic-cli` state is refused outright while the policy can escalate to a
     human — which `policy.builtins: false` alone does not settle: a `default` or a
     rule of `require_approval` keeps it escalating.

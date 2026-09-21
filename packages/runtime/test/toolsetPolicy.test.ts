@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { Approver } from "@declarative-ai/permissions";
 import type { LoadedState } from "@declarative-ai/hw";
-import { parseToolset, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
+import { parseToolset, TOOLSET_MARKERS, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, stateWithChatSettings } from "../src/chatOperation";
 import { compilePolicy } from "../src/policy";
 import { planAgentTools } from "../src/agentTools";
@@ -52,10 +52,12 @@ describe("compilePolicy", () => {
 });
 
 describe("planAgentTools", () => {
-  it("plans a toolset exactly as it plans the list and the implementations it was folded from", () => {
+  it("serves and keeps the same tools from a toolset as from the list it was folded from — and only the MAP removes the rest", () => {
     const fromLegacy = planAgentTools(["read_file", "glob", "bash"], { glob: "native" });
     const fromMap = planAgentTools(parseToolset({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, bash: "smart" }).toolset);
-    expect(fromMap).toEqual(fromLegacy);
+    expect({ ...fromMap, denyNatives: [] }).toEqual(fromLegacy);
+    // The legacy reading leaves the agent what the list did not mention, exactly as it always did.
+    expect(fromLegacy.denyNatives).toEqual([]);
     expect(fromMap.inject).toEqual(["read_file", "glob", "show_artifact", "bash"].filter((n) => n !== "glob"));
     expect(fromMap.askNatives).toEqual(["Glob"]);
     expect(fromMap.denyNatives).toEqual(expect.arrayContaining(["Write", "Edit", "WebFetch"]));
@@ -152,7 +154,7 @@ describe("a conversation turn", () => {
     const written = stateWithChatSettings(host({}), { toolset: { read_file: "allow", "git status": "allow", other: "deny" } });
     expect(written?.environment).toEqual({
       tools: ["read_file"],
-      permissions: { tools: { read_file: "allow" }, other: "deny", subjects: { "git status": "allow" } },
+      permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny", subjects: { "git status": "allow" } },
     });
   });
 });

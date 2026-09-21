@@ -33,6 +33,22 @@
  * honours it through `planAgentTools`; a run injects ours, which is the governed choice, because the
  * engine hands an executor a state's tool LIST and a gate, and neither can say whose code was chosen.
  *
+ * ## The LEGACY reading, and how a run tells it from a map
+ *
+ * A state still written as a LIST (with or without the old `permissions` block) is the legacy
+ * reading, and it runs EXACTLY as it did: on a delegated agent its list is a grant and not a fence,
+ * so the built-ins of standard tools the list does not mention stay, under the gate. "Not in the
+ * toolset → the native is removed" (decision 0007 §3) is what a MAP says — an inline map, a
+ * `$/toolsets/…` reference, a `$ref` with overrides. Which one a state means is chosen when it is
+ * migrated (0007 step 7), never inferred. {@link Toolset.legacy} carries the difference.
+ *
+ * A run does not see a `Toolset`: the engine hands an executor the tools it resolved and a GATE over
+ * the state's `permissions` block, and nothing else. So a lowered map says it WAS a map in the one
+ * place a gate can be asked about: {@link TOOLSET_MARKERS}, two entries in the lowered
+ * `permissions.tools` that no tool is named by. They are a PAIR with different modes because a gate
+ * answers `other` for a name it has no entry for — one marker could not be told from an `other` that
+ * happened to agree with it; two that DISAGREE can only be entries. A legacy block never has them.
+ *
  * ## There is no profile
  *
  * `permissions.profile` (`read-only` | `plan` | `full`) is gone as a concept (decision 0007 §1): what
@@ -49,6 +65,18 @@ export const OTHER_SUBJECT = "other";
 export const SCRIPT_SUBJECT = "script";
 /** The key that starts a toolset from another — the same `$ref` every other block uses. */
 export const TOOLSET_REF_KEY = "$ref";
+
+/**
+ * WRITTEN BY LOWERING, never authored: the two `permissions.tools` entries that say "this block was
+ * a toolset MAP" — see the module header. Not tools, never offered, and stripped by every reader.
+ */
+export const TOOLSET_MARKERS: Readonly<Record<string, PermissionMode>> = { "jaira:toolset+": "allow", "jaira:toolset-": "deny" };
+
+/** Does a block in the upstream shape carry the marks a lowered MAP leaves? */
+export function isLoweredToolset(permissions: Pick<PermissionsDecl, "tools"> | undefined): boolean {
+  const tools = permissions?.tools;
+  return tools !== undefined && Object.entries(TOOLSET_MARKERS).every(([name, mode]) => Object.hasOwn(tools, name) && tools[name] === mode);
+}
 
 const IMPLEMENTATIONS: readonly ToolImplementation[] = ["app", "native"];
 
@@ -83,6 +111,13 @@ export interface Toolset {
   entries: Record<string, ToolsetEntry>;
   /** The mode for everything no entry names. Legacy: `permissions.other ?? permissions.default`. */
   other?: PermissionMode;
+  /**
+   * `true` ONLY from {@link toolsetOfLegacy}: this came from a LIST and/or the old `permissions`
+   * block, with no map. A legacy toolset is a GRANT on a delegated agent, as it always was — the
+   * built-ins of standard tools it does not mention stay, under the gate — where a map is the whole
+   * grant and what it does not hold is removed (decision 0007 §3). A map never has this.
+   */
+  legacy?: true;
 }
 
 export interface ToolsetIssue {
@@ -288,7 +323,7 @@ export function applyLegacyProfile(toolset: Toolset, profile: string | undefined
   if (profile === undefined || !LEGACY_NARROWING_PROFILES.includes(profile)) return toolset;
   const entries: Record<string, ToolsetEntry> = { ...toolset.entries };
   for (const name of LEGACY_NON_READ_ONLY_TOOLS) entries[name] = { kind: "tool", mode: "deny", offered: false };
-  return { entries, other: "deny" };
+  return { entries, other: "deny", ...(toolset.legacy === true ? { legacy: true as const } : {}) };
 }
 
 /**
@@ -317,11 +352,11 @@ export function toolsetOfLegacy(
     entries[name] = { kind: "tool", ...(mode !== undefined ? { mode } : {}), ...(implementation !== undefined ? { implementation } : {}) };
   }
   for (const [name, mode] of Object.entries(permissions?.tools ?? {})) {
-    if (Object.hasOwn(entries, name)) continue;
+    if (Object.hasOwn(entries, name) || Object.hasOwn(TOOLSET_MARKERS, name)) continue;
     entries[name] = { kind: "tool", mode, offered: false };
   }
   const other = permissions?.other ?? permissions?.default;
-  return applyLegacyProfile({ entries, ...(other !== undefined ? { other } : {}) }, permissions?.profile);
+  return applyLegacyProfile({ entries, ...(other !== undefined ? { other } : {}), legacy: true }, permissions?.profile);
 }
 
 // --- what consumers read -----------------------------------------------------
@@ -372,7 +407,9 @@ export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> 
  * toolset and pass through beside it.
  */
 export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[] | undefined): PermissionsDecl {
-  const tools = toolModes(toolset);
+  // A MAP leaves its marks, so a run — which sees this block only through a gate — can tell it from
+  // the legacy reading. See the module header and {@link TOOLSET_MARKERS}.
+  const tools = { ...toolModes(toolset), ...(toolset.legacy === true ? {} : TOOLSET_MARKERS) };
   const subjects = shellSubjects(toolset);
   const implementations = toolImplementations(toolset);
   return {
@@ -397,6 +434,8 @@ export function toolsetOfEnvironment(
   implementations?: Readonly<Record<string, ToolImplementation>> | undefined,
 ): Toolset {
   const toolset = toolsetOfLegacy(tools, permissions, { ...permissions?.implementations, ...implementations });
+  // The marks a lowered MAP left say this block was never the legacy reading.
+  if (isLoweredToolset(permissions)) delete toolset.legacy;
   for (const [subject, mode] of Object.entries(permissions?.subjects ?? {})) {
     if (Object.hasOwn(toolset.entries, subject)) continue;
     toolset.entries[subject] = { kind: subject === SCRIPT_SUBJECT ? "script" : "command", mode };

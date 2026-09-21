@@ -36,10 +36,30 @@
  * read back is whose code was chosen: a run's `implementation: "native"` is carried on the lowered
  * block and reaches nobody, so a run injects ours.
  *
- * A call that declares NO tools at all — no list, no map — is not a toolset that holds nothing; it is
- * a state that said nothing, and the agent keeps what it has, under the gate. That is every state
- * written before tools were a fence, and it is told apart from an empty toolset by the only evidence
- * a run has: whether anything but the always-granted tools was resolved.
+ * ## The rule is a MAP's. The legacy reading runs exactly as it did
+ *
+ * "Not in the toolset → the native is removed" is what a toolset MAP says — an inline map, a
+ * `$/toolsets/…` reference, a `$ref` with overrides. A state still written as a LIST (with or without
+ * the old `permissions` block), and a state that declares no tools at all, is the LEGACY reading: on
+ * a delegated agent its list was a grant and never a fence, the workflows people run today are
+ * written that way and lean on the agent's own `Glob`, `Grep` and web tools, and which reading a
+ * state means is chosen when it is migrated (decision 0007 step 7) — never inferred here.
+ *
+ *  - **A legacy RUN is passed through untouched.** What was removed before is removed now, by the
+ *    same code: the engine still seeds a list-form file's `profile`, and the upstream executor still
+ *    denies claude's write-capable built-ins under it, maps it onto codex's read-only sandbox and
+ *    refuses it on a transport that enforces nothing. Nothing is added and nothing translated.
+ *  - **A legacy conversation turn** no longer has a profile to seed (`gateTools` registers none), so
+ *    the plan removes what the old profile removed — the `deny` entries `applyLegacyProfile` wrote,
+ *    and `Task` and its kind under its `other: "deny"` — displaces the built-in of a tool of ours it
+ *    injects, keeps a `native` choice under an ask rule, and leaves every built-in the list simply
+ *    did not mention where it was, under the gate.
+ *
+ * A run tells the two apart by the marks a lowered map leaves in its `permissions.tools`
+ * (`TOOLSET_MARKERS` in `@jaira/shared`): two entries with DIFFERENT modes, asked of the gate. A gate
+ * answers `other` for a name it has no entry for, so two answers that disagree can only be entries.
+ * With no gate — a run with no approver — nothing of a state's block is visible, and the call is
+ * read as legacy.
  */
 import {
   finishedHandle,
@@ -52,10 +72,10 @@ import {
 import { emptyWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
 import type { ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permissions";
 import {
-  ALWAYS_GRANTED_TOOLS,
   nativesOfStandard,
   offeredTools,
   standardOfNative,
+  TOOLSET_MARKERS,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
   toolsetOfLegacy,
@@ -139,8 +159,13 @@ export function standardOfAnyNative(native: string): string | undefined {
 /** One call's toolset, reduced to the four questions the plan asks of it. */
 export interface ToolsetView {
   /**
-   * Does this call state a toolset at all? `false` is a state that declared no tools — the agent
-   * keeps what it has, under the gate — and is NOT the same as a toolset that holds nothing.
+   * Is this the LEGACY reading — a list, the old block, or nothing declared at all? See the module
+   * header: a legacy call keeps the built-ins it does not mention, and a legacy RUN is not touched.
+   */
+  legacy: boolean;
+  /**
+   * Is this a toolset MAP, which is the whole grant? `false` is the legacy reading — the agent keeps
+   * what the list did not mention, under the gate — and is NOT the same as a map that holds nothing.
    */
   declared: boolean;
   /** Whose code runs a standard tool the toolset HOLDS; `undefined` when it does not hold it. */
@@ -162,7 +187,8 @@ export function viewOfToolset(toolset: Toolset): ToolsetView {
   const offered = new Set(offeredTools(toolset));
   const entry = (name: string) => (Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined);
   return {
-    declared: true,
+    legacy: toolset.legacy === true,
+    declared: toolset.legacy !== true,
     held: (standard) => (offered.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
     modeOf: (standard) => entry(standard)?.mode,
     otherFor: () => toolset.other,
@@ -175,16 +201,19 @@ export function viewOfToolset(toolset: Toolset): ToolsetView {
  *
  * `ctx.tools` is the state's resolved tool list, so membership is exact. `ctx.gate` resolves a mode
  * through the state's own block, the run's ledger and the project baseline, so a `deny` is exact too
- * — including `other`, which is what the gate answers for a name nothing registered.
+ * — including `other`, which is what the gate answers for a name nothing registered. And the gate is
+ * how a lowered MAP is told from the legacy reading: by the two marks a map leaves, which disagree.
  */
 export function viewOfServices(ctx: ExecServices): ToolsetView {
-  const names = Object.keys(ctx.tools ?? {});
-  const held = new Set(names);
+  const held = new Set(Object.keys(ctx.tools ?? {}));
   const baseline = ctx.policy?.baseline?.tools;
   const modeOf = (name: string): PermissionMode | undefined =>
     ctx.gate?.modeOf({ name }) ?? (baseline !== undefined && Object.hasOwn(baseline, name) ? baseline[name] : undefined);
+  const marks = Object.keys(TOOLSET_MARKERS).map((name) => ctx.gate?.modeOf({ name }));
+  const isMap = ctx.gate !== undefined && new Set(marks).size === marks.length;
   return {
-    declared: names.some((name) => !ALWAYS_GRANTED_TOOLS.includes(name)),
+    legacy: !isMap,
+    declared: isMap,
     held: (standard) => (held.has(standard) ? "app" : undefined),
     modeOf,
     otherFor: modeOf,
@@ -242,8 +271,8 @@ export function planAgentTools(
     const natives = nativesOfStandard(declaration, spec.name);
     const implementation = holds(spec.name);
     if (implementation === undefined) {
-      // NOT IN THE TOOLSET. Removed — unless the call declared no tools at all, where only an explicit
-      // `deny` removes anything and the agent otherwise keeps what it has.
+      // NOT IN THE TOOLSET. A MAP removes it. The legacy reading never did: a list was a grant, so
+      // only an explicit `deny` — an old profile's, or the block's own — removes anything.
       if (view.declared || view.modeOf(spec.name) === "deny") plan.denyNatives.push(...natives);
       continue;
     }
@@ -347,6 +376,9 @@ export function withAgentToolset(
       if (op.kind !== "prompt") return executor.start(op, ctx);
       const known = toolsetOf(ctx);
       const view = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
+      // A LEGACY RUN is handed on exactly as the engine built it — see the module header. What was
+      // removed from it before is still removed, upstream, by the code that always removed it.
+      if (known === undefined && view.legacy) return executor.start(op, ctx);
       const plan = planAgentTools(view, {}, declaration);
 
       if (declaration.channel === "none") {
@@ -383,7 +415,9 @@ export function withAgentToolset(
 export function agentServices(declaration: AgentToolDeclaration, ctx: ExecServices): ExecServices {
   if (declaration.channel !== "tools") return ctx;
   const known = toolsetOf(ctx);
-  const plan = planAgentTools(known !== undefined ? viewOfToolset(known) : viewOfServices(ctx), {}, declaration);
+  const view = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
+  if (known === undefined && view.legacy) return ctx;
+  const plan = planAgentTools(view, {}, declaration);
   return servicesUnder(ctx, declaration, [...new Set([...plan.displaced, ...plan.denyNatives])]);
 }
 

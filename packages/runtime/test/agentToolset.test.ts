@@ -13,7 +13,13 @@
  *  - IN it → ours is injected and displaces the native, or the native is kept and forced through the
  *    permission callback so the entry's mode still decides;
  *  - a native with no standard tool answers to `other`;
- *  - an old `profile: "read-only"` and the map it reads as reach the agent as the same configuration.
+ *
+ * ALL OF THAT IS WHAT A MAP SAYS. A state still written as a LIST is the legacy reading and runs
+ * EXACTLY as it did — pinned here by equality against the executors `agentPromptRoutes` built before
+ * this existed (`git show c0b5972:packages/runtime/src/modelRoutes.ts`: a bare `AgentCliExecutor`
+ * and `AgentCodexExecutor`, nothing around them), and against the deny list that wiring produced,
+ * written out. The people running list-form workflows lean on claude's own `Glob`, `Grep` and web
+ * tools; which reading a state means is chosen at migration (0007 step 7).
  */
 import { describe, expect, it } from "vitest";
 import { loadBundle } from "@declarative-ai/hw";
@@ -22,7 +28,8 @@ import type { ExecServices, InlineFamily, PromptOp, Tool } from "@declarative-ai
 import type { Approver } from "@declarative-ai/permissions";
 import { lowerStateToolsets, parseToolset } from "@jaira/shared";
 import { planAgentTools, withToolsetService } from "../src/agentTools";
-import { agentPromptRoutes } from "../src/modelRoutes";
+import { AgentCliExecutor, AgentCodexExecutor } from "@declarative-ai/agents-cli";
+import { agentPromptRoutes, normaliseAgentModel } from "../src/modelRoutes";
 import { gateTools } from "../src/tools";
 import { buildPromptExecutor, executeWorkflow, newRegistry } from "../src/wiring";
 
@@ -50,7 +57,13 @@ function registry() {
 /** One prompt state under `environment`, lowered as the loader lowers it, run on one agent route. */
 async function run(
   environment: Record<string, unknown>,
-  options: { agent?: string; approve?: Approver; agents?: Parameters<typeof agentPromptRoutes>[0] } = {},
+  options: {
+    agent?: string;
+    approve?: Approver;
+    agents?: Parameters<typeof agentPromptRoutes>[0];
+    /** Build the route as commit c0b5972 did: the upstream executor, bare. The "before" of every equality. */
+    asBefore?: boolean;
+  } = {},
 ): Promise<{ opts: AgentQueryOptions | undefined; asked: string[]; result: Awaited<ReturnType<typeof executeWorkflow>> }> {
   const agent = options.agent ?? "claude-cli";
   const { seen, query } = capturingQuery();
@@ -69,7 +82,16 @@ async function run(
     bundle: loadBundle({ digest: lowered.def }, "digest"),
     inputs: {},
     registry: registry(),
-    prompt: buildPromptExecutor({ routes: agentPromptRoutes(options.agents ?? {}, { query }), tree: { kind: "agent", agent } }),
+    prompt: buildPromptExecutor({
+      routes:
+        options.asBefore === true
+          ? {
+              "claude-cli": normaliseAgentModel("claude-cli", new AgentCliExecutor({ query })),
+              "codex-cli": normaliseAgentModel("codex-cli", new AgentCodexExecutor({ query })),
+            }
+          : agentPromptRoutes(options.agents ?? {}, { query }),
+      tree: { kind: "agent", agent },
+    }),
     approve:
       options.approve ??
       ((req) => {
@@ -87,16 +109,67 @@ const ask = (opts: AgentQueryOptions, toolName: string, input: Record<string, un
 const LEGACY_READ_ONLY = { tools: ["read_file"], permissions: { profile: "read-only", tools: { read_file: "allow" } } };
 const READ_ONLY_MAP = { tools: { read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", other: "deny" } };
 
-describe("a read-only toolset reaches claude as `profile: \"read-only\"` did", () => {
-  it("removes everything the profile removed, and produces the SAME configuration from either form", async () => {
+/** Everything about a spawn a toolset could have changed. */
+const configurationOf = (opts: AgentQueryOptions) => ({
+  disallowedTools: opts.disallowedTools,
+  allowedTools: opts.allowedTools,
+  served: Object.keys(opts.mcpTools ?? {}),
+  permissionMode: opts.permissionMode,
+  providerOptions: opts.providerOptions,
+});
+
+describe("a LEGACY list-form state runs exactly as it did before (c0b5972)", () => {
+  /**
+   * The deny lists the OLD wiring produced, written out. Upstream's `CLAUDE_MUTATING_BUILTINS` under
+   * a seeded `read-only` profile, in its order, then `AskUserQuestion`, which the engine withholds
+   * from any state that declares outputs. The old prompt routes passed no `replacesNative`, so `Read`
+   * was NOT displaced there — and `Glob`, `Grep`, `WebFetch` and `WebSearch` were never touched.
+   */
+  const OLD_READ_ONLY_DENIED = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Task", "Agent", "SlashCommand", "AskUserQuestion"];
+  const OLD_UNRESTRICTED_DENIED = ["AskUserQuestion"];
+
+  const cases: Array<[string, Record<string, unknown>, string[]]> = [
+    ["`tools: [\"read_file\"]` + `profile: \"read-only\"`", LEGACY_READ_ONLY, OLD_READ_ONLY_DENIED],
+    ["a list with no profile", { tools: ["read_file"] }, OLD_UNRESTRICTED_DENIED],
+    ["a list with modes and no profile", { tools: ["read_file", "bash"], permissions: { tools: { read_file: "allow", bash: "ask" }, default: "ask" } }, OLD_UNRESTRICTED_DENIED],
+    ["no tools at all, only an old block", { permissions: { tools: { read_file: "allow", edit: "deny" } } }, OLD_UNRESTRICTED_DENIED],
+  ];
+
+  it.each(cases)("claude, %s: the deny list EQUALS the old one, and so does everything else", async (_name, environment, denied) => {
+    const now = (await run(environment)).opts!;
+    const before = (await run(environment, { asBefore: true })).opts!;
+    expect(now.disallowedTools).toEqual(denied);
+    expect(configurationOf(now)).toEqual(configurationOf(before));
+    // The natives the list never mentioned are still the agent's.
+    for (const native of ["Glob", "Grep", "WebFetch", "WebSearch"]) expect(now.disallowedTools).not.toContain(native);
+  });
+
+  it.each(cases)("codex, %s: the same sandbox flag as before", async (_name, environment) => {
+    const now = (await run(environment, { agent: "codex-cli" })).opts!;
+    const before = (await run(environment, { agent: "codex-cli", asBefore: true })).opts!;
+    expect(configurationOf(now)).toEqual(configurationOf(before));
+  });
+
+  it("is asked about exactly as before: by the NATIVE name, of the same gate", async () => {
+    const answers = async (asBefore: boolean) => {
+      const { opts, asked } = await run({ tools: ["read_file"] }, { asBefore });
+      return { edit: await ask(opts!, "Edit", { file_path: "a.md" }), glob: await ask(opts!, "Glob", { pattern: "*" }), asked };
+    };
+    expect(await answers(false)).toEqual(await answers(true));
+  });
+});
+
+describe("a read-only toolset MAP reaches claude holding everything `profile: \"read-only\"` removed", () => {
+  it("removes everything the profile removed, plus the built-ins of what the map does not hold, and nothing else differs", async () => {
     const legacy = (await run(LEGACY_READ_ONLY)).opts!;
     const map = (await run(READ_ONLY_MAP)).opts!;
 
     // Nothing the profile denied up front has come back.
     expect(legacy.disallowedTools).toEqual(expect.arrayContaining(PROFILE_DENIED));
     expect(map.disallowedTools).toEqual(expect.arrayContaining(PROFILE_DENIED));
-    // The two forms are one configuration: the deny list, the pre-approvals, what is served, the mode.
-    expect([...(map.disallowedTools ?? [])].sort()).toEqual([...(legacy.disallowedTools ?? [])].sort());
+    // The map's deny list is the legacy one PLUS the natives of the standard tools it does not hold
+    // and the one ours displaces. The pre-approvals, what is served and the mode are the same.
+    expect([...(map.disallowedTools ?? [])].sort()).toEqual([...(legacy.disallowedTools ?? []), "Read", "Glob", "Grep", "WebFetch", "WebSearch"].sort());
     expect(map.allowedTools).toEqual(legacy.allowedTools);
     expect(Object.keys(map.mcpTools ?? {})).toEqual(Object.keys(legacy.mcpTools ?? {}));
     expect(map.permissionMode).toBe(legacy.permissionMode);
@@ -134,7 +207,7 @@ describe("a read-only toolset reaches claude as `profile: \"read-only\"` did", (
 });
 
 describe("a read-only toolset reaches codex as the same sandbox flag", () => {
-  it("is `--sandbox read-only` from the old profile and from the map — codex's `plan` is nothing else", async () => {
+  it("is `--sandbox read-only` from a map, as it was from the old profile — codex's `plan` is nothing else", async () => {
     // No tools held: codex cannot be served ours, and refuses a run that injects any.
     const legacy = (await run({ permissions: { profile: "read-only" } }, { agent: "codex-cli" })).opts!;
     const map = (await run({ tools: { edit: "deny", write_file: "deny", bash: "deny", other: "deny" } }, { agent: "codex-cli" })).opts!;
@@ -154,16 +227,19 @@ describe("a read-only toolset reaches codex as the same sandbox flag", () => {
     expect((await run({ tools: { read_file: "allow", bash: "ask" } }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
     // …and a toolset that holds only readers leaves it off, with no profile anywhere.
     expect((await run({ tools: { read_file: "allow", glob: "allow" } }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
-    expect((await run({ tools: ["read_file"] }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
+    // A MAP that holds nothing is still a map: the marks say so, where `ctx.tools` alone could not.
+    expect((await run({ tools: { other: "ask" } }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
+    // The legacy LIST keeps the configured sandbox, as it always did.
+    expect((await run({ tools: ["read_file"] }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
   });
 });
 
 describe("the postmortem case: tools with no restriction (task t-19fipjbavj)", () => {
-  it("does NOT leave the CLI agent its own Edit — a tool list is the whole grant now", async () => {
+  it("a MAP does not leave the CLI agent its own Edit — the map is the whole grant", async () => {
     // The feature workflow declared `tools: ["read_file"]` and never a profile. The list was a grant,
     // not a fence: claude kept its built-ins, used its native `Edit` 127 times and rewrote docs on
-    // disk. No profile exists any more, and none is needed: `edit` is not in the toolset.
-    const { opts, asked } = await run({ tools: ["read_file"] });
+    // disk. As a map no profile is needed: `edit` is not in the toolset.
+    const { opts, asked } = await run({ tools: { read_file: "allow" } });
     expect(opts!.disallowedTools).toEqual(expect.arrayContaining(["Edit", "MultiEdit", "NotebookEdit", "Write", "Bash"]));
     // And if the binary asked anyway, the answer is no — without a person being asked to say it.
     expect(await ask(opts!, "Edit", { file_path: "docs/product/x.md" })).toMatchObject({ allow: false });
@@ -172,19 +248,22 @@ describe("the postmortem case: tools with no restriction (task t-19fipjbavj)", (
     expect(Object.keys(opts!.mcpTools ?? {})).toEqual(["read_file"]);
   });
 
-  it("leaves a state that declared NO tools what the agent has — under the gate, by standard name", async () => {
-    // Not a toolset that holds nothing: a state that said nothing. Every workflow written before tools
-    // were a fence is this, and removing everything from it would not be a migration.
-    const { opts, asked } = await run({ permissions: { tools: { read_file: "allow", edit: "deny" } } });
-    expect(opts!.disallowedTools ?? []).not.toContain("Read");
-    expect(opts!.disallowedTools ?? []).not.toContain("Bash");
-    // An explicit `deny` still removes — every native that is that standard tool.
-    expect(opts!.disallowedTools).toEqual(expect.arrayContaining(["Edit", "MultiEdit", "NotebookEdit"]));
-    // The callback names `Read`; the mode was written against `read_file`, and is what answers.
-    expect(await ask(opts!, "Read", { file_path: "a.ts" })).toMatchObject({ allow: true });
-    // `Bash` has no mode of its own, so a person is asked — about `bash`, the name a policy is written in.
+  it("the LIST it was written as never runs Edit UNGATED: the call reaches the gate, and a person", async () => {
+    // Unmigrated, the state keeps the built-in — that is the legacy reading, unchanged — and what
+    // stands between it and the disk is what always did: `Edit` is put to the permission callback,
+    // the gate has no `allow` for it, and the approver is asked. Here the approver says no.
+    const { opts, asked } = await run({ tools: ["read_file"] });
+    expect(opts!.canUseTool).toBeDefined();
+    expect(opts!.allowedTools ?? []).not.toContain("Edit");
+    expect(await ask(opts!, "Edit", { file_path: "docs/product/x.md" })).toMatchObject({ allow: false });
+    expect(asked).toEqual(["Edit"]);
+  });
+
+  it("a map that holds nothing is NOT a state that said nothing", async () => {
+    const { opts, asked } = await run({ tools: { other: "ask" } });
+    expect(opts!.disallowedTools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebFetch", "WebSearch"]));
     expect(await ask(opts!, "Bash", { command: "ls" })).toMatchObject({ allow: false });
-    expect(asked).toEqual(["bash"]);
+    expect(asked).toEqual([]);
   });
 });
 

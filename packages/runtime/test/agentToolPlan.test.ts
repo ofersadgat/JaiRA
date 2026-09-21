@@ -20,16 +20,36 @@ import { AGENT_TOOLS, agentToolsOf, nativeNamesByRoute } from "../src/agents";
 import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, planAgentTools, refusalsOf, viewOfToolset } from "../src/agentTools";
 import { claudePermissionSettings, claudeReplacements } from "../src/tools";
 
+/** A toolset MAP holding these tools — the form whose absences REMOVE (decision 0007 §3). */
+const mapOf = (tools: readonly string[], implementations: Record<string, "app" | "native"> = {}) =>
+  parseToolset(Object.fromEntries(tools.map((name) => [name, { mode: "ask", ...(implementations[name] !== undefined ? { implementation: implementations[name] } : {}) }]))).toolset;
+
 describe("planAgentTools", () => {
-  it("denies the built-in of a tool nobody granted", () => {
+  it("denies the built-in of a tool a MAP does not hold", () => {
     // The leak. Undeclared used to mean "the agent keeps its own", which is the opposite of what
-    // leaving a box unticked looks like it means.
-    const plan = planAgentTools([]);
+    // leaving a tool out of a toolset looks like it means.
+    const plan = planAgentTools(mapOf([]));
     expect(plan.denyNatives).toContain("Read");
     expect(plan.denyNatives).toContain("Bash");
     // The always-granted set, and nothing else — see the `alwaysGranted` block below.
     expect(plan.inject).toEqual([...ALWAYS_GRANTED_TOOLS]);
     expect(plan.askNatives).toEqual([]);
+  });
+
+  it("removes NOTHING a legacy list merely did not mention — a list was a grant, and still is", () => {
+    // The workflows people run today are lists, and lean on the agent's own `Glob`, `Grep` and web
+    // tools. Which reading a state means is chosen when it is migrated (0007 step 7), not inferred.
+    for (const plan of [planAgentTools([]), planAgentTools(["read_file"]), planAgentTools(toolsetOfLegacy(["read_file"], { tools: { read_file: "allow" } }))]) {
+      expect(plan.denyNatives).toEqual([]);
+      expect(plan.askNatives).toEqual([]);
+    }
+    // What it removes is what the old code removed: the built-in our injected tool stands in for…
+    expect(planAgentTools(["read_file"]).displaced).toEqual(["Read"]);
+    // …and what an old `profile: "read-only"` denied — upstream's own list, name for name.
+    const readOnly = planAgentTools(toolsetOfLegacy(["read_file"], { profile: "read-only", tools: { read_file: "allow" } }));
+    expect([...readOnly.denyNatives].sort()).toEqual(["Agent", "Bash", "Edit", "MultiEdit", "NotebookEdit", "SlashCommand", "Task", "Write"]);
+    expect(readOnly.denyNatives).not.toContain("Glob");
+    expect(readOnly.denyNatives).not.toContain("WebFetch");
   });
 
   it("declares ours for `app`, so the built-in is displaced", () => {
@@ -60,7 +80,7 @@ describe("planAgentTools", () => {
   });
 
   it("keeps the two axes independent", () => {
-    const plan = planAgentTools(["read_file", "glob", "bash"], { read_file: "app", glob: "native" });
+    const plan = planAgentTools(mapOf(["read_file", "glob", "bash"], { read_file: "app", glob: "native" }));
     // TABLE order, not the order they were granted in — the plan walks `TOOL_SPECS`, which is why
     // `show_artifact` lands between the two rather than after them.
     expect(plan.inject).toEqual(["read_file", "show_artifact", "bash"]);
@@ -75,7 +95,7 @@ describe("planAgentTools", () => {
     // measure is tools that HAVE a native counterpart, because that is where falling through costs
     // something: an ungranted tool whose built-in stays live is a capability nobody granted. A tool
     // with no counterpart (`show_artifact`) leaves no built-in behind to deny.
-    const plan = planAgentTools(["read_file", "glob"], { read_file: "app", glob: "native" });
+    const plan = planAgentTools(mapOf(["read_file", "glob"], { read_file: "app", glob: "native" }));
     // EVERY native the executor declares as a standard tool lands in exactly one place: displaced by
     // ours, kept and asked about, or removed.
     const placed = [...plan.displaced, ...plan.askNatives, ...plan.denyNatives].sort();
