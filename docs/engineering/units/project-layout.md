@@ -2,13 +2,13 @@
 id: engineering/units/project-layout
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/share-processes-across-projects, product/all-projects-in-one-place, ui/components/file-tree, ui/surfaces/settings-files]
 layer: data
 owns_contracts: [engineering/contracts/jaira-layout]
 requires: [engineering/units/tool-policy]
 implemented_by: [packages/shared/src/paths.ts, packages/shared/src/hiddenPaths.ts, packages/shared/src/json.ts, packages/shared/src/jsonFile.ts]
-verified_by: [packages/shared/test/shared.test.ts, packages/shared/test/hiddenPaths.test.ts, packages/cli/test/home.test.ts, packages/app/test/service.test.ts, packages/persistence/test/systemProject.test.ts, packages/persistence/test/worktrees.test.ts]
+verified_by: [packages/shared/test/shared.test.ts, packages/shared/test/hiddenPaths.test.ts, packages/cli/test/home.test.ts, packages/app/test/service.test.ts, packages/persistence/test/systemProject.test.ts, packages/persistence/test/worktrees.test.ts, packages/persistence/test/builtInLayer.test.ts, packages/app/test/builtInLayer.test.ts]
 siblings: [engineering/units/project-store, engineering/units/project-config, engineering/units/user-settings, engineering/units/files-view-models]
 ---
 
@@ -16,7 +16,20 @@ siblings: [engineering/units/project-store, engineering/units/project-config, en
 
 ## The layout computes every path a root holds and the key a project opens under, and creates nothing
 
-`jairaPaths(projectDir, baseDir?)` in `paths.ts` returns a project's `JairaPaths`: its `.jaira/` directory, `settings.json`, `workflows/` and `skills/`, the generated children of `.jaira/system/`, the shared root's layout as `base`, the ordered layer `roots`, and `worktreesDir` outside the checkout. `jairaBasePaths(baseDir?)` returns the shared root's `JairaBasePaths`, which adds `user-settings.json`, `functions/`, `.env`, `.env.local`, `system/machine.key` and the legacy `system/approvals.local.json`. `baseAsProjectPaths(baseDir?)` maps the shared root onto the project shape so it can be opened as a project. Each path, what it holds and whether git ignores it are [jaira-layout](../contracts/jaira-layout.md).
+`jairaPaths(projectDir, baseDir?, builtInDir?)` in `paths.ts` returns a project's `JairaPaths`: its `.jaira/` directory, `settings.json`, `workflows/` and `skills/`, the generated children of `.jaira/system/`, the shared root's layout as `base`, the built-in layer's as `builtIn`, the ordered layer `roots`, and `worktreesDir` outside the checkout. `jairaBasePaths(baseDir?)` returns the shared root's `JairaBasePaths`, which adds `user-settings.json`, `functions/`, `.env`, `.env.local`, `system/machine.key` and the legacy `system/approvals.local.json`. `baseAsProjectPaths(baseDir?, builtInDir?)` maps the shared root onto the project shape so it can be opened as a project. Each path, what it holds and whether git ignores it are [jaira-layout](../contracts/jaira-layout.md).
+
+### There are three layers, and the third is what ships
+
+`roots` is three directories in search order: the project's `.jaira/`, the shared root, and the built-in layer, which a reference names `$SYSTEM` ([decision 0006](../decisions/0006-built-in-layer.md)). `jairaBuiltInPaths(builtInDir?)` returns its `JairaBuiltInPaths`: `dir`, `workflows/`, `functions/`, `prompts/` and `toolsets/`. It has no `system/`, no settings and no database, because nothing is generated into it.
+
+- It is last. `layerRoots` in `paths.ts` appends it after the other roots, and `searchPathFor` in `workflowRefs.ts` appends its `workflows/` and `functions/` after whatever `workflows.path` configured, lifting out an entry that named them earlier. `prepareUserModules` does the same for the module require path.
+- It is read-only. `isWritableLayer` in `view.ts` is the rule, and `AppService.writable` refuses the `system` layer on every surface that takes a layer and changes a file. Copying a state out of it is allowed, because that copy is the override.
+- It is trusted. `trustingBuiltIn` in `userModules.ts` answers the approval gate for a module under the layer with the file's current hash: [module-approvals](module-approvals.md). A person's copy at another path is gated as before.
+- The source of truth is `packages/shared/builtin/`. `packages/cli/build.mjs` and `packages/app/build.mjs` copy it to `dist/builtin/` beside their bundles. `defaultBuiltInDir()` answers the first of these that exists: `<process.resourcesPath>/builtin` for a packaged Electron app, `builtin/` beside the running module for a bundle, and `../builtin` from `paths.ts` for source under tsx and vitest. When none exists it answers the second, and an absent directory reads as an empty layer.
+- `$SYSTEM/…` names the shipped copy of a document: a prompt, an operation document, a toolset. It does not pin a state. A state reference that lands under any search directory folds back to its bare id, as `$BASE/workflows/…` always has, so `$SYSTEM/workflows/chat/hello` is the state `chat/hello` and a person's copy shadows it.
+- `setBuiltInDir(dir)` names the directory for the process. No environment variable and no settings key does, because a file under the layer skips the approval gate, so whatever can name the directory can run code unasked.
+- `$SYSTEM` means something else in an artifact destination, where it is a root's generated `system/` directory: [artifact-destination-template](../contracts/artifact-destination-template.md). A destination template is not a reference, so the two never meet. `JairaPaths` calls the layer `builtIn` and the generated directory `systemDir`.
+- The layer ships holding only its `README.md`. The chat states and the self-test are still installed into the shared root until step 2 of the decision.
 
 Beside the path builders it owns:
 
@@ -47,6 +60,7 @@ It deliberately does not own:
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
 | `JairaPaths`, `JairaBasePaths` | computed on every call, never cached | the project and base directories passed in | every store, the app service, the runtime's artifact anchors, the CLI |
+| The built-in layer's location | found once per process by `defaultBuiltInDir` and remembered; replaced by `setBuiltInDir` | `packages/shared/builtin/`, copied to `dist/builtin/` by both builds | `workflowLoadOptions`, `prepareUserModules`, `projectSource` and `baseSource`, `workflowRoots`, and the `system` branch of `AppService`'s path helpers read it; nothing writes it |
 | The shared root's location | `JAIRA_HOME` read by `defaultBaseDir`; `--home` lifted by `takeHomeFlag` | the flag, the environment, `user-settings.json` `baseDir`, then `~/.jaira` | `AppService` and `settingsBaseDir` in `service.ts`; `runCli` in `cli.ts` |
 | A project's key | computed by `sessionKey` | the directory's real path | `AppService.sessions` keys every open project by it |
 | Hidden rules | compiled by `compileHidden(hiddenRules(shared, personal))` | `settings.json` `files.hidden`, or `DEFAULT_HIDDEN_PATHS` when absent, followed by `user-settings.json` `filesHidden` | `hiddenRulesFor` in `service.ts` compiles them; `fileTree` and `baseFileTree` in `stateViews.ts` filter by them |
@@ -56,8 +70,13 @@ It deliberately does not own:
 | # | Invariant | Asserted by |
 | --- | --- | --- |
 | 1 | No generated path of a root lies outside its `system/`, and no authored directory lies inside it | `service.test.ts` "keeps everything it generates under the root's system/ directory"; `systemProject.test.ts` "puts everything it generates under system/, and nothing else there" |
-| 2 | The shared root opened as a project has itself as its only root | `systemProject.test.ts` `"searches only itself — there is no layer behind the layer"` |
-| 3 | A project's `roots` lead with its own `.jaira/` and never name one directory twice | unasserted |
+| 2 | The shared root opened as a project searches itself and then the built-in layer, and no other root | `systemProject.test.ts` `"searches itself and then what ships — no PERSON's layer is behind the layer"` |
+| 3 | A project's `roots` lead with its own `.jaira/`, end with the built-in layer, and never name one directory twice | `builtInLayer.test.ts` "puts the built-in layer last, behind the project and the shared root"; the deduplication is unasserted |
+| 3a | A bare id, a `$/…` reference and a module symbol resolve project first, shared second, built-in last, and `$SYSTEM/…` names the shipped copy whatever shadows it | `builtInLayer.test.ts` "lets the shared root shadow the built-in copy, and the project shadow both", "searches `$/…` along all three, first match winning", "names the shipped copy with `$SYSTEM/…`, whatever shadows it" |
+| 3b | `workflows.path` can neither drop the built-in layer nor move it ahead of another root | `builtInLayer.test.ts` "keeps the layer on the end of a configured path that left it out", "moves the layer to the end of a configured path that put it first" |
+| 3c | An absent built-in directory is an empty layer | `builtInLayer.test.ts` "treats a missing built-in directory as an empty layer" |
+| 3d | No write surface that takes a layer writes into the built-in layer or, refused, into the project instead; a copy out of it is allowed | `app/test/builtInLayer.test.ts` "refuses every write surface that takes a layer", "leaves the layer byte-for-byte as it was, and writes nothing into the project instead", "allows the override: a COPY out of the layer, into the project or the shared root" |
+| 3e | A module under the built-in layer needs no approval, and a person's copy of one does | `builtInLayer.test.ts` "runs a shipped `.ts` function nobody approved, and freezes it into the snapshot", "gates a person's copy that shadows the shipped function, exactly as before" |
 | 4 | A task's worktree path never lies inside the project directory | `worktrees.test.ts` "creates a worktree outside the project for a bound task and records it" |
 | 5 | Two spellings of one directory never give two keys, and two directories never share one | `shared.test.ts` "collapses spellings of the same directory to one key", "keeps genuinely different directories apart", "ignores case on Windows, where one path is one directory" |
 | 6 | Case is never folded off Windows, and a directory that does not exist still has a key | `shared.test.ts` "keeps case elsewhere, where two spellings are two directories", "answers for a directory that does not exist yet, which is what `init` hands it" |
@@ -74,7 +93,10 @@ It deliberately does not own:
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| `JAIRA_HOME` names a project's own `.jaira/` | `roots` collapses to that one directory | point `JAIRA_HOME` at the shared root | the project shows no shared layer |
+| `JAIRA_HOME` names a project's own `.jaira/` | `roots` collapses to that directory and the built-in layer | point `JAIRA_HOME` at the shared root | the project shows no shared layer |
+| The built-in directory is missing, as in a build that copied nothing | every listing of it is empty and every search moves on | rebuild, so `dist/builtin/` is copied | a state only the layer supplied is an unknown state; everything else runs |
+| A write names the `system` layer | `AppService.writable` refuses it before any path is resolved; `syncStatus` answers a `blocked` line instead | copy the file into the shared root or the project | the refusal `what ships with JaiRA is read-only` |
+| A packager wraps `dist/` in an asar | worker threads and the TypeScript compiler host cannot read the layer there | ship the directory as an extra resource at `<resources>/builtin`, which `defaultBuiltInDir` looks for first | none today: nothing packages the app yet |
 | A suite runs without the repository's vitest setup, so `JAIRA_HOME` is unset | `defaultBaseDir` throws, naming how to run the tests | run from the repository root | the test fails with that message |
 | `--home` has no value, or the next token is a flag | the CLI exits 2 with `--home needs a directory` and the usage; the app ignores the flag | pass a directory | a usage error in the terminal; the app opens its usual root |
 | `user-settings.json` does not parse | `settingsBaseDir` reads the defaults, so a saved `baseDir` is not used | fix the file | the app opens on `~/.jaira` |

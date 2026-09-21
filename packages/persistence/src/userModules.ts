@@ -211,6 +211,52 @@ interface ApprovalRow {
   mac: string;
 }
 
+/**
+ * Whether a module file is the app's OWN code — under the built-in layer (decision 0006) — and
+ * therefore not something a person is asked to approve.
+ *
+ * The whole layer rather than its `functions/` alone: the decision names `$SYSTEM/functions` because
+ * that is where a callee lives, but a shipped function that imports a helper from beside it would
+ * otherwise put an approval prompt in front of somebody for code that came in the same installer.
+ *
+ * By LOCATION, and only by location. A person's `~/.jaira/functions/text.ts` that shadows a shipped
+ * `text.ts` is a different file at a different path, so it is not under this directory and is gated
+ * exactly as it always was; being a copy of trusted bytes does not make a file trusted, because the
+ * next edit to it is nobody's but theirs.
+ *
+ * Compared on the canonical spelling with a trailing slash, so `…/builtin-evil/x.ts` is not "under"
+ * `…/builtin`. Case-insensitive on Windows only, where the two spellings are
+ * one directory — the same rule `sessionKey` follows.
+ */
+export function isBuiltInModule(file: string, builtInDir: string): boolean {
+  const fold = (path: string): string => (process.platform === "win32" ? path.toLowerCase() : path);
+  const root = `${fold(canonicalModulePath(builtInDir))}/`;
+  return fold(canonicalModulePath(file)).startsWith(root);
+}
+
+/**
+ * An approval store that answers YES for the built-in layer's modules and defers for everything else.
+ *
+ * The exemption is expressed as a store rather than as a branch at each gate because there are three
+ * gates — the symbol index, the pending-approvals walk and the freeze — and two of them live
+ * upstream, where the only seam is `ApprovalStore.approved`. Answering with the file's CURRENT hash
+ * is what "exempt" means in that contract: whatever bytes ship are the bytes agreed to, so an app
+ * upgrade that changes a built-in function does not put a prompt in front of anybody.
+ *
+ * A file that cannot be read has no current hash and is answered `undefined` — unapproved — which is
+ * the conservative reading the rest of this module takes of "cannot tell".
+ *
+ * Only `approved` is widened. `all` and `unverified` still describe the PERSON's table: a settings
+ * page listing what they agreed to run should not list code they were never asked about.
+ */
+export function trustingBuiltIn(approvals: Approvals, builtInDir: string, vfs: Vfs): Approvals {
+  return {
+    ...approvals,
+    approved: (file) =>
+      isBuiltInModule(file, builtInDir) ? currentHashOf(vfs, file) : approvals.approved(file),
+  };
+}
+
 // --- The process-wide pair ----------------------------------------------------
 
 export interface UserModules {
@@ -249,8 +295,16 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   // single load self-consistent and what makes a process-wide one go stale — so a rebuild is the only
   // way a function file added after startup becomes visible, and it must not inherit the old cache.
   const vfs = nodeVfs();
-  const approvals = approvalsIn(paths.base);
-  const searchPath = (options.searchPath ?? workflowSearchPath(paths.roots)).map(canonicalModulePath);
+  // Everything below asks THIS store, so the built-in layer's exemption (decision 0006) holds at all
+  // three gates at once — the index, the pending walk and the freeze — rather than at whichever of
+  // them somebody remembered.
+  const approvals = trustingBuiltIn(approvalsIn(paths.base), paths.builtIn.dir, vfs);
+  // The built-in layer's directories close the list whatever was configured, for the reason
+  // `searchPathFor` gives: `workflows.path` replaces the generated list, and what ships is not
+  // something a replacement may drop.
+  const builtIn = workflowSearchPath([paths.builtIn.dir]).map(canonicalModulePath);
+  const configured = (options.searchPath ?? workflowSearchPath(paths.roots)).map(canonicalModulePath);
+  const searchPath = [...configured.filter((dir) => !builtIn.includes(dir)), ...builtIn];
   const requirePath = requirePathFor(searchPath);
   // ONE parse cache behind both indexes. Named off the option rather than off a `SymbolTable` import
   // because hw does not re-export that type — and a cache is exactly the thing that must not be two

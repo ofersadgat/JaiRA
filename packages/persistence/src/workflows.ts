@@ -29,7 +29,7 @@ import type { FunctionCapabilities } from "@declarative-ai/exec";
 import { loadBundle, parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
 import { baseAsProjectPaths, componentConfigIssues, parseJsonText, type JairaPaths } from "@jaira/shared";
 import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
-import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
+import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry, WorkflowLayer, WritableLayer } from "@jaira/shared";
 import type { Project } from "./project";
 import { checkLabel } from "./runLabel";
 import { isStateFile } from "./snapshots";
@@ -116,35 +116,56 @@ export interface BrowseOptions {
  * Where a browse, a digest or a sync reads its workflows from.
  *
  * Named because there are two answers and they are not the same shape. With a project open the
- * search is two layers deep and writes land in the project's `.jaira/`; with none open the shared
- * root is the only layer there is and writes land in IT. Everything downstream — the browser, the
+ * search is three layers deep and writes land in the project's `.jaira/`; with none open the shared
+ * root is the only layer a PERSON has and writes land in it. Either way the built-in layer
+ * (decision 0006) closes the list, read and never written — which is why {@link layer} cannot be
+ * it. Everything downstream — the browser, the
  * digest, the sync baseline — needs the same four facts, and a second code path that re-derived
  * them is how the projectless mode would end up disagreeing with the project one about which file
  * a state came from.
  */
 export interface LayerSource {
   /** The layer roots, in search order — first match wins, exactly as reference resolution does. */
-  layers: ReadonlyArray<{ dir: string; layer: "project" | "base" }>;
+  layers: ReadonlyArray<{ dir: string; layer: WorkflowLayer }>;
   /**
    * The layer this source AUTHORS in: the one a sync may propose files against, and the one a
    * baseline hashes. Always the first layer — the others are inherited and read-only from here.
    */
-  layer: "project" | "base";
+  layer: WritableLayer;
   paths: JairaPaths;
   searchPath?: readonly string[] | undefined;
   tasks: TaskIndex;
 }
 
-/** The two layers a project searches, and the project layer as the one it writes. */
+/**
+ * The layers a root's OWN directories are followed by: the built-in one (decision 0006), unless it
+ * is already listed.
+ *
+ * Browsed for the reason the base is browsed from a project — a state a person can run has to be
+ * visible where runnable states are shown, and a shipped workflow that fails to lint should say so
+ * in the listing rather than at the first start. Deduplicated by directory, as `paths.roots` is.
+ */
+function withBuiltIn(
+  own: ReadonlyArray<{ dir: string; layer: WorkflowLayer }>,
+  paths: JairaPaths,
+): Array<{ dir: string; layer: WorkflowLayer }> {
+  const dir = paths.builtIn.workflowsDir;
+  return own.some((entry) => entry.dir === dir) ? [...own] : [...own, { dir, layer: "system" }];
+}
+
+/** The three layers a project searches, and the project layer as the one it writes. */
 export function projectSource(project: Project): LayerSource {
   // The base root is browsed too, or the states a project inherits would be invisible in exactly
   // the surface meant to show what it can run — and a lint error in a shared workflow would only
   // ever surface as a load failure in whichever project first used it.
   return {
-    layers: [
-      { dir: project.paths.workflowsDir, layer: "project" },
-      { dir: project.paths.base.workflowsDir, layer: "base" },
-    ],
+    layers: withBuiltIn(
+      [
+        { dir: project.paths.workflowsDir, layer: "project" },
+        { dir: project.paths.base.workflowsDir, layer: "base" },
+      ],
+      project.paths,
+    ),
     layer: "project",
     paths: project.paths,
     searchPath: project.config.workflows.path,
@@ -168,7 +189,7 @@ export function baseSource(baseDir: string, project?: Project): LayerSource {
   // stale snapshot. Without it every shared state reads as one nothing has ever run, and the Files
   // view says so, wrongly.
   return {
-    layers: [{ dir: paths.workflowsDir, layer: "base" }],
+    layers: withBuiltIn([{ dir: paths.workflowsDir, layer: "base" }], paths),
     layer: "base",
     paths,
     tasks: project === undefined ? EMPTY_TASKS : tasksOf(project),
@@ -248,12 +269,12 @@ function tasksOf(project: Project): TaskIndex {
  */
 function browseLayers(
   paths: JairaPaths,
-  layers: ReadonlyArray<{ dir: string; layer: "project" | "base" }>,
+  layers: ReadonlyArray<{ dir: string; layer: WorkflowLayer }>,
   searchPath: readonly string[] | undefined,
   tasks: TaskIndex,
   options: BrowseOptions,
 ): WorkflowBrowser {
-  const byStateId = new Map<string, { file: string; raw: unknown; layer: "project" | "base"; root: string }>();
+  const byStateId = new Map<string, { file: string; raw: unknown; layer: WorkflowLayer; root: string }>();
   const fileEntries: WorkflowFileEntry[] = [];
   for (const { dir, layer } of layers) {
     const { files, errors } = readWorkflowsTolerantly(dir);

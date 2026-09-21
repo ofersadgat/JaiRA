@@ -117,9 +117,11 @@ describe("openSharedProject — the selected root, as a project", () => {
     expect(readFileSync(old, "utf8")).toBe(wholesale);
   });
 
-  it("searches only itself — there is no layer behind the layer", () => {
+  it("searches itself and then what ships — no PERSON's layer is behind the layer", () => {
+    // The built-in layer (decision 0006) closes every search path, this one included: the shared
+    // root opened as a project still gets the conversations and the self-test JaiRA ships.
     const shared = track(openSharedProject({ baseDir }));
-    expect(shared.paths.roots).toEqual([shared.paths.projectDir]);
+    expect(shared.paths.roots).toEqual([shared.paths.projectDir, shared.paths.builtIn.dir]);
   });
 
   it("says which kind of project it is, because the refusals below key off it", () => {

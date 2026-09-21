@@ -262,6 +262,9 @@ describe("the project search path", () => {
       join(project.paths.jairaDir, "functions"),
       project.paths.base.workflowsDir,
       project.paths.base.functionsDir,
+      // What ships, last (decision 0006) — see `builtInLayer.test.ts` for what that layer promises.
+      project.paths.builtIn.workflowsDir,
+      project.paths.builtIn.functionsDir,
     ]);
   });
 
@@ -269,6 +272,7 @@ describe("the project search path", () => {
     expect(workflowLoadOptions(project.paths).rootPath).toEqual([
       project.paths.jairaDir,
       project.paths.base.baseDir,
+      project.paths.builtIn.dir,
     ]);
   });
 });

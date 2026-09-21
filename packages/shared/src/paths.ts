@@ -8,6 +8,9 @@
  * overrides. The two directories have the same shape on purpose — a workflow moves
  * between them by being copied, with nothing to rewrite.
  *
+ * Behind both sits a THIRD layer nobody writes: what JaiRA ships ({@link JairaBuiltInPaths},
+ * decision 0006). It has the authored half of the shape and none of the generated half.
+ *
  * Within either root there is ONE line, and {@link SYSTEM_DIR_NAME} draws it:
  *
  *  - **Beside `system/`** — `workflows/`, `functions/`, `skills/`, `prompts/`, `settings.json` — is
@@ -19,9 +22,10 @@
  * next to a database, a WAL file, a snapshot cache and a pile of run logs. The layout said nothing
  * about which of those they owned; now the top level of a root is exactly what they own.
  */
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
 // Declared in `./hiddenPaths` rather than here, and re-exported so `@jaira/shared` is unchanged:
 // the Files screen needs the spelling too, and this module imports `node:fs`, which a renderer
@@ -89,13 +93,23 @@ export interface JairaPaths {
    */
   base: JairaBasePaths;
   /**
-   * The ordered LAYER ROOTS: this project's `.jaira/`, then the shared one.
+   * What JaiRA ships, as the layer behind both others (`$SYSTEM` in a reference — decision 0006).
+   *
+   * Read-only and always LAST: see {@link JairaBuiltInPaths}. Named `builtIn` here rather than
+   * `system`, because {@link systemDir} already means something else — the directory of generated
+   * files inside a root, which is also what `$SYSTEM` means in an ARTIFACT DESTINATION. The two
+   * vocabularies never meet (a destination template is not a reference), but two fields of one
+   * object both called `system` would.
+   */
+  builtIn: JairaBuiltInPaths;
+  /**
+   * The ordered LAYER ROOTS: this project's `.jaira/`, then the shared one, then what ships.
    *
    * The single list everything else is derived from. A bare `$` is searched along
-   * it, so `$/prompts/goals.md` finds the project's copy if there is one and the
-   * shared copy otherwise; and the workflow search path is generated from it
-   * (`<root>/workflows`, `<root>/functions` per root) rather than maintained by
-   * hand. Adding a third layer later is one more entry here and nothing else.
+   * it, so `$/prompts/goals.md` finds the project's copy if there is one, the
+   * shared copy otherwise, and the shipped one where nobody wrote either; and the workflow search
+   * path is generated from it (`<root>/workflows`, `<root>/functions` per root) rather than
+   * maintained by hand. The built-in layer is the LAST entry, whatever else is true.
    */
   roots: string[];
   /**
@@ -184,6 +198,118 @@ export interface JairaBasePaths {
 
 
 export const WORKTREES_DIR_NAME = ".jaira-worktrees";
+
+/**
+ * The built-in layer (`$SYSTEM`, decision 0006): what JaiRA ships, at the END of the search path.
+ *
+ * A directory with the same shape as the other two layer roots — `workflows/`, `prompts/`,
+ * `functions/`, `toolsets/` — so a state, a prompt or a toolset moves between layers by being
+ * copied, with nothing to rewrite. Three properties make it a layer of its own rather than a third
+ * copy of the shared root:
+ *
+ *  - **It is last, always.** {@link jairaPaths} appends it after everything else and
+ *    `workflowLoadOptions` appends its search directories after whatever `workflows.path`
+ *    configured, so configuration can neither move it ahead of a person's file nor drop it.
+ *  - **It is read-only.** Nothing JaiRA does writes here; "override" copies a file UP a layer. It
+ *    has no `system/`, no database and no settings — nothing is generated into it.
+ *  - **It is trusted.** A `.ts` function under `functions/` here is the app's own code and is not
+ *    put to the module approval gate (`userModules.ts`). A person's copy that shadows one is theirs,
+ *    and gated like any other.
+ *
+ * The directory may not exist — a build that shipped nothing, a checkout mid-move. That is an empty
+ * layer, not an error: the vfs lists an absent directory as empty and the search moves on, which is
+ * the same rule that makes a machine with no `~/.jaira` yet harmless.
+ */
+export interface JairaBuiltInPaths {
+  dir: string;
+  workflowsDir: string;
+  functionsDir: string;
+  promptsDir: string;
+  toolsetsDir: string;
+}
+
+/** The layer's directory name, in the source tree and beside a bundle. See {@link defaultBuiltInDir}. */
+export const BUILT_IN_DIR_NAME = "builtin";
+
+export function jairaBuiltInPaths(builtInDir: string = defaultBuiltInDir()): JairaBuiltInPaths {
+  const dir = resolve(builtInDir);
+  return {
+    dir,
+    workflowsDir: join(dir, "workflows"),
+    functionsDir: join(dir, "functions"),
+    promptsDir: join(dir, "prompts"),
+    toolsetsDir: join(dir, "toolsets"),
+  };
+}
+
+let registeredBuiltInDir: string | undefined;
+let locatedBuiltInDir: string | undefined;
+
+/**
+ * Name the built-in layer's directory for this process, or pass `undefined` to go back to finding it.
+ *
+ * For a host that keeps the directory somewhere {@link defaultBuiltInDir} cannot guess, and for a
+ * test that wants a fixture in its place across code it does not call directly. Deliberately NOT an
+ * environment variable and NOT a settings key: files under this directory skip the module approval
+ * gate, so whatever can name it can run code unasked. A process's own startup code is allowed that;
+ * a project's `.env`, or a `settings.json` an agent can edit, is not.
+ */
+export function setBuiltInDir(dir: string | undefined): void {
+  registeredBuiltInDir = dir === undefined ? undefined : resolve(dir);
+}
+
+/**
+ * Where the built-in layer lives when nobody has said (decision 0006, step 1).
+ *
+ * The layer's source of truth is `packages/shared/builtin/`, and both bundlers copy it to
+ * `dist/builtin/` beside their output (`packages/cli/build.mjs`, `packages/app/build.mjs`). So the
+ * directory is found relative to THIS module, in whichever of its shapes is running:
+ *
+ *  1. `<process.resourcesPath>/builtin` — a packaged Electron app that ships the directory as an
+ *     extra resource. Outside `app.asar` on purpose: the layer is read with plain `node:fs` by the
+ *     main process, by worker threads and by the TypeScript compiler host, and a real directory is
+ *     the one thing all of them can read. Under `electron .` this is Electron's own resources
+ *     directory, which holds no `builtin/`, so the search moves on.
+ *  2. `<dir of this file>/builtin` — a bundle. `dist/cli.mjs` and `dist/main.cjs` both inline this
+ *     module, so "this file" is the bundle and the copy sits beside it. This is how the published
+ *     CLI finds it: its `files: ["bin", "dist"]` already ships `dist/builtin/`.
+ *  3. `<dir of this file>/../builtin` — TypeScript source under tsx or vitest, where this file is
+ *     `packages/shared/src/paths.ts`.
+ *
+ * The first one that EXISTS wins, and the answer is remembered: it cannot change while a process
+ * runs, and `jairaPaths` is called far too often to stat three directories each time. When none
+ * exists the answer is (2) anyway — a path is not a claim that anything is there, and an absent
+ * layer reads as an empty one.
+ *
+ * `typeof __filename` for the reason `nativeBinding.ts` gives: the Electron main bundle is CJS,
+ * where `__filename` exists; the CLI bundle and the sources are ESM, where `import.meta.url` does.
+ */
+export function defaultBuiltInDir(): string {
+  if (registeredBuiltInDir !== undefined) return registeredBuiltInDir;
+  if (locatedBuiltInDir !== undefined) return locatedBuiltInDir;
+  const here = dirname(typeof __filename === "string" ? __filename : fileURLToPath(import.meta.url));
+  const resources = (process as { resourcesPath?: unknown }).resourcesPath;
+  const candidates = [
+    ...(typeof resources === "string" && resources.length > 0 ? [join(resources, BUILT_IN_DIR_NAME)] : []),
+    join(here, BUILT_IN_DIR_NAME),
+    join(here, "..", BUILT_IN_DIR_NAME),
+  ];
+  locatedBuiltInDir = candidates.find((dir) => existsSync(dir)) ?? join(here, BUILT_IN_DIR_NAME);
+  return locatedBuiltInDir;
+}
+
+/**
+ * The layer roots in search order, with the built-in one last and nothing listed twice.
+ *
+ * One function because both layouts need the same two rules: a directory that is already a layer is
+ * not searched again (tests and a misconfigured `JAIRA_HOME` both point the base at the project),
+ * and the built-in layer goes on the end whatever came before it.
+ */
+function layerRoots(own: readonly string[], builtIn: JairaBuiltInPaths): string[] {
+  const out: string[] = [];
+  for (const dir of [...own, builtIn.dir]) if (!out.includes(dir)) out.push(dir);
+  return out;
+}
 
 
 
@@ -292,14 +418,16 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
  * sit directly under it, because it is the library rather than a checkout's override of one. So this
  * maps the base's own fields onto the project shape, with two deliberate differences:
  *
- *  - **`roots` is the base alone.** There is no layer behind it; it IS the layer behind everything
- *    else. A project's `roots` puts its own `.jaira/` first and this second.
+ *  - **`roots` is the base, then what ships.** No PERSON's layer is behind it; it is the layer
+ *    behind every project. A project's `roots` puts its own `.jaira/` first and this second, and the
+ *    built-in layer is last in both.
  *  - **`worktreesDir` is fabricated.** `~` is not a git repository and JaiRA's own runs are refused a
  *    branch, so nothing ever resolves it. It is present because the type requires it, and pointing it
  *    somewhere impossible is better than pointing it somewhere plausible.
  */
-export function baseAsProjectPaths(baseDir: string = defaultBaseDir()): JairaPaths {
+export function baseAsProjectPaths(baseDir: string = defaultBaseDir(), builtInDir?: string): JairaPaths {
   const base = jairaBasePaths(baseDir);
+  const builtIn = jairaBuiltInPaths(builtInDir);
   return {
     projectDir: base.baseDir,
     // The base has no `.jaira/` inside it: it IS one. `system/` therefore sits directly under the
@@ -320,19 +448,23 @@ export function baseAsProjectPaths(baseDir: string = defaultBaseDir()): JairaPat
     syncFile: base.syncFile,
     worktreesDir: join(base.baseDir, WORKTREES_DIR_NAME),
     base,
-    roots: [base.baseDir],
+    builtIn,
+    roots: layerRoots([base.baseDir], builtIn),
   };
 }
 
 /**
  * `baseDir` is a parameter rather than always read from the environment so a test
- * (and the app's own settings surface) can point a project at a scratch base.
+ * (and the app's own settings surface) can point a project at a scratch base. `builtInDir` is one
+ * for the first of those reasons only: a test hands in a fixture, and nothing a person configures
+ * reaches it.
  */
-export function jairaPaths(projectDir: string, baseDir?: string): JairaPaths {
+export function jairaPaths(projectDir: string, baseDir?: string, builtInDir?: string): JairaPaths {
   const root = resolve(projectDir);
   const jairaDir = join(root, JAIRA_DIR_NAME);
   const system = join(jairaDir, SYSTEM_DIR_NAME);
   const base = jairaBasePaths(baseDir ?? defaultBaseDir());
+  const builtIn = jairaBuiltInPaths(builtInDir);
   return {
     projectDir: root,
     jairaDir,
@@ -354,7 +486,8 @@ export function jairaPaths(projectDir: string, baseDir?: string): JairaPaths {
     // A project's own `.jaira/` always leads: a layer that could be pushed behind another would
     // stop being an override. Deduplicated, so pointing the base at the project (which tests and
     // a misconfigured `JAIRA_HOME` both do) does not search the same directory twice.
-    roots: base.baseDir === jairaDir ? [jairaDir] : [jairaDir, base.baseDir],
+    builtIn,
+    roots: layerRoots([jairaDir, base.baseDir], builtIn),
   };
 }
 

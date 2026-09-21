@@ -455,8 +455,23 @@ export interface LintIssue {
  * `project` is the project's own `.jaira/`; `base` is the shared root behind every project on the
  * machine. The distinction is not cosmetic — editing a `base` file changes every project that has
  * not overridden it, so the UI has to be able to say so before someone types.
+ *
+ * `system` is what JaiRA ships (`$SYSTEM`, decision 0006): the last layer, behind both. It is
+ * READ-ONLY — every write surface that takes a layer refuses this one, and "override" means copying
+ * the file up into one of the other two.
  */
-export type WorkflowLayer = "project" | "base";
+export type WorkflowLayer = "project" | "base" | "system";
+
+/** The layers a person can write to — every layer but the one that ships. */
+export type WritableLayer = Exclude<WorkflowLayer, "system">;
+
+/**
+ * Whether a write may land in this layer. The one spelling of the rule, so a new write surface has
+ * something to call rather than a comparison to remember.
+ */
+export function isWritableLayer(layer: WorkflowLayer): layer is WritableLayer {
+  return layer !== "system";
+}
 
 /** One state file in the browser's tree. */
 export interface WorkflowFileEntry {

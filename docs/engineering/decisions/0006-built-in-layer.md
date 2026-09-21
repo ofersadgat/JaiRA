@@ -150,6 +150,41 @@ person owns.
 5. With 0005 step 6 and 0007 step 4: `chat/session`, `chat/control`, and
    the toolsets they name.
 
+## Built
+
+**Step 1 (2026-09-21).** `packages/shared/src/paths.ts` holds the layer (`JairaBuiltInPaths`,
+`paths.builtIn`, `roots` ending with it); `packages/persistence/src/workflowRefs.ts` adds `SYSTEM`
+to the reference roots and forces the layer's two directories to the end of the search path;
+`userModules.ts` holds the exemption (`trustingBuiltIn`); `WorkflowLayer` gained `"system"`.
+Tests: `packages/persistence/test/builtInLayer.test.ts`, `packages/app/test/builtInLayer.test.ts`.
+What the build settled that the text above left open:
+
+- **Where the directory lives.** Its source is `packages/shared/builtin/`, and both bundlers copy
+  it to `dist/builtin/` beside their output, so the published CLI ships it through the `dist` it
+  already publishes. `defaultBuiltInDir()` looks in `<resources>/builtin` (a packaged app), then
+  beside the running module (a bundle), then one level up (source under tsx and vitest). It is a
+  real directory and not something inside an asar, because worker threads and the TypeScript
+  compiler host read it with plain `node:fs`; so "the vfs over the app's resources" is the
+  ordinary `nodeVfs`.
+- **Nothing a person configures can name it.** `setBuiltInDir` is a call a host makes at startup
+  and a test makes for a fixture. There is no environment variable and no settings key, because
+  whatever names the directory names code that runs unapproved.
+- **`workflows.path` cannot drop it.** A configured path replaces the generated list, so the
+  layer's directories are appended after it and lifted out of it if it named them earlier.
+- **The exemption covers the whole layer, not `functions/` alone**, so a shipped function that
+  imports a helper from beside it does not prompt. It is decided by location: a byte-identical copy
+  elsewhere is gated.
+- **`$SYSTEM/…` pins a document and not a state.** A state reference under any search directory
+  folds to its bare id upstream, as `$BASE/workflows/…` always has, so shadowing applies to it.
+- **`$SYSTEM` was already a word in artifact destinations** (a root's generated `system/`). The two
+  vocabularies never meet, and the code says `builtIn` for the layer and `systemDir` for the other.
+- **The write refusal is one guard.** `AppService.writable` is called by every surface that takes
+  a layer and changes a file; before it, a `system` layer fell through each
+  `layer === "base" ? … : …` as `project`. A copy OUT of the layer is allowed — it is the override.
+- **The Files tree does not draw the third root yet.** The workflow listing and lint see three
+  layers; the tree is where files are made, and its read-only root belongs with steps 3–4.
+- The layer ships holding only a `README.md`. The install steps are untouched (step 2).
+
 ## Revisit when
 
 Overrides of built-ins go stale often enough that people are running old

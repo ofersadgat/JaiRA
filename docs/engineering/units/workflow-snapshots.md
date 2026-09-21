@@ -2,13 +2,13 @@
 id: engineering/units/workflow-snapshots
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/work-runs-the-process-it-started-with]
 layer: data
 owns_contracts: [engineering/contracts/workflow-snapshot]
 requires: []
 implemented_by: [packages/persistence/src/snapshots.ts]
-verified_by: [packages/persistence/test/snapshots.test.ts, packages/persistence/test/workflowRefs.test.ts]
+verified_by: [packages/persistence/test/snapshots.test.ts, packages/persistence/test/workflowRefs.test.ts, packages/persistence/test/builtInLayer.test.ts]
 siblings: [engineering/units/task-lifecycle, engineering/units/module-approvals, engineering/units/workflow-browser, engineering/units/board-projection]
 ---
 
@@ -24,6 +24,10 @@ siblings: [engineering/units/task-lifecycle, engineering/units/module-approvals,
 - `readWorkflowFiles(workflowsDir, {onError})`, `readStateDocument`, `isStateFile` and `STATE_SUFFIXES` read authored `.json`, `.yaml` and `.yml` state files through upstream `parseReferencedFile`, skipping dotfiles, for the loads that build a bundle from `workflows/`.
 
 The directory layout and meta fields are [workflow-snapshot](../contracts/workflow-snapshot.md).
+
+### A snapshot's closure spans all three layers, and records none of them
+
+A bundle is resolved along the project's `.jaira/`, the shared root and the built-in layer `$SYSTEM` ([project-layout](project-layout.md), [decision 0006](../decisions/0006-built-in-layer.md)), and a snapshot stores the result: each resolved state, with every document it transcluded already spliced in, and each frozen module's emit. Which layer supplied a file is not stored, because nothing reads a layer again once a task is pinned. So a state, a prompt or a `.ts` function that came from the built-in layer is copied like any other, and an app upgrade that changes or removes the shipped file does not change a task that already started. A module under the built-in layer is frozen without an approval: [module-approvals](module-approvals.md).
 
 It deliberately does not own:
 
@@ -59,6 +63,7 @@ It deliberately does not own:
 | 6 | A refused rename is retried, a concurrent writer's identical snapshot ends the wait, and a final failure reports the rename's own error | `snapshots.test.ts` "retries, and the snapshot lands once the handle closes", "stops as soon as a concurrent writer's identical snapshot appears", "gives up with the rename's own error, not a cleanup failure" |
 | 7 | An out-of-tree state round-trips under its canonical id | `workflowRefs.test.ts` "round-trips an out-of-tree state through a snapshot" |
 | 8 | Editing a referenced document after a task started does not change what it runs, and a different document gives a different hash | `workflowRefs.test.ts` "pins the referenced file, so editing it cannot change a started task", "gives a different hash when a referenced file differs" |
+| 8a | What the built-in layer supplied is copied like any other layer's, so a pinned task keeps it when the shipped file changes, disappears, or the whole layer does | `builtInLayer.test.ts` "copies what the layer supplied into the snapshot — state, child and fragment", "survives the layer vanishing altogether", "runs a shipped `.ts` function nobody approved, and freezes it into the snapshot" |
 | 9 | A state id with an empty, `.` or `..` segment is never written as a path | unasserted |
 | 10 | The workflow walk reads nested state files and skips dotfiles | `snapshots.test.ts` "readWorkflowFiles walks nested state files and skips dotfiles" |
 

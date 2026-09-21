@@ -77,15 +77,21 @@ export interface WorkflowRefOptions {
 /**
  * Build the reference-resolution options for one project.
  *
- * `roots` is deliberately small: `$JAIRA` and `$PROJECT` are the two anchors a workflow can name.
+ * `roots` is deliberately small: `$JAIRA` and `$PROJECT` are the two anchors a workflow can name
+ * in its own project, `$BASE` names the shared root, and `$SYSTEM` names what JaiRA ships
+ * (decision 0006) — for an author who means exactly the shipped copy, whatever shadows it.
  * `$WORKTREE` is absent because it is per-TASK — a workflow definition is loaded before any task
  * binds a worktree, and a reference that resolved differently per task would make the snapshot hash
  * depend on which task read it.
+ *
+ * ⚠️ `$SYSTEM` HERE is the built-in layer (`paths.builtIn.dir`). In an ARTIFACT DESTINATION the same
+ * spelling is a root's generated `system/` directory (`artifactPath.ts`). Two vocabularies that never
+ * meet — a destination template is not a reference — but worth knowing before grepping for one.
  */
 export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptions = {}): LoadBundleOptions {
   const workflowsDir = options.workflowsDir ?? paths.workflowsDir;
-  const roots = { JAIRA: paths.jairaDir, PROJECT: paths.projectDir, BASE: paths.base.baseDir };
-  const searchPath = searchPathFor(workflowsDir, roots, options.path ?? workflowSearchPath(paths.roots));
+  const roots = { JAIRA: paths.jairaDir, PROJECT: paths.projectDir, BASE: paths.base.baseDir, SYSTEM: paths.builtIn.dir };
+  const searchPath = searchPathFor(workflowsDir, roots, options.path ?? workflowSearchPath(paths.roots), paths.builtIn.dir);
   return {
     defaultRoot: searchPath,
     roots,
@@ -143,14 +149,29 @@ function userModuleOptions(watch?: UnapprovedWatch): Pick<LoadBundleOptions, "sy
  * An entry naming a directory that does not exist is harmless: the vfs lists it as empty, and the
  * search moves on. That is what makes `$BASE/workflows` a safe default on a machine with no shared
  * root yet, and `$JAIRA/functions` a safe one before anything is in it.
+ *
+ * The built-in layer's two directories are forced LAST, as `workflowsDir` is forced first and for the
+ * mirrored reason (decision 0006): `workflows.path` REPLACES the generated list, so a project that
+ * set it would otherwise have silently dropped everything JaiRA ships — and one that listed
+ * `$SYSTEM/workflows` early would have put the shipped copy ahead of a person's override of it. An
+ * entry naming them is therefore lifted out of wherever it was written and put on the end.
  */
-function searchPathFor(workflowsDir: string, roots: Readonly<Record<string, string>>, configured: readonly string[] | undefined): string[] {
+function searchPathFor(
+  workflowsDir: string,
+  roots: Readonly<Record<string, string>>,
+  configured: readonly string[] | undefined,
+  builtInDir: string,
+): string[] {
+  const last = workflowSearchPath([builtInDir]);
   const out = [workflowsDir];
   for (const entry of configured ?? []) {
     const match = /^\$([A-Z_][A-Z0-9_]*)?(?:\/(.*))?$/.exec(entry);
     const expanded = match ? join(roots[match[1] ?? "JAIRA"] ?? "", match[2] ?? "") : entry;
-    if (expanded.length > 0 && !out.includes(expanded)) out.push(expanded);
+    if (expanded.length > 0 && !out.includes(expanded) && !last.includes(expanded)) out.push(expanded);
   }
+  // Unless the project's own workflows directory IS the built-in one — which is nobody's layout, but
+  // a directory must not be searched twice whoever asked.
+  for (const dir of last) if (!out.includes(dir)) out.push(dir);
   return out;
 }
 

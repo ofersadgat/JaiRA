@@ -14,7 +14,8 @@
  * before the CLI has printed anything. Declaring it as a dependency is what externalizes it.
  */
 import { build } from "esbuild";
-import { rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { cp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -54,4 +55,12 @@ await build({
   entryPoints: { mcpBridgeWorker: fileURLToPath(import.meta.resolve("@declarative-ai/agents-cli/mcpBridgeWorker")) },
 });
 
-console.log("built dist/cli.mjs and dist/mcpBridgeWorker.mjs");
+// The built-in layer (`$SYSTEM`, decision 0006): state files, prompts, functions and toolsets that
+// ship with JaiRA and sit at the end of every search path. They are DATA the bundle reads with
+// `node:fs`, not code it imports, so esbuild does not carry them — they are copied beside the bundle,
+// which is the second place `defaultBuiltInDir` (shared/paths.ts) looks. `files: ["bin", "dist"]`
+// then publishes them with no further mention. `dist` was emptied above, so nothing stale survives.
+const builtIn = fileURLToPath(new URL("../shared/builtin", import.meta.url));
+if (existsSync(builtIn)) await cp(builtIn, "dist/builtin", { recursive: true });
+
+console.log("built dist/cli.mjs, dist/mcpBridgeWorker.mjs and dist/builtin/");

@@ -224,7 +224,16 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
       // sits directly under it.
       prefix: prefixOf(project.paths.projectDir, project.paths.roots[0] ?? project.paths.projectDir),
     },
-    ...project.paths.roots.slice(1).map((dir) => ({ dir, layer: "base" as WorkflowLayer, prefix: "" })),
+    // The built-in layer (decision 0006) is the last of `roots` and is NOT drawn here. This tree is
+    // where files are made, renamed and deleted, and every one of its menus assumes a root it can
+    // write to; the read-only third root arrives with the layer picker's "Built in" segment (0006
+    // steps 3–4). What ships is still listed and linted — `browseWorkflows` reads all three layers —
+    // and labelling it `base` here, which is what this line did to every root after the first, would
+    // have offered to save into the installed app.
+    ...project.paths.roots
+      .slice(1)
+      .filter((dir) => dir !== project.paths.builtIn.dir)
+      .map((dir) => ({ dir, layer: "base" as WorkflowLayer, prefix: "" })),
   ];
   const roots = layerRoots.map(({ dir, layer, prefix }) => {
     const nodes = walkDir(dir, dir, layer, rules, prefix, layer === "project" ? project.paths.projectDir : undefined);
@@ -455,7 +464,11 @@ export function baseFileTree(baseDir: string, browser?: WorkflowBrowser, hidden?
   // working": the shared root is browsable with nothing open, and that was the one surface in JaiRA
   // that listed state files and never said a word about them.
   const lint = lintByStateId(browser);
-  const errors = new Map((browser?.files ?? []).filter((f) => f.error !== undefined).map((f) => [f.stateId, f.error!]));
+  // This layer's files only: the browser lists the built-in layer's too now (decision 0006), and a
+  // shipped file that failed to parse is not a fault in the shared file of the same id that shadows it.
+  const errors = new Map(
+    (browser?.files ?? []).filter((f) => f.error !== undefined && f.layer === "base").map((f) => [f.stateId, f.error!]),
+  );
   const mark = (list: FileNode[]): void => {
     for (const node of list) {
       if (node.stateId !== undefined) {
@@ -565,7 +578,9 @@ export function stateSlots(roots: readonly string[], stateIds: readonly string[]
 
 /** The workflows directory of every layer, in search order — what {@link stateInputs} resolves against. */
 export function workflowRoots(project: Project): string[] {
-  return [project.paths.workflowsDir, project.paths.base.workflowsDir];
+  // Three, with what ships last (decision 0006) — and each directory once, since the shared root
+  // opened as a project is its own base.
+  return [...new Set([project.paths.workflowsDir, project.paths.base.workflowsDir, project.paths.builtIn.workflowsDir])];
 }
 
 // --- boards ------------------------------------------------------------------
@@ -887,7 +902,12 @@ export function stateView(
   const entry = browser.files.find((f) => f.stateId === stateId && f.shadowed !== true)
     ?? browser.files.find((f) => f.stateId === stateId);
   const layer: WorkflowLayer = entry?.layer ?? "project";
-  const root = layer === "base" ? project.paths.base.workflowsDir : project.paths.workflowsDir;
+  const root =
+    layer === "system"
+      ? project.paths.builtIn.workflowsDir
+      : layer === "base"
+        ? project.paths.base.workflowsDir
+        : project.paths.workflowsDir;
   const file = entry !== undefined ? join(entry.root, entry.file) : `${stateFilePath(stateId, root)}.json`;
 
   const owning = rootContaining(browser, stateId);
