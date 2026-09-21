@@ -20,6 +20,7 @@ import type { RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
 import type { TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
+import type { TaskConnectRequest, TaskConnectResult, TaskConnectUndoRequest, TaskConnectUndoResult } from "./connect";
 import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAdoptRequest, TaskAdoptResult, TaskOutputRef } from "./adopt";
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
@@ -1772,6 +1773,16 @@ export interface IpcContract {
    * refusal is an ANSWER (`ok: false`), not a rejection: schema misfit, a hole, a missing input.
    */
   "task:adopt": { request: TaskAdoptRequest; response: TaskAdoptResult };
+  /**
+   * CONNECT (decision 0005 §1): send a task to a state, finding or making the workflow that relates
+   * the two — a move within its workflow, an adoption into a real one, or a modification of its
+   * frozen copy. With `dryRun` it changes nothing and answers the same shape, which is what a board
+   * asks once per column while a card hovers. A refusal is an ANSWER (`ok: false`): the inputs that
+   * do not bind with their schemas, the workflows to choose between, a forward move that needs `skip`.
+   */
+  "task:connect": { request: TaskConnectRequest; response: TaskConnectResult };
+  /** Take a connect back, with the token it handed out: un-adopt, or rewind to before the move. */
+  "task:connectUndo": { request: TaskConnectUndoRequest; response: TaskConnectUndoResult };
   /** "From a task…": the earlier tasks' outputs that fit each slot's schema. */
   "task:inputSources": { request: InputSourcesRequest; response: InputSourcesResponse };
   /** A task's merge requests, for the gate's remote strip (decision 0004). Reads nothing from the forge. */
@@ -2043,6 +2054,8 @@ export const IPC_CHANNELS = [
   "userEvent:deliver",
   "task:move",
   "task:adopt",
+  "task:connect",
+  "task:connectUndo",
   "task:inputSources",
   "remote:status",
   "remote:check",

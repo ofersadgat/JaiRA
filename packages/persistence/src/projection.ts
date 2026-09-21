@@ -562,6 +562,7 @@ function cardOf(
     ...(task.labels !== undefined ? { labels: task.labels } : {}),
     ...(heading !== undefined ? { heading } : {}),
     ...(task.origin !== undefined ? { origin: task.origin } : {}),
+    ...(task.origin?.kind === "adopt" ? { under: task.origin.taskId } : {}),
     ...(task.waitingFor !== undefined && task.waitingFor.length > 0 ? { waitingFor: task.waitingFor } : {}),
     ...(task.inReview !== undefined ? { inReview: task.inReview } : {}),
     updatedAt: task.updatedAt,

@@ -2141,6 +2141,16 @@ export default function App(): JSX.Element {
                           // wait by id: main answers that wait when it is still there, and moves the
                           // task itself when the run went on while the card was in the air.
                           onTaskDrop={(_requestId, card, columnKey) => void actions.moveTask(p.project, card.taskId, columnKey)}
+                          // A column NO rule offered is still somewhere a task can go (decision 0005
+                          // §1): the host finds or makes the workflow that relates the two. The dry
+                          // run is asked once per column per drag; the drop is the commit, with no
+                          // step after it; Undo is on the card it made or moved.
+                          connect={{
+                            ask: (card, column) => actions.connectPreview(p.project, card.taskId, column.stateId),
+                            onDrop: (card, column) => void actions.connectTask(p.project, card.taskId, column.stateId),
+                            undoable: new Set(Object.keys(state.connectUndo)),
+                            onUndo: (taskId) => void actions.undoConnect(taskId),
+                          }}
                         />
                       ) : (
                         <p className="empty">No board here yet.</p>

@@ -21,6 +21,8 @@ import {
   type SaveFileRequest,
   type InputSourcesRequest,
   type TaskAdoptRequest,
+  type TaskConnectRequest,
+  type TaskConnectUndoRequest,
   type TaskMoveRequest,
 } from "@jaira/shared";
 import { stackDetail } from "./diagnostics";
@@ -430,6 +432,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
   "task:move": ((request: TaskMoveRequest) => service.moveTask(request)) as Handler,
   "task:adopt": ((request: TaskAdoptRequest) => service.adoptTask(request)) as Handler,
+  "task:connect": ((request: TaskConnectRequest) => service.connectTask(request)) as Handler,
+  "task:connectUndo": ((request: TaskConnectUndoRequest) => service.undoConnect(request)) as Handler,
   "task:inputSources": ((request: InputSourcesRequest) => service.inputSources(request)) as Handler,
   "remote:status": ((request: { taskId: string; project?: string }) => service.remoteStatus(request.taskId, request.project)) as Handler,
   "remote:check": ((request: { taskId: string; project?: string }) => service.checkRemotes(request.taskId, request.project)) as Handler,

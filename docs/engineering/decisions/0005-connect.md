@@ -370,6 +370,7 @@ conversation's. Per-item workflows: items share one document.
    see "What step 4 settled" below.
 5. **`connect`** and the board drop with its hover preview and Undo. Until
    6, a drop whose inputs do not all bind is refused with what is missing.
+   **Built 2026-09-21** — see "What step 5 settled" below.
 6. **The conversations** (needs 0006): the `workflow` toolset over
    `connect`; `chat/session` growing its first child; `chat/control` for a
    task that becomes a dynamic workflow.
@@ -549,6 +550,95 @@ left open:
   subtree. `chat/control` and `chat/session` must carry their model and
   tools on `operation`, or the states they start inherit them.
 
+## What step 5 settled
+
+Built in `@jaira/persistence` (`connect.ts`), the app (`AppService.connectTask`,
+`undoConnect`, the board) and the CLI, with no upstream change; the statement
+of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
+`task:connectUndo`), [jaira-cli](../contracts/jaira-cli.md) and
+[task-board](../../ui/components/task-board.md). What the text above left open:
+
+- **`connect` owns an order, and no mechanism.** A move is `task:move`, an
+  adoption is `task:adopt`, a modified workflow is the generator; `connectTask`
+  is the order they are tried in and is handed the host's two operations, so
+  the drop, the CLI and — later — the conversation's `move` tool are one code
+  path down to the same `task_move`. A waiting `on_user_event` rule still gets
+  its answer first, and a drag a workflow offers is unchanged.
+- **A column is a target, and a workflow's own column means "into it".** At the
+  root listing the columns are workflows, so the second resolution reads "a
+  composite that mounts the task's state and either *is* the target or mounts
+  it too". Dropped on the workflow, the task is adopted and stands at what
+  comes next, with no move at all.
+- **The seam for fast-forward is `forward: "fast-forward" | "skip"`**, absent
+  reading `fast-forward`. Until step 7 a forward move that steps over states is
+  refused with what lies between, unless it says `skip`; `skip: true` is the
+  same thing in the spelling the `move` tool and the CLI use. The very next
+  state needs neither. **The board never skips**: a preview has no controls
+  and a drop that silently interrupts a running state is not a drop, so a
+  column that is states ahead says so and refuses. `jaira task move --skip`
+  is the way until the strip exists.
+- **The way down is handed over a level at a time.** A directed transition
+  names an instance by id, and a composite that has not entered has none. So a
+  nested target is a move with a `path`: the host watches the journal, and the
+  moment the composite above enters it directs the next step at the id the
+  engine just gave it. The engine registers an instance before it journals its
+  entry and takes a waiting move before it walks the spine, so the composite
+  goes straight to the named child. What comes before that child inside it is
+  stepped over like anything else, and needs `skip` like anything else. An
+  upstream `path` on `DirectedTransition` would replace the follower.
+- **Whether inputs bind is decided before anything is written, statically.**
+  From the lowered wires and the loaded machine: a wire binds when every child
+  it reads has ended well — or is running now, for a move that is held until
+  it ends — a backward move forgets what its reset will, and a composite
+  entered fresh on the way down has nothing behind it. A required input that
+  does not bind refuses the connect with the input, its schema, its description
+  and the reason; an optional one is listed as what can be given afterwards.
+  A rule of the workflow that is waiting on the move is trusted to have done
+  its own wiring. The engine's entry remains the judge of what actually
+  resolves.
+- **A new document's conversation is opened with what happened.** The shipped
+  conversation declares a required input, and §0 forbids naming it. It is
+  filled by schema: a required input of the conversation state that takes a
+  string is given the sentence `"<title>" was moved to <target>.`, recorded
+  `bound`; one that takes anything else refuses as missing. The conversation
+  is `CONNECT_CONVERSATION` — `chat/agent` until step 6 changes that line —
+  and it has its turn before the move is taken, because a state's own
+  operation runs before a move between its children. With the stand-in that
+  turn is a model call made by a drop.
+- **A new transition waits for a task that is not running.** A task picks a
+  new version up at its next load, so a running task cannot take a move its
+  engine's bundle does not hold. It is refused, saying to pause it first.
+- **A split's first element is the task that was moved.** Run under the real
+  engine and the fan-out host, a generated `each: "split"` with
+  `start: "manual"` makes one queued task per *other* element and starts none
+  of them; releasing one starts it with its element. Element 0 is the moved
+  task itself, as in every split, and it stands at the target with it: a split
+  has no way to hold the task that is performing it.
+- **Undo is a cut, and only sometimes a delete.** An adoption is undone by
+  cutting the parent's journal at the mirror row, which un-adopts, and resumes
+  nothing — an undo that ran the child in the parent would be a second move. A
+  parent the connect made that had run nothing is removed, its row and file
+  only, since the worktree it stands in is the adopted task's; one that ran
+  something is kept, cut. A move is undone by the ordinary rewind to before
+  it, which is also what puts a cloned task back under its pin. A document a
+  `new` made outlives its undo, and an augmented document keeps its version:
+  other tasks may stand in it, and a standing rule nobody takes costs nothing.
+- **The token is the renderer's, for the session.** `Undo` is on the card
+  until it is used or the app closes; after that the task's own rewind takes
+  the same thing back. It is not on the task file because it is not a fact
+  about the task.
+- **An adopted task stays in sight.** Steps 2–3 left it off the roots board.
+  It was a task of its own first, with a card somebody knows, so it files in
+  its parent's column with `under` naming the parent, and the board draws it
+  beneath that card — out of the lane its own status names, because what
+  relates the two is not a status. It cannot be picked up: it moves with the
+  task above it.
+- **One verb.** `jaira task move <id> --to <state> [--workflow <w>] [--skip]
+  [--dry-run]`. A move is done *to* a task that exists and only sometimes
+  makes one, which `task create --from` would have said backwards. The CLI has
+  no engine waiting, so a move that has to be taken is taken by running the
+  task there, as `task start` runs one.
+
 ## Open
 
 - A finished task publishes no runtime wait, so a "→ ui" chip offering a
@@ -559,11 +649,15 @@ left open:
   whose earlier passes ran in the adopted task).
 - An adopted child that fans out (`each: "inline"` or `"task"`) is refused:
   one task cannot stand for a batch. Adopting a whole batch is not designed.
-- The board's `.card-child` indent for an adopted task is not built: the
-  task files in its child's column on the parent's board, as a mount's task
-  does, and is off the roots board.
-- Whether `connect` from the CLI is one verb (`jaira task move <id> --to
-  <state>`) or rides `task create --from`.
+- A forward move on the board: refused until fast-forward exists (step 7),
+  because the board has nowhere to say `skip`.
+- A new transition for a task that is running: refused until it is paused.
+  Stopping it and reopening it with the move is `skip` by another name, and
+  was not taken without being asked for.
+- `Undo` does not survive a restart, and an undone move of a task that had
+  finished does not get back the outputs its reopening cleared.
+- A connect that refuses part-way — the adoption into a new document's task,
+  a move after an adoption — leaves what it had written, and says so.
 
 ## Revisit when
 

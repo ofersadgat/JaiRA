@@ -11,8 +11,9 @@
  * part in it: a guard that jumps backwards is control flow, and letting it reorder the columns would
  * turn the board's shape into something you cannot read left to right.
  */
-import { useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import type { BoardCard, BoardView, InstanceStatus, TaskStatus } from "@jaira/shared/browser";
+import { Fragment, useEffect, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import type { BoardCard, BoardColumn, BoardView, InstanceStatus, TaskStatus } from "@jaira/shared/browser";
+import { canConnect, ConnectDrag, nestUnder, ownColumnOf, previewOf, type ConnectAsk, type ConnectPreview, type Words } from "./connectDrag";
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
 import { cardRemoteWord } from "./remoteStrip";
@@ -178,7 +179,10 @@ export function Tile({
   onMenu,
   onDragStart,
   onDragEnd,
+  child = false,
 }: {
+  /** Filed BENEATH the card above it — an adopted task under the task that adopted it (decision 0005). */
+  child?: boolean;
   /** Colours the stripe and picks the badge glyph. Absent ⇒ neither, for a card of something with
       no state of its own to report. */
   status?: string;
@@ -211,7 +215,7 @@ export function Tile({
       // No `card-${status}` any more: every rule that read it was colouring the left stripe or the
       // status word, and both are the trailing pill's job now. A class nothing styles is a hook the
       // next person has to check before they can change anything.
-      className={`card${selected === true ? " card-selected is-active" : ""}${draggable ? " card-draggable" : ""}`}
+      className={`card${selected === true ? " card-selected is-active" : ""}${draggable ? " card-draggable" : ""}${child ? " card-child" : ""}`}
       // Only where something is waiting for it. `draggable` on every card would offer a gesture that
       // does nothing almost everywhere, and an affordance that usually lies is worse than none.
       {...(draggable ? { draggable: true, onDragStart, ...(onDragEnd !== undefined ? { onDragEnd } : {}) } : {})}
@@ -307,7 +311,7 @@ export function Column({
    * column lights up only where dropping would actually answer a waiting rule, and every other
    * column stays inert rather than accepting a gesture it would have to discard.
    */
-  drop?: { accepts: boolean; onDrop: () => void } | undefined;
+  drop?: { accepts: boolean; onDrop: () => void; preview?: (() => ConnectPreview | "asking" | undefined) | undefined } | undefined;
   children?: ReactNode;
 }): JSX.Element {
   // Whether the pointer is over THIS column, which is a different fact from whether the column would
@@ -339,18 +343,25 @@ export function Column({
       {...(onMenu !== undefined ? { onContextMenu: raise } : {})}
       {...(onOpen !== undefined ? { onDoubleClick: onOpen } : {})}
       {...(tip !== undefined ? { title: tip } : {})}
-      {...(accepts
+      {...(accepts || drop?.preview !== undefined
         ? {
             // `preventDefault` on drag-over IS the acceptance: without it the browser refuses the
-            // drop and the card springs back, which reads as the app rejecting the move.
+            // drop and the card springs back, which reads as the app rejecting the move. A column
+            // that would REFUSE a connect still tracks the pointer, so it can say why — and does
+            // not prevent the default, so the browser refuses the drop for it.
             onDragOver: (e: ReactDragEvent) => {
-              e.preventDefault();
-              setOver(true);
+              if (accepts) e.preventDefault();
+              if (!over) setOver(true);
             },
-            onDragLeave: () => setOver(false),
+            // Leaving for a CHILD of the column is not leaving it: the preview is such a child, and
+            // without this the column would flicker out from under its own explanation.
+            onDragLeave: (e: ReactDragEvent) => {
+              if (!(e.currentTarget as Element).contains(e.relatedTarget as Node | null)) setOver(false);
+            },
             onDrop: (e: ReactDragEvent) => {
-              e.preventDefault();
               setOver(false);
+              if (!accepts) return;
+              e.preventDefault();
               drop?.onDrop();
             },
           }
@@ -369,8 +380,56 @@ export function Column({
       <div className="column-body">
         {children}
         {count === 0 ? <div className="empty">{empty}</div> : null}
+        {over && drop?.preview !== undefined ? <ConnectPop preview={drop.preview()} /> : null}
       </div>
     </section>
+  );
+}
+
+function WordsView({ words }: { words: Words }): JSX.Element {
+  return (
+    <>
+      {words.map((part, i) =>
+        typeof part === "string" ? <span key={i}>{part}</span> : "b" in part ? <b key={i}>{part.b}</b> : <code key={i}>{part.code}</code>,
+      )}
+    </>
+  );
+}
+
+/**
+ * The DROP PREVIEW (decision 0005, "What draws"): what a drop on the column under the pointer WILL
+ * do — which of the three it is, where the task will stand, what will be asked afterwards.
+ *
+ * It has NO controls, and `pointer-events: none` so it can never be one: the drop is the commit. A
+ * column that would refuse says why in the same box, without the accent line that names the drop.
+ */
+export function ConnectPop({ preview }: { preview: ConnectPreview | "asking" | undefined }): JSX.Element | null {
+  if (preview === undefined) return null;
+  if (preview === "asking") {
+    return (
+      <div className="connect-pop connect-pop-inline" role="status">
+        <span className="connect-kind">Working out what a drop does…</span>
+      </div>
+    );
+  }
+  return (
+    <div className={`connect-pop connect-pop-inline${preview.refused !== undefined ? " connect-refused" : ""}`} role="status">
+      <span className="connect-kind">{preview.kind}</span>
+      <p className="connect-say">
+        <WordsView words={preview.say} />
+      </p>
+      {preview.facts.length > 0 ? (
+        <ul className="connect-facts">
+          {preview.facts.map((fact, i) => (
+            <li key={i}>
+              <WordsView words={fact} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {preview.drop !== undefined ? <span className="connect-drop">{preview.drop}</span> : null}
+      {preview.refused !== undefined ? <span className="connect-drop connect-no">{preview.refused}</span> : null}
+    </div>
   );
 }
 
@@ -402,12 +461,21 @@ export function Lanes({
   cards: readonly BoardCard[];
   render: (card: BoardCard) => ReactNode;
 }): JSX.Element {
-  const lanes = lanesOf(cards);
+  // An adopted task files BENEATH the task that adopted it (decision 0005 §2), wherever its own
+  // status would have put it: what relates the two is not a lane.
+  const { top, beneath } = nestUnder(cards);
+  const withBeneath = (card: BoardCard): ReactNode => (
+    <Fragment key={card.taskId}>
+      {render(card)}
+      {(beneath.get(card.taskId) ?? []).map(render)}
+    </Fragment>
+  );
+  const lanes = lanesOf(top);
   // One lane: no heading, because a rule saying "Finished" over a column of nothing but finished
   // cards says what every card under it says. The lane's OWN cards, not the ones passed in — a
   // column that is all finished is the commonest case there is, and it is the one whose order the
   // lane fixed.
-  if (lanes.length <= 1) return <>{(lanes[0]?.cards ?? []).map(render)}</>;
+  if (lanes.length <= 1) return <>{(lanes[0]?.cards ?? []).map(withBeneath)}</>;
   return (
     <>
       {lanes.map(({ lane, cards: inLane }) => (
@@ -418,7 +486,7 @@ export function Lanes({
               <span className="count data-num">{inLane.length}</span>
             </h5>
           ) : null}
-          {inLane.map(render)}
+          {inLane.map(withBeneath)}
         </div>
       ))}
     </>
@@ -500,8 +568,17 @@ export function Card({
   onMenu,
   onDragStart,
   onDragEnd,
+  child = false,
+  onUndo,
 }: {
   card: BoardCard;
+  /** Drawn beneath the task that adopted it — see {@link Tile}. */
+  child?: boolean;
+  /**
+   * TAKE THE MOVE BACK (decision 0005): present on the card a drop just made or moved, until it is
+   * used. The one control a connect has, and it comes AFTER — the drop itself was never confirmed.
+   */
+  onUndo?: (() => void) | undefined;
   selected: boolean;
   onSelect: (e: ReactMouseEvent) => void;
   onDrill?: () => void;
@@ -548,15 +625,23 @@ export function Card({
       meta={
         card.endedAt !== undefined ? (
           <>
-            <span className="ellip">{card.activeStateId ?? card.status}</span>
+            {/* An ADOPTED task says so, and says what it ran: its status is on its pill, and "where it
+                is" is under the task above it. */}
+            <span className="ellip">{card.under !== undefined ? `adopted · ${card.workflow}` : (card.activeStateId ?? card.status)}</span>
             <span className="card-status" title={new Date(card.endedAt).toLocaleString()}>
-              {endedLabel(card.endedAt)}
+              {onUndo !== undefined ? <UndoLink onUndo={onUndo} /> : endedLabel(card.endedAt)}
             </span>
           </>
         ) : (
           <>
-            <span className="ellip">{card.activeStateId ?? card.status}</span>
-            {waitingKindOf(card) !== undefined ? (
+            {/* An ADOPTED task says so, and says what it ran: its status is on its pill, and "where it
+                is" is under the task above it. */}
+            <span className="ellip">{card.under !== undefined ? `adopted · ${card.workflow}` : (card.activeStateId ?? card.status)}</span>
+            {onUndo !== undefined ? (
+              <span className="card-status">
+                <UndoLink onUndo={onUndo} />
+              </span>
+            ) : waitingKindOf(card) !== undefined ? (
               // A holding card names what it holds for in the tooltip; the word is the kind.
               <span className="card-status" {...(holdingLabelOf(card) !== undefined ? { title: holdingLabelOf(card) } : {})}>
                 {waitingKindOf(card)}
@@ -568,6 +653,7 @@ export function Card({
       onSelect={onSelect}
       onDrill={onDrill}
       onMenu={onMenu}
+      child={child}
       {...(onDragStart !== undefined
         ? {
             onDragStart: (e: ReactDragEvent) => {
@@ -610,6 +696,7 @@ export function Board({
   onColumnMenu,
   dragOffers = NO_DRAG_OFFERS,
   onTaskDrop,
+  connect,
 }: {
   board: BoardView;
   selected: string | null;
@@ -661,6 +748,23 @@ export function Board({
   dragOffers?: DragOffers;
   /** A card was dropped on a column that was offering it a place. The caller answers the wait. */
   onTaskDrop?: ((requestId: string, card: BoardCard, columnKey: string) => void) | undefined;
+  /**
+   * CONNECT (decision 0005 §1): a card may be dragged to a column NO rule offered it, and the host
+   * finds or makes the workflow that relates the two. `ask` is the dry run — asked once per column
+   * per drag, which is what lights the columns and fills the preview; `onDrop` is the commit.
+   * `undoable` names the cards a connect just made or moved, which carry **Undo**.
+   *
+   * Absent in the Files view and on a run's board, which move nothing. A column a waiting rule DOES
+   * offer keeps answering that rule through {@link onTaskDrop}, exactly as before.
+   */
+  connect?:
+    | {
+        ask: ConnectAsk;
+        onDrop: (card: BoardCard, column: BoardColumn) => void;
+        undoable?: ReadonlySet<string>;
+        onUndo?: (taskId: string) => void;
+      }
+    | undefined;
 }): JSX.Element {
   /**
    * The card being dragged right now, so the columns can say which of them would take it.
@@ -669,6 +773,33 @@ export function Board({
    * column — and only the board sees both.
    */
   const [dragging, setDragging] = useState<BoardCard | null>(null);
+  /**
+   * The drag's CONNECT answers — one dry run per column, asked the moment the card is picked up and
+   * never again (`ConnectDrag`). A ref, because the answers arrive over time and the memo must be the
+   * same object for the whole drag; the reducer is only the "an answer arrived, draw it" tick.
+   */
+  const connecting = useRef<ConnectDrag | null>(null);
+  const [, answered] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => () => connecting.current?.end(), []);
+  const pickUp = (card: BoardCard): void => {
+    setDragging(card);
+    connecting.current?.end();
+    connecting.current = null;
+    if (connect === undefined || !canConnect(card)) return;
+    const drag = new ConnectDrag(card, connect.ask, answered);
+    connecting.current = drag;
+    const own = ownColumnOf(board.columns, card);
+    for (const column of board.columns) {
+      // Its own column is where it IS; a column a waiting rule offers is that rule's to answer.
+      if (column.key === own || requestFor(dragOffers, card.taskId, column.key) !== undefined) continue;
+      drag.resolve(column);
+    }
+  };
+  const putDown = (): void => {
+    connecting.current?.end();
+    connecting.current = null;
+    setDragging(null);
+  };
   /** What double-clicking this card does: open the run, else follow its path one level down. */
   const drillOf = (card: BoardCard): (() => void) | undefined => {
     if (onOpenTask !== undefined) return () => onOpenTask(card);
@@ -688,16 +819,30 @@ export function Board({
    * `undefined` when nothing is being dragged, so a column that is not part of a gesture in progress
    * carries no drop handlers at all rather than handlers that decline.
    */
-  const dropFor = (columnKey: string): { accepts: boolean; onDrop: () => void } | undefined => {
+  const dropFor = (column: BoardColumn): { accepts: boolean; onDrop: () => void; preview?: () => ConnectPreview | "asking" | undefined } | undefined => {
     const card = dragging;
     if (card === null || onTaskDrop === undefined) return undefined;
+    const columnKey = column.key;
     const requestId = requestFor(dragOffers, card.taskId, columnKey);
+    const drag = connecting.current;
+    if (requestId !== undefined || drag === null || connect === undefined || drag.answer(columnKey) === undefined) {
+      return {
+        accepts: requestId !== undefined,
+        onDrop: () => {
+          putDown();
+          if (requestId !== undefined) onTaskDrop(requestId, card, columnKey);
+        },
+      };
+    }
     return {
-      accepts: requestId !== undefined,
+      accepts: drag.accepts(columnKey),
+      // THE DROP IS THE COMMIT: no dialog, no second step. What it did is on the board a moment later.
       onDrop: () => {
-        setDragging(null);
-        if (requestId !== undefined) onTaskDrop(requestId, card, columnKey);
+        const accepted = drag.accepts(columnKey);
+        putDown();
+        if (accepted) connect.onDrop(card, column);
       },
+      preview: () => (drag.answer(columnKey)?.status === "asking" ? "asking" : previewOf(drag.answer(columnKey), card, column)),
     };
   };
   return (
@@ -719,7 +864,7 @@ export function Board({
             {...(onSelectColumn !== undefined ? { onSelect: () => onSelectColumn(column.stateId) } : {})}
             {...(onColumnMenu !== undefined ? { onMenu: (at: MenuPoint) => onColumnMenu(column.stateId, at) } : {})}
             selected={column.stateId === selectedColumn}
-            {...(dropFor(column.key) !== undefined ? { drop: dropFor(column.key)! } : {})}
+            {...(dropFor(column) !== undefined ? { drop: dropFor(column)! } : {})}
           >
             <Lanes
               cards={column.cards}
@@ -733,8 +878,10 @@ export function Board({
                     onSelect={(e) => onSelectTask(card.taskId, e)}
                     {...(drill !== undefined ? { onDrill: drill } : {})}
                     {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
-                    {...(onTaskDrop !== undefined && canDrag(dragOffers, card.taskId)
-                      ? { onDragStart: () => setDragging(card), onDragEnd: () => setDragging(null) }
+                    child={card.under !== undefined && column.cards.some((other) => other.taskId === card.under)}
+                    {...(connect?.onUndo !== undefined && connect.undoable?.has(card.taskId) === true ? { onUndo: () => connect.onUndo!(card.taskId) } : {})}
+                    {...(onTaskDrop !== undefined && (canDrag(dragOffers, card.taskId) || (connect !== undefined && canConnect(card)))
+                      ? { onDragStart: () => pickUp(card), onDragEnd: putDown }
                       : {})}
                   />
                 );
@@ -760,6 +907,24 @@ export function Board({
         />
       ) : null}
     </div>
+  );
+}
+
+/** **Undo**, on the card a connect made or moved. A link, not a button: it is a word in the card's own line. */
+function UndoLink({ onUndo }: { onUndo: () => void }): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="link"
+      // The card under it selects on click and opens on double-click; this is neither.
+      onClick={(e) => {
+        e.stopPropagation();
+        onUndo();
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      Undo
+    </button>
   );
 }
 

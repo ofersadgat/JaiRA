@@ -39,4 +39,5 @@ export * from "./scopes";
 export * from "./hiddenPaths";
 export * from "./userEvents";
 export * from "./adopt";
+export * from "./connect";
 export * from "./refusal";

@@ -39,6 +39,7 @@ export * from "./unifiedDiff";
 export * from "./grammars";
 export * from "./userEvents";
 export * from "./adopt";
+export * from "./connect";
 export * from "./toolVocabulary";
 export * from "./agentTools";
 export * from "./toolsets";
