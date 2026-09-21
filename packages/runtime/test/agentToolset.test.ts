@@ -107,7 +107,10 @@ const ask = (opts: AgentQueryOptions, toolName: string, input: Record<string, un
 
 /** The legacy form 19 authored states still use, and the map it reads as. */
 const LEGACY_READ_ONLY = { tools: ["read_file"], permissions: { profile: "read-only", tools: { read_file: "allow" } } };
-const READ_ONLY_MAP = { tools: { read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", other: "deny" } };
+// `bash` is ABSENT, not `deny`: a map's `bash` entry is the answer for "any other command" on a line
+// that is taken apart (decision 0007 §4), so `"bash": "deny"` still OFFERS the shell. Not holding it
+// is what takes it away.
+const READ_ONLY_MAP = { tools: { read_file: "allow", edit: "deny", write_file: "deny", other: "deny" } };
 
 /** Everything about a spawn a toolset could have changed. */
 const configurationOf = (opts: AgentQueryOptions) => ({
@@ -200,7 +203,9 @@ describe("a read-only toolset MAP reaches claude holding everything `profile: \"
     );
     const environment = (lowered.def as { environment: { tools: string[]; permissions: Record<string, unknown> } }).environment;
     expect(environment.permissions).not.toHaveProperty("profile");
-    expect(environment.permissions).toMatchObject({ tools: { edit: "deny", write_file: "deny", bash: "deny" }, other: "deny" });
+    // The shell's refusal is carried as its SUBJECT, behind the `smart` every shell entry lowers to.
+    expect(environment.permissions).toMatchObject({ tools: { edit: "deny", write_file: "deny", bash: "smart" }, subjects: { bash: "deny" }, other: "deny" });
+    expect(environment.tools).toEqual(["read_file"]);
     // …and says so where the author can see it.
     expect(lowered.issues.map((issue) => issue.message).join("\n")).toMatch(/permissions\.profile beside a toolset map/);
   });
@@ -210,7 +215,7 @@ describe("a read-only toolset reaches codex as the same sandbox flag", () => {
   it("is `--sandbox read-only` from a map, as it was from the old profile — codex's `plan` is nothing else", async () => {
     // No tools held: codex cannot be served ours, and refuses a run that injects any.
     const legacy = (await run({ permissions: { profile: "read-only" } }, { agent: "codex-cli" })).opts!;
-    const map = (await run({ tools: { edit: "deny", write_file: "deny", bash: "deny", other: "deny" } }, { agent: "codex-cli" })).opts!;
+    const map = (await run({ tools: { edit: "deny", write_file: "deny", other: "deny" } }, { agent: "codex-cli" })).opts!;
     expect(legacy.permissionMode).toBe("plan");
     expect(map.permissionMode).toBe("plan");
     // Codex has no deny list and refuses one by name, so the toolset writes NOTHING into it: what is
@@ -290,8 +295,8 @@ describe("a native with no standard tool", () => {
 
 describe("nothing is granted outside the toolset", () => {
   it("serves exactly the held tools, pre-approves only an `allow`, and removes every other built-in", async () => {
-    const { opts } = await run({ tools: { read_file: "allow", grep: "ask", bash: "deny", other: "deny" } });
-    // `bash` is held and refused: never offered, and its built-in is gone with it.
+    const { opts } = await run({ tools: { read_file: "allow", grep: "ask", edit: "deny", other: "deny" } });
+    // `edit` is held and refused: never offered, and its built-ins are gone with it.
     expect(Object.keys(opts!.mcpTools ?? {}).sort()).toEqual(["grep", "read_file"]);
     expect(opts!.allowedTools).toEqual(["read_file"]);
     const declared = ["Read", "Glob", "Grep", "Edit", "MultiEdit", "NotebookEdit", "Write", "Bash", "WebFetch", "WebSearch", "Task", "Agent", "SlashCommand"];
@@ -306,7 +311,7 @@ describe("a transport that enforces nothing", () => {
     const { opts, result } = await run(READ_ONLY_MAP, { agent: "aider", agents });
     expect(opts).toBeUndefined();
     // Read back off the gate, where an unheld tool answers to `other` — so everything refused is named.
-    expect(JSON.stringify(result)).toMatch(/aider: this state's toolset refuses .*'edit', 'write_file'.*'bash'.*'other', and this transport enforces nothing/);
+    expect(JSON.stringify(result)).toMatch(/aider: this state's toolset refuses .*'edit', 'write_file'.*'other', and this transport enforces nothing/);
   });
 
   it("runs a state that restricts nothing", async () => {

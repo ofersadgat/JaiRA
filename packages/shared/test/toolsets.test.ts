@@ -17,6 +17,7 @@ import {
   permissionsOfToolset,
   resolveToolsetDecl,
   shellSubjects,
+  gateToolModes,
   subjectKindOf,
   toolImplementations,
   toolModes,
@@ -84,7 +85,11 @@ describe("parsing the map", () => {
     expect(issues).toEqual([]);
     expect(offeredTools(toolset)).toEqual(["bash"]);
     // Whitespace in a command subject is normalized, so two spellings of one command are one entry.
-    expect(shellSubjects(toolset)).toEqual({ "git status": "allow", "git commit": "ask", git: "deny", script: "ask" });
+    // The shell's own entry is among them: it is the mode for any command no other entry names (§4).
+    expect(shellSubjects(toolset)).toEqual({ bash: "ask", "git status": "allow", "git commit": "ask", git: "deny", script: "ask" });
+    // …and the gate is handed `smart` for it, so the line is read before anything answers for the tool.
+    expect(toolModes(toolset)).toEqual({ bash: "ask" });
+    expect(gateToolModes(toolset)).toEqual({ bash: "smart" });
   });
 
   it("WARNS about a tool name nothing knows, and drops it — it falls to `other`", () => {
@@ -228,8 +233,10 @@ describe("the legacy reader", () => {
     const lowered = lowerToolset(toolset, { profile: "read-only" });
     expect(lowered.tools).toEqual(["read_file"]);
     expect(lowered.permissions).toEqual({
-      tools: { read_file: "allow", bash: "deny", edit: "deny", write_file: "deny", ...TOOLSET_MARKERS },
+      // The shell's refusal rides as its SUBJECT, behind the gate mode every shell entry lowers to.
+      tools: { read_file: "allow", bash: "smart", edit: "deny", write_file: "deny", ...TOOLSET_MARKERS },
       other: "deny",
+      subjects: { bash: "deny" },
     });
   });
 
@@ -263,13 +270,21 @@ describe("legacy equivalence", () => {
     expect({ ...fromMap, legacy: true }).toEqual(fromLegacy);
   });
 
-  it("and lowers to the block the old form wrote by hand — plus the marks that say it was a MAP", () => {
-    expect(lowerToolset(parseToolset(map).toolset)).toEqual({
-      tools: legacy.tools,
-      permissions: { ...legacy.permissions, tools: { ...legacy.permissions.tools, ...TOOLSET_MARKERS } },
-    });
-    // The legacy reading lowers to exactly what was written: no marks, so a run reads it as legacy.
-    expect(lowerToolset(toolsetOfLegacy(legacy.tools, legacy.permissions))).toEqual(legacy);
+  it("and lowers to the block the old form wrote by hand — but for the shell, whose mode is a SUBJECT, and the marks that say it was a MAP", () => {
+    // `bash: "ask"` is the answer for any command nothing else names, not a mode for the tool: the
+    // gate is handed `smart` so the line is taken apart first, and the authored mode rides beside it.
+    const lowered = { tools: legacy.tools, permissions: { tools: { ...legacy.permissions.tools, bash: "smart" }, other: "deny", subjects: { bash: "ask" } } };
+    const marked = { ...lowered, permissions: { ...lowered.permissions, tools: { ...lowered.permissions.tools, ...TOOLSET_MARKERS } } };
+    expect(lowerToolset(parseToolset(map).toolset)).toEqual(marked);
+    // The legacy reading lowers with NO marks, so a run reads it as legacy.
+    expect(lowerToolset(toolsetOfLegacy(legacy.tools, legacy.permissions))).toEqual(lowered);
+    // Without the shell, the legacy block is the same block to the letter.
+    const { bash: _bash, ...tools } = legacy.permissions.tools;
+    const quiet = { tools: ["read_file", "write_file"], permissions: { tools, other: "deny" as const } };
+    expect(lowerToolset(toolsetOfLegacy(quiet.tools, quiet.permissions))).toEqual(quiet);
+    // Either spelling reads back as the toolset it was — a map as a map, a list as the legacy reading.
+    expect(toolsetOfEnvironment(marked.tools, marked.permissions as never)).toEqual(parseToolset(map).toolset);
+    expect(toolsetOfEnvironment(lowered.tools, lowered.permissions as never)).toEqual({ ...parseToolset(map).toolset, legacy: true });
   });
 
   it("tells a lowered MAP from a legacy block by the marks, and strips them on the way back", () => {
@@ -292,7 +307,7 @@ describe("legacy equivalence", () => {
     expect(lowered.permissions).toEqual({
       tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS },
       other: "ask",
-      subjects: { "git commit": "ask", script: "deny" },
+      subjects: { bash: "smart", "git commit": "ask", script: "deny" },
       implementations: { read_file: "native" },
     });
     expect(toolsetOfEnvironment(lowered.tools, lowered.permissions)).toEqual(authored);
@@ -301,12 +316,14 @@ describe("legacy equivalence", () => {
   it("keeps `scopes` beside a toolset, folds a legacy `profile` INTO it, and never writes `default` or a profile", () => {
     const scopes = [{ path: "app/**", default: "allow" as const }];
     const lowered = lowerToolset(parseToolset({ read_file: "allow" }).toolset, { scopes, profile: "read-only", default: "ask" });
+    // `bash` is refused like the other two — as the SUBJECT it is, behind a gate mode of `smart`.
     expect(lowered.permissions).toEqual({
-      tools: { read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", ...TOOLSET_MARKERS },
+      tools: { read_file: "allow", edit: "deny", write_file: "deny", bash: "smart", ...TOOLSET_MARKERS },
       other: "deny",
+      subjects: { bash: "deny" },
       scopes,
     });
-    expect(permissionsOfToolset(toolsetOfLegacy(["bash"], { default: "ask" }))).toEqual({ tools: { bash: "ask" }, other: "ask" });
+    expect(permissionsOfToolset(toolsetOfLegacy(["bash"], { default: "ask" }))).toEqual({ tools: { bash: "smart" }, other: "ask", subjects: { bash: "ask" } });
   });
 });
 
@@ -340,7 +357,7 @@ describe("lowering a state file", () => {
     expect(issues).toEqual([]);
     expect(def).toEqual({
       environment: { model: "m", tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "allow", ...TOOLSET_MARKERS }, other: "deny" } },
-      operation: { kind: "prompt", prompt: "go", tools: ["bash"], permissions: { tools: { bash: "smart", ...TOOLSET_MARKERS }, subjects: { "git status": "allow" } } },
+      operation: { kind: "prompt", prompt: "go", tools: ["bash"], permissions: { tools: { bash: "smart", ...TOOLSET_MARKERS }, subjects: { bash: "smart", "git status": "allow" } } },
       children: {
         review: {
           state: "./review",

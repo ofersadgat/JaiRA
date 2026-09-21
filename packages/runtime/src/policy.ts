@@ -15,22 +15,46 @@
  *    rules become a function over {@link ParsedCommand}s instead of a second
  *    enforcement mechanism.
  *
+ * **One shell line is several requests** (decision 0007 §4). A line is taken apart
+ * (`command.ts`), each part is named as a request for a SUBJECT — a standard tool on a
+ * path, `script`, or a command (`commandParts.ts`) — and each is judged here: authored
+ * rules and the destructive floor first, then the toolset, the same subject → mode map
+ * every tool answers to. The line runs only if every part may; one that asks produces
+ * ONE approval carrying all of them ({@link CommandDecision.parts}).
+ *
  * Three properties are deliberate:
  *
- *  1. **Every command on a line is judged**, and the strictest verdict wins — a
+ *  1. **Every part of a line is judged**, and the strictest verdict wins — a
  *     denied command cannot be smuggled behind a benign one (`npm test && git
- *     reset --hard`).
+ *     reset --hard`), inside a wrapper, a substitution or a `find -exec`.
  *  2. **Unparsable ⇒ ask.** A command the parser cannot model never resolves to
  *     `allow` (DESIGN §10.1's stated default).
  *  3. **`.jaira/**` is denied by path**, because a worktree normally *does* contain
  *     `.jaira/` (§1g item 5) — the deny rule is the real enforcement, not the
  *     directory layout.
  */
-import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, SmartVerdict } from "@declarative-ai/permissions";
-import { describeCommand, parseCommand, type CommandDialect, type ParsedCommand } from "./command";
+import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
+import { describeCommand, takeApart, type CommandDialect, type ParsedCommand } from "./command";
+import { SHELL_SUBJECT, classifyRequest, lookUp, shellToolsetOf, shellToolsetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellToolset } from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
-import { DEFAULT_ASK_ABOVE_BYTES, toolModes, type Scope, type Toolset } from "@jaira/shared";
-import { scopeNarrowingFor } from "./tools";
+import {
+  DEFAULT_ASK_ABOVE_BYTES,
+  absolutize,
+  entriesToRemember,
+  isAbsolutePath,
+  gateToolModes,
+  type CommandApproval,
+  type CommandPart,
+  type CommandPartDecider,
+  type CommandPartVerdict,
+  type PermissionsDecl,
+  type Scope,
+  type TextSpan,
+  type Toolset,
+} from "@jaira/shared";
+// Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
+import { standardOfAnyNative } from "./agentTools";
+import { partScopeFor, scopeNarrowingFor } from "./tools";
 
 /** What a rule does when it matches — DESIGN §10.1's vocabulary. */
 export type PolicyAction = "allow" | "deny" | "require_approval";
@@ -188,44 +212,310 @@ export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; 
 /** Strictest wins, so nothing benign on the same line can soften a verdict. */
 const RANK: Record<PolicyAction, number> = { allow: 0, require_approval: 1, deny: 2 };
 
+const ACTION_OF: Record<CommandPartVerdict, PolicyAction> = { allowed: "allow", asks: "require_approval", denied: "deny" };
+const VERDICT_OF: Record<PolicyAction, CommandPartVerdict> = { allow: "allowed", require_approval: "asks", deny: "denied" };
+const VERDICT_OF_MODE: Record<Exclude<PermissionMode, "smart">, CommandPartVerdict> = { allow: "allowed", ask: "asks", deny: "denied" };
+
 export interface CommandDecision {
   action: PolicyAction;
   reason: string;
-  /** The command the verdict is about (absent when the line was unparsable). */
+  /** The command the verdict is about (absent when the line was unparsable, or the part is a redirect). */
   command?: ParsedCommand;
+  /** The line as the requests it is made of, each with its own verdict — what an approval draws (decision 0007 §4). */
+  parts: CommandApproval;
 }
 
 /**
- * Decide a whole command line: parse it, judge every command, and return the
- * strictest verdict.
+ * Answers a person gave about PARTS, remembered for as long as this object lives — a run.
+ *
+ * Keyed by a WIDTH (`git commit`, or `git`; `rm`; `script`; `write_file`), never by a line: the same
+ * answer then covers the next line that holds the same request, whatever else shares it. An `allow`
+ * lifts a part that would have ASKED and nothing else — a denied part stays denied, so a remembered
+ * answer never reaches over the destructive floor, `.jaira/`, a rule's or a toolset's `deny`, or a
+ * line the parser could not read. Writing the entry into a toolset FILE is the other reach ("add to
+ * the toolset"), and is not done here.
  */
-export function decideCommand(policy: JairaPolicy, line: string, dialect: CommandDialect = "posix"): CommandDecision {
-  const parsed = parseCommand(line, dialect);
-  if (parsed.unparsed || parsed.commands.length === 0) {
-    // DESIGN §10.1: "Unparsable commands default to require_approval."
-    return {
-      action: "require_approval",
-      reason: parsed.reason !== undefined ? `command could not be parsed (${parsed.reason})` : "command could not be parsed",
-    };
+export class CommandGrants {
+  private readonly answers = new Map<string, "allow" | "deny">();
+
+  /** Remember one answer at one width. Widths are normalized the way toolset subjects are. */
+  remember(width: string, decision: "allow" | "deny"): void {
+    const key = width.trim().replace(/\s+/g, " ").toLowerCase();
+    if (key.length > 0) this.answers.set(key, decision);
   }
 
-  let worst: CommandDecision = { action: policy.default ?? "allow", reason: "no rule matched" };
-  for (const command of parsed.commands) {
-    let verdict: { action: PolicyAction; reason: string } | undefined;
-    // Authored rules first (first match wins), then the built-ins.
+  /**
+   * Remember an approval's answer for the PARTS that asked, each at a chosen width.
+   *
+   * `widths` names the chosen ones (`["git"]` to widen `git commit` to the program); a part none of
+   * them fits is remembered at its narrowest. A width no ASKING part offers is dropped, which is what
+   * keeps this from ever storing a line, a part that was already allowed, or one that was denied.
+   * Returns what was stored.
+   */
+  rememberParts(approval: CommandApproval, decision: "allow" | "deny", widths?: readonly string[]): string[] {
+    const chosen = Object.keys(entriesToRemember(approval, decision, (part) => part.widths.find((w) => widths?.includes(w) === true) ?? part.widths[0]));
+    for (const width of chosen) this.remember(width, decision);
+    return chosen;
+  }
+
+  /** The narrowest remembered answer among a part's widths. */
+  answerFor(widths: readonly string[]): { width: string; decision: "allow" | "deny" } | undefined {
+    for (const width of widths) {
+      const decision = this.answers.get(width.toLowerCase());
+      if (decision !== undefined) return { width, decision };
+    }
+    return undefined;
+  }
+
+  list(): Record<string, "allow" | "deny"> {
+    return Object.fromEntries(this.answers);
+  }
+
+  clear(): void {
+    this.answers.clear();
+  }
+}
+
+export interface DecideCommandOptions {
+  /**
+   * The toolset the line is judged against, as the shell reads it. Absent ⇒ the line answers to the
+   * rules, the built-ins and `default` alone, which is what it did before toolsets held commands.
+   */
+  toolset?: ShellToolset | undefined;
+  /** Answers remembered for this run, by part width. */
+  grants?: CommandGrants | undefined;
+  /**
+   * What a scope table says about one part's place, by the STANDARD TOOL the part is — so a path
+   * scope written for `write_file` binds `rm` and `>` exactly as it binds the tool.
+   */
+  scopeOf?: ((tool: string, place: { path?: string; url?: string }) => PermissionMode | undefined) | undefined;
+  /** What a relative place resolves against for {@link scopeOf}: the workspace, then the call's own `cwd`, then each `cd` on the line. */
+  root?: string | undefined;
+  cwd?: string | undefined;
+}
+
+/** Programs that move the directory the REST of the line runs in. */
+const DIRECTORY_CHANGERS = new Set(["cd", "chdir", "pushd", "sl", "set-location", "push-location"]);
+
+/** A part's answer while it is being composed: the layer that gave it is kept beside it. */
+interface Composed {
+  verdict: CommandPartVerdict;
+  source: CommandPartDecider;
+  reason: string;
+  entry?: string;
+  /** The words a toolset entry matched, when one decided. */
+  matched?: TextSpan[];
+}
+
+const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => RANK[ACTION_OF[a]] > RANK[ACTION_OF[b]];
+
+/**
+ * Judge one part. `undefined` when it is no request at all (`cd foo`, `echo hi`).
+ *
+ * The order, and what each layer may do:
+ *
+ *  1. `.jaira/` anywhere in the part ⇒ denied. Nothing below is consulted.
+ *  2. The COMMAND POLICY: the first matching authored rule, else the built-in destructive floor
+ *     (deny), else a built-in ask, else `default`.
+ *  3. The TOOLSET's answer for the part's subject. It composes with (2) as the STRICTER of the two,
+ *     with one exception: an entry that NAMES the program (`git push`, `git`) replaces a built-in ask
+ *     or the `default` — naming it is the decision those two stand in for. It never replaces a rule,
+ *     and never the floor: the floor stays above every toolset, and an authored rule is the project's
+ *     own statement, which a state may tighten and not loosen.
+ *  4. A part the parser cannot vouch for asks at least.
+ *  5. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied`. It never
+ *     lifts `denied`, and never what the parser could not read.
+ *  6. A SCOPE table's answer for the part's place, by the standard tool the part is. Strictest again,
+ *     and after (5): a remembered `rm` does not open a place the table shut.
+ */
+function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCommandOptions, here: string | undefined): Composed | undefined {
+  // Every word, and the value written into a flag (`--output=.jaira/x`).
+  const words = part.command !== undefined ? [...commandWords(part.command), ...part.command.flags.flatMap((f) => (f.includes("=") ? [f.slice(f.indexOf("=") + 1)] : []))] : [];
+  if ([...words, ...part.paths].some(isDeniedPath)) {
+    return { verdict: "denied", source: "path", reason: ".jaira/ is engine-owned" };
+  }
+
+  // (2) the command policy
+  let fromPolicy: Composed | undefined;
+  if (part.command !== undefined) {
     for (const rule of policy.rules ?? []) {
-      if (matches(rule.match, command)) {
-        verdict = { action: rule.action, reason: rule.reason ?? `matched a project policy rule` };
+      if (matches(rule.match, part.command)) {
+        fromPolicy = { verdict: VERDICT_OF[rule.action], source: "rule", reason: rule.reason ?? "matched a project policy rule" };
         break;
       }
     }
-    if (verdict === undefined && policy.builtins !== false) verdict = builtinVerdict(command);
-    const decided = verdict ?? { action: policy.default ?? "allow", reason: "no rule matched" };
-    if (RANK[decided.action] >= RANK[worst.action]) {
-      worst = { ...decided, command };
+    if (fromPolicy === undefined && policy.builtins !== false) {
+      const builtin = builtinVerdict(part.command);
+      if (builtin !== undefined) fromPolicy = { verdict: VERDICT_OF[builtin.action], source: "builtin", reason: builtin.reason };
+    }
+  } else if (policy.builtins !== false && part.paths.some((p) => SECRET_PATTERNS.some((s) => s.test(p)))) {
+    fromPolicy = { verdict: "asks", source: "builtin", reason: "the redirect touches a credentials path" };
+  }
+
+  // `cd`, `echo`, `true`: a request only when something above made it one.
+  if (part.noRequest === true && (fromPolicy === undefined || fromPolicy.verdict === "allowed")) return undefined;
+
+  let composed: Composed = fromPolicy ?? { verdict: VERDICT_OF[policy.default ?? "allow"], source: "default", reason: "no rule matched" };
+
+  // (3) the toolset
+  if (options.toolset !== undefined && part.noRequest !== true) {
+    const answer = lookUp(options.toolset, part);
+    if (answer.mode !== undefined) {
+      const fromToolset: Composed = {
+        verdict: VERDICT_OF_MODE[answer.mode],
+        source: "toolset",
+        ...(answer.entry !== undefined ? { entry: answer.entry } : {}),
+        reason: answer.entry === undefined ? `the toolset does not hold '${part.subject}'` : `the toolset's '${answer.entry}' is ${answer.mode}`,
+        ...(answer.matched !== undefined ? { matched: answer.matched } : {}),
+      };
+      const builtinAsk = composed.source === "builtin" && composed.verdict === "asks";
+      if (answer.specific && (composed.source === "default" || builtinAsk)) composed = fromToolset;
+      else if (isStricter(fromToolset.verdict, composed.verdict)) composed = fromToolset;
+      else if (fromToolset.verdict === composed.verdict && composed.source === "default") composed = fromToolset;
+      // Both ask: the toolset's entry is the one a person can change, and the built-in is why it matters.
+      else if (fromToolset.verdict === composed.verdict && builtinAsk) composed = { ...fromToolset, reason: `${fromToolset.reason} — ${composed.reason}` };
     }
   }
-  return worst;
+
+  // (4) what the parser cannot vouch for
+  if (part.unmodelled !== undefined && composed.verdict !== "denied") {
+    composed = { verdict: "asks", source: "parser", reason: part.kind === "unparsed" ? `command could not be parsed (${part.unmodelled})` : part.unmodelled };
+  }
+
+  // (5) remembered for this run
+  if (composed.verdict === "asks" && part.unmodelled === undefined) {
+    const remembered = options.grants?.answerFor(part.widths);
+    if (remembered !== undefined) {
+      composed = {
+        verdict: remembered.decision === "allow" ? "allowed" : "denied",
+        source: "remembered",
+        entry: remembered.width,
+        reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run`,
+      };
+    }
+  }
+
+  // (6) where
+  if (options.scopeOf !== undefined && part.tool !== undefined && composed.verdict !== "denied") {
+    const resolved = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
+    const places: Array<{ path?: string; url?: string }> = [...part.paths.map((path) => ({ path: resolved(path) })), ...(part.url !== undefined ? [{ url: part.url }] : [])];
+    for (const place of places) {
+      const mode = options.scopeOf(part.tool, place);
+      if (mode === undefined || mode === "allow" || mode === "smart") continue;
+      if (isStricter(VERDICT_OF_MODE[mode], composed.verdict)) {
+        composed = { verdict: VERDICT_OF_MODE[mode], source: "scope", reason: `${part.tool} is ${mode === "deny" ? "denied" : "asked about"} at ${place.path ?? place.url}` };
+      }
+    }
+  }
+  return composed;
+}
+
+/**
+ * Decide a whole command line: take it apart, judge every part, and return the
+ * strictest verdict — with the parts, which are what an approval shows.
+ *
+ * The line runs only if EVERY part may. Any part denied ⇒ the line is refused. Any part asking ⇒
+ * one approval, carrying every part.
+ */
+export function decideCommand(policy: JairaPolicy, line: string, dialect: CommandDialect = "posix", options: DecideCommandOptions = {}): CommandDecision {
+  const taken = takeApart(line, dialect);
+  const parts: CommandPart[] = [];
+  const commands: Array<ParsedCommand | undefined> = [];
+  let findRoots: string[] = ["."];
+  let here =options.cwd !== undefined ? (isAbsolutePath(options.cwd) || options.root === undefined ? options.cwd : absolutize(options.cwd, options.root)) : options.root;
+  for (const request of taken.requests) {
+    const classified = classifyRequest(request, dialect);
+    if (classified === undefined) continue;
+    // `find docs -exec rm {} +` removes under `docs`: `{}` stands for the places the find walks.
+    if (classified.command?.program === "find" && classified.via?.at(-1) !== "find") findRoots = classified.paths.length > 0 ? classified.paths : ["."];
+    else if (classified.via?.at(-1) === "find" && classified.paths.includes("{}")) classified.paths = classified.paths.flatMap((p) => (p === "{}" ? findRoots : [p]));
+    const judged = judgePart(policy, classified, options, here);
+    // `cd infra && rm x` is about `infra/x`: the directory moves for what follows it on the line.
+    if (classified.noRequest === true && DIRECTORY_CHANGERS.has(classified.command?.program ?? "") && classified.paths[0] !== undefined && here !== undefined) {
+      here = isAbsolutePath(classified.paths[0]) ? classified.paths[0] : absolutize(classified.paths[0], here);
+    }
+    if (judged === undefined) continue;
+    // A command is named by the entry that decided it (`git commit`, or `git`), unless that entry is a fallback.
+    const named = judged.source === "toolset" && judged.matched !== undefined && judged.entry !== undefined;
+    // What is underlined: the words of the entry that decided; for a rule, the floor, a built-in ask
+    // or a remembered width, the words of the command's own subject; else the part's own default —
+    // the program alone, the redirect's operator, a script's whole invocation.
+    const byName = classified.kind === "command" && classified.command !== undefined && classified.unmodelled === undefined;
+    const underlined =
+      judged.matched ??
+      (byName && judged.source === "remembered" && judged.entry !== undefined
+        ? subjectWordSpans(classified.command!, judged.entry)
+        : byName && (judged.source === "rule" || judged.source === "builtin")
+          ? subjectWordSpans(classified.command!, classified.subject)
+          : classified.matched);
+    parts.push({
+      span: classified.span,
+      matched: underlined,
+      text: line.slice(classified.span.start, classified.span.end),
+      kind: classified.kind,
+      subject: named && classified.kind === "command" ? judged.entry! : classified.subject,
+      ...(classified.paths.length > 0 && classified.noRequest !== true ? { paths: classified.paths } : {}),
+      ...(classified.url !== undefined ? { url: classified.url } : {}),
+      verdict: judged.verdict,
+      decidedBy: { source: judged.source, ...(judged.entry !== undefined ? { entry: judged.entry } : {}), reason: judged.reason },
+      widths: classified.widths,
+      ...(classified.via !== undefined ? { via: classified.via } : {}),
+    });
+    commands.push(classified.command);
+  }
+  // A part written inside another: `rm {}` inside its `find`, `$( … )` inside the command it feeds.
+  parts.forEach((part, index) => {
+    let within: number | undefined;
+    parts.forEach((other, at) => {
+      if (at === index || other.span.start > part.span.start || other.span.end < part.span.end) return;
+      if (other.span.start === part.span.start && other.span.end === part.span.end) return;
+      const size = (p: CommandPart): number => p.span.end - p.span.start;
+      if (within === undefined || size(parts[within]!) > size(other)) within = at;
+    });
+    if (within !== undefined) part.within = within;
+  });
+
+  const payload = (verdict: CommandPartVerdict): CommandApproval => ({
+    line,
+    dialect,
+    parts,
+    verdict,
+    ...(taken.reason !== undefined ? { unparsed: taken.reason } : {}),
+  });
+
+  let worst: Omit<CommandDecision, "parts"> | undefined;
+  parts.forEach((part, index) => {
+    const action = ACTION_OF[part.verdict];
+    if (worst === undefined || RANK[action] >= RANK[worst.action]) {
+      const command = commands[index];
+      worst = { action, reason: part.decidedBy.reason, ...(command !== undefined ? { command } : {}) };
+    }
+  });
+
+  if ((taken.unparsed || taken.requests.length === 0) && worst?.action !== "deny" && worst?.action !== "require_approval") {
+    // DESIGN §10.1: "Unparsable commands default to require_approval." A deny beside the unreadable
+    // piece stands; an allow does not. An empty line has nothing to judge, and still must not allow.
+    const reason = taken.reason !== undefined ? `command could not be parsed (${taken.reason})` : "command could not be parsed";
+    if (!parts.some((part) => part.kind === "unparsed")) {
+      parts.push({
+        span: { start: 0, end: line.length },
+        matched: [{ start: 0, end: line.length }],
+        text: line,
+        kind: "unparsed",
+        subject: SHELL_SUBJECT,
+        verdict: "asks",
+        decidedBy: { source: "parser", reason },
+        widths: [],
+      });
+    }
+    return { action: "require_approval", reason, parts: payload("asks") };
+  }
+  if (worst === undefined) {
+    // Every part was no request at all (`cd foo && echo done`): nothing to refuse and nothing to ask.
+    const action = policy.default ?? "allow";
+    return { action, reason: "no rule matched", parts: payload(VERDICT_OF[action]) };
+  }
+  return { ...worst, parts: payload(VERDICT_OF[worst.action]) };
 }
 
 /**
@@ -315,14 +605,19 @@ export interface CompilePolicyOptions {
    * the project's table and be handed a tool the message had set to `deny`.
    *
    * Only TOOL entries fold. `other` does not: the baseline has no such field, and the gate reads it
-   * off the authored block. Command subjects and `script` do not either — ⚠️ they are carried on the
-   * toolset and NOT enforced yet; a shell line is still judged by `rules` and the built-ins below,
-   * whatever the toolset says about `git commit` (decision 0007 §4 is a later task).
+   * off the authored block. Command subjects and `script` do not fold either — they are not tools —
+   * and are what a shell line's PARTS are judged against (decision 0007 §4, {@link decideCommand}).
    *
    * A run does not pass one: the engine hands each state's own block to the gate at the moment of
-   * decision, so a run's policy stays the project's.
+   * decision, so a run's policy stays the project's — and the state's command subjects arrive the
+   * same way, on the lowered block's `subjects`, read by the narrowing.
    */
   toolset?: Toolset;
+  /**
+   * Answers remembered about the PARTS of shell lines, for as long as the caller keeps this object —
+   * a run. A part that would ask and was allowed at one of its widths no longer asks.
+   */
+  grants?: CommandGrants;
 }
 
 export interface PolicyAuditEntry {
@@ -333,6 +628,9 @@ export interface PolicyAuditEntry {
   parsed?: ParsedCommand;
   action: PolicyAction;
   reason: string;
+  /** The line as its parts, each with its own verdict — present whenever a command line was judged. */
+  parts?: CommandApproval;
+  /** Empty when the NARROWING decided (a deny, or a toolset's ask): upstream gives it no session. */
   sessionId: string;
 }
 
@@ -381,24 +679,74 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       audit({ tool, action: "require_approval", reason: "no command found in the tool input", sessionId: req.sessionId });
       return "ask";
     }
-    const decision = decideCommand(policy, line, dialect);
-    // Screen the command's own words for `.jaira/`: a path matcher applied to the
-    // whole line would never match, because the path is preceded by a space.
-    const touchesJaira = parseCommand(line, dialect).commands.some((c) => commandWords(c).some(isDeniedPath));
-    if (touchesJaira) {
-      audit({ tool, command: line, action: "deny", reason: ".jaira/ is engine-owned", sessionId: req.sessionId });
-      return "deny";
-    }
+    // The narrowing below has usually judged this very call already — with the STATE's toolset in
+    // hand, which this approver is never given. `.jaira/` is screened inside, part by part.
+    const decision = lineDecisionFor(input, undefined);
+    auditLine(tool, line, decision, req.sessionId);
+    return decision.action === "allow" ? "allow" : decision.action === "deny" ? "deny" : "ask";
+  };
 
+  const auditLine = (tool: string, line: string, decision: CommandDecision, sessionId: string): void =>
     audit({
       tool,
       command: line,
       ...(decision.command !== undefined ? { parsed: decision.command } : {}),
       action: decision.action,
       reason: decision.reason,
-      sessionId: req.sessionId,
+      parts: decision.parts,
+      sessionId,
     });
-    return decision.action === "allow" ? "allow" : decision.action === "deny" ? "deny" : "ask";
+
+  /**
+   * One shell line, decided ONCE per call and found again by the call's own input.
+   *
+   * Upstream hands the state's `permissions` block to `scopeOf` and to nothing else — not to the
+   * `smart` approver, not to `approve`. So the narrowing is where a line meets its toolset; the
+   * decision is kept against the input object, which upstream passes unchanged to the approver and to
+   * the human gate, and both read it back ({@link commandDecisionOf}) instead of judging again
+   * without the toolset.
+   */
+  /** The state's own block first — it is the nearer statement — then the toolset this policy was compiled for. */
+  const compiledFor = options.toolset !== undefined ? shellToolsetOf(options.toolset) : undefined;
+  const toolsetFor = (authored: PermissionsDecl | undefined): ShellToolset | undefined => shellToolsetOfBlock(authored) ?? compiledFor;
+
+  const lineDecisionFor = (input: Record<string, unknown>, authored: PermissionsDecl | undefined): CommandDecision => {
+    const known = LINE_DECISIONS.get(input);
+    if (known !== undefined) return known;
+    const toolset = toolsetFor(authored);
+    const cwd = typeof input["cwd"] === "string" && input["cwd"] !== "" ? input["cwd"] : undefined;
+    const decision = decideCommand(policy, commandOf(input) ?? "", dialect, {
+      toolset,
+      grants: options.grants,
+      scopeOf: partScopeFor(authored?.scopes, options.workspaceRoot, options.scopes),
+      ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
+      ...(cwd !== undefined ? { cwd } : {}),
+    });
+    LINE_DECISIONS.set(input, decision);
+    return decision;
+  };
+
+  /**
+   * The line's verdict, as a NARROWING — the one seam that runs whatever mode the tool resolved to.
+   *
+   * A `deny` always narrows, so the destructive floor, `.jaira/` and a rule's deny stand above a
+   * state that authored `bash: "allow"` and above an "allow for this run" remembered against the
+   * whole tool. An `ask` narrows when a toolset is judging the line: a remembered `bash: allow` would
+   * otherwise wave through the next line's asking parts, and it is parts that are remembered, never
+   * lines. Without a toolset an ask is left to the `smart` approver, as it always was.
+   */
+  const commandNarrowing: ScopeNarrowing = (tool, input, authored) => {
+    const name = COMMAND_TOOLS.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
+    const args = (input ?? {}) as Record<string, unknown>;
+    const line = COMMAND_TOOLS.has(name) ? commandOf(args) : undefined;
+    if (line === undefined) return undefined;
+    const block = authored as PermissionsDecl | undefined;
+    const decision = lineDecisionFor(args, block);
+    const judged = toolsetFor(block) !== undefined;
+    if (decision.action === "allow" || (decision.action === "require_approval" && !judged)) return undefined;
+    // The approver will not run, so this is the only place the decision can be written down.
+    auditLine(name, line, decision, "");
+    return decision.action === "deny" ? "deny" : "ask";
   };
 
   const baseline: PermissionBaseline = {
@@ -412,7 +760,9 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       // about, and its size is a reason to ask harder rather than a reason to stop asking.
       ...Object.fromEntries([...COMMAND_TOOLS].map((tool) => [tool, "smart" as PermissionMode])),
       ...policy.tools,
-      ...(options.toolset !== undefined ? toolModes(options.toolset) : {}),
+      // `gateToolModes`: the shell's entry folds as `smart` whatever it says, because its mode is the
+      // answer for "any other command" on a line that is taken apart — not a mode for the tool.
+      ...(options.toolset !== undefined ? gateToolModes(options.toolset) : {}),
     },
     ...(policy.profile !== undefined ? { profile: policy.profile } : {}),
   };
@@ -428,8 +778,41 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // The scope floor, as the callback every consumer of a policy already knows how to read.
   // `perCall`: built even with no floor, because a STATE may author `permissions.scopes` and the
   // engine hands that block to this callback at the moment of decision.
-  const scopeOf = scopeNarrowingFor(undefined, options.workspaceRoot, options.execEnv, options.scopes, true);
-  return { baseline, smart, ...(scopeOf !== undefined ? { scopeOf } : {}) };
+  const places = scopeNarrowingFor(undefined, options.workspaceRoot, options.execEnv, options.scopes, true);
+  // Where, then what: the scope table's answer and the line's own, the stricter kept.
+  const scopeOf: ScopeNarrowing = (tool, input, authored) => {
+    const where = places?.(tool, input, authored);
+    const what = commandNarrowing(tool, input, authored);
+    if (where === undefined || what === undefined) return where ?? what;
+    return MODE_RANK[where] >= MODE_RANK[what] ? where : what;
+  };
+  const compiled: ExecPolicy = { baseline, smart, scopeOf };
+  COMMAND_NARROWINGS.set(compiled, commandNarrowing);
+  return compiled;
+}
+
+const MODE_RANK: Record<PermissionMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
+
+/** Line decisions by the input object of the call they are about — see `lineDecisionFor`. */
+const LINE_DECISIONS = new WeakMap<object, CommandDecision>();
+const COMMAND_NARROWINGS = new WeakMap<ExecPolicy, ScopeNarrowing>();
+
+/**
+ * What the policy decided about a shell call, found by the call's own input.
+ *
+ * For whoever is handed the same `PermissionRequest.input` next — the approval hub, which puts the
+ * decision's {@link CommandDecision.parts} on the request a person answers.
+ */
+export function commandDecisionOf(input: unknown): CommandDecision | undefined {
+  return input !== null && typeof input === "object" ? LINE_DECISIONS.get(input) : undefined;
+}
+
+/**
+ * The shell half of a compiled policy's narrowing, without its scope table — for a gate that builds
+ * its own table narrowing (`gateTools`) and still has to take a line apart.
+ */
+export function commandNarrowingOf(policy: ExecPolicy | undefined): ScopeNarrowing | undefined {
+  return policy !== undefined ? COMMAND_NARROWINGS.get(policy) : undefined;
 }
 
 /** A human-readable line for an approval prompt. */

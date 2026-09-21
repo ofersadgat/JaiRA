@@ -272,7 +272,14 @@ preset that is a function.
    run cannot tell a written `other: "ask"` from the gate's last resort.
 3. **Shell**: redirects, substitutions and the embedder list in
    `parseCommand`; the utility → standard-tool table; `script`; parts as
-   requests, and the approval that lists them.
+   requests, and the approval that lists them. *Engine half built
+   2026-09-21* ([tool-policy](../units/tool-policy.md)): a line is taken
+   apart with spans, each part judged against the toolset under the rules
+   and the floor, and an approval request carries the parts and remembers
+   them at a width for the run. What composes how is written there — an
+   entry that names the program replaces a built-in ask; `bash` lowers as
+   `smart` with its mode among the subjects. The approval's drawing, and
+   writing a remembered line into a toolset file, are not built.
 4. **Buckets** in `$SYSTEM/toolsets/**` (needs 0006): the four `chat`
    toolsets as data; `chat_control`.
 5. **The composer**: Permissions rows from the bucket, the bucket picker,

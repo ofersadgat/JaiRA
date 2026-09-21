@@ -14,7 +14,8 @@
  * Upstream's `PermissionLedger` applies it; this hub only collects it.
  */
 import type { Approver, PermissionDecision, PermissionRequest, PermissionScope } from "@declarative-ai/permissions";
-import type { PolicyAuditEntry } from "./policy";
+import type { CommandApproval } from "@jaira/shared";
+import { CommandGrants, commandDecisionOf, type PolicyAuditEntry } from "./policy";
 
 /** A parked approval, as the UI sees it. */
 export interface ApprovalRequest {
@@ -25,6 +26,13 @@ export interface ApprovalRequest {
   command?: string;
   /** Why policy escalated (`pushes publish work`). */
   reason?: string;
+  /**
+   * A shell line as the REQUESTS it is made of, each with its span, its subject, its verdict and the
+   * toolset entry that decided it (decision 0007 §4) — what the approval draws instead of one opaque
+   * line. Present whenever the policy took the line apart; a consumer that ignores it sees the
+   * request it always saw.
+   */
+  parts?: CommandApproval;
   /** Tool input as the model produced it, for the details view. */
   input: Record<string, unknown>;
   /** Upstream's approval-scope key — the agent session this call belongs to. */
@@ -56,6 +64,8 @@ export class ApprovalHub {
   private counter = 0;
   /** Reasons captured from the policy audit, keyed by the command they concern. */
   private readonly reasons = new Map<string, string>();
+  /** Part answers remembered "for this run", by task — see {@link grants}. */
+  private readonly remembered = new Map<string, CommandGrants>();
   /**
    * Tasks whose runs are STOPPING — the gate, held shut.
    *
@@ -100,9 +110,23 @@ export class ApprovalHub {
     }
   }
 
-  /** Open it again — a new run for this task may ask for tools. */
+  /** Open it again — a new run for this task may ask for tools. What the last run remembered about parts goes with it. */
   allow(taskId: string): void {
     this.stopping.delete(taskId);
+    this.remembered.get(taskId)?.clear();
+  }
+
+  /**
+   * The part answers remembered for one task's run — hand this to `compilePolicy({ grants })`, so
+   * what {@link decide} remembers is what the next shell line is judged with.
+   *
+   * One object per task for the life of the hub, emptied when a new run opens the gate: "for this
+   * run" is a reach, and a run that ended takes its answers with it.
+   */
+  grants(taskId: string): CommandGrants {
+    let grants = this.remembered.get(taskId);
+    if (grants === undefined) this.remembered.set(taskId, (grants = new CommandGrants()));
+    return grants;
   }
 
   /** Is this task's gate shut? */
@@ -124,11 +148,15 @@ export class ApprovalHub {
     const requestId = this.options.nextId?.() ?? `approval-${++this.counter}`;
     const input = req.input as Record<string, unknown>;
     const command = typeof input["command"] === "string" ? (input["command"] as string) : undefined;
+    // The policy judged this very call a moment ago and kept what it found against the input.
+    const decided = commandDecisionOf(req.input);
+    const reason = command !== undefined && this.reasons.has(command) ? this.reasons.get(command)! : decided?.reason;
     const request: ApprovalRequest = {
       requestId,
       tool: req.tool,
       ...(command !== undefined ? { command } : {}),
-      ...(command !== undefined && this.reasons.has(command) ? { reason: this.reasons.get(command)! } : {}),
+      ...(reason !== undefined ? { reason } : {}),
+      ...(decided !== undefined ? { parts: decided.parts } : {}),
       input,
       sessionId: req.sessionId,
       ...(taskId !== undefined ? { taskId } : {}),
@@ -144,11 +172,24 @@ export class ApprovalHub {
     });
   }
 
-  /** Answer a parked approval. Returns false for an unknown or already-answered id. */
-  decide(requestId: string, decision: "allow" | "deny", scope: PermissionScope = "once"): boolean {
+  /**
+   * Answer a parked approval. Returns false for an unknown or already-answered id.
+   *
+   * `remember` is the "for this run" reach of an answer about a shell line: the widths chosen for
+   * its asking PARTS (`["git commit"]`, or `["git"]` to cover the program). It is the parts that are
+   * remembered, never the line — so the answer handed upstream is `once` whatever `scope` said: a
+   * wider scope there would remember the whole shell tool. `[]` remembers each asking part at its
+   * narrowest width.
+   */
+  decide(requestId: string, decision: "allow" | "deny", scope: PermissionScope = "once", remember?: readonly string[]): boolean {
     const entry = this.pending.get(requestId);
     if (!entry) return false;
     this.pending.delete(requestId);
+    const { parts, taskId } = entry.request;
+    if (remember !== undefined && parts !== undefined && taskId !== undefined) {
+      this.grants(taskId).rememberParts(parts, decision, remember.length > 0 ? remember : undefined);
+      scope = "once";
+    }
     const resolved: PermissionDecision = { decision, scope };
     entry.resolve(resolved);
     this.options.onResolved?.(requestId, resolved);

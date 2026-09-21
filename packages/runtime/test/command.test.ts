@@ -5,7 +5,7 @@
  * anything unmodellable comes back `unparsed` rather than looking benign.
  */
 import { describe, expect, it } from "vitest";
-import { describeCommand, parseCommand, programName } from "../src/command";
+import { describeCommand, parseCommand, programName, takeApart } from "../src/command";
 
 /** The single command on a line (fails loudly if the line produced several). */
 function one(line: string, dialect: "posix" | "powershell" = "posix") {
@@ -148,6 +148,98 @@ describe("PowerShell dialect", () => {
   it("unwraps powershell -Command", () => {
     const result = parseCommand(`powershell -Command "git push"`, "powershell");
     expect(result.commands[0]).toMatchObject({ program: "git", subcommand: "push", via: ["powershell"] });
+  });
+});
+
+/**
+ * One shell line is several requests (decision 0007 §4). The parser's half: WHERE the line comes
+ * apart, and the span of each piece in the line as it was written.
+ */
+describe("taking a line apart", () => {
+  /** Every request as `kind «text»`, the text cut out of the ORIGINAL line by its span. */
+  const pieces = (line: string, dialect: "posix" | "powershell" = "posix"): string[] =>
+    takeApart(line, dialect).requests.map((r) => `${r.kind} «${line.slice(r.span.start, r.span.end)}»`);
+
+  it.each<[string, string[]]>([
+    ["rm foo.txt && git commit -m wip", ["command «rm foo.txt»", "command «git commit -m wip»"]],
+    ["a || b ; c & d | e\nf", ["command «a»", "command «b»", "command «c»", "command «d»", "command «e»", "command «f»"]],
+    ["(cd x && make) ; { ls; pwd; }", ["command «cd x»", "command «make»", "command «ls»", "command «pwd»"]],
+    // Substitutions are requests of their own, INSIDE the command they feed.
+    ["echo $(git rm a.txt) `cat b.txt`", ["command «echo $(git rm a.txt) `cat b.txt`»", "command «git rm a.txt»", "command «cat b.txt»"]],
+    ['echo "built $(date +%s)"', ['command «echo "built $(date +%s)"»', "command «date +%s»"]],
+    ["diff <(sort a.txt) <(sort b.txt)", ["command «diff <(sort a.txt) <(sort b.txt)»", "command «sort a.txt»", "command «sort b.txt»"]],
+    ["echo $((1 + 2))", ["command «echo $((1 + 2))»"]],
+    // Redirects are requests: operator and target together.
+    ["sort < in.txt 2> err.log >> out.log 2>&1", ["command «sort»", "redirect «< in.txt»", "redirect «2> err.log»", "redirect «>> out.log»"]],
+    ["make &> build.log", ["command «make»", "redirect «&> build.log»"]],
+    // A here-document's BODY is data; its target is an ordinary redirect; a live `$( … )` inside it runs.
+    ["cat <<EOF > out.txt\nrm -rf / $(whoami)\nEOF\necho done", ["command «cat»", "redirect «> out.txt»", "command «whoami»", "command «echo done»"]],
+    ["cat <<'EOF'\n$(whoami)\nEOF", ["command «cat»"]],
+    // Control words lead a command without being one.
+    ["if true; then git reset --hard; fi", ["command «true»", "command «git reset --hard»"]],
+    ["for f in *.ts; do rm $f; done", ["command «rm $f»"]],
+    ["# a comment\nls # another", ["command «ls»"]],
+  ])("%s", (line, expected) => {
+    expect(pieces(line)).toEqual(expected);
+  });
+
+  it("opens every embedder on the list, recursively, and keeps the spans in the ORIGINAL line", () => {
+    const opened = (line: string): string[] => takeApart(line).requests.flatMap((r) => (r.kind === "command" ? [`${line.slice(r.span.start, r.span.end)} via ${(r.command.via ?? []).join(">")}`] : []));
+    expect(opened(`bash -c "cd /tmp && rm -rf build; git commit -m 'x y'"`)).toEqual(["cd /tmp via bash", "rm -rf build via bash", "git commit -m 'x y' via bash"]);
+    expect(opened(`sh -c "bash -lc 'git push'"`)).toEqual(["git push via sh>bash"]);
+    expect(opened("sudo -u bob timeout 5 nice -n 3 xargs -n 1 rm")).toEqual(["rm via sudo>timeout>nice>xargs"]);
+    expect(opened("env -i FOO=1 nohup time git reset --hard")).toEqual(["git reset --hard via env>nohup>time"]);
+    expect(opened("eval git reset --hard")).toEqual(["git reset --hard via eval"]);
+    expect(opened("exec git reset --hard")).toEqual(["git reset --hard via exec"]);
+    expect(opened("watch -n 5 'git status | head'")).toEqual(["git status via watch", "head via watch"]);
+    expect(opened("parallel gzip ::: a b c")).toEqual(["gzip via parallel"]);
+    expect(opened("npx -p typescript tsc --noEmit")).toEqual(["tsc --noEmit via npx"]);
+    expect(opened("pnpm dlx cowsay hi")).toEqual(["cowsay hi via pnpm"]);
+    // An embedder that is a request of its own as well is KEPT, the hidden command inside its span.
+    expect(opened("ssh -p 22 host 'rm -rf /var/x && ls'")).toEqual(["ssh -p 22 host 'rm -rf /var/x && ls' via ", "rm -rf /var/x via ssh", "ls via ssh"]);
+    expect(opened("docker exec -it web rm -rf /srv")).toEqual(["docker exec -it web rm -rf /srv via ", "rm -rf /srv via docker"]);
+    expect(opened("find . -name '*.tmp' -exec rm {} \\; -ok mv {} /tmp +")).toEqual(["find . -name '*.tmp' -exec rm {} \\; -ok mv {} /tmp + via ", "rm {} via find", "mv {} /tmp via find"]);
+    expect(opened("git -c alias.x='!rm -rf /' x")).toEqual(["git -c alias.x='!rm -rf /' x via ", "rm -rf / via git"]);
+    expect(opened("git submodule foreach --recursive 'git reset --hard'")).toEqual(["git submodule foreach --recursive 'git reset --hard' via ", "git reset --hard via git"]);
+  });
+
+  it("leaves an embedder that hides nothing, and one it does not know, as ordinary commands", () => {
+    expect(one("docker ps")).toMatchObject({ program: "docker", subcommand: "ps" });
+    expect(one("find . -name x")).toMatchObject({ program: "find" });
+    // `pnpm` is not a wrapper: only `pnpm dlx` and `pnpm exec` hide a command.
+    expect(one("pnpm publish")).toMatchObject({ program: "pnpm", subcommand: "publish" });
+    // Not on the list, so what it runs is not seen — which is what the `bash` entry and `other` are for.
+    expect(one("mytool --run 'git reset --hard'")).toMatchObject({ program: "mytool" });
+  });
+
+  it("gives every word its span, and says when WHAT RUNS is decided at run time", () => {
+    const line = "FOO=1 git -C sub commit -m 'a b'";
+    const command = one(line);
+    expect(command.words!.map((w) => line.slice(w.span.start, w.span.end))).toEqual(["FOO=1", "git", "-C", "sub", "commit", "-m", "'a b'"]);
+    expect(command.programIndex).toBe(1);
+    expect(one("$CMD --hard").dynamic).toBe(true);
+    expect(takeApart("git $(cat x) --hard").commands[0]).toMatchObject({ program: "git", dynamic: true });
+    expect(one('git commit -m "$MSG"').dynamic).toBeUndefined();
+  });
+
+  it("reports an unreadable PAYLOAD as a piece, beside everything it could read", () => {
+    const line = `git status; bash -c "echo 'unterminated"`;
+    const result = takeApart(line);
+    expect(result).toMatchObject({ unparsed: true, reason: "unterminated quote" });
+    expect(result.requests.map((r) => `${r.kind} «${line.slice(r.span.start, r.span.end)}»`)).toEqual(["command «git status»", "unparsed «echo 'unterminated»"]);
+    for (const bad of ["cat <<EOF\nno end", "echo $(unclosed", "echo > ", "case $x in a) ls;; esac"]) {
+      expect(takeApart(bad).unparsed, bad).toBe(true);
+    }
+  });
+
+  it("takes PowerShell apart too: separators, script blocks, redirects, the call operator", () => {
+    expect(pieces("Get-Content a.txt | Select-String foo; git status", "powershell")).toEqual(["command «Get-Content a.txt»", "command «Select-String foo»", "command «git status»"]);
+    expect(pieces("Get-ChildItem | ForEach-Object { Remove-Item $_ }", "powershell")).toEqual(["command «Get-ChildItem»", "command «ForEach-Object»", "command «Remove-Item $_»"]);
+    expect(pieces("echo hi > out.txt 2> $null", "powershell")).toEqual(["command «echo hi»", "redirect «> out.txt»", "redirect «2> $null»"]);
+    expect(pieces('& "C:\\tools\\x.exe" -v; $r = Get-Content f.txt', "powershell")).toEqual(['command «"C:\\tools\\x.exe" -v»', "command «Get-Content f.txt»"]);
+    expect(pieces(`cmd /c "del x.txt"`, "powershell")).toEqual(["command «del x.txt»"]);
+    // An encoded command cannot be read at all.
+    expect(takeApart("powershell -EncodedCommand AAAA", "powershell")).toMatchObject({ unparsed: true, reason: "an encoded command cannot be read" });
   });
 });
 

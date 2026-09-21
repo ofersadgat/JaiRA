@@ -22,6 +22,7 @@ import type { SchemaViolation } from "./schemas";
 import type { TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
+import type { CommandApproval } from "./commandParts";
 import type {
   BoardView,
   ChatThreadView,
@@ -46,6 +47,7 @@ import type {
   TaskSummary,
   WorkflowBrowser,
   WorkflowLayer,
+  WritableLayer,
 } from "./view";
 
 // --- invoke channels ---------------------------------------------------------
@@ -137,6 +139,12 @@ export interface PendingApproval {
   command?: string;
   /** Why policy escalated. */
   reason?: string;
+  /**
+   * A shell line as the requests it is made of (decision 0007 §4): per part its span in
+   * {@link command}, the span of the words that matched, its subject, its path or url, its verdict
+   * and the toolset entry that decided it. Absent for a tool that takes no command line.
+   */
+  parts?: CommandApproval;
   input: Record<string, JsonValue>;
   taskId?: string;
   /**
@@ -159,6 +167,13 @@ export interface SubmitApprovalRequest {
   decision: "allow" | "deny";
   /** Defaults to `once` — the narrowest answer. */
   scope?: ApprovalScope;
+  /**
+   * "For this run", for a shell line: the widths chosen for its asking PARTS — one of each part's
+   * `widths` (`"git commit"`, or `"git"`). `[]` takes each part's narrowest. It is the parts that are
+   * remembered, never the line, so `scope` is not also applied. Writing the entry into a toolset
+   * file ("add to the toolset") is a separate act.
+   */
+  remember?: string[];
 }
 
 /** One choice a {@link PendingQuestion}'s question offers. */
@@ -372,6 +387,40 @@ export interface WorkflowSource {
   text: string;
   /** False when nothing is at this path yet — a write would create it. */
   exists: boolean;
+  /** How this state stands against what ships — see {@link BuiltInStanding}. */
+  builtIn?: BuiltInStanding;
+}
+
+/**
+ * How one state file stands against the built-in layer (decision 0006).
+ *
+ * Present only where the layer is involved: on a shipped file itself, and on a person's file whose
+ * state id JaiRA also ships. Absent everywhere else, which is almost every file, so a surface that
+ * reads it needs no second test for "is this about a built-in at all".
+ */
+export interface BuiltInStanding {
+  /**
+   * Every layer holding a file for this state id, in search order — so the first is the one that
+   * loads. What decides which "Override…" an editor may still offer: a layer already listed has its
+   * copy, and copying over it is refused.
+   */
+  layers: WorkflowLayer[];
+  /**
+   * Set on a PERSON's file whose parsed value equals one JaiRA shipped: `current` is what ships
+   * now, `superseded` a version an earlier build installed into the shared root. Compared as values,
+   * not bytes — re-indenting a file is not editing it. Such a copy changes nothing (or pins an old
+   * version for no reason), which is why it is the one kind of override the app OFFERS to delete.
+   */
+  identical?: "current" | "superseded";
+}
+
+/** One copy the app may offer to delete — see {@link BuiltInStanding.identical}. */
+export interface BuiltInLeftover {
+  stateId: string;
+  layer: WritableLayer;
+  /** Absolute path, for display: the offer has to say exactly which file would go. */
+  file: string;
+  identical: "current" | "superseded";
 }
 
 /**
@@ -861,6 +910,8 @@ export interface FileSource {
   exists: boolean;
   /** The state this file defines, when it is under `workflows/` and named like one. */
   stateId?: string;
+  /** How that state stands against what ships — see {@link BuiltInStanding}. */
+  builtIn?: BuiltInStanding;
 }
 
 /**
@@ -1726,6 +1777,16 @@ export interface IpcContract {
     response: WorkflowMutationResult;
   };
   /**
+   * The shared root's copies of built-in states that are identical to a version JaiRA shipped
+   * (decision 0006): what the install steps left behind. A read — listing is not an offer taken.
+   */
+  "builtin:leftovers": { request: void; response: BuiltInLeftover[] };
+  /**
+   * Delete the named leftovers. Each is re-checked against the disk first, so a file edited since it
+   * was listed is left alone and is simply absent from the answer.
+   */
+  "builtin:cleanup": { request: { stateIds: string[] }; response: BuiltInLeftover[] };
+  /**
    * Show a file in the OS file manager.
    *
    * Here rather than in the renderer because opening a file manager is Electron's `shell`, and the
@@ -1860,6 +1921,8 @@ export const IPC_CHANNELS = [
   "workflow:write",
   "workflow:move",
   "workflow:delete",
+  "builtin:leftovers",
+  "builtin:cleanup",
   "workflow:syncStatus",
   "workflow:sync",
   "workflow:syncCancel",

@@ -23,15 +23,24 @@
  * `$ref` needs a file, and that is handed in as a {@link ToolsetReader} — `@jaira/persistence` builds
  * one over the same reference resolver a workflow's other references use.
  *
- * ## What is carried and not yet enforced
+ * ## The shell's entries
  *
- * A COMMAND subject (`git commit`, `git`) and `script` are accepted, validated, kept on the
- * {@link Toolset} and carried through lowering under `permissions.subjects`. Nothing judges a shell
- * line against them yet: taking a line apart into requests is decision 0007 §4 and a later task. Until
- * it lands, a shell line answers to the `bash` entry and the project's command policy, exactly as
- * before. The same goes for `implementation: "native"` on a state the ENGINE runs — the chat path
- * honours it through `planAgentTools`; a run injects ours, which is the governed choice, because the
- * engine hands an executor a state's tool LIST and a gate, and neither can say whose code was chosen.
+ * A COMMAND subject (`git commit`, `git`) and `script` are kept on the {@link Toolset} and carried
+ * through lowering under `permissions.subjects`, where the policy reads them at the moment a shell
+ * line is decided: the line is taken apart and each part answers to its own subject (decision 0007
+ * §4, `@jaira/runtime`'s `decideCommand`).
+ *
+ * The shell tool's OWN entry (`bash`) is the answer for "any other command" on such a line — not a
+ * mode for the tool. So it lowers as `smart` in `permissions.tools` — the one mode under which the
+ * gate reads the line before it answers — and its authored mode rides in `subjects` beside the
+ * commands it stands behind. `"bash": "deny", "git status": "allow"` therefore offers the shell and
+ * runs `git status`; every reader that wants the authored mode back goes through
+ * {@link toolsetOfEnvironment}.
+ *
+ * `implementation: "native"` on a state the ENGINE runs is still carried and not enforced — the chat
+ * path honours it through `planAgentTools`; a run injects ours, which is the governed choice, because
+ * the engine hands an executor a state's tool LIST and a gate, and neither can say whose code was
+ * chosen.
  *
  * ## The LEGACY reading, and how a run tells it from a map
  *
@@ -63,6 +72,8 @@ import { TOOL_SPEC_BY_NAME } from "./toolVocabulary";
 export const OTHER_SUBJECT = "other";
 /** The subject that answers for RUNNING A FILE — `./x.sh`, `npm run build` (decision 0007 §4). */
 export const SCRIPT_SUBJECT = "script";
+/** The shell tool: its entry answers for any command no other entry names (decision 0007 §4). */
+export const SHELL_TOOL = "bash";
 /** The key that starts a toolset from another — the same `$ref` every other block uses. */
 export const TOOLSET_REF_KEY = "$ref";
 
@@ -377,6 +388,20 @@ export function toolModes(toolset: Toolset): Record<string, PermissionMode> {
   return out;
 }
 
+/**
+ * {@link toolModes} as the GATE takes them: the shell's entry is `smart`, whatever it says.
+ *
+ * Any other mode would answer for the tool before its line was read — `deny` would refuse the
+ * `git status` the same toolset allows, `allow` would pre-approve a delegated agent's shell so that
+ * no line was ever judged at all. The authored mode is not lost: it is the `bash` subject a part
+ * falls to ({@link shellSubjects}).
+ */
+export function gateToolModes(toolset: Toolset): Record<string, PermissionMode> {
+  const modes = toolModes(toolset);
+  if (Object.hasOwn(modes, SHELL_TOOL)) modes[SHELL_TOOL] = "smart";
+  return modes;
+}
+
 /** Whose code runs each tool, where an entry chose. */
 export function toolImplementations(toolset: Toolset): Record<string, ToolImplementation> {
   const out: Record<string, ToolImplementation> = {};
@@ -387,14 +412,13 @@ export function toolImplementations(toolset: Toolset): Record<string, ToolImplem
 }
 
 /**
- * The command subjects and `script`, with their modes.
- *
- * ⚠️ CARRIED, NOT ENFORCED. Nothing reads this to judge a shell line yet — see the module header.
+ * What a shell line's parts answer to beyond the standard tools: the command subjects, `script`, and
+ * the shell's own entry (`bash`) as the mode for any other command — see the module header.
  */
 export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> {
   const out: Record<string, PermissionMode> = {};
   for (const [subject, entry] of Object.entries(toolset.entries)) {
-    if (entry.kind !== "tool" && entry.mode !== undefined) out[subject] = entry.mode;
+    if ((entry.kind !== "tool" || subject === SHELL_TOOL) && entry.mode !== undefined) out[subject] = entry.mode;
   }
   return out;
 }
@@ -409,7 +433,7 @@ export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> 
 export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[] | undefined): PermissionsDecl {
   // A MAP leaves its marks, so a run — which sees this block only through a gate — can tell it from
   // the legacy reading. See the module header and {@link TOOLSET_MARKERS}.
-  const tools = { ...toolModes(toolset), ...(toolset.legacy === true ? {} : TOOLSET_MARKERS) };
+  const tools = { ...gateToolModes(toolset), ...(toolset.legacy === true ? {} : TOOLSET_MARKERS) };
   const subjects = shellSubjects(toolset);
   const implementations = toolImplementations(toolset);
   return {
@@ -437,7 +461,16 @@ export function toolsetOfEnvironment(
   // The marks a lowered MAP left say this block was never the legacy reading.
   if (isLoweredToolset(permissions)) delete toolset.legacy;
   for (const [subject, mode] of Object.entries(permissions?.subjects ?? {})) {
-    if (Object.hasOwn(toolset.entries, subject)) continue;
+    if (Object.hasOwn(toolset.entries, subject)) {
+      // The shell's entry was lowered as `smart`; its authored mode is the one carried here.
+      if (subject === SHELL_TOOL) toolset.entries[subject] = { ...toolset.entries[subject]!, mode };
+      continue;
+    }
+    // …and a block that carries the shell's mode without granting the shell keeps it un-offered.
+    if (subject === SHELL_TOOL) {
+      toolset.entries[subject] = { kind: "tool", mode, offered: false };
+      continue;
+    }
     toolset.entries[subject] = { kind: subject === SCRIPT_SUBJECT ? "script" : "command", mode };
   }
   return toolset;

@@ -6,11 +6,14 @@
  * task and read a board. Every one of those steps can be the broken one, so a failure anywhere told
  * you nothing about where.
  *
- * This pane asks the question in one click. It installs a two-state workflow, runs it, and shows the
- * result beside the machinery that produced it: the files on disk, the instance tree, the live event
- * stream, the prompts actually sent and the replies actually received. Nothing here is a special
- * path — it is `workflow:write`, `task:create` and `task:start`, the same three channels the Files
- * tree and the board use, which is what makes a pass here mean something about the real thing.
+ * This pane asks the question in one click. It runs a two-state workflow that ships with the app
+ * (the built-in layer, decision 0006) and shows the result beside the machinery that produced it: the
+ * files that loaded, the instance tree, the live event stream, the prompts actually sent and the
+ * replies actually received. Nothing here is a special path — it is `task:create` and `task:start`,
+ * the same channels the board uses, against state files the Files tree lists like any others, which
+ * is what makes a pass here mean something about the real thing. Nothing is installed first, so it
+ * runs on a machine whose shared root holds no state at all. (The RUN is still recorded in the shared
+ * root's own project, so a shared root that cannot be written to at all cannot hold a self-test.)
  *
  * The second stage is what makes it a test rather than a smoke check: it takes the FIRST stage's
  * output as a declared input and reports on it. A pass therefore proves the binding carried, not
@@ -31,12 +34,13 @@ import type {
   SessionRef,
   SessionView,
   TaskDetail,
+  WorkflowLayer,
 } from "@jaira/shared/browser";
 import { Badge } from "./board";
 import { Conversation, TaskPanel } from "./detail";
-import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles } from "./debugWorkflow";
+import { SELF_TEST_ROOT } from "./debugWorkflow";
 import { SessionPanel } from "./session";
-import type { DebugState } from "./store";
+import type { DebugFile, DebugState } from "./store";
 
 /**
  * What the run's outputs say, read defensively.
@@ -87,29 +91,29 @@ function Readiness({ availability }: { availability: AvailabilitySnapshot }): JS
   );
 }
 
-/** One state file's row: is it there, is it ours, and where did it land. */
-function FileRow({
-  stateId,
-  file,
-  exists,
-  matches,
-  onOpen,
-}: {
-  stateId: string;
-  file: string;
-  exists: boolean;
-  matches: boolean;
-  onOpen: () => void;
-}): JSX.Element {
-  const status = !exists ? "missing" : matches ? "installed" : "edited";
+/** What a self-test row says about the copy that loads: which layer it is in, in the pane's words. */
+export function debugFileStatus(file: Pick<DebugFile, "layer" | "identical">): {
+  word: string;
+  tone: "success" | "unknown" | "error";
+} {
+  if (file.layer === null) return { word: "missing", tone: "error" };
+  if (file.layer === "system") return { word: "built in", tone: "success" };
+  // A person's copy wins over what ships. One JaiRA itself wrote is worth telling apart: it is not
+  // an experiment somebody is running, it is what an earlier build left behind.
+  return file.identical !== undefined ? { word: "old copy", tone: "unknown" } : { word: "overridden", tone: "unknown" };
+}
+
+/** One state file's row: which copy loads, and where it is. */
+function FileRow({ file, onOpen }: { file: DebugFile; onOpen: () => void }): JSX.Element {
+  const status = debugFileStatus(file);
   return (
-    <div className={`debug-file debug-file-${status}`}>
-      <span className={`dot ${exists ? (matches ? "success" : "unknown") : "error"}`} />
-      <span className="mono grow ellip" title={file || stateId}>
-        {stateId}
+    <div className={`debug-file debug-file-${status.tone}`}>
+      <span className={`dot ${status.tone}`} />
+      <span className="mono grow ellip" title={file.file || file.stateId}>
+        {file.stateId}
       </span>
-      <span className="chip">{status}</span>
-      <button className="link" onClick={onOpen} disabled={!exists}>
+      <span className="chip">{status.word}</span>
+      <button className="link" onClick={onOpen} disabled={file.layer === null}>
         open ↗
       </button>
     </div>
@@ -130,10 +134,12 @@ export interface DebugPaneProps {
   hasProject: boolean;
   onRun: (options: { scripted?: boolean; fresh?: boolean }) => void;
   onCancel: () => void;
-  onInstall: (force: boolean) => void;
+  /** Offer to delete the copies of the self-test an earlier build left in the shared root. */
+  onCleanup: (stateIds: string[]) => void;
   onRecheck: () => void;
   onDismissError: () => void;
-  onOpenState: (stateId: string) => void;
+  /** Open the copy that LOADS — the row knows which layer that is. */
+  onOpenState: (stateId: string, layer: WorkflowLayer) => void;
   onShowSession: (instanceId: string | null) => void;
 }
 
@@ -150,13 +156,12 @@ export function DebugPane({
   hasProject,
   onRun,
   onCancel,
-  onInstall,
+  onCleanup,
   onRecheck,
   onDismissError,
   onOpenState,
   onShowSession,
 }: DebugPaneProps): JSX.Element {
-  const files = selfTestFiles();
   // The detail panel is only about the self-test when the selection still IS the self-test. Clicking
   // a card in Tasks moves the selection, and showing that task's tree under a "self-test" heading
   // would attribute somebody else's run to this button.
@@ -164,8 +169,9 @@ export function DebugPane({
   const run = mine?.runs[mine.runs.length - 1];
   const result = verdictOf(run?.outputs ?? null);
   const running = mine?.status === "running" || run?.outcome === "running";
-  const missing = debug.files.filter((f) => !f.exists).length;
-  const edited = debug.files.filter((f) => f.exists && !f.matches).length;
+  const missing = debug.files.filter((f) => f.layer === null).length;
+  const overridden = debug.files.filter((f) => f.layer !== null && f.layer !== "system");
+  const oldCopies = overridden.filter((f) => f.identical !== undefined);
 
   return (
     // `view` is what makes this a two-column grid the height of the viewport — without it the
@@ -200,47 +206,57 @@ export function DebugPane({
               <span className="mono">verdict: string</span>
             </li>
           </ol>
-          {/* The files themselves, verbatim. This pane's claim is that nothing here is special, and
-              the only way to make that checkable is to show what it writes. */}
+          {/* The files themselves, verbatim — the copies that LOAD, from whichever layer supplied
+              them. This pane's claim is that nothing here is special, and the only way to make that
+              checkable is to show what it runs. */}
           <details className="debug-source">
-            <summary>The state files, as they will be written</summary>
-            {SELF_TEST_STATES.map((stateId) => (
-              <div key={stateId}>
-                <div className="sub mono">{stateId}.json</div>
-                <pre className="outputs">{JSON.stringify(files[stateId], null, 2)}</pre>
+            <summary>The state files, as they load</summary>
+            {debug.files.map((f) => (
+              <div key={f.stateId}>
+                <div className="sub mono">{f.file || `${f.stateId}.json`}</div>
+                <pre className="outputs">{f.text}</pre>
               </div>
             ))}
           </details>
         </section>
 
         <section>
-          <h3>Installed</h3>
+          <h3>Where it comes from</h3>
           <div className="notice">
-            The self-test lives in the SHARED root, not in the open project — it is a fact about this
-            installation, and three debug files in a checkout's <code>.jaira/</code> would be three
-            files in its next commit.
+            The self-test ships with JaiRA, so there is nothing to install and it runs with nothing in
+            the shared root. A copy of one of its states in <code>~/.jaira</code> wins over the built-in
+            one, as an override of any built-in does.
           </div>
           {debug.files.map((f) => (
-            <FileRow key={f.stateId} {...f} onOpen={() => onOpenState(f.stateId)} />
+            <FileRow key={f.stateId} file={f} onOpen={() => (f.layer === null ? undefined : onOpenState(f.stateId, f.layer))} />
           ))}
-          {debug.files.length > 0 ? (
-            <div className="sub mono ellip" title={debug.files[0]!.file}>
-              {debug.files[0]!.file}
+          {missing > 0 ? (
+            <div className="notice bad">
+              {missing === 1 ? "One state was" : `${missing} states were`} found in no layer, so the run cannot
+              start. The built-in layer is missing from this build.
             </div>
           ) : null}
-          {edited > 0 ? (
+          {overridden.length > 0 ? (
             <div className="notice warn">
-              {edited === 1 ? "One file differs" : `${edited} files differ`} from what this build would
-              write. Left alone — a run uses what is on disk. Reinstall to put them back.
+              {overridden.length === 1 ? "One state loads" : `${overridden.length} states load`} from the shared
+              root instead of from what ships, and a run uses what loads.
+              {oldCopies.length === 0
+                ? ""
+                : ` ${
+                    oldCopies.length < overridden.length
+                      ? `${oldCopies.length} of them ${oldCopies.length === 1 ? "is" : "are"}`
+                      : oldCopies.length === 1
+                        ? "It is"
+                        : "They are"
+                  } identical to what JaiRA itself installed there.`}
             </div>
           ) : null}
           <div className="pane-actions">
-            <button className="ghost" disabled={debug.busy || missing === 0} onClick={() => onInstall(false)}>
-              Install missing
-            </button>
-            <button className="ghost" disabled={debug.busy} onClick={() => onInstall(true)}>
-              Reinstall
-            </button>
+            {oldCopies.length > 0 ? (
+              <button className="ghost" disabled={debug.busy} onClick={() => onCleanup(oldCopies.map((f) => f.stateId))}>
+                {oldCopies.length === 1 ? "Delete the old copy…" : `Delete ${oldCopies.length} old copies…`}
+              </button>
+            ) : null}
             <button className="ghost" disabled={debug.busy} onClick={onRecheck}>
               Re-check
             </button>
@@ -370,7 +386,9 @@ export function DebugPane({
             stream={stream}
             onStart={() => onRun({})}
             onCancel={onCancel}
-            onOpenState={onOpenState}
+            // A state the run went through, opened as the copy that loads — the rows above know which
+            // layer that is; a state they do not list is one of the three that ship.
+            onOpenState={(stateId) => onOpenState(stateId, debug.files.find((f) => f.stateId === stateId)?.layer ?? "system")}
           />
         ) : (
           <p className="empty">Run the self-test to see its task here.</p>

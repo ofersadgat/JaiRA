@@ -266,10 +266,28 @@ describe("what enumerates layers sees three", () => {
     expect(view.file).toBe(file);
   });
 
-  it("does not draw the read-only root in the Files tree, which is where files are made", () => {
-    write(builtIn, "workflows/chat/hello.json", promptState("shipped"));
+  it("draws the read-only root LAST in the Files tree, as `system` and never as `base`", () => {
+    // Labelling every root after the first `base` — which the tree used to do — would have offered
+    // to save into the installed app. The layer is what every menu on that root reads.
+    const file = write(builtIn, "workflows/chat/hello.json", promptState("shipped"));
     const p = open();
-    expect(fileTree(p, browseWorkflows(p)).roots.map((r) => r.layer)).toEqual(["project", "base"]);
+    const roots = fileTree(p, browseWorkflows(p)).roots;
+    expect(roots.map((r) => r.layer)).toEqual(["project", "base", "system"]);
+    expect(roots[2]).toMatchObject({ label: "Built in", dir: builtIn, prefix: "", exists: true });
+    const hello = roots[2]!.nodes[0]?.children?.[0]?.children?.[0];
+    expect(hello).toMatchObject({ stateId: "chat/hello", layer: "system", path: "workflows/chat/hello.json" });
+    expect(hello?.shadowed).toBeUndefined();
+    expect(file.endsWith("hello.json")).toBe(true);
+  });
+
+  it("marks the shipped row overridden and the person's row overriding, once a copy shadows it", () => {
+    write(builtIn, "workflows/chat/hello.json", promptState("shipped"));
+    write(testHome(), "workflows/chat/hello.json", promptState("mine"));
+    const p = open();
+    const roots = fileTree(p, browseWorkflows(p)).roots;
+    const at = (index: number): unknown => roots[index]!.nodes.find((n) => n.name === "workflows")?.children?.[0]?.children?.[0];
+    expect(at(1)).toMatchObject({ layer: "base", overridesBuiltIn: true });
+    expect(at(2)).toMatchObject({ layer: "system", shadowed: true });
   });
 });
 

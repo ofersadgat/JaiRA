@@ -586,8 +586,17 @@ export interface FileNode {
   project?: string;
   /** The state this file defines, when `kind` is `workflow`. */
   stateId?: string;
-  /** Set on a BASE file that a project file of the same state id shadows (see {@link WorkflowFileEntry}). */
+  /**
+   * Set on a file a layer AHEAD of it shadows: a base file the project overrides, or a built-in one
+   * that either of the others does (see {@link WorkflowFileEntry}).
+   */
   shadowed?: boolean;
+  /**
+   * Set on a project or shared state file whose id JaiRA also ships (decision 0006) — the other end
+   * of a built-in row's `shadowed`. It is what lets a row say "this is an override of something that
+   * ships" without the tree that holds it also having to hold the built-in root.
+   */
+  overridesBuiltIn?: boolean;
   /** Set when the file could not be read or parsed. */
   error?: string;
   /** Lint state, joined from the workflow browser. Absent on a node nothing is known about. */
@@ -613,6 +622,9 @@ export interface FileNode {
  * Once beside rather than under each: `~/.jaira` is machine-global, so repeating it per project
  * would draw the same directory three times and invite somebody to wonder which copy they were
  * editing. The projects are the tree's top level and the shared root is their sibling.
+ *
+ * The LAST root is always what ships (`layer: "system"`, decision 0006): read-only, listed once, and
+ * the one root every tree has whatever the shell is standing in — it is behind all of them.
  */
 export interface FileTree {
   roots: FileRoot[];
@@ -625,7 +637,7 @@ export interface FileRoot {
    * no project — see {@link FileTree}.
    */
   project?: string;
-  /** What to call it: the project's basename, or `~/.jaira` for the shared root. */
+  /** What to call it: the project's basename, `~/.jaira` for the shared root, `Built in` for what ships. */
   label: string;
   dir: string;
   /**

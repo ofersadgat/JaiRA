@@ -858,16 +858,76 @@ the same rule.
   | `codex-cli` | its sandbox, and nothing finer: `workspace-write` when the toolset holds `write_file`, `edit` or `bash` with a mode that is not `deny`, `read-only` otherwise |
   | `generic-cli` | nothing — so a toolset that **denies** anything is **refused** there, naming what it denies |
 
-  ⚠️ **Three things a toolset says that are not enforced yet.** A **command
-  subject** and **`script`** are accepted, checked and carried with the state,
-  and nothing judges a shell line against them: a line still answers to the `bash`
-  entry and the project's command policy (`policy` in settings), so `"git push": "allow"`
-  does not yet spare a push its approval. `"implementation": "native"` is honoured
+  **One shell line is several requests.** A `bash` call is not judged as a tool.
+  The line is taken apart — at `&&`, `||`, `;`, `&`, `|`, newlines, `( … )`,
+  `{ … }`, `$( … )`, backticks and `<( … )` — and each part is a request for a
+  subject of this same map:
+
+  - **A file utility is the standard tool on its path.** `cat`, `head`, `tail`,
+    `less` → `read_file`; `ls`, `find`, `tree` → `glob`; `grep`, `rg` → `grep`;
+    `rm`, `mv`, `cp`, `touch`, `mkdir`, `chmod`, `tee`, `sed -i` → `write_file`;
+    `curl`, `wget` → `web_fetch` on the url. PowerShell's cmdlets and aliases map
+    the same way (`Get-Content`, `Get-ChildItem`, `Select-String`, `Remove-Item`,
+    `Set-Content`, `Invoke-WebRequest`). So `"write_file": "ask"` asks about
+    `rm x`, and a `scopes` table written for `write_file` binds `rm x` and `> x`
+    exactly as it binds the tool.
+  - **A redirect is a request**: `>`, `>>`, `2>`, `&>` → `write_file` on the
+    target; `<` → `read_file` on the source. `> /dev/null` (`$null`, `NUL`) is none.
+  - **Running a file is `script`**: `./x.sh`, `bash x.sh`, `python x.py`,
+    `node x.js`, `npm run <name>`, `make <target>` — and code a line carries
+    inline (`node -e …`), because what it does cannot be read off the line either.
+  - **Anything else is a command subject**: the program and its subcommand. The
+    most specific entry wins — `git push --force` (every flag an entry names must
+    be present), then `git push`, then `git` — and with none, the **`bash`
+    entry**, which is what "any other command" means; then `other`. A subject the
+    map does not hold at all is not offered, and asks.
+  - `cd`, `echo`, `pwd`, `test`, `true` are no request. Embedders are opened,
+    recursively: `sh -c "…"`, `powershell -Command`, `eval`, `exec`,
+    `find … -exec`, `xargs`, `env`, `sudo`, `nohup`, `time`, `timeout`, `nice`,
+    `watch`, `parallel`, `ssh host …`, `docker exec …`, `git -c alias.…`,
+    `git submodule foreach`, `npx`, `pnpm dlx`. One the list does not know is an
+    ordinary command, and what it hides answers only to `bash` and `other`.
+
+  **The line runs only if every part may.** One denied part refuses it; any part
+  that asks produces one approval, which shows the line in the colours of its
+  parts and lets an answer be remembered for the run **per part, at a width**
+  (`git commit`, or `git`) — never for the line, and never for the shell.
+
+  So `"bash": "deny", "git status": "allow"` offers the shell, runs `git status`
+  and refuses everything else: `bash`'s mode is the answer for a command nothing
+  else names, not a switch on the tool. (It reaches the engine as `smart`, with the
+  mode you wrote carried in `permissions.subjects` — that is what makes the gate
+  read the line before it answers.) **`smart`** on a shell subject defers to the
+  project's command policy.
+
+  **How it composes with `policy` in settings.** Per part: `.jaira/` is denied;
+  then the first matching `policy.rules` rule, else the built-in destructive floor
+  (`git reset --hard`, a force push, `rm -r .git` — denied), else a built-in ask
+  (push, merge, install, publish, deploy, network, a credentials path), else
+  `policy.default`. The toolset's answer is then folded in as the **stricter of
+  the two** — with one exception: an entry that **names the program**
+  (`"git push": "allow"`, `"npm": "allow"`) replaces a built-in *ask* or the
+  default, because naming it is the decision those stand in for. `"bash": "allow"`
+  does not: "any other command" says nothing about pushing. Nothing in a toolset
+  lifts the destructive floor, and nothing in one loosens an authored rule — a
+  state may tighten the project's statement, never widen it. A line the parser
+  cannot model (an unterminated quote, `$CMD …`, `git $(…) …`, a `case`, an
+  encoded PowerShell command) asks whatever the toolset allows.
+
+  ⚠️ **Two things a toolset says that are not enforced yet.**
+  `"implementation": "native"` is honoured
   by a **conversation turn** and not by a **run**, which injects JaiRA's
   implementation — the governed choice: the engine hands an executor a state's
   resolved tools and its gate, and neither says whose code an entry chose. And a
   run's `"other": "ask"` does not *force* `Task` and its kind to the callback (a
   conversation turn's does); write `"other": "deny"` to remove them.
+
+  ⚠️ **The old form's `bash` mode is still a mode for the tool.** A state written
+  as a list with `permissions.tools.bash: "ask"` asks before every line, as it
+  always did, and `"allow"` runs every line the destructive floor and a rule's
+  `deny` do not refuse; only the map form is judged part by part. `run_command`
+  is a host function with no state toolset in reach: its line answers to `policy`
+  alone.
 
   ⚠️ **Across layers a toolset replaces the offered TOOLS, and only those.** It
   reaches the engine as a list and a `permissions` block, and the block merges per

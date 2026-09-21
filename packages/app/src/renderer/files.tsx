@@ -25,6 +25,7 @@ import {
 } from "react";
 import type {
   BoardCard,
+  BuiltInLeftover,
   FileMutationResult,
   FileNode,
   FileRoot,
@@ -38,7 +39,8 @@ import type {
   WorkflowLayer,
   WorkflowMutationResult,
 } from "@jaira/shared/browser";
-import { isTextMime } from "@jaira/shared/browser";
+import { isTextMime, isWritableLayer } from "@jaira/shared/browser";
+import { leftoversAsk } from "./builtIn";
 import { Badge } from "./board";
 import { CrumbBar, alternatives, runCrumbs, shortRunName, type Crumb } from "./crumbs";
 import { TaskPanel } from "./detail";
@@ -96,10 +98,12 @@ type MoveRequest = MoveWorkflowRequest;
 const LAYER_LABEL: Record<WorkflowLayer, string> = {
   project: "this project",
   base: "shared",
-  // What ships (decision 0006). The tree does not draw this root yet, so the label is reached only
-  // by a state opened from the workflow listing.
+  // What ships (decision 0006): the tree's last root, read-only.
   system: "built in",
 };
+
+/** What a layer's ROOT is called in the address bar — a directory's name, or the reference that names it. */
+const ROOT_WORD: Record<WorkflowLayer, string> = { project: ".jaira", base: "~/.jaira", system: "$SYSTEM" };
 
 /** What each file kind looks like in the tree. Glyphs, not colour, so the meaning survives a theme. */
 const KIND_GLYPH: Record<string, string> = {
@@ -251,12 +255,21 @@ function TreeNode({
         {node.error === undefined && lint !== undefined && lint.errors === 0 && lint.warnings > 0 ? (
           <span className="chip chip-warn">{lint.warnings}</span>
         ) : null}
-        {node.shadowed ? <span className="chip">shadowed</span> : null}
+        {node.shadowed ? <span className="chip">{node.layer === "system" ? "overridden" : "shadowed"}</span> : null}
+        {/* Which layer supplied a state is the row's ROOT, except in the one case the root cannot
+            say: this file is a person's, and JaiRA ships a state of the same id beneath it. */}
+        {node.overridesBuiltIn ? (
+          // One word, because the column is 250px and the NAME is what must not be the part that
+          // gives way; the sentence is the tooltip, and the editor's top bar says it in full.
+          <span className="chip" title="Overrides built in: JaiRA ships a state with this id, and this file runs instead of it">
+            override
+          </span>
+        ) : null}
         {/* The folder's own `+`. On hover and on focus only — a column of plus signs down a tree is
             a column of things to click by accident — and it stops the click, because the row it
             sits on opens the folder and a menu that opened under a folder that had just closed
-            would be a menu pointing at nothing. */}
-        {isDir ? (
+            would be a menu pointing at nothing. Not on what ships: nothing is made there. */}
+        {isDir && isWritableLayer(node.layer) ? (
           <button
             className="tree-add"
             title={`new file, folder or workflow in ${node.name}`}
@@ -479,6 +492,47 @@ export function standingRoot(tree: FileTree | null, project: string | null): Fil
   return tree.roots.find((root) => root.layer === "base") ?? tree.roots[0] ?? null;
 }
 
+const NO_LEFTOVERS: readonly BuiltInLeftover[] = [];
+
+/**
+ * The verbs a row under "Built in" offers: READ and OVERRIDE, and nothing else (decision 0006).
+ *
+ * No New, no Rename, no Duplicate, no Delete — every one of those writes into the layer, and what
+ * ships is the app's. It is a separate function from the ordinary menu rather than a set of
+ * `disabled` flags on it, so that a verb added to that menu later is not offered here by default:
+ * the safe answer to "may this row do X" is no until somebody says otherwise.
+ *
+ * Overriding is a copy UP a layer under the same id, which is what makes it an override. Both
+ * destinations are always listed; the project one is disabled with nothing open, as every
+ * project-layer verb in this tree is.
+ */
+export function builtInItems(
+  node: FileNode,
+  root: FileRoot,
+  act: {
+    hasProject: boolean;
+    onOpen: (stateId: string, layer: WorkflowLayer) => void;
+    onOverride: (stateId: string, toLayer: "base" | "project") => void;
+    onCopy: (text: string) => void;
+    onReveal: (file: string) => void;
+  },
+): MenuItem[] {
+  const abs = `${root.dir}/${node.path}`;
+  const look: MenuItem[] = [
+    { label: "Copy path", onSelect: () => act.onCopy(abs) },
+    { label: "Reveal in file explorer", onSelect: () => act.onReveal(abs) },
+  ];
+  const id = node.stateId;
+  if (id === undefined) return look;
+  return [
+    { label: "Open", note: "read-only", onSelect: () => act.onOpen(id, root.layer) },
+    { label: "Override for all projects", note: "~/.jaira", separator: true, onSelect: () => act.onOverride(id, "base") },
+    { label: "Override here", note: ".jaira", disabled: !act.hasProject, onSelect: () => act.onOverride(id, "project") },
+    { label: "Copy state id", separator: true, onSelect: () => act.onCopy(id) },
+    ...look,
+  ];
+}
+
 /**
  * The three ways to make something, for one directory.
  *
@@ -631,6 +685,8 @@ export function FileTreePanel({
   onDraft,
   onUnfold,
   project = null,
+  leftovers = NO_LEFTOVERS,
+  onCleanup,
 }: {
   tree: FileTree | null;
   selected: FileSelection | null;
@@ -723,6 +779,12 @@ export function FileTreePanel({
    * name, printed it twice. The one you are standing in is the one that needs no introduction.
    */
   project?: string | null;
+  /**
+   * Copies of built-in states in the shared root that JaiRA wrote and nobody changed, and how to
+   * delete the ones named (decision 0006). The "Built in" root offers it; with neither, it does not.
+   */
+  leftovers?: readonly BuiltInLeftover[];
+  onCleanup?: ((stateIds: string[]) => void) | undefined;
 }): JSX.Element {
   /** Used only when the host does not control the folding — see the prop's own note. */
   const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -932,6 +994,16 @@ export function FileTreePanel({
    */
   const itemsFor = (node: FileNode, root: FileRoot): MenuItem[] => {
     const abs = `${root.dir}/${node.path}`;
+    // What ships is read and overridden, and nothing else (decision 0006) — see {@link builtInItems}.
+    if (!isWritableLayer(root.layer)) {
+      return builtInItems(node, root, {
+        hasProject,
+        onOpen,
+        onOverride: (id, toLayer) => void move({ stateId: id, layer: "system", to: id, toLayer, copy: true }, "Override"),
+        onCopy: copyText,
+        onReveal,
+      });
+    }
     const parentDir = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
     const reveal: MenuItem[] = [
       { label: "Copy path", onSelect: () => copyText(abs), separator: true },
@@ -1076,15 +1148,19 @@ export function FileTreePanel({
           <p className="empty">Open a project to browse its files.</p>
         ) : (
           tree.roots.map((root) => {
-            const named = rootNeedsName(root, project);
+            // What ships always introduces itself: it is never the place you are standing in, and
+            // its name is the only thing that says these rows are not yours to edit.
+            const writable = isWritableLayer(root.layer);
+            const named = !writable || rootNeedsName(root, project);
             const rootMenu = (e: ReactMouseEvent): void => {
               e.preventDefault();
               e.stopPropagation();
               setMenu({
                 ...pointOf(e),
                 items: [
-                  ...newItems(root, "", startDraft),
-                  { label: "Copy path", separator: true, onSelect: () => copyText(root.dir) },
+                  // Nothing is made in what ships, so its root offers the two ways of looking only.
+                  ...(writable ? newItems(root, "", startDraft) : []),
+                  { label: "Copy path", separator: writable, onSelect: () => copyText(root.dir) },
                   {
                     label: "Reveal in file explorer",
                     disabled: !root.exists,
@@ -1103,14 +1179,15 @@ export function FileTreePanel({
                file here". Every node stops the event, so a right-click on a file gets the file's. */
             <ul className="file-tree" key={root.dir} title={named ? undefined : root.dir} onContextMenu={rootMenu}>
               {named ? (
-              <li className="tree-root" title={root.dir} onContextMenu={rootMenu}>
+              <li className={writable ? "tree-root" : "tree-root is-readonly"} title={root.dir} onContextMenu={rootMenu}>
                 {/* The project's own name, in the data voice — a directory basename, and the same
                     string the crumb prints. `~/.jaira` is listed once beside the projects rather
                     than under each, so it names itself the same way. */}
                 <span className="data-secondary grow ellip">{root.label}</span>
-                {/* The `+` every folder has, on the row that stands for the whole root. The one root
-                    without this line is the one you are standing in, and that root's `+` is the
-                    Files row's own — see `standingRoot`. */}
+                {writable ? (
+                /* The `+` every folder has, on the row that stands for the whole root. The one root
+                   without this line is the one you are standing in, and that root's `+` is the
+                   Files row's own — see `standingRoot`. */
                 <button
                   className="tree-add"
                   title={`new file, folder or workflow in ${root.label}`}
@@ -1119,6 +1196,34 @@ export function FileTreePanel({
                 >
                   +
                 </button>
+                ) : (
+                  <>
+                    <span className="chip" title="What ships with JaiRA. Read it here; change it by overriding it.">
+                      read-only
+                    </span>
+                    {/* The offer to clear out what the old install steps left in the shared root
+                        (decision 0006). Here because this is the root those files are copies OF, and
+                        a button rather than a sweep because the shared root is a person's: every
+                        file is named in the dialog, and nothing goes without a yes. */}
+                    {leftovers.length > 0 && onCleanup !== undefined ? (
+                      <button
+                        type="button"
+                        className="link tree-leftovers"
+                        title={`${leftovers.length === 1 ? "A file" : `${leftovers.length} files`} in the shared root identical to what JaiRA installed there — not needed any more`}
+                        onClick={() =>
+                          setAsk(
+                            leftoversAsk(leftovers, () => {
+                              setAsk(null);
+                              onCleanup(leftovers.map((left) => left.stateId));
+                            }),
+                          )
+                        }
+                      >
+                        {leftovers.length === 1 ? "1 old copy…" : `${leftovers.length} old copies…`}
+                      </button>
+                    ) : null}
+                  </>
+                )}
               </li>
               ) : null}
               {draftIn(root, null)}
@@ -1143,7 +1248,11 @@ export function FileTreePanel({
                 // saying what fixes it — is the difference between an empty branch that looks
                 // broken and one that looks like an invitation.
                 <li className="empty root-empty">
-                  {root.exists ? "empty" : "not created yet — adding a state here will create it"}
+                  {root.exists
+                    ? "empty"
+                    : writable
+                      ? "not created yet — adding a state here will create it"
+                      : "nothing ships with this build"}
                 </li>
               ) : null}
             </ul>
@@ -1304,8 +1413,8 @@ export function crumbsOf(input: CrumbInput): Crumb[] {
   // The root, as a folder like any other. Its menu is the other roots — and the way to a project
   // that is not open, which is the only navigation in this bar that is not already on disk.
   const roots: MenuItem[] = (tree?.roots ?? []).map((entry) => ({
-    label: entry.layer === "project" ? ".jaira" : "~/.jaira",
-    note: entry.layer === "project" ? "this project" : "shared",
+    label: ROOT_WORD[entry.layer],
+    note: LAYER_LABEL[entry.layer],
     checked: entry.layer === layer,
     onSelect: () => input.onOpenDir(entry.layer, ""),
   }));
@@ -1313,7 +1422,7 @@ export function crumbsOf(input: CrumbInput): Crumb[] {
     roots.push({ label: "Open another project…", separator: roots.length > 0, onSelect: input.onOpenProject });
   }
   out.push({
-    text: layer === "project" ? ".jaira" : "~/.jaira",
+    text: ROOT_WORD[layer],
     kind: "folder",
     ...(root !== undefined ? { title: root.dir } : {}),
     ...(segments.length > 0 || trail.length > 0 ? { go: () => input.onOpenDir(layer, "") } : {}),
@@ -1772,7 +1881,10 @@ export function FilePanel({
           </button>
         ) : null}
         {shut ? null : Edit ? (
-          <Edit {...props} />
+          // What ships is read, never written (decision 0006): the same surface, mounted as the
+          // READING of its type — which every editor already knows how to be, because it is what the
+          // panel beside a finished run asks of them. No Save is drawn, so none can be refused.
+          <Edit {...(isWritableLayer(doc.layer) ? props : viewProps)} />
         ) : (
           // Reached only by a type that is not text — an image, the database, an archive. Naming the
           // type is the useful part: "no editor" alone reads as a missing feature rather than as a
@@ -2060,7 +2172,7 @@ export function FolderInspector({
   return (
     <div className="inspector">
       <div className="insp-crumb">
-        <span className="state-id ellip">{path === "" ? (layer === "project" ? ".jaira" : "~/.jaira") : (path.split("/").pop() ?? path)}</span>
+        <span className="state-id ellip">{path === "" ? ROOT_WORD[layer] : (path.split("/").pop() ?? path)}</span>
         <span className="sub">· the folder</span>
       </div>
       <section>

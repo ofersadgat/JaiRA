@@ -422,8 +422,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "interaction:submit": ((request: { requestId: string; value: never }) =>
     service.submitInteraction(request.requestId, request.value)) as Handler,
   "approval:pending": (() => service.pendingApprovals()) as Handler,
-  "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never }) =>
-    service.submitApproval(request.requestId, request.decision, request.scope)) as Handler,
+  "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never; remember?: string[] }) =>
+    service.submitApproval(request.requestId, request.decision, request.scope, request.remember)) as Handler,
   "userEvent:pending": (() => service.pendingUserEvents()) as Handler,
   "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
   "task:move": ((request: TaskMoveRequest) => service.moveTask(request)) as Handler,
@@ -444,6 +444,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "workflow:syncCancel": (() => service.cancelSync()) as Handler,
   "workflow:delete": ((request: Parameters<typeof service.deleteWorkflow>[0]) =>
     service.deleteWorkflow(request)) as Handler,
+  "builtin:leftovers": (() => service.builtInLeftovers()) as Handler,
+  "builtin:cleanup": ((request: Parameters<typeof service.cleanupBuiltIn>[0]) => service.cleanupBuiltIn(request)) as Handler,
   "schema:validate": ((request: Parameters<typeof service.validateSchema>[0]) =>
     service.validateSchema(request)) as Handler,
   "schema:check": ((request: Parameters<typeof service.checkValues>[0]) => service.checkValues(request)) as Handler,
