@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0006-built-in-layer">
+<meta name="state" content="editor-layer">
+<meta name="captured" content="2026-09-20">
+<meta name="reflects" content="proposed">
+<title>0006 · Which layer a state came from</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../../../ui/assets/mockup.css">
+<link rel="stylesheet" href="../0005-assets/proposed.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup" style="display: grid; gap: 22px; justify-items: start; align-content: start">
+<div><p class="mockup-caption">today · the shared copy</p>
+<div class="mockup-stage" style="width: 720px; flex: none"><div class="edit-bar editor-top"><div class="sub file-path"><bdi>~/.jaira/workflows/chat/agent.json</bdi></div><span class="chip chip-warn">shared copy</span><div class="tabs seg"><button class="layer-on">Form</button><button class="ghost">JSON</button><button class="ghost">Graph</button></div></div></div></div>
+<div><p class="mockup-caption">proposed · a built-in — read-only, with where it can be overridden</p>
+<div class="mockup-stage" style="width: 720px; flex: none"><div class="edit-bar editor-top"><div class="sub file-path"><bdi>$SYSTEM/workflows/chat/control.json</bdi></div><span class="chip">built in · read-only</span><button type="button" class="link">Override for all projects</button><button type="button" class="link">Override here</button><div class="tabs seg"><button class="layer-on">Form</button><button class="ghost">JSON</button><button class="ghost">Graph</button></div></div></div></div>
+<div><p class="mockup-caption">proposed · the same state once this project has its own — what it overrides is one click away</p>
+<div class="mockup-stage" style="width: 720px; flex: none"><div class="edit-bar editor-top"><div class="sub file-path"><bdi>.jaira/workflows/chat/control.json</bdi></div><span class="chip">overrides built in</span><button type="button" class="link">Compare with what ships</button><div class="tabs seg"><button class="layer-on">Form</button><button class="ghost">JSON</button><button class="ghost">Graph</button></div></div></div></div>
+</body>
+</html>

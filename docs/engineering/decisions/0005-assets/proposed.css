@@ -1,0 +1,717 @@
+/* Decision 0005 — the rules these mockups need that styles.css does not have yet. Everything here is
+   written in the app's tokens and ratios, so each block can move into styles.css as it stands. */
+
+/* The drop preview: what a drop on the column under the pointer WILL do. It is shown while hovering
+   and has no controls — the drop is the commit. In the New task popover's own box. */
+.connect-pop {
+  width: 300px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--lift);
+  font-size: var(--size-app);
+}
+.connect-kind {
+  font: 600 calc(var(--size-app) * 10.5 / 12.5) / 1.3 var(--font-data);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.connect-say {
+  margin: 0;
+  line-height: 1.45;
+}
+.connect-facts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.connect-facts b {
+  color: var(--text);
+  font-weight: 600;
+}
+.connect-pop {
+  pointer-events: none;
+}
+.connect-drop {
+  font: 600 calc(var(--size-app) * 11 / 12.5) / 1.3 var(--font-data);
+  color: var(--accent);
+}
+
+/* The connected line is an ordinary step note that is not a failure. */
+.sb-note.sb-connected,
+.sb-note.sb-connected .sb-note-icon,
+.sb-note.sb-skipped,
+.sb-note.sb-skipped .sb-note-icon {
+  color: var(--dim);
+}
+.sb-note.sb-connected b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* A gate the control conversation answered says so in the settled-by box, in the accent rather than in `ok`:
+   it is a judgement somebody may want back, not a confirmation. */
+.gate-settled-by.by-control {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+}
+.gate-settled-by.by-control svg {
+  color: var(--accent);
+  margin-top: 0;
+}
+.gate-settled-by .grow {
+  flex: 1;
+}
+.conf {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
+
+/* The fast-forward strip is the activity strip with a destination and a way past it. */
+.run-doing.ffwd b + .run-doing-cut {
+  margin-left: 2px;
+}
+.run-doing .ffwd-steps {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
+
+/* Where an input's value came from. */
+.prov {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: 600 calc(var(--size-app) * 10 / 12.5) / 1.6 var(--font-data);
+  color: var(--dim);
+}
+.prov-inferred {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  color: var(--accent);
+}
+.prov-asked {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  color: var(--warn);
+}
+
+/* Board: an adopted task under its parent. */
+.card.card-child {
+  margin-left: 14px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+/* ---- 0006: named sets in Settings ---------------------------------------------------------------
+   Everything structural is the Presets pane's (cfg-row, llm-config, pane-actions). These are the
+   four things it did not have. */
+
+/* A set's name and where its value comes from read as one unit, so the button keeps the far edge. */
+.set-title {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.set-title .cfg-row-title {
+  flex: none;
+}
+/* Set in the layer being edited — the accent, because it is the one a person can change here. */
+.cfg-status.here {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.cfg-status.here .cfg-dot {
+  background: var(--accent);
+}
+/* What the set holds is the row's content; who uses it is a footnote to that. */
+.set-holds {
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.set-used {
+  margin-top: 1px;
+}
+
+/* One tool per line: the switch or the name, what it does, and (for a permission set) its verdict. */
+.tool-rows {
+  display: grid;
+}
+.tool-row {
+  display: grid;
+  grid-template-columns: auto 11em minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.tool-row:first-child {
+  border-top: 0;
+}
+.tool-row.verdict {
+  grid-template-columns: 11em minmax(0, 1fr) auto;
+}
+.tool-row.off .tool-name {
+  color: var(--dim);
+}
+.tool-name {
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  font-weight: 600;
+}
+
+/* A verdict is one of four, and its colour is its meaning — the same three tints the status pills
+   use — so a column of them reads at a glance without reading a word. */
+.verdict-seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  overflow: hidden;
+  background: var(--panel);
+}
+.verdict-seg button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 3px 10px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  font-weight: 500;
+  color: var(--dim);
+}
+.verdict-seg button + button {
+  border-left: 1px solid var(--line);
+}
+.verdict-seg button.on {
+  font-weight: 650;
+}
+.verdict-seg button.on.default {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.verdict-seg button.on.allow {
+  background: var(--tint-ok);
+  color: var(--ok);
+}
+.verdict-seg button.on.ask {
+  background: var(--tint-warn);
+  color: var(--warn);
+}
+.verdict-seg button.on.deny {
+  background: var(--tint-bad);
+  color: var(--bad);
+}
+
+/* ---- 0006: sets inside the composer's Tools and Permissions cards -------------------------------
+   The cards are the shipped ones, bodies untouched. The head's origin becomes a picker (it opens the
+   card's own `cx-submenu`), and gains a "+". */
+.cx-origin-wrap {
+  position: relative;
+  flex: none;
+}
+.cx-origin-pick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: -1px -5px;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.cx-origin-pick:hover,
+.cx-origin-pick[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.cx-origin-wrap .cx-submenu {
+  left: 0;
+  right: auto;
+  min-width: 320px;
+}
+/* Keep what is ticked as a set. Dim while it already is one. */
+.cx-set-add {
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel-2);
+  box-shadow: none;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  line-height: 1.5;
+  color: var(--dim);
+  cursor: pointer;
+}
+.cx-set-add.ready {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+.cx-set-add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cx-submenu.cx-set-new {
+  gap: 7px;
+  min-width: 270px;
+  padding: 9px;
+}
+.cx-set-new-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cx-set-new-foot .cx-input {
+  width: auto;
+  flex: 1 1 auto;
+}
+.cx-submenu.cx-set-new .cx-set-new-foot button.primary {
+  flex: none;
+  width: auto;
+  justify-content: center;
+  padding: 4px 13px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+/* Where a set's value comes from. */
+.cx-src {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font: 500 calc(var(--size-app) * 9.5 / 12.5) / 1.5 var(--font-app);
+  color: var(--tok-hint);
+}
+/* A set named inside another set, or beside single tools. */
+.set-ref {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
+}
+.rule-chip.set-chip {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+.rule-chip.set-chip svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.set-chip-n {
+  font: 600 calc(var(--size-app) * 10 / 12.5) / 1 var(--font-data);
+  color: var(--tok-hint);
+}
+
+/* ---- 0006: a set's configuration is the Tools card, standing still -------------------------------
+   The same panel the composer's popover is, without being a popover. */
+.set-card {
+  max-width: 560px;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.set-card-label {
+  padding: 6px 2px 3px;
+  font: 600 calc(var(--size-app) * 9.5 / 12.5) / 1.3 var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tok-hint);
+}
+.set-card-label:first-child {
+  padding-top: 0;
+}
+/* A row that is read, not pressed: the grant's metrics without being a button. */
+.set-card span.cx-tool-grant,
+.set-config span.cx-tool-grant {
+  display: flex;
+  align-items: center;
+  cursor: default;
+}
+/* Out of the set: a red minus, at the very start of the line. */
+.set-minus {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin: 0 2px 0 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bad);
+  box-shadow: none;
+  color: #fff;
+  font: 700 13px/1 var(--font-app);
+  cursor: pointer;
+}
+.set-minus span {
+  margin-top: -2px;
+}
+.set-minus:hover {
+  filter: brightness(1.08);
+}
+/* Into the set: the last line of a section. */
+.cx-tool.set-add-line {
+  background: none;
+}
+.set-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 6px 4px 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.set-add:hover,
+.set-add[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.set-plus {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px dashed var(--tok-hint);
+  border-radius: 50%;
+  color: var(--tok-hint);
+  font: 600 13px/1 var(--font-app);
+}
+.set-readonly .cx-tool-mode {
+  pointer-events: none;
+}
+
+/* The same rows outside a section: no rule down the left, no indent. */
+.cx-cat-body.set-flat {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* ---- 0007 ---------------------------------------------------------------------------------------
+   The Permissions head names a bucket. */
+.cx-origin-pick.cx-bucket {
+  align-items: center;
+  color: var(--text);
+  font-weight: 600;
+}
+.cx-origin-pick.cx-bucket .cx-chip-icon svg {
+  width: 12px;
+  height: 12px;
+}
+/* A shell line taken apart: what each part is a request FOR, and what the toolset says to it. */
+.approval-parts {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.approval-parts .part {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--control-radius-sm);
+}
+.approval-parts .part-text {
+  font-family: var(--font-data);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-parts .part-arrow,
+.approval-parts .part-note {
+  color: var(--tok-hint);
+}
+.approval-parts .part-subject {
+  font-weight: 600;
+}
+.approval-parts .part-subject + .part-note {
+  grid-column: 3;
+  grid-row: 2;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+}
+.approval-parts .part-verdict {
+  grid-column: 4;
+  grid-row: 1;
+  padding: 0 7px;
+  border-radius: 999px;
+  font: 600 calc(var(--size-app) * 10.5 / 12.5) / 1.6 var(--font-app);
+  color: var(--dim);
+  background: var(--panel-2);
+}
+.approval-parts .part.asks {
+  background: var(--tint-warn);
+}
+.approval-parts .part.asks .part-verdict {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, var(--panel));
+}
+.approval-parts .part.denied .part-verdict {
+  color: var(--bad);
+  background: var(--tint-bad);
+}
+
+/* ---- 0007, second pass --------------------------------------------------------------------------
+   The line in the colours of its parts. A part is tinted and underlined in its hue; what joins the
+   parts is dim, so the eye lands on the requests and not on the glue. */
+.shell-line .part-c {
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--hue) 13%, transparent);
+  color: var(--text);
+}
+/* The tint is the whole part; the underline is only the words that matched the toolset's line. */
+.part-m {
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--hue) 75%, transparent);
+  font-weight: 600;
+}
+.shell-line .op {
+  color: var(--tok-hint);
+}
+.approval-parts .part {
+  grid-template-columns: auto minmax(0, 1.2fr) auto minmax(0, 1fr) auto;
+}
+.approval-parts .part-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--hue);
+  align-self: center;
+}
+.approval-parts .part-subject + .part-note {
+  grid-column: 4;
+}
+.approval-parts .part-verdict {
+  grid-column: 5;
+}
+
+/* One answer each way, and an arrow for how far it reaches. */
+.approval-answers {
+  display: flex;
+  gap: 8px;
+}
+.split {
+  position: relative;
+  display: inline-flex;
+}
+.split .split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.split .split-caret {
+  margin-left: -1px;
+  padding-left: 7px;
+  padding-right: 7px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.split .split-caret svg {
+  width: 12px;
+  height: 12px;
+}
+.split.primary .split-caret {
+  border-left: 1px solid color-mix(in srgb, #fff 35%, transparent);
+}
+.split .cx-submenu.answer-menu {
+  left: 0;
+  right: auto;
+  min-width: 340px;
+}
+.answer-rule {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--line);
+}
+
+/* A program is a group under Execution; its subcommands hang one step further in. */
+.cx-cat-body > .cx-cat.cx-sub {
+  border: 0;
+  margin: 0;
+}
+.cx-cat.cx-sub > .cx-cat-head {
+  padding: 1px 0;
+}
+.cx-cat.cx-sub > .cx-cat-head .cx-cat-fold {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.cx-cat.cx-sub > .cx-cat-body {
+  margin-left: 18px;
+}
+
+/* Settings → Toolsets: the rail is the bucket hierarchy. */
+.llm-config.set-config {
+  grid-template-columns: 212px minmax(0, 1fr);
+}
+.set-rail-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 8px 3px;
+  font: 600 calc(var(--size-app) * 11.5 / 12.5) / 1.3 var(--font-data);
+  color: var(--text);
+}
+.set-rail-label:first-child {
+  padding-top: 3px;
+}
+.set-rail-label .cx-chip-icon svg {
+  width: 13px;
+  height: 13px;
+  color: var(--tok-hint);
+}
+.set-rail-label .cx-src {
+  margin-left: auto;
+}
+.set-config .llm-rail-item {
+  padding: 5px 9px;
+}
+.set-here-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.llm-rail-item.set-rail-add .llm-rail-summary {
+  color: var(--tok-hint);
+}
+.set-config .llm-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.set-config .llm-detail .pane-actions {
+  margin-top: 2px;
+}
+
+/* A closed group inside an open section keeps its own chevron. */
+.cx-cat.open .cx-cat.cx-sub:not(.open) > .cx-cat-head .cx-cat-chev {
+  transform: none;
+}
+
+/* ---- 0007, third pass ---------------------------------------------------------------------------
+   The answer menu says WHAT the answer covers before it says how far it reaches. */
+.answer-what {
+  display: grid;
+  gap: 4px;
+  padding: 4px 7px 6px;
+}
+.answer-what .verdict-seg {
+  display: flex;
+}
+.cx-submenu .answer-what .verdict-seg button {
+  flex: 1 1 0;
+  width: auto;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 0;
+  white-space: nowrap;
+}
+.cx-submenu .answer-what .verdict-seg button.on {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text);
+}
+.split .cx-submenu.answer-menu {
+  min-width: 390px;
+}
+/* The add-menu opens past the card's edge. */
+.llm-config.set-config {
+  overflow: visible;
+}
+.set-config .llm-rail {
+  border-radius: 0 0 0 7px;
+}
+.set-config .llm-detail {
+  min-height: 330px;
+}
+
+/* Tabs across the top of a rail-and-detail editor — the Presets pane's proposal. */
+.set-bucket-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 8px;
+  min-width: 0;
+}
+.set-bucket-row .cx-origin-pick.cx-bucket {
+  margin: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel);
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
+}
+.set-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 6px;
+  margin-bottom: -1px;
+}
+.set-tab {
+  position: relative;
+  padding: 6px 13px 7px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: none;
+  box-shadow: none;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+}
+.set-tab:hover {
+  color: var(--text);
+}
+.set-tab.on {
+  z-index: 1;
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+}
+.set-tab-add {
+  color: var(--tok-hint);
+}
+/* The open tab and the rail are one surface, so the tab reads as the rail's. */
+.set-tabs + .llm-config {
+  border-top-left-radius: 0;
+}
+/* Presets: two rails — the presets, then the open preset's sections — then the detail. The outer
+   rail is a step darker, so the two read as nested rather than as one long list. */
+.llm-config.preset-config {
+  grid-template-columns: 172px 146px minmax(0, 1fr);
+}
+.llm-config.preset-config.preset-new {
+  grid-template-columns: 172px minmax(0, 1fr);
+}
+.llm-rail.preset-rail {
+  background: color-mix(in srgb, var(--text) 5%, var(--panel-2));
+}
+.preset-config .llm-detail .pane-actions {
+  margin-top: auto;
+}
+.preset-note {
+  margin: 8px 2px 0;
+}
