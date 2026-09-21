@@ -17,7 +17,7 @@
  * That is findmyprompt's signature-driven pattern, and the reason to take it: the alternative is
  * three hand-written descriptions of one shape, drifting.
  */
-import { useMemo, useState, type JSX } from "react";
+import type { JSX } from "react";
 import {
   DEFAULT_EXECUTOR,
   type AvailabilitySnapshot,
@@ -27,12 +27,11 @@ import {
   type JairaOperationNode,
   type ProbeResult,
 } from "@jaira/shared/browser";
-import { Disclosure, Field, FieldGrid, TextArea, TextInput } from "./controls";
-import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
 import { ExecutorTree } from "./executorTreePane";
-import { providerState } from "./providersPane";
+import { LAYER_LABELS } from "./layerLabels";
 import { modelsBlock, type ModelPatch } from "./modelsConfig";
-import { executorBlock, formatAllow, parseAllow, type ExecutorPatch, type ExecutorTarget } from "./executorConfig";
+import { Presets, type PresetDocs } from "./presetTabs";
+import type { ExecutorPatch, ExecutorTarget } from "./executorConfig";
 
 export interface ExecutorsPaneProps {
   config: ConfigView | null;
@@ -81,13 +80,7 @@ export function ExecutorsPane(props: ExecutorsPaneProps): JSX.Element {
         )}
       </section>
 
-      <Presets
-        layerDoc={layerDoc}
-        effective={config.effective}
-        locked={locked}
-        layer={layer}
-        onSave={props.onSaveModels}
-      />
+      <PresetsGroup config={config} locked={locked} layer={layer} onSave={props.onSaveModels} />
     </div>
   );
 }
@@ -100,26 +93,30 @@ function definitionsOf(doc: unknown): Record<string, JairaOperationNode> {
   return block as Record<string, JairaOperationNode>;
 }
 
-/** Named LLM configurations a state selects with `operation.configRef`. */
-function Presets({
-  layerDoc,
-  effective,
+/** The presets a document states, as an object. */
+function presetsOf(doc: unknown): PresetDocs {
+  const block = modelsBlock(doc)?.["presets"];
+  return block !== null && typeof block === "object" && !Array.isArray(block) ? (block as PresetDocs) : {};
+}
+
+/**
+ * Named LLM configurations a state selects with `operation.configRef`.
+ *
+ * The group head, and the three documents the tabs are drawn from: what THIS layer states, what is
+ * in effect, and what the other layer states. Everything else is `presetTabs.tsx`.
+ */
+function PresetsGroup({
+  config,
   locked,
   layer,
   onSave,
 }: {
-  layerDoc: unknown;
-  effective: unknown;
+  config: ConfigView;
   locked: boolean;
   layer: ConfigLayer;
   onSave: (fields: ModelPatch, layer: ConfigLayer) => void;
 }): JSX.Element {
-  const here = (modelsBlock(layerDoc)?.["presets"] ?? {}) as Record<string, LlmConfigDoc>;
-  const inherited = (modelsBlock(effective)?.["presets"] ?? {}) as Record<string, LlmConfigDoc>;
-  const [adding, setAdding] = useState("");
-  const names = Object.keys(here);
-  const inheritedOnly = Object.keys(inherited).filter((n) => !(n in here));
-
+  const other: ConfigLayer = layer === "base" ? "project" : "base";
   return (
     <section className="cfg-group">
       <header className="cfg-group-head">
@@ -130,110 +127,18 @@ function Presets({
           is only the settings.
         </p>
       </header>
-
-      {names.length === 0 && inheritedOnly.length === 0 ? (
-        <p className="cfg-hint">None yet.</p>
-      ) : (
-        <ul className="cfg-rows">
-          {names.map((name) => (
-            <PresetRow
-              key={`${layer}:${name}`}
-              name={name}
-              value={here[name] ?? {}}
-              locked={locked}
-              onSave={(next) => onSave({ [`presets.${name}`]: next }, layer)}
-              onRemove={() => onSave({ [`presets.${name}`]: undefined }, layer)}
-            />
-          ))}
-          {inheritedOnly.map((name) => (
-            <li key={`inherited:${name}`} className="cfg-row">
-              <div className="cfg-row-head">
-                <span className="cfg-row-title mono">{name}</span>
-                <span className="cfg-status unchecked">
-                  <span className="cfg-dot" aria-hidden="true" />
-                  inherited
-                </span>
-              </div>
-              <p className="cfg-hint">{summariseLlmConfig(inherited[name] ?? {})}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <Disclosure summary="Add a preset" desc="a named set of call settings">
-        <div className="cfg-stack">
-          <FieldGrid>
-            <Field label="Name" param="models.presets.<name>" hint="What a state will write in configRef.">
-              <TextInput value={adding} mono placeholder="fast" disabled={locked} onChange={setAdding} />
-            </Field>
-          </FieldGrid>
-          <div className="pane-actions">
-            <button
-              disabled={locked || adding.trim().length === 0}
-              onClick={() => {
-                onSave({ [`presets.${adding.trim()}`]: {} }, layer);
-                setAdding("");
-              }}
-            >
-              Add it
-            </button>
-          </div>
-        </div>
-      </Disclosure>
+      <Presets
+        // A different layer is a different list: start clean rather than show one layer's unsaved
+        // edits, or its selection, over another's presets.
+        key={layer}
+        here={presetsOf(layer === "base" ? config.base : config.project)}
+        effective={presetsOf(config.effective)}
+        others={presetsOf(other === "base" ? config.base : config.project)}
+        locked={locked}
+        originLabel={LAYER_LABELS[other]}
+        onWrite={(name, value) => onSave({ [`presets.${name}`]: value }, layer)}
+      />
     </section>
   );
 }
 
-function PresetRow({
-  name,
-  value,
-  locked,
-  onSave,
-  onRemove,
-}: {
-  name: string;
-  value: LlmConfigDoc;
-  locked: boolean;
-  onSave: (next: LlmConfigDoc) => void;
-  onRemove: () => void;
-}): JSX.Element {
-  const savedJson = JSON.stringify(value);
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<LlmConfigDoc>(value);
-  const [baseline, setBaseline] = useState(savedJson);
-
-  if (baseline !== savedJson) {
-    if (JSON.stringify(draft) === baseline) setDraft(value);
-    setBaseline(savedJson);
-  }
-
-  const dirty = JSON.stringify(draft) !== savedJson;
-
-  return (
-    <li className="cfg-row">
-      <div className="cfg-row-head">
-        <span className="cfg-row-title mono">{name}</span>
-        <button className="ghost" onClick={() => setOpen((v) => !v)}>
-          {open ? "Done" : "Configure"}
-        </button>
-      </div>
-      <p className="cfg-hint">{summariseLlmConfig(draft)}</p>
-      {open ? (
-        <div className="cfg-row-body">
-          <LlmConfigForm value={draft} disabled={locked} onChange={setDraft} />
-          <div className="pane-actions">
-            <button className="primary" disabled={locked || !dirty} onClick={() => onSave(draft)}>
-              Save
-            </button>
-            <button className="ghost" disabled={!dirty} onClick={() => setDraft(value)}>
-              Revert
-            </button>
-            <button className="ghost danger" disabled={locked} onClick={onRemove}>
-              Remove
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </li>
-  );
-}

@@ -17,13 +17,9 @@ import { CONFIG_JSON, SETTINGS_FILE_NAME, type ConfigLayer, type ConfigView, typ
 import type { Drafts, SetDraft } from "./drafts";
 import { ConfigEdit, ConfigEffectiveView } from "./fileSurfaces";
 import type { FileSurfaceContext, FileSurfaceProps } from "./fileTypes";
+import { LAYER_LABELS } from "./layerLabels";
 
 export type { ConfigLayer };
-
-const LAYER_LABELS: Record<ConfigLayer, string> = {
-  project: "This project",
-  base: "Shared (all projects)",
-};
 
 /** A two-way layer switch, used wherever a write has to name where it lands. */
 export function LayerPicker({
