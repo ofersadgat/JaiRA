@@ -61,6 +61,8 @@ import type {
   TaskAdoptResult,
   TaskConnectRequest,
   TaskConnectResult,
+  TaskFastForwardRequest,
+  TaskFastForwardResult,
   TaskMoveRequest,
   TaskMoveResult,
   WorkflowBrowser,
@@ -104,6 +106,14 @@ export interface ConnectHost {
   adopt(request: TaskAdoptRequest): Promise<TaskAdoptResult>;
   /** `task_move`, published — the host's `task:move`. */
   move(request: TaskMoveRequest): Promise<TaskMoveResult>;
+  /**
+   * RUN the machine to the target (§4) — the host's `task:fastForward`.
+   *
+   * Absent for a host that cannot drive a run (the CLI, a test double), and then a forward move that
+   * would step over states is refused with {@link fastForwardRefusal}, as it was before step 7. That
+   * refusal is not a fallback so much as the truth: there is nobody here to answer on the way.
+   */
+  fastForward?(request: TaskFastForwardRequest): Promise<TaskFastForwardResult>;
 }
 
 const refused = (dryRun: boolean, refusal: ConnectRefusal, plan?: ConnectPlan): TaskConnectResult => ({ ok: false, dryRun, refusal, ...(plan !== undefined ? { plan } : {}) });
@@ -473,12 +483,34 @@ function conversationInputs(
 
 const skipOf = (request: TaskConnectRequest): boolean => request.skip === true || request.forward === "skip";
 
+/**
+ * A forward move nobody here can run (§4): no host to drive one, so there is nobody to answer on
+ * the way. Skip is the whole of what is left, and it is what the CLI has always used.
+ */
 function fastForwardRefusal(move: ConnectMove): ConnectRefusal {
   return {
     code: "fast-forward",
     message:
       `'${[move.to, ...move.path].join("/")}' is ahead of where the task stands, past ${move.passes.map((p) => `'${p}'`).join(", ")}. ` +
-      `Running the states between (fast-forward) is not built yet — say skip to go there directly, which records ${move.passes.length === 1 ? "it" : "them"} as skipped`,
+      `Running the states between (fast-forward) needs a conversation to answer what comes up on the way, and there is none here — ` +
+      `say skip to go there directly, which records ${move.passes.length === 1 ? "it" : "them"} as skipped`,
+  };
+}
+
+/** The mode a forward move asks the host for — see {@link ConnectHost.fastForward}. */
+function fastForwardRequest(request: TaskConnectRequest, taskId: string, target: string, move: ConnectMove, inputs: Record<string, JsonValue>): TaskFastForwardRequest {
+  return {
+    taskId,
+    target,
+    toState: move.to,
+    ...(move.instanceId !== undefined ? { instanceId: move.instanceId } : {}),
+    ...(move.path.length > 0 ? { path: [...move.path] } : {}),
+    ...(move.passes.length > 0 ? { through: [...move.passes] } : {}),
+    by: request.by ?? "person",
+    ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
+    ...(request.project !== undefined ? { project: request.project } : {}),
+    ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+    ...(request.fake !== undefined ? { fake: request.fake } : {}),
   };
 }
 
@@ -550,10 +582,14 @@ export async function connectTask(project: Project, request: TaskConnectRequest,
         ...(states[0]?.label !== undefined ? { workflowLabel: states[0].label } : {}),
         standsAt: { path: [...keys], stateId: target, ...(states.at(-1)?.label !== undefined ? { label: states.at(-1)!.label! } : {}) },
         move: within.move,
+        ...(within.move.direction === "forward" ? { forward: skipOf(request) ? ("skip" as const) : ("fast-forward" as const) } : {}),
         inputs: within.inputs,
         asks: within.asks,
       };
-      if (within.move.direction === "forward" && !skipOf(request)) return refused(dryRun, fastForwardRefusal(within.move), plan);
+      // FORWARD, past states nobody has run: the machine runs them (§4). Not a transition at all —
+      // the host is asked for the MODE, and the spine walks itself into the target.
+      const forward = within.move.direction === "forward" && !skipOf(request);
+      if (forward && host.fastForward === undefined) return refused(dryRun, fastForwardRefusal(within.move), plan);
       const open = stillMissing(within.missing, request.supplied, target);
       if (open.length > 0 && within.move.answersRule !== true) {
         return refused(dryRun, { code: "inputs-missing", message: `moving '${meta.title}' to '${keys.join("/")}' leaves required inputs unbound: ${missingSentence(open)}`, missing: open }, plan);
@@ -562,6 +598,10 @@ export async function connectTask(project: Project, request: TaskConnectRequest,
       const undo = moveUndo();
       const handed = suppliedFor(request.supplied, states.at(-1));
       recordSupplied(project, taskId, { ...(within.move.instanceId !== undefined ? { instanceId: within.move.instanceId } : {}), to: keys.at(-1)!, nested: within.move.path.length > 0 }, request.supplied, Object.keys(handed));
+      if (forward) {
+        const running = await host.fastForward!(fastForwardRequest(request, taskId, target, within.move, handed));
+        return { ok: true, dryRun, plan, taskId, moved: "fast-forwarding", controlTaskId: running.controlTaskId, undo };
+      }
       const moved = await host.move(moveRequest(request, taskId, within.move, handed));
       return { ok: true, dryRun, plan, taskId, moved: moved.status, undo };
     }
@@ -825,13 +865,15 @@ async function adoptInto(
       ...(standsKey !== undefined && bundle.states[root.children?.[standsKey]?.state ?? ""]?.label !== undefined ? { label: bundle.states[root.children![standsKey]!.state]!.label! } : {}),
     },
     ...(needsMove ? { move: within!.move } : {}),
+    ...(needsMove && within!.move.direction === "forward" ? { forward: skipOf(request) ? ("skip" as const) : ("fast-forward" as const) } : {}),
     adopt: adoptPlan,
     adoptedAs: candidate.childKey,
     inputs: within?.inputs ?? nextUp?.inputs ?? [],
     asks: [...adoptPlan.asks.filter((ask) => !ask.required).map((ask) => asMissing(candidate.workflow, ask)), ...(within?.asks ?? nextUp?.asks ?? [])],
     ...(adoptPlan.branch !== undefined ? { branch: adoptPlan.branch } : {}),
   };
-  if (needsMove && within!.move.direction === "forward" && !skipOf(request)) return refused(dryRun, fastForwardRefusal(within!.move), plan);
+  const forward = needsMove && within!.move.direction === "forward" && !skipOf(request);
+  if (forward && host.fastForward === undefined) return refused(dryRun, fastForwardRefusal(within!.move), plan);
   if (missing.length > 0) {
     return refused(dryRun, { code: "inputs-missing", message: `adopting '${at.title}' into '${candidate.workflow}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, plan);
   }
@@ -856,6 +898,10 @@ async function adoptInto(
   if (!needsMove) return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, undo };
   const handed = suppliedFor(request.supplied, bundle.states[root.children?.[candidate.targetKey ?? ""]?.state ?? ""]);
   recordSupplied(project, parentId, { to: within!.move.to }, request.supplied, Object.keys(handed));
+  if (forward) {
+    const running = await host.fastForward!(fastForwardRequest(request, parentId, target, within!.move, handed));
+    return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, moved: "fast-forwarding", controlTaskId: running.controlTaskId, undo };
+  }
   const moved = await host.move(moveRequest(request, parentId, within!.move, handed));
   return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, moved: moved.status, undo };
 }

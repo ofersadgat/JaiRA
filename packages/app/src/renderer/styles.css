@@ -14087,3 +14087,44 @@ fieldset.reading {
 .set-tools-field .set-card {
   margin-top: 6px;
 }
+
+/* ---- Decision 0005, step 7: fast-forward, Skip, and the answers given for you -------------------- */
+
+/* A note about the machine moving that is not a failure: a move's own note, and a state a person's
+   move stepped past. Dim; the name in a move's note stays in the text colour, because it is where
+   the work went. */
+.sb-note.sb-connected,
+.sb-note.sb-connected .sb-note-icon,
+.sb-note.sb-skipped,
+.sb-note.sb-skipped .sb-note-icon {
+  color: var(--dim);
+}
+.sb-note.sb-connected b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* A gate the control conversation answered says so in the settled-by box — in the accent rather than
+   in `ok`: it is a judgement somebody may want back, not a confirmation. */
+.gate-settled-by.by-control {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+}
+.gate-settled-by.by-control svg {
+  color: var(--accent);
+  margin-top: 0;
+}
+.gate-settled-by .grow {
+  flex: 1;
+}
+
+/* The fast-forward strip is the activity strip with a destination and a way past it. */
+.run-doing.ffwd b + .run-doing-cut {
+  margin-left: 2px;
+}
+.run-doing .ffwd-steps {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}

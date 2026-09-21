@@ -50,6 +50,8 @@ import {
   buildTaskLoad,
   adoptedInto,
   connectTask as connectTaskIn,
+  CONNECT_CONVERSATION,
+  ensureControlConversation,
   descentFollower,
   missingInputs,
   pinWorkflow,
@@ -125,6 +127,7 @@ import {
   stateSlots,
   stateView,
   taskDetailView,
+  taskRun,
   readSyncRecord,
   syncDrift,
   taskSummaries,
@@ -162,6 +165,11 @@ import {
   roundOf,
   settledFollowUp,
   wantsFollowUp,
+  autopilotOperation,
+  autopilotAnswerOf,
+  autopilotAnswersOf,
+  autopilotServices,
+  type AutopilotAsk,
   causesOfEvents,
   compilePolicy,
   enabledAdapters,
@@ -366,7 +374,8 @@ let installed: LogSink | undefined;
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
-import { createWorkflowHost } from "./workflowHost";
+import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
+import { arrivedAt, fastForwardView, labelOfTarget, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
 import { identicalTo, SUPERSEDED } from "./shippedStates";
 import type {
   Scope,
@@ -418,6 +427,9 @@ import type {
   PendingUserEvent,
   TaskMoveRequest,
   TaskMoveResult,
+  TaskFastForwardRequest,
+  TaskFastForwardResult,
+  FastForwardEnd,
   TaskAdoptRequest,
   TaskAdoptResult,
   TaskConnectRequest,
@@ -1205,6 +1217,9 @@ export class AppService {
       onRequest: (request) => {
         this.requestOwner.set(request.requestId, key);
         this.publish({ type: "question:requested", pending: pendingQuestionOf(request, this.refOf(key)) });
+        // An agent's AskUserQuestion is a question like any gate's: a fast-forward asks its conversation.
+        const session = this.sessions.get(key);
+        if (session !== undefined && request.taskId !== undefined) this.offerToControl(session, request.taskId, { kind: "question", request });
       },
       onResolved: (requestId) => {
         this.requestOwner.delete(requestId);
@@ -2263,6 +2278,9 @@ export class AppService {
       });
     }
     this.publish({ type: "interaction:requested", pending });
+    // A task being fast-forwarded asks its conversation first (decision 0005 §4). After the row and
+    // the publication, so the question is exactly as durable and as visible as any other.
+    if (session !== undefined && pending.taskId !== "") this.offerToControl(session, pending.taskId, { kind: "interaction", pending });
   }
 
   /**
@@ -2852,7 +2870,12 @@ export class AppService {
   taskDetail(taskId: string, project?: string): TaskDetail {
     // Scoped, because the Tasks view now shows the root's runs beside the project's and selecting one
     // must read the database it actually lives in.
-    const detail = taskDetailView(this.session(project).project, taskId, this.viewOptions());
+    const open = this.session(project);
+    const viewed = taskDetailView(open.project, taskId, this.viewOptions());
+    // The fast-forward is a mode this process holds (decision 0005 §4), not a fact in the journal, so
+    // it is stamped here — the strip reads it off the detail it already has.
+    const forward = open.fastForwards.get(taskId);
+    const detail = forward !== undefined && forward.end === undefined ? { ...viewed, fastForward: fastForwardView(forward) } : viewed;
     // Folded in HERE rather than fetched separately, because the one surface that needs it — the
     // activity strip's verb — already has the detail and would otherwise draw a button before
     // knowing what it does. Computed only for a task that could actually start: for anything else
@@ -3395,6 +3418,8 @@ export class AppService {
     const directed = opts.directed ?? new DirectedTransitions();
     let endedCompleted = false;
     const descents = opts.descents ?? [];
+    // What a SKIP leaves in the inbox, read off this run's own journal — see `SkipWithdrawals`.
+    const withdrawals = new SkipWithdrawals(project.events.list(taskId).map((row) => row.event));
     open.live.set(taskId, { taskId, abort, done, directed, descents });
 
     // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
@@ -3701,6 +3726,11 @@ export class AppService {
               // A move on its way DOWN to a nested target directs its next step here, the moment
               // the composite above it enters (decision 0005 §1).
               for (const follow of descents) follow(event);
+              // A fast-forward's arrival, its progress, and a failure that ends it (decision 0005 §4).
+              this.fastForwardSaw(open, taskId, event);
+              // A skip that interrupted an agent: what it asked is withdrawn, not left answerable.
+              const skipped = withdrawals.note(event);
+              if (skipped !== undefined) this.withdrawSkipped(open, taskId, skipped);
               this.traceRun(open.key, taskId, event);
               // The record lands when the operation settles — the stored view now holds everything
               // the live tail held, so the tail goes BEFORE the event that makes viewers refetch.
@@ -3802,6 +3832,11 @@ export class AppService {
         // spend it on whatever the NEXT run of this task asks first, which from the person's side is
         // a gate that answered itself with something they said about a different question.
         open.hub.unseed(taskId);
+        // A fast-forward that is still one when its run ends did not arrive: the run finished, failed
+        // or was stopped short of the target. Either way the mode is over, before the rules it
+        // answered from go (decision 0005 §4).
+        const forward = open.fastForwards.get(taskId);
+        if (forward !== undefined) this.endFastForward(open, taskId, open.project.runtime.get(taskId)?.status === "canceled" ? "stopped" : "failed", "the run ended before it reached the target");
         open.fakeRules.delete(taskId);
         open.live.delete(taskId);
         open.liveTurns.drop(taskId);
@@ -5286,6 +5321,7 @@ export class AppService {
       },
       adopt: (adopt) => this.adoptTask(adopt),
       move: (move) => this.moveTask(move),
+      fastForward: (forward) => this.fastForwardTask(forward),
     });
     if (request.dryRun !== true) {
       this.connectBrowsers.delete(open.key);
@@ -5302,6 +5338,384 @@ export class AppService {
       this.publishFor(open, { type: "store:invalidate", scope: "board" });
     }
     return result;
+  }
+
+  // --- fast-forward (decision 0005 §4, step 7) ----------------------------------
+
+  /**
+   * FAST-FORWARD ("task:fastForward"): run the machine to a state somebody sent the task to.
+   *
+   * What `connect` hands a forward move that would step over states, however it was asked for — the
+   * board's drop, `jaira task move`, a conversation's `move`. No transition is handed to anybody: the
+   * task is started or resumed and its own spine walks it into the target. What makes it a
+   * fast-forward is the MODE this registers:
+   *
+   *  - **the controlling conversation answers what comes up** (`offerToControl`), through the same
+   *    `answer` the tool is, each answer marked and a rewind point — and never an approval;
+   *  - **Skip is showing** in the strip (`skipFastForward`);
+   *  - **it ends on arrival** (`fastForwardSaw`), or on the run ending any other way.
+   *
+   * A task with no conversation is given one first, because the conversation is what answers on the
+   * way — see `ensureControlConversation` for why that is a graft onto the task's own root and not a
+   * wrapper around it. A task that is RUNNING with no conversation is refused: its engine holds the
+   * version it loaded, and the graft is one it cannot see. Pause it, then move it — the same answer
+   * a new transition gets.
+   */
+  async fastForwardTask(request: TaskFastForwardRequest): Promise<TaskFastForwardResult> {
+    const open = this.session(request.project);
+    const project = open.project;
+    const { taskId } = request;
+    const at = { project: open.key, taskId };
+    const row = project.runtime.get(taskId);
+    const meta = project.tasks.tryRead(taskId);
+    if (row === undefined || meta === undefined) throw this.refusal("run", `cannot fast-forward unknown task '${taskId}'`, at);
+    const live = open.live.has(taskId);
+    if (!live && (row.status === "running" || row.status === "stopping")) {
+      throw this.refusal("run", `task '${taskId}' is ${row.status} in another process — move it there`, at);
+    }
+    // Decided BEFORE anything is written: a task with nothing left to run cannot be run forward, and
+    // grafting it a conversation first would leave a document behind a refusal.
+    const plan = live ? undefined : this.resumable(taskId, open.dir);
+    if (plan !== undefined && plan.kind === "none") {
+      throw this.refusal(
+        "run",
+        `'${meta.title}' has nothing left to run on the way to '${request.target}'${plan.blocked !== undefined ? ` (${plan.blocked})` : ""} — say skip to go there directly`,
+        at,
+      );
+    }
+    const controlTaskId = await this.controlOf(open, taskId, live);
+    const through = request.through ?? [];
+    const run: FastForwardRun = {
+      taskId,
+      controlTaskId,
+      target: request.target,
+      targetLabel: labelOfTarget(request.target, request.path !== undefined && request.path.length > 0 ? request.path[request.path.length - 1]! : request.toState),
+      to: request.toState,
+      path: request.path ?? [],
+      ...(request.instanceId !== undefined ? { instanceId: request.instanceId } : {}),
+      through,
+      ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
+      step: 0,
+      answered: 0,
+      left: 0,
+      startedAt: Date.now(),
+      seen: new Set(),
+    };
+    open.fastForwards.get(taskId)?.seen.forEach((id) => run.seen.add(id));
+    open.fastForwards.set(taskId, run);
+    this.log({ level: "info", source: "run", message: `fast-forwarding ${taskId} to '${request.target}' through ${through.length === 0 ? "nothing" : through.join(", ")}, answered by ${controlTaskId}`, ...at });
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    try {
+      if (live) {
+        // Already running — what it is asking RIGHT NOW is the first thing the conversation gets.
+        this.offerPending(open, taskId);
+      } else if (plan!.kind === "fresh") {
+        await this.startTask({ taskId, project: open.dir, ...(request.interactions !== undefined ? { interactions: request.interactions } : {}), ...(request.fake !== undefined ? { fake: request.fake } : {}) });
+      } else {
+        await this.resumeTask({ taskId, project: open.dir, ...(request.interactions !== undefined ? { interactions: request.interactions } : {}), ...(request.fake !== undefined ? { fake: request.fake } : {}) });
+      }
+    } catch (e) {
+      this.endFastForward(open, taskId, "failed", (e as Error).message);
+      throw e;
+    }
+    return { taskId, controlTaskId, status: "fast-forwarding" };
+  }
+
+  /**
+   * The conversation that answers for this task on the way: the task's own root when it speaks, else
+   * the nearest task above it whose root does — a dynamic workflow's conversation over what it
+   * adopted or started — else one grafted onto the task (see {@link fastForwardTask}).
+   */
+  private async controlOf(open: ProjectSession, taskId: string, live: boolean): Promise<string> {
+    const project = open.project;
+    const speaks = (id: string): boolean => {
+      const row = project.runtime.get(id);
+      if (row === undefined || (row.snapshotHash === undefined && row.documentId === undefined)) return false;
+      try {
+        const bundle = loadPinnedBundle(project, row);
+        return bundle.states[bundle.rootId]?.operation?.kind === "prompt";
+      } catch {
+        return false;
+      }
+    };
+    const visited = new Set<string>();
+    for (let id: string | undefined = taskId; id !== undefined && !visited.has(id); id = project.tasks.tryRead(id)?.parentTaskId) {
+      visited.add(id);
+      if (speaks(id)) return id;
+    }
+    if (live) {
+      throw this.refusal(
+        "run",
+        `task '${taskId}' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly`,
+        { project: open.key, taskId },
+      );
+    }
+    await ensureControlConversation(project, { taskId, conversation: this.options.connectConversation ?? CONNECT_CONVERSATION });
+    return taskId;
+  }
+
+  /**
+   * End a task's fast-forward, ONCE — see `fastForward.ts` rule 2.
+   *
+   * The mode goes; nothing else is touched. What the run was doing it goes on doing, and a question
+   * parked after this is the person's again.
+   */
+  private endFastForward(open: ProjectSession, taskId: string, why: FastForwardEnd, detail?: string): void {
+    const run = open.fastForwards.get(taskId);
+    if (run === undefined || run.end !== undefined) return;
+    run.end = why;
+    open.fastForwards.delete(taskId);
+    this.log({
+      level: why === "failed" ? "warn" : "info",
+      source: "run",
+      message: `fast-forward of ${taskId} to '${run.target}' ${why === "arrived" ? "arrived" : why === "skipped" ? "was skipped to its target" : why === "stopped" ? "was stopped" : "stopped short"}${detail !== undefined ? `: ${detail}` : ""} (${run.answered} answered for you, ${run.left} left to you)`,
+      project: open.key,
+      taskId,
+    });
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+  }
+
+  /**
+   * What a run's journal says to a fast-forward — called for every event it records.
+   *
+   * The ENTRY of the target ends the mode (arrival); the entry of anything on the way moves the
+   * strip. A failed state on the way stops it, because a fast-forward promised to run the states
+   * between and one of them did not run: the person gets the failure, and the questions after it.
+   */
+  private fastForwardSaw(open: ProjectSession, taskId: string, event: EngineEvent): void {
+    const run = open.fastForwards.get(taskId);
+    if (run === undefined || run.end !== undefined) return;
+    if (arrivedAt(run, event)) {
+      this.endFastForward(open, taskId, "arrived");
+      return;
+    }
+    if (event.type === "instance.entered" && event.childKey !== undefined) {
+      const path = taskRun(open.project, taskId)
+        .activePath.flatMap((step) => (step.childKey !== undefined ? [step.childKey] : []))
+        .join("/");
+      noteEntry(run, event, path);
+      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+      return;
+    }
+    if (event.type === "instance.terminated" && (event.outcome === "error" || event.outcome === "timeout")) {
+      this.endFastForward(open, taskId, "failed", `'${event.stateId}' ended ${event.outcome}`);
+    }
+  }
+
+  /**
+   * SKIP ("task:skip") — interrupt what is running and enter the fast-forward's target directly.
+   *
+   * The existing Skip, and nothing new: a directed move with `skip: true`, which the engine journals
+   * — the transition, and every state it steps over as `skipped` — BEFORE it aborts anything. That
+   * ordering is the interrupt trap's whole answer: a successful `interrupt()` COMPLETES the operation,
+   * and a completion that landed before the jump was decided would walk the run into the next
+   * intermediate. The mode is ended first, so a question raised by a call on its way down is the
+   * person's and not offered to the conversation.
+   */
+  async skipFastForward(request: { taskId: string; project?: string }): Promise<TaskMoveResult> {
+    const open = this.session(request.project);
+    const run = open.fastForwards.get(request.taskId);
+    if (run === undefined) throw this.refusal("run", `task '${request.taskId}' is not being fast-forwarded — there is nothing to skip to`, { project: open.key, taskId: request.taskId });
+    this.endFastForward(open, request.taskId, "skipped");
+    return this.moveTask({
+      project: open.dir,
+      taskId: request.taskId,
+      toState: run.to,
+      by: "person",
+      skip: true,
+      ...(run.instanceId !== undefined ? { instanceId: run.instanceId } : {}),
+      ...(run.path.length > 0 ? { path: run.path } : {}),
+      ...(run.inputs !== undefined ? { inputs: run.inputs } : {}),
+    });
+  }
+
+  /**
+   * "ANSWER IT YOURSELF" ("task:answerYourself") — take back an answer the conversation gave.
+   *
+   * A rewind to the `jaira.answered` row and nothing more: the cut deletes the answer and the
+   * completion that followed it, and the state dispatches its gate again. What a service adds is the
+   * order — a fast-forward still running is stopped first (a rewind refuses a running task), and the
+   * mode is over: the person has taken the work back, and the questions after this one are theirs.
+   */
+  async answerYourself(request: { taskId: string; at: number; project?: string; interactions?: Record<string, JsonValue[]>; fake?: JsonValue }): Promise<{ taskId: string }> {
+    const open = this.session(request.project);
+    const { taskId } = request;
+    this.endFastForward(open, taskId, "stopped", "a person took an answer back");
+    const live = open.live.get(taskId);
+    if (live !== undefined) {
+      this.cancelTaskIn(open, taskId);
+      await live.done;
+    }
+    return this.rewindTask({
+      taskId,
+      at: request.at,
+      ...(request.project !== undefined ? { project: request.project } : {}),
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+    });
+  }
+
+  /** Offer the conversation what the task is ALREADY asking — a fast-forward registered on a live run. */
+  private offerPending(open: ProjectSession, taskId: string): void {
+    for (const pending of this.pendingInteractions()) if (pending.taskId === taskId) this.offerToControl(open, taskId, { kind: "interaction", pending });
+    for (const request of open.questions.list()) if (request.taskId === taskId) this.offerToControl(open, taskId, { kind: "question", request });
+  }
+
+  /**
+   * A task parked a question. When it is being fast-forwarded, the CONVERSATION is asked first.
+   *
+   * ## An approval is never offered — twice over
+   *
+   * This is reached from exactly two places: the gate hub's `onRequest` and the question hub's. The
+   * approval hub's `onRequest` does not call it, and nothing here holds the approval hub, so a tool
+   * permission, a push, a merge or a `remote.publish` cannot get here at all. Then, of what does get
+   * here, a gate whose component is not a QUESTION or a JUDGEMENT (`ANSWERABLE_COMPONENTS` —
+   * `confirm_action` and `review_artifacts` are the two left out on purpose) is left to the person
+   * without a model ever seeing it. And `answer` itself checks the component a third time.
+   *
+   * The question stays on screen while the conversation considers it: a person who answers first
+   * simply wins, and the conversation's answer is refused as a question nobody is waiting on.
+   */
+  private offerToControl(
+    open: ProjectSession,
+    taskId: string,
+    what: { kind: "interaction"; pending: PendingInteraction } | { kind: "question"; request: QuestionRequest },
+  ): void {
+    const run = open.fastForwards.get(taskId);
+    if (run === undefined || run.end !== undefined) return;
+    const requestId = what.kind === "interaction" ? what.pending.requestId : what.request.requestId;
+    if (run.seen.has(requestId)) return;
+    run.seen.add(requestId);
+    if (what.kind === "interaction" && !ANSWERABLE_COMPONENTS.has(what.pending.component)) return;
+    void this.autopilotAnswer(open, run, what).catch((e: unknown) => {
+      run.left += 1;
+      this.log({ level: "warn", source: "run", message: `the conversation could not answer ${requestId} for ${taskId}; it is yours: ${(e as Error).message}`, project: open.key, taskId, ...stackDetail(e) });
+      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    });
+  }
+
+  /**
+   * One model call, outside any run: the conversation, the work, the question — answer it as they
+   * would. Built like a follow-up round (`askFollowUp`): the default executor under the task's
+   * scripted rules, so a headless test answers from its script.
+   *
+   * The confidence is judged HERE, against `autopilot.askBelow` — never by the model — and only an
+   * answer at or above it is handed to `answer`, which journals `jaira.answered` and settles.
+   */
+  private async autopilotAnswer(
+    open: ProjectSession,
+    run: FastForwardRun,
+    what: { kind: "interaction"; pending: PendingInteraction } | { kind: "question"; request: QuestionRequest },
+  ): Promise<void> {
+    const project = open.project;
+    const taskId = run.taskId;
+    const requestId = what.kind === "interaction" ? what.pending.requestId : what.request.requestId;
+    const ask: AutopilotAsk =
+      what.kind === "interaction"
+        ? { kind: "interaction", component: what.pending.component, ...(what.pending.config !== undefined ? { config: what.pending.config } : {}), inputs: what.pending.inputs }
+        : { kind: "question", questions: what.request.questions as unknown as JsonValue };
+    const fakeRules = open.fakeRules.get(taskId) ?? open.fakeRules.get(run.controlTaskId);
+    const fake = fakeRules !== undefined;
+    const secrets = this.secretResolver(open);
+    const prompt = buildPromptExecutor({
+      ...(fakeRules !== undefined ? { fakeRules } : {}),
+      ...this.promptWiring(project.config, { fake, secrets }),
+      tree: this.defaultTree(project.config, { rootId: "autopilot", states: {} }, fake, secrets, false).prompt,
+    });
+    const op = autopilotOperation(ask, {
+      title: project.tasks.tryRead(taskId)?.title ?? taskId,
+      target: run.target,
+      ...(run.at !== undefined ? { at: run.at } : {}),
+      said: this.controlSaid(open, run.controlTaskId),
+    });
+    const result = await prompt.start(op, autopilotServices()).result;
+    if ("error" in result) throw new Error(result.error.reason);
+    const reply = autopilotAnswerOf(result.value as JsonValue | undefined);
+    const threshold = project.config.autopilot.askBelow;
+    const leave = (why: string): void => {
+      run.left += 1;
+      this.log({ level: "info", source: "run", message: `left ${requestId} to you (${taskId}): ${why}`, project: open.key, taskId });
+      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    };
+    if (reply === undefined) return leave("the conversation gave no usable answer");
+    if (reply.confidence < threshold) return leave(`the conversation is ${reply.confidence} sure, under autopilot.askBelow ${threshold}`);
+    // Arrived, skipped or stopped while the model was thinking: the question is the person's now.
+    if (run.end !== undefined) return;
+    const host = this.workflowHostFor(open, run.controlTaskId);
+    const answered =
+      what.kind === "interaction"
+        ? host.answer({ request: requestId, value: reply.answer, confidence: reply.confidence })
+        : ((): ReturnType<WorkflowToolHost["answer"]> => {
+            const answers = autopilotAnswersOf(reply.answer);
+            return answers === undefined ? { ok: false, reason: "the answer named no question's label" } : host.answer({ request: requestId, answers, confidence: reply.confidence });
+          })();
+    const done = await answered;
+    if (!done.ok) return leave(done.reason);
+    run.answered += 1;
+    this.log({ level: "info", source: "run", message: `answered ${requestId} for you (${taskId}), confidence ${reply.confidence}${reply.reason !== undefined ? `: ${reply.reason}` : ""}`, project: open.key, taskId });
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+  }
+
+  /**
+   * The ONE instance a task's question can be parked on — a gate: a running function operation
+   * reading `waiting_for_user`; an agent's question: a running prompt operation. Two candidates is
+   * no answer: the row is written without an instance and draws on nothing, which is honest, where
+   * picking one would put "answered for you" on a question the conversation never saw.
+   */
+  private askingInstance(open: ProjectSession, taskId: string, kind: "interaction" | "question"): string | undefined {
+    let detail: TaskDetail;
+    try {
+      detail = taskDetailView(open.project, taskId, this.viewOptions());
+    } catch {
+      return undefined;
+    }
+    const found: string[] = [];
+    const walk = (nodes: readonly InstanceNode[]): void => {
+      for (const node of nodes) {
+        if (node.operation?.status === "running" && (kind === "interaction" ? node.status === "waiting_for_user" : node.operation.kind === "prompt")) found.push(node.instanceId);
+        walk(node.children);
+      }
+    };
+    walk(detail.instances);
+    return found.length === 1 ? found[0] : undefined;
+  }
+
+  /** What the controlling conversation has said so far, as plain turns — the context an answer is given. */
+  private controlSaid(open: ProjectSession, controlTaskId: string): Array<{ role: string; text: string }> {
+    let thread: ChatThreadView | null = null;
+    try {
+      thread = this.chatThread({ taskId: controlTaskId, project: open.dir });
+    } catch {
+      // A conversation that cannot be read is one that has said nothing the answer could use.
+    }
+    return (thread?.session.turns ?? []).flatMap((turn) => (turn.text !== undefined && turn.text.trim().length > 0 ? [{ role: turn.role, text: turn.text }] : []));
+  }
+
+  /**
+   * A skip landed in a task's journal — withdraw what the interrupted agent left in the inbox.
+   *
+   * See `SkipWithdrawals`: only when every prompt operation still running was inside what was
+   * skipped. A question is dismissed and an approval denied once; both publish `resolved`, so the
+   * inbox is clear by the time the target runs.
+   */
+  private withdrawSkipped(open: ProjectSession, taskId: string, verdict: { withdraw: boolean; blockedBy: string[] }): void {
+    const questions = open.questions.list().filter((request) => request.taskId === taskId);
+    const approvals = open.approvals.list().filter((request) => request.taskId === taskId);
+    if (questions.length === 0 && approvals.length === 0) return;
+    if (!verdict.withdraw) {
+      this.log({
+        level: "warn",
+        source: "run",
+        message: `a skip in ${taskId} left ${questions.length + approvals.length} question(s) or approval(s) standing: an agent outside what was skipped is still running (${verdict.blockedBy.join(", ")}), and whose they are cannot be told apart`,
+        project: open.key,
+        taskId,
+      });
+      return;
+    }
+    for (const request of questions) open.questions.answer(request.requestId, undefined);
+    for (const request of approvals) open.approvals.decide(request.requestId, "deny", "once");
+    this.log({ level: "info", source: "run", message: `a skip in ${taskId} withdrew ${questions.length} question(s) and ${approvals.length} approval(s) its interrupted agent had asked`, project: open.key, taskId });
   }
 
   /**
@@ -5336,6 +5750,13 @@ export class AppService {
       pendingQuestions: () => this.pendingQuestions(),
       submitInteraction: (requestId, value) => this.submitInteraction(requestId, value),
       submitQuestion: (requestId, answers) => this.submitQuestion(requestId, answers),
+      checkInteraction: (requestId, value) => {
+        const contract = this.configOf(requestId);
+        if (contract === undefined) return undefined;
+        const check = validateComponentResult(contract.config, value, contract.inputs);
+        return check.ok ? undefined : `invalid ${contract.config.component} response: ${check.errors}`;
+      },
+      askingInstance: (id, kind) => this.askingInstance(open, id, kind),
       cancel: (id) => this.cancelTaskIn(open, id),
       resume: (id) => this.resumeTask({ taskId: id, project: open.dir }),
       startTask: (id) => this.startTask({ taskId: id, project: open.dir }),
@@ -5730,6 +6151,8 @@ export class AppService {
    * that is deliberately never the focused one.
    */
   private cancelTaskIn(session: ProjectSession, taskId: string): { taskId: string } {
+    // A stop is the later word about a fast-forward too: what is parked from here on is the person's.
+    this.endFastForward(session, taskId, "stopped", "a person stopped the run");
     const run = session.live.get(taskId);
     if (run) {
       // Fail any gate this task is parked on, or the abort would never be observed.

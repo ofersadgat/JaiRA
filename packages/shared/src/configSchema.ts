@@ -154,6 +154,23 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
     },
   },
   {
+    key: "autopilot",
+    title: "Fast-forward",
+    hint: "When a fast-forward lets the conversation answer a question for you, and when it leaves it.",
+    schema: {
+      $type: "autopilot",
+      type: "object",
+      properties: {
+        askBelow: {
+          type: "number",
+          title: "leave it to me below",
+          description:
+            "A fast-forward runs the states between where the work stands and where you sent it, and the conversation steering it answers the questions that come up — each marked, and each a point you can rewind to. Under this confidence it does not: the question waits for you, as it would have. 1 means never answer for me; 0 means always. It has nothing to do with any threshold a workflow of your own declares.",
+        },
+      },
+    },
+  },
+  {
     key: "workflows",
     title: "Workflow lookup",
     hint: "The roots a bare workflow reference is searched along — shell PATH semantics, first match wins.",

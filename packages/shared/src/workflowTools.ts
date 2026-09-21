@@ -139,7 +139,15 @@ export type MoveResult =
       standsAt: string;
       adoptedAs?: string;
       mount?: "plain" | "split";
-      moved?: "answered" | "taking" | "held" | "reopened";
+      /**
+       * `fast-forwarding` — the target is ahead: the states between are RUNNING, and this conversation
+       * is the one that answers what they ask on the way (decision 0005 §4). It ends on arrival.
+       */
+      moved?: "answered" | "taking" | "held" | "reopened" | "fast-forwarding";
+      /** The conversation answering on the way, when this started a fast-forward. */
+      answeredBy?: string;
+      /** The states a fast-forward runs on the way, as child-key paths — what its note names. */
+      through?: string[];
     }
   | InputsMissing
   | { ok: false; code: string; reason: string; candidates?: ConnectCandidate[] };

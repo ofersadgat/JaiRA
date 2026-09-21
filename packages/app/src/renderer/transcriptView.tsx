@@ -540,6 +540,27 @@ function WorkflowOutcome({ result }: { result: JsonValue }): JSX.Element | null 
   const adoptedAs = typeof r["adoptedAs"] === "string" ? r["adoptedAs"] : undefined;
   const where = standsAt ?? key;
   if (where === undefined) return null;
+  // A FAST-FORWARD (decision 0005 §4): the move did not land anywhere yet — the states between are
+  // running, and this conversation is what answers them. The note says where it is going and
+  // through what, in the words the strip below uses.
+  if (r["moved"] === "fast-forwarding") {
+    const through = Array.isArray(r["through"]) ? (r["through"] as JsonValue[]).filter((step): step is string => typeof step === "string") : [];
+    return (
+      <div className="sb-note step sb-connected" role="note">
+        <Icon name="workflow" className="sb-note-icon" />
+        <span className="sb-note-verb">fast-forwarding to</span>
+        <span className="sb-note-text">
+          <b>{where.split("/").pop()}</b>
+          {through.length > 0 ? ` · through ${through.join(", ")}` : null}
+        </span>
+        {workflow !== undefined ? (
+          <span className="sb-note-state mono ellip" title={workflow}>
+            {workflow}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
   // `start` says what was mounted and how; `move` says which of the three resolutions happened, and
   // an adoption says what the task became in the workflow that took it.
   const verb =

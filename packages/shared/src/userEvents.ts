@@ -96,6 +96,41 @@ export interface TaskMoveResult {
 }
 
 /**
+ * A forward move that RUNS the states between (decision 0005 §4, step 7) — the fast-forward.
+ *
+ * Not a directed transition and not a move at all: the machine walks its own spine, and what is
+ * being asked for is a MODE — the control conversation answers what comes up, Skip is showing, and
+ * arrival ends it. So this reaches the host beside `task:move` rather than through it, and the only
+ * thing it has in common with a move is where it is aimed.
+ */
+export interface TaskFastForwardRequest {
+  project?: string;
+  taskId: string;
+  /** The target state id, for the strip and for what `tasks` says. */
+  target: string;
+  /** The child key the target is entered under — what a Skip is a directed move TO. */
+  toState: string;
+  /** The composite whose child that is, by instance id. Absent ⇒ the task's root instance. */
+  instanceId?: string;
+  /** Child keys beneath `toState`, as `TaskMoveRequest.path` carries them. */
+  path?: string[];
+  /** The states stepped through on the way, as child-key paths from the run's root. */
+  through?: string[];
+  by?: "person" | "control";
+  /** What the asker hands the target when it is finally entered. */
+  inputs?: Record<string, JsonValue>;
+  interactions?: Record<string, JsonValue[]>;
+  fake?: JsonValue;
+}
+
+export interface TaskFastForwardResult {
+  taskId: string;
+  /** The conversation answering on the way — the task's own root, or the one it was given. */
+  controlTaskId: string;
+  status: "fast-forwarding";
+}
+
+/**
  * `task_drag`'s options. The event type decides the shape of the bag, which is why this is named for
  * the event and not for the function.
  */

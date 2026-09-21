@@ -106,6 +106,17 @@ export interface WorkflowHostDeps {
   pendingQuestions(): PendingQuestion[];
   submitInteraction(requestId: string, value: JsonValue): unknown;
   submitQuestion(requestId: string, answers?: Record<string, string | string[]>): unknown;
+  /**
+   * Would this value settle that gate — the check `submitInteraction` makes, asked FIRST. `answer`
+   * journals before it submits, so without it an answer the contract refuses would leave a
+   * `jaira.answered` row claiming a settlement that never happened. Absent ⇒ unchecked here.
+   */
+  checkInteraction?(requestId: string, value: JsonValue): string | undefined;
+  /**
+   * The instance a task's question is parked on, when exactly one could be — what the answered row
+   * names, so the gate it settled can draw who settled it and rewind to it. Absent or unsure ⇒ none.
+   */
+  askingInstance?(taskId: string, kind: "interaction" | "question"): string | undefined;
   cancel(taskId: string): unknown;
   resume(taskId: string): Promise<unknown>;
   startTask(taskId: string): Promise<unknown>;
@@ -329,6 +340,8 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         ...(plan.adoptedAs !== undefined ? { adoptedAs: plan.adoptedAs } : {}),
         ...(plan.mount !== undefined ? { mount: plan.mount } : {}),
         ...(result.moved !== undefined ? { moved: result.moved } : {}),
+        ...(result.controlTaskId !== undefined ? { answeredBy: result.controlTaskId } : {}),
+        ...(result.moved === "fast-forwarding" && plan.move !== undefined && plan.move.passes.length > 0 ? { through: [...plan.move.passes] } : {}),
       };
     },
 
@@ -387,9 +400,12 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
           return { ok: false, reason: `'${gate.component}' is an approval, not a question — it is the person's to give, and \`answer\` cannot reach it` };
         }
         if (input.value === undefined) return { ok: false, reason: `a '${gate.component}' gate is answered with \`value\`, in the shape it asks for` };
+        // Checked BEFORE the row: an answer the contract refuses settles nothing, and must say nothing.
+        const refused = deps.checkInteraction?.(input.request, input.value);
+        if (refused !== undefined) return { ok: false, reason: refused };
         try {
           // Journaled first: the answer resumes the run, and the row belongs before what follows it.
-          journal(gate.taskId, "interaction", (gate as { instanceId?: string }).instanceId);
+          journal(gate.taskId, "interaction", deps.askingInstance?.(gate.taskId, "interaction"));
           deps.submitInteraction(input.request, input.value);
         } catch (e) {
           return { ok: false, reason: (e as Error).message };
@@ -401,7 +417,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         if (question.taskId === undefined || !mine.has(question.taskId)) return { ok: false, reason: "that question belongs to a task this conversation did not start" };
         if (input.answers === undefined) return { ok: false, reason: "an agent's questions are answered with `answers`: question text → the chosen label" };
         try {
-          journal(question.taskId, "question");
+          journal(question.taskId, "question", deps.askingInstance?.(question.taskId, "question"));
           deps.submitQuestion(input.request, input.answers);
         } catch (e) {
           return { ok: false, reason: (e as Error).message };

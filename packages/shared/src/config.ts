@@ -312,7 +312,29 @@ export interface JairaConfig {
   files: JairaFilesConfig;
   /** Connections to remote systems, and the defaults of what runs over them (`./forge`, decision 0004). */
   integrations: JairaIntegrationsConfig;
+  /** What a fast-forward answers for you, and what it leaves to you (decision 0005 §6). */
+  autopilot: JairaAutopilotConfig;
 }
+
+/**
+ * The one platform setting a fast-forward reads (decision 0005 §6).
+ *
+ * ⚠️ It has NO relation to any workflow's own thresholds. `ask_below` on a `confidence` state is one
+ * author's convention and the platform never reads a workflow input by name (§0); this decides one
+ * thing only — how sure the control conversation has to be before its answer stands in for yours.
+ */
+export interface JairaAutopilotConfig {
+  /**
+   * Below this confidence, a fast-forward leaves the question to the person, and it waits as it
+   * would have. 0–1, and very low on purpose: the conversation answering for you is the exception.
+   *
+   * `1` therefore means "never answer for me" and `0` means "always".
+   */
+  askBelow: number;
+}
+
+/** Very low on purpose — see {@link JairaAutopilotConfig.askBelow}. */
+export const DEFAULT_ASK_BELOW = 0.2;
 
 /**
  * The Files tree's own configuration.
@@ -524,7 +546,26 @@ export function defaultConfig(): JairaConfig {
     workflows: {},
     files: {},
     integrations: defaultIntegrations(),
+    autopilot: { askBelow: DEFAULT_ASK_BELOW },
   };
+}
+
+/**
+ * Parse the autopilot block. Strict, like every other block here: a threshold that does not parse
+ * is a fast-forward answering more than somebody meant it to, which is the one failure this setting
+ * exists to prevent.
+ */
+function parseAutopilot(raw: unknown): JairaAutopilotConfig {
+  if (raw === undefined) return { askBelow: DEFAULT_ASK_BELOW };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.autopilot must be an object");
+  }
+  const askBelow = (raw as Record<string, unknown>)["askBelow"];
+  if (askBelow === undefined) return { askBelow: DEFAULT_ASK_BELOW };
+  if (typeof askBelow !== "number" || !Number.isFinite(askBelow) || askBelow < 0 || askBelow > 1) {
+    throw new Error("config.autopilot.askBelow must be a number between 0 and 1");
+  }
+  return { askBelow };
 }
 
 /**
@@ -1018,6 +1059,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     workflows: parseWorkflows(cfg["workflows"]),
     files: parseFiles(cfg["files"]),
     integrations: parseIntegrations(cfg["integrations"]),
+    autopilot: parseAutopilot(cfg["autopilot"]),
   };
 }
 

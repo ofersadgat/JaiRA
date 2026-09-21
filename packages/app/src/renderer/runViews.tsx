@@ -16,6 +16,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type {
   ChatPlanView,
   ChatSettings,
+  FastForwardView,
+  SettledByView,
   InstanceNode,
   OperationRecordView,
   SessionRef,
@@ -530,6 +532,31 @@ function settledGateOf(call: ReadCall, node: InstanceNode, taskId: string | unde
   return pending;
 }
 
+/**
+ * A gate the CONTROL CONVERSATION answered (decision 0005 §4): who, how sure, and the way back.
+ *
+ * In the accent and not in `ok`: it is a judgement somebody may want back, not a confirmation. The
+ * confidence is the number the conversation gave and the one `autopilot.askBelow` was held against.
+ * "Answer it yourself" is a REWIND to the answer — the question is asked again and the fast-forward,
+ * if it is still going, is over.
+ */
+export function AnsweredForYou({ by, onAnswerYourself }: { by: SettledByView; onAnswerYourself?: (() => void) | undefined }): JSX.Element {
+  return (
+    <div className="gate-settled-by by-control" data-testid="answered-for-you">
+      <Icon name="think" />
+      <div>
+        Answered for you by <b>the conversation</b> <span className="conf">· confidence {by.confidence.toFixed(2)}</span>
+      </div>
+      <span className="grow" />
+      {onAnswerYourself !== undefined ? (
+        <button type="button" className="quiet" onClick={onAnswerYourself} title="Rewind to this question, so it is asked again and answered by you">
+          Answer it yourself
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /** A settled gate in its state's panel: the control as answered, and the record behind a toggle. */
 function SettledGate({
   call,
@@ -565,6 +592,14 @@ function SettledGate({
         {...(editor !== undefined ? { editor } : {})}
         settled={answered ? { value: call.result } : {}}
       />
+      {answered && node.settledBy !== undefined && taskId !== undefined ? (
+        <AnsweredForYou
+          by={node.settledBy}
+          onAnswerYourself={() => {
+            void invoke("task:answerYourself", { taskId, at: node.settledBy!.at, ...(project !== undefined && project !== "" ? { project } : {}) }).catch(() => undefined);
+          }}
+        />
+      ) : null}
       <div className="gate-record">
         <button type="button" className="quiet" aria-expanded={record} onClick={() => setRecord((v) => !v)}>
           {record ? "Hide the record" : "Show the record"}
@@ -1306,6 +1341,17 @@ function ChatComposer({
     void invoke("chat:cancel", { taskId, ...(project !== undefined ? { project } : {}) }).catch(() => undefined);
   };
 
+  /** Skip, from the fast-forward strip (decision 0005 §4): enter the target now, what is between recorded `skipped`. */
+  const skip = (): void => {
+    void invoke("task:skip", { taskId, ...(project !== undefined ? { project } : {}) }).catch((e: unknown) =>
+      setError(e instanceof Error ? e.message : String(e)),
+    );
+  };
+  // A fast-forward is SHOWING whatever the panel is otherwise showing: the strip is where Skip lives,
+  // and a Skip that was only offered over a composite would be a Skip that vanished the moment
+  // somebody clicked into the conversation that is answering for them.
+  const forwarding = detail.fastForward !== undefined;
+
   // Why sending is impossible, when it is. `null` is not a loading state to wait out — the channel
   // answered and said this state has no session of its own, and an enabled box above that answer is
   // an invitation to an error. `undefined` is the wait, and it disables nothing.
@@ -1331,6 +1377,7 @@ function ChatComposer({
           <RunActivity
             detail={detail}
             onStop={stop}
+            onSkip={skip}
             {...(asking === true ? { asking: true } : {})}
             {...(onRerun !== undefined ? { onRerun } : {})}
             {...(onResume !== undefined ? { onResume } : {})}
@@ -1343,6 +1390,11 @@ function ChatComposer({
   return (
     <>
       {cutStrip !== null ? <div className="cx-doing">{cutStrip}</div> : null}
+      {cutStrip === null && forwarding ? (
+        <div className="cx-doing">
+          <RunActivity detail={detail} onStop={stop} onSkip={skip} />
+        </div>
+      ) : null}
       {error !== null ? <p className="cx-error">{error}</p> : null}
       <Composer
         plan={plan ?? null}
@@ -1391,6 +1443,7 @@ export function RunActivity({
   asking,
   onRerun,
   onResume,
+  onSkip,
 }: {
   detail: TaskDetail;
   onStop: () => void;
@@ -1407,7 +1460,13 @@ export function RunActivity({
   onRerun?: ((taskId: string) => void) | undefined;
   /** Pick it up where it stopped. Absent ⇒ the strip only ever offers the restart. */
   onResume?: ((taskId: string) => void) | undefined;
+  /**
+   * Skip to a fast-forward's target (decision 0005 §4). Absent ⇒ a fast-forward is drawn without it,
+   * which a caller should not do: "Skip is always showing" is the decision's word.
+   */
+  onSkip?: (() => void) | undefined;
 }): JSX.Element | null {
+  if (detail.fastForward !== undefined) return <FastForwardStrip forward={detail.fastForward} onStop={onStop} onSkip={onSkip} />;
   const deepest = detail.activePath[detail.activePath.length - 1];
   const node = deepest === undefined ? undefined : nodeAt(detail.instances, deepest.instanceId);
   // A gate is not motion but it is still something happening, and it is happening to YOU — which is
@@ -1500,6 +1559,52 @@ export function RunActivity({
         title={resuming ? stopped.hint : fallback.hint}
       >
         {resuming ? stopped.verb : fallback.verb}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The activity strip while a task is being FAST-FORWARDED (decision 0005 §4) — the strip with a
+ * destination and a way past it.
+ *
+ * "Fast-forwarding to **implementation** · at **ux → item** · 1 of 3", then **Skip to implementation**
+ * beside **Stop**. Skip is ALWAYS here while the mode is: it is the one thing a person watching work
+ * run ahead of them needs within reach, and it is not in the strip's ordinary vocabulary anywhere
+ * else. No elapsed clock: what the strip is counting is states, not seconds.
+ */
+export function FastForwardStrip({ forward, onStop, onSkip }: { forward: FastForwardView; onStop: () => void; onSkip?: (() => void) | undefined }): JSX.Element {
+  const of = forward.through.length;
+  return (
+    <div className="run-doing ffwd" data-testid="ffwd-strip">
+      <Pulse />
+      <span className="ellip">
+        Fast-forwarding to <b>{forward.targetLabel}</b>
+      </span>
+      {forward.at !== undefined ? (
+        <>
+          <span className="run-doing-cut">·</span>
+          <span className="ellip">
+            at <b>{forward.at}</b>
+          </span>
+        </>
+      ) : null}
+      {of > 0 ? (
+        <>
+          <span className="run-doing-cut">·</span>
+          <span className="ffwd-steps" title={forward.through.join(", ")}>
+            {Math.max(forward.step, 1)} of {of}
+          </span>
+        </>
+      ) : null}
+      <span className="grow" />
+      {onSkip !== undefined ? (
+        <button type="button" onClick={onSkip} title={`Stop what is running and go straight to ${forward.targetLabel}; what is between is recorded as skipped`}>
+          Skip to {forward.targetLabel}
+        </button>
+      ) : null}
+      <button type="button" className="danger" onClick={onStop}>
+        Stop
       </button>
     </div>
   );

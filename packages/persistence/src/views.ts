@@ -7,7 +7,7 @@
  * from the same code. Anything that *runs* a workflow lives above this.
  */
 import { createLogger } from "@declarative-ai/log";
-import { isTaskId, refusal, SUPPLIED_EVENT, type SuppliedEvent } from "@jaira/shared";
+import { ANSWERED_EVENT, isTaskId, refusal, SUPPLIED_EVENT, type AnsweredEvent, type SuppliedEvent } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent, StateDef, WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./toolsets";
@@ -607,12 +607,53 @@ function markProvenance(project: Project, taskId: string, nodes: readonly Instan
   walk(nodes, true);
 }
 
+/**
+ * Stamp the gates a CONTROL CONVERSATION answered (decision 0005 §4) — see `InstanceNode.settledBy`.
+ *
+ * The `jaira.answered` row names the instance whose gate it settled, because `answer` looked it up
+ * at the moment it answered — the hub's park carries no instance, and joining after the fact would
+ * be a guess about which of two parallel questions got which answer. A row that names none is
+ * dropped rather than attached to whatever was waiting.
+ *
+ * The seq matters as much as the mark: it is what "Answer it yourself" rewinds to. Cutting there
+ * deletes the answer and the completion that followed it, so the state dispatches its gate again.
+ */
+function markAnswered(nodes: readonly InstanceNode[], rows: readonly { seq: number; event: EngineEvent }[]): void {
+  const byInstance = new Map<string, AnsweredEvent & { seq: number }>();
+  /**
+   * Where each instance was ENTERED — the rewind point. Not the answered row itself: a cut keeps the
+   * settle of a call that had started before it (`partitionAt`, which is right for a conversation cut
+   * mid-turn), so cutting at the answer would keep the answer's completion and ask nothing. Cut at
+   * the entry, the state is entered again as the next occurrence and parks its gate for the person.
+   */
+  const enteredAt = new Map<string, number>();
+  for (const row of rows) {
+    const event = row.event as unknown as AnsweredEvent;
+    if (row.event.type === "instance.entered" && !enteredAt.has(row.event.instanceId)) enteredAt.set(row.event.instanceId, row.seq);
+    if (event.type !== ANSWERED_EVENT || event.instanceId === undefined) continue;
+    // The FIRST: a follow-up round answered again is the same question, and taking it back means
+    // going back to where it was first asked.
+    if (!byInstance.has(event.instanceId)) byInstance.set(event.instanceId, { ...event, seq: row.seq });
+  }
+  if (byInstance.size === 0) return;
+  const walk = (list: readonly InstanceNode[]): void => {
+    for (const node of list) {
+      const said = byInstance.get(node.instanceId);
+      if (said !== undefined) node.settledBy = { ...said.settled_by, byTaskId: said.byTaskId, at: enteredAt.get(node.instanceId) ?? said.seq };
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+}
+
 export function taskRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
-  const { events, atMs } = eventsOf(project.events.list(taskId));
+  const rows = project.events.list(taskId);
+  const { events, atMs } = eventsOf(rows);
   if (events.length === 0) return { instances: [], activePath: [], blocked: [] };
   const projected = projectRun(events, shape, atMs);
   markMade(project, taskId, projected.instances);
   markProvenance(project, taskId, projected.instances, events);
+  markAnswered(projected.instances, rows);
   if (projected.instances.length <= 1) return projected;
   // Several parentless trees is history's shape, not the machine's: an in-place restart before
   // re-runs minted tasks grew one per attempt. The NEWEST is the task's own — the same rule the

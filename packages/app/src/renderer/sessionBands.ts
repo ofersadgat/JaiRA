@@ -469,7 +469,7 @@ export interface BandNote {
    * "could not enter X" — rather than as a bare reason, because that is what it is. `failure` is
    * everything else that went wrong: a call that failed, a state that gave up.
    */
-  kind: "failure" | "blocked" | "entered" | "transition" | "made";
+  kind: "failure" | "blocked" | "entered" | "transition" | "made" | "skipped";
   /** The state DEFINITION the note is about, when the journal named one — what the title shows. */
   stateId?: string;
   /** For a `made` note: the runs the batch's elements became — see `MadeBatch`. */
@@ -623,12 +623,35 @@ export function segmentsFrom(path: string, root: string): string[] {
  * NOT: a loop that took `critique → draft` three times took it three times, and collapsing those
  * would hide the one thing a path is drawn to show.
  */
+/** How long an interrupted state had been running — the run card's own units (`durationOf`), restated to keep this module free of the view's. */
+function spanOf(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const seconds = Math.round(ms / 1000);
+  return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
+}
+
 export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode): BandNote[] {
   const byInstance = instancesById(root);
   /** With no tree to ask, nothing is claimed by a panel — see the note above. */
   const hasPanel = (turn: ConversationTurn): boolean => byInstance.size > 0 && ranAnOperation(turn, byInstance);
   const seen = new Set<string>();
   const out: BandNote[] = [];
+  /**
+   * A person's move stepped past it (decision 0005 §4) — interrupted by a Skip, or never entered.
+   *
+   * Never entered is journaled as an entry and a `skipped` end back to back, because a skipped
+   * occurrence is still an occurrence. Drawn as "entered X", then "skipped X", that reads as a state
+   * that ran; so the pair is ONE row that says it never did. An interrupted state keeps its entry
+   * and says how long it had been running when it was cut.
+   */
+  const enteredAt = new Map<string, { seq: number; at: number }>();
+  const neverEntered = new Set<string>();
+  for (const turn of turns) {
+    if (turn.instanceId === undefined) continue;
+    if (turn.kind === "entered") enteredAt.set(turn.instanceId, { seq: turn.seq, at: turn.at });
+    else if (turn.kind === "terminated" && turn.text === "skipped" && enteredAt.get(turn.instanceId)?.seq === turn.seq - 1) neverEntered.add(turn.instanceId);
+  }
   for (const turn of turns) {
     const named = {
       ...(turn.stateId !== undefined ? { stateId: turn.stateId } : {}),
@@ -646,7 +669,15 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
       // The ROOT entering itself is not a step. Everything in the run is inside it, so "entered
       // feature" on a page about `feature` says only that the page is about `feature`.
       if (path === "") continue;
+      if (turn.instanceId !== undefined && neverEntered.has(turn.instanceId)) continue;
       out.push({ seq: turn.seq, at: turn.at, kind: "entered", ...named, path, text: "" });
+      continue;
+    }
+    if (turn.kind === "terminated" && turn.text === "skipped") {
+      if (path === "") continue;
+      const began = turn.instanceId !== undefined ? enteredAt.get(turn.instanceId) : undefined;
+      const text = turn.instanceId !== undefined && neverEntered.has(turn.instanceId) ? "never entered" : began !== undefined ? `interrupted at ${spanOf(turn.at - began.at)}` : "interrupted";
+      out.push({ seq: turn.seq, at: turn.at, kind: "skipped", ...named, path, text });
       continue;
     }
     // An element that became a TASK (decision 0003): the machine made something, and the line says

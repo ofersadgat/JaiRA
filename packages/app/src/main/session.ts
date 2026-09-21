@@ -23,6 +23,7 @@ import { LiveCalls } from "@jaira/runtime";
 import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub, RemoteEventHub, UserEventHub } from "@jaira/runtime";
 import type { SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
+import type { FastForwardRun } from "./fastForward";
 
 /** A run this session started and has not yet settled. */
 export interface LiveRun {
@@ -201,6 +202,14 @@ export class ProjectSession {
    * run-end handler, the way a move left on the port is; dropped when the run is stopped or fails.
    */
   readonly afterRun = new Map<string, Array<() => Promise<unknown>>>();
+  /**
+   * The tasks being FAST-FORWARDED right now, by task id (decision 0005 §4, step 7).
+   *
+   * In memory because nothing in the journal is a fast-forward: it is a mode a run is in, and a
+   * process that did not start it has no business answering questions on its behalf. A task whose
+   * app went away comes back standing wherever the machine got to, with its questions its own again.
+   */
+  readonly fastForwards = new Map<string, FastForwardRun>();
   /**
    * How to write down what a task's live turn holds RIGHT NOW, by task id.
    *

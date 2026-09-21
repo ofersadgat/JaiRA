@@ -195,7 +195,11 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     // `integrations` is left out of the starter file. A connection is a fact about a MACHINE — its
     // hosts, its tokens — and belongs to the shared root; a project file that spelled the defaults out
     // would shadow whatever the shared root says, in every project created after it was said.
-    const { integrations: _machineWide, ...starter } = defaultConfig();
+    //
+    // `autopilot` is left out for the same reason and a stronger one: how sure a conversation has to
+    // be before it answers FOR YOU is a fact about you, not about a checkout, and a project that
+    // spelled the default out would silently override the answer you gave once in the shared root.
+    const { integrations: _machineWide, autopilot: _yours, ...starter } = defaultConfig();
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");

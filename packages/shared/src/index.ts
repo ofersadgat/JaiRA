@@ -43,4 +43,5 @@ export * from "./userEvents";
 export * from "./adopt";
 export * from "./connect";
 export * from "./workflowTools";
+export * from "./fastForward";
 export * from "./refusal";

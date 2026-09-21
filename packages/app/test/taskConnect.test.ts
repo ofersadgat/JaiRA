@@ -6,7 +6,8 @@
  * pinned here with the journal rows that make it real:
  *
  *  1. **move** — the target is in the task's own workflow: backward, to the very next state, forward
- *     only with `skip` (fast-forward is a later step's), and DOWN into a nested composite;
+ *     by fast-forward or with `skip` (the fast-forward itself is `fastForward.test.ts`'s), and DOWN
+ *     into a nested composite;
  *  2. **adopt** — a real workflow holds both: a new task of it adopts the task, and stands where the
  *     target is; two such workflows are returned as candidates, never chosen between;
  *  3. **modify** — nothing relates them: a finished task is wrapped in a NEW document and adopted
@@ -198,20 +199,20 @@ describe("rule 1 — the target is in the task's workflow", () => {
     expect(journal(taskId).filter((e) => e.type === "transition.taken")).toMatchObject([{ to: "a", by: "person" }]);
   });
 
-  it("goes to the very NEXT state without skip, refuses to step OVER states without it, and steps over them with it", async () => {
+  it("goes to the very NEXT state without skip, FAST-FORWARDS over states by default, and steps over them with skip", async () => {
     const taskId = await standingIn("flow", 0); // parked at a
     expect(ok(await service.connectTask({ taskId, target: "flow/b", dryRun: true })).plan.move).toMatchObject({ direction: "next", passes: [] });
 
-    const refusal = no(await service.connectTask({ taskId, target: "flow/d", dryRun: true }));
-    expect(refusal.refusal.code).toBe("fast-forward");
-    expect(refusal.refusal.message).toBe(
-      "'d' is ahead of where the task stands, past 'b', 'c'. Running the states between (fast-forward) is not built yet — say skip to go there directly, which records them as skipped",
+    // Forward past states is a FAST-FORWARD (decision 0005 §4, step 7) — the dry run says so.
+    const dry = ok(await service.connectTask({ taskId, target: "flow/d", dryRun: true }));
+    expect(dry.plan).toMatchObject({ resolution: "move", forward: "fast-forward", move: { direction: "forward", passes: ["b", "c"] } });
+    // This task is RUNNING and nothing speaks at its root: there is no conversation to answer on the
+    // way, and a running engine cannot pick one up. Refused, having done nothing.
+    await expect(service.connectTask({ taskId, target: "flow/d" })).rejects.toThrow(
+      "task '" + taskId + "' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly",
     );
-    // The refusal still says what it resolved to, so a preview can.
-    expect(refusal.plan).toMatchObject({ resolution: "move", move: { direction: "forward", passes: ["b", "c"] } });
-    // …and the real thing is refused the same way, having done nothing.
-    expect(no(await service.connectTask({ taskId, target: "flow/d" })).refusal.code).toBe("fast-forward");
     expect(journal(taskId).some((e) => e.type === "transition.taken")).toBe(false);
+    expect(documents()).toEqual([]);
 
     const done = ok(await service.connectTask({ taskId, target: "flow/d", forward: "skip" }));
     expect(done.moved).toBe("taking");
@@ -225,9 +226,9 @@ describe("rule 1 — the target is in the task's workflow", () => {
 
   it("enters the ANCESTORS of a nested target on the way down, and goes straight to it", async () => {
     const taskId = await standingIn("deep", 0); // parked at one
-    const dry = no(await service.connectTask({ taskId, target: "deep/two/y", dryRun: true }));
+    const dry = ok(await service.connectTask({ taskId, target: "deep/two/y", dryRun: true }));
     // `x` comes before `y` inside the composite: stepping over it is a skip like any other.
-    expect(dry.plan?.move).toMatchObject({ direction: "forward", to: "two", path: ["y"], passes: ["two/x"] });
+    expect(dry.plan.move).toMatchObject({ direction: "forward", to: "two", path: ["y"], passes: ["two/x"] });
 
     ok(await service.connectTask({ taskId, target: "deep/two/y", skip: true }));
     expect((await parked()).state).toBe("y");
@@ -282,9 +283,9 @@ describe("rule 2 — a real workflow holds both", () => {
 
   it("reaches a target past the next state only by skip, and refuses one whose binding reads what was skipped", async () => {
     const product = await ran("feat/product", 1);
-    const over = no(await service.connectTask({ taskId: product, target: "feat/build", dryRun: true }));
-    expect(over.refusal.code).toBe("fast-forward");
-    expect(over.plan).toMatchObject({ resolution: "adopt", move: { direction: "forward", to: "build", passes: ["ux"] } });
+    // Without skip it is a fast-forward — the plan says so, and runs `ux` on the way.
+    const over = ok(await service.connectTask({ taskId: product, target: "feat/build", dryRun: true }));
+    expect(over.plan).toMatchObject({ resolution: "adopt", forward: "fast-forward", move: { direction: "forward", to: "build", passes: ["ux"] } });
 
     // `ship` reads `ux`, which a skip steps over: the input would not bind, and the refusal says which, with its schema.
     const unbound = no(await service.connectTask({ taskId: product, target: "feat/ship", skip: true }));
