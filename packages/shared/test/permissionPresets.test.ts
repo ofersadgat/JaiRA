@@ -1,9 +1,9 @@
 /**
  * Permission presets — a starting point for the per-tool modes, and nothing more.
  *
- * The distinction under test is the whole design. The engine's `profile` is a scope FILTER resolved
- * at call time: it runs ahead of the mode, refuses whatever it excludes, and — for a name nothing
- * recognises — refuses everything. A preset is spent on the click. It writes a mode per tool and
+ * The distinction under test is the whole design. A `profile` was a scope FILTER resolved at call
+ * time: it ran ahead of the mode, refused whatever it excluded, and — for a name nothing recognised —
+ * refused everything. It is gone (decision 0007). A preset is spent on the click. It writes a mode per tool and
  * then has no further say, so what runs is the map, which is also what the reader sees and edits.
  *
  * That is not a stylistic preference. A composer that wrote profile NAMES once sent `acceptEdits`,
@@ -17,15 +17,17 @@ import {
   PERMISSION_PRESETS,
   presetModes,
   presetOf,
+  READ_ONLY_PRESET_TOOLS,
   type PermissionMode,
   type ToolChoice,
 } from "../src/operationVocabulary";
+import { TOOL_SPEC_BY_NAME } from "../src/toolVocabulary";
 
 /** JaiRA's own gateable set, in the shape the plan hands the composer. */
 const TOOLS: ToolChoice[] = [
-  { name: "bash", readOnly: false },
-  { name: "read_file", readOnly: true },
-  { name: "write_file", readOnly: false },
+  { name: "bash" },
+  { name: "read_file" },
+  { name: "write_file" },
 ];
 
 const preset = (id: string) => PERMISSION_PRESETS.find((p) => p.id === id)!;
@@ -47,16 +49,36 @@ describe("what a preset writes", () => {
     }
   });
 
-  it("read-only asks the TOOL what it does, rather than knowing tool names", () => {
-    // Which is what makes it right for a tool nobody has written yet: a newly registered writer is
-    // denied by this preset without anybody remembering to add it to a list.
+  it("read-only is an EXPLICIT list, and a tool it has never heard of is refused", () => {
+    // It used to ask each tool whether it was `readOnly`; that flag is gone (decision 0007 §1), so
+    // the preset names what it lets through. The failure direction is the safe one: a tool nobody
+    // added to the list is denied by this preset, never allowed.
     expect(presetModes(preset("read-only"), TOOLS)).toEqual({
       read_file: "allow",
       bash: "deny",
       write_file: "deny",
     });
-    const invented: ToolChoice[] = [{ name: "delete_everything", readOnly: false }];
+    const invented: ToolChoice[] = [{ name: "delete_everything" }];
     expect(presetModes(preset("read-only"), invented)).toEqual({ delete_everything: "deny" });
+  });
+
+  it("writes exactly the map it wrote when it was derived from `readOnly`", () => {
+    // Frozen from the vocabulary on the day the flag was removed: the composer must behave the same.
+    const all: ToolChoice[] = ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search"].map(
+      (name) => ({ name }),
+    );
+    expect(presetModes(preset("read-only"), all)).toEqual({
+      read_file: "allow",
+      glob: "allow",
+      grep: "allow",
+      edit: "deny",
+      write_file: "deny",
+      show_artifact: "allow",
+      bash: "deny",
+      web_fetch: "allow",
+      web_search: "allow",
+    });
+    expect(READ_ONLY_PRESET_TOOLS.every((name) => TOOL_SPEC_BY_NAME.has(name))).toBe(true);
   });
 
   it("has no `plan`, because a chat turn has no door out of it", () => {

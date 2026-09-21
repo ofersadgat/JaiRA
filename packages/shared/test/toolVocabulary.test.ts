@@ -1,20 +1,15 @@
 /**
- * The tool table, its categories, and profiles as maps.
+ * The tool table and its categories.
  *
  * What this suite is really defending is EXHAUSTIVENESS. The bug the table exists to fix was not a
- * wrong answer, it was a missing one: an agent's `Glob` was a tool nothing had a name for, so no
- * profile had an opinion about it and the gate could only escalate or wave it through. Every
- * assertion below is a way of asking "is anything undecided?"
+ * wrong answer, it was a missing one: an agent's `Glob` was a tool nothing had a name for, so nothing
+ * had an opinion about it and the gate could only escalate or wave it through. Every assertion below
+ * is a way of asking "is anything undecided?"
  */
 import { describe, expect, it } from "vitest";
 import {
   categoryModeOf,
-  logicalOfNative,
-  nativeNamesFor,
-  profileModeOf,
   TOOL_CATEGORIES,
-  TOOL_PROFILES,
-  TOOL_PROFILE_BY_ID,
   TOOL_SPECS,
   TOOL_SPEC_BY_NAME,
   toolsInCategory,
@@ -42,60 +37,14 @@ describe("the table", () => {
   });
 });
 
-describe("native names — the two directions", () => {
-  it("maps a built-in back to the logical name a policy is written against", () => {
-    // The direction the gate asks in: a callback arrives naming `Glob`, and the authored mode says
-    // `glob`. Without this the two never meet.
-    expect(logicalOfNative("Glob")).toBe("glob");
-    expect(logicalOfNative("Read")).toBe("read_file");
-    expect(logicalOfNative("WebFetch")).toBe("web_fetch");
-    expect(logicalOfNative("SomethingNobodyModelled")).toBeUndefined();
-  });
-
-  it("lists a transport's native names, whole or for a subset", () => {
-    expect(nativeNamesFor("claude")).toContain("Bash");
-    expect(nativeNamesFor("claude", ["glob", "grep"])).toEqual(["Glob", "Grep"]);
-    // A transport with no built-in for a job contributes nothing rather than a placeholder.
-    expect(nativeNamesFor("codex")).toEqual([]);
-  });
-});
-
-describe("profiles as maps", () => {
-  it("says something about every tool in the table, under every profile", () => {
-    // The property the predicate form could not have: no tool falls through to a default nobody
-    // chose, because there is an entry for each.
-    for (const profile of TOOL_PROFILES) {
-      for (const spec of TOOL_SPECS) {
-        expect(Object.hasOwn(profile.tools, spec.name), `'${profile.id}' says nothing about '${spec.name}'`).toBe(true);
-      }
+describe("the table is the STANDARD list, and nothing else", () => {
+  it("carries no agent's names, no `readOnly` and no profile", () => {
+    // Decision 0007 §3 and §1: which built-in is which standard tool is what an agent EXECUTOR
+    // declares (`agentTools.ts`), and what a tool may do is what a toolset says about it.
+    for (const spec of TOOL_SPECS) {
+      expect(Object.keys(spec), spec.name).not.toContain("natives");
+      expect(Object.keys(spec), spec.name).not.toContain("readOnly");
     }
-  });
-
-  it("keeps read-only meaning read-only", () => {
-    const readOnly = TOOL_PROFILE_BY_ID.get("read-only")!;
-    expect(profileModeOf(readOnly, "read_file")).toBe("ask");
-    expect(profileModeOf(readOnly, "glob")).toBe("ask");
-    expect(profileModeOf(readOnly, "write_file")).toBe("deny");
-    expect(profileModeOf(readOnly, "bash")).toBe("deny");
-  });
-
-  it("answers for a tool it has never heard of, which is the whole point of `other`", () => {
-    // `Glob` under its NATIVE name is not in the table — it is a name that turns up at runtime, and
-    // before `other` existed the gate had nothing to consult but a guess.
-    for (const profile of TOOL_PROFILES) {
-      expect(profileModeOf(profile, "mcp__someone__whatever")).toBe(profile.other);
-    }
-    expect(TOOL_PROFILE_BY_ID.get("read-only")!.other).toBe("ask");
-  });
-
-  it("keeps `other` and `default` distinct", () => {
-    // Different questions: `default` is what a KNOWN tool with no entry resolves to; `other` is for
-    // a name that is not in the table at all. Collapsing them is how "I have not decided about
-    // write_file" and "I have never heard of this" came to mean the same thing.
-    const readOnly = TOOL_PROFILE_BY_ID.get("read-only")!;
-    expect(readOnly.default).toBe("deny");
-    expect(readOnly.other).toBe("ask");
-    expect(readOnly.default).not.toBe(readOnly.other);
   });
 });
 

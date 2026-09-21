@@ -686,7 +686,7 @@ function ToolRow({
   onImpl,
 }: {
   tool: ToolChoice;
-  /** The vocabulary entry, when this tool has one — what supplies its label, hint and native name. */
+  /** The vocabulary entry, when this tool has one — what supplies its label and hint. */
   spec?: ToolSpec | undefined;
   granted: boolean;
   mode: PermissionMode;
@@ -697,7 +697,9 @@ function ToolRow({
   onMode: (next: PermissionMode) => void;
   onImpl: (next: ToolImplementation) => void;
 }): JSX.Element {
-  const native = cliRoute !== undefined ? spec?.natives?.claude : undefined;
+  // What the ANSWERING agent calls its own tool doing this job — off that executor's declaration, by
+  // route. Absent ⇒ that agent has no built-in to pick instead, so there is no choice to draw.
+  const native = cliRoute !== undefined ? tool.natives?.[cliRoute] : undefined;
   return (
     <div className={`cx-tool${granted ? " on" : ""}`}>
       <button type="button" className="cx-tool-grant" title={spec?.hint ?? tool.name} onClick={onGrant}>
@@ -707,7 +709,7 @@ function ToolRow({
         </span>
         <span className="cx-opt-text">
           <span className="cx-opt-name ellip">{spec?.label ?? tool.name}</span>
-          <span className="cx-opt-hint ellip">{spec?.hint ?? (tool.readOnly ? "reads only" : "can change things")}</span>
+          <span className="cx-opt-hint ellip">{spec?.hint ?? tool.name}</span>
         </span>
       </button>
       {native !== undefined ? <ImplPicker value={impl} native={native} onPick={onImpl} /> : null}
@@ -1153,7 +1155,7 @@ export function Composer({
                   <Opt
                     key={choice.id}
                     on={preset?.id === choice.id}
-                    icon={MODE_META[choice.modeFor({ name: "", readOnly: false })].icon}
+                    icon={MODE_META[choice.modeFor({ name: "" })].icon}
                     name={choice.label}
                     hint={choice.hint}
                     // Spent on the click: it writes a mode for every tool and then has no further

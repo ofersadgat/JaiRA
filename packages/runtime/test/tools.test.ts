@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPermissionDenied, PermissionLedger, withPermission, type Approver } from "@declarative-ai/permissions";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
+import { LEGACY_NON_READ_ONLY_TOOLS, READ_ONLY_PRESET_TOOLS } from "@jaira/shared";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 import { createBashTool, gateTools, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
 import { registerFileTools } from "../src/fileTools";
@@ -44,7 +45,7 @@ describe("createBashTool", () => {
     expect(result.exitCode).toBe(3);
   }, 60_000);
 
-  it("declares readOnly: false, which is what plan/read-only profiles gate on", () => {
+  it("declares the upstream `Tool.readOnly: false` — it runs commands", () => {
     expect(createBashTool().readOnly).toBe(false);
   });
 
@@ -198,7 +199,7 @@ describe("a produced artifact needs permission like anything else", () => {
   });
 });
 
-describe("JAIRA_TOOLS — the gateable set, and what each one may do", () => {
+describe("JAIRA_TOOLS — the gateable set", () => {
   /**
    * Everything JaiRA registers under its own policy — BOTH calls.
    *
@@ -220,18 +221,25 @@ describe("JAIRA_TOOLS — the gateable set, and what each one may do", () => {
     return registry;
   };
 
-  it("restates every registered tool's `readOnly` exactly", () => {
-    // The table is a RESTATEMENT: it exists so a caller describing choices — a permission preset
-    // assigning a mode per tool — need not construct a shell and an artifact store to ask whether a
-    // tool writes. A restatement can drift, and this is the assertion that stops it. Nothing else
-    // would notice: a `read_file` marked writable would simply be refused under the read-only preset,
-    // quietly, in whichever project happened to pick it.
+  it("names nothing that is not registered", () => {
+    // The vocabulary no longer restates what a tool DOES (`readOnly` went with decision 0007 §1: a
+    // toolset says what a state may do, by name). What is left to drift is the NAME: one here with
+    // nothing behind it is a permission somebody can grant and no tool can honour.
     const registry = registered();
     for (const declared of JAIRA_TOOLS) {
-      const built = registry.tools.get(declared.name);
-      expect(built, `JAIRA_TOOLS names '${declared.name}', which nothing registers`).toBeDefined();
-      expect(built!.readOnly, `'${declared.name}' readOnly`).toBe(declared.readOnly);
+      expect(registry.tools.get(declared.name), `JAIRA_TOOLS names '${declared.name}', which nothing registers`).toBeDefined();
+      expect(Object.keys(declared)).toEqual(["name"]);
     }
+  });
+
+  it("keeps the frozen legacy facts true of the tools as built", () => {
+    // `LEGACY_NON_READ_ONLY_TOOLS` and the read-only preset's list are what `readOnly` said on the day
+    // it was removed. They are frozen, not derived — so this is the one place that notices if a tool
+    // they call a reader starts writing.
+    const registry = registered();
+    for (const name of LEGACY_NON_READ_ONLY_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(false);
+    for (const name of READ_ONLY_PRESET_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(true);
+    expect([...LEGACY_NON_READ_ONLY_TOOLS, ...READ_ONLY_PRESET_TOOLS].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
   });
 
   it("names every tool JaiRA registers — the set is the WHOLE gateable one", () => {

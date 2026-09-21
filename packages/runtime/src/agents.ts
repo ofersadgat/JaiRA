@@ -32,6 +32,8 @@ import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
 import type { ExecEnv } from "./paths";
+import { primaryNativeOf, type AgentToolDeclaration } from "@jaira/shared";
+import { agentServices, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS } from "./agentTools";
 import { claudeReplacements } from "./tools";
 
 /** The registry names JaiRA registers its agents under. */
@@ -44,6 +46,36 @@ export const AGENT_CLI = "claude-cli";
  * sandbox) and therefore declares `policyEnforcement: "config"` — which passes.
  */
 export const AGENT_CODEX = "codex-cli";
+
+/**
+ * What each agent DECLARES about its own tools, by the name it is registered and routed under
+ * (decision 0007 §3). The two claude transports drive one agent, so they share one declaration.
+ */
+export const AGENT_TOOLS: Readonly<Record<string, AgentToolDeclaration>> = {
+  [AGENT_SDK]: CLAUDE_TOOLS,
+  [AGENT_CLI]: CLAUDE_TOOLS,
+  [AGENT_CODEX]: CODEX_TOOLS,
+};
+
+/** An agent's declaration — a name nothing declared is a generic CLI, which declares nothing. */
+export function agentToolsOf(name: string): AgentToolDeclaration {
+  return Object.hasOwn(AGENT_TOOLS, name) ? AGENT_TOOLS[name]! : GENERIC_CLI_TOOLS;
+}
+
+/**
+ * What each agent route calls ITS OWN tool doing a standard tool's job — `{ "claude-cli": "Read" }`.
+ *
+ * Only routes whose implementation is a CHOICE: a `tools` transport can be served ours or keep its
+ * own. Codex cannot be served ours at all, so offering the pick there would offer nothing.
+ */
+export function nativeNamesByRoute(standard: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [route, declaration] of Object.entries(AGENT_TOOLS)) {
+    const native = declaration.channel === "tools" ? primaryNativeOf(declaration, standard) : undefined;
+    if (native !== undefined) out[route] = native;
+  }
+  return out;
+}
 
 /**
  * Spawn a CLI agent through a seam JaiRA can watch, in the project's execution
@@ -249,6 +281,11 @@ export function registerAgentRuntimes(
     replacesNative: claudeReplacements(),
     ...options.sdk,
   };
+  // And the other half of decision 0007 §3: a tool the state's toolset does NOT hold loses its
+  // built-in too. Applied to the services each call is handed, from the claude executor's own
+  // declaration — see `agentServices`.
+  const held = <F extends (inputs: never, ctx: never) => unknown>(run: F): F =>
+    ((inputs: never, ctx: never) => run(inputs, agentServices(CLAUDE_TOOLS, ctx) as never)) as F;
 
   if (adapters.includes("sdk")) {
     const sdk = createClaudeCodeFunction({
@@ -257,7 +294,7 @@ export function registerAgentRuntimes(
     });
     registry.functions.set(
       AGENT_SDK,
-      runtimeFunction(sdk.run as never, sdk.capabilities) as never,
+      runtimeFunction(held(sdk.run as never), sdk.capabilities) as never,
     );
   }
 
@@ -288,7 +325,7 @@ export function registerAgentRuntimes(
           });
     registry.functions.set(
       AGENT_CLI,
-      runtimeFunction(cli.run as never, cli.capabilities) as never,
+      runtimeFunction(held(cli.run as never), cli.capabilities) as never,
     );
   }
 

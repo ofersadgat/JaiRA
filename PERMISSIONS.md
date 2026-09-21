@@ -330,7 +330,7 @@ allowed working directory") and read `inside/a.txt` under the same rule without 
 
 So for a delegated agent the table is not only something our callback consults — it is something we
 can hand over. Each scope entry becomes `allow` / `ask` / `deny` rules over the agent's *native*
-names (`logicalOfNative` in reverse), emitted through the `settings` escape hatch both transports
+names (the claude executor's own declaration, `CLAUDE_TOOLS`, read in reverse), emitted through the `settings` escape hatch both transports
 already carry. Scope enforcement then happens in the agent's own gate, up front, without a
 round-trip per call. Our callback stays underneath as the floor for everything the rules cannot
 express — `bash` path extraction (§2.2) above all.
@@ -407,5 +407,5 @@ Steps 1–2 are shippable on their own and are most of the value.
 - **Constraining a `web_fetch` by what a `web_search` returned.** Tempting and a different
   mechanism: it is taint tracking, not scoping.
 - **Scoping the agent's own built-ins directly.** They reach us as native names through the
-  permission callback (`logicalOfNative`), so they resolve through the same table as our tools —
+  permission callback and are asked about by their standard name (`withAgentToolset`, from the executor's declaration), so they resolve through the same table as our tools —
   provided the ask-rules are on (`claudeAskSettings`). That is a wiring question, not a design one.

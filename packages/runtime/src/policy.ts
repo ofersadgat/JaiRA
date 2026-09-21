@@ -43,7 +43,6 @@ import {
   entriesToRemember,
   isAbsolutePath,
   gateToolModes,
-  logicalOfNative,
   type CommandApproval,
   type CommandPart,
   type CommandPartDecider,
@@ -53,6 +52,8 @@ import {
   type TextSpan,
   type Toolset,
 } from "@jaira/shared";
+// Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
+import { standardOfAnyNative } from "./agentTools";
 import { partScopeFor, scopeNarrowingFor } from "./tools";
 
 /** What a rule does when it matches — DESIGN §10.1's vocabulary. */
@@ -735,7 +736,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
    * lines. Without a toolset an ask is left to the `smart` approver, as it always was.
    */
   const commandNarrowing: ScopeNarrowing = (tool, input, authored) => {
-    const name = COMMAND_TOOLS.has(tool.name) ? tool.name : (logicalOfNative(tool.name) ?? tool.name);
+    const name = COMMAND_TOOLS.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
     const args = (input ?? {}) as Record<string, unknown>;
     const line = COMMAND_TOOLS.has(name) ? commandOf(args) : undefined;
     if (line === undefined) return undefined;

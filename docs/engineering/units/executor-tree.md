@@ -2,7 +2,7 @@
 id: engineering/units/executor-tree
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [ui/components/executor-tree, ui/surfaces/settings-executors, product/bring-your-own-models-and-agents, ux/patterns/inherited-unless-set-here]
 layer: core
 owns_contracts: []
@@ -26,7 +26,7 @@ The runtime half builds executors from a resolved node. `buildPromptTree` makes 
 It deliberately does not own:
 
 - Which provider routes are usable, which agents exist and whose models they serve, the probes, and refusing a run at start: [model-routing](model-routing.md).
-- Building the agent executors a node selects: [agent-executors](agent-executors.md) and `agentPromptRoutes` in [model-routing](model-routing.md).
+- Building the agent executors a node selects: [agent-executors](agent-executors.md) and `agentPromptRoutes` in [model-routing](model-routing.md). Each arrives already wrapped in `withAgentToolset` with that agent's own tool declaration, so the executor an `agent` node selects passes a legacy list-form run through untouched and, under a toolset map, removes the built-ins the map does not hold, sets codex's sandbox from it, and refuses a denying toolset on a generic CLI: [tool-policy](tool-policy.md).
 - Parsing `executors` in `settings.json`: [project-config](project-config.md). Compiling the scope table into the floor: [tool-policy](tool-policy.md).
 - The repair loop, the fake and the session layers around the tree: [engine-wiring](engine-wiring.md).
 
@@ -82,3 +82,4 @@ It deliberately does not own:
 - The step order is JaiRA's, `memoize`, `retry`, `rateLimit`, `deadline` from outermost in, and cannot be authored, because a hit must skip everything and each retry must be admitted by the limiter again.
 - An absent field is derived from what is available rather than stored as a default, so a route installed later appears without editing `settings.json`.
 - The security floor merges over the state's config, deeply and with arrays unioned, where every other defaulting layer merges under it, because a state must not be able to drop the project's scope rules.
+- A toolset is applied at the leaf and not in the tree. The floor, a router's defaults and a node's model rules all run before the route is known or without caring which it is; which built-ins to remove is a fact about the one agent that answers, so `withAgentToolset` sits innermost, around the agent executor itself, and the ask rules it writes are unioned into the same `providerOptions` permission arrays the floor writes.

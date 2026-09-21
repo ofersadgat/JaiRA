@@ -29,27 +29,25 @@ import {
   absolutize,
   ALWAYS_GRANTED_TOOLS,
   isAbsolutePath,
-  logicalOfNative,
+  nativesOfStandard,
+  replacementsOf,
   withAlwaysGranted,
   normalizePath,
-  offeredTools,
   permissionsOfToolset,
   resolveScope,
   resolveScopes,
   resolveUrlScope,
   scopeModeOf,
-  TOOL_PROFILES,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
-  toolImplementations,
   toolsetOfEnvironment,
-  toolsetOfLegacy,
+  type AgentToolDeclaration,
   type PermissionsDecl,
   type Scope,
   type ScopeOptions,
-  type ToolImplementation,
   type Toolset,
 } from "@jaira/shared";
+import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
@@ -85,9 +83,9 @@ function clamp(text: string, max: number): string {
 /**
  * A `bash` tool: run a command line in the workspace and return its output.
  *
- * `readOnly: false` is deliberate and load-bearing — it is what the `read-only`
- * and `plan` permission profiles gate on, so a plan-mode session cannot run
- * commands at all regardless of the per-command policy.
+ * `readOnly: false` is the UPSTREAM `Tool` field, and it is true of this tool. JaiRA's own vocabulary
+ * no longer has such a flag (decision 0007): whether a state may run commands is whether its toolset
+ * holds `bash`, and with what mode.
  */
 export function createBashTool(options: ToolOptions = {}): Tool {
   const exec = options.exec ?? new NodeExec();
@@ -274,8 +272,9 @@ export function gateTools(options: {
   policy?: ExecPolicy | undefined;
   approve?: Approver | undefined;
   /**
-   * The operation's own `permissions` block, in the LEGACY shape: a profile, a default mode,
-   * per-tool modes, scopes. Folded into a toolset with `names` as the grant — see {@link toolset}.
+   * The operation's own `permissions` block, in the LEGACY shape: a default mode, per-tool modes,
+   * scopes, and perhaps an old `profile`, which is read as the entries it used to mean and never
+   * seeded as one. Folded into a toolset with `names` as the grant — see {@link toolset}.
    * Its `scopes` are read either way: where a tool may act is not part of a toolset.
    */
   authored?: PermissionsDecl | undefined;
@@ -306,8 +305,6 @@ export function gateTools(options: {
   // the gate as the same thing. Absent when nothing was authored at all, as before.
   const authored =
     options.toolset === undefined && options.authored === undefined ? undefined : permissionsOfToolset(toolset, options.authored?.scopes);
-  // Still honoured, from the legacy block only — a toolset has no profile (decision 0007 §1).
-  if (toolset.profile !== undefined) ledger.seedProfile(options.sessionId, toolset.profile);
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
   const placeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
@@ -331,10 +328,9 @@ export function gateTools(options: {
     preGated: options.names,
     ...(authored !== undefined ? { authored } : {}),
     ...(options.policy?.smart !== undefined ? { smart: options.policy.smart } : {}),
-    // The vocabulary's tables, unless the caller supplied its own. Registering them under the
-    // built-in names is what gives the gate an opinion about an agent's own tools rather than an
-    // escalation — see `profileRules`.
-    profiles: options.policy?.profiles ?? profileRules(),
+    // No profile tables (decision 0007 §1). What they existed for — an opinion about a name the gate
+    // has never registered — is the toolset's `other`, which rides on `authored`.
+    ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
     ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
   });
   if (options.names.length === 0) return { tools: {}, gate };
@@ -357,7 +353,7 @@ export function gateTools(options: {
       // The block itself, so the narrowing sees the toolset's command subjects at the moment of decision.
       ...(authored !== undefined ? { authored } : {}),
       ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
-      profiles: options.policy?.profiles ?? profileRules(),
+      ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
       // The SAME narrowing the gate applies. A wrapped tool and a delegated one are two routes to one
       // decision, and a scope that bound only one of them would be a sandbox with a door in it.
       ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
@@ -367,12 +363,12 @@ export function gateTools(options: {
 }
 
 /**
- * Every tool JaiRA can put under its OWN policy, and whether each one can change anything.
+ * Every tool JaiRA can put under its OWN policy.
  *
  * DERIVED from `TOOL_SPECS` rather than restated. It was a hand-written list of three, and being
  * hand-written is how it came to be a list of three: `glob`, `grep`, `edit` and the two web tools
  * were things an agent did that nothing here had a name for, so nothing here could gate them. One
- * table now, in `shared`, because the menu that draws these and the profile that governs them need
+ * table now, in `shared`, because the menu that draws these and the toolset that governs them need
  * the same answer — and a second copy is a second thing to forget to update.
  *
  * `tools.test.ts` asserts this against what {@link registerTools} and its siblings actually build,
@@ -380,28 +376,25 @@ export function gateTools(options: {
  * direction: a name here with nothing behind it is a permission somebody can grant and no tool can
  * honour.
  */
-export const JAIRA_TOOLS: readonly { name: string; readOnly: boolean }[] = TOOL_SPECS.filter(
-  (spec) => spec.nativeOnly !== true,
-).map((spec) => ({ name: spec.name, readOnly: spec.readOnly }));
+export const JAIRA_TOOLS: readonly { name: string }[] = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true).map((spec) => ({
+  name: spec.name,
+}));
 
 /** Just the names — the shape most callers want. */
 export const JAIRA_TOOL_NAMES = JAIRA_TOOLS.map((t) => t.name);
 
 /**
- * Claude Code's own built-ins, as the names its permission rules are written against.
+ * Claude Code's own READING built-ins, as the names its permission rules are written against —
+ * read off what the claude executor declares (`agentTools.ts`), for the standard tools that read.
  *
- * Not a tool set — these are the agent's, not ours, and JaiRA neither implements nor registers them.
  * What this is is the LIST OF NAMES needed to say "ask me about these", which is a thing you can
- * only say by naming them.
- *
- * Read-only and mutating are separated because the two are different requests. The mutating ones are
- * already denied up front by the transport under a narrowing profile; it is the READ ones that were
- * the surprise — a real run globbed and read twenty files under `profile: "read-only"` and nothing
- * asked, because in its default mode Claude Code auto-allows its own read-only built-ins and never
- * routes them to the permission callback at all.
+ * only say by naming them. It is the READ ones that were the surprise: a real run globbed and read
+ * twenty files and nothing asked, because in its default mode Claude Code auto-allows its own
+ * read-only built-ins and never routes them to the permission callback at all.
  */
-export const CLAUDE_NATIVE_READ_TOOLS = ["Read", "Glob", "Grep", "NotebookRead", "WebFetch", "WebSearch"] as const;
-export const CLAUDE_NATIVE_WRITE_TOOLS = ["Write", "Edit", "NotebookEdit", "Bash", "KillShell"] as const;
+export const CLAUDE_NATIVE_READ_TOOLS: readonly string[] = ["read_file", "glob", "grep", "web_fetch", "web_search"].flatMap(
+  (standard) => nativesOfStandard(CLAUDE_TOOLS, standard),
+);
 
 /**
  * The provider options that make a delegated Claude agent ASK about tools it would otherwise decide
@@ -424,13 +417,9 @@ export const CLAUDE_NATIVE_WRITE_TOOLS = ["Write", "Edit", "NotebookEdit", "Bash
  * "providerOptions": { "claudeCode": { "settings": { "permissions": { "ask": ["Read", "Glob"] } } } }
  * ```
  *
- * ⚠️ Turning this on means every one of those calls reaches JaiRA's gate — and under a NARROWING
- * profile the gate escalates a tool it cannot classify to the human rather than deciding
- * (`decideToolCall`: an agent's built-in carries no `readOnly` we know, and guessing either way is
- * worse than asking). So on a `read-only` state this produces one prompt per read, which for a run
- * that reads twenty files is twenty prompts. Making our layer answer those without a human needs the
- * gate to be told what these tools DO — see `CLAUDE_NATIVE_READ_TOOLS`, which is the list to classify
- * them from once there is a channel to pass it on.
+ * ⚠️ Turning this on means every one of those calls reaches JaiRA's gate, which is asked about a
+ * native by its STANDARD name (`withAgentToolset`) — so `Read` answers to the state's `read_file`
+ * entry, and a tool the toolset does not hold was removed before it could be asked about.
  */
 export function claudeAskSettings(tools: readonly string[]): Record<string, JsonValue> {
   return claudePermissionSettings({ ask: tools });
@@ -455,86 +444,11 @@ export function claudePermissionSettings(rules: {
   return { claudeCode: { settings: { permissions } } } as unknown as Record<string, JsonValue>;
 }
 
-/** What an agent should be handed, once the two axes of the tools menu are resolved. */
-export interface AgentToolPlan {
-  /**
-   * Tools to DECLARE, so ours are injected and the agent's counterpart is displaced.
-   *
-   * This is `environment.tools`. Declaring a tool is what makes `replacesNative` bite, which is why
-   * the implementation choice is expressed as membership of this list rather than as a flag the
-   * executor reads: `nativeTools` is fixed at registration and cannot vary per call, but WHICH TOOLS
-   * ARE DECLARED already does.
-   */
-  inject: string[];
-  /**
-   * Native names the agent keeps, forced to its permission callback so our gate still decides.
-   *
-   * The other half of "native means the implementation, not the access". Without these rules Claude
-   * Code's own policy auto-allows its read-only built-ins and never consults the callback at all.
-   */
-  askNatives: string[];
-  /** Native names for tools nobody granted — the agent must not have the capability. */
-  denyNatives: string[];
-}
-
-/**
- * Resolve the tools menu's two axes into what the agent is actually handed.
- *
- * Three states per tool, and the whole point is that they are three rather than the two the old
- * "default" row could express:
- *
- *  - **Not granted** — the agent must not have this capability, so its built-in is denied. This is
- *    the case that used to leak: an ungranted tool was merely undeclared, the built-in stayed, and
- *    a `read-only` state watched twenty ungoverned reads go by.
- *  - **Granted, `app`** — declare ours; `replacesNative` displaces the built-in.
- *  - **Granted, `native`** — declare nothing, leave the built-in, and add an ask-rule so the call
- *    reaches our gate. The mode beside it in the menu is what then decides.
- *
- * A fourth case sits outside the three: a tool marked `alwaysGranted` is injected whether the list
- * names it or not, because its absence is an omission rather than a decision. It still answers to the
- * gate — see {@link ToolSpec.alwaysGranted}.
- *
- * `app` is the default for a granted tool with no explicit choice, because DECLARING a tool has
- * always meant injecting ours and that is what every authored state already relies on. `native` is
- * the opt-out, and it is the one that needs saying.
- */
-export function planAgentTools(
-  /** A toolset, or the legacy pair it is folded from: the granted list and the composer's map. */
-  grant: readonly string[] | Toolset,
-  legacyImplementations: Readonly<Record<string, ToolImplementation>> = {},
-): AgentToolPlan {
-  const toolset: Toolset = isToolList(grant) ? toolsetOfLegacy(grant, undefined, legacyImplementations) : grant;
-  // Only TOOL entries reach an agent. A command subject or `script` is not a tool to hand over; it
-  // is a line of the map a shell request will be checked against once decision 0007 §4 is built.
-  const granted = offeredTools(toolset);
-  const implementations = toolImplementations(toolset);
-  const plan: AgentToolPlan = { inject: [], askNatives: [], denyNatives: [] };
-  for (const spec of TOOL_SPECS) {
-    const native = spec.natives?.claude;
-    // A tool the list does not get to leave out — see `ToolSpec.alwaysGranted`. It is folded in HERE,
-    // at the one function that turns a grant into what the agent is handed, so every caller of the
-    // plan gets it without a second list to remember.
-    if (spec.alwaysGranted !== true && !granted.includes(spec.name)) {
-      if (native !== undefined) plan.denyNatives.push(native);
-      continue;
-    }
-    // A tool we cannot serve has no `app` to choose, whatever the menu recorded.
-    const choice = spec.nativeOnly === true ? "native" : (implementations[spec.name] ?? "app");
-    if (choice === "native" && native !== undefined) plan.askNatives.push(native);
-    else plan.inject.push(spec.name);
-  }
-  return plan;
-}
-
-function isToolList(grant: readonly string[] | Toolset): grant is readonly string[] {
-  return Array.isArray(grant);
-}
-
 /**
  * Fold the always-granted tools into every prompt state of a bundle, in place.
  *
- * The chat path gets this through {@link planAgentTools}, which is the one function standing between
- * a grant and what an agent is handed. A RUN does not go through it: the engine resolves a state's
+ * The chat path gets this through `planAgentTools`, which is the one function standing between a
+ * grant and what an agent is handed. A RUN does not go through it: the engine resolves a state's
  * `environment.tools` against the registry itself, so a workflow authored before this tool existed
  * would keep drawing HTML into its answer forever. This is the run's equivalent, applied where the
  * bundle is already being walked for capabilities.
@@ -564,46 +478,16 @@ export function grantAlwaysGrantedTools(states: Record<string, unknown>): void {
 }
 
 /**
- * The vocabulary's profiles, as the tables upstream now takes.
+ * Which of the agent's built-ins each of our tools stands in for — upstream's `replacesNative`.
  *
- * Registered under the BUILT-IN names, which shadows upstream's own `read-only` / `plan` / `full` —
- * deliberately, and it is the whole point. Upstream's are predicates over `readOnly`, so they answer
- * for the tools we registered and say nothing about an agent's own built-ins: every such call is
- * `unknown`, and `unknown` escalates. Under `read-only` that meant either a human interrupted once
- * per read, or — where nothing routed the call to us — the read went by ungoverned. A table has an
- * opinion about every name, including through `other`, so there is nothing left to escalate for want
- * of one.
- *
- * The shapes line up because `ToolProfile` was designed against this seam: `tools`, `default` and
- * `other`, with the label and hint dropped — those are the menu's business, not the gate's.
+ * Read off the claude executor's DECLARATION rather than written out, so a native added there is
+ * displaced without anybody remembering a second list — `edit` displaces `Edit`, `MultiEdit` and
+ * `NotebookEdit`. Naming a built-in here puts it on `disallowedTools` whenever our counterpart is
+ * injected, which the agent checks BEFORE its allow-list — so the substitution is real rather than an
+ * offer the model declines.
  */
-export function profileRules(): Record<string, { tools: Record<string, PermissionMode>; default: PermissionMode; other: PermissionMode }> {
-  const out: Record<string, { tools: Record<string, PermissionMode>; default: PermissionMode; other: PermissionMode }> = {};
-  for (const profile of TOOL_PROFILES) {
-    out[profile.id] = {
-      tools: { ...profile.tools } as Record<string, PermissionMode>,
-      default: profile.default as PermissionMode,
-      other: profile.other as PermissionMode,
-    };
-  }
-  return out;
-}
-
-/**
- * Which of the agent's built-ins each of our tools stands in for — `replacesNative`.
- *
- * Derived from the vocabulary rather than written out, so a tool added to the table displaces the
- * right built-in without anybody remembering a second list. Naming a built-in here puts it on
- * `disallowedTools` whenever our counterpart is injected, which the agent checks BEFORE its
- * allow-list — so the substitution is real rather than an offer the model declines.
- */
-export function claudeReplacements(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const spec of TOOL_SPECS) {
-    const native = spec.natives?.claude;
-    if (native !== undefined) out[spec.name] = native;
-  }
-  return out;
+export function claudeReplacements(): Record<string, string[]> {
+  return replacementsOf(CLAUDE_TOOLS);
 }
 
 /**
@@ -638,7 +522,7 @@ export function scopeNarrowingFor(
       : scopes;
     // By LOGICAL name, whichever implementation called: a gate asked about the agent's own `Glob`
     // resolves the table written for `glob`. Without this the two spellings would be two policies.
-    const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (logicalOfNative(tool.name) ?? tool.name);
+    const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
 
     // A SHELL COMMAND is about more than one place, and the ordinary extractor cannot see them: its
     // paths are inside a string. See `commandSubjects` — the cwd it runs in plus every path it
@@ -791,27 +675,31 @@ function resolveAgainst(cwd: string, value: string): string {
  * blanket prompt — the trap that made a first live test read as "path rules do not work".
  *
  * Only tools with a native name and a path argument compile: a rule can only name what the agent
- * calls it, and can only scope what its arguments carry.
+ * calls it, and can only scope what its arguments carry. The native names are the claude executor's
+ * own declaration, and EVERY native of a standard tool gets the rule — a table that bounded `Edit`
+ * and said nothing about `MultiEdit` would be a sandbox with a door in it.
  */
 export function compileClaudeScopeRules(
   scopes: readonly Scope[],
-  options: { root?: string | undefined } = {},
+  options: { root?: string | undefined; declaration?: AgentToolDeclaration | undefined } = {},
 ): { allow: string[]; ask: string[]; deny: string[] } {
+  const declaration = options.declaration ?? CLAUDE_TOOLS;
   const out = { allow: [] as string[], ask: [] as string[], deny: [] as string[] };
   for (const scope of scopes) {
     if (scope.path === undefined || scope.path === "") continue;
     const glob = absolutize(scope.path, options.root);
     for (const spec of TOOL_SPECS) {
-      const native = spec.natives?.claude;
-      if (native === undefined || (spec.pathArgs ?? []).length === 0) continue;
+      if ((spec.pathArgs ?? []).length === 0) continue;
       const mode = scope.tools?.[spec.name] ?? scope.default;
       // `smart` inspects the call, so it cannot be a rule — it has to reach our callback to be
       // decided at all. Emitting it as `ask` would be a lie about who decides.
       if (mode === undefined || mode === "smart") continue;
-      const rule = `${native}(${glob})`;
-      if (mode === "allow") out.allow.push(rule);
-      else if (mode === "ask") out.ask.push(rule);
-      else out.deny.push(rule);
+      for (const native of nativesOfStandard(declaration, spec.name)) {
+        const rule = `${native}(${glob})`;
+        if (mode === "allow") out.allow.push(rule);
+        else if (mode === "ask") out.ask.push(rule);
+        else out.deny.push(rule);
+      }
     }
   }
   return out;

@@ -26,6 +26,7 @@ export * from "./policy";
 export * from "./approval";
 export * from "./questions";
 export * from "./agents";
+export * from "./agentTools";
 export * from "./tools";
 export * from "./sessionServices";
 // The agent's own on-disk session file, captured into the record at operation close — the lines

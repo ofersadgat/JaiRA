@@ -12,15 +12,16 @@
  *
  *  - the runtime registers implementations for these names;
  *  - the permission menu draws them, grouped by {@link ToolCategory};
- *  - a profile is a map over them ({@link ToolProfile});
- *  - the agent wiring translates between our name and the agent's own ({@link ToolSpec.natives}).
+ *  - a toolset is a map over them (`toolsets.ts`, decision 0007);
+ *  - each agent executor says which of ITS tools is which of these (`agentTools.ts`) — the table
+ *    holds no agent's names, and stays the one standard list.
  *
  * ## Categories are derived, never stored
  *
  * A category has no setting of its own. It SHOWS the setting of what is under it — every child the
  * same means the category reads as that, and anything else reads as `custom`. That keeps one map on
  * disk (`permissions.tools`) and keeps the menu from growing a precedence chain between a category, a
- * tool and a profile, which is three places for one answer to come from.
+ * tool and a preset, which is three places for one answer to come from.
  *
  * ## `other` is not `default`
  *
@@ -49,31 +50,13 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "mcp", label: "MCP", hint: "tools served by connected MCP servers" },
 ];
 
-/**
- * What an agent calls a tool of ours, per transport.
- *
- * The names are the agent's own and are what its permission rules, its allow-list and its deny-list
- * are all written against — so this map is what makes "use JaiRA's version of `read_file`" and "let
- * the agent use its own `Read`" expressible as the same decision about one tool.
- *
- * Absent for a transport ⇒ that agent has no built-in doing this job, so there is nothing to choose
- * between: the tool is ours or it does not exist.
- */
-export interface NativeNames {
-  claude?: string;
-  codex?: string;
-}
-
 export interface ToolSpec {
   /** The LOGICAL name — what a workflow authors, what a policy is written against. */
   name: string;
   label: string;
   category: ToolCategoryId;
-  /** Does not change the workspace or the world — what a narrowing profile gates on. */
-  readOnly: boolean;
   /** What granting it actually lets the model do, in one line, for the menu. */
   hint: string;
-  natives?: NativeNames;
   /**
    * Which of this tool's arguments name a PLACE — what a scope table is resolved against.
    *
@@ -120,69 +103,41 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     name: "read_file",
     label: "read",
     category: "files",
-    readOnly: true,
     hint: "read a file in the workspace",
     pathArgs: ["path"],
-    natives: { claude: "Read" },
   },
   {
     name: "glob",
     label: "glob",
     category: "files",
-    readOnly: true,
     hint: "list files matching a pattern",
     pathArgs: ["path"],
-    natives: { claude: "Glob" },
   },
   {
     name: "grep",
     label: "grep",
     category: "files",
-    readOnly: true,
     hint: "search file contents for a pattern",
     pathArgs: ["path"],
-    natives: { claude: "Grep" },
   },
   {
     name: "edit",
     label: "edit",
     category: "files",
-    readOnly: false,
     hint: "replace exact text in an existing file",
     pathArgs: ["path"],
-    natives: { claude: "Edit" },
   },
   {
     name: "write_file",
     label: "write",
     category: "files",
-    readOnly: false,
     hint: "create a file, or replace one whole",
     pathArgs: ["path"],
-    natives: { claude: "Write" },
   },
   {
     name: "show_artifact",
     label: "show",
     category: "files",
-    /*
-     * READ-ONLY, and it is the implementation that earns it rather than the intent.
-     *
-     * `readOnly` here means "nothing that was already there is different afterwards" — the property a
-     * narrowing profile exists to protect. Producing a new file under the task's own artifact
-     * directory does not violate that, any more than writing a cache entry does; overwriting
-     * `src/index.ts` would.
-     *
-     * So the tool is confined to that directory and cannot address anything else (`showDestination`
-     * in `fileTools.ts`, which refuses a `$RELPATH` that climbs out). Left on the configured
-     * destination it would inherit `$DEFAULT` — the bare workspace — and this classification would be
-     * a promise the code did not keep.
-     *
-     * What this buys: `plan` mode can draw. A profile whose whole purpose is "read and think before
-     * you change anything" is exactly when a mockup is worth having, and a tool that leaves the
-     * workspace as it found it belongs inside it.
-     */
-    readOnly: true,
     /*
      * ALWAYS GRANTED, and it is the confinement above that pays for it.
      *
@@ -196,34 +151,28 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     alwaysGranted: true,
     hint: "produce something to look at — a page, a drawing, a document",
     pathArgs: ["path"],
-    // No `natives`: the agent has no built-in doing this job in a delegated run, so there is nothing
-    // to displace and nothing to deny when the tool is not granted.
+    // No agent declares a native for it: there is no built-in doing this job in a delegated run, so
+    // there is nothing to displace and nothing to remove when the tool is not held.
   },
   {
     name: "bash",
     label: "bash",
     category: "execution",
-    readOnly: false,
     hint: "run shell commands, under the policy",
     pathArgs: ["cwd"],
-    natives: { claude: "Bash" },
   },
   {
     name: "web_fetch",
     label: "fetch",
     category: "web",
-    readOnly: true,
     hint: "fetch a URL and read what comes back",
     urlArgs: ["url"],
-    natives: { claude: "WebFetch" },
   },
   {
     name: "web_search",
     label: "search",
     category: "web",
-    readOnly: true,
     hint: "search the web",
-    natives: { claude: "WebSearch" },
   },
 ];
 
@@ -247,119 +196,13 @@ export function withAlwaysGranted(tools: readonly string[]): string[] {
   return [...tools, ...ALWAYS_GRANTED_TOOLS.filter((name) => !tools.includes(name))];
 }
 
-/**
- * The LOGICAL name an agent's built-in stands for, when one of ours does that job.
- *
- * The reverse of {@link ToolSpec.natives}, and the direction the permission gate actually asks in: a
- * callback arrives naming `Glob`, and the mode that governs it was authored against `glob`.
- */
-export function logicalOfNative(native: string): string | undefined {
-  for (const spec of TOOL_SPECS) {
-    if (spec.natives?.claude === native || spec.natives?.codex === native) return spec.name;
-  }
-  return undefined;
-}
-
-/** Every native name for a transport — what a deny-list or an ask-list is written from. */
-export function nativeNamesFor(transport: keyof NativeNames, tools?: readonly string[]): string[] {
-  const wanted = tools === undefined ? TOOL_SPECS : TOOL_SPECS.filter((spec) => tools.includes(spec.name));
-  return wanted.map((spec) => spec.natives?.[transport]).filter((n): n is string => n !== undefined);
-}
-
 /** The tools in one category, in table order. */
 export function toolsInCategory(category: ToolCategoryId): ToolSpec[] {
   return TOOL_SPECS.filter((spec) => spec.category === category);
 }
 
-// --- profiles ----------------------------------------------------------------
-
-/**
- * A profile, as a MAP rather than a predicate.
- *
- * It used to be a function over `readOnly`, which answered for the tools we had registered and had
- * nothing to say about the ones we had not — the exact gap that let an agent's built-ins run
- * ungoverned. A map says something about every tool by name, and `other` says something about every
- * tool there is no name for, which between them leaves nothing undecided.
- *
- * `default` and `other` are both here and are not the same (see the module header): `default` is the
- * fallback for a KNOWN tool with no entry, `other` is the answer for a name that is not in the table.
- */
-export interface ToolProfile {
-  id: string;
-  label: string;
-  hint: string;
-  /** Per-tool, by logical name. A tool absent here takes {@link ToolProfile.default}. */
-  tools: Record<string, ToolMode>;
-  /** What a known tool with no entry resolves to. */
-  default: ToolMode;
-  /** What a tool NOT in {@link TOOL_SPECS} resolves to — an agent built-in, an MCP tool, anything. */
-  other: ToolMode;
-}
-
 /** The four modes, restated here so this module stands alone for a renderer that only draws them. */
 export type ToolMode = "ask" | "smart" | "allow" | "deny";
-
-/**
- * A profile whose per-tool entries are GENERATED from `readOnly`.
- *
- * The three built-in profiles are built this way rather than hand-authored, because a hand-authored
- * table silently loses coverage the day somebody adds a tool and forgets to update four maps — and
- * the failure is invisible: the new tool simply falls to `default` under every profile, which is
- * precisely how you get a writer treated as a reader.
- */
-function profileOf(id: string, label: string, hint: string, modeFor: (spec: ToolSpec) => ToolMode, rest: { default: ToolMode; other: ToolMode }): ToolProfile {
-  return {
-    id,
-    label,
-    hint,
-    // `alwaysGranted` short-circuits the profile as well as the list, and it has to: being handed a
-    // tool that then asks every time is the same interruption wearing a different hat, and under
-    // `read-only` and `full` alike this spec's generated mode would be `ask`. `allow` here is not the
-    // last word — the gate composes profile and baseline with the STRICTEST verdict, so the size rule
-    // registered against `CONTENT_TOOLS` still resolves to `smart` and still asks before a huge one.
-    tools: Object.fromEntries(TOOL_SPECS.map((spec) => [spec.name, spec.alwaysGranted === true ? "allow" : modeFor(spec)])),
-    ...rest,
-  };
-}
-
-/**
- * The built-in profiles.
- *
- * `other` is the entry that matters and the one that did not exist. Under `read-only` it is `ask`:
- * an unmodelled tool might read and might write, and the honest thing is to put the one question we
- * cannot answer to somebody who can. Under `full` it is `ask` as well rather than `allow` — `full`
- * means every tool is in SCOPE, not that every tool is waved through, and a name nobody has ever
- * seen is not a thing to wave through on the strength of the profile being permissive.
- */
-export const TOOL_PROFILES: readonly ToolProfile[] = [
-  profileOf("read-only", "Read only", "nothing may change the workspace or the world", (spec) => (spec.readOnly ? "ask" : "deny"), {
-    default: "deny",
-    other: "ask",
-  }),
-  profileOf("plan", "Plan", "read and think; changes wait for a plan you approve", (spec) => (spec.readOnly ? "allow" : "deny"), {
-    default: "deny",
-    other: "ask",
-  }),
-  profileOf("full", "Full", "every tool is in scope; each still answers to its own mode", () => "ask", {
-    default: "ask",
-    other: "ask",
-  }),
-];
-
-export const TOOL_PROFILE_BY_ID: ReadonlyMap<string, ToolProfile> = new Map(TOOL_PROFILES.map((p) => [p.id, p]));
-
-/**
- * The mode a profile gives one tool — the whole resolution, in one place.
- *
- * Order: the profile's explicit entry, then `default` for a tool we know, then `other` for one we do
- * not. A caller's own authored mode is layered ON TOP of this by the permission ledger; this answers
- * only what the profile says, which is the floor.
- */
-export function profileModeOf(profile: ToolProfile, tool: string): ToolMode {
-  const own = Object.hasOwn(profile.tools, tool) ? profile.tools[tool] : undefined;
-  if (own !== undefined) return own;
-  return TOOL_SPEC_BY_NAME.has(tool) ? profile.default : profile.other;
-}
 
 /**
  * What a category reads as, given the modes under it — see the module header on derivation.

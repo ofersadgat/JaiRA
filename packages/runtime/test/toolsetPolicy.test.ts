@@ -5,10 +5,11 @@
 import { describe, expect, it } from "vitest";
 import type { Approver } from "@declarative-ai/permissions";
 import type { LoadedState } from "@declarative-ai/hw";
-import { lowerToolset, parseToolset, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
+import { lowerToolset, parseToolset, TOOLSET_MARKERS, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, stateWithChatSettings } from "../src/chatOperation";
 import { commandDecisionOf, compilePolicy } from "../src/policy";
-import { gateTools, planAgentTools, registerAllTools } from "../src/tools";
+import { planAgentTools } from "../src/agentTools";
+import { gateTools, registerAllTools } from "../src/tools";
 import { newRegistry } from "../src/wiring";
 
 const LEGACY = {
@@ -83,10 +84,12 @@ describe("compilePolicy", () => {
 });
 
 describe("planAgentTools", () => {
-  it("plans a toolset exactly as it plans the list and the implementations it was folded from", () => {
+  it("serves and keeps the same tools from a toolset as from the list it was folded from — and only the MAP removes the rest", () => {
     const fromLegacy = planAgentTools(["read_file", "glob", "bash"], { glob: "native" });
     const fromMap = planAgentTools(parseToolset({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, bash: "smart" }).toolset);
-    expect(fromMap).toEqual(fromLegacy);
+    expect({ ...fromMap, denyNatives: [] }).toEqual(fromLegacy);
+    // The legacy reading leaves the agent what the list did not mention, exactly as it always did.
+    expect(fromLegacy.denyNatives).toEqual([]);
     expect(fromMap.inject).toEqual(["read_file", "glob", "show_artifact", "bash"].filter((n) => n !== "glob"));
     expect(fromMap.askNatives).toEqual(["Glob"]);
     expect(fromMap.denyNatives).toEqual(expect.arrayContaining(["Write", "Edit", "WebFetch"]));
@@ -126,13 +129,13 @@ describe("gateTools", () => {
         write: (await gate.check({ name: "write_file" }, { path: "a.ts" })).allow,
         // A name nothing here registered answers to `other`.
         unknown: (await gate.check({ name: "SomeMcpTool" }, {})).allow,
-        // The `full` profile table asks about everything it does not deny (tool-policy.md), so an
-        // `allow` reaches the approver; a `deny` — an entry's, or `other`'s — never does.
+        // An `allow` is an allow: there is no profile table left to ask about what the map allowed
+        // (decision 0007 §1). A `deny` — an entry's, or `other`'s — never reaches the approver either.
         asked: [...asked],
       });
     }
     expect(outcomes[0]).toEqual(outcomes[1]);
-    expect(outcomes[0]).toEqual({ read: false, write: false, unknown: false, asked: ["read_file"] });
+    expect(outcomes[0]).toEqual({ read: true, write: false, unknown: false, asked: [] });
   });
 
   it("still honours the legacy `default`, as a listed tool's mode and as `other`", async () => {
@@ -141,9 +144,19 @@ describe("gateTools", () => {
     expect(await gate.check({ name: "SomeMcpTool" }, {})).toMatchObject({ allow: false });
   });
 
-  it("still seeds the legacy profile", () => {
-    expect(gated({ authored: { profile: "read-only" } }).gate.profile).toBe("read-only");
+  it("seeds NO profile: an old `read-only` is the denies it meant, decided by the map", async () => {
+    asked.length = 0;
+    const { gate, tools } = gated({ authored: { profile: "read-only", tools: { read_file: "allow", write_file: "allow" } } });
+    expect(gate.profile).toBe("full");
     expect(gated({ toolset: mapToolset }).gate.profile).toBe("full");
+    // The writer the block ALLOWED is refused, as the profile refused it — by the gate a delegated
+    // agent asks, and by the wrapped tool a composed runtime runs.
+    expect(await gate.check({ name: "write_file" }, { path: "a.ts" })).toMatchObject({ allow: false });
+    expect(await tools["write_file"]!.run({ path: "a.ts", content: "x" }, {})).toMatchObject({ denied: true });
+    expect((await gate.check({ name: "read_file" }, { path: "a.ts" })).allow).toBe(true);
+    // And a name nothing registered answers to the `other` the profile reads as.
+    expect(await gate.check({ name: "Task" }, {})).toMatchObject({ allow: false });
+    expect(asked).toEqual([]);
   });
 });
 
@@ -181,7 +194,7 @@ describe("a conversation turn", () => {
     const written = stateWithChatSettings(host({}), { toolset: { read_file: "allow", "git status": "allow", other: "deny" } });
     expect(written?.environment).toEqual({
       tools: ["read_file"],
-      permissions: { tools: { read_file: "allow" }, other: "deny", subjects: { "git status": "allow" } },
+      permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny", subjects: { "git status": "allow" } },
     });
   });
 });
