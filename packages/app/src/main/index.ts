@@ -19,6 +19,8 @@ import {
   type IpcChannel,
   type PushMessage,
   type SaveFileRequest,
+  type InputSourcesRequest,
+  type TaskAdoptRequest,
   type TaskMoveRequest,
 } from "@jaira/shared";
 import { stackDetail } from "./diagnostics";
@@ -427,6 +429,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "userEvent:pending": (() => service.pendingUserEvents()) as Handler,
   "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
   "task:move": ((request: TaskMoveRequest) => service.moveTask(request)) as Handler,
+  "task:adopt": ((request: TaskAdoptRequest) => service.adoptTask(request)) as Handler,
+  "task:inputSources": ((request: InputSourcesRequest) => service.inputSources(request)) as Handler,
   "remote:status": ((request: { taskId: string; project?: string }) => service.remoteStatus(request.taskId, request.project)) as Handler,
   "remote:check": ((request: { taskId: string; project?: string }) => service.checkRemotes(request.taskId, request.project)) as Handler,
   "remote:reply": ((request: { taskId: string; key: string; thread: string; body: string; resolve?: boolean; project?: string }) => service.replyRemote(request)) as Handler,

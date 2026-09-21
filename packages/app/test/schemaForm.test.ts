@@ -199,4 +199,36 @@ describe("a form somebody fills in", () => {
     expect(html).not.toContain("cfg-set");
     expect(html).toContain("not set here — inherits workflows");
   });
+
+  it("marks how a recorded value was settled, after its type — and says nothing where nothing was recorded", () => {
+    const schema: Schema = { type: "object", properties: { feature: { type: "string" }, patterns: { type: "string" }, units: { type: "string" }, old: { type: "string" } } };
+    const settled = { feature: { via: "bound" as const, note: "bound — from Product · brief" }, patterns: { via: "inferred" as const, confidence: 0.78 }, units: { via: "asked" as const } };
+    const html = draw(schema, { feature: "f", patterns: "p", units: "u", old: "o" }, { ...keys, provenance: (path) => settled[path as keyof typeof settled] });
+    expect(html).toContain('<span class="prov prov-bound" title="bound — from Product · brief">bound</span>');
+    expect(html).toContain('<span class="prov prov-inferred">inferred</span><span class="conf">0.78</span>');
+    expect(html).toContain('<span class="prov prov-asked">asked</span>');
+    expect(html.match(/class="prov /g)).toHaveLength(3);
+  });
+
+  it("offers a member somewhere else its value can come from, and draws the pick instead of a box", () => {
+    const schema: Schema = { type: "object", properties: { brief: { type: "string" }, tone: { type: "string" } }, required: ["brief", "tone"] };
+    const sources = (picked: string | undefined) => ({
+      label: "from a task…",
+      optionsFor: (path: string) => (path === "brief" ? [{ id: "t-1#brief", label: "Product · brief", note: "the brief" }] : []),
+      picked: (path: string) => (path === "brief" ? picked : undefined),
+      pick: () => undefined,
+    });
+    // Offered and not taken: the chip, and the member's own box still.
+    const typed = draw(schema, { brief: "typed", tone: "plain" }, { ...keys, sources: sources(undefined) });
+    expect(typed.match(/from a task…/g)).toHaveLength(1);
+    expect(typed).toContain('value="typed"');
+    // Taken: the box is gone, the picker and what the source holds are in its place.
+    const taken = draw(schema, { tone: "plain" }, { ...keys, sources: sources("t-1#brief") });
+    expect(taken).toContain('<option value="t-1#brief" selected="">Product · brief</option>');
+    expect(taken).toContain('<div class="sf-absent">the brief</div>');
+    expect(taken).toContain('class="cfg-chip on"');
+    expect(taken).toContain('value="plain"');
+    // A reading offers nothing.
+    expect(draw(schema, { brief: "b", tone: "t" }, { ...keys, reading: true, sources: sources(undefined) })).not.toContain("from a task…");
+  });
 });

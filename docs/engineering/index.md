@@ -14,6 +14,7 @@ Template: [_templates/engineering-unit.md](../_templates/engineering-unit.md).
 
 | Unit | Layer | Responsibility | Implements | Status |
 | --- | --- | --- | --- | --- |
+| [adoption](units/adoption.md) | service | Takes a task that ran alone up as a child of another by mirror rows: schema fit, holes, inputs inferred backwards, the split shape, the workspace. | large-work-splits-into-independent-pieces, pick-up-where-it-left-off, nested-under-what-caused-it, refuse-with-the-reason-and-the-fix | shipped |
 | [address-trail](units/address-trail.md) | ui | The run path the address bar shows and navigates, pruned against the task's instance tree. | address-bar, run-view, drill-in-and-back-out, nested-under-what-caused-it, keep-track-of-everything | shipped |
 | [agent-executors](units/agent-executors.md) | core | Registers, lists and probes the coding-agent runtimes, and refuses one that cannot enforce policy. | bring-your-own-models-and-agents, work-inside-wsl, risky-actions-wait-for-approval, settings-executors, settings-providers, checked-status-with-the-fix | shipped |
 | [app-log](units/app-log.md) | service | Policy-gated diagnostics from every producer, pushed live, mirrored to daily files and read back newest first. | find-out-why-the-app-misbehaves, failures-explain-themselves, logs-view, filter-in-place | shipped |

@@ -23,6 +23,7 @@ import type {
   OperationRecordView,
   SessionRef,
   SessionView,
+  InputSourcesResponse,
   AvailabilitySnapshot,
   ExecutorInfo,
   JairaOperationNode,
@@ -109,9 +110,11 @@ import {
   runHistoryOf,
   runTargetOf,
   runTitle,
+  sourceSlotsOf,
   workflowLayerOf,
   workflowMimeOf,
   type RunField,
+  type RunSources,
 } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
@@ -360,6 +363,13 @@ export interface AppState {
    * selects is re-read on selection, which is the moment the answer is about to be shown.
    */
   workflowForms: Record<string, RunField[] | null>;
+
+  /**
+   * "From a task…" (decision 0005 §2): for each workflow asked about, the earlier tasks' outputs that
+   * fit each of its input slots — the main process's answer, since fitting is the run's own validator's
+   * to say. Re-asked whenever the workflow is picked, because the tasks are what changes.
+   */
+  inputSources: Record<string, InputSourcesResponse>;
 
   /**
    * The workflow the Tasks view has SELECTED — a column, not a card.
@@ -838,6 +848,7 @@ const EMPTY: AppState = {
   runValues: {},
   workflows: [],
   workflowForms: {},
+  inputSources: {},
   taskWorkflow: null,
   taskWorkflowProject: null,
   taskWorkflowRun: null,
@@ -1249,12 +1260,19 @@ export function useApp() {
             }
           }
         }
-        patch({
-          workflowForms: {
-            ...ref.current.workflowForms,
-            [stateId]: runFieldsOf(source.text, workflowMimeOf(source.file)),
-          },
-        });
+        const fields = runFieldsOf(source.text, workflowMimeOf(source.file));
+        patch({ workflowForms: { ...ref.current.workflowForms, [stateId]: fields } });
+        // What earlier tasks produced that fits these slots. Its own catch: a form with no sources
+        // on offer is still a form, and a failed ask must not turn the fields above into `null`.
+        const slots = sourceSlotsOf(fields ?? []);
+        if (slots.length > 0) {
+          try {
+            const offered = await invoke("task:inputSources", { slots });
+            patch({ inputSources: { ...ref.current.inputSources, [stateId]: offered } });
+          } catch {
+            /* nothing offered */
+          }
+        }
       } catch {
         // Unreadable is unparseable as far as a form is concerned: there are no boxes either way, and
         // the one thing the caller must not do is offer a Create button over a state it cannot read.
@@ -2842,13 +2860,16 @@ export function useApp() {
        * In the FOCUSED project, which is the only project the button is offered in (see `App.tsx`)
        * and the one whose board the new card appears on.
        */
-      createTask: async (workflow: string, inputs: Record<string, JsonValue>) => {
+      createTask: async (workflow: string, inputs: Record<string, JsonValue>, sources: RunSources = {}) => {
         patch({ busy: true, error: null });
         try {
           const summary = await invoke("task:create", {
             title: runTitle(workflow, runHistoryOf(workflow, ref.current.tasks, null).startedHere.length),
             workflow,
             ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
+            // Slots taken FROM A TASK (decision 0005 §2): read by the main process, now or when the
+            // source completes — the new task holds for it until then.
+            ...(Object.keys(sources).length > 0 ? { sources } : {}),
           });
           // Selected before anything else lands, for the reason `runState` does it: the panels that
           // follow a task have to be pointed at it to show its beginning rather than its middle.

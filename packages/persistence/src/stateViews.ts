@@ -645,7 +645,8 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
   const rootOf = (summary: (typeof summaries)[number]): string => {
     let current = summary;
     const seen = new Set<string>([current.taskId]);
-    while (current.origin?.kind === "task") {
+    // An ADOPTED task (decision 0005 §2) files as a mount's task does: under the task that took it up.
+    while (current.origin?.kind === "task" || current.origin?.kind === "adopt") {
       const parent = byTaskId.get(current.origin.taskId);
       if (parent === undefined || seen.has(parent.taskId)) break;
       seen.add(parent.taskId);
@@ -836,7 +837,9 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
     // item of one feature — and shows on the board of the state that mounted it, not here. A task
     // at this level is a feature; a SPLIT copy is one, and files under its parent's flow like any
     // other subsidiary.
-    if (summary.origin?.kind === "task") continue;
+    // An ADOPTED task (decision 0005 §2) is the same: it stands for a child of the task that adopted
+    // it, and files in that child's column on the parent's board.
+    if (summary.origin?.kind === "task" || summary.origin?.kind === "adopt") continue;
     // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
     // active path, and `taskRun` without a shape still yields one.
     const bundle = bundleFor(project, summary.workflow, summary.snapshotHash);

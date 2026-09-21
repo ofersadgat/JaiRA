@@ -59,6 +59,17 @@
  * loads live. And a directed transition whose target never entered is an entry the instance still
  * OWES (`LoadedInstance.directed`): the run died between the two rows, and the load makes the entry
  * without journaling the transition again.
+ *
+ * ## An adopted child is history whose outputs are ON its row (decision 0005 §2)
+ *
+ * An adoption (`adopt.ts`) mirrors a task that ran alone into this journal: an `instance.entered`
+ * marked `adopted`, whose instance id is that task's, and an `instance.terminated` carrying the
+ * outputs the task recorded. Such a node has no operation and no children here — they are in the
+ * adopted task's journal — so there is nothing for the engine to recompute its outputs FROM. It is
+ * emitted as history under a STAND-IN state id (`adoptedStandInId`), its recorded outputs as the
+ * stand-in operation's value; `withAdoptedStandIns` puts the matching state into the bundle the run
+ * is handed. A mirror still OPEN — the adopted task has not completed — blocks the load: continued
+ * live, the engine would run the child a second time, inside the parent.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { hashOperation, scopedOperationId, type Failure, type ResolvedValue } from "@declarative-ai/exec";
@@ -69,6 +80,7 @@ import { SqliteEventLog } from "./eventLog";
 import { hydrate } from "./blobStore";
 import type { JairaDb } from "./db";
 import type { Project } from "./project";
+import { adoptedStandInId } from "./adopt";
 
 /** A live leaf of the loaded machine: somewhere the continuing run picks up spending again. */
 export interface LoadFrontierEntry {
@@ -121,6 +133,8 @@ interface FoldNode {
   childKey?: string;
   /** The element of a fanned-out mount this instance is — see `InstanceNode.element`. */
   element?: number;
+  /** A mirrored ADOPTION — see the header. The outputs arrive with its end. */
+  adopted?: { outputs?: Record<string, JsonValue> };
   inputs: Record<string, JsonValue>;
   /** In FIRST-entry order — a re-stated entry (older journals) merges rather than appending. */
   children: FoldNode[];
@@ -351,6 +365,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           ...(event.parentInstanceId !== undefined ? { parentId: event.parentInstanceId } : {}),
           ...(event.childKey !== undefined ? { childKey: event.childKey } : {}),
           ...(event.element !== undefined ? { element: event.element } : {}),
+          ...((event as { adopted?: boolean }).adopted === true ? { adopted: {} } : {}),
           inputs: (event.inputs ?? {}) as Record<string, JsonValue>,
           children: [],
           index: 0,
@@ -383,6 +398,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
             ...(event.failure !== undefined ? { failure: event.failure } : {}),
             at,
           };
+          const outputs = (event as { outputs?: Record<string, JsonValue> }).outputs;
+          if (node.adopted !== undefined && outputs !== undefined) node.adopted = { outputs };
         }
         break;
       }
@@ -540,11 +557,30 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     };
   };
 
+  /** Adopted tasks whose mirror is still open — see the header. */
+  const awaited: string[] = [];
+
   const emit = (node: FoldNode, live: boolean, occurrence: number, prefix: InstanceAddress): LoadedInstance => {
     const address: InstanceAddress =
       node.childKey === undefined
         ? prefix
         : [...prefix, { childKey: node.childKey, occurrence, ...(node.element !== undefined ? { element: node.element } : {}) }];
+    if (node.adopted !== undefined) {
+      // History, read off the row: never live, never revived, and nothing beneath it to walk.
+      const ended = node.terminated?.outcome === "success" && node.adopted.outputs !== undefined;
+      if (!ended) awaited.push(node.id);
+      else loadedOps += 1;
+      return {
+        id: node.id,
+        stateId: adoptedStandInId(node.stateId),
+        ...(node.childKey !== undefined ? { childKey: node.childKey } : {}),
+        occurrence,
+        inputs: node.inputs as Record<string, ResolvedValue>,
+        live: false,
+        outcome: "success",
+        operation: { value: (node.adopted.outputs ?? {}) as ResolvedValue },
+      };
+    }
     const children: LoadedInstance[] = [];
     const unanswered: Array<{ key: string; at: number }> = [];
     // Occurrence counts entries under one key IN THIS PARENT, superseded included — a loop's second
@@ -563,6 +599,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       // interruption — wherever its row landed relative to the transition that decided it.
       const childLive =
         live &&
+        child.adopted === undefined &&
         (child.terminated === undefined ||
           (child.terminated.outcome !== "success" && child.terminated.outcome !== "skipped" && child.terminated.at > node.advancedAt));
       if (childLive) anyChildLive = true;
@@ -628,6 +665,10 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
 
   const rootLive = root.terminated === undefined || root.terminated.outcome !== "success";
   const loaded = emit(root, rootLive, 0, []);
+  if (awaited.length > 0) {
+    const names = awaited.map((id) => `'${project.tasks.tryRead(id)?.title ?? id}'`).join(", ");
+    return none(`it adopted ${names}, which ${awaited.length === 1 ? "has" : "have"} not completed — it continues when ${awaited.length === 1 ? "that does" : "they do"}`);
+  }
   return {
     taskId,
     loaded,

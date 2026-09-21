@@ -2,14 +2,14 @@
 id: engineering/units/fan-out-host
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/large-work-splits-into-independent-pieces, ux/patterns/nested-under-what-caused-it]
 layer: service
 owns_contracts: [engineering/contracts/fan-out-host-answers]
 requires: [engineering/units/event-journal, engineering/units/task-lifecycle, engineering/units/rewind-and-fork, engineering/units/task-worktrees, engineering/units/app-log]
 implemented_by: [packages/app/src/main/fanOut.ts]
 verified_by: [packages/app/test/eachHosted.test.ts]
-siblings: [engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/run-load]
+siblings: [engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/run-load, engineering/units/adoption]
 ---
 
 # Fan-out host
@@ -31,6 +31,7 @@ It deliberately does not own:
 - Starting, waiting for and cancelling tasks, and starting dependents when a task completes. `startMadeTask`, `waitForTask`, `cancelTaskIn` and `releaseDependents` belong to [task-lifecycle](task-lifecycle.md) and reach the host as `FanOutDeps` callbacks.
 - A copy's worktree and the branch it is based on: [task-worktrees](task-worktrees.md).
 - The line at the mount, lanes and filing on the board: [board-projection](board-projection.md).
+- Mirror rows written AFTER the fact, for a task that ran alone and was never an element: [adoption](adoption.md). It reuses this unit's rows and none of its code. An adoption's rows sit under a plain mount, which has no host to be asked about on resume, so they carry `adopted: true` and the task's `outputs`, and the load answers for them through a stand-in state. The host is never asked about an adopted child, and refuses nothing about one: `existingOf` and `recordedRuns` match on `origin.kind` and on `fanout.made`, and an adoption has neither.
 
 ## The host is main-process service code behind the engine's fan-out seam, and only the app wires it
 
@@ -45,7 +46,7 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | `fanout.made` row `{instanceId, stateId, childKey, occurrence, kind, runs: [{element, id, runId, title}]}` | written once per mount occurrence, before anything is made; read back by `recordedRuns` | the parent's journal, copied into every split copy's journal | `conversation.ts` draws the line at the mount from it |
 | Made task meta `origin`, `split`, `dependsOn`, `branch`, `parentTaskId`, `title` | written through `createTask` or `copyTaskPrefix`; the task that split rewrites its own `split`, `title` and `dependsOn` once | `.jaira/system/tasks/<taskId>.json` | `existingOf` finds a made task by `origin`; `holdingOf`, `releaseDependents`, the start refusal and board filing read the rest |
-| Mirrored `instance.entered` and `instance.terminated` whose instance id is the task id, for `"task"` mounts only | appended to the parent's journal | the parent's journal | the engine hands them back as `request.loaded` when the parent resumes |
+| Mirrored `instance.entered` and `instance.terminated` whose instance id is the task id, for `"task"` mounts only | appended to the parent's journal | the parent's journal | the engine hands them back as `request.loaded` when the parent resumes; [adoption](adoption.md) writes the same two rows, marked `adopted`, under a plain mount |
 | A copy's `instance.entered` at the mount, as element 0 with the element's inputs | appended to each split copy's journal after the copy is cut | the copy's journal | the copy's resume loads it and dispatches from the mount |
 
 ## The invariants keep one batch per mount and never start a task that still holds

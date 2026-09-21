@@ -39,6 +39,8 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `description` | string | no | free text |
 | `labels` | string array | no | free labels |
 | `inputs` | `Record<string, JsonValue>` | no | the root inputs, fixed for the task's life |
+| `sources` | `Record<string, {taskId, output}>` | no | inputs taken from a task, per input name; read at creation when that task has completed, else the new task holds for it and the value is read at its start. Recorded `bound` with `from` |
+| `provenance` | `Record<string, InputProvenance>` | no | how the typed `inputs` were settled; absent reads `{via: "asked"}` for each |
 | `branch` | string | no | branch binding; refused on the shared root |
 | `project` | `ProjectRef` | no | where the task is recorded, and whose config governs its runs |
 
@@ -96,6 +98,65 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `held` | the task runs in this process and takes the move when its running state ends |
 | `reopened` | the task was not running and was started again by load with the move waiting; a `completed` task is reopened under its own id, and any other status steps past the state it stopped in |
 
+### `task:adopt` takes a task up as a child, and answers the plan or the refusal
+
+`task:adopt` takes `TaskAdoptRequest` and answers `TaskAdoptResult` ([decision 0005](../decisions/0005-connect.md) §2, [adoption](../units/adoption.md)).
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `taskId` | string | yes | the task to adopt |
+| `childKey` | string | no | which child of the parent's root it stands for; needed only where the root mounts the task's state more than once |
+| `workflow` | string | unless `parentTaskId` | the root state id of the NEW task that adopts |
+| `parentTaskId` | string | no | adopt INTO this task instead of making one; its workflow is what it runs under |
+| `also` | `{taskId, childKey?}` array | no | more tasks the same parent takes up |
+| `inputs` | `Record<string, JsonValue>` | no | what the form supplied for the parent's inputs the adopted tasks do not determine; never overrides an inferred one |
+| `suppliedVia` | `"asked"` or `"inferred"` | no | how `inputs` were settled; absent reads `asked` |
+| `title` | string | no | the new task's title; absent takes the adopted task's |
+| `dryRun` | boolean | no | answer what would happen and change nothing |
+| `start` | boolean | no | `false` leaves the parent standing past the child, not started |
+| `interactions`, `fake` | as `task:start` | no | script the parent's run |
+| `project` | `ProjectRef` | no | as above |
+
+`TaskAdoptResult` is `{ok: true, dryRun, plan, taskId?, started?}` or `{ok: false, dryRun, refusal}`. `taskId` is the parent and is absent from a dry run. `started` is false when `start` was false or the parent holds.
+
+| `AdoptPlan` field | Type | Meaning |
+| --- | --- | --- |
+| `workflow`, `title` | string | the parent's workflow and title |
+| `parentTaskId` | string, optional | the existing task adopted into |
+| `adopted` | `{taskId, title, childKey, stateId, shape, index?, pending, stateChanged}` array | each child taken up, in sequence order; `shape` is `child` or `split`, `index` the split element, `pending` a task that has not completed |
+| `cursor`, `next` | string, string optional | the child the parent stands past, and the one that runs next |
+| `inputs`, `provenance` | objects | the parent's inputs as recorded, and how each was settled |
+| `asks` | `{name, required, schema?, description?}` array | declared inputs nothing determined |
+| `branch` | string, optional | the branch the parent takes up |
+| `waitsFor` | string array | tasks the parent holds for |
+
+| `refusal.code` | When |
+| --- | --- |
+| `unknown-task`, `unknown-workflow` | the task, the parent or the workflow does not exist or does not load |
+| `not-mounted`, `ambiguous-child` | no child of the root mounts the task's state, or more than one does and `childKey` does not say which |
+| `unsupported-mount` | the child fans out inline or `each: "task"` |
+| `already-adopted` | the task already has an `origin` |
+| `parent-state` | `parentTaskId` names a task that is running or finished, has entered that child, or stands past it |
+| `schema-misfit` | a recorded output does not fit the mounted state's current slot; `path` is `outputs.<name><path>` |
+| `hole` | a child before the cursor is neither adopted nor unread; `reference` is `<where> → children.<key>` |
+| `split-element` | the split's list is not a parent input or an adopted sibling's output, or the element is not in it |
+| `inputs-conflict` | two children, or the child and the existing parent, disagree on an input bound by a plain path |
+| `inputs-missing` | a real adoption with a required `ask` left; never answered by a dry run |
+| `workspace` | adopted tasks on different branches, or an existing parent standing in another tree |
+
+### `task:inputSources` answers the outputs that fit a slot
+
+`task:inputSources` takes `{slots: [{key, schema}], project?}` and answers `Record<key, InputSourceOption[]>`, newest task first and at most 20 per slot.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `taskId`, `title`, `status`, `workflow` | strings | the source task |
+| `output` | string | the output's name on its root state |
+| `preview` | string, optional | the value shortened to 80 characters; absent while `pending` |
+| `pending` | boolean | the task has not completed, so a task created from it holds |
+
+A completed task's output is offered when its value validates against the slot's schema with the run's validator; an artifact is offered as its content. A `queued`, `running`, `stopping` or `interrupted` task's declared output is offered when its schema equals the slot's once `description`, `title` and `default` are set aside, or the slot takes anything.
+
 ### Stopping and deleting take only the task
 
 `task:cancel` and `task:delete` take `{taskId: string; project?}` and answer `{taskId: string}`. A cancel of a run in this process sets `stopping` and answers; `canceled` is written when the run settles.
@@ -148,6 +209,9 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `task:move` to a state that is not a child of the instance named, or naming an instance the task does not have | `cannot move task '<id>' to '<state>': '<state>' is not a declared child of '<stateId>'` for a running task, `… it is not a state of '<stateId>'` or `… it has no instance '<instanceId>'` for one that is not; nothing is started | pick a state of that level |
 | `task:move` of a task another process is running, or one that never ran | `task '<id>' is <status> in another process — move it there`, or `task '<id>' has never run, so it stands nowhere to be moved from — start it instead` | move it there, or start it |
 | `task:move` of a history that cannot load | `task '<id>' cannot be moved: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Reopening it would repeat them.` | rerun it |
+| `task:create` names a source task that does not exist, or one that completed without that output | `input '<name>' is taken from task '<id>', which does not exist`, or `… from '<title>', which completed without producing '<output>'` | pick another source |
+| A start of a task whose source completed without the output it owed | `task '<id>' takes '<name>' from '<title>', which has not produced '<output>'` | create the task again with another source |
+| A resume of a task that adopted one whose outputs no longer fit, or one that has not completed | `task '<id>' cannot continue: what '<title>' produced does not fit the child it was adopted as — <path> <reason>`, or `… cannot be resumed: it adopted '<title>', which has not completed — it continues when that does` | rewind past the mirror row, or wait |
 | A rewind, fork or delete of a running task | `task '<id>' is running — stop it before rewinding it`, `… forking it`, or `… cancel it before deleting it` | stop it first |
 | A cut the journal cannot take | `has no journal event <seq>`, `nothing in task '<id>' comes after event <seq>`, `… comes before event <seq>`, `has never run, so there is nothing to fork`, `has history in per-run journal files, which a cut cannot address`, or `the journal file holds N events and the table M — refusing to cut a journal that disagrees with its file` | refresh the view, rerun, or reopen the project, as the message says |
 | A chat fork whose copy has no instance that spoke | `the fork of '<id>' holds no conversation to continue`, after the copy exists | delete the copy |
@@ -171,6 +235,8 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 - `task:cancel` of a finished task answers `{taskId}` and changes nothing, where `jaira task cancel` refuses.
 - `functions:pending` ignores `project`: the list is keyed by task id alone, set when a `task:start` or `task:rerun` start refuses with `ApprovalRequired`, and cleared when a later start of that task succeeds.
 - `task:resumable` and `task:detail` throw for a startable task with history whose snapshot is missing or corrupt, because the plan loads the snapshot without a fallback.
+- `task:adopt` answers a refusal as data and rejects only for a broken installation, an unapproved module included. A real adoption whose parent then refuses to start has already written the parent and the mirror rows.
+- `task:rewind` and `task:delete` of a task that adopted others clear those tasks' `origin` and `parentTaskId` where the mirror row is gone.
 - `task:resumable` has no renderer caller. The renderer reads the same plan from `task:detail`'s `resume`, present only for a startable task.
 - A rewind whose cut leaves no frontier restores the task's status and outcome without resuming, and its outputs are cleared.
 - A run fork whose resume refuses rejects the request while the copy stays. A chat fork answers the copy's id before its message is answered; a failed message is only logged.

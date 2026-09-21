@@ -1,0 +1,99 @@
+---
+id: engineering/units/adoption
+type: engineering-unit
+status: shipped
+updated: 2026-09-21
+implements: [product/large-work-splits-into-independent-pieces, product/pick-up-where-it-left-off, ux/patterns/nested-under-what-caused-it, ux/patterns/refuse-with-the-reason-and-the-fix]
+layer: service
+owns_contracts: []
+requires: [engineering/units/fan-out-host, engineering/units/run-load, engineering/units/task-lifecycle, engineering/units/rewind-and-fork, engineering/units/task-worktrees, engineering/units/workflow-snapshots, engineering/units/event-journal, engineering/units/schema-check]
+implemented_by: [packages/persistence/src/adopt.ts, packages/persistence/src/load.ts, packages/shared/src/adopt.ts, packages/app/src/main/service.ts]
+verified_by: [packages/app/test/taskAdopt.test.ts, packages/persistence/test/adopt.test.ts]
+siblings: [engineering/units/fan-out-host, engineering/units/run-load, engineering/units/task-lifecycle, engineering/units/board-projection]
+---
+
+# Adoption
+
+## Adoption makes a task that ran alone the child of a new task by mirror rows, and copies nothing
+
+[Decision 0005](../decisions/0005-connect.md) §2. `planAdoption` in `adopt.ts` decides what an adoption would do, or refuses it; `writeAdoption` does it; `AppService.adoptTask` is the host operation behind `task:adopt`.
+
+- The mechanism is the [fan-out-host](fan-out-host.md)'s: a task mirrored into its parent's journal as `instance.entered` and `instance.terminated` rows whose instance id is the task's id. An adoption writes those rows after the fact, for a child that was never an element, into the journal of a **new** parent task.
+- The parent's root is entered with its inputs, each adopted task is mirrored under the child key that mounts its root state, and the parent stands `queued` past the last of them with its snapshot already pinned. It is started by resume, as a split copy is.
+- The adopted task keeps its journal, its sessions, its workspace and its card. `parentTaskId` and `origin: {kind: "adopt", taskId, key, index}` are all that change, and `origin.formerParentTaskId` keeps a rerun's link for an un-adoption to put back.
+- **Eligibility is schema fit.** The task's root state must be the state a child of the parent's root mounts, compared by source id so a mount variant still fits. Its recorded outputs are checked against the mounted state's current output slots by `fitOutputs`; a misfit is refused with the path.
+- **Holes are refused.** Every sequence member before the cursor is adopted, or read by nothing later: the wires, `async` flag and mount rules of later members, the root's output bindings and computed output defaults, and the root's transitions. `childrenReadBy` walks the lowered references.
+- **Parent inputs are inferred backwards.** Where a child's wire is a plain `.inputs.<name>` path (`plainInputOf`), the parent's input takes the value the adopted task ran with, recorded `bound` with `from`. A form value never overrides one. What nothing determines is listed as `asks`, derived from the declared slots; a required one refuses a real adoption.
+- **The workspace comes along.** The parent is created on the adopted task's branch and its `worktree_path` is set to the adopted task's, so [task-worktrees](task-worktrees.md) reuses the tree.
+- **The split shape.** A child mounted `each: "split"` is adopted as its element: the parent's `split` gets `{expr, index}` where the list is a parent input or an adopted sibling's output, and the mirror row carries no `element`, so the mount reads as an ordinary one.
+- **A task still running** is mirrored at once with no end, and the parent is made holding through `dependsOn`. `settleAdoptions` writes the end when the task has completed: at its run end, and before every resume of the parent.
+- **Into a new task, or into one that exists.** `AdoptionInput.parentTaskId` names a task something else made, which is what `connect()` composes with a dynamic workflow's task. The record is the constraint: the parent must be startable and not running, a child it has entered is not adopted over, a parent standing past the child is refused, its recorded inputs must agree with what the child ran with, and one that has run keeps the tree it stands in. The mirror rows go under the root it already entered, or a root entry is written first. A parent already pinned, to a snapshot or a versioned document, adopts under what it runs.
+- **A rewind past the mirror row un-adopts.** `releaseUnmirroredAdoptions` runs after every `task:rewind` and `task:delete` of a parent.
+
+It deliberately does not own:
+
+- Reading the rows back: [run-load](run-load.md) emits an adopted node as history under a stand-in state, and `withAdoptedStandIns` adds that state to the bundle a loaded run is handed.
+- Holding, release and the start refusals: [task-lifecycle](task-lifecycle.md). Cutting a journal: [rewind-and-fork](rewind-and-fork.md). Filing: [board-projection](board-projection.md).
+- Finding the workflow that relates two states, modifying a frozen workflow, and the board's drop: decision 0005 steps 4 and 5.
+
+## Adoption is service code between the task store and the load, and asks the host for one thing
+
+- Layer `service`. `adopt.ts` is in `@jaira/persistence` beside `load.ts`, calls `createTask`, `loadSnapshot`, the runtime store and the journal recorder, and imports nothing from the app.
+- The one thing it cannot do is validate a value, because the data package carries no validator. `AdoptDeps.check` is the host's: `AppService.valueCheck` wraps the same ajv instance `schema:check` uses ([schema-check](schema-check.md)). Without it presence is checked and shapes are not, which is what the CLI's resume does.
+- Upstream seam: none added. The engine recomputes a loaded child's outputs from its operation and children, and a mirror row has neither, so the load names a **stand-in** state, `jaira:adopted:<stateId>`: the mounted state's current output slots with no bindings, and an operation that is never dispatched whose loaded value is the recorded outputs. `finish()` validates and returns them. The real state stays in the bundle, so a back-transition enters it, in the parent, as occurrence 1.
+
+## The mirror rows hold the outputs, and the adopted task's file holds the join
+
+| Data | Read / written | Source of truth | Who else touches it |
+| --- | --- | --- | --- |
+| Mirror `instance.entered` with `adopted: true`, `childKey`, the task's id as `instanceId` and the inputs the task ran with | written once by `writeAdoption` | the parent's journal | `buildTaskLoad`, `conversationView`, `settleAdoptions`, `releaseUnmirroredAdoptions` |
+| Mirror `instance.terminated` with `outcome: "success"` and `outputs` as the task recorded them | written by `writeAdoption` for a completed task, else by `settleAdoptions` | the parent's journal | `buildTaskLoad` reads `outputs` as the stand-in operation's value |
+| The adopted task's `parentTaskId` and `origin` | written by `writeAdoption`; removed by `releaseUnmirroredAdoptions` | the task file, with `task_runtime.parent_task_id` beside it | board filing, `markMade`, `taskOriginOf`, `isMadeRow` |
+| The parent's `inputs`, `inputProvenance`, `branch`, `split`, `dependsOn` | written by `createTask` inside `writeAdoption` | the parent's task file | every reader of a task file |
+| The parent's `snapshot_hash` and `worktree_path` | `setSnapshot` and `setWorktree`, before the first journal row | `task_runtime` | `resumeTask`, `ensureWorkspace` |
+
+## The invariants keep the adopted task whole and the parent's record honest
+
+| # | Invariant | Asserted by |
+| --- | --- | --- |
+| 1 | An adoption writes a root entry, a mirror entry whose instance id is the task's and a mirror end carrying its outputs, and the parent then runs only what is left | `taskAdopt.test.ts` "mirrors it into a new parent that stands past it, infers the parent's input backwards, and runs only what is left" |
+| 2 | The load reads the mirror as history under the stand-in state with the recorded outputs, and owes the parent its answer | `taskAdopt.test.ts` "loads as history under a stand-in state, with the child still owed its answer" |
+| 3 | A parent input bound by a plain path takes what the child ran with and is recorded `bound` with `from`; an expression infers nothing; a form value never overrides | `taskAdopt.test.ts` the first test; `adopt.test.ts` "infers only plain-path inputs, applies literal defaults to the recorded entry, and asks for the rest", "records a conversation's values as inferred, and never lets a form value override what the child ran with" |
+| 4 | Recorded outputs that no longer fit the mounted state refuse the adoption naming the path, and outputs that still fit adopt across the change | `taskAdopt.test.ts` "refuses a task whose recorded outputs no longer fit the state, naming the path that failed", "adopts across a change the recorded outputs still fit, and says the state changed" |
+| 5 | A child before the cursor that something later reads refuses the adoption naming the reference; one nothing reads, or one adopted with it, does not | `taskAdopt.test.ts` "refuses a HOLE — a child before the cursor that something later reads — naming the reference" |
+| 6 | A dry run answers the plan, or the refusal, and changes nothing; a real adoption missing a required input is refused for that input and changes nothing | `taskAdopt.test.ts` "says what an adoption would do — and what it would still ask — and changes nothing" |
+| 7 | A rewind past the mirror row clears the adopted task's `origin` and `parentTaskId` and the parent runs the child itself; a rewind to a later point keeps the adoption | `taskAdopt.test.ts` "un-adopts: the task is its own again, and the parent runs the child itself" |
+| 8 | A back-transition into an adopted child runs in the parent as occurrence 1 and leaves the adopted task as it was | `taskAdopt.test.ts` "runs it in the parent as occurrence 1, and leaves the adopted task as occurrence 0's history" |
+| 9 | A split-mounted state adopts as its element: the parent is split on the list at that index, the mount reads as ordinary, and no copies are made | `taskAdopt.test.ts` "adopts an element as a task standing past the split, on the list at its element, and makes no copies" |
+| 10 | A running task is mirrored with no end, the parent holds, and its completion writes the end and starts the parent | `taskAdopt.test.ts` "mirrors its entry now, holds the parent, and writes the end — and starts the parent — when it completes"; `adopt.test.ts` "is ended once the adopted task completes, releasing the parent — and un-adopted when the row is gone" |
+| 11 | The parent takes up the adopted task's branch and worktree, and two tasks on different branches are refused | `adopt.test.ts` "binds the parent to the adopted task's branch and worktree, so the next state reads what it wrote", "refuses two adopted tasks standing on different branches" |
+| 12 | A task whose state the workflow does not mount, an unknown task, and a task that already has an `origin` are refused | `taskAdopt.test.ts` "refuses a task whose state the workflow does not mount, and a task already somebody's" |
+| 13 | A parent whose mirror is still open does not load | `taskAdopt.test.ts` "mirrors its entry now, holds the parent, …", through `resumable` answering `none` |
+| 14 | An adoption into an existing task makes no new task, keeps that task's own inputs and their provenance, and refuses one whose input disagrees with what the child ran with | `taskAdopt.test.ts` "takes a task up into a parent that has not run, under the child key named, and makes no new task", "refuses a parent whose own input disagrees with what the child ran with" |
+| 15 | An existing parent that is running, or has entered the child, is refused; one stopped before a later child takes it up under the root it already entered, and is not asked that child's question | `taskAdopt.test.ts` "refuses a parent that is running or has entered the child, and takes a later child into one that stopped before it" |
+| 16 | An adopted child that fans out inline or `each: "task"` is refused | unasserted |
+
+## Every refusal is an answer, and what is half written is a queued task somebody can delete
+
+| When | Behavior | Recovery | UX state |
+| --- | --- | --- | --- |
+| The adoption is refused | `task:adopt` answers `{ok: false, refusal: {code, message, path?, reference?}}` and nothing is written | act on the message | the reason, where the caller shows it |
+| The parent's workflow does not load or validate | `unknown-workflow` with the loader's message; an unapproved module rejects as `ApprovalRequired` | fix or approve, then adopt again | the refusal |
+| The process dies after the parent is created and before its rows are written | a `queued` parent with a snapshot and no journal, which starts fresh and runs the child itself | delete it and adopt again | an extra queued task |
+| The process dies after the rows and before the adopted task's file is rewritten | the mirror rows load, but the task files on its own and its line in the parent's conversation draws as an ordinary entry | adopt cannot be retried into that parent; delete the parent | the task is on the roots board |
+| The adopted task completes with outputs the parent's pinned slots refuse | `settleAdoptions` leaves the mirror open and returns the reason; the parent's resume refuses with it | rewind the parent past the mirror, or fix the task and run it again | the parent stays queued |
+| The adopted task fails or is stopped | the parent keeps holding, as any task holds for an unfinished dependency | resume the adopted task | the parent waits for it |
+| The adopted task is deleted | the parent's `dependsOn` no longer holds, and its load refuses on the open mirror; a closed mirror still loads, from the outputs on its row | rewind the parent past the mirror | the parent does not resume |
+| The parent is deleted | `releaseUnmirroredAdoptions` clears every task it adopted; the parent's worktree, which is the adopted task's, is removed with it | the adopted task's next start cuts the worktree again from its branch | the adopted tasks file on their own again |
+| An adopted task is reopened by a move after the adoption | its row's outputs are cleared while it runs, and the parent still reads the outputs on its mirror row | none needed | none |
+
+## The rows are additive, and an older build reads a mirror as an instance it cannot finish
+
+- `adopted` and `outputs` ride `instance.entered` and `instance.terminated` as extra fields. The journal stores whole events, so they round-trip; upstream's event types do not declare them.
+- A build before this one folds a mirror row as an ordinary child with no operation, and the engine fails to recompute its outputs. There is no rollback for a parent already made.
+- `origin.kind: "adopt"`, `formerParentTaskId` and `inputProvenance` are optional in the task file, so older files parse unchanged.
+
+## Adoption departs from the engine's load by naming a state the workflow does not contain
+
+- The stand-in state exists only in the bundle handed to `executeWorkflow` for one loaded run. It is not in the snapshot, the workflow browser or lint. It stands in for a seam upstream does not have: a loaded instance whose outputs are given rather than recomputed.
+- The parent shares the adopted task's worktree rather than getting its own, where every other bound task owns its path.

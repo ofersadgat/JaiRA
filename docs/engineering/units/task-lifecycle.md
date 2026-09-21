@@ -8,8 +8,8 @@ layer: service
 owns_contracts: [engineering/contracts/task-file, engineering/contracts/task-channels]
 requires: [engineering/units/workflow-snapshots, engineering/units/module-approvals, engineering/units/workflow-browser, engineering/units/run-load, engineering/units/engine-wiring, engineering/units/fan-out-host, engineering/units/task-worktrees, engineering/units/process-claims, engineering/units/interaction-gateway, engineering/units/interaction-hub, engineering/units/live-turns, engineering/units/event-journal, engineering/units/storage-policy, engineering/units/operation-record-store, engineering/units/model-routing, engineering/units/tool-policy, engineering/units/agent-executors, engineering/units/host-tools, engineering/units/artifact-placement, engineering/units/native-session-capture, engineering/units/scripted-doubles, engineering/units/project-sessions, engineering/units/app-log]
 implemented_by: [packages/persistence/src/lifecycle.ts, packages/persistence/src/runtime.ts, packages/persistence/src/taskStore.ts, packages/shared/src/task.ts, packages/app/src/main/service.ts]
-verified_by: [packages/persistence/test/lifecycle.test.ts, packages/persistence/test/holding.test.ts, packages/persistence/test/moduleApproval.test.ts, packages/persistence/test/stores.test.ts, packages/persistence/test/rowFile.test.ts, packages/persistence/test/systemProject.test.ts, packages/shared/test/shared.test.ts, packages/app/test/service.test.ts, packages/app/test/resume.test.ts, packages/app/test/eachHosted.test.ts, packages/app/test/gateDurability.test.ts, packages/app/test/taskMove.test.ts]
-siblings: [engineering/units/run-load, engineering/units/rewind-and-fork, engineering/units/fan-out-host, engineering/units/task-worktrees, engineering/units/workflow-snapshots]
+verified_by: [packages/persistence/test/lifecycle.test.ts, packages/persistence/test/holding.test.ts, packages/persistence/test/moduleApproval.test.ts, packages/persistence/test/stores.test.ts, packages/persistence/test/rowFile.test.ts, packages/persistence/test/systemProject.test.ts, packages/shared/test/shared.test.ts, packages/app/test/service.test.ts, packages/app/test/resume.test.ts, packages/app/test/eachHosted.test.ts, packages/app/test/gateDurability.test.ts, packages/app/test/taskMove.test.ts, packages/app/test/taskAdopt.test.ts]
+siblings: [engineering/units/run-load, engineering/units/rewind-and-fork, engineering/units/fan-out-host, engineering/units/adoption, engineering/units/task-worktrees, engineering/units/workflow-snapshots]
 ---
 
 # Task lifecycle
@@ -18,7 +18,8 @@ siblings: [engineering/units/run-load, engineering/units/rewind-and-fork, engine
 
 A task is one state machine under one id. Its half in `@jaira/persistence` keeps the durable bookkeeping; its half in `AppService` sequences a run in the main process.
 
-- `createTask` in `lifecycle.ts` refuses a branch on the shared root and an id that exists, writes the task file, then inserts a `queued` `task_runtime` row.
+- `createTask` in `lifecycle.ts` refuses a branch on the shared root and an id that exists, writes the task file, then inserts a `queued` `task_runtime` row. `AppService.createTask` records how each input was settled ([decision 0005](../decisions/0005-connect.md) §4): what a form sent is `asked` unless the request says a conversation `inferred` it, and an input taken from a task (`sources`) is `bound` with `from`. A source that has completed is read at once; one that has not leaves the input absent and the task holding for it through `dependsOn`.
+- `pinWorkflow` reads, validates, freezes and snapshots a workflow as its own step. `beginTaskRun` calls it at a first start, and [adoption](adoption.md) calls it before there is a run, because a task made with a journal is continued and never started fresh.
 - `beginTaskRun` refuses an unknown task, a status `isStartableStatus` rejects, a task with journal history unless `continues` is set, and a task holding for a dependency. It then loads the pinned snapshot, else a supplied bundle, else the live workflow files, and pins the hash and sets `running` in one transaction. For a task that names a versioned frozen document the pinned snapshot is the document's latest version (`currentPin` in [workflow-snapshots](workflow-snapshots.md)), and a version that differs from the one the task last ran under is journaled as `workflow.version` in the same transaction. `hasJournalHistory` does not count that row.
 - `AppService.startTask` and `startRun` wire and detach one run, and on its end call `finishTaskRun`, publish `run:finished`, settle `taskWaiters` and, when it completed, `releaseDependents`.
 - `cancelTaskIn` stops a run here, raises the cross-process cancel flag for a run elsewhere, or records `canceled` for a task nothing runs.
@@ -26,7 +27,8 @@ A task is one state machine under one id. Its half in `@jaira/persistence` keeps
 - `rerunTask` always mints a new task linked by `parentTaskId` and starts it.
 - `moveTask` publishes a person's move ([decision 0005](../decisions/0005-connect.md)): it answers the transition waiting on exactly that move, else hands the live run's `DirectedTransitions` port a directed transition, else reopens the task by load with the move queued on a port of its own. `LiveRun.directed` is that port, and `beginTaskRun`'s `reopen` is the one way a `completed` task runs again under its own id.
 - `deleteTask` removes the worktree, then every row and file of the task.
-- `holdingOf` derives holding from `dependsOn`. `startMadeTask`, `waitForTask` and `releaseDependents` serve the fan-out host.
+- `holdingOf` derives holding from `dependsOn`. `startMadeTask`, `waitForTask` and `releaseDependents` serve the fan-out host, and release a task that held for an input's source or for a task it adopted.
+- `inputSources` answers `task:inputSources`: per slot, the outputs of earlier tasks that fit it. A completed task's output fits when its value validates against the slot's schema with the run's validator; a task still on its way is offered when its declared output schema says what the slot's does.
 - `RuntimeStore.recoverInterrupted` marks abandoned `running` tasks `interrupted` at open, and `resumeSuspended` resumes the tasks the last close left waiting on a person.
 - `moduleApprovals` keeps the files a start refused on for `functions:pending`, and `functionsApprove` approves and rebuilds the module pair.
 
@@ -37,7 +39,7 @@ It deliberately does not own:
 - Turning a registry, a prompt executor and a bundle into a run: [engine-wiring](engine-wiring.md). Continuing a loaded machine is upstream `@declarative-ai/hw`.
 - Building the load and the two releases that precede it: [run-load](run-load.md).
 - Cutting a journal and copying a task: [rewind-and-fork](rewind-and-fork.md).
-- Making tasks of fan-out elements: [fan-out-host](fan-out-host.md).
+- Making tasks of fan-out elements: [fan-out-host](fan-out-host.md). Taking up a task that ran alone: [adoption](adoption.md).
 - The worktree a bound task runs in: [task-worktrees](task-worktrees.md). Run claims, heartbeats and the cancel flag: [process-claims](process-claims.md).
 - The snapshot format: [workflow-snapshots](workflow-snapshots.md). The approval store and the module freeze: [module-approvals](module-approvals.md).
 - Parked gates and their durable rows: [interaction-gateway](interaction-gateway.md). The live tail: [live-turns](live-turns.md). Typed turns: [chat-turns](chat-turns.md). The terminal verbs: [cli](cli.md).
@@ -53,25 +55,26 @@ It deliberately does not own:
 
 1. `open.live` already holds the task: refused.
 2. `holdingOf` names an unfinished dependency: refused before anything is made.
-3. `ensureWorkspace` materializes the worktree.
-4. The registry is built, and `interactions.clearTask` deletes the task's durable gates.
-5. `beginTaskRun` refuses or pins, with `continues` set when a load is supplied.
-6. `resolveUserFunctions`, file, search and web tools, then `gateCapabilities`; an issue records the task `failed` and refuses.
-7. `open.live.set` and the `RunOwner` claim.
-8. Hub registration, `parseFakeRules`, `buildPromptExecutor` with the start-time model check in `defaultTree`, the turn stream, session services and `compilePolicy`; `approvals.allow` reopens the approval gate.
-9. The request resolves. Detached, `prepareUserFunctions` and `executeWorkflow` run; a throw inside records `failed`; `finally` releases the claim and deletes `open.live`.
+3. `settleOwedInputs` reads every input a completed source task owed into the task file, and refuses naming the input when the source produced no such output.
+4. `ensureWorkspace` materializes the worktree.
+5. The registry is built, and `interactions.clearTask` deletes the task's durable gates.
+6. `beginTaskRun` refuses or pins, with `continues` set when a load is supplied.
+7. `resolveUserFunctions`, file, search and web tools, then `gateCapabilities`; an issue records the task `failed` and refuses.
+8. `open.live.set` and the `RunOwner` claim.
+9. Hub registration, `parseFakeRules`, `buildPromptExecutor` with the start-time model check in `defaultTree`, the turn stream, session services and `compilePolicy`; `approvals.allow` reopens the approval gate.
+10. The request resolves. Detached, `prepareUserFunctions` and `executeWorkflow` run, the bundle passed through `withAdoptedStandIns` when a load is supplied; a throw inside records `failed`; `finally` releases the claim and deletes `open.live`. A run that completed settles the mirror row of a parent that adopted it before `releaseDependents` runs.
 
 ## The task file holds what a task is, and its runtime row holds how it stands
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `system/tasks/<taskId>.json` as `TaskMeta` | written by `createTask` and `renameTask`; read by every summary and start | the file | the fan-out host rewrites a split task's `title`, `split` and `dependsOn`; people editing by hand |
+| `system/tasks/<taskId>.json` as `TaskMeta` | written by `createTask` and `renameTask`; `settleOwedInputs` fills an owed input; read by every summary and start | the file | the fan-out host rewrites a split task's `title`, `split` and `dependsOn`; [adoption](adoption.md) rewrites an adopted task's `parentTaskId` and `origin`; people editing by hand |
 | `task_runtime`: `status`, `snapshot_hash`, `started_at`, `ended_at`, `outcome`, `outputs_json`, `failure_json`, `parent_task_id`, `root_instance_id` | inserted by `createTask`; `beginTask`, `setStatus`, `endTask` and `recoverInterrupted` | the table, or the `taskRows` file when `storage.tasks` is file-backed | `markCut` and `stampFork` from rewind-and-fork; `setWorktree` from task-worktrees; views |
 | Holding | derived by `holdingOf` from `dependsOn` and each dependency's status | never stored | board filing, `dependencyBaseOf`, `TaskSummary.waitingFor` |
 | `operation_records` left `open` | settled `interrupted` by `recoverInterrupted`, keeping `result_json` | operation-record-store | native capture recovery |
 | A deleted task's rows | `deleteTask` removes `state_machine_events`, `command_log`, `job_output`, `jobs`, `operation_records`, `session_names`, `artifacts`, `pending_interactions`, `task_runtime`, then file-backed journal, conversation and row files, then the task file | the stores named | history-pruning trims ended tasks without deleting them |
 | `AppService.moduleApprovals` | set when a start throws `ApprovalRequired`; deleted when a start succeeds | memory, by task id | none |
-| `ProjectSession.live` and `AppService.taskWaiters` | set at step 7 and by `waitForTask`; cleared in the run's `finally` and end handler | memory | rewind, fork, delete and chat read `live`; the fan-out host waits |
+| `ProjectSession.live` and `AppService.taskWaiters` | set at step 8 and by `waitForTask`; cleared in the run's `finally` and end handler | memory | rewind, fork, delete and chat read `live`; the fan-out host waits |
 
 ## The invariants keep one machine per task and never start a task over its own history
 
@@ -102,6 +105,7 @@ It deliberately does not own:
 | 23 | A move a `standing` rule was waiting on answers that rule, and a standing rule nobody answers neither parks the sequence nor holds the task open | `taskMove.test.ts` "answers the transition that was waiting on exactly this move, and the workflow's own rule moves the task", "a standing rule nobody answers changes nothing: the task runs as written and finishes" |
 | 24 | A finished task takes a move by being reopened under its own id, while a plain resume of it stays refused; a stopped task reopened to take one does not ask its stopped state's question again | `taskMove.test.ts` "reopens a FINISHED task to take it, under its own id — and a plain resume of it is still refused", "reopens a STOPPED task past the state it stopped in, without asking that state's question again" |
 | 25 | A task that dies mid-skip resumes in the skip's target with what it stepped over still `skipped`, and makes the entry the skip still owed when the target never entered | `taskMove.test.ts` "resumes in the state the skip went to, with what it stepped over still skipped", "makes the entry the skip still OWED when the process died before the target entered" |
+| 26 | An input taken from a completed task is read at creation and recorded `bound` with `from`; one taken from a task still running leaves the input absent and the new task holding, and is read when its dependency completes and starts it | `taskAdopt.test.ts` "offers the outputs that fit the slot, resolves the pick at creation, and records where it came from", "holds for a source still running, and reads the value when it starts" |
 
 ## A refusal after the task is marked running strands it until the app restarts
 
@@ -113,8 +117,8 @@ It deliberately does not own:
 | Two starts of one task race in one process | `open.live` is set only after `ensureWorkspace` and `beginTaskRun` await, and `beginTaskRun` reads the status before its `running` transaction, so both can pass | none | two runs journal into one task |
 | Another process drives the task | `beginTaskRun` refuses its `running` status | stop it there | refusal naming the status |
 | `ensureWorkspace` fails | the error is thrown before `beginTaskRun` | fix git and start again | the task stays startable |
-| A start is refused at step 5 or later | the task's durable gates are already deleted, and a bound task's worktree already exists | none for the gates | a parked question leaves the inbox |
-| `resolveUserFunctions`, `parseFakeRules`, the model check or `compilePolicy` throws | the error escapes outside the run's `try`; the row stays `running`, and past step 7 the task stays in `open.live` with its claim beating, so Stop sets `stopping` and aborts a controller nothing listens to | restart the app: recovery marks a `running` row `interrupted`, and Force stop settles a `stopping` one | task stuck running or stopping |
+| A start is refused at step 6 or later | the task's durable gates are already deleted, and a bound task's worktree already exists | none for the gates | a parked question leaves the inbox |
+| `resolveUserFunctions`, `parseFakeRules`, the model check or `compilePolicy` throws | the error escapes outside the run's `try`; the row stays `running`, and past step 8 the task stays in `open.live` with its claim beating, so Stop sets `stopping` and aborts a controller nothing listens to | restart the app: recovery marks a `running` row `interrupted`, and Force stop settles a `stopping` one | task stuck running or stopping |
 | `gateCapabilities` finds a runtime that cannot enforce the policy | `finishTaskRun` records `failed`, and the start refuses | fix the state, then resume | failed with the reason |
 | The process dies mid-run | the next open marks the task `interrupted` once its claim is stale | Resume | Resume offered |
 | The app reopens inside the claim's stale window after a crash | `recoverInterrupted` sees a fresh heartbeat and leaves the task `running`; Stop raises a cancel flag nothing polls | Stop again after the window, or reopen the project | running with nothing running |
@@ -129,7 +133,7 @@ It deliberately does not own:
 ## The runtime row absorbed the runs table, and neither migration rolls back
 
 - Migration 16 folded the last run's `started_at`, `ended_at`, `outcome`, `outputs_json` and `failure_json` into `task_runtime`, added `parent_task_id`, stamped `root_instance_id`, and dropped `run_id` from every table. Migration 17 added `forked_at_seq` and `fork_boundary_seq`. Neither rolls back; the schema is [sqlite-schema](../contracts/sqlite-schema.md).
-- `origin`, `split` and `dependsOn` are optional in the task file, and `parseTaskMeta` checks only `id`, `title`, `workflow` and `createdAt`, so older files parse unchanged.
+- `origin`, `split`, `dependsOn` and `inputProvenance` are optional in the task file, and `parseTaskMeta` checks only `id`, `title`, `workflow` and `createdAt`, so older files parse unchanged.
 
 ## Resume loads rather than re-runs, and a rerun is always a new task
 

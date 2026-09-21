@@ -4,6 +4,7 @@
  * history live in SQLite (@jaira/persistence) and reference tasks by id only.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import type { InputProvenance } from "./adopt";
 
 export type TaskStatus =
   | "queued"
@@ -35,6 +36,13 @@ export interface TaskMeta {
    *  construction — the task file is JSON, and these are bound as the run's
    *  operation inputs. */
   inputs?: Record<string, JsonValue>;
+  /**
+   * How each of {@link inputs} was settled (decision 0005 §4): `bound` by wiring, `inferred` by a
+   * conversation, `asked` of a person. Recorded when the value is, per input name. An entry whose
+   * `from` names a task and whose input is still ABSENT is a value that task has yet to produce —
+   * the task holds for it (`dependsOn`) and the value is read when it starts.
+   */
+  inputProvenance?: Record<string, InputProvenance>;
   /** Branch binding (DESIGN §9.2) — recorded now, acted on in phase 5. */
   branch?: string;
   parentTaskId?: string;
@@ -73,8 +81,13 @@ export interface SplitEntry {
 
 /** Where a fan-out-made task came from — see {@link TaskMeta.origin}. */
 export interface TaskProvenance {
-  /** `split`: a copy of the parent, standing at the mount. `task`: a fresh task rooted at the mounted state. */
-  kind: "split" | "task";
+  /**
+   * `split`: a copy of the parent, standing at the mount. `task`: a fresh task rooted at the mounted
+   * state. `adopt`: a task that ran ALONE and was taken up afterwards (decision 0005 §2) — `taskId`
+   * is the parent that adopted it and `key` the child it stands for there. It keeps its own journal,
+   * sessions and workspace; only where it files changes.
+   */
+  kind: "split" | "task" | "adopt";
   /** The task whose list made this one. */
   taskId: string;
   /** The mount key the list was on, in that task. */
@@ -91,6 +104,8 @@ export interface TaskProvenance {
    * wire's default.
    */
   start?: "manual" | "when_ready";
+  /** For an adoption: the `parentTaskId` the task had before — a re-run's predecessor — put back if it is un-adopted. */
+  formerParentTaskId?: string;
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);

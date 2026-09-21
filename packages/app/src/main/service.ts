@@ -48,6 +48,15 @@ import {
   baseStateView,
   beginTaskRun,
   buildTaskLoad,
+  adoptedInto,
+  missingInputs,
+  pinWorkflow,
+  planAdoption,
+  releaseUnmirroredAdoptions,
+  settleAdoptions,
+  withAdoptedStandIns,
+  writeAdoption,
+  type ValueCheck,
   rehydrateArtifactInputs,
   releaseRevivedFailures,
   resetUserModules,
@@ -385,6 +394,12 @@ import type {
   PendingUserEvent,
   TaskMoveRequest,
   TaskMoveResult,
+  TaskAdoptRequest,
+  TaskAdoptResult,
+  InputProvenance,
+  InputSourceOption,
+  InputSourcesRequest,
+  InputSourcesResponse,
   ProbeResult,
   PruneRequest,
   PruneResult,
@@ -2930,12 +2945,34 @@ export class AppService {
   createTask(request: CreateTaskRequest): TaskSummary {
     const open = this.session(request.project);
     const project = open.project;
+    // How each input was settled (decision 0005 §4), recorded with the value. What a form sent was
+    // ASKED of a person unless the caller says a conversation supplied it; what comes FROM A TASK is
+    // bound — read now where that task has completed, and owed (the new task holds for it, and
+    // `startRun` reads it) where it has not.
+    const inputs: Record<string, JsonValue> = { ...(request.inputs ?? {}) };
+    const provenance: Record<string, InputProvenance> = {};
+    const waitsFor: string[] = [];
+    for (const name of Object.keys(inputs)) provenance[name] = request.provenance?.[name] ?? { via: "asked" };
+    for (const [name, source] of Object.entries(request.sources ?? {})) {
+      const row = project.runtime.get(source.taskId);
+      if (row === undefined) throw this.refusal("run", `input '${name}' is taken from task '${source.taskId}', which does not exist`);
+      provenance[name] = { via: "bound", from: source };
+      delete inputs[name];
+      const value = taskOutputOf(row, source.output);
+      if (value !== undefined) inputs[name] = value;
+      else if (row.status === "completed") {
+        const title = project.tasks.tryRead(source.taskId)?.title ?? source.taskId;
+        throw this.refusal("run", `input '${name}' is taken from '${title}', which completed without producing '${source.output ?? ""}'`);
+      } else if (!waitsFor.includes(source.taskId)) waitsFor.push(source.taskId);
+    }
     const meta = createTask(project, {
       title: request.title,
       workflow: request.workflow,
       ...(request.description !== undefined ? { description: request.description } : {}),
       ...(request.labels !== undefined ? { labels: request.labels } : {}),
-      ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
+      ...(request.inputs !== undefined || Object.keys(inputs).length > 0 ? { inputs } : {}),
+      inputProvenance: provenance,
+      ...(waitsFor.length > 0 ? { dependsOn: waitsFor } : {}),
       ...(request.branch !== undefined ? { branch: request.branch } : {}),
     });
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
@@ -3123,6 +3160,10 @@ export class AppService {
         throw this.refusal("run", `task '${taskId}' is waiting for ${holding.map((h) => `'${h.title}' (${h.status})`).join(", ")} to complete`);
       }
     }
+    // Inputs OWED by a task this one was holding for ("From a task…", decision 0005 §2): it has
+    // completed — the hold above would have refused otherwise — so the value is read now, into the
+    // task's file, before anything reads the inputs. The run's own slot validation judges it.
+    this.settleOwedInputs(open, taskId);
     // Materialize the worktree before marking the task running, so a git failure
     // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
     const workspace = opts.workspace ?? (await ensureWorkspace(project, taskId));
@@ -3556,7 +3597,9 @@ export class AppService {
         // puts on the far side of the approval gate `beginTaskRun`'s freeze already ran.
         if (userFns !== undefined) await prepareUserFunctions(userFns.userFunctions);
         const result = await executeWorkflow({
-          bundle: started.bundle,
+          // A loaded machine that ADOPTED a task (decision 0005 §2) reads that child through a
+          // stand-in state — see `withAdoptedStandIns`. Every other run gets its bundle as pinned.
+          bundle: withAdoptedStandIns(started.bundle, opts.loaded),
           inputs: started.meta.inputs ?? {},
           registry,
           prompt: streaming,
@@ -3655,6 +3698,9 @@ export class AppService {
         });
         this.publishFor(open, { type: "run:finished", taskId, status });
         this.settleWaiters(open, taskId);
+        // A task adopted while it was still running (decision 0005 §2) owes its parent the END of
+        // its mirror row, outputs and all — written before the parent is released to read it.
+        if (status === "completed") this.settleAdoptedInto(open, taskId);
         if (status === "completed") this.releaseDependents(open, taskId);
         endedCompleted = status === "completed";
       } catch (e) {
@@ -4775,6 +4821,9 @@ export class AppService {
     }
     session.questions.dismissFor(taskId);
     const cut = cutTaskJournal(session.project, taskId, request.at);
+    // Rewinding past a mirror row UN-ADOPTS (decision 0005 §2): the task that stood for that child
+    // goes back to being its own, and the parent runs the child itself from here.
+    releaseUnmirroredAdoptions(session.project, taskId);
     this.log({
       level: "info",
       source: "run",
@@ -4963,6 +5012,14 @@ export class AppService {
     // call's record is deliberately NOT touched — it may be the only witness to turns already in
     // the remote stream, and the re-dispatch continues into it.
     releaseUnconsumedFailures(open.project, taskId);
+    // An adopted task that has completed since (decision 0005 §2) gets the end of its mirror row
+    // now — in whatever process it finished — so the load below reads it as the history it is.
+    const owed = settleAdoptions(open.project, taskId, { check: this.valueCheck() });
+    if (owed.misfits.length > 0) {
+      const first = owed.misfits[0]!;
+      const title = open.project.tasks.tryRead(first.taskId)?.title ?? first.taskId;
+      throw this.refusal("run", `task '${taskId}' cannot continue: what '${title}' produced does not fit the child it was adopted as — ${first.reason}`, at);
+    }
     const bundle = loadPinnedBundle(open.project, row);
     const load = buildTaskLoad(open.project, taskId, bundle.states);
     if (load.blocked !== undefined || load.loaded === undefined) {
@@ -5008,6 +5065,193 @@ export class AppService {
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
     });
+  }
+
+  // --- adopt, and inputs taken from a task (decision 0005 §2) -------------------------------------
+
+  /**
+   * ADOPT ("task:adopt"): a task that ran alone becomes a child of a NEW task in a workflow that
+   * mounts its state — see `persistence/adopt.ts`, which holds every rule. What this adds is what a
+   * service owns: pinning the parent's workflow, the run's own validator, and starting the parent.
+   *
+   * A DRY RUN plans against the live files and writes nothing, so a board can ask while a card
+   * hovers. The real thing pins the workflow first and plans against the PINNED definition, so what
+   * is written is what was checked. A refusal is an answer in both: only a broken installation — a
+   * module awaiting approval — rejects.
+   *
+   * The parent is started by RESUME, as a split copy is: it has a journal, and its load is what
+   * reads the mirror rows. A parent that adopted a task still running is made holding instead, and
+   * is released the ordinary way when that task completes (`releaseDependents`).
+   */
+  async adoptTask(request: TaskAdoptRequest): Promise<TaskAdoptResult> {
+    const open = this.session(request.project);
+    const project = open.project;
+    const dryRun = request.dryRun === true;
+    // Into a task that EXISTS (`parentTaskId`) the workflow is that task's own, read from what it
+    // runs under; into a new one it is the workflow the request names.
+    const into = request.parentTaskId !== undefined ? project.runtime.get(request.parentTaskId) : undefined;
+    const intoMeta = request.parentTaskId !== undefined ? project.tasks.tryRead(request.parentTaskId) : undefined;
+    if (request.parentTaskId !== undefined && (into === undefined || intoMeta === undefined)) {
+      return { ok: false, dryRun, refusal: { code: "unknown-task", message: `unknown task '${request.parentTaskId}'` } };
+    }
+    if (request.parentTaskId !== undefined && (open.live.has(request.parentTaskId) || project.jobs.liveRunJob(request.parentTaskId, Date.now()) !== undefined)) {
+      return { ok: false, dryRun, refusal: { code: "parent-state", message: `'${intoMeta!.title}' is running — a task adopts only while it is not` } };
+    }
+    const workflow = intoMeta?.workflow ?? request.workflow;
+    if (workflow === undefined) return { ok: false, dryRun, refusal: { code: "unknown-workflow", message: "an adoption names the workflow that adopts, or the task that does" } };
+    const pinnedAlready = into !== undefined && (into.snapshotHash !== undefined || into.documentId !== undefined);
+    const input = {
+      workflow,
+      ...(request.parentTaskId !== undefined ? { parentTaskId: request.parentTaskId } : {}),
+      targets: [{ taskId: request.taskId, ...(request.childKey !== undefined ? { childKey: request.childKey } : {}) }, ...(request.also ?? [])],
+      ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
+      ...(request.suppliedVia !== undefined ? { suppliedVia: request.suppliedVia } : {}),
+      ...(request.title !== undefined ? { title: request.title } : {}),
+    };
+    const deps = { check: this.valueCheck() };
+    if (dryRun) {
+      let bundle: WorkflowBundle | undefined;
+      try {
+        bundle = pinnedAlready ? loadPinnedBundle(project, into!) : bundleFor(project, workflow);
+      } catch {
+        bundle = undefined;
+      }
+      if (bundle === undefined) return { ok: false, dryRun, refusal: { code: "unknown-workflow", message: `workflow '${workflow}' does not load` } };
+      const outcome = planAdoption(project, bundle, input, deps);
+      return outcome.ok ? { ok: true, dryRun, plan: outcome.planned.plan } : { ok: false, dryRun, refusal: outcome.refusal };
+    }
+    let pin: { bundle: WorkflowBundle; hash?: string };
+    try {
+      // A task already pinned — to a snapshot, or to a versioned document — adopts under what it runs.
+      pin = pinnedAlready ? { bundle: loadPinnedBundle(project, into!) } : await pinWorkflow(project, workflow);
+    } catch (e) {
+      if (e instanceof ApprovalRequired) throw e;
+      return { ok: false, dryRun, refusal: { code: "unknown-workflow", message: (e as Error).message } };
+    }
+    const outcome = planAdoption(project, pin.bundle, input, deps);
+    if (!outcome.ok) return { ok: false, dryRun, refusal: outcome.refusal };
+    const missing = missingInputs(outcome.planned.plan);
+    if (missing !== undefined) return { ok: false, dryRun, refusal: missing };
+    const parent = writeAdoption(project, pin, outcome.planned);
+    const plan = outcome.planned.plan;
+    this.log({
+      level: "info",
+      source: "run",
+      message: `adopted ${plan.adopted.map((child) => `${child.taskId} as '${child.childKey}'`).join(", ")} into ${parent.id} (${plan.workflow})`,
+      project: open.key,
+      taskId: parent.id,
+    });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    let started = false;
+    if (request.start !== false && plan.waitsFor.length === 0) {
+      await this.resumeTask({
+        taskId: parent.id,
+        project: open.dir,
+        ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+        ...(request.fake !== undefined ? { fake: request.fake } : {}),
+      });
+      started = true;
+    }
+    return { ok: true, dryRun, plan, taskId: parent.id, started };
+  }
+
+  /**
+   * "From a task…" ("task:inputSources"): for each slot, the outputs of earlier tasks that FIT it.
+   *
+   * A completed task's output fits when its VALUE validates against the slot's schema — the run's
+   * own validator, so what is offered is what will be accepted. A task still on its way has no value
+   * to check, so its DECLARED output fits when the two schemas say the same thing (or the slot takes
+   * anything); picking one makes the new task hold until it completes.
+   */
+  inputSources(request: InputSourcesRequest): InputSourcesResponse {
+    const open = this.session(request.project);
+    const project = open.project;
+    const check = this.valueCheck();
+    const metas = [...project.tasks.list()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const out: InputSourcesResponse = {};
+    for (const slot of request.slots) out[slot.key] = [];
+    const declared = new Map<string, Record<string, JsonValue>>();
+    for (const meta of metas) {
+      const row = project.runtime.get(meta.id);
+      if (row === undefined) continue;
+      const base = { taskId: meta.id, title: meta.title, status: row.status, workflow: meta.workflow };
+      if (row.status === "completed") {
+        const outputs = row.outputsJson !== undefined ? (JSON.parse(row.outputsJson) as unknown) : undefined;
+        if (outputs === null || typeof outputs !== "object" || Array.isArray(outputs)) continue;
+        for (const slot of request.slots) {
+          const options = out[slot.key]!;
+          if (options.length >= INPUT_SOURCE_LIMIT) continue;
+          for (const name of Object.keys(outputs)) {
+            const value = taskOutputOf(row, name);
+            if (value === undefined || check(slot.schema, value) !== undefined) continue;
+            options.push({ ...base, output: name, preview: previewOfValue(value), pending: false } satisfies InputSourceOption);
+          }
+        }
+        continue;
+      }
+      if (row.status === "failed" || row.status === "canceled") continue;
+      let schemas = declared.get(meta.workflow);
+      if (schemas === undefined) {
+        const def = bundleFor(project, meta.workflow, row.snapshotHash)?.states[meta.workflow];
+        schemas = Object.fromEntries(Object.entries(def?.outputs ?? {}).map(([name, param]) => [name, (param.schema ?? {}) as JsonValue]));
+        declared.set(meta.workflow, schemas);
+      }
+      for (const slot of request.slots) {
+        const options = out[slot.key]!;
+        if (options.length >= INPUT_SOURCE_LIMIT) continue;
+        for (const [name, schema] of Object.entries(schemas)) {
+          if (sameSchema(slot.schema, schema)) options.push({ ...base, output: name, pending: true });
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Read every input a completed task OWES this one into its file — see `TaskMeta.inputProvenance`. */
+  private settleOwedInputs(open: ProjectSession, taskId: string): void {
+    const meta = open.project.tasks.tryRead(taskId);
+    if (meta?.inputProvenance === undefined) return;
+    const inputs = { ...(meta.inputs ?? {}) };
+    let changed = false;
+    for (const [name, settled] of Object.entries(meta.inputProvenance)) {
+      if (settled.from?.output === undefined || inputs[name] !== undefined) continue;
+      const row = open.project.runtime.get(settled.from.taskId);
+      const value = row !== undefined ? taskOutputOf(row, settled.from.output) : undefined;
+      if (value === undefined) {
+        const title = open.project.tasks.tryRead(settled.from.taskId)?.title ?? settled.from.taskId;
+        throw this.refusal("run", `task '${taskId}' takes '${name}' from '${title}', which has not produced '${settled.from.output}'`);
+      }
+      inputs[name] = value;
+      changed = true;
+    }
+    if (changed) open.project.tasks.write({ ...meta, inputs });
+  }
+
+  /** A task that completed may have been ADOPTED while it ran: its parent's mirror row gets its end. */
+  private settleAdoptedInto(open: ProjectSession, taskId: string): void {
+    const into = adoptedInto(open.project.tasks.tryRead(taskId));
+    if (into === undefined || open.project.runtime.get(into) === undefined) return;
+    const { misfits } = settleAdoptions(open.project, into, { check: this.valueCheck() });
+    for (const misfit of misfits) {
+      this.log({ level: "warn", source: "run", message: `what ${misfit.taskId} produced does not fit the child ${into} adopted it as: ${misfit.reason}`, project: open.key, taskId: into });
+    }
+  }
+
+  /** The run's own validator as the one question adoption asks of it: does this value fit, and if not, where. */
+  private valueCheck(): ValueCheck {
+    return (schema, value) => {
+      if (schema === true) return undefined;
+      let validate: ValidateFunction;
+      try {
+        validate = this.valueValidator(schema);
+      } catch (e) {
+        return { path: "", message: `has a schema that does not compile: ${(e as Error).message}` };
+      }
+      if (validate(value)) return undefined;
+      const first = validate.errors?.[0];
+      return { path: first?.instancePath ?? "", message: first?.message ?? "does not fit its schema" };
+    };
   }
 
   /**
@@ -5185,6 +5429,8 @@ export class AppService {
       if (!result.removed) throw this.refusal("run", `could not remove the task's worktree: ${result.reason}`);
     }
     deleteTask(session.project, taskId);
+    // What it had adopted is nobody's child now.
+    releaseUnmirroredAdoptions(session.project, taskId);
     this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
     // Both projections: the lists, and the board whose column the card just left.
     this.publishFor(session, { type: "store:invalidate", scope: "board" });
@@ -8640,4 +8886,58 @@ function reasonOf(failureJson: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** How many sources the "From a task…" picker is offered per slot — newest first, so the cut is the old ones. */
+const INPUT_SOURCE_LIMIT = 20;
+
+/**
+ * One output of a COMPLETED task, as a value an input can take — undefined while the task has not
+ * completed, or where it produced no such output.
+ *
+ * An artifact travels as a reference carrying its content; an input wants the content. Handing the
+ * reference across tasks would hand over a name only the producing run can resolve.
+ */
+function taskOutputOf(row: TaskRuntimeRow, output: string | undefined): JsonValue | undefined {
+  if (output === undefined || row.status !== "completed" || row.outputsJson === undefined) return undefined;
+  let outputs: unknown;
+  try {
+    outputs = JSON.parse(row.outputsJson);
+  } catch {
+    return undefined;
+  }
+  if (outputs === null || typeof outputs !== "object" || Array.isArray(outputs)) return undefined;
+  const value = (outputs as Record<string, JsonValue>)[output];
+  if (value !== null && typeof value === "object" && !Array.isArray(value) && (value as { artifact?: unknown }).artifact === true) {
+    const content = (value as { content?: unknown }).content;
+    return typeof content === "string" ? content : undefined;
+  }
+  return value;
+}
+
+/** A value in a few words, for a picker row. */
+function previewOfValue(value: JsonValue): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+}
+
+/**
+ * Whether a declared output says the same thing a slot asks for — the only check there is for a task
+ * that has produced nothing yet. A slot that takes anything fits everything; otherwise the two
+ * schemas must agree once the words a person reads (`description`, `title`, `default`) are set aside.
+ */
+function sameSchema(slot: JsonValue, declared: JsonValue): boolean {
+  if (slot === true || (slot !== null && typeof slot === "object" && !Array.isArray(slot) && Object.keys(slot).length === 0)) return true;
+  const canon = (value: JsonValue): JsonValue => {
+    if (Array.isArray(value)) return value.map(canon);
+    if (value === null || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== "description" && key !== "title" && key !== "default")
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, canon(item as JsonValue)]),
+    );
+  };
+  return JSON.stringify(canon(slot)) === JSON.stringify(canon(declared));
 }

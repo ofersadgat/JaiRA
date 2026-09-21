@@ -14,8 +14,10 @@ import { stoppedAction } from "./taskAction";
 import { TaskName } from "./taskName";
 
 /** The verb an origin line opens with — who or what made this task out of another (decision 0003). */
-function originVerb(kind: "fork" | "split" | "task" | undefined): string {
+function originVerb(kind: "fork" | "split" | "task" | "adopt" | undefined): string {
   switch (kind) {
+    case "adopt":
+      return "adopted by";
     case "split":
       return "split from";
     case "task":

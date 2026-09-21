@@ -11,6 +11,7 @@ export * from "./rowFile";
 export * from "./lifecycle";
 export * from "./projection";
 export * from "./load";
+export * from "./adopt";
 export * from "./runLabel";
 export * from "./shape";
 export * from "./views";

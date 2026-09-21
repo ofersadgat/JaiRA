@@ -636,7 +636,8 @@ export function projectBoard(
      * without this it would be on no board at all. Filed where its parent stands: the parent is one
      * of these tasks, its path passes through this level, and the mount is one of these columns.
      */
-    const made = task.origin?.kind === "task" && task.origin.key !== undefined ? task.origin : undefined;
+    // An ADOPTED task (decision 0005 §2) files the same way: it stands for the child that mounts its state.
+    const made = (task.origin?.kind === "task" || task.origin?.kind === "adopt") && task.origin.key !== undefined ? task.origin : undefined;
     const parent = made !== undefined ? byTaskId.get(made.taskId) : undefined;
     const column = made?.key !== undefined ? byKey.get(made.key) : undefined;
     if (made !== undefined && parent !== undefined && column !== undefined && boardPathOf(parent.run).some((step) => step.stateId === level)) {

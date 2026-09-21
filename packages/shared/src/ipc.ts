@@ -20,6 +20,7 @@ import type { RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
 import type { TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
+import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAdoptRequest, TaskAdoptResult, TaskOutputRef } from "./adopt";
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { CommandApproval } from "./commandParts";
@@ -89,6 +90,19 @@ export interface CreateTaskRequest {
   description?: string;
   labels?: string[];
   inputs?: Record<string, JsonValue>;
+  /**
+   * Inputs taken FROM A TASK (decision 0005 §2): per input name, the earlier task's output to read.
+   * Resolved at creation when that task has completed — the value is checked against nothing here;
+   * the run's own slot validation is the judge — and recorded `bound` with where it came from. A
+   * source still on its way makes the new task HOLD for it (`dependsOn`), and the value is read when
+   * the task starts.
+   */
+  sources?: Record<string, TaskOutputRef>;
+  /**
+   * How the typed `inputs` were settled. Absent ⇒ `asked`: a person filled in a form. A conversation
+   * creating a task on somebody's behalf says `inferred`, per input, with how sure it was.
+   */
+  provenance?: Record<string, InputProvenance>;
   branch?: string;
   /** Where the task is recorded. See {@link ProjectRef}. */
   project?: ProjectRef;
@@ -1659,6 +1673,15 @@ export interface IpcContract {
    * running to take it. Refused — rejected with the reason — when the move cannot be made.
    */
   "task:move": { request: TaskMoveRequest; response: TaskMoveResult };
+  /**
+   * ADOPT (decision 0005 §2): a task that ran alone becomes the child of a NEW task in a workflow
+   * that mounts its state — mirror rows in the parent's journal, nothing copied. With `dryRun` it
+   * changes nothing and answers with the same shape, so a hover can say what a drop will do. A
+   * refusal is an ANSWER (`ok: false`), not a rejection: schema misfit, a hole, a missing input.
+   */
+  "task:adopt": { request: TaskAdoptRequest; response: TaskAdoptResult };
+  /** "From a task…": the earlier tasks' outputs that fit each slot's schema. */
+  "task:inputSources": { request: InputSourcesRequest; response: InputSourcesResponse };
   /** A task's merge requests, for the gate's remote strip (decision 0004). Reads nothing from the forge. */
   "remote:status": { request: { taskId: string; project?: ProjectRef }; response: RemoteStatusView[] };
   /** "Check now": read the forge for this task's awaited requests, then answer as `remote:status` does. */
@@ -1913,6 +1936,8 @@ export const IPC_CHANNELS = [
   "userEvent:pending",
   "userEvent:deliver",
   "task:move",
+  "task:adopt",
+  "task:inputSources",
   "remote:status",
   "remote:check",
   "remote:reply",

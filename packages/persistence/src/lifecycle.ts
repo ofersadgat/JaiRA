@@ -9,7 +9,7 @@ import { ApprovalRequired, approvalRefusalMessage, refusal } from "@jaira/shared
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./toolsets";
-import { newTaskId, isStartableStatus, type Holding, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
+import { newTaskId, isStartableStatus, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } from "./documents";
 import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
@@ -30,6 +30,8 @@ export interface CreateTaskInput {
   description?: string;
   labels?: string[];
   inputs?: Record<string, JsonValue>;
+  /** How each input was settled — see `TaskMeta.inputProvenance`. */
+  inputProvenance?: Record<string, InputProvenance>;
   branch?: string;
   parentTaskId?: string;
   /** How a fan-out made this task, when one did — see `TaskMeta.origin`. */
@@ -62,6 +64,7 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
     ...(input.description !== undefined ? { description: input.description } : {}),
     ...(input.labels !== undefined ? { labels: input.labels } : {}),
     ...(input.inputs !== undefined ? { inputs: input.inputs } : {}),
+    ...(input.inputProvenance !== undefined && Object.keys(input.inputProvenance).length > 0 ? { inputProvenance: input.inputProvenance } : {}),
     ...(input.branch !== undefined ? { branch: input.branch } : {}),
     ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
     ...(input.origin !== undefined ? { origin: input.origin } : {}),
@@ -244,6 +247,43 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
     hash = snap.hash;
     dir = snap.dir;
   } else {
+    const fresh = await pinWorkflow(project, meta.workflow, options.functions ? { functions: options.functions } : {});
+    bundle = fresh.bundle;
+    hash = fresh.hash;
+    dir = fresh.dir;
+  }
+
+  project.db.transaction(() => {
+    // A version picked up is journaled BEFORE the stretch that runs under it, so every row after it
+    // — and every record those rows name — says which version it ran under by where it sits.
+    if (pin?.documentId !== undefined && pin.snapshotHash !== runtime.snapshotHash) {
+      recordVersionPickUp(project, taskId, pin, runtime.snapshotHash !== undefined ? versionAt(project, taskId) : undefined, nowMs);
+    }
+    // `beginTask` pins the snapshot, stamps when execution started, and clears how the last
+    // stretch ended — one machine, one row (Identity and Resume §05).
+    project.runtime.beginTask(taskId, hash, nowMs);
+    project.runtime.setStatus(taskId, "running", nowMs);
+  })();
+
+  return { meta, bundle, snapshotHash: hash, snapshotDir: dir, pinned };
+}
+
+/**
+ * Read a workflow off disk, validate it, FREEZE the modules it reaches and snapshot it — what a
+ * task's first start pins, as its own step.
+ *
+ * Separate from {@link beginTaskRun} because one caller pins BEFORE there is a run: an adoption
+ * (decision 0005 §2) writes mirror rows into a new task's journal, and a task with a journal is
+ * continued, never started fresh — so its snapshot has to be on its row when the rows are, or the
+ * load that follows has no definition to read the rows against.
+ */
+export async function pinWorkflow(
+  project: Project,
+  workflow: string,
+  options: Pick<BeginRunOptions, "functions"> = {},
+): Promise<{ bundle: WorkflowBundle; hash: string; dir: string }> {
+  let bundle: WorkflowBundle;
+  {
     // Unreadable files are collected rather than thrown: only the root's transitive
     // closure matters, so one half-saved scratch file elsewhere must not block every
     // task start. If the load then fails, they are reported with it — a missing
@@ -264,7 +304,7 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
     try {
       bundle = loadWorkflowBundle(
         files,
-        meta.workflow,
+        workflow,
         workflowLoadOptions(project.paths, {
           vfs,
           path: project.config.workflows.path,
@@ -282,27 +322,11 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
     const report = validateBundle(bundle, options.functions ? { functions: options.functions } : {});
     if (report.errors.length > 0) {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
-      throw refusal(log, `workflow validation failed for '${meta.workflow}':\n  ${detail}`);
+      throw refusal(log, `workflow validation failed for '${workflow}':\n  ${detail}`);
     }
     const snap = await snapshotWithModules(project, bundle);
-    hash = snap.hash;
-    dir = snap.dir;
-    bundle = snap.bundle;
+    return { bundle: snap.bundle, hash: snap.hash, dir: snap.dir };
   }
-
-  project.db.transaction(() => {
-    // A version picked up is journaled BEFORE the stretch that runs under it, so every row after it
-    // — and every record those rows name — says which version it ran under by where it sits.
-    if (pin?.documentId !== undefined && pin.snapshotHash !== runtime.snapshotHash) {
-      recordVersionPickUp(project, taskId, pin, runtime.snapshotHash !== undefined ? versionAt(project, taskId) : undefined, nowMs);
-    }
-    // `beginTask` pins the snapshot, stamps when execution started, and clears how the last
-    // stretch ended — one machine, one row (Identity and Resume §05).
-    project.runtime.beginTask(taskId, hash, nowMs);
-    project.runtime.setStatus(taskId, "running", nowMs);
-  })();
-
-  return { meta, bundle, snapshotHash: hash, snapshotDir: dir, pinned };
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   initialRunValues,
   instanceAt,
   isFilled,
+  keptSources,
   missingOf,
   newestRunOf,
   runBlocker,
@@ -26,6 +27,11 @@ import {
   runTargetOf,
   runTitle,
   runValuesOf,
+  settledMarkOf,
+  sourceIdOf,
+  sourceOptionsOf,
+  sourceRefOf,
+  sourceSlotsOf,
   workflowLayerOf,
   workflowMimeOf,
   type RunContext,
@@ -559,5 +565,64 @@ describe("finding a state's layer", () => {
     // disk, which is what makes an unlisted state readable at all.
     expect(workflowLayerOf(WORKFLOWS, "nobody/knows")).toBe("project");
     expect(workflowLayerOf([], "feature")).toBe("project");
+  });
+});
+
+describe("a slot taken from a task (decision 0005 §2)", () => {
+  const FIELDS = runFieldsOf(
+    JSON.stringify({
+      inputs: {
+        brief: { schema: { type: "string", minLength: 1 } },
+        plan: { schema: "$/types/plan" },
+        note: { schema: { type: "string" }, optional: true },
+      },
+    }),
+    WORKFLOW_JSON,
+  )!;
+  const FROM = { brief: { taskId: "t-aaaaaaaaaa", output: "brief" } };
+
+  it("asks about the slots whose schema it can read, and not about a linked type", () => {
+    expect(sourceSlotsOf(FIELDS)).toEqual([
+      { key: "brief", schema: { type: "string", minLength: 1 } },
+      { key: "note", schema: { type: "string" } },
+    ]);
+  });
+
+  it("sends a sourced slot as a source and never as a value, and neither checks it nor calls it missing", () => {
+    const values = { brief: "", note: "n" };
+    expect(runInputsOf(FIELDS, values, FROM)).toEqual({ note: "n" });
+    expect(runChecksOf(FIELDS, values, FROM).map((c) => c.path)).toEqual(["note"]);
+    expect(missingOf(FIELDS, { note: "n" }, FROM)).toEqual([{ path: "plan", message: "required" }]);
+    // With nothing sourced the required slot is back to being the form's to fill.
+    expect(missingOf(FIELDS, { note: "n" }).map((e) => e.path)).toEqual(["brief", "plan"]);
+  });
+
+  it("names an option by its task and output, round-trips its id, and says when the task is still on its way", () => {
+    const options = sourceOptionsOf([
+      { taskId: "t-aaaaaaaaaa", title: "Product", status: "completed", workflow: "feat/product", output: "brief", preview: "the brief", pending: false },
+      { taskId: "t-bbbbbbbbbb", title: "Other", status: "running", workflow: "feat/product", output: "brief", pending: true },
+    ]);
+    expect(options).toEqual([
+      { id: "t-aaaaaaaaaa#brief", label: "Product · brief", note: "the brief" },
+      { id: "t-bbbbbbbbbb#brief", label: "Other · brief", note: "running — the new task waits for it to complete" },
+    ]);
+    expect(sourceRefOf(sourceIdOf(FROM.brief))).toEqual(FROM.brief);
+    expect(sourceOptionsOf(undefined)).toEqual([]);
+  });
+
+  it("drops a pick the main process no longer offers", () => {
+    const offered = { brief: [{ taskId: "t-aaaaaaaaaa", title: "P", status: "completed" as const, workflow: "w", output: "brief", pending: false }] };
+    expect(keptSources(FROM, offered)).toEqual(FROM);
+    expect(keptSources(FROM, { brief: [] })).toEqual({});
+    expect(keptSources(FROM, undefined)).toEqual({});
+  });
+
+  it("says how a recorded value was settled, naming the task a bound one came from", () => {
+    const titleOf = (id: string): string | undefined => (id === "t-aaaaaaaaaa" ? "Product" : undefined);
+    expect(settledMarkOf(undefined, titleOf)).toBeUndefined();
+    expect(settledMarkOf({ via: "bound" }, titleOf)).toEqual({ via: "bound", note: "bound — the workflow's wiring resolved it" });
+    expect(settledMarkOf({ via: "bound", from: { taskId: "t-aaaaaaaaaa", output: "brief" } }, titleOf)).toEqual({ via: "bound", note: "bound — from Product · brief" });
+    expect(settledMarkOf({ via: "inferred", confidence: 0.78 }, titleOf)).toEqual({ via: "inferred", confidence: 0.78, note: "inferred — a conversation supplied it" });
+    expect(settledMarkOf({ via: "asked" }, titleOf)?.via).toBe("asked");
   });
 });

@@ -170,6 +170,34 @@ export function conversationView(project: Project, taskId: string, options: Conv
         // id is the task's id, and the task's provenance is what confirms the join.
         if (isMadeRow(project, taskId, event.instanceId)) {
           madeIds.add(event.instanceId);
+          // An ADOPTION (decision 0005 §2) has no batch row to draw its line from — it was never an
+          // element — so the mirrored entry is the line: "adopted [title] · standing", at the child
+          // it stands for. The task's standing is read now, as a batch's is.
+          if ((event as { adopted?: boolean }).adopted === true) {
+            const adopted = project.tasks.tryRead(event.instanceId);
+            turns.push({
+              seq,
+              at,
+              kind: "made",
+              stateId: event.stateId,
+              ...mountedAt(under(event.parentInstanceId, event.childKey)),
+              ...(event.parentInstanceId !== undefined ? { instanceId: event.parentInstanceId } : {}),
+              made: {
+                kind: "adopt",
+                runs: [
+                  {
+                    taskId: event.instanceId,
+                    element: 0,
+                    title: adopted?.title ?? event.instanceId,
+                    status: project.runtime.get(event.instanceId)?.status ?? "queued",
+                    holding: adopted !== undefined ? holdingOf(project, adopted).length : 0,
+                    self: false,
+                    waitsFor: (meta?.dependsOn ?? []).includes(event.instanceId),
+                  },
+                ],
+              },
+            });
+          }
           break;
         }
         turns.push({ seq, at, kind: "entered", stateId: event.stateId, ...at_(event.instanceId) });

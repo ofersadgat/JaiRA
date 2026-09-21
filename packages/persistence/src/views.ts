@@ -9,9 +9,9 @@
 import { createLogger } from "@declarative-ai/log";
 import { isTaskId, refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import type { StateDef, WorkflowBundle } from "@declarative-ai/hw";
+import type { EngineEvent, StateDef, WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./toolsets";
-import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskMeta, TaskOrigin, TaskSummary, TimelineEntry } from "@jaira/shared";
+import type { BoardView, InputProvenance, InputSettledVia, InstanceAddress, InstanceNode, TaskDetail, TaskMeta, TaskOrigin, TaskSummary, TimelineEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import type { TaskRuntimeRow } from "./runtime";
 import { holdingOf } from "./lifecycle";
@@ -107,7 +107,8 @@ export function taskOriginOf(project: Project, row: TaskRuntimeRow, meta?: TaskM
       at: row.forkedAtSeq ?? 0,
       boundary: row.forkBoundarySeq ?? 0,
       boundaryAt: boundary?.created_at ?? 0,
-      label: `element ${made.index + 1} of ${made.key}${made.item !== undefined ? ` (${made.item})` : ""}`,
+      // An adoption (decision 0005 §2) was no element of anything: it stands for the child itself.
+      label: made.kind === "adopt" ? `as ${made.key}` : `element ${made.index + 1} of ${made.key}${made.item !== undefined ? ` (${made.item})` : ""}`,
     };
   }
   if (row.parentTaskId === undefined || row.forkedAtSeq === undefined || row.forkBoundarySeq === undefined) return undefined;
@@ -536,11 +537,56 @@ function markMade(project: Project, taskId: string, nodes: readonly InstanceNode
   }
 }
 
+/**
+ * Stamp how each instance's inputs were SETTLED (decision 0005 §4) — see `InstanceNode.inputProvenance`.
+ *
+ * Three sources, and the journal plus the task's file hold all of them. The ROOT's inputs are the
+ * task's own, and its file says how each was settled; a file written before provenance was recorded
+ * says nothing, and then a task a fan-out made was bound by the wire that made it and any other was
+ * typed into a form. A CHILD's inputs are bound — the parent's wiring resolved them, which is what
+ * entering a child is — except the ones a DIRECTED transition handed it (`transition.taken` with
+ * `by` and `inputs`): those came from whoever moved the task, a person or a conversation.
+ */
+function markProvenance(project: Project, taskId: string, nodes: readonly InstanceNode[], events: readonly EngineEvent[]): void {
+  const meta = project.tasks.tryRead(taskId);
+  /** Inputs a directed transition handed the NEXT entry of `to` under an instance, by parent and key. */
+  const handed = new Map<string, { via: InputSettledVia; names: string[] }>();
+  const directed = new Map<string, { via: InputSettledVia; names: Set<string> }>();
+  const sep = String.fromCharCode(0);
+  for (const event of events) {
+    if (event.type === "transition.taken" && event.by !== undefined && event.inputs !== undefined) {
+      handed.set(`${event.instanceId}${sep}${event.to}`, { via: event.by === "control" ? "inferred" : "asked", names: Object.keys(event.inputs) });
+    } else if (event.type === "instance.entered" && event.parentInstanceId !== undefined && event.childKey !== undefined) {
+      const key = `${event.parentInstanceId}${sep}${event.childKey}`;
+      const gift = handed.get(key);
+      if (gift === undefined) continue;
+      handed.delete(key);
+      directed.set(event.instanceId, { via: gift.via, names: new Set(gift.names) });
+    }
+  }
+  const walk = (list: readonly InstanceNode[], isRoot: boolean): void => {
+    for (const node of list) {
+      const names = Object.keys(node.inputs ?? {});
+      if (names.length > 0) {
+        const out: Record<string, InputProvenance> = {};
+        for (const name of names) {
+          if (isRoot) out[name] = meta?.inputProvenance?.[name] ?? { via: meta?.origin !== undefined && meta.origin.kind !== "adopt" ? "bound" : "asked" };
+          else out[name] = directed.get(node.instanceId)?.names.has(name) === true ? { via: directed.get(node.instanceId)!.via } : { via: "bound" };
+        }
+        node.inputProvenance = out;
+      }
+      walk(node.children, false);
+    }
+  };
+  walk(nodes, true);
+}
+
 export function taskRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
   const { events, atMs } = eventsOf(project.events.list(taskId));
   if (events.length === 0) return { instances: [], activePath: [], blocked: [] };
   const projected = projectRun(events, shape, atMs);
   markMade(project, taskId, projected.instances);
+  markProvenance(project, taskId, projected.instances, events);
   if (projected.instances.length <= 1) return projected;
   // Several parentless trees is history's shape, not the machine's: an in-place restart before
   // re-runs minted tasks grew one per attempt. The NEWEST is the task's own — the same rule the

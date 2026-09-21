@@ -71,11 +71,7 @@
 .gate-settled-by .grow {
   flex: 1;
 }
-.conf {
-  font-family: var(--font-data);
-  font-size: calc(var(--size-app) * 11 / 12.5);
-  color: var(--dim);
-}
+/* `.conf` moved into styles.css with steps 2-3 (the confidence beside an inferred value). */
 
 /* The fast-forward strip is the activity strip with a destination and a way past it. */
 .run-doing.ffwd b + .run-doing-cut {
@@ -87,23 +83,7 @@
   color: var(--dim);
 }
 
-/* Where an input's value came from. */
-.prov {
-  flex: none;
-  padding: 0 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font: 600 calc(var(--size-app) * 10 / 12.5) / 1.6 var(--font-data);
-  color: var(--dim);
-}
-.prov-inferred {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
-  color: var(--accent);
-}
-.prov-asked {
-  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
-  color: var(--warn);
-}
+/* `.prov`, `.prov-inferred` and `.prov-asked` moved into styles.css with steps 2-3. */
 
 /* Board: an adopted task under its parent. */
 .card.card-child {

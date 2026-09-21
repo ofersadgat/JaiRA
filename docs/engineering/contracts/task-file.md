@@ -2,7 +2,7 @@
 id: engineering/contracts/task-file
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 visibility: public
 kind: format
 owned_by: [engineering/units/task-lifecycle]
@@ -35,10 +35,11 @@ The file is `.jaira/system/tasks/<taskId>.json` in a project and `system/tasks/<
 | `createdAt` | string, ISO 8601 | yes | when the task was created |
 | `description` | string | no | free text |
 | `labels` | string array | no | free labels; `jaira run` writes `["adhoc"]` |
-| `inputs` | object of JSON values | no | the root inputs, fixed at creation and bound as the run's inputs |
+| `inputs` | object of JSON values | no | the root inputs, fixed at creation and bound as the run's inputs; an input owed by a source task is absent until the task starts |
+| `inputProvenance` | object of `{via, confidence?, from?}` | no | per input name, how it was settled: `via` is `bound`, `inferred` or `asked`; `confidence` is a conversation's; `from` is `{taskId, output?, input?}`, the task a bound value came from |
 | `branch` | string | no | the branch a worktree is cut for; refused at creation on the shared root |
-| `parentTaskId` | string | no | the task this one reran, was forked from, or was made by in a fan-out |
-| `origin` | object | no | how a fan-out made the task |
+| `parentTaskId` | string | no | the task this one reran, was forked from, was made by in a fan-out, or was adopted by |
+| `origin` | object | no | how a fan-out made the task, or which task adopted it |
 | `split` | array of `{expr: string, index: number}` | no | one entry per `each: "split"` list the task is split on: the wire's expression verbatim and this task's element index; omitted when empty |
 | `dependsOn` | string array | no | ids of tasks that must complete before this one starts; omitted when empty |
 
@@ -46,13 +47,14 @@ The file is `.jaira/system/tasks/<taskId>.json` in a project and `system/tasks/<
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `origin.kind` | `"split"` or `"task"` | yes | `split`: a copy of the parent standing at the mount; `task`: a fresh task rooted at the mounted state |
-| `origin.taskId` | string | yes | the task whose list made this one |
+| `origin.kind` | `"split"`, `"task"` or `"adopt"` | yes | `split`: a copy of the parent standing at the mount; `task`: a fresh task rooted at the mounted state; `adopt`: a task that ran alone and was taken up afterwards ([adoption](../units/adoption.md)) |
+| `origin.taskId` | string | yes | the task whose list made this one, or the task that adopted it |
 | `origin.key` | string | yes | the mount's child key in that task |
 | `origin.occurrence` | number | no | which entry of the mount made the batch; absent reads as 0 |
 | `origin.index` | number | yes | the element's position in the list |
 | `origin.item` | string | no | the element's own id, when the wire named an id field |
 | `origin.start` | `"manual"` or `"when_ready"` | no | for a split, who starts the task once its dependencies complete; absent reads as `when_ready` |
+| `origin.formerParentTaskId` | string | no | for an adoption, the `parentTaskId` the task had before, put back when it is un-adopted |
 
 ## Errors are thrown by every reader, and a list stops at the first bad file
 
@@ -81,3 +83,5 @@ The file is `.jaira/system/tasks/<taskId>.json` in a project and `system/tasks/<
 - A `dependsOn` id with no row is not waited for.
 - A summary's `createdAt` comes from the file, while `task:list` order comes from the row's `created_at`.
 - A task that splits rewrites its own `split`, `title` and `dependsOn` once per list, while it runs.
+- An adoption rewrites the adopted task's `parentTaskId` and `origin`, and a rewind of the parent past the mirror row removes them again. `worktrees.ts` reads `origin.kind: "task"` alone, so an adopted task keeps its own workspace.
+- `inputProvenance` is written at creation and when an owed input is read. A file without it projects a fan-out-made task's inputs as `bound` and any other's as `asked`.

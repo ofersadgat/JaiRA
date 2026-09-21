@@ -25,7 +25,7 @@
  * left here is which element draws it.
  */
 import { useId, useState, type JSX, type KeyboardEvent } from "react";
-import { Chip, Field, FieldGrid, NumberText, Switch, TextArea, TextInput } from "../controls";
+import { Chip, Field, FieldGrid, NumberText, SelectInput, Switch, TextArea, TextInput } from "../controls";
 import { jsonTextOf, jsonValueOf } from "../jsonText";
 import {
   branchesOf,
@@ -279,7 +279,12 @@ function Member({
   const [index, pick] = useShape(shapes, value, root);
   const reading = ctx.reading === true;
   const disabled = ctx.disabled === true;
-  const on = reading || required ? true : ctx.isSet !== undefined ? ctx.isSet(path) : value !== undefined;
+  // Somewhere else the value can come from (`SchemaFormContext.sources`), and whether it does.
+  const options = reading ? undefined : ctx.sources?.optionsFor(path);
+  const offered = options !== undefined && options.length > 0;
+  const sourced = offered ? ctx.sources!.picked(path) : undefined;
+  const settled = ctx.provenance?.(path);
+  const on = reading || required || sourced !== undefined ? true : ctx.isSet !== undefined ? ctx.isSet(path) : value !== undefined;
   // The cycle guard has to see a reference this member expands ITSELF — a union's branch is handed on
   // without it, and a schema that refers to itself through a union would otherwise never stop.
   const ref = typeof declared["$ref"] === "string" ? (declared["$ref"] as string) : undefined;
@@ -302,9 +307,9 @@ function Member({
       mono={ctx.labels === "keys"}
       param={ctx.labels === "keys" || ctx.hidePaths === true ? undefined : path}
       {...(pres.tooltip !== undefined ? { hint: pres.tooltip } : {})}
-      error={on ? errorAt(ctx, path) : undefined}
+      error={on && sourced === undefined ? errorAt(ctx, path) : undefined}
       lead={
-        !required && !reading ? (
+        !required && !reading && sourced === undefined ? (
           // In a layered form this switch IS the "set here" mark — it says whether this layer states
           // the value — so the tag is not drawn beside it as well.
           <Switch
@@ -333,7 +338,30 @@ function Member({
             </b>
           ) : null}
           {hint.length > 0 ? <span className="sf-type">{hint}</span> : null}
-          {shapes !== undefined && on && !reading ? (
+          {settled !== undefined ? (
+            <>
+              <span className={`prov prov-${settled.via}`} {...(settled.note !== undefined ? { title: settled.note } : {})}>
+                {settled.via}
+              </span>
+              {settled.confidence !== undefined ? <span className="conf">{settled.confidence.toFixed(2)}</span> : null}
+            </>
+          ) : null}
+          {offered ? (
+            <span className="sf-pick" role="group" aria-label="where the value comes from">
+              <Chip
+                active={sourced !== undefined}
+                disabled={disabled}
+                title={sourced !== undefined ? "type the value instead" : "take the value from somewhere else"}
+                onClick={() => {
+                  ctx.touch?.(path);
+                  ctx.sources!.pick(path, sourced !== undefined ? undefined : options![0]!.id);
+                }}
+              >
+                {ctx.sources!.label}
+              </Chip>
+            </span>
+          ) : null}
+          {shapes !== undefined && on && !reading && sourced === undefined ? (
             <ShapeChips
               branches={shapes}
               index={index}
@@ -347,7 +375,21 @@ function Member({
         </>
       }
     >
-      {!on ? (
+      {sourced !== undefined ? (
+        // The value is somebody else's to produce: the control is the choice of WHOSE, and what it
+        // holds is said beneath it rather than copied into a box that could then be edited.
+        <>
+          <SelectInput
+            value={sourced}
+            options={options!.map((option): [string, string] => [option.label, option.id])}
+            disabled={disabled}
+            onChange={(id) => ctx.sources!.pick(path, id)}
+          />
+          {options!.find((option) => option.id === sourced)?.note !== undefined ? (
+            <div className="sf-absent">{options!.find((option) => option.id === sourced)!.note}</div>
+          ) : null}
+        </>
+      ) : !on ? (
         <div className="sf-absent">{unsetNoteOf(ctx, path, node, value)}</div>
       ) : (
         <SchemaForm schema={body} value={value} onChange={onSet} ctx={bodyCtx} containerType={node["$type"] as string | undefined} />
@@ -359,7 +401,7 @@ function Member({
   // above it: squeezed into the right-hand rail of a two-column field, its rows are unreadable.
   const block =
     widgetFor(node["$type"] as string | undefined) !== undefined ||
-    (on && (isObjectSchema(held) || isArraySchema(held) || leafControlOf(held) === "multiline"));
+    (on && sourced === undefined && (isObjectSchema(held) || isArraySchema(held) || leafControlOf(held) === "multiline"));
   if (!block) return field;
   return <div className={isArraySchema(held) || leafControlOf(held) === "multiline" ? "cfg-span cfg-block" : "cfg-span"}>{field}</div>;
 }

@@ -107,7 +107,7 @@ import { GalleryPane } from "./galleryPane";
 import { ProvidersPane } from "./providersPane";
 import { IntegrationsPane } from "./integrationsPane";
 import { ExecutorsPane } from "./executorsPane";
-import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf } from "./runForm";
+import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf, settledMarkOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView, TaskContext } from "./runViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
@@ -1179,10 +1179,16 @@ export default function App(): JSX.Element {
      */
     const run = state.taskWorkflowRun === null ? null : nodeAt(detail?.instances ?? [], state.taskWorkflowRun);
     const called = run?.inputs;
+    // How each value was settled (decision 0005 §4) — said only while the boxes still hold what the
+    // run was called with. Once something is typed over them the form is a question about the NEXT
+    // run, and a mark saying where a value came from would be about a value no longer on screen.
+    const recorded = state.runValues[stateId] === undefined ? run?.inputProvenance : undefined;
+    const titleOf = (taskId: string): string | undefined => [...state.tasks, ...state.sharedTasks].find((task) => task.taskId === taskId)?.title;
     return {
       fields,
       values:
         state.runValues[stateId] ?? (called !== undefined ? runValuesOf(fields ?? [], called) : initialRunValues(fields ?? [])),
+      ...(recorded !== undefined ? { provenance: (path: string) => settledMarkOf(recorded[path], titleOf) } : {}),
       target: {
         ...(project !== null && project !== state.at ? { project } : {}),
         label: summary?.label ?? projectName(project),
@@ -1806,10 +1812,11 @@ export default function App(): JSX.Element {
                       // own state, so it is the popover that looks the two up.
                       forms={state.workflowForms}
                       values={state.runValues}
+                      sources={state.inputSources}
                       busy={state.busy}
                       onPick={actions.pickWorkflow}
                       onChange={actions.setRunValues}
-                      onCreate={(workflow, inputs) => void actions.createTask(workflow, inputs)}
+                      onCreate={(workflow, inputs, sources) => void actions.createTask(workflow, inputs, sources)}
                     />
                   ) : null}
                 </>
