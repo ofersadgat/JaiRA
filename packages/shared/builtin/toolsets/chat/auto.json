@@ -1,0 +1,12 @@
+{
+  "read_file": "smart",
+  "glob": "smart",
+  "grep": "smart",
+  "edit": "smart",
+  "write_file": "smart",
+  "show_artifact": "smart",
+  "bash": "smart",
+  "web_fetch": "smart",
+  "web_search": "smart",
+  "other": "smart"
+}

@@ -373,7 +373,7 @@ export interface FileSurfaceContext {
   onRunQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
   /** The command approval a running agent in this task is waiting on, hosted the same way. */
   runApproval?: PendingApproval | undefined;
-  onRunApproval?: ((decision: "allow" | "deny", scope: ApprovalScope) => void) | undefined;
+  onRunApproval?: ((decision: "allow" | "deny", scope: ApprovalScope, extras?: { remember?: string[]; addTo?: WritableLayer }) => void) | undefined;
   onAnswer?: (() => void) | undefined;
   /**
    * Set this run going again — `task:rerun`, and the shell's own action rather than a raw call.

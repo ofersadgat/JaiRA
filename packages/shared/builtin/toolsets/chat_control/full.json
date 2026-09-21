@@ -1,0 +1,11 @@
+{
+  "workflows": "allow",
+  "start": "allow",
+  "move": "allow",
+  "tasks": "allow",
+  "answer": "allow",
+  "hold": "allow",
+  "release": "allow",
+  "stop": "allow",
+  "other": "deny"
+}

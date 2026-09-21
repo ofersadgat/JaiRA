@@ -426,8 +426,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "interaction:submit": ((request: { requestId: string; value: never }) =>
     service.submitInteraction(request.requestId, request.value)) as Handler,
   "approval:pending": (() => service.pendingApprovals()) as Handler,
-  "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never; remember?: string[] }) =>
-    service.submitApproval(request.requestId, request.decision, request.scope, request.remember)) as Handler,
+  "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never; remember?: string[]; addTo?: "project" | "base" }) =>
+    service.submitApproval(request.requestId, request.decision, request.scope, request.remember, request.addTo)) as Handler,
   "userEvent:pending": (() => service.pendingUserEvents()) as Handler,
   "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
   "task:move": ((request: TaskMoveRequest) => service.moveTask(request)) as Handler,
@@ -476,6 +476,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>
     service.reviewSyncChangeset(request)) as Handler,
   "file:write": ((request: Parameters<typeof service.writeFile>[0]) => service.writeFile(request)) as Handler,
+  "toolset:save": ((request: Parameters<typeof service.saveToolset>[0]) => service.saveToolset(request)) as Handler,
   "file:create": ((request: Parameters<typeof service.createFile>[0]) => service.createFile(request)) as Handler,
   "file:rename": ((request: Parameters<typeof service.renameFile>[0]) => service.renameFile(request)) as Handler,
   "file:delete": ((request: Parameters<typeof service.deleteFile>[0]) => service.deleteFile(request)) as Handler,

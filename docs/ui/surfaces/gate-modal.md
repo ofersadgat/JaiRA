@@ -39,7 +39,7 @@ Only one card shows at a time. A [module approval dialog](module-approval-dialog
 ## A command approval arrives by itself and leaves only when it is answered
 
 - The card appears over any room, Settings included, the moment an agent's call with no task is held by policy. The inbox strip lists it too, and choosing that entry does nothing, because the card is already on screen.
-- `Allow once`, `Allow for this run`, `Always allow` or `Deny` answers it. The card and scrim go and the room behind is exactly as it was.
+- `Allow` or `Deny`, or a reach chosen from the arrow beside either, answers it. The card and scrim go and the room behind is exactly as it was.
 - Escape does not close it, a click on the scrim does nothing, and there is no close button. Closing the project it belongs to denies the command and removes the card.
 - On the Components view the card is part of a variant's stage. Answering records the result under the card, which stays.
 

@@ -372,7 +372,7 @@ function agentToolWiring(settings: ChatSettings): {
   // tools is exactly the one that gets asked for a mockup. See `ToolSpec.alwaysGranted`.
   if (!declaresTools(settings)) return { environment: { tools: [...ALWAYS_GRANTED_TOOLS] }, config: {} };
   // ONE map, whichever way the settings spelled it — a toolset, or the list, the block and the
-  // implementations map the composer still writes (`toolsetOfSettings`).
+  // implementations map an inherited declaration arrives as (`toolsetOfSettings`).
   const plan = planAgentTools(toolsetOfSettings(settings).toolset);
   // The scope table, compiled into the agent's own rules, so its built-ins are bounded UP FRONT
   // rather than one callback at a time. Our gate stays underneath for what rules cannot express.

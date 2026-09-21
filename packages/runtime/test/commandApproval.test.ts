@@ -13,13 +13,14 @@ import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 
 const TOOLSET = { bash: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", other: "deny" } as const;
 
-function harness() {
+function harness(source?: string) {
   const asked: ApprovalRequest[] = [];
   const hub = new ApprovalHub({ onRequest: (request) => void asked.push(request) });
   const audit: PolicyAuditEntry[] = [];
   const policy = compilePolicy({}, { execEnv: { wsl: "test" }, grants: hub.grants("t1"), onDecision: (e) => audit.push(e) });
   // What a loaded state holds: the list and the lowered block, whichever form its author wrote.
-  const block = lowerToolset(parseToolset(TOOLSET).toolset).permissions!;
+  // `source` is what lowering a STATE writes beside the subjects: the reference its toolset was named by.
+  const block = { ...lowerToolset(parseToolset(TOOLSET).toolset).permissions!, ...(source !== undefined ? { source } : {}) };
   const ran: string[] = [];
   const bash: Tool = {
     description: "shell",
@@ -110,6 +111,22 @@ describe("an approval for a shell line", () => {
     // …and a new run starts with nothing remembered.
     hub.allow("t1");
     expect(hub.grants("t1").list()).toEqual({});
+  });
+
+  it("says WHICH toolset judged the line: the reference the state named it by, or `inline` for a map with no file", async () => {
+    const named = harness("$/toolsets/feature/implementation/writes-asking");
+    const first = named.run("git commit -m wip");
+    await Promise.resolve();
+    expect(named.asked[0]!.parts!.toolset).toBe("$/toolsets/feature/implementation/writes-asking");
+    named.hub.decide(named.asked[0]!.requestId, "deny");
+    await first;
+
+    const inline = harness();
+    const second = inline.run("git commit -m wip");
+    await Promise.resolve();
+    expect(inline.asked[0]!.parts!.toolset).toBe("inline");
+    inline.hub.decide(inline.asked[0]!.requestId, "deny");
+    await second;
   });
 
   it("asks about a line it cannot read, and that answer cannot be remembered", async () => {

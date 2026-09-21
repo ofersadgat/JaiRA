@@ -70,6 +70,7 @@ import type {
   TaskSummary,
   WorkflowEntry,
   WorkflowLayer,
+  WritableLayer,
   WorkflowSource,
   RendererChoice,
   RendererEdit,
@@ -3275,9 +3276,21 @@ export function useApp() {
        * Answer a per-command approval. `scope` is why a user is not asked the same
        * question on every tool call (DESIGN §10.2).
        */
-      decideApproval: async (requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once") => {
+      decideApproval: async (
+        requestId: string,
+        decision: "allow" | "deny",
+        scope: ApprovalScope = "once",
+        /** The part widths to remember, and the layer to write them into (decision 0007 §4). */
+        extras: { remember?: string[]; addTo?: WritableLayer } = {},
+      ) => {
         try {
-          await invoke("approval:submit", { requestId, decision, scope });
+          await invoke("approval:submit", {
+            requestId,
+            decision,
+            scope,
+            ...(extras.remember !== undefined ? { remember: extras.remember } : {}),
+            ...(extras.addTo !== undefined ? { addTo: extras.addTo } : {}),
+          });
         } catch (e) {
           fail(e);
         }

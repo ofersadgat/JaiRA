@@ -357,7 +357,8 @@ describe("lowering a state file", () => {
     expect(issues).toEqual([]);
     expect(def).toEqual({
       environment: { model: "m", tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "allow", ...TOOLSET_MARKERS }, other: "deny" } },
-      operation: { kind: "prompt", prompt: "go", tools: ["bash"], permissions: { tools: { bash: "smart", ...TOOLSET_MARKERS }, subjects: { bash: "smart", "git status": "allow" } } },
+      // `source` is written beside `subjects`, and only there: where a shell line's subjects came from.
+      operation: { kind: "prompt", prompt: "go", tools: ["bash"], permissions: { tools: { bash: "smart", ...TOOLSET_MARKERS }, subjects: { bash: "smart", "git status": "allow" }, source: "inline" } },
       children: {
         review: {
           state: "./review",

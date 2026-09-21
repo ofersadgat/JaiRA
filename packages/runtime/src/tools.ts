@@ -376,9 +376,11 @@ export function gateTools(options: {
  * direction: a name here with nothing behind it is a permission somebody can grant and no tool can
  * honour.
  */
-export const JAIRA_TOOLS: readonly { name: string }[] = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true).map((spec) => ({
-  name: spec.name,
-}));
+export const JAIRA_TOOLS: readonly { name: string }[] = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true && spec.unserved !== true).map(
+  // `unserved`: a name a toolset may hold with nothing behind it YET (the workflow tools, decision
+  // 0005 §3). Not gateable until something registers it — which is exactly what this list means.
+  (spec) => ({ name: spec.name }),
+);
 
 /** Just the names — the shape most callers want. */
 export const JAIRA_TOOL_NAMES = JAIRA_TOOLS.map((t) => t.name);

@@ -109,6 +109,7 @@ function parsedDoc(text: string): { doc?: Record<string, unknown>; error?: strin
 /** A string field of a parsed document, when it is one. */
 const stringAt = (doc: Record<string, unknown>, key: string): string | undefined =>
   typeof doc[key] === "string" ? (doc[key] as string) : undefined;
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
 export interface ComponentGalleryProps {
   /** The schema check, over IPC — the store's, the same one every JSON editor in the app uses. */
@@ -441,13 +442,20 @@ function Stage({
       tool: stringAt(doc, "tool") ?? "Bash",
       ...(stringAt(doc, "command") !== undefined ? { command: stringAt(doc, "command")! } : {}),
       ...(stringAt(doc, "reason") !== undefined ? { reason: stringAt(doc, "reason")! } : {}),
+      // The parts and the toolset are the engine's own shapes, typed in whole: the gallery has no
+      // policy behind it to take a line apart, and a sample is the place to see exactly what one carries.
+      ...(isRecord(doc["parts"]) ? { parts: doc["parts"] as unknown as NonNullable<PendingApproval["parts"]> } : {}),
+      ...(isRecord(doc["toolset"]) ? { toolset: doc["toolset"] as unknown as NonNullable<PendingApproval["toolset"]> } : {}),
       input: (doc["input"] ?? {}) as Record<string, JsonValue>,
       project: GALLERY_PROJECT,
       at: 0,
     };
     return (
       <div className="inline-gate">
-        <ApprovalSurface pending={pending} onDecide={(decision, scope) => onResult({ value: { decision, scope } })} />
+        <ApprovalSurface
+          pending={pending}
+          onDecide={(decision, scope, extras) => onResult({ value: { decision, scope, ...(extras ?? {}) } as JsonValue })}
+        />
       </div>
     );
   }
