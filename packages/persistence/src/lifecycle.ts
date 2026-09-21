@@ -11,6 +11,7 @@ import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./toolsets";
 import { newTaskId, isStartableStatus, type Holding, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
+import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } from "./documents";
 import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
 import { nodeVfs } from "./vfs";
 import { workflowLoadOptions } from "./workflowRefs";
@@ -37,6 +38,11 @@ export interface CreateTaskInput {
   split?: SplitEntry[];
   /** Tasks that must complete before this one starts — see `TaskMeta.dependsOn`. */
   dependsOn?: string[];
+  /**
+   * The versioned frozen document this task runs (decision 0005 §3) — `workflow` is then the
+   * document's root id, and the task pins the document's latest version each time it loads.
+   */
+  documentId?: string;
   id?: string;
 }
 
@@ -69,6 +75,7 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
     // The re-run chain (Identity and Resume §05): a task minted as another's re-run points back at
     // it on its runtime row, where a query can walk it — the JSON meta carries it for people.
     ...(meta.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
+    ...(input.documentId !== undefined ? { documentId: input.documentId } : {}),
   });
   return meta;
 }
@@ -148,7 +155,13 @@ export interface BeginRunOptions {
  * comes to promise what the lifecycle then refuses.
  */
 export function hasJournalHistory(project: Project, taskId: string): boolean {
-  return project.db.prepare(`SELECT 1 FROM state_machine_events WHERE task_id = ? LIMIT 1`).get(taskId) !== undefined;
+  // A version pick-up (`documents.ts`) is the host's note about what the machine is ABOUT to run
+  // under, written before the engine says anything — so it is not the machine having said something.
+  return (
+    project.db
+      .prepare(`SELECT 1 FROM state_machine_events WHERE task_id = ? AND type != ? LIMIT 1`)
+      .get(taskId, WORKFLOW_VERSION_EVENT) !== undefined
+  );
 }
 
 /**
@@ -211,11 +224,16 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
   let hash: string;
   let dir: string;
   const pinned = runtime.snapshotHash !== undefined;
-  if (runtime.snapshotHash !== undefined) {
+  // What this task runs under NOW: the snapshot it pinned — or, for a task in a versioned document
+  // (decision 0005 §3), the document's LATEST version, which is how a modification reaches every
+  // task standing in it. A task loads rather than replays, so continuing under a later version is
+  // no more than being handed a root with another child in it.
+  const pin = currentPin(project, runtime);
+  if (pin !== undefined) {
     // No options: a snapshot stores the RESOLVED definition, so there is nothing left to resolve
     // and no root a reference could still need (EXPRESSIONS.md §11).
-    bundle = loadSnapshot(project.paths.snapshotsDir, runtime.snapshotHash);
-    hash = runtime.snapshotHash;
+    bundle = loadSnapshot(project.paths.snapshotsDir, pin.snapshotHash);
+    hash = pin.snapshotHash;
     dir = `${project.paths.snapshotsDir}/${hash}`;
   } else if (options.bundle !== undefined) {
     // Supplied whole: nothing to read, nothing to validate against a directory it was never in. It is
@@ -273,6 +291,11 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
   }
 
   project.db.transaction(() => {
+    // A version picked up is journaled BEFORE the stretch that runs under it, so every row after it
+    // — and every record those rows name — says which version it ran under by where it sits.
+    if (pin?.documentId !== undefined && pin.snapshotHash !== runtime.snapshotHash) {
+      recordVersionPickUp(project, taskId, pin, runtime.snapshotHash !== undefined ? versionAt(project, taskId) : undefined, nowMs);
+    }
     // `beginTask` pins the snapshot, stamps when execution started, and clears how the last
     // stretch ended — one machine, one row (Identity and Resume §05).
     project.runtime.beginTask(taskId, hash, nowMs);
@@ -294,7 +317,7 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
  * A workflow that reaches no module takes the early return and is snapshotted exactly as before,
  * digest key absent — which is what keeps every snapshot taken before this feature identical.
  */
-async function snapshotWithModules(
+export async function snapshotWithModules(
   project: Project,
   bundle: WorkflowBundle,
 ): Promise<{ hash: string; dir: string; bundle: WorkflowBundle }> {

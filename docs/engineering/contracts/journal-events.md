@@ -80,6 +80,20 @@ The vocabulary is `EngineEvent` in `@declarative-ai/hw` `ports.ts`. `failure` is
 
 What the fan-out host makes around `fanout.made` and its mirrored rows is [fan-out-host-answers](fan-out-host-answers.md).
 
+### A version pick-up is JaiRA's own row, and says which workflow version the rows after it ran under
+
+A task in a versioned frozen document ([workflow-snapshot](workflow-snapshot.md), [decision 0005](../decisions/0005-connect.md) §3) picks up the document's latest version each time it loads. `beginTaskRun` writes this row, in the table and the file, before the stretch that runs under the version, and only when the version changed:
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `type` | `"workflow.version"` | yes | not an engine event: the engine neither writes nor reads it, and it carries no `instanceId` |
+| `documentId` | string | yes | the frozen document |
+| `version` | integer | yes | the version picked up |
+| `snapshotHash` | string | yes | the snapshot that version is |
+| `previous` | `{snapshotHash, documentId?, version?}` | no | what the task ran under before; absent on the first start of a task made in the document. A `previous` with no `documentId` is the snapshot a real workflow's task ran under before it diverged |
+
+Every row after it, and every record those rows name, ran under that version until the next such row. `pinAt` in `documents.ts` is the read: the newest pick-up strictly before a seq, else what the first pick-up says came before it, else the task's own pin. A cut drops the row like any row with no instance at or past the point, which is what puts a rewound task back under the version current at its cut. `hasJournalHistory` does not count it, and `projectRun` and `buildTaskLoad` ignore it.
+
 ### A directed transition is a rule-less `transition.taken` that says who asked, and the rows after it say what it stepped over
 
 A person's move ([decision 0005](../decisions/0005-connect.md)) reaches the engine as a directed transition, and the engine writes these rows synchronously, in this order, before it interrupts anything:

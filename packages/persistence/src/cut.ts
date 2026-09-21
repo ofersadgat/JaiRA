@@ -62,6 +62,7 @@ import type { StoredEvent } from "./eventLog";
 import { appendRewound, effectiveLines, journalFileFor, journalFiles } from "./journalFile";
 import { ConversationLog, type NameRow, type RecordRow, type SessionRow } from "./conversationFile";
 import { createTask } from "./lifecycle";
+import { pinAt, type Pin } from "./documents";
 import { isFileBacked } from "./shadow";
 
 const log = createLogger("jaira.persistence.cut");
@@ -170,6 +171,23 @@ function journalOf(project: Project, taskId: string, seq: number, ofLiveTask = f
   return events;
 }
 
+/**
+ * What the task ran under at the cut (decision 0005 §3): the version its journal says was current
+ * just before `seq` — not the one it runs under now, which a later modification may have moved on.
+ *
+ * A rewound task goes back under it, so what it draws is the workflow as it was there; the load that
+ * follows picks up the document's latest version like any other load, and says so in the journal. A
+ * cut behind the row that moved the task INTO a document puts it back under the snapshot it had
+ * before, in no document at all: rewinding past a divergence un-diverges, as rewinding past a mirror
+ * row un-adopts. A fork's copy starts under the same answer.
+ */
+function pinAtCut(project: Project, taskId: string, events: readonly StoredEvent[], seq: number): Pin | undefined {
+  const row = project.runtime.get(taskId)!;
+  const standing: Pin | undefined =
+    row.snapshotHash === undefined ? undefined : { snapshotHash: row.snapshotHash, ...(row.documentId !== undefined ? { documentId: row.documentId } : {}) };
+  return pinAt(events, seq, standing);
+}
+
 /** Every record of a task at or after the cut — by the events that name them, and by doomed instance. */
 function doomedRecordsOf(project: Project, taskId: string, part: Partition): Set<string> {
   const ids = new Set(part.droppedRecords);
@@ -197,6 +215,8 @@ export function rewindTask(project: Project, taskId: string, seq: number, nowMs 
 
   const recordIds = doomedRecordsOf(project, taskId, part);
   const store = sessionStoreFor(project, { taskId });
+  const before = project.runtime.get(taskId)!;
+  const pin = pinAtCut(project, taskId, events, seq);
   let deletedRecords = 0;
   project.db.transaction(() => {
     // Conversations first: a seated record is cut from its conversation, which also takes every
@@ -242,6 +262,10 @@ export function rewindTask(project: Project, taskId: string, seq: number, nowMs 
     // A question parked past the cut is a question about a state that no longer ran.
     project.interactions.clearTask(taskId);
     project.runtime.markCut(taskId, nowMs);
+    // Back under the version that was current at the cut — see {@link pinAtCut}.
+    if (pin !== undefined && (pin.snapshotHash !== before.snapshotHash || pin.documentId !== before.documentId)) {
+      project.runtime.setPin(taskId, pin.snapshotHash, pin.documentId ?? null, nowMs);
+    }
   })();
   log.info(`rewound ${taskId} to before event ${seq}: ${part.dropped.length} event(s) and ${deletedRecords} record(s) deleted`);
   return { taskId, events: part.dropped.length, records: deletedRecords };
@@ -382,6 +406,9 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
   const meta = project.tasks.read(taskId);
   const part = partitionAt(events, seq);
   if (part.kept.length === 0) throw refusal(log, `nothing in task '${taskId}' comes before event ${seq}`, { taskId, seq });
+  // The copy stands in the workflow as it was at the cut, and in the same document: a copy is
+  // another item flowing through it, which is what a split's copies already are.
+  const pin = pinAtCut(project, taskId, events, seq) ?? { snapshotHash: parent.snapshotHash };
 
   // --- fresh identity for everything copied ------------------------------------------------
   let minted = 0;
@@ -617,7 +644,8 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
     project.runtime.stampFork(
       copy.id,
       {
-        snapshotHash: parent.snapshotHash!,
+        snapshotHash: pin.snapshotHash,
+        documentId: pin.documentId,
         rootInstanceId: parent.rootInstanceId !== undefined && instanceIds.has(parent.rootInstanceId) ? mapInstance(parent.rootInstanceId) : undefined,
         forkedAtSeq: seq,
         forkBoundarySeq: boundarySeq,

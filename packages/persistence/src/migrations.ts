@@ -476,6 +476,16 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS remote_handles_awaiting ON remote_handles(awaiting) WHERE awaiting = 1;
     `,
   },
+  {
+    version: 19,
+    note: "a task names the versioned frozen document it runs, when it runs one",
+    // Decision 0005 §3. A dynamic workflow — and a real workflow's diverged copy — is a frozen
+    // document that may be modified, each modification a new version and each version an ordinary
+    // snapshot. The document has an identity outside any task (several tasks stand in one), so a
+    // task only NAMES it; `snapshot_hash` stays what it was, the snapshot the task last ran under.
+    // Which version each stretch of the journal ran under is in the journal (`workflow.version`).
+    run: (db) => addColumn(db, "task_runtime", "document_id", "TEXT"),
+  },
 ];
 
 /**

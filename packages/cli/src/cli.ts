@@ -20,7 +20,7 @@ import {
   cancelTask,
   createTask,
   finishTaskRun,
-  loadSnapshot,
+  loadPinnedBundle,
   releaseRevivedFailures,
   releaseUnconsumedFailures,
   initProject,
@@ -959,7 +959,7 @@ async function runTaskNow(
       // never happened remotely — deleting its record frees the identity and the seat, and the
       // continuing run makes the call fresh. A cut call's record is kept and reopened.
       releaseUnconsumedFailures(project, taskId);
-      const pinned = loadSnapshot(project.paths.snapshotsDir, runtime.snapshotHash);
+      const pinned = loadPinnedBundle(project, runtime);
       const load = buildTaskLoad(project, taskId, pinned.states);
       if (load.blocked !== undefined) {
         throw new Error(`task '${taskId}' cannot be resumed: ${load.blocked}`);
