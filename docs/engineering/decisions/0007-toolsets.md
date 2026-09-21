@@ -309,11 +309,24 @@ preset that is a function.
    to the maps the function presets wrote, and `other` is what each preset
    gave a name it had never heard of. The `chat_control` four hold the
    eight workflow tools of [0005](0005-connect.md) §3 and `other: "deny"`.
-   Those tools are not built, so the standard list names them in a new
-   category, Tasks & workflows, with the mark `unserved`: a toolset may
-   hold one and the linter knows it, and lowering, the agent plan and the
-   runtime's registration each leave it out, so nothing is handed a tool
-   nobody serves. Deleting the mark is the whole change when one is built.
+   Those tools were not built, so the standard list named them in a new
+   category, Tasks & workflows, with the mark `unserved`: a toolset could
+   hold one and the linter knew it, while lowering, the agent plan and the
+   runtime's registration each left it out, so nothing was handed a tool
+   nobody served. **[0005](0005-connect.md) step 6 built them (2026-09-21),
+   and deleting the mark was indeed the whole change**: `TOOL_SPECS` carries
+   none now, the eight are in the list lowering writes and in what
+   `planAgentTools` injects, and `registerWorkflowTools` registers them. The
+   `unserved` mechanism stays for the next tool named before it is served.
+   Two things went with the mark: the composer's "· not served yet" suffix,
+   and the frozen-preset test's claim that `chat_control` hands nobody
+   anything. **The four `chat` toolsets grew the eight lines**, because a
+   session holds the project's tools AND the workflow tools ([0005](0005-connect.md)
+   §3) and `chat/ask-first` asks before every tool a conversation holds. The
+   rule that keeps one bucket from drifting from the other, and what the
+   frozen-preset test now asserts: a `chat/<name>` gives a workflow tool
+   whatever `chat_control/<name>` gives it, while the nine project tools stay
+   exactly the maps the four function presets wrote.
    The function presets are gone; "which preset is this" is
    `matchToolset`. Two things a file has no place for are kept beside the
    code instead: the shipped toolsets' labels, hints and glyphs, and the

@@ -202,12 +202,15 @@ describe("the Tools card", () => {
     );
   });
 
-  it("has a Tasks & workflows section, whose tools say they are not served yet", () => {
+  it("has a Tasks & workflows section, whose tools are drawn like any other now that they are served", () => {
     const tasks = [...TOOLS];
     const html = draw({ plan: toolsetPlan({ toolset: { start: "ask", other: "deny" } }), startOpen: { card: "Tools", folds: ["tasks"] } });
     expect(tasks.some((t) => t.name === "start")).toBe(true);
     expect(html).toContain("Tasks &amp; workflows");
-    expect(html).toContain("start a task in a workflow, from this conversation · not served yet");
+    // The hint alone — the "· not served yet" suffix went with the `unserved` mark (decision 0005
+    // step 6), and a tool a conversation can actually call must not still say nothing serves it.
+    expect(html).toContain("start a task in a workflow, from this conversation");
+    expect(html).not.toContain("not served yet");
   });
 });
 

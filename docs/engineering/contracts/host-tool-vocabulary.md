@@ -20,7 +20,7 @@ The tools JaiRA registers on `registry.tools` for a model to call, and the `run_
 
 **Do not use when.** Expecting an agent to keep a built-in the toolset does not hold. Under a toolset map on a claude transport a held tool is served by JaiRA's implementation and displaces the built-in, a `native` choice leaves the built-in running under an ask rule, and the built-in of every standard tool the map does not hold is removed. The older list is the legacy reading and keeps the built-ins it does not mention: see [tool-policy](../units/tool-policy.md). Deciding where an artifact's bytes go: [artifact-destination-template](artifact-destination-template.md).
 
-## The shape is ten names, each with its arguments and the result it returns
+## The shape is eighteen names, each with its arguments and the result it returns
 
 ### A toolset's subjects are these names, plus three kinds that are not tools
 
@@ -49,6 +49,18 @@ The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered.
 | `web_fetch` | true | `registerWebTools` | `url` | `WebFetch` |
 | `web_search` | true | `registerWebTools` | none; the tool checks its endpoint itself | `WebSearch` |
 | `run_command` | false, a host function on `registry.functions` | `registerCommandFunction` | none | none |
+| `workflows` | true | `registerWorkflowTools` | none | none |
+| `start` | false | `registerWorkflowTools` | none | none |
+| `move` | false | `registerWorkflowTools` | none | none |
+| `tasks` | true | `registerWorkflowTools` | none | none |
+| `answer` | false | `registerWorkflowTools` | none | none |
+| `hold`, `release`, `stop` | false | `registerWorkflowTools` | none | none |
+
+The last eight are the **workflow tools** ([0005](../decisions/0005-connect.md) §3), and they are the tools of a
+CONVERSATION rather than of a workspace: none of them names a place, so no scope table narrows one, and no
+agent has a built-in that is one. `chat/control` holds these and nothing else; `chat/session` holds them
+beside the rest. Where nothing serves them — the CLI, a test registry — the names still resolve and every
+call answers that it cannot be served there, so a state that holds one still loads and runs.
 
 Claude's `Task`, `Agent` and `SlashCommand` are declared with no standard tool and answer to `other`. Codex declares `shell` as `bash` and `apply_patch` as `edit`, and one switch, its `workspace-write` sandbox, which `write_file`, `edit` or `bash` turns on. A generic CLI declares nothing.
 
@@ -106,6 +118,51 @@ A path has its backslashes turned into `/` and a leading `./` and leading slashe
 | `grep` out `matches` | array of `{path, line, text}` | yes | at most 200; `line` is 1-based and `text` is clipped to 400 characters |
 | `grep` out `count`, `filesSearched` | number | yes | matches returned, and files read |
 | `glob`, `grep` out `truncated` | string | no | says the match cap or the 20000-entry walk limit was hit |
+
+### The workflow tools steer work, and every refusal is part of the answer
+
+Each is the host's own operation, not a second implementation of it: `move` is `task:connect`, `start` is
+the document generator plus a `task_move`, the three gestures are what the board's are. A call that cannot
+be made answers `{ok: false, …}` and does nothing; only `workflows` answers `{error}`, as the other reading
+tools do.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `workflows` in `state` | string | no | a state id; absent lists the workflows |
+| `workflows` out `workflows` | array of `{id, label?, description?}` | one of the three | every workflow root that loads |
+| `workflows` out `state` | `{id, label?, description?, inputs, outputs, children}` | one of the three | one level: each slot is `{schema, description?, required?}`, each child `{key, state, label?, description?}` |
+| `workflows` out `error` | string | one of the three | no state of that id is on the workflow path |
+| `start` in `state` | string | yes | the state to start as a child of this conversation |
+| `start`, `move` in `inputs` | object | no | values for the TARGET state's own declared inputs, by its names |
+| `start`, `move` in `asked` | string array | no | which names in `inputs` a person answered; every other supplied value is `inferred` |
+| `start`, `move` in `confidence` | number 0–1 | no | how sure the conversation is of what it inferred |
+| `start` out `ok: true` | `{task, key, state, status, mount, inputs}` | on success | `status` is `started`, `queued` (an engine holds the task) or `held`; `mount` is `plain` or `split`; `inputs` is `{name, via, from?}` per input, `via` one of `bound`, `inferred`, `asked`, `default` |
+| `move` in `task` | string | no | the task to move; absent means this conversation's own |
+| `move` in `to` | string | yes | the target state id |
+| `move` in `workflow` | string | no | which workflow the target is meant in, when more than one holds it |
+| `move` in `skip` | boolean | no | go directly, recording what is stepped over as `skipped` |
+| `move` out `ok: true` | `{task, resolution, modification?, workflow, standsAt, adoptedAs?, mount?, moved?}` | on success | `resolution` is `move`, `adopt` or `modify`; `moved` is how the transition landed |
+| `start`, `move` out `inputs-missing` | `{ok: false, code, reason, missing, schema, filled}` | on a required input nothing binds | NOTHING was done. `missing` is `{state, name, schema?, description?, reason}` each; `schema` is the target's whole input schema; `filled` is what the host settled itself. Supply the values and call again |
+| `move` out `candidates` | array of `{workflow, label?, childKey, targetKey?}` | on `ambiguous-workflow` | call again naming one |
+| `tasks` in `all` | boolean | no | every task of the project, shortly, instead of what was started here |
+| `tasks` out `tasks` | array | yes | `{task, title, status, workflow, relation?, standsAt?, held?, waitsFor?, asking?, outputs?}`; `asking` holds the `request` ids `answer` takes |
+| `answer` in `request` | string | yes | a `request` id from `tasks` |
+| `answer` in `value` | any | one of the two | a gate's answer, in the shape its component asks for |
+| `answer` in `answers` | object | one of the two | an agent's questions: question text → the chosen label, or labels |
+| `answer` in `confidence` | number 0–1 | yes | recorded with the answer; without it nothing is settled |
+| `answer` out | `{ok: true, request, settled_by: {via: "control", confidence}}` | on success | also journaled on the task that asked, as `jaira.answered` |
+| `hold`, `release`, `stop` in `tasks` | string array | yes | task ids, from `tasks`; a bare `task` string is read as a list of one |
+| `hold`, `release`, `stop` out `results` | array of `{task, ok, did?, reason?}` | yes | one entry per task named, in order |
+
+**An approval is not reachable through `answer`.** Only a question or a judgement on a document can be
+settled by a conversation ([0005](../decisions/0005-connect.md) §4), and that holds in two places at once:
+`tasks` does not list an approval among what a task is `asking`, so there is no `request` id to name, and
+`answer` refuses one by its component if a caller names it anyway. A tool permission, a publish, a push and
+a merge stay the person's.
+
+**Every task named must be one this conversation started** — itself, what it started, what it adopted, what
+its fan-out made. `tasks` without `all` is exactly that family, and the three gestures refuse anything
+outside it.
 
 ### The web tools read a page or a list of results
 

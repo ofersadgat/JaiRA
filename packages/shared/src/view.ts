@@ -974,6 +974,12 @@ export interface MadeTask {
   status: TaskStatus;
   /** How many dependencies it is still holding for. */
   holding: number;
+  /**
+   * Made HELD and started by nobody: a generated split's `start: "manual"` (decision 0005 §3), whose
+   * tasks are made and nothing confirmed. `release` — the board's gesture, or the conversation's
+   * tool — is what starts one. Different from `holding`, which is a task waiting its turn.
+   */
+  held?: boolean;
   /** This run is the task reading the record — the one drawn inline, not as a link. */
   self: boolean;
   /** The reading task holds for this run to complete. */
@@ -1099,6 +1105,11 @@ export interface TaskSummary {
   origin?: TaskOrigin;
   /** The dependencies still unfinished — non-empty means the task is holding. See {@link Holding}. */
   waitingFor?: Holding[];
+  /**
+   * How many tasks stand UNDER this one — filed beneath it, adopted by it, or made by its fan-out
+   * (decision 0005). What the Chat list says of a conversation that is controlling work: "3 tasks".
+   */
+  controls?: number;
   /** A merge request this task is waiting on (decision 0004) — see {@link InReview}. */
   inReview?: InReview;
   createdAt: string;

@@ -62,7 +62,10 @@ export interface TaskMoveRequest {
   by?: "person" | "control";
   /** Go NOW: interrupt the running state and record it, and every state stepped over, `skipped`. */
   skip?: boolean;
-  /** What the asker hands the target, over the workflow's own wiring, per input name. */
+  /**
+   * What the asker hands the target, over the workflow's own wiring, per input name. The target is
+   * the LAST state named: `toState`, or the end of `path` when the move goes further down.
+   */
   inputs?: Record<string, JsonValue>;
   /** The composite whose child `toState` is, by instance id. Absent ⇒ the task's root instance. */
   instanceId?: string;

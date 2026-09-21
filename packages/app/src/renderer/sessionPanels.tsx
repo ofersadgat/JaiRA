@@ -1033,9 +1033,17 @@ function MadeRow({
   );
 }
 
-/** A run's standing in words: what it is still holding for, or its status. */
+/**
+ * A run's standing in words: held, what it is still holding for, or its status.
+ *
+ * `held` comes first and is said even when the task also waits for something, because they are
+ * different answers to "why is this not running" and only one of them is a person's to change: a
+ * held task is waiting to be ASKED for (decision 0005 §3), and Release is the asking.
+ */
 function standingOf(run: MadeTask): string {
-  return run.holding > 0 ? `waiting for ${run.holding} ${run.holding === 1 ? "task" : "tasks"}` : run.status;
+  const waiting = run.holding > 0 ? `waiting for ${run.holding} ${run.holding === 1 ? "task" : "tasks"}` : undefined;
+  if (run.held === true) return waiting === undefined ? "held" : `held · ${waiting}`;
+  return waiting ?? run.status;
 }
 
 /** What the machine did to make the runs — "split off Beta, Gamma", "made Alpha, Beta". */

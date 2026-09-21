@@ -7,7 +7,7 @@
  * from the same code. Anything that *runs* a workflow lives above this.
  */
 import { createLogger } from "@declarative-ai/log";
-import { isTaskId, refusal } from "@jaira/shared";
+import { isTaskId, refusal, SUPPLIED_EVENT, type SuppliedEvent } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent, StateDef, WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./toolsets";
@@ -55,6 +55,12 @@ export function functionRefsOf(bundle: WorkflowBundle): Set<string> {
 }
 
 export function taskSummaries(project: Project): TaskSummary[] {
+  // Who stands under whom: a task filed beneath another, adopted by it, or made by its fan-out.
+  const under = new Map<string, number>();
+  for (const meta of project.tasks.list()) {
+    const above = meta.origin?.taskId ?? meta.parentTaskId;
+    if (above !== undefined) under.set(above, (under.get(above) ?? 0) + 1);
+  }
   return project.runtime.list().map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
     const origin = taskOriginOf(project, row, meta);
@@ -71,6 +77,7 @@ export function taskSummaries(project: Project): TaskSummary[] {
       ...(meta?.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
       ...(origin !== undefined ? { origin } : {}),
       ...(waitingFor.length > 0 ? { waitingFor } : {}),
+      ...((under.get(row.taskId) ?? 0) > 0 ? { controls: under.get(row.taskId)! } : {}),
       ...(awaited !== undefined ? { inReview: { provider: awaited.provider, number: awaited.number!, url: awaited.url! } } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
@@ -553,10 +560,25 @@ function markProvenance(project: Project, taskId: string, nodes: readonly Instan
   const handed = new Map<string, { via: InputSettledVia; names: string[] }>();
   const directed = new Map<string, { via: InputSettledVia; names: Set<string> }>();
   const sep = String.fromCharCode(0);
+  /**
+   * What a CONVERSATION said about the values it handed the next entry of a key (`jaira.supplied`,
+   * step 6): per name, inferred or asked, and how sure. It is finer than `by`, which only knows that
+   * a conversation asked for the move — and it also covers a generated mount, whose supplied values
+   * are literals in the document and ride no transition at all.
+   */
+  const told: SuppliedEvent[] = [];
+  const supplied = new Map<string, SuppliedEvent["provenance"]>();
+  let rootId: string | undefined;
   for (const event of events) {
-    if (event.type === "transition.taken" && event.by !== undefined && event.inputs !== undefined) {
+    if ((event as { type: string }).type === SUPPLIED_EVENT) {
+      told.push(event as unknown as SuppliedEvent);
+    } else if (event.type === "transition.taken" && event.by !== undefined && event.inputs !== undefined) {
       handed.set(`${event.instanceId}${sep}${event.to}`, { via: event.by === "control" ? "inferred" : "asked", names: Object.keys(event.inputs) });
-    } else if (event.type === "instance.entered" && event.parentInstanceId !== undefined && event.childKey !== undefined) {
+    } else if (event.type === "instance.entered" && event.parentInstanceId === undefined) {
+      rootId ??= event.instanceId;
+    } else if (event.type === "instance.entered" && event.childKey !== undefined) {
+      const at = told.findIndex((row) => row.to === event.childKey && (row.nested === true || (row.instanceId ?? rootId) === event.parentInstanceId));
+      if (at >= 0) supplied.set(event.instanceId, told.splice(at, 1)[0]!.provenance);
       const key = `${event.parentInstanceId}${sep}${event.childKey}`;
       const gift = handed.get(key);
       if (gift === undefined) continue;
@@ -571,7 +593,11 @@ function markProvenance(project: Project, taskId: string, nodes: readonly Instan
         const out: Record<string, InputProvenance> = {};
         for (const name of names) {
           if (isRoot) out[name] = meta?.inputProvenance?.[name] ?? { via: meta?.origin !== undefined && meta.origin.kind !== "adopt" ? "bound" : "asked" };
-          else out[name] = directed.get(node.instanceId)?.names.has(name) === true ? { via: directed.get(node.instanceId)!.via } : { via: "bound" };
+          else {
+            const said = supplied.get(node.instanceId)?.[name];
+            if (said !== undefined) out[name] = { via: said.via, ...(said.confidence !== undefined ? { confidence: said.confidence } : {}) };
+            else out[name] = directed.get(node.instanceId)?.names.has(name) === true ? { via: directed.get(node.instanceId)!.via } : { via: "bound" };
+          }
         }
         node.inputProvenance = out;
       }

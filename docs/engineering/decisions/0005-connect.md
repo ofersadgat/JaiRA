@@ -373,7 +373,8 @@ conversation's. Per-item workflows: items share one document.
    **Built 2026-09-21** — see "What step 5 settled" below.
 6. **The conversations** (needs 0006): the `workflow` toolset over
    `connect`; `chat/session` growing its first child; `chat/control` for a
-   task that becomes a dynamic workflow.
+   task that becomes a dynamic workflow. **Built 2026-09-21** — see
+   "What step 6 settled" below.
 7. **Fast-forward**: `answer`, `settled_by: control`, `autopilot.askBelow`,
    the strip, Skip.
 
@@ -639,6 +640,105 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
   no engine waiting, so a move that has to be taken is taken by running the
   task there, as `task start` runs one.
 
+## What step 6 settled
+
+Built in `@jaira/shared` (`workflowTools.ts`, the two state files and the four
+`chat` toolsets), `@jaira/runtime` (`workflowTools.ts`), the app
+(`main/workflowHost.ts`, `AppService.workflowHostFor`, the transcript's rows and
+note, the Chat list) and `@jaira/persistence` (`connect.ts`, `load.ts`,
+`dynamicDocuments.ts`, `views.ts`), with no upstream change. The statement of
+record is [host-tool-vocabulary](../contracts/host-tool-vocabulary.md) for the
+eight tools, [host-tools](../units/host-tools.md) for what registers them and
+[chat-turns](../units/chat-turns.md) for the conversation they run in. What the
+text above left open:
+
+- **The tools are thin, and the host is bound to one conversation.**
+  `runtime/workflowTools.ts` validates the shape a model handed it and calls a
+  `WorkflowToolHost`; `app/main/workflowHost.ts` is that host over
+  `AppService`'s own operations — `connectTask`, `moveTask`, the generator, the
+  two pending lists, `cancelTask`/`resumeTask`/`startTask`. Which conversation
+  is CLOSED OVER at registration rather than named by the model: a registry is
+  built per run and per typed turn, for a known task. A caller with no host —
+  the CLI, a test registry — gets `noWorkflowHost`, under which every name
+  resolves and every call answers that it cannot be served there, so a state
+  that holds one still loads and runs.
+- **`answer` cannot reach an approval, by wiring and not by check.** The host is
+  handed the interaction hub's and the question hub's pending lists and never
+  the approval hub, so there is no third lookup for an approval to be found
+  through. On top of that the two lists are filtered to
+  `ANSWERABLE_COMPONENTS` — `choose_option`, `fill_form`, `review_artifact`,
+  `edit_artifact` — in BOTH directions: an approval is not among what `tasks`
+  says a task is asking, so no `request` id exists to name, and `answer` refuses
+  one by component if a caller names it anyway. `confirm_action` and
+  `review_artifacts` are the two that are excluded on purpose.
+- **A refusal is the ask.** `start` and `move` answer `inputs-missing` with
+  `missing`, the target's whole input `schema` and what the host `filled`
+  itself, and write NOTHING — no version, no child, no run. The conversation
+  supplies the value from what was said, or asks the person in words, and calls
+  again naming in `asked` what they answered. There is no separate input filler
+  and no confirm dialog; the loop is the tool being called twice.
+- **Provenance is a journal row, not a second place to look.** `jaira.supplied`
+  carries `{to, instanceId?, nested?, provenance}` — per name, `inferred` or
+  `asked`, with the confidence — written on the task that takes the move, just
+  before it. `markProvenance` folds it onto the entry that follows, ahead of
+  what `transition.taken`'s `by` could say, because `by` knows only that a
+  conversation asked and this knows which value came from where. A value that
+  rides a generated mount as a literal carries the same thing inside the
+  version's hash, which is where step 4 put it.
+- **A control conversation starts idle, and the load is where that is decided.**
+  The root of a task standing in a DOCUMENT, whose state has a **prompt**
+  operation and children, and whose operation never started, is loaded with that
+  operation already settled and nothing said (`IDLE_CONVERSATION_VALUE`). So a
+  drop that makes a dynamic workflow dispatches no model call at all: the
+  conversation simply exists, and the first turn is whatever the person types —
+  a typed turn is a synthetic child `chat:<root>` the engine never sees
+  ([chat-turns](../units/chat-turns.md)). A prompt and not any operation,
+  because a conversation is the thing that may be left unsaid; a root that runs
+  a function is running something, which is not this rule's to skip.
+- **The conversation is grafted onto a cloned root.** Step 4 recorded which
+  conversation controls a document and did not give a diverged root the
+  operation, precisely because it would have dispatched. It does now: the
+  loaded conversation state's resolved `operation` and execution `environment`
+  are moved onto the frozen root alongside the lowered mount, and the idle rule
+  above is what makes that safe. A root that already speaks — a `chat/session`
+  that grew a child — keeps its own operation, which is the mechanism behind
+  "a session that starts work stays a session".
+- **`start` is not a move across workflows.** It points the conversation's own
+  task at a document rooted in ITS OWN state: `mode: "clone"` for a task in no
+  document (the frozen copy, conversation and all, gains the child and its
+  standing rule), an augmentation for one already in a document. `chat/control`
+  is what `CONNECT_CONVERSATION` names and is only ever made by a MOVE.
+- **A `start` made while an engine holds the task is queued.** A running engine
+  runs the bundle it loaded, and a version written now is one it cannot see. So
+  the version is written and the move is queued on `ProjectSession.afterRun`,
+  taken by the run-end handler when that run ends WELL — the same place, and for
+  the same reason, as a move left on the directed port. A child the engine
+  already holds is moved to at once and held by it until the running state ends.
+- **Both states carry their model and tools on `operation`.** The loader
+  resolves an operation's execution-environment fields into the state's own
+  `environment`, so the composer and the turn read them exactly as before —
+  while the AUTHORED `environment` block, which is what a dynamic root hands
+  down to every child it starts, stays empty. That is the whole of step 4's
+  last note, and it is asserted rather than assumed.
+- **`chat/session` took `chat/agent`'s place and the four `chat` toolsets grew
+  eight lines.** A session holds the project's tools AND the workflow tools, so
+  `chat/ask-first` — "asks before every tool a conversation holds" — had to hold
+  them too. The rule the frozen-preset test now states is that a `chat/<name>`
+  gives a workflow tool whatever `chat_control/<name>` gives it; the nine
+  project tools are still held to exactly the maps the four function presets
+  wrote. `chat/agent` and `chat/assistant` still ship, so a conversation already
+  started as one keeps running.
+- **A dynamic workflow is a row in the Chat list.** `task:all` takes
+  `dynamic/` as a NAMESPACE (a root id is minted and cannot be listed ahead of
+  time), and a conversation controlling work says how much: `TaskSummary.controls`
+  counts the tasks filed under it, adopted by it or made by its fan-out.
+- **The note under a tool row is the tool's own answer.** "adopted into
+  **feature** as `product` · standing at `ux`" is drawn from what `move`
+  returned, inline under the row that returned it, in the glyph and words a
+  `made` or `entered` note uses. It is not a rail row: a rail row is built from
+  the journal, and nothing in the journal says what a tool answered. A refused
+  call draws no note — the row's mark and its result already say it once.
+
 ## Open
 
 - A finished task publishes no runtime wait, so a "→ ui" chip offering a
@@ -658,6 +758,15 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
   finished does not get back the outputs its reopening cleared.
 - A connect that refuses part-way — the adoption into a new document's task,
   a move after an adoption — leaves what it had written, and says so.
+- `connect`'s `askAfter` is built — a drop whose target's inputs do not all bind
+  makes the conversation WITHOUT the target and answers what it is about to ask
+  for — and the board does not send it yet, so a drop of that shape is still
+  refused with what is missing. The conversation's own `start` is what mounts
+  the target afterwards.
+- The "fast-forward strip" and `answer`'s use by a fast-forward are step 7's;
+  `answer` is wired and callable now, and nothing calls it automatically.
+- A control conversation's opening row is drawn as the tool's own note, not as
+  a row on the rail beside the panel as the mockup has it.
 
 ## Revisit when
 

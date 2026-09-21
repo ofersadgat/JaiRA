@@ -2,20 +2,28 @@
 id: ui/components/work-row
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/stream-then-settle, ux/patterns/nested-under-what-caused-it, ux/patterns/drill-in-and-back-out]
 serves: [product/watch-agents-work-live, product/complete-record-of-every-run, product/failures-explain-themselves, product/agents-ask-instead-of-guessing, product/read-what-work-produced]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
 reuses: [ui/components/value-view, ui/components/choice-list, ui/components/question-stepper, ui/components/transcript, ui/components/icon]
 implemented_by: [packages/app/src/renderer/transcriptView.tsx, packages/app/src/renderer/transcript.ts]
 verified_by: [packages/app/test/transcript.test.ts, packages/app/test/choices.test.ts]
-mockups: [ui/assets/work-row/success.html, ui/assets/work-row/live.html, ui/assets/work-row/error.html, ui/assets/work-row/open.html, ui/assets/work-row/subagent.html, ui/assets/work-row/shown.html]
+mockups: [ui/assets/work-row/success.html, ui/assets/work-row/live.html, ui/assets/work-row/error.html, ui/assets/work-row/open.html, ui/assets/work-row/subagent.html, ui/assets/work-row/shown.html, ui/assets/work-row/workflow-tools.html]
 siblings: [ui/components/message, ui/components/run-step-note, ui/components/computed-state-body, ui/components/agent-question]
 ---
 
 # Work row
 
 A dense single line between the messages of a conversation: a small glyph, a bold tool name, a grey mono argument, the time, a chevron and a green tick or red cross, which opens underneath into what the call was given and returned.
+
+## A workflow tool's row says what it was called FOR, and what it did under it
+
+The eight workflow tools ([decision 0005](../../engineering/decisions/0005-connect.md) §3) are work rows like any other, with two differences a reader sees:
+
+- **The glyph is the forking path** — the one a `made` or an `entered` note wears — because a row that starts or moves work is the same kind of fact as the note it leaves behind. Matched by exact name, not by the family heuristic, which would otherwise read `tasks` as an agent and `move` and `release` as writes.
+- **The grey line is the call in its own words**, not its first string argument: `feature/product · issue: "Let a person pause…"`, `Pause and stop → feature/ux · skip`, `Pause and stop · Resume a paused run`. It is `workflowToolSummary` in `@jaira/shared`, pure over the arguments, so a record read a year later draws the same line.
+- **A `start` or a `move` that succeeded leaves a NOTE under its row** — "adopted into **Feature workflow** as `product` · standing at `ux`" — drawn from what the tool answered, in the note's own glyph, verb and monospace ending. A refused call draws none: the row's cross and its result say it once already.
 
 ## A work row is one thing that happened while an agent worked
 

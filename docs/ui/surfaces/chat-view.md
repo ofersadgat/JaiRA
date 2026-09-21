@@ -2,18 +2,26 @@
 id: ui/surfaces/chat-view
 type: ui-surface
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 kind: screen
 realizes: [ux/patterns/stream-then-settle, ux/patterns/follow-the-live-edge, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/show-the-request-not-the-outcome, ux/patterns/arm-the-cut-then-confirm, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/choose-a-side-where-it-divided]
 serves: [product/chat-with-agents, product/steer-agents-mid-task, product/watch-agents-work-live, product/rewind-to-where-it-went-wrong, product/try-another-direction, product/read-what-work-produced]
 components: [ui/components/transcript, ui/components/message, ui/components/work-row, ui/components/produced-artifacts, ui/components/fork-mark, ui/components/composer, ui/components/composer-setting-chip, ui/components/model-cascade, ui/components/value-view, ui/components/splitter, ui/components/context-menu]
-mockups: [ui/assets/chat-view/empty.html, ui/assets/chat-view/thread.html, ui/assets/chat-view/producing.html, ui/assets/chat-view/armed.html, ui/assets/chat-view/divided.html, ui/assets/chat-view/error.html]
+mockups: [ui/assets/chat-view/empty.html, ui/assets/chat-view/thread.html, ui/assets/chat-view/producing.html, ui/assets/chat-view/armed.html, ui/assets/chat-view/divided.html, ui/assets/chat-view/error.html, ui/assets/chat-view/controlling.html]
 siblings: [ui/surfaces/conversation-list, ui/surfaces/sidebar, ui/surfaces/context-panel, ui/surfaces/tasks-view, ui/surfaces/run-conversation, ui/surfaces/inbox-strip]
 ---
 
 # Chat view
 
 The Chat room: one conversation read as a single transcript on a white sheet with the composer under it, or, when none is open, a centred box asking what to do. It fills the window right of the sidebar, whose Chat row lists the conversations, and takes the place of the other rooms. It has no panel beside it until a value is pinned.
+
+## A conversation may be steering work, and the list says which one is
+
+The Chat view starts **`chat/session`** ([decision 0005](../../engineering/decisions/0005-connect.md) §3): a conversation that may work in the project, start a workflow, or only talk. What it starts becomes its children and nothing about the conversation changes — a session that starts work stays a session. A **`chat/control`** is the other kind, made when a person MOVES a task somewhere no workflow relates it to; it steers that work and holds nothing of the project. A dynamic workflow IS a conversation, so it is a row here and not a column of its own.
+
+- **The row of a conversation that controls work** carries a count after its title — `3 tasks` — in the provenance face. A count and not the titles: what each task is doing is the conversation's to say, and it says it.
+- **A control conversation starts idle.** The drop that made it dispatches no model call; the first turn is whatever the person types, or the turn in which the conversation has to ask for an input nothing bound.
+- **The composer's chips read the conversation's own toolset.** A session shows the project's tools and the workflow tools; a control shows the eight and denies the rest outright.
 
 ## The conversation reads first and the box to answer it sits under it
 

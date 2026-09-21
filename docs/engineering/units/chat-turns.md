@@ -2,7 +2,7 @@
 id: engineering/units/chat-turns
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/chat-with-agents, product/steer-agents-mid-task, ui/components/composer, ui/components/composer-setting-chip, ux/patterns/button-says-what-will-happen]
 layer: service
 owns_contracts: [engineering/contracts/chat-channels]
@@ -35,6 +35,7 @@ It deliberately does not own:
 - Layer `service`. `chatOperation.ts` and `chatTurn.ts` live in `@jaira/runtime` and import only upstream types, `@jaira/shared` and `tools.ts`. The host half is `AppService` in `packages/app/src/main`, with per-project state on `ProjectSession`.
 - Upstream seams: `Executor.start`, `SessionStore.resolve` and `SessionStore.refAt` from `@declarative-ai/exec`; the `EngineEvent` shapes and `LoadedState` from `@declarative-ai/hw`. Nothing binds to a chat child and no transition fires from it, so `executeWorkflow` is not called.
 - Boundary: renderer and main. A message enters only through `chat:send`. Settings come from the task's pinned snapshot; only `chat:startPlan` reads the live state file, because no snapshot exists before the first message.
+- A conversation's own tools may be written on its `operation` rather than on `environment`, and the two shipped ones are: the loader resolves an operation's execution-environment fields into the state's resolved `environment`, which is what `chatPlanFor` reads, while the AUTHORED `environment` block — the default a dynamic root hands every child it starts ([0005](../decisions/0005-connect.md) §3) — stays empty.
 - `service.ts` reads `operation` from `chatOperationOf` and discards `environment`. Tools reach the call through `gateTools`, permissions through the folded `ExecPolicy`, and the session through the position `runChatTurn` resolves.
 - A turn's prompt tree is built with `refuse` left on, over every state of the pinned snapshot, while `chatPlan` and `chatStartPlan` build theirs with `refuse: false`.
 
@@ -74,6 +75,8 @@ It deliberately does not own:
 | 19 | A message to a steerable call joins that call's turn and writes no record and no journal event | unasserted |
 | 20 | A stop flushes the live partial before it aborts any turn | unasserted |
 | 21 | `effective.model` prefers the model that answered the last turn over the router's default | unasserted |
+| 22 | A turn of either shipped conversation is handed the workflow tools, and a `chat/control` turn is handed nothing of the project — per tool, and by `other: deny` | `workflowTools.test.ts` (app) "gives a SESSION the project's tools and the workflow tools, and a CONTROL only the workflow tools", "denies a project tool in a control conversation rather than offering it, per tool and by `other`" |
+| 23 | A dynamic workflow's root conversation starts IDLE: a move that makes one dispatches no model call, and the conversation's first turn is whatever the person types | `taskConnect.test.ts` "NEW: wraps a finished task in a document…", "roots a new document in the SHIPPED conversation…" |
 
 ## Every failure leaves the turn's message and position in place, and the next message continues from them
 
@@ -96,6 +99,13 @@ It deliberately does not own:
 ## A send waits up to two bounded intervals before its turn starts
 
 - `CHAT_WAIT_MS = 120_000` in `service.ts`, applied first to the send ahead and then to a call registered on the conversation's session, so one send can wait 240 s.
+
+## A conversation a MOVE made starts idle, and its first turn is a typed one
+
+- A dynamic workflow's root is a state with an operation — a conversation — and children ([0005](../decisions/0005-connect.md) §3). An instance loaded with an operation it never ran dispatches it, so a drop that made one would spend a model call on a message nobody sent.
+- `buildTaskLoad` ([run-load](run-load.md)) therefore loads such a root's never-run PROMPT operation as already settled with nothing said, and the engine goes straight to what the move asked for. The conversation exists all the same, because a typed turn is this unit's synthetic child `chat:<root>` and the engine never sees one.
+- A root whose operation DID run — a `chat/session` whose opening message was its own run, which then grew a child — is read from its record like any other, which is what keeps a session a session.
+- What a person types reaches it with no new rule: `chatPlanFor` walks to the first state on the path whose operation is a prompt, and in a dynamic workflow that state is the root. A child's questions reach the person the way a nested state's already do.
 
 ## A typed turn departs from a run by bypassing the engine, the job claim and the audit
 

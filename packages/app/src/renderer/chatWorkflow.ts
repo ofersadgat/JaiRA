@@ -57,16 +57,38 @@ export const CHAT_ASSISTANT = "chat/assistant";
 /** The working conversation: the same thread, with the project's tools under the project's policy. */
 export const CHAT_AGENT = "chat/agent";
 
-/** Every state a Chat-view conversation can be, plain first. Both ship in the built-in layer. */
-export const CHAT_STATES = [CHAT_ASSISTANT, CHAT_AGENT] as const;
+/**
+ * What the Chat view STARTS (decisions 0005 §3, 0006): a person began a conversation, and it may work
+ * in the project, start a workflow, or only talk — the project's tools and the workflow tools, under
+ * `chat/ask-first`. It took `chat/agent`'s place; the two older states still ship, so a conversation
+ * started as one keeps running as one.
+ */
+export const CHAT_SESSION = "chat/session";
+/**
+ * What a task gets when a person MOVES it and the move makes a dynamic workflow: the conversation
+ * that steers that work, holding the task and workflow tools and nothing of the project. Never
+ * started from the Chat view, and never what a session turns into.
+ */
+export const CHAT_CONTROL = "chat/control";
+/** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): a conversation with children. */
+export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
+
+/** Every state a Chat-view conversation can be, plain first. All ship in the built-in layer. */
+export const CHAT_STATES = [CHAT_ASSISTANT, CHAT_AGENT, CHAT_SESSION, CHAT_CONTROL] as const;
 
 /** Which conversation a task is: the workflow it was created from, or `null` for a task that is not one. */
 export type ChatKind = (typeof CHAT_STATES)[number];
 
-/** True for a task the Chat view owns — its workflow is one of {@link CHAT_STATES}. */
-export function isChatWorkflow(workflow: string | undefined): workflow is ChatKind {
-  return workflow !== undefined && (CHAT_STATES as readonly string[]).includes(workflow);
+/**
+ * True for a task the Chat view owns — its workflow is one of {@link CHAT_STATES}, or a dynamic
+ * workflow, which IS a conversation: a row in the Chat list and not a column of its own.
+ */
+export function isChatWorkflow(workflow: string | undefined): boolean {
+  return workflow !== undefined && ((CHAT_STATES as readonly string[]).includes(workflow) || workflow.startsWith(DYNAMIC_WORKFLOW_PREFIX));
 }
+
+/** What `task:all` is asked for to list every conversation — the states, and the dynamic namespace. */
+export const CHAT_LIST_WORKFLOWS: readonly string[] = [...CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX];
 
 /**
  * A conversation's name, from the words it opened with.
