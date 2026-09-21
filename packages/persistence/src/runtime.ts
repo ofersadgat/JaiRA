@@ -177,6 +177,26 @@ export class RuntimeStore {
     this.logTask(taskId);
   }
 
+  /**
+   * Whose child this task is — set when another task ADOPTS it (decision 0005 §2), and cleared (or
+   * put back to what it was) when a rewind of that parent drops the mirror row. The task's JSON
+   * carries the same fact for people; this is the copy a query walks.
+   */
+  setParent(taskId: string, parentTaskId: string | undefined, nowMs: number): void {
+    const res = this.db
+      .prepare(`UPDATE task_runtime SET parent_task_id = ?, updated_at = ? WHERE task_id = ?`)
+      .run(parentTaskId ?? null, nowMs, taskId);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
+    this.logTask(taskId);
+  }
+
+  /** The branch a task is bound to, when it was bound AFTER creation — a task taking up the workspace of one it adopts. */
+  setBranch(taskId: string, branch: string, nowMs: number): void {
+    const res = this.db.prepare(`UPDATE task_runtime SET branch = ?, updated_at = ? WHERE task_id = ?`).run(branch, nowMs, taskId);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
+    this.logTask(taskId);
+  }
+
   clearWorktree(taskId: string, nowMs: number): void {
     this.db
       .prepare(`UPDATE task_runtime SET worktree_path = NULL, updated_at = ? WHERE task_id = ?`)

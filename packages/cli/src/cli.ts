@@ -23,6 +23,8 @@ import {
   loadPinnedBundle,
   releaseRevivedFailures,
   releaseUnconsumedFailures,
+  settleAdoptions,
+  withAdoptedStandIns,
   initProject,
   lintErrors,
   openProject,
@@ -954,11 +956,18 @@ async function runTaskNow(
     // refuses the bare restart outright.
     let resume: { loaded: NonNullable<TaskLoad["loaded"]>; answers: TaskLoad["answers"] } | undefined;
     const runtime = project.runtime.get(taskId);
-    if (runtime !== undefined && runtime.status !== "queued" && runtime.snapshotHash !== undefined) {
+    // A task that ADOPTED another (decision 0005 §2) stands `queued` with a journal already — its
+    // mirror rows — and is loaded too. Asked of the adopted tasks' provenance rather than of the
+    // journal: a split copy is also `queued` with history, and the CLI has no fan-out host to load it.
+    const adopts = runtime?.status === "queued" && project.tasks.list().some((meta) => meta.origin?.kind === "adopt" && meta.origin.taskId === taskId);
+    if (runtime !== undefined && (runtime.status !== "queued" || adopts) && runtime.snapshotHash !== undefined) {
       // §05, before the fold reads the store: a failed call that consumed no provider sequence
       // never happened remotely — deleting its record frees the identity and the seat, and the
       // continuing run makes the call fresh. A cut call's record is kept and reopened.
       releaseUnconsumedFailures(project, taskId);
+      // The end of a mirror row whose adopted task has completed since. Presence is checked here and
+      // shapes are not: the app owns the validator, and the engine's stand-in validates on load.
+      settleAdoptions(project, taskId);
       const pinned = loadPinnedBundle(project, runtime);
       const load = buildTaskLoad(project, taskId, pinned.states);
       if (load.blocked !== undefined) {
@@ -1056,7 +1065,8 @@ async function runTaskNow(
     // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
     await prepareResolvedFunctions();
     const result = await executeWorkflow({
-      bundle: started.bundle,
+      // An adopted child is read through a stand-in state — see `withAdoptedStandIns`.
+      bundle: withAdoptedStandIns(started.bundle, resume?.loaded),
       inputs: started.meta.inputs ?? {},
       registry,
       prompt,

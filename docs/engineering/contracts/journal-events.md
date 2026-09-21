@@ -80,6 +80,17 @@ The vocabulary is `EngineEvent` in `@declarative-ai/hw` `ports.ts`. `failure` is
 
 What the fan-out host makes around `fanout.made` and its mirrored rows is [fan-out-host-answers](fan-out-host-answers.md).
 
+### An adoption's mirror rows are engine events with two fields of JaiRA's own
+
+[Adoption](../units/adoption.md) writes an `instance.entered` and an `instance.terminated` for a task that ran alone, under the child key it stands for. Both are upstream's events with the adopted task's id as `instanceId`, and each carries one field upstream's type does not declare. The journal stores whole events, so they round-trip.
+
+| `type` | Extra field | Meaning |
+| --- | --- | --- |
+| `instance.entered` | `adopted: true` | the row is a mirror, written by `writeAdoption`; `inputs` are what the adopted task ran with, and there is no `element`, a split-mounted child included |
+| `instance.terminated` | `outputs` | the adopted task's outputs as it recorded them, with `outcome: "success"`; written with the entry for a completed task, else by `settleAdoptions` when it completes |
+
+`buildTaskLoad` emits such a node as history under the state id `jaira:adopted:<stateId>` with `outputs` as its operation's value, never revives it, and blocks the load while its end is missing. `conversationView` draws the entry as a `made` line of kind `adopt`. A cut at or before the entry drops both rows, and the adopted task is then un-adopted.
+
 ### A version pick-up is JaiRA's own row, and says which workflow version the rows after it ran under
 
 A task in a versioned frozen document ([workflow-snapshot](workflow-snapshot.md), [decision 0005](../decisions/0005-connect.md) §3) picks up the document's latest version each time it loads. `beginTaskRun` writes this row, in the table and the file, before the stretch that runs under the version, and only when the version changed:

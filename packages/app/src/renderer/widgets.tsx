@@ -7,17 +7,23 @@
  */
 import { useState, type JSX } from "react";
 import type { JsonValue } from "@declarative-ai/json";
-import type { HistorySize, WorkflowEntry } from "@jaira/shared/browser";
+import type { HistorySize, InputSourcesResponse, WorkflowEntry } from "@jaira/shared/browser";
 import { SelectInput } from "./controls";
 import { RunInputsForm, useRunCheck } from "./runPanel";
 import {
   createBlocker,
   initialRunValues,
   isFilled,
+  keptSources,
   runInputsOf,
+  sourceIdOf,
+  sourceOptionsOf,
+  sourceRefOf,
   type RunField,
+  type RunSources,
   type RunValues,
 } from "./runForm";
+import type { ValueSources } from "./schemaForm/types";
 import { useTouched } from "./schemaForm/check";
 import type { PruneReport } from "./store";
 
@@ -43,11 +49,17 @@ import type { PruneReport } from "./store";
  *
  * So the form has no fields of its own until a workflow is picked, and that is the honest shape:
  * everything below the picker is a question the picked workflow asked.
+ *
+ * A slot can also be filled FROM A TASK (decision 0005 §2): where an earlier task produced something
+ * that fits the slot's schema, the slot's own line offers it, through the schema form like every
+ * other choice the form makes. The pick is sent as a source, not as a value — the main process reads
+ * it, and a task whose source is still running holds until it has.
  */
 export function NewTask({
   workflows,
   forms,
   values,
+  sources,
   busy,
   onPick,
   onChange,
@@ -67,14 +79,18 @@ export function NewTask({
   forms: Record<string, RunField[] | null>;
   /** What each workflow's form holds, by state id — see `AppState.runValues`. */
   values: Record<string, RunValues>;
+  /** The earlier tasks' outputs that fit each slot, by state id — see `AppState.inputSources`. */
+  sources: Record<string, InputSourcesResponse>;
   busy: boolean;
   /** A workflow was picked: read its inputs. */
   onPick: (stateId: string) => void;
   onChange: (stateId: string, values: RunValues) => void;
-  onCreate: (workflow: string, inputs: Record<string, JsonValue>) => void;
+  onCreate: (workflow: string, inputs: Record<string, JsonValue>, sources: RunSources) => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [workflow, setWorkflow] = useState("");
+  /** Which slots take their value from a task, per workflow — the popover's own, like the pick itself. */
+  const [taken, setTaken] = useState<Record<string, RunSources>>({});
 
   const picked = workflows.find((entry) => entry.rootId === workflow);
   const errors = picked?.issues.filter((issue) => issue.severity === "error").length ?? 0;
@@ -83,7 +99,21 @@ export function NewTask({
   // same map the Files view's run form uses, so one workflow's form holds one set of answers wherever
   // it is filled in.
   const form: RunValues = values[workflow] ?? initialRunValues(fields ?? []);
-  const check = useRunCheck(fields, form);
+  const offered = sources[workflow];
+  // Only what is still on offer: a source deleted since it was picked is a pick that means nothing.
+  const from = keptSources(taken[workflow] ?? {}, offered);
+  const fromTask: ValueSources = {
+    label: "from a task…",
+    optionsFor: (path) => sourceOptionsOf(offered?.[path]),
+    picked: (path) => (from[path] !== undefined ? sourceIdOf(from[path]!) : undefined),
+    pick: (path, id) => {
+      const next = { ...from };
+      if (id === undefined) delete next[path];
+      else next[path] = sourceRefOf(id);
+      setTaken({ ...taken, [workflow]: next });
+    },
+  };
+  const check = useRunCheck(fields, form, from);
   const { touched, touch } = useTouched(workflow);
   const blocked = createBlocker({ workflow, fields, check, busy });
   const filled = (fields ?? []).filter(isFilled);
@@ -104,7 +134,7 @@ export function NewTask({
           onSubmit={(e) => {
             e.preventDefault();
             if (blocked !== null) return;
-            onCreate(workflow, runInputsOf(fields ?? [], form));
+            onCreate(workflow, runInputsOf(fields ?? [], form, from), from);
             // The picked workflow stays. Creating one task from a workflow is the strongest available
             // evidence about which workflow the next one comes from, and the boxes are held in the
             // store per state id, so re-opening the form finds what was typed.
@@ -158,6 +188,7 @@ export function NewTask({
                 touched={touched}
                 touch={touch}
                 onChange={(next) => onChange(workflow, next)}
+                sources={fromTask}
               />
             </div>
           )}

@@ -108,7 +108,48 @@ export interface SchemaFormContext {
    * `default` for an ordinary form and the inherited value for a layered one.
    */
   unsetNote?: (path: string, schema: Schema, value: unknown) => string;
+  /**
+   * How the value at a path was SETTLED (decision 0005 §4), for a form that shows a run's recorded
+   * inputs: `bound` by the workflow's wiring, `inferred` by a conversation, `asked` of a person. Drawn
+   * as a mark after the member's type. Absent, or undefined for a path, draws nothing.
+   */
+  provenance?: (path: string) => SettledMark | undefined;
+  /**
+   * Somewhere ELSE a member's value can come from, offered beside its shapes — "from a task…" in the
+   * New task form. The form draws the choice and the picker; what the options are, and what a pick
+   * means, are the host's. A member with a source picked holds no value of its own.
+   */
+  sources?: ValueSources;
   disabled?: boolean;
+}
+
+/** How a recorded value was settled — see {@link SchemaFormContext.provenance}. */
+export interface SettledMark {
+  via: "bound" | "inferred" | "asked";
+  /** How sure the conversation was, for an inferred value. */
+  confidence?: number;
+  /** Where the value came from, in words, for the mark's tooltip. */
+  note?: string;
+}
+
+/** One place a value can be taken from. */
+export interface ValueSourceOption {
+  id: string;
+  label: string;
+  /** What it holds, or why it holds nothing yet. */
+  note?: string;
+}
+
+/** See {@link SchemaFormContext.sources}. */
+export interface ValueSources {
+  /** What the choice is called on its chip. */
+  label: string;
+  /** The options for the member at this path. Empty or undefined ⇒ the member is not offered the choice. */
+  optionsFor: (path: string) => readonly ValueSourceOption[] | undefined;
+  /** The option picked for this path, when one is. */
+  picked: (path: string) => string | undefined;
+  /** Pick an option, or — with undefined — go back to typing the value. */
+  pick: (path: string, id: string | undefined) => void;
 }
 
 export interface WidgetProps {

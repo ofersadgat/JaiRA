@@ -38,6 +38,7 @@ export * from "./structured";
 export * from "./unifiedDiff";
 export * from "./grammars";
 export * from "./userEvents";
+export * from "./adopt";
 export * from "./toolVocabulary";
 export * from "./toolsets";
 export * from "./commandParts";

@@ -3,7 +3,7 @@ id: engineering/decisions/0005-connect
 type: decision
 status: proposed
 updated: 2026-09-21
-decides_for: [engineering/units/fan-out-host, engineering/units/workflow-snapshots, engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/interaction-hub, engineering/units/workflow-browser]
+decides_for: [engineering/units/adoption, engineering/units/fan-out-host, engineering/units/workflow-snapshots, engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/interaction-hub, engineering/units/workflow-browser]
 ---
 
 # 0005. Connect: a task moves to any state, and "top level" stops being a concept
@@ -360,10 +360,11 @@ conversation's. Per-item workflows: items share one document.
    an outcome. Reopen-to-take for a finished task. **Built 2026-09-21** —
    see "What step 1 settled" below.
 2. **Provenance on recorded inputs** (bound, inferred, asked), and
-   `outcome: "skipped"` readable from an expression.
+   `outcome: "skipped"` readable from an expression. **Built 2026-09-21** —
+   see "What steps 2–3 settled" below.
 3. **Adopt**: mirror rows after the fact, backwards input inference, the
    schema-fit and hole checks, taking up the child's branch. "From a
-   task…" in New task.
+   task…" in New task. **Built 2026-09-21.**
 4. **Versioned frozen workflows** and the dynamic document: generate,
    augment, clone-on-diverge, the generated `split`. **Built 2026-09-21** —
    see "What step 4 settled" below.
@@ -403,6 +404,70 @@ Four things the text above left open were decided in the building:
   existing `{ "to": … }` leaves behind was not this step's to do.
 
 A held move lives in the engine's memory and is lost with the process.
+
+## What steps 2–3 settled
+
+Built in JaiRA alone, with no upstream change; the statement of record is
+[adoption](../units/adoption.md), [task-channels](../contracts/task-channels.md)
+and [task-file](../contracts/task-file.md). What the text above left open:
+
+- **Where provenance lives.** On the task file, per input name
+  (`inputProvenance`), for the root's inputs, because that is the one place
+  a value is settled by somebody. A child's inputs are `bound` by
+  construction — entering a child is the wiring resolving — so nothing is
+  stored for them: the projection derives it, and reads `asked` or
+  `inferred` only for what a directed `transition.taken` handed the entry
+  that followed it. `outcome: "skipped"` was already readable from an
+  expression after step 1.
+- **The mirror row carries the outputs.** The engine recomputes a loaded
+  child's outputs from its operation and children, and a plain mount has no
+  host to ask, as an `each: "task"` mount does. So the row's end carries
+  `outputs` as the task recorded them and its entry carries `adopted`, and
+  the load reads the child through a **stand-in state** — the mounted
+  state's current output slots with no bindings, fed the recorded outputs as
+  its operation's value — added to the bundle for that run only. The real
+  state is untouched, which is what makes a back-transition run it, in the
+  parent, as occurrence 1. An upstream seam that takes a loaded instance's
+  outputs as given would replace the stand-in; nothing else would change.
+- **Schema fit is checked twice.** At adoption, against the mounted state's
+  current output slots, with the run's validator: the refusal names
+  `outputs.<name><path>`. And again by the engine on every load, because the
+  stand-in's slots are the current ones.
+- **What "later" means for a hole.** The wires, `async` flag and mount rules
+  of the sequence members after the cursor, the root's output bindings and
+  computed output defaults, and the root's transitions. The adopted child's
+  own wires are not later, so a child that read a sibling nobody ran can
+  still be adopted; a back-transition into it would then run it without
+  that sibling, as it would in any run that jumped there.
+- **A form value never overrides an inferred one.** The parent's record says
+  what the child ran with. What nothing determines is returned as `asks`,
+  each with the declared schema and description and nothing the platform
+  named; a required one refuses a real adoption, which is step 5's "refused
+  with what is missing".
+- **A running task's parent waits as a task, not as an engine.** The parent
+  is made holding through `dependsOn`, the mirror's end is written when the
+  adopted task completes, and the ordinary release starts the parent. A load
+  that finds a mirror still open refuses, so nothing can run the child twice.
+  An adopted task that fails keeps the parent holding.
+- **The split shape needs the list.** The parent is split on the list at the
+  element's index, which is only knowable where the list is a parent input
+  the form supplies or the output of a sibling adopted with it. One element
+  cannot say what the rest of its list was; any other list is refused.
+- **The parent shares the worktree.** It takes the adopted task's branch
+  *and* its worktree path, rather than a second worktree on one branch,
+  which git refuses. Deleting either task removes the tree the other stands
+  in; the next start cuts it again from the branch.
+- **Into a new task, or into one that exists.** `task:adopt` makes the parent
+  unless `parentTaskId` names one, which is what `connect()` composes with
+  the dynamic workflow's task that step 4's generator makes without
+  adopting. The record is the constraint there: a child the parent entered
+  is not adopted over, a parent standing past it is refused, and its
+  recorded inputs must agree with what the child ran with.
+- **"From a task…" is a source, not a value.** The New task form sends
+  `sources` and the main process reads them, so a task whose source is still
+  running is created holding and reads the value when it starts. A pending
+  source is offered only where its declared output schema says what the slot's
+  does, since there is no value to validate.
 
 ## What step 4 settled
 
@@ -492,6 +557,11 @@ left open:
   ships without the chip.
 - A named session continued across an adoption boundary (a refine loop
   whose earlier passes ran in the adopted task).
+- An adopted child that fans out (`each: "inline"` or `"task"`) is refused:
+  one task cannot stand for a batch. Adopting a whole batch is not designed.
+- The board's `.card-child` indent for an adopted task is not built: the
+  task files in its child's column on the parent's board, as a mount's task
+  does, and is off the roots board.
 - Whether `connect` from the CLI is one verb (`jaira task move <id> --to
   <state>`) or rides `task create --from`.
 

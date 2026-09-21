@@ -6,6 +6,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { TaskStatus } from "./task";
+import type { InputProvenance } from "./adopt";
 import type { ModuleApproval } from "./refusal";
 
 /**
@@ -133,7 +134,13 @@ export interface InstanceNode {
    * operation and no children of its own — its work is in that task — so a conversation draws it as
    * a line rather than a panel, and a board files the task by it.
    */
-  made?: { taskId: string; kind: "split" | "task" };
+  made?: { taskId: string; kind: "split" | "task" | "adopt" };
+  /**
+   * How each of {@link inputs} was settled (decision 0005 §4) — `bound` by the workflow's wiring,
+   * `inferred` by a conversation, `asked` of a person. Per input name; an input with no entry was
+   * recorded before provenance was.
+   */
+  inputProvenance?: Record<string, InputProvenance>;
   /**
    * What to call this RUN, resolved from {@link inputs} — see `resolveLabel`.
    *
@@ -939,7 +946,8 @@ export interface ConversationTurn {
  * parent is in the list nowhere, since it made every element.
  */
 export interface MadeBatch {
-  kind: "split" | "task";
+  /** `adopt`: not a fan-out at all — a task that ran alone, taken up as this child (decision 0005 §2). */
+  kind: "split" | "task" | "adopt";
   /** Every element's run, in element order — the reader's own included. */
   runs: MadeTask[];
 }
@@ -1405,7 +1413,7 @@ export interface TaskOrigin {
    * What made the copy. A `fork` is a person's verb; `split` and `task` are a fan-out's (decision
    * 0003). Absent means `fork`, which is every origin projected before the field existed.
    */
-  kind?: "fork" | "split" | "task";
+  kind?: "fork" | "split" | "task" | "adopt";
   taskId: string;
   /** The parent's title, when the parent is still there to have one. */
   title?: string;

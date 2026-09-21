@@ -77,7 +77,8 @@ The task view models are the JSON shapes in `@jaira/shared` `view.ts` that task 
 | `startedAt` | number | yes | when it was entered |
 | `endedAt` | number | no | when it terminated; cleared when a re-stated entry revives it |
 | `inputs` | object of JSON values | no | the resolved inputs from `instance.entered`, unwrapped |
-| `made` | `{taskId, kind: "split" or "task"}` | no | the task this node's element became; such a node has no operation and no children |
+| `inputProvenance` | object of `InputProvenance` | no | per name in `inputs`, how it was settled: `{via: "bound", "inferred" or "asked", confidence?, from?}`. The root's is the task file's; a child's reads `bound`, except what a directed transition handed it |
+| `made` | `{taskId, kind: "split", "task" or "adopt"}` | no | the task this node's element became, or the task adopted as this child; such a node has no operation and no children |
 | `label` | string | no | the state's `label` resolved against `inputs`, or a settled computed `label` |
 | `address` | `AddressStep` array | no | the node's position from the root |
 | `calls` | `OperationCall` array | no | every `operation.dispatched`, in order, once per operation id |
@@ -174,7 +175,7 @@ The task view models are the JSON shapes in `@jaira/shared` `view.ts` that task 
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `MadeBatch.kind` | `"split"` or `"task"` | yes | how the mount made its elements |
+| `MadeBatch.kind` | `"split"`, `"task"` or `"adopt"` | yes | how the mount made its elements; `adopt` is one task that ran alone, drawn from its mirrored entry and not from a `fanout.made` row |
 | `MadeBatch.runs` | `MadeTask` array | yes | every element's task, in element order |
 | `MadeTask.taskId`, `element`, `title` | string, number, string | yes | the task, its position, its current title or the recorded one |
 | `MadeTask.id` | string | no | the element's own id |

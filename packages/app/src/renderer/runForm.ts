@@ -31,15 +31,19 @@ import {
   WORKFLOW_JSON,
   WORKFLOW_YAML,
   type BoardCard,
+  type InputProvenance,
+  type InputSourceOption,
+  type InputSourcesResponse,
   type SessionRef,
   type StateView,
+  type TaskOutputRef,
   type TaskSummary,
   type WorkflowEntry,
   type WorkflowLayer,
 } from "@jaira/shared/browser";
 import { checkBlocker, seedFor, type FieldError, type FormCheck } from "./schemaForm/model";
 import type { CheckItem } from "./schemaForm/check";
-import type { Schema } from "./schemaForm/types";
+import type { Schema, SettledMark, ValueSourceOption } from "./schemaForm/types";
 import { slotRowOf } from "./slotForm";
 
 // --- what the state asks for -------------------------------------------------
@@ -192,11 +196,19 @@ export function runValuesOf(fields: readonly RunField[], inputs: Record<string, 
   return values;
 }
 
+/**
+ * The slots whose value is TAKEN FROM A TASK rather than typed (decision 0005 §2), by slot name. A
+ * sourced slot holds no value in the form: the main process reads it when the task is created, or —
+ * where the source is still running — when the task it then holds for completes.
+ */
+export type RunSources = Record<string, TaskOutputRef>;
+
 /** The values to send to the main process's check: every slot that is set and has a schema to meet. */
-export function runChecksOf(fields: readonly RunField[], values: RunValues): CheckItem[] {
+export function runChecksOf(fields: readonly RunField[], values: RunValues, sources: RunSources = {}): CheckItem[] {
   const out: CheckItem[] = [];
   for (const field of fields) {
     const value = values[field.name];
+    if (sources[field.name] !== undefined) continue;
     if (!isFilled(field) || value === undefined || field.declared === undefined) continue;
     out.push({ path: field.name, schema: field.declared, value });
   }
@@ -209,20 +221,75 @@ export function runChecksOf(fields: readonly RunField[], values: RunValues): Che
  * Rare, because a required slot opens with one and has no switch to take it away — but the run would
  * refuse it (`required input missing`), so it is said here rather than there.
  */
-export function missingOf(fields: readonly RunField[], values: RunValues): FieldError[] {
+export function missingOf(fields: readonly RunField[], values: RunValues, sources: RunSources = {}): FieldError[] {
   return fields
-    .filter((field) => isFilled(field) && field.required && values[field.name] === undefined)
+    .filter((field) => isFilled(field) && field.required && values[field.name] === undefined && sources[field.name] === undefined)
     .map((field) => ({ path: field.name, message: "required" }));
 }
 
-/** What `task:create` takes: the slots that are set, as they are. */
-export function runInputsOf(fields: readonly RunField[], values: RunValues): Record<string, JsonValue> {
+/** What `task:create` takes: the slots that are set, as they are — a sourced slot is the main process's to fill. */
+export function runInputsOf(fields: readonly RunField[], values: RunValues, sources: RunSources = {}): Record<string, JsonValue> {
   const inputs: Record<string, JsonValue> = {};
   for (const field of fields) {
     const value = values[field.name];
-    if (isFilled(field) && value !== undefined) inputs[field.name] = value;
+    if (isFilled(field) && value !== undefined && sources[field.name] === undefined) inputs[field.name] = value;
   }
   return inputs;
+}
+
+// --- a value taken from a task -----------------------------------------------
+
+/**
+ * The slots to ask `task:inputSources` about: every slot a person fills whose schema this module can
+ * read. A linked type is left out — the renderer cannot expand it, and asking with `{}` would offer
+ * every output of every task as though it fit.
+ */
+export function sourceSlotsOf(fields: readonly RunField[]): Array<{ key: string; schema: JsonValue }> {
+  return fields.filter((field) => isFilled(field) && field.declared !== undefined).map((field) => ({ key: field.name, schema: field.declared as JsonValue }));
+}
+
+/** One picker option's id — a task and one of its outputs. `#` cannot appear in a task id. */
+export function sourceIdOf(ref: TaskOutputRef): string {
+  return `${ref.taskId}#${ref.output ?? ""}`;
+}
+
+export function sourceRefOf(id: string): TaskOutputRef {
+  const at = id.indexOf("#");
+  return { taskId: id.slice(0, at), output: id.slice(at + 1) };
+}
+
+/** The main process's answer for one slot, as the form's picker draws it. */
+export function sourceOptionsOf(options: readonly InputSourceOption[] | undefined): ValueSourceOption[] {
+  return (options ?? []).map((option) => ({
+    id: sourceIdOf(option),
+    label: `${option.title} · ${option.output}`,
+    note: option.pending ? `${option.status} — the new task waits for it to complete` : (option.preview ?? ""),
+  }));
+}
+
+/** Drop the picks a fresh answer no longer offers — a task deleted, an output that stopped fitting. */
+export function keptSources(picked: RunSources, offered: InputSourcesResponse | undefined): RunSources {
+  const kept: RunSources = {};
+  for (const [name, ref] of Object.entries(picked)) {
+    if ((offered?.[name] ?? []).some((option) => option.taskId === ref.taskId && option.output === ref.output)) kept[name] = ref;
+  }
+  return kept;
+}
+
+/** How a recorded input was settled, as the form's mark says it — `titleOf` names the task a value came from. */
+export function settledMarkOf(settled: InputProvenance | undefined, titleOf: (taskId: string) => string | undefined): SettledMark | undefined {
+  if (settled === undefined) return undefined;
+  const from = settled.from;
+  const where = from === undefined ? undefined : `${titleOf(from.taskId) ?? from.taskId} · ${from.output ?? from.input ?? ""}`;
+  const note =
+    settled.via === "bound"
+      ? where !== undefined
+        ? `bound — from ${where}`
+        : "bound — the workflow's wiring resolved it"
+      : settled.via === "inferred"
+        ? "inferred — a conversation supplied it"
+        : "asked — a person supplied it";
+  return { via: settled.via, note, ...(settled.confidence !== undefined ? { confidence: settled.confidence } : {}) };
 }
 
 // --- where it runs -----------------------------------------------------------

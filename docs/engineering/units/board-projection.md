@@ -2,13 +2,13 @@
 id: engineering/units/board-projection
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/keep-track-of-everything, product/complete-record-of-every-run, product/failures-explain-themselves, product/know-what-work-costs, product/large-work-splits-into-independent-pieces, ux/patterns/drill-in-and-back-out, ux/patterns/nested-under-what-caused-it, ui/components/task-board, ui/components/task-card, ui/components/task-name, ui/components/task-panel, ui/components/instance-index]
 layer: data
 owns_contracts: [engineering/contracts/task-view-models]
 requires: [engineering/units/event-journal, engineering/units/task-lifecycle, engineering/units/workflow-snapshots, engineering/units/workflow-browser, engineering/units/run-load, engineering/units/tool-policy]
 implemented_by: [packages/persistence/src/projection.ts, packages/persistence/src/views.ts, packages/persistence/src/conversation.ts, packages/persistence/src/shape.ts, packages/persistence/src/runLabel.ts]
-verified_by: [packages/persistence/test/projection.test.ts, packages/persistence/test/conversationPath.test.ts, packages/persistence/test/madeTurn.test.ts, packages/persistence/test/runLabel.test.ts, packages/app/test/eachHosted.test.ts, packages/app/test/runCut.test.ts]
+verified_by: [packages/persistence/test/projection.test.ts, packages/persistence/test/conversationPath.test.ts, packages/persistence/test/madeTurn.test.ts, packages/persistence/test/runLabel.test.ts, packages/app/test/eachHosted.test.ts, packages/app/test/runCut.test.ts, packages/app/test/taskAdopt.test.ts]
 siblings: [engineering/units/files-view-models, engineering/units/conversation-lookup, engineering/units/run-load, engineering/units/view-addressing]
 ---
 
@@ -25,7 +25,7 @@ siblings: [engineering/units/files-view-models, engineering/units/conversation-l
 
 `shape.ts` reduces a `WorkflowBundle` to the `WorkflowShape` the fold reads: label, children in `sequence` order then declaration order, `interactive` and `titled`. `runLabel.ts` resolves a state's `label` against one run's inputs with `resolveLabel`, and `checkLabel` asks the same of declared inputs for lint.
 
-`views.ts` joins the fold to a `Project`: `taskSummaries`, `taskOriginOf`, `bundleFor`, `runCauses`, `runCostUsd`, `taskRun`, `instanceAddresses`, `boardView` and `taskDetailView`. `conversation.ts` holds `conversationView`, the timeline of journal turns merged with command-log turns. Every shape these return is [task-view-models](../contracts/task-view-models.md).
+`views.ts` joins the fold to a `Project`: `taskSummaries`, `taskOriginOf`, `bundleFor`, `runCauses`, `runCostUsd`, `taskRun`, `instanceAddresses`, `boardView` and `taskDetailView`. `taskRun` is where the tree meets the task store, twice: `markMade` stamps a mirrored node with the task it stands for, and `markProvenance` stamps `inputProvenance` on every node that has inputs ([decision 0005](../decisions/0005-connect.md) §4). The root's comes from the task file's `inputProvenance`, and where the file says nothing a task a fan-out made reads `bound` and any other `asked`. A child's inputs read `bound`, except the ones a directed `transition.taken` handed the entry that followed it, which read `asked` for `by: "person"` and `inferred` for `by: "control"`. `conversation.ts` holds `conversationView`, the timeline of journal turns merged with command-log turns. Every shape these return is [task-view-models](../contracts/task-view-models.md).
 
 It deliberately does not own:
 
@@ -48,7 +48,7 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | `state_machine_events` | read whole per task by `project.events.list`; one row by `seq` in `taskOriginOf` | the journal, see [event-journal](event-journal.md) | written by the engine, the fan-out host and chat turns |
 | `task_runtime` row | read: `status`, `snapshotHash`, `forkedAtSeq`, `forkBoundarySeq`, `rootInstanceId`, `outcome`, `outputsJson`, `failureJson`, timing | the row | [task-lifecycle](task-lifecycle.md) |
-| Task file | read by `tryRead`: `title`, `workflow`, `labels`, `description`, `inputs`, `origin`, `dependsOn` | the file, see [task-file](../contracts/task-file.md) | task-lifecycle and the fan-out host |
+| Task file | read by `tryRead`: `title`, `workflow`, `labels`, `description`, `inputs`, `inputProvenance`, `origin`, `dependsOn` | the file, see [task-file](../contracts/task-file.md) | task-lifecycle and the fan-out host |
 | `command_log` | read by `project.commands.list` into `tool` and `policy` turns | the table | written by [tool-policy](tool-policy.md) |
 | Workflow shape | read by `bundleFor` then `workflowShape` | the pinned snapshot, else the live `workflows/` | [workflow-snapshots](workflow-snapshots.md), [workflow-browser](workflow-browser.md) |
 | View models | computed per call, never stored | the rows and files above | the app, the CLI and `stateViews.ts` |
@@ -73,8 +73,10 @@ It deliberately does not own:
 | 14 | A turn's `path` spells an element `key[i]`, a blocked turn carries no instance, and a re-stated entry is not narrated again | `conversationPath.test.ts` "spells an element of a fan-out as key[i], the way the engine addresses it", "carries NONE for a blocked child, because there never was one", "is folded into the instance it continues, not narrated again" |
 | 15 | A fan-out's `made` line is one per mount, read from where the reading task stands, and a mirrored row or node is claimed only by the task its provenance names | `madeTurn.test.ts` "is one `made` line at the mount listing every run, read from where this task stands", "says how each run stands now, off its row", "is not claimed by a task that did not make it, even when the id is a task's", "marks a mirrored element's node as made, so no panel is drawn for it" |
 | 16 | A label without a leading dot is a literal, and a label richer than an input path is refused rather than half-evaluated | `runLabel.test.ts` "treats a bare word as a literal, so no existing label had to grow quotes", "refuses an expression richer than a path instead of half-evaluating it" |
-| 17 | A fork's origin names, in words, the parent's event it was cut before | `runCut.test.ts` "is a second task that asks the question again, while the original keeps its answers" |
-| 18 | A legacy journal holding several root trees draws only the one `root_instance_id` names, or else the newest | unasserted |
+| 17 | An adopted task is off the roots board and in its child's column on its parent's board, its mirrored node is `made` with kind `adopt`, its origin label reads `as <key>`, and the parent's conversation holds one `made` line of kind `adopt` at that child | `taskAdopt.test.ts` "files the adopted task under its parent: off the roots board, in the child's column of the parent's", "mirrors it into a new parent that stands past it, infers the parent's input backwards, and runs only what is left" |
+| 18 | A root's inputs carry the provenance its task file records, a child's read `bound`, and what a person's move handed a child reads `asked` | `taskAdopt.test.ts` "mirrors it into a new parent that stands past it, …", "runs it in the parent as occurrence 1, and leaves the adopted task as occurrence 0's history", "offers the outputs that fit the slot, resolves the pick at creation, and records where it came from" |
+| 19 | A fork's origin names, in words, the parent's event it was cut before | `runCut.test.ts` "is a second task that asks the question again, while the original keeps its answers" |
+| 20 | A legacy journal holding several root trees draws only the one `root_instance_id` names, or else the newest | unasserted |
 
 ## Every failure degrades a read rather than a record, and one bad task file fails every list in its project
 
@@ -87,6 +89,7 @@ It deliberately does not own:
 | `boardView` is asked with no level, or for a level the newest task's workflow does not hold | the shape is the most recently updated task's workflow, so other workflows' tasks are on no column | ask `board:view` with a level, which resolves the owning workflow | tasks of other workflows missing |
 | `jaira board` projects without a gate vocabulary | `functionRefsOf` treats every function operation as interactive | none | every running function state shows waiting |
 | A task's journal outgrows the limits | `taskDetailView` keeps the last 200 events and `conversationView` the last 400 turns | none | the earliest history is not shown |
+| An adopted task's parent is not among the tasks projected, or never reached the level | the task falls through to its own path, which begins below the level | none | the adopted task is on no column of that board |
 | A fork's parent has been deleted, or the event at `forkedAtSeq` is gone | the label reads `a task since deleted`, or `event <seq>` | none | a vaguer origin line |
 | Another process appends while a read folds | the read sees the rows committed when it listed them, which is a consistent prefix of an append-only journal | read again | the view catches up on the next push |
 | Two writers, a process killed mid-write, a retry that duplicates | the projection writes nothing; a duplicated dispatch is deduplicated by operation id and a re-stated entry merged by instance id | none needed | the call and the step are drawn once |

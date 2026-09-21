@@ -25,12 +25,14 @@ import {
   runTitle,
   type RunField,
   type RunHistory,
+  type RunSources,
   type RunTarget,
   type RunValues,
 } from "./runForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import { useSchemaCheck, useTouched } from "./schemaForm/check";
 import type { FormCheck } from "./schemaForm/model";
+import type { SettledMark, ValueSources } from "./schemaForm/types";
 
 /**
  * A workflow's declared inputs, as the one schema form.
@@ -50,6 +52,8 @@ export function RunInputsForm({
   touched,
   touch,
   onChange,
+  sources,
+  provenance,
 }: {
   fields: readonly RunField[];
   values: RunValues;
@@ -57,6 +61,10 @@ export function RunInputsForm({
   touched: (path: string) => boolean;
   touch: (path: string) => void;
   onChange: (values: RunValues) => void;
+  /** "From a task…": another place a slot's value can come from — see `SchemaFormContext.sources`. */
+  sources?: ValueSources | undefined;
+  /** How each value shown was settled, when the form holds what a run was CALLED with. */
+  provenance?: ((path: string) => SettledMark | undefined) | undefined;
 }): JSX.Element {
   const fixed = fields.filter((field) => !isFilled(field));
   return (
@@ -75,15 +83,23 @@ export function RunInputsForm({
         schema={runSchemaOf(fields)}
         value={values}
         onChange={(next) => onChange(next as RunValues)}
-        ctx={{ path: "", labels: "keys", errors: check.errors, touched, touch }}
+        ctx={{
+          path: "",
+          labels: "keys",
+          errors: check.errors,
+          touched,
+          touch,
+          ...(sources !== undefined ? { sources } : {}),
+          ...(provenance !== undefined ? { provenance } : {}),
+        }}
       />
     </div>
   );
 }
 
 /** The check a run form's values get: the run's own validator per slot, plus a required slot with nothing in it. */
-export function useRunCheck(fields: readonly RunField[] | null | undefined, values: RunValues): FormCheck {
-  return useSchemaCheck(runChecksOf(fields ?? [], values), missingOf(fields ?? [], values));
+export function useRunCheck(fields: readonly RunField[] | null | undefined, values: RunValues, sources: RunSources = {}): FormCheck {
+  return useSchemaCheck(runChecksOf(fields ?? [], values, sources), missingOf(fields ?? [], values, sources));
 }
 
 /**
@@ -107,6 +123,11 @@ export interface RunSurface {
   fields: RunField[] | null;
   /** What the form holds — a value per slot that is set. */
   values: RunValues;
+  /**
+   * How each value was settled (decision 0005 §4), when the form is showing what a run was CALLED
+   * with and nothing has been typed over it. Absent for a form that is a question about the next run.
+   */
+  provenance?: ((path: string) => SettledMark | undefined) | undefined;
   /**
    * Which project the run goes to, decided by the file's layer — see {@link runTargetOf}.
    *
@@ -156,7 +177,7 @@ export function RunSection({
   /** How many runs this state has already had — what numbers the auto-generated title. */
   startedHere: number;
 }): JSX.Element {
-  const { fields, values, target, targetDir, exists, dirty, busy, onChange, onRun } = run;
+  const { fields, values, provenance, target, targetDir, exists, dirty, busy, onChange, onRun } = run;
   const check = useRunCheck(fields, values);
   const { touched, touch } = useTouched(state?.stateId ?? "");
   const blocked = runBlocker({ state, target, exists, fields, check, busy });
@@ -189,7 +210,7 @@ export function RunSection({
           {fields.length === 0 ? (
             <div className="sub">This state declares no inputs.</div>
           ) : (
-            <RunInputsForm fields={fields} values={values} check={check} touched={touched} touch={touch} onChange={onChange} />
+            <RunInputsForm fields={fields} values={values} check={check} touched={touched} touch={touch} onChange={onChange} provenance={provenance} />
           )}
         </>
       )}

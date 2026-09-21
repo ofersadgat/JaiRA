@@ -622,6 +622,10 @@ export function SilentState({ node, records }: { node: InstanceNode; records: Re
       {slots.map(([name, value]) => (
         <div className="ss-slot" key={name}>
           <span className="ss-slot-name">{name}</span>
+          {/* How the value was settled (decision 0005 §4): bound by wiring, inferred, or asked. */}
+          {node.inputProvenance?.[name] !== undefined ? (
+            <span className={`prov prov-${node.inputProvenance[name]!.via}`}>{node.inputProvenance[name]!.via}</span>
+          ) : null}
           <span className="ss-slot-value ellip">{previewOf(value)}</span>
         </div>
       ))}

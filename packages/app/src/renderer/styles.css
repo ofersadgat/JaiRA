@@ -8608,6 +8608,32 @@ textarea.cfg-input {
   color: var(--bad);
   font-weight: 700;
 }
+/* Where an input's value came from (decision 0005 §4): bound by the workflow's wiring, inferred by a
+   conversation, asked of a person. Bound is the quiet one — it is what nearly every value is — and
+   the other two take the accent and the warning tint, because those are the values somebody may
+   want back. */
+.prov {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: 600 calc(var(--size-app) * 10 / 12.5) / 1.6 var(--font-data);
+  color: var(--dim);
+}
+.prov-inferred {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  color: var(--accent);
+}
+.prov-asked {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  color: var(--warn);
+}
+/* How sure the conversation was, beside an inferred value. */
+.conf {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
 /* The chips sit in a well of their own so they read as ONE choice rather than three buttons. */
 .sf-pick {
   display: inline-flex;
@@ -10637,11 +10663,15 @@ fieldset.reading {
   min-width: 0;
 }
 .ss-slot-name {
-  display: block;
+  display: inline-block;
   margin-bottom: 2px;
   font-family: var(--font-data);
   font-size: calc(var(--size-data) * 11 / 12);
   color: var(--dim);
+}
+/* How the value was settled, on the name's line — see `.prov`. */
+.ss-slot-name + .prov {
+  margin-left: 6px;
 }
 /* One line, always. `previewOf` bounds a slot before it gets here, and this is the second guard: a
    preview of a single-line 20 kB document is still one very long line. */
