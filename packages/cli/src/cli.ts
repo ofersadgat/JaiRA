@@ -207,7 +207,8 @@ const USAGE = `usage:
   jaira workflow list [--json] [--project <dir>]
   jaira workflow lint [--json] [--project <dir>]
   jaira workflow migrate-toolsets [--project <dir> | --base] [--write [--shared-root]]
-            [--accept unlisted-shell]... [--max-lines <n>] [--json]   dry run unless --write
+            [--accept unlisted-shell|shell-judged]... [--max-lines <n>] [--json]
+            a DRY RUN unless --write; --shared-root is the second consent ~/.jaira takes
   jaira functions list [--json] [--project <dir>]
   jaira functions approve <file>... [--project <dir>]
   jaira functions revoke <file>... [--project <dir>]
@@ -1452,9 +1453,13 @@ async function cmdWorkflowMigrateToolsets(argv: string[], io: CliIo): Promise<nu
       json: { type: "boolean" },
     },
   });
+  // Both are about the SHELL, and neither is assumed: see `ToleratedDifference` in `@jaira/runtime`.
+  const ACCEPTABLE: readonly ToleratedDifference[] = ["unlisted-shell", "shell-judged"];
   const accept = (values.accept ?? []) as ToleratedDifference[];
   for (const kind of accept) {
-    if (kind !== "unlisted-shell") throw new UsageError(`--accept takes 'unlisted-shell'; '${kind}' is not a difference this migration can be told to accept`);
+    if (!ACCEPTABLE.includes(kind)) {
+      throw new UsageError(`--accept takes ${ACCEPTABLE.map((one) => `'${one}'`).join(" or ")}; '${kind}' is not a difference this migration can be told to accept`);
+    }
   }
   const maxLines = values["max-lines"] === undefined ? undefined : Number(values["max-lines"]);
   if (maxLines !== undefined && !Number.isInteger(maxLines)) throw new UsageError("--max-lines takes a whole number");
