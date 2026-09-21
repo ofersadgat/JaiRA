@@ -424,8 +424,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "interaction:submit": ((request: { requestId: string; value: never }) =>
     service.submitInteraction(request.requestId, request.value)) as Handler,
   "approval:pending": (() => service.pendingApprovals()) as Handler,
-  "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never; remember?: string[] }) =>
-    service.submitApproval(request.requestId, request.decision, request.scope, request.remember)) as Handler,
+  "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never; remember?: string[]; addTo?: "project" | "base" }) =>
+    service.submitApproval(request.requestId, request.decision, request.scope, request.remember, request.addTo)) as Handler,
   "userEvent:pending": (() => service.pendingUserEvents()) as Handler,
   "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
   "task:move": ((request: TaskMoveRequest) => service.moveTask(request)) as Handler,

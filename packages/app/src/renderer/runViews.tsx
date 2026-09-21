@@ -23,6 +23,7 @@ import type {
   PendingQuestion,
   ApprovalScope,
   PendingApproval,
+  WritableLayer,
   PendingUserEvent,
   StateChild,
   StateView,
@@ -704,7 +705,7 @@ export function RunConversation({
   onQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
   /** A command approval a running agent is waiting on, hosted under the same leaf for the same reason. */
   approval?: PendingApproval | undefined;
-  onApproval?: ((decision: "allow" | "deny", scope: ApprovalScope) => void) | undefined;
+  onApproval?: ((decision: "allow" | "deny", scope: ApprovalScope, extras?: { remember?: string[]; addTo?: WritableLayer }) => void) | undefined;
   /** A state to go to, asked for by the Instances index — see `SessionBandsView`. */
   focus?: { instance: string; at: number } | undefined;
   /**

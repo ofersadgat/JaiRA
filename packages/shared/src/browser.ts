@@ -43,6 +43,7 @@ export * from "./toolVocabulary";
 export * from "./agentTools";
 export * from "./toolsets";
 export * from "./commandParts";
+export * from "./toolsetEdit";
 export * from "./scopes";
 export * from "./hiddenPaths";
 export * from "./refusal";

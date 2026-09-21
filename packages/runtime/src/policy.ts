@@ -39,6 +39,7 @@ import { SHELL_SUBJECT, classifyRequest, lookUp, shellToolsetOf, shellToolsetOfB
 import { dialectFor, type ExecEnv } from "./paths";
 import {
   DEFAULT_ASK_ABOVE_BYTES,
+  INLINE_TOOLSET,
   absolutize,
   entriesToRemember,
   isAbsolutePath,
@@ -282,6 +283,11 @@ export interface DecideCommandOptions {
    * rules, the built-ins and `default` alone, which is what it did before toolsets held commands.
    */
   toolset?: ShellToolset | undefined;
+  /**
+   * Where {@link toolset} came from: the reference a state names it by, or `inline`. Carried onto
+   * the approval untouched; nothing here reads it.
+   */
+  toolsetSource?: string | undefined;
   /** Answers remembered for this run, by part width. */
   grants?: CommandGrants | undefined;
   /**
@@ -481,6 +487,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     parts,
     verdict,
     ...(taken.reason !== undefined ? { unparsed: taken.reason } : {}),
+    ...(options.toolset !== undefined && options.toolsetSource !== undefined ? { toolset: options.toolsetSource } : {}),
   });
 
   let worst: Omit<CommandDecision, "parts"> | undefined;
@@ -715,8 +722,12 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     if (known !== undefined) return known;
     const toolset = toolsetFor(authored);
     const cwd = typeof input["cwd"] === "string" && input["cwd"] !== "" ? input["cwd"] : undefined;
+    // The state's own block says where its subjects came from; a toolset this policy was compiled
+    // for is a message's, which has no file behind it.
+    const toolsetSource = toolset === undefined ? undefined : authored?.subjects !== undefined ? (authored.source ?? INLINE_TOOLSET) : INLINE_TOOLSET;
     const decision = decideCommand(policy, commandOf(input) ?? "", dialect, {
       toolset,
+      toolsetSource,
       grants: options.grants,
       scopeOf: partScopeFor(authored?.scopes, options.workspaceRoot, options.scopes),
       ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),

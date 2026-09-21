@@ -137,6 +137,8 @@ import {
   type TaskWorkspace,
   type WorkflowDigestOptions,
   type LayerSource,
+  addToToolset,
+  toolsetWriteTargets,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -271,6 +273,11 @@ import {
   type Changeset,
   parseChangesetSource,
   isWritableLayer,
+  chosenWidths,
+  entriesToRemember,
+  type ApprovalToolset,
+  type JairaPaths,
+  type ToolsetAddition,
   jairaBasePaths,
   jairaBuiltInPaths,
   DEFAULT_EXECUTOR,
@@ -791,13 +798,33 @@ function pendingQuestionOf(request: QuestionRequest, project: string): PendingQu
 }
 
 /** An approval as the renderer sees it (the hub's request, minus internals). */
-function pendingApprovalOf(request: ApprovalRequest, project: string): PendingApproval {
+/**
+ * The toolset behind an approval, as the answer menu needs it (decision 0007 §4): its name, and the
+ * layers a remembered line could be written into. Read off the disk each time it is asked for, so a
+ * file created since the question parked is what the menu describes.
+ */
+function approvalToolsetOf(paths: JairaPaths, reference: string): ApprovalToolset {
+  const found = toolsetWriteTargets(paths, reference);
+  return {
+    ...(found.id !== undefined ? { id: found.id } : {}),
+    targets: found.targets.map(({ layer, file, follows, shadowed }) => ({
+      layer,
+      file,
+      ...(follows !== undefined ? { follows } : {}),
+      ...(shadowed === true ? { shadowed } : {}),
+    })),
+    ...(found.unwritable !== undefined ? { unwritable: found.unwritable } : {}),
+  };
+}
+
+function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: JairaPaths): PendingApproval {
   return {
     requestId: request.requestId,
     tool: request.tool,
     ...(request.command !== undefined ? { command: request.command } : {}),
     ...(request.reason !== undefined ? { reason: request.reason } : {}),
     ...(request.parts !== undefined ? { parts: request.parts } : {}),
+    ...(request.parts?.toolset !== undefined && paths !== undefined ? { toolset: approvalToolsetOf(paths, request.parts.toolset) } : {}),
     input: request.input as Record<string, JsonValue>,
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
     project,
@@ -1113,7 +1140,7 @@ export class AppService {
     const approvals = new ApprovalHub({
       onRequest: (request) => {
         this.requestOwner.set(request.requestId, key);
-        this.publish({ type: "approval:requested", pending: pendingApprovalOf(request, this.refOf(key)) });
+        this.publish({ type: "approval:requested", pending: pendingApprovalOf(request, this.refOf(key), this.sessions.get(key)?.project.paths) });
       },
       onResolved: (requestId, decision) => {
         // The human's answer is the audit entry policy alone could not produce.
@@ -5545,18 +5572,44 @@ export class AppService {
   pendingApprovals(): PendingApproval[] {
     // Every session's, not the focused one's: an approval names its own request id, and a run in
     // another project parked on a tool call is still waiting for the same person.
-    return [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir)));
+    return [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir, s.project.paths)));
   }
 
   /**
    * Answer a parked approval. `scope` is how long the answer applies — the reason
    * a user is not asked the same question on every tool call.
+   *
+   * `addTo` is "add to the toolset" (decision 0007 §4): the asking parts, at the widths `remember`
+   * names, are written into the toolset file that asked, in that layer, BEFORE the request is
+   * answered — so a write that fails refuses the submit and the question stays where it was. The
+   * answer then remembers the same widths for the run, because a started task reads its pinned
+   * snapshot and would otherwise ask again until the next one.
    */
-  submitApproval(requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once", remember?: readonly string[]): { requestId: string } {
+  submitApproval(
+    requestId: string,
+    decision: "allow" | "deny",
+    scope: ApprovalScope = "once",
+    remember?: readonly string[],
+    addTo?: WorkflowLayer,
+  ): { requestId: string } {
     // Routed by OWNER rather than to the focused project. A request id is all the renderer sends, and
     // answering it against the wrong session would deny a call nobody asked about while the one that
     // is actually parked waits forever.
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    if (owner !== undefined && addTo !== undefined) {
+      const request = owner.approvals.list().find((r) => r.requestId === requestId);
+      if (request === undefined) throw this.refusal("run", `no pending approval '${requestId}'`);
+      this.writable(addTo);
+      if (request.parts === undefined) throw this.refusal("file", "this request is not a shell line, so there is no part of it to add to a toolset");
+      const widths = chosenWidths(request.parts, remember ?? []);
+      const entries: ToolsetAddition = entriesToRemember(request.parts, decision, (part) => part.widths.find((w) => widths.includes(w))) as ToolsetAddition;
+      try {
+        addToToolset(owner.project.paths, request.parts.toolset, addTo, entries);
+      } catch (e) {
+        throw this.refusal("file", (e as Error).message);
+      }
+      remember = widths;
+    }
     if (owner === undefined || !owner.approvals.decide(requestId, decision, scope, remember)) {
       throw this.refusal("run", `no pending approval '${requestId}'`);
     }

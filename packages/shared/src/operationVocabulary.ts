@@ -230,6 +230,16 @@ export interface PermissionsDecl {
    * tells a lowered toolset from an unmigrated block, whose shell answers as it always did.
    */
   subjects?: Record<string, PermissionMode>;
+  /**
+   * WRITTEN BY LOWERING, never authored, and only beside {@link subjects}: where those subjects came
+   * from — the reference the state named its toolset by (`$/toolsets/chat/ask-first`), or `inline`
+   * for a map written on the state (a `$ref` with siblings counts as written on the state: a sibling
+   * is an entry no file holds). Written WITH `subjects` every time, so a child block that replaces
+   * the one replaces the other, and an approval never names a parent's file for a child's map.
+   *
+   * It is how an approval can say which toolset asked, and which file "add to the toolset" edits.
+   */
+  source?: string;
   /** WRITTEN BY LOWERING, never authored: a toolset entry's `implementation`, by tool. */
   implementations?: Record<string, ToolImplementation>;
 }

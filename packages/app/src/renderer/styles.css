@@ -7037,6 +7037,224 @@ button.link.change-path {
   font-size: calc(var(--size-app) * 12 / 12.5);
   margin: 10px 0 0;
 }
+.reason-note + .reason-note {
+  margin-top: 3px;
+}
+
+/* ---- a shell line as the requests it is made of (decision 0007 §4) -----------------------------
+   The line in the colours of its parts. A part is tinted in its hue; what joins the parts is dim, so
+   the eye lands on the requests and not on the glue. */
+.approval-surface .mono {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+}
+.shell-line .part-c {
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--hue) 13%, transparent);
+  color: var(--text);
+  /* A part that wraps keeps its tint and its padding on every line it lands on. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* The tint is the whole part; the underline is only the words that matched the toolset's line. */
+.part-m {
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--hue) 75%, transparent);
+  font-weight: 600;
+}
+.shell-line .op {
+  color: var(--tok-hint);
+}
+/* Pointing at a part, on the line or in its row, lights both: past four parts the hues repeat, and
+   this is what says which of two blues a row is. */
+.shell-line .part-c.hot {
+  background: color-mix(in srgb, var(--hue) 26%, transparent);
+}
+
+/* One row per part, in the same colour: what was typed, what it is a request FOR, and what the
+   toolset says to it. */
+.approval-parts {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.approval-parts .part {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.2fr) auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 4px 8px;
+  /* A part written inside another (`rm {}` inside its `find`) hangs one step in, under its host. */
+  margin-left: calc(var(--depth, 0) * 17px);
+  border-radius: var(--control-radius-sm);
+}
+.approval-parts .part-swatch,
+.answer-what-row .part-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--hue);
+  align-self: center;
+}
+.approval-parts .part-text {
+  font-family: var(--font-data);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-parts .part-arrow,
+.approval-parts .part-note {
+  color: var(--tok-hint);
+}
+.approval-parts .part-subject {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-parts .part-subject + .part-note {
+  grid-column: 4;
+  grid-row: 2;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  overflow-wrap: anywhere;
+}
+.approval-parts .part-verdict {
+  grid-column: 5;
+  grid-row: 1;
+  padding: 0 7px;
+  border-radius: 999px;
+  font: 600 calc(var(--size-app) * 10.5 / 12.5) / 1.6 var(--font-app);
+  color: var(--dim);
+  background: var(--panel-2);
+}
+.approval-parts .part.hot {
+  background: color-mix(in srgb, var(--hue) 9%, transparent);
+}
+.approval-parts .part.asks {
+  background: var(--tint-warn);
+}
+.approval-parts .part.asks .part-verdict {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, var(--panel));
+}
+.approval-parts .part.denied .part-verdict {
+  color: var(--bad);
+  background: var(--tint-bad);
+}
+
+/* One answer each way, and an arrow for what it covers and how far it reaches. */
+.approval-answers {
+  display: flex;
+  gap: 8px;
+}
+.split {
+  position: relative;
+  display: inline-flex;
+}
+.split .split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.split .split-caret {
+  margin-left: -1px;
+  padding-left: 7px;
+  padding-right: 7px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.split .split-caret svg {
+  width: 12px;
+  height: 12px;
+}
+.split.primary .split-caret {
+  border-left: 1px solid color-mix(in srgb, #fff 35%, transparent);
+}
+.split .cx-submenu.answer-menu {
+  left: 0;
+  right: auto;
+  min-width: 390px;
+  max-width: min(460px, 86vw);
+}
+.answer-rule {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--line);
+}
+/* A reach reads as a list: tick, name, the sentence under it, all from the left edge. */
+.split .cx-submenu.answer-menu > button {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+.answer-menu .cx-opt-hint {
+  overflow-wrap: anywhere;
+}
+.answer-note {
+  margin: 0;
+  padding: 4px 7px 5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  line-height: 1.4;
+  color: var(--tok-hint);
+}
+/* The menu says WHAT the answer covers before it says how far it reaches. */
+.answer-what {
+  display: grid;
+  gap: 4px;
+  padding: 4px 7px 6px;
+}
+.answer-what-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.answer-what-row .verdict-seg {
+  flex: 1 1 auto;
+}
+/* A segmented choice: one border, the chosen half filled. */
+.verdict-seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  overflow: hidden;
+  background: var(--panel);
+}
+.verdict-seg button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 3px 10px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  font-weight: 500;
+  color: var(--dim);
+}
+.verdict-seg button + button {
+  border-left: 1px solid var(--line);
+}
+.verdict-seg button.on {
+  font-weight: 650;
+}
+.answer-what .verdict-seg {
+  display: flex;
+}
+.cx-submenu .answer-what .verdict-seg button {
+  flex: 1 1 0;
+  width: auto;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 0;
+  white-space: nowrap;
+}
+.cx-submenu .answer-what .verdict-seg button + button {
+  border-left: 1px solid var(--line);
+}
+.cx-submenu .answer-what .verdict-seg button.on {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text);
+}
 
 .toast {
   position: fixed;

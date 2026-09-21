@@ -43,7 +43,7 @@ import { Board, lanesOf } from "./board";
 import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
-import { ApprovalDialog, ModuleApprovalDialog } from "./components";
+import { ApprovalDialog, ModuleApprovalDialog, type ApprovalAnswerExtras } from "./components";
 import {
   AskDialog,
   ContextMenu,
@@ -1362,7 +1362,8 @@ export default function App(): JSX.Element {
     ...(inlineApproval !== null
       ? {
           runApproval: inlineApproval,
-          onRunApproval: (decision: "allow" | "deny", scope: ApprovalScope) => actions.decideApproval(inlineApproval.requestId, decision, scope),
+          onRunApproval: (decision: "allow" | "deny", scope: ApprovalScope, extras?: ApprovalAnswerExtras) =>
+            actions.decideApproval(inlineApproval.requestId, decision, scope, extras),
         }
       : {}),
     // The request's OWN project, not the ambient one. A parked request stamps the project it parked
@@ -2409,7 +2410,7 @@ export default function App(): JSX.Element {
         <ApprovalDialog
           pending={orphanApproval}
           error={state.error}
-          onDecide={(decision, scope) => actions.decideApproval(orphanApproval.requestId, decision, scope)}
+          onDecide={(decision, scope, extras) => actions.decideApproval(orphanApproval.requestId, decision, scope, extras)}
         />
       ) : null}
       {/* Every component is a render function; where it renders is its caller's choice, and a

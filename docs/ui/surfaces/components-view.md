@@ -37,7 +37,7 @@ The page is on `--bg` with 12px by 14px padding and 18px between its heading and
 | `Confirm an action` | `interaction` · `confirm_action` | `Buttons that say what they do` · `Defaults` |
 | `Review a set of artifacts` | `interaction` · `review_artifacts` | `A proposal in a worktree` · `With a review-level decision` · `A sync against the base` |
 | `A gate JaiRA does not know` | `interaction` · `unknown_function` | `The JSON box` |
-| `Approve a command` | `approval` | `A command line` · `Structured input` |
+| `Approve a command` | `approval` | `One line, two requests` · `A line nobody took apart` · `Structured input` |
 | `Answer an agent's question` | `question` | `One question` · `Several, in steps` · `Pick several` |
 
 The variant bar lists `basic 9`, `comments 2`, `custom 2`, `multiple 2`, `steps 2`, `follow_up 1`, `confirm 1`, `defaults 2`, `editable 1`, `routed 1`, `base 1`, `input 1` and `empty 1`, in that order.

@@ -26,8 +26,6 @@ import {
   fillFormSchema,
   type FillFormConfig,
   type FormField,
-  type ApprovalScope,
-  type PendingApproval,
   type ModuleApproval,
   type PendingInteraction,
   type PendingQuestion,
@@ -1047,72 +1045,9 @@ export function InteractionDialog(props: {
   );
 }
 
-/**
- * The per-command approval dialog (DESIGN §10.2).
- *
- * Distinct from a workflow gate: policy escalated a *tool call*, so what the user
- * judges is a command, and the answer carries a SCOPE — the reason they are not
- * asked the same thing on every call. The scope buttons widen left to right, with
- * deny kept visually separate so the destructive-looking choice is not the easy
- * mis-click.
- */
-export interface ApprovalSurfaceProps {
-  pending: PendingApproval;
-  error?: string | null;
-  onDecide: (decision: "allow" | "deny", scope: ApprovalScope) => void;
-}
-
-/**
- * The command approval as a RENDER FUNCTION: the command, the policy's reason, and the four
- * answers, with no opinion about where it sits. A conversation hosts it under the state whose
- * agent proposed the command; the gallery draws it in a row; `ApprovalDialog` is the one caller
- * that still puts it in a modal, for a request no conversation can host.
- */
-export function ApprovalSurface({ pending, error, onDecide }: ApprovalSurfaceProps): JSX.Element {
-  const detail = JSON.stringify(pending.input, null, 2);
-  return (
-    <div className="approval-surface" data-testid="approval">
-      <h3>
-        <Icon name="shield" className="gate-icon" /> Approve this command?
-      </h3>
-      <div className="sub">{pending.tool}</div>
-
-      {pending.command !== undefined ? (
-        <pre className="artifact" data-testid="approval-command">
-          {pending.command}
-        </pre>
-      ) : (
-        <pre className="artifact">{detail}</pre>
-      )}
-
-      {pending.reason !== undefined ? <p className="reason-note">Policy: {pending.reason}</p> : null}
-
-      <div className="options">
-        <button onClick={() => onDecide("allow", "once")}>Allow once</button>
-        <button onClick={() => onDecide("allow", "workflow-run")}>Allow for this run</button>
-        <button onClick={() => onDecide("allow", "always")}>Always allow</button>
-      </div>
-      <div className="options">
-        <button className="danger" onClick={() => onDecide("deny", "once")}>
-          Deny
-        </button>
-      </div>
-      {error ? <p className="reason">{error}</p> : null}
-    </div>
-  );
-}
-
-/** The approval in a modal — a caller's choice of place, for a request that names no task. */
-export function ApprovalDialog(props: ApprovalSurfaceProps): JSX.Element {
-  return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        {props.pending.taskId !== undefined ? <div className="sub">{props.pending.taskId}</div> : null}
-        <ApprovalSurface {...props} />
-      </div>
-    </div>
-  );
-}
+// The per-command approval (DESIGN 10.2, decision 0007 section 4) lives in its own file; it is
+// re-exported here because this module is where every other gate surface is imported from.
+export { ApprovalDialog, ApprovalSurface, type ApprovalAnswerExtras, type ApprovalSurfaceProps } from "./approvalSurface";
 
 /**
  * The js/ts modules a workflow calls, before it is allowed to call them (SPEC §7.5.5).
