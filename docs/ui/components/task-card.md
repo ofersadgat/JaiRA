@@ -2,14 +2,14 @@
 id: ui/components/task-card
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/context-beside-what-you-stand-on, ux/patterns/drag-only-where-the-process-allows, ux/patterns/verbs-on-the-thing-itself, ux/patterns/nested-under-what-caused-it]
 serves: [product/keep-track-of-everything, product/hand-work-to-agents, product/move-work-on-by-hand, product/large-work-splits-into-independent-pieces]
 surfaces: [ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/run-view]
 reuses: [ui/components/task-name, ui/components/status-pill]
 implemented_by: [packages/app/src/renderer/board.tsx, packages/app/src/renderer/pill.tsx, packages/app/src/renderer/runViews.tsx]
-verified_by: [packages/app/test/board.test.ts, packages/app/test/pill.test.ts]
-mockups: [ui/assets/task-card/loading.html, ui/assets/task-card/queued.html, ui/assets/task-card/holding.html, ui/assets/task-card/running.html, ui/assets/task-card/waiting.html, ui/assets/task-card/stopped.html, ui/assets/task-card/error.html, ui/assets/task-card/success.html, ui/assets/task-card/selected.html, ui/assets/task-card/execution.html]
+verified_by: [packages/app/test/board.test.ts, packages/app/test/connectDrag.test.ts, packages/app/test/pill.test.ts]
+mockups: [ui/assets/task-card/loading.html, ui/assets/task-card/queued.html, ui/assets/task-card/holding.html, ui/assets/task-card/running.html, ui/assets/task-card/waiting.html, ui/assets/task-card/stopped.html, ui/assets/task-card/error.html, ui/assets/task-card/success.html, ui/assets/task-card/selected.html, ui/assets/task-card/adopted.html, ui/assets/task-card/undo.html, ui/assets/task-card/execution.html]
 siblings: [ui/components/task-board, ui/components/instance-index, ui/components/conversation-row]
 ---
 
@@ -45,6 +45,8 @@ A borderless rounded tile in a board column: the task's name in mono with a stat
 | error | Flat `--bad` pill `⛔ failed` for a failed or timed-out task; far end is the age. No reason is shown on the card. | [error.html](../assets/task-card/error.html) |
 | success | Flat `--ok` pill `✓ done`; far end is the age, which becomes a date from seven days on. | [success.html](../assets/task-card/success.html) |
 | selected | Ground `--tint-accent` and the name at weight 600. On the Tasks view several cards can be selected at once, each tinted. | [selected.html](../assets/task-card/selected.html) |
+| adopted | A task another task took up as one of its children: drawn under that task's card, 14px in, with a 2px left edge of `--accent` mixed into `--line`. Its second line reads `adopted · {the state it ran}`; pill and far end as usual. It cannot be picked up: it moves with the task above it. | [adopted.html](../assets/task-card/adopted.html) |
+| undo | A task a drop has just made or moved: the far end of its second line is the link `Undo`, in place of the word or the age, until it is used or the app closes. | [undo.html](../assets/task-card/undo.html) |
 | execution | One pass of a state on a run's board: the pass chip, the inputs, the duration and the raw status. Passes stack oldest first. | [execution.html](../assets/task-card/execution.html) |
 
 ## A single click describes the card and a double click enters it
@@ -57,7 +59,8 @@ A borderless rounded tile in a board column: the task's name in mono with a stat
 | Shift-click, Tasks view | Selects every card from the anchor to this one in the order the board draws them | The range tinted |
 | Double-click | Tasks view: opens that run on the address. Files view: goes one level down the task's own path. Run board: walks into that execution | The address extends |
 | Right-click, Tasks view | Opens the card's verbs in a [context-menu](context-menu.md) | Menu at the pointer |
-| Drag, only when a waiting transition offers this task a move | Picks the card up; the board marks the columns that would take it | Cursor `grab`, then `grabbing` |
+| Drag, when a waiting transition offers this task a move, or on the Tasks view when the task stands somewhere | Picks the card up; the board marks the columns that would take it | Cursor `grab`, then `grabbing` |
+| Click `Undo` | Takes back the move that made or moved this task; the click neither selects nor opens the card | The board redraws |
 | Drop on a column that takes it | Asks the waiting process to make the move | The card appears in the new column once the process has moved it |
 
 ## The copy is the status in one word and the place in data

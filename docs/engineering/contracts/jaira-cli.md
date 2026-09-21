@@ -62,6 +62,7 @@ The `jaira` command line: its commands, flags, environment variables, what each 
 | `task list` | `--project` | `[{taskId, status, title, workflow, snapshotHash?}]`; `title` is `(missing task file)` when the file is gone |
 | `task status <taskId>` | `--events <n>`, `--project` | `{taskId, status, title, workflow, snapshotHash?, runs: [{outcome, startedAt, endedAt?, outputs?, failure?}], events?}`; `runs` holds at most one entry; `events` holds the last n journal events as `{seq, ...event}` |
 | `task cancel <taskId>` | `--project` | `{taskId, status: "canceled"}`, or `"cancel_requested"` when another live process owns the run |
+| `task move <taskId>` | `--to <stateId>` required; `--workflow <rootStateId>`, `--skip`, `--dry-run`, `--interactions`, `--fake`, `--repair-turns`, `--project`, `--non-interactive`, `--approve-functions` | `connect(task, target)` per [task-channels](task-channels.md): with `--dry-run`, or when refused, the `TaskConnectResult`; otherwise the durable `run` report of the task run here to take the move — reopened if it had finished — with `connect: <resolution> — <taskId> will stand at '<path>' in '<workflow>'` on stderr first. One JSON document either way |
 | `board` | `--level <stateId>`, `--json`, `--project` | text board, or `BoardView` JSON per [task-view-models](task-view-models.md) |
 | `worktree list` | `--project` | `[{path, branch?, taskId?, status?, prunable?}]` |
 | `worktree remove <taskId>` | `--force`, `--project` | `{taskId, removed, reason?}` |
@@ -93,6 +94,7 @@ The `--fake` and `--interactions` documents are [fake-rules-format](fake-rules-f
 | `workflow check --workflow` names an unknown root | exit 1, `unknown workflow '<root>'` with the known roots | name a known root |
 | `worktree remove` meets uncommitted work | exit 1 with `reason`, and a stderr hint to re-run with `--force` | commit, or `--force` |
 | `task cancel` on a task already ended | exit 1, `task '<id>' is already <status>` | nothing |
+| `task move` refused | exit 1, the `TaskConnectResult` on stdout and `refused: <message>` on stderr | `--skip` for a forward move, `--workflow` for an ambiguous one, or supply what is missing another way |
 
 ## A renamed flag, a reshaped report or a changed exit code breaks scripts at once, and no deprecation path exists
 

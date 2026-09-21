@@ -837,9 +837,12 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
     // item of one feature — and shows on the board of the state that mounted it, not here. A task
     // at this level is a feature; a SPLIT copy is one, and files under its parent's flow like any
     // other subsidiary.
-    // An ADOPTED task (decision 0005 §2) is the same: it stands for a child of the task that adopted
-    // it, and files in that child's column on the parent's board.
-    if (summary.origin?.kind === "task" || summary.origin?.kind === "adopt") continue;
+    // An ADOPTED task (decision 0005 §2) stands for a child of the task that adopted it too, and
+    // files in that child's column on the parent's board — but it was a task of its OWN first, with
+    // a card a person knows, so here it stays in sight: in its parent's column, marked `under` it,
+    // which the board draws indented beneath the parent's card.
+    if (summary.origin?.kind === "task") continue;
+    const adoptedBy = summary.origin?.kind === "adopt" && byTaskId.has(summary.origin.taskId) ? summary.origin.taskId : undefined;
     // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
     // active path, and `taskRun` without a shape still yields one.
     const bundle = bundleFor(project, summary.workflow, summary.snapshotHash);
@@ -871,6 +874,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
       ...(heading !== undefined ? { heading } : {}),
       ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
+      ...(adoptedBy !== undefined ? { under: adoptedBy } : {}),
       ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
       ...(summary.inReview !== undefined ? { inReview: summary.inReview } : {}),
       updatedAt: summary.updatedAt,

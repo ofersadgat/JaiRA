@@ -2,14 +2,14 @@
 id: ui/components/task-board
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 realizes: [ux/patterns/ordered-by-urgency-then-recency, ux/patterns/context-beside-what-you-stand-on, ux/patterns/drill-in-and-back-out, ux/patterns/verbs-on-the-thing-itself, ux/patterns/drag-only-where-the-process-allows, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/absence-is-stated]
 serves: [product/keep-track-of-everything, product/hand-work-to-agents, product/move-work-on-by-hand, product/complete-record-of-every-run]
 surfaces: [ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/run-view]
 reuses: [ui/components/task-card, ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/board.tsx, packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/taskDrag.ts, packages/app/src/renderer/App.tsx]
-verified_by: [packages/app/test/board.test.ts, packages/app/test/taskDrag.test.ts, packages/app/test/runViews.test.ts, packages/app/test/runDragOffers.test.ts]
-mockups: [ui/assets/task-board/empty.html, ui/assets/task-board/root-listing.html, ui/assets/task-board/level.html, ui/assets/task-board/dragging.html, ui/assets/task-board/run-board.html]
+implemented_by: [packages/app/src/renderer/board.tsx, packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/taskDrag.ts, packages/app/src/renderer/connectDrag.ts, packages/app/src/renderer/App.tsx]
+verified_by: [packages/app/test/board.test.ts, packages/app/test/taskDrag.test.ts, packages/app/test/connectDrag.test.ts, packages/app/test/runViews.test.ts, packages/app/test/runDragOffers.test.ts]
+mockups: [ui/assets/task-board/empty.html, ui/assets/task-board/root-listing.html, ui/assets/task-board/level.html, ui/assets/task-board/dragging.html, ui/assets/task-board/connecting.html, ui/assets/task-board/refused.html, ui/assets/task-board/after-drop.html, ui/assets/task-board/run-board.html]
 siblings: [ui/components/task-card, ui/components/address-bar, ui/components/instance-index, ui/components/state-graph]
 ---
 
@@ -29,6 +29,7 @@ A row of rounded hairline columns on `--panel-2`, each under a `--panel-3` band 
 - **Column.** `--panel-2` ground, 1px `--line` edge, 9px corners. The band on `--panel-3` with a `--line` hairline under it holds the sequence number in `.data-num`, the name in mono at the `.data-title` size and weight, never uppercased, and the count at the far end in `.app-secondary`. The band stays at the top of the board while a long column scrolls under it.
 - **Order.** Below a project's roots, columns run left to right in the order the children run, numbered from 1, and the row scrolls sideways past the view's width. At the roots the columns are the project's processes, unnumbered, and wrap onto further rows 12px apart.
 - **Cards.** 6px inside the column, 4px apart. A column with no cards shows `—`, or `not reached` on a run's board, in `--dim`.
+- **Beneath.** A task another task adopted is drawn directly under that task's card, indented, wherever its own status would have filed it; the lanes are made of what is left. At the root listing it stands in its parent's column; on a level's board, under the parent only when the parent stands in the same column.
 - **Lanes.** A column that mixes kinds groups its cards: running, then paused, then not started, then finished with the most recently ended first. Only not started and finished get a heading: an `.app-label` word, a `--line` rule running right, and the count in `.data-num`. Those two lanes are drawn at 72% opacity and come to full on hover. A column of one kind has no lanes.
 - **Tray.** Tasks at this level that stand in no column: an uppercase `AT THIS LEVEL` caption in `--dim`, then 210px cards wrapping in rows 8px apart, laned the same way. Only the Tasks view draws it.
 
@@ -43,6 +44,9 @@ A row of rounded hairline columns on `--panel-2`, each under a `--panel-3` band 
 | root listing | The project's processes as unnumbered columns that wrap onto further rows. | [root-listing.html](../assets/task-board/root-listing.html) |
 | level | Numbered columns in run order in one row, lanes where a column mixes kinds, empty columns as `—`, and the tray. A column the context panel describes has an `--accent` edge and its band on `--fill-ghost-selected`, and no card is selected meanwhile; a selected card is drawn by task-card. | [level.html](../assets/task-board/level.html) |
 | dragging | While a card offered a move is held, each column that would take it gets a dashed `--accent` edge and the one under the pointer fills with `--fill-ghost-selected`. Every other column is unchanged and refuses the drop. | [dragging.html](../assets/task-board/dragging.html) |
+| connecting | On the Tasks view a card that stands somewhere can be held over a column no process offered it. Every column a drop would do something in lights the same way, and the one under the pointer holds a preview under its cards: an uppercase kind, `Adopt into`, `Move within` or `New transition`; a sentence; dim facts naming where the task will stand, where each input comes from and what can be given afterwards; and the drop in `--accent`. The preview has no controls and takes no pointer. Until its answer is in it reads `Working out what a drop does…`. | [connecting.html](../assets/task-board/connecting.html) |
+| refused | A column a drop would do nothing in stays unlit and refuses the drop. Under the pointer it holds the same preview with the reason in `--dim` where the drop line would be, and each required input that would not be bound named among the facts. | [refused.html](../assets/task-board/refused.html) |
+| after a drop | The drop has happened; nothing was confirmed. A task the drop made stands in its column with `Undo` at the far end of its second line, and the task it adopted is drawn beneath it. | [after-drop.html](../assets/task-board/after-drop.html) |
 | run board | One column per declared child, one card per pass stacked oldest first, `not reached` in a column no pass entered. No tray, no lanes. | [run-board.html](../assets/task-board/run-board.html) |
 
 ## A click describes, a double click enters, and a right click offers the verbs
@@ -60,6 +64,10 @@ A row of rounded hairline columns on `--panel-2`, each under a `--panel-3` band 
 | Right-click a column outside its cards, Tasks view | Offers the column's verbs, titled with the state id | Menu at the pointer |
 | Drag a card, only where a waiting process offers it a move | Marks the columns that would take it | Dashed `--accent` edges; cursor `grabbing` |
 | Drop on a column that takes it | Asks the waiting process to make the move | The card appears in the new column once the process has moved it |
+| Drag a card that stands somewhere, Tasks view | Asks once for each other column what a drop there would do, when the card is picked up and never while the pointer moves | The columns that would take it light as their answers arrive |
+| Hold it over a column | Nothing is asked again | The preview, or the reason a drop would do nothing |
+| Drop on a lit column | Makes the move: within the task's process, into the process that holds both by adopting the task, or by adding the move to the task's own copy. There is no step after the drop | The board redraws; a task the drop made or moved carries `Undo` |
+| Click `Undo` | Takes the move back: an adopted task is its own again and a task the drop had made, having run nothing, is removed; a moved task returns to where it stood | The cards return; a refusal while the task runs says to stop it first |
 | Choose `Delete…` or `Delete {n} tasks…` | Asks first, naming everything that goes | The confirm dialog |
 
 A disabled verb stays in its place. `Re-run` and `Delete…` are disabled while the task runs; `Cancel` is disabled once it completed, failed or was canceled. A group verb counts only the members it applies to and names what it skipped; it is disabled at zero.
@@ -72,6 +80,14 @@ A disabled verb stays in its place. `Re-run` and `Delete…` are disabled while 
 | Empty column | `—` on a task board · `not reached` on a run's board |
 | Lane headings | `Not started` · `Finished`, drawn uppercase |
 | Tray caption | `At this level`, drawn uppercase |
+| Preview kinds | `Adopt into` · `Move within` · `New transition` · `Cannot move here`, drawn uppercase |
+| Preview, adopt | `{workflow} mounts this task's state as {child key}. The task becomes that child; nothing runs again.` · facts `stands at {state}` · `{input} taken from what {child key} ran with` · drop `Drop to adopt` |
+| Preview, move | `{state} is behind where this task stands. It is entered again, as the next pass.` · `{state} is the state that comes next.` · `{state} is {n} states ahead in this task's workflow.` · facts `steps over {states}, recorded as skipped` · `steps past {state}, where it stopped` · drop `Drop to go back` · `Drop to move` · `Drop to skip ahead` |
+| Preview, new transition | `No workflow holds both {own} and {target}.` then `A new one is made around this task, with a move to it.` or `This task's copy of the workflow gains a move to it.` · `This task's workflow gains a move to {target}.` · facts `this task becomes its first child, {child key}` · `the copy stops following {own}` · `one task per element, made held — none starts` · drop `Drop to add the move and take it` |
+| Preview, every kind | `{input} comes from {source}` · `{input} takes one element of {source}` · `{n} inputs can be given afterwards` · `works on branch {branch}` |
+| Preview, refused | `Running the states between is not built yet.` with `{states} lie between` · `{n} required inputs would not be bound.` with `{input} is required and unbound — {reason}` · `could join {workflow} as {child key}` when more than one process holds both · otherwise the reason as the host gave it |
+| Preview, waiting | `Working out what a drop does…` |
+| Card a drop made or moved | `Undo` |
 | Column tooltip | Tasks view `click to describe {state id}, double-click to open it` · Files `double-click to open {state id}` · run board `double-click to walk into {key}` or `{key} was not reached` |
 | Card verbs | `Open` · `Start` for a queued task, `Re-run as a new task` with note `fresh copy` for an ended task or a conversation, else `Re-run` · `Cancel` · `Copy task id` · `Delete…` |
 | Group verbs, title `{n} tasks` | `Re-run {n} tasks` with note `running skipped` · `Cancel {n} tasks` with note `finished skipped` · `Copy task ids` · `Delete {n} tasks…` with note `running skipped`; every `{n} tasks` reads `1 task` for one |
@@ -86,6 +102,7 @@ A disabled verb stays in its place. `Re-run` and `Delete…` are disabled while 
 - Theme: grounds, edges and the drop marks are tokens, so both themes keep them.
 - Focus: columns and cards are not tab stops. Selecting, opening, the verbs and the move are pointer gestures only; the context panel's buttons are the keyboard route.
 - The Files view draws the board without the tray, without column descriptions or verbs, and without moves.
+- The preview sits inside the column it explains, at the column's width, and wraps; it never covers another column.
 
 ## Two quiet marks do not use the quiet register
 

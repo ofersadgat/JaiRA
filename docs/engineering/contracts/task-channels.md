@@ -89,6 +89,8 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `skip` | boolean | no | interrupt the running state rather than wait for it to end |
 | `inputs` | `Record<string, JsonValue>` | no | handed to the target over the workflow's own wiring, per input name |
 | `instanceId` | string | no | the composite whose child `toState` is; absent names the task's root instance |
+| `path` | string[] | no | child keys entered beneath `toState`, in order: each is directed at the composite above it the moment the journal says that composite entered, so it goes straight to the named child |
+| `interactions`, `fake` | as `task:start` | no | script the run a reopen starts |
 | `project` | `ProjectRef` | no | as above |
 
 | `status` | When |
@@ -97,6 +99,80 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `taking` | the task runs in this process, has the move, and nothing stands in its way |
 | `held` | the task runs in this process and takes the move when its running state ends |
 | `reopened` | the task was not running and was started again by load with the move waiting; a `completed` task is reopened under its own id, and any other status steps past the state it stopped in |
+
+### `task:connect` sends a task to a state, and answers which of three things that was
+
+`task:connect` takes `TaskConnectRequest` and answers `TaskConnectResult` ([decision 0005](../decisions/0005-connect.md) §1). It composes `task:move`, `task:adopt` and the dynamic workflow generator and owns none of them; `connectTask` in `persistence/connect.ts` holds the order. The board's drop sends it, the conversation's `move` tool will, and `jaira task move` is the same call.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `taskId` | string | yes | the task to send |
+| `target` | string | yes | a state id; a workflow's own root id means "into this workflow" |
+| `workflow` | string | no | the composite that holds the target; narrows the second resolution to it and skips the first when it is not the task's own |
+| `forward` | `"fast-forward"` or `"skip"` | no | how a forward move crosses the states between; absent reads `fast-forward`, which is refused until it is built |
+| `skip` | boolean | no | `true` is `forward: "skip"` |
+| `by` | `"person"` or `"control"` | no | who asked, journaled on the move |
+| `dryRun` | boolean | no | answer what would happen and change nothing: no task, no document, no pin, no journal row |
+| `start` | boolean | no | `false` leaves a task the connect makes queued where no move has to be taken; a move an engine has to take starts one regardless |
+| `interactions`, `fake` | as `task:start` | no | script a run the connect starts |
+| `project` | `ProjectRef` | no | as above |
+
+Resolution, in order, stopping at the first that applies:
+
+| `plan.resolution` | When | What it does |
+| --- | --- | --- |
+| `move` | the task's pinned definition mounts the target, at any depth | `task:move` from the deepest instance the task stands in that the path passes through, with `path` for the rest of the way down |
+| `adopt` | one composite mounts the task's root state as a child and either is the target or mounts it as a child too; tried only for a task in no document that nothing made | `task:adopt` into a new task of that composite, then `task:move` of the new task unless the target is what comes next anyway |
+| `modify` | neither | `generateDocumentVersion`: `new` for a task that finished well, whose task is made and which adopts the source as its first child; `augmented` for a task already in a document; `cloned` for one standing inside a real workflow. Then `task:move` |
+
+`TaskConnectResult` is `{ok: true, dryRun, plan, taskId?, moved?, undo?}` or `{ok: false, dryRun, refusal, plan?}`. `taskId` is the task that stands at the target: the moved task, or the parent a connect made, absent from a dry run that would make one. `moved` is `task:move`'s status. A refusal carries `plan` wherever the resolution got far enough to have one, so a preview can say what was refused.
+
+| `ConnectPlan` field | Type | Meaning |
+| --- | --- | --- |
+| `resolution` | `"move"`, `"adopt"` or `"modify"` | which of the three |
+| `modification` | `"new"`, `"augmented"` or `"cloned"`, optional | which modification, for `modify` |
+| `workflow`, `workflowLabel` | string | the workflow the task will stand in; `jaira:dynamic:…` from a `new` dry run, whose document does not exist yet |
+| `standsAt` | `{path: string[], stateId, label?}` | child keys from that workflow's root to where the task will stand |
+| `move` | `ConnectMove`, optional | the directed transition it ends in; absent where the adoption alone reaches the target |
+| `adopt` | `AdoptPlan`, optional | the adoption that is part of it; absent from a `new` dry run |
+| `adoptedAs` | string, optional | the child key the task becomes |
+| `mount` | `"plain"` or `"split"`, optional | the mount a modification adds; `split` makes one held task per element |
+| `inputs` | `{name, via: "wire", "literal" or "default", from?, each?}` array | how each input of the target settles |
+| `asks` | `ConnectMissingInput` array | inputs nothing determines that are not required |
+| `branch` | string, optional | the branch a made parent takes up |
+
+| `ConnectMove` field | Type | Meaning |
+| --- | --- | --- |
+| `direction` | `"backward"`, `"next"`, `"forward"` or `"aside"` | `aside` is a child on no spine, as a document's children are |
+| `instanceId` | string, optional | the composite whose child is entered; absent names the root instance |
+| `to`, `path` | string, string[] | the child entered, and the child keys entered beneath it |
+| `passes` | string[] | the states a forward move steps over, as paths of child keys |
+| `stepsPast` | string, optional | the state a task that is not running stopped in, which the move records `skipped` |
+| `answersRule` | boolean, optional | a transition of the workflow is waiting on exactly this move, so nothing is stepped over and no input is checked |
+
+| `refusal.code` | When | Also carries |
+| --- | --- | --- |
+| `unknown-task`, `unknown-target` | the task has no row, or no state of that id is on the workflow path | |
+| `already-there` | the target is the task's own root | |
+| `never-run` | the task has no journal, so it stands nowhere | |
+| `unloadable` | the task's pinned workflow or its journal does not load | |
+| `fast-forward` | a forward move would step over states and did not say `skip` | `plan` with `move.passes` |
+| `ambiguous-workflow` | more than one composite holds both | `candidates: [{workflow, label?, childKey, targetKey?}]`; call again with `workflow` |
+| `inputs-missing` | a required input of the target, of an ancestor entered on the way down, of the adopting workflow or of a new document's conversation would not be bound | `missing: [{state, name, schema?, description?, reason}]` |
+| `running` | the move is a new transition and an engine is running the task, which picks a new version up only at its next load | |
+| `adopt` | the adoption refused | `adopt`, the `AdoptRefusal` |
+| `generate` | the generator or its lint refused | |
+
+`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made}` or `{kind: "move", taskId, after, pin?, wasCompleted?}`. `after` is the task's last journal seq before the move.
+
+### `task:connectUndo` takes a connect back with the token it handed out
+
+`task:connectUndo` takes `{undo: ConnectUndo, project?}` and answers `{taskId, removed?}`.
+
+| `undo.kind` | Does |
+| --- | --- |
+| `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made that had entered nothing of its own is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. A parent that ran something is kept |
+| `move` | `task:rewind` to `after + 1` when the journal holds anything later, which puts a cloned task back under its previous pin; a task that had completed is marked completed again; then the pin is put back if it still differs |
 
 ### `task:adopt` takes a task up as a child, and answers the plan or the refusal
 
@@ -207,7 +283,8 @@ A completed task's output is offered when its value validates against the slot's
 | `task:resume` of a running, unstartable or never-pinned task | `task '<id>' is already running`, `… is <status> and cannot be resumed — run it again instead`, or `… has no pinned snapshot to resume against — run it instead` | rerun or start it |
 | `task:resume` of a history that cannot load | `task '<id>' cannot be resumed: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Running it again would repeat them.` | rerun it |
 | `task:move` to a state that is not a child of the instance named, or naming an instance the task does not have | `cannot move task '<id>' to '<state>': '<state>' is not a declared child of '<stateId>'` for a running task, `… it is not a state of '<stateId>'` or `… it has no instance '<instanceId>'` for one that is not; nothing is started | pick a state of that level |
-| `task:move` of a task another process is running, or one that never ran | `task '<id>' is <status> in another process — move it there`, or `task '<id>' has never run, so it stands nowhere to be moved from — start it instead` | move it there, or start it |
+| `task:move` of a task another process is running, or one that never ran and names no document | `task '<id>' is <status> in another process — move it there`, or `task '<id>' has never run, so it stands nowhere to be moved from — start it instead` | move it there, or start it |
+| `task:connectUndo` of a running task, or of an adoption whose mirror row is gone | `'<title>' is running — stop it before taking the move back`, `task '<id>' is running — …`, or `'<title>' no longer holds the task it adopted — there is nothing to take back` | stop it, or nothing |
 | `task:move` of a history that cannot load | `task '<id>' cannot be moved: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Reopening it would repeat them.` | rerun it |
 | `task:create` names a source task that does not exist, or one that completed without that output | `input '<name>' is taken from task '<id>', which does not exist`, or `… from '<title>', which completed without producing '<output>'` | pick another source |
 | A start of a task whose source completed without the output it owed | `task '<id>' takes '<name>' from '<title>', which has not produced '<output>'` | create the task again with another source |
@@ -235,6 +312,10 @@ A completed task's output is offered when its value validates against the slot's
 - `task:cancel` of a finished task answers `{taskId}` and changes nothing, where `jaira task cancel` refuses.
 - `functions:pending` ignores `project`: the list is keyed by task id alone, set when a `task:start` or `task:rerun` start refuses with `ApprovalRequired`, and cleared when a later start of that task succeeds.
 - `task:resumable` and `task:detail` throw for a startable task with history whose snapshot is missing or corrupt, because the plan loads the snapshot without a fallback.
+- `task:connect` answers a refusal as data, as `task:adopt` does. A real connect writes in order — the document, its task, the adoption, the move — and a refusal or rejection part-way leaves what was written: the `adopt` refusal of a `new` names the document and the task already made, and a `task:move` that rejects after an adoption leaves the adoption.
+- `task:connect` decides whether inputs will bind statically, from the lowered wires and the loaded machine: a wire counts as bound when every child it reads has ended well, and a computed expression that reads nothing is taken to resolve. The engine's own entry is still the judge.
+- A `move` undo of a task that had completed restores `completed` and `success` but not the outputs the reopen cleared.
+- The `Undo` token lives in the renderer's memory: it does not survive a restart, after which `task:rewind` takes the same thing back.
 - `task:adopt` answers a refusal as data and rejects only for a broken installation, an unapproved module included. A real adoption whose parent then refuses to start has already written the parent and the mirror rows.
 - `task:rewind` and `task:delete` of a task that adopted others clear those tasks' `origin` and `parentTaskId` where the mirror row is gone.
 - `task:resumable` has no renderer caller. The renderer reads the same plan from `task:detail`'s `resume`, present only for a startable task.
