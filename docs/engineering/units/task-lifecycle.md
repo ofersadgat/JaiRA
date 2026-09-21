@@ -2,13 +2,13 @@
 id: engineering/units/task-lifecycle
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/hand-work-to-agents, product/pick-up-where-it-left-off, product/work-runs-the-process-it-started-with, product/only-approved-code-runs, product/large-work-splits-into-independent-pieces, ux/patterns/refuse-with-the-reason-and-the-fix, ux/patterns/button-says-what-will-happen, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/consent-to-exactly-what-was-shown, ui/components/activity-strip, ui/surfaces/module-approval-dialog]
 layer: service
 owns_contracts: [engineering/contracts/task-file, engineering/contracts/task-channels]
 requires: [engineering/units/workflow-snapshots, engineering/units/module-approvals, engineering/units/workflow-browser, engineering/units/run-load, engineering/units/engine-wiring, engineering/units/fan-out-host, engineering/units/task-worktrees, engineering/units/process-claims, engineering/units/interaction-gateway, engineering/units/interaction-hub, engineering/units/live-turns, engineering/units/event-journal, engineering/units/storage-policy, engineering/units/operation-record-store, engineering/units/model-routing, engineering/units/tool-policy, engineering/units/agent-executors, engineering/units/host-tools, engineering/units/artifact-placement, engineering/units/native-session-capture, engineering/units/scripted-doubles, engineering/units/project-sessions, engineering/units/app-log]
 implemented_by: [packages/persistence/src/lifecycle.ts, packages/persistence/src/runtime.ts, packages/persistence/src/taskStore.ts, packages/shared/src/task.ts, packages/app/src/main/service.ts]
-verified_by: [packages/persistence/test/lifecycle.test.ts, packages/persistence/test/holding.test.ts, packages/persistence/test/moduleApproval.test.ts, packages/persistence/test/stores.test.ts, packages/persistence/test/rowFile.test.ts, packages/persistence/test/systemProject.test.ts, packages/shared/test/shared.test.ts, packages/app/test/service.test.ts, packages/app/test/resume.test.ts, packages/app/test/eachHosted.test.ts, packages/app/test/gateDurability.test.ts]
+verified_by: [packages/persistence/test/lifecycle.test.ts, packages/persistence/test/holding.test.ts, packages/persistence/test/moduleApproval.test.ts, packages/persistence/test/stores.test.ts, packages/persistence/test/rowFile.test.ts, packages/persistence/test/systemProject.test.ts, packages/shared/test/shared.test.ts, packages/app/test/service.test.ts, packages/app/test/resume.test.ts, packages/app/test/eachHosted.test.ts, packages/app/test/gateDurability.test.ts, packages/app/test/taskMove.test.ts]
 siblings: [engineering/units/run-load, engineering/units/rewind-and-fork, engineering/units/fan-out-host, engineering/units/task-worktrees, engineering/units/workflow-snapshots]
 ---
 
@@ -24,6 +24,7 @@ A task is one state machine under one id. Its half in `@jaira/persistence` keeps
 - `cancelTaskIn` stops a run here, raises the cross-process cancel flag for a run elsewhere, or records `canceled` for a task nothing runs.
 - `resumeTask` continues a stopped task by load, and `resumable` answers the `ResumePlan` the primary action follows.
 - `rerunTask` always mints a new task linked by `parentTaskId` and starts it.
+- `moveTask` publishes a person's move ([decision 0005](../decisions/0005-connect.md)): it answers the transition waiting on exactly that move, else hands the live run's `DirectedTransitions` port a directed transition, else reopens the task by load with the move queued on a port of its own. `LiveRun.directed` is that port, and `beginTaskRun`'s `reopen` is the one way a `completed` task runs again under its own id.
 - `deleteTask` removes the worktree, then every row and file of the task.
 - `holdingOf` derives holding from `dependsOn`. `startMadeTask`, `waitForTask` and `releaseDependents` serve the fan-out host.
 - `RuntimeStore.recoverInterrupted` marks abandoned `running` tasks `interrupted` at open, and `resumeSuspended` resumes the tasks the last close left waiting on a person.
@@ -97,6 +98,10 @@ It deliberately does not own:
 | 19 | A task the app closed while it waited on a person runs again at the next open and asks the same question | `gateDurability.test.ts` "records WHY the close ended the run, so the open knows to resume it", "is being asked again when the app opens, by a run that is running again" |
 | 20 | A completed task starts every task that held only for it, except a split copy whose `start` is `manual` | `eachHosted.test.ts` "starts a copy that holds for nothing at once, and a dependent the moment its dependency completes", "refuses to start a copy while it holds, and resumes a released one from the mount with the parent's history" |
 | 21 | An approval records the hash of the file as main reads it at approval time | unasserted |
+| 22 | A move published to a running task is held until its running state ends, is journaled `transition.taken` with `by`, and records what it stepped over `skipped`; with `skip` the running state's gate is withdrawn and the state ends `skipped` | `taskMove.test.ts` "is held while the state it is in runs, taken when that state ends, and journaled with who asked", "with SKIP, interrupts the running state: its gate is withdrawn, and it and what was stepped over end skipped" |
+| 23 | A move a `standing` rule was waiting on answers that rule, and a standing rule nobody answers neither parks the sequence nor holds the task open | `taskMove.test.ts` "answers the transition that was waiting on exactly this move, and the workflow's own rule moves the task", "a standing rule nobody answers changes nothing: the task runs as written and finishes" |
+| 24 | A finished task takes a move by being reopened under its own id, while a plain resume of it stays refused; a stopped task reopened to take one does not ask its stopped state's question again | `taskMove.test.ts` "reopens a FINISHED task to take it, under its own id — and a plain resume of it is still refused", "reopens a STOPPED task past the state it stopped in, without asking that state's question again" |
+| 25 | A task that dies mid-skip resumes in the skip's target with what it stepped over still `skipped`, and makes the entry the skip still owed when the target never entered | `taskMove.test.ts` "resumes in the state the skip went to, with what it stepped over still skipped", "makes the entry the skip still OWED when the process died before the target entered" |
 
 ## A refusal after the task is marked running strands it until the app restarts
 
@@ -116,6 +121,9 @@ It deliberately does not own:
 | The process dies while a task is `stopping` | recovery sweeps only `running` | Force stop, which records `canceled` because nothing is live | Stopping with Force stop |
 | A task running in another process is stopped | `requestCancel` sets the flag its owner's heartbeat polls | none needed | stopping, then canceled |
 | The process dies between the copy and the start in `rerunTask`, or the copy's start refuses | the copy stays `queued`, and a retried rerun mints another | start or delete the copies | extra queued tasks |
+| The process dies while a move is held for a running state | the hold is in the engine's memory, so the move is gone; the journal holds no row for it | publish the move again after resuming | the task resumes in the state it was in |
+| A move reaches a run after its engine let go and before the run settled | the port keeps it, and the run-end handler publishes it again when the run completed, which reopens the task | none needed | the task finishes, then reopens at the target |
+| A `skip` interrupts a state whose agent has a tool approval or a question parked | the agent's call is aborted and the state ends `skipped`, but only a gate withdraws itself on a skip; the approval or question stays on the inbox until answered or the task is stopped | answer or dismiss it | a stale inbox entry for a state nobody is in |
 | A stopped task takes a typed turn that needs approval | `approvals.stop` holds until the next `startRun` calls `allow`, and chat turns never call it | resume the task or restart the app | each approval in the turn is denied unasked |
 
 ## The runtime row absorbed the runs table, and neither migration rolls back

@@ -35,7 +35,7 @@ Types are from `ipc.ts` unless a table says otherwise; view types are from `view
 
 | Family | Channels | Contract |
 | --- | --- | --- |
-| Task actions and module approval | `task:create`, `task:start`, `task:cancel`, `task:rerun`, `task:resume`, `task:resumable`, `task:rewind`, `task:fork`, `task:delete`, `task:rename`, `functions:pending`, `functions:approve` | [task-channels](task-channels.md) |
+| Task actions and module approval | `task:create`, `task:start`, `task:cancel`, `task:rerun`, `task:resume`, `task:resumable`, `task:move`, `task:rewind`, `task:fork`, `task:delete`, `task:rename`, `functions:pending`, `functions:approve` | [task-channels](task-channels.md) |
 | Typed conversation | `chat:plan`, `chat:startPlan`, `chat:send`, `chat:cancel`, `chat:thread` | [chat-channels](chat-channels.md) |
 | Inbox | `interaction:pending`, `interaction:submit`, `approval:pending`, `approval:submit`, `question:pending`, `question:submit`, `userEvent:pending`, `userEvent:deliver` | [inbox-channels](inbox-channels.md) |
 | Live turn snapshot | `session:live` | [session-live-protocol](session-live-protocol.md) |

@@ -1664,3 +1664,36 @@ Three consequences, each of which is a rule rather than an implementation detail
   same event to two different places are two calls, and get one registration each.
 
 JaiRA's `on_user_event` is the first user of all of this — see WORKFLOWS.md §7.4.
+
+### 18.3 A wait that holds nothing: `standing` — **built**
+
+The first consequence above — a deferred `PENDING` stops the list — is right for a question the state
+ASKED: nothing new starts until it is answered. It is wrong for an offer somebody may never take up.
+A host that generates "this task may be moved to `ui`" for every task cannot have every task park on
+it, and a task with nothing left to do must finish rather than wait forever on a move nobody asked of
+it.
+
+So a transition may be marked `"standing": true` (SPEC §3.3, decision 0005):
+
+```jsonc
+{ "when": "on_user_event('task_move', { to_state: 'ui' })", "to": "ui", "standing": true }
+```
+
+Its deferred call is started and cancelled exactly as any other. What changes is what its `PENDING`
+does, and the rules are the three the decision pins:
+
+- **It sits LAST.** Standing rules are evaluated — and prepared, the two walks must agree — behind
+  every ordinary rule of the round, whatever position they were written in. A waiting rule blocks the
+  rules behind it, so an offer that stands beside the workflow can never be ahead of a rule of it.
+- **The implicit end stays AHEAD of it.** Its `PENDING` skips instead of stopping: the rules behind
+  it get their turn, the sequence advances, and a state with nothing left to run terminates, which
+  withdraws the offer. A guard that comes TRUE while a sync child holds the cursor is held, and taken
+  in the round that child's end triggers.
+- **A taken transition cancels the waits it did not answer** — unchanged, and now reachable in a
+  state that carries on afterwards, which is what exposed that a cancelled wait's own failure was
+  landing in the results after they had been cleared. A consumed wait is `withdrawn`: its key is
+  free for the fresh wait the next round registers, and what it settles with is discarded.
+
+`.children.<key>.outcome` gains a fifth value an expression may compare against: `"skipped"` — a
+child a person's move stepped past (SPEC §3.6). It is a fact about the run, where a child that never
+ran is still an absence.

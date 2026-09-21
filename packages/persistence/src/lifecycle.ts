@@ -111,6 +111,13 @@ export interface BeginRunOptions {
    * shapes the runs collapse retired.
    */
   continues?: boolean;
+  /**
+   * This start REOPENS a finished task to take a person's move (decision 0005): the one case a
+   * `completed` task runs again under its own id. Only with {@link continues} — the reopened machine
+   * is loaded, never walked afresh — and only the caller that holds the move sets it, so every other
+   * path still finds a completed lifecycle closed.
+   */
+  reopen?: boolean;
   nowMs?: number;
 }
 
@@ -165,7 +172,8 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
   const nowMs = options.nowMs ?? Date.now();
   const runtime = project.runtime.get(taskId);
   if (!runtime) throw refusal(log, `unknown task '${taskId}'`, { taskId });
-  if (!isStartableStatus(runtime.status)) {
+  const reopening = options.reopen === true && options.continues === true && runtime.status === "completed";
+  if (!isStartableStatus(runtime.status) && !reopening) {
     throw refusal(log, `task '${taskId}' is ${runtime.status}; only queued/interrupted/failed tasks can start`, { taskId });
   }
   // A task that ran before is not restarted in place — see {@link BeginRunOptions.continues}. The

@@ -56,13 +56,13 @@ import {
 } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 
-import { ON_USER_EVENT, type UserEventRequest } from "@jaira/shared";
+import { MOVE_EVENTS, ON_USER_EVENT, type UserEventRequest } from "@jaira/shared";
 import { RemoteEventHub } from "./remoteEvents";
 
 // The vocabulary lives in `@jaira/shared` — persistence hands the document to the loader, the
 // renderer matches a drop against a pending wait, and neither may depend on this package. Re-exported
 // so a caller wiring the hub does not have to know that.
-export { ON_USER_EVENT, TASK_DRAG, type TaskDragOptions, type UserEventRequest } from "@jaira/shared";
+export { MOVE_EVENTS, ON_USER_EVENT, TASK_DRAG, TASK_MOVE, type TaskDragOptions, type TaskMoveOptions, type UserEventRequest } from "@jaira/shared";
 
 /**
  * A wait, not a computation: `deferred` is what makes the engine START the call and read it in a
@@ -280,6 +280,25 @@ export class UserEventHub {
    */
   deliver(requestId: string): boolean {
     return this.pending.get(requestId)?.settle(true) ?? false;
+  }
+
+  /**
+   * A person MOVED this task to `toState` (decision 0005) — answer the wait that was offering exactly
+   * that, if one is.
+   *
+   * `task_drag` and `task_move` are one vocabulary, so a wait of either event counts; the OLDEST
+   * match is answered, which is the engine's own order — transitions are evaluated as declared and
+   * the first match is the one that would fire. Returns the request answered, or `undefined` when
+   * nothing was waiting on this move: the caller then hands the run a directed transition instead,
+   * which is how a task moves where no rule offered it.
+   */
+  answerMove(taskId: string, toState: string): string | undefined {
+    for (const { request } of this.pending.values()) {
+      if (request.taskId !== taskId || !MOVE_EVENTS.includes(request.event)) continue;
+      if (request.options.to_state !== toState) continue;
+      if (this.deliver(request.requestId)) return request.requestId;
+    }
+    return undefined;
   }
 
   /** The event did NOT happen — the rules behind this one get their turn. */

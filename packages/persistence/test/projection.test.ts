@@ -657,3 +657,35 @@ describe("computed titles", () => {
     expect(card).toMatchObject({ title: "my task", heading: { text: "Planning", pending: true, instanceId: "p" } });
   });
 });
+
+describe("a person's move in the tree (decision 0005)", () => {
+  it("draws what a move stepped past as SKIPPED — not failed, and not still to do", () => {
+    const events: EngineEvent[] = [
+      entered("1", "feature/plan"),
+      entered("2", "feature/plan/goals", "1", "goals"),
+      { type: "transition.taken", instanceId: "1", stateId: "feature/plan", to: "context", index: 1, iteration: 0, by: "person", skip: true },
+      { type: "instance.terminated", instanceId: "2", stateId: "feature/plan/goals", outcome: "skipped" },
+      entered("3", "feature/plan/context", "1", "context"),
+    ];
+    const run = projectRun(events, SHAPE, events.map((_, i) => 1000 + i));
+    const root = run.instances[0]!;
+    expect(root.children.map((c) => [c.childKey, c.status])).toEqual([["goals", "skipped"], ["context", "running"]]);
+    expect(run.activePath.map((step) => step.stateId)).toEqual(["feature/plan", "feature/plan/context"]);
+  });
+
+  it("reopens a finished instance, and the path above it, on a directed transition", () => {
+    const events: EngineEvent[] = [
+      entered("1", "feature/plan"),
+      entered("2", "feature/plan/goals", "1", "goals"),
+      terminated("2", "feature/plan/goals", "success"),
+      terminated("1", "feature/plan", "success"),
+      { type: "transition.taken", instanceId: "1", stateId: "feature/plan", to: "goals", index: 1, iteration: 1, by: "person" },
+    ];
+    const run = projectRun(events, SHAPE, events.map((_, i) => 1000 + i));
+    expect(run.instances[0]!.status).toBe("running");
+    expect(run.instances[0]!.endedAt).toBeUndefined();
+    // A RULE's transition reopens nothing: only a directed one carries `by`.
+    const ruled = events.map((e) => (e.type === "transition.taken" ? { ...e, by: undefined } : e)) as EngineEvent[];
+    expect(projectRun(ruled, SHAPE, ruled.map((_, i) => 1000 + i)).instances[0]!.status).toBe("completed");
+  });
+});

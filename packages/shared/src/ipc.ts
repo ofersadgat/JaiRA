@@ -19,7 +19,7 @@ import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } fr
 import type { RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
-import type { UserEventRequest } from "./userEvents";
+import type { TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type {
@@ -1601,6 +1601,13 @@ export interface IpcContract {
   "userEvent:pending": { request: void; response: PendingUserEvent[] };
   /** The gesture happened — the card was dropped where this wait was offering. */
   "userEvent:deliver": { request: { requestId: string }; response: { requestId: string; delivered: boolean } };
+  /**
+   * `task_move`, published (decision 0005): a person moved this task to a state. Answers the
+   * transition waiting on exactly that when one is; otherwise hands the running task a directed
+   * transition (held until its running state ends, unless `skip`), or reopens a task that is not
+   * running to take it. Refused — rejected with the reason — when the move cannot be made.
+   */
+  "task:move": { request: TaskMoveRequest; response: TaskMoveResult };
   /** A task's merge requests, for the gate's remote strip (decision 0004). Reads nothing from the forge. */
   "remote:status": { request: { taskId: string; project?: ProjectRef }; response: RemoteStatusView[] };
   /** "Check now": read the forge for this task's awaited requests, then answer as `remote:status` does. */
@@ -1844,6 +1851,7 @@ export const IPC_CHANNELS = [
   "question:submit",
   "userEvent:pending",
   "userEvent:deliver",
+  "task:move",
   "remote:status",
   "remote:check",
   "remote:reply",

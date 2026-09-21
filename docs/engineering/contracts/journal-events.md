@@ -2,7 +2,7 @@
 id: engineering/contracts/journal-events
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 visibility: public
 kind: event
 owned_by: [engineering/units/event-journal]
@@ -60,7 +60,7 @@ A replay reads task directories in name order; inside each, legacy `<runId>.json
 
 ### The engine events are upstream's vocabulary, stored as the engine wrote them
 
-The vocabulary is `EngineEvent` in `@declarative-ai/hw` `ports.ts`. `failure` is upstream `Failure` with `classification`, `reason`, and optional `retryAfterMs`, `rateLimited` and `detail`. `metrics` is `WorkflowMetrics`. A termination's `outcome` is one of `success`, `error`, `canceled`, `timeout`. A `?` marks an optional field.
+The vocabulary is `EngineEvent` in `@declarative-ai/hw` `ports.ts`. `failure` is upstream `Failure` with `classification`, `reason`, and optional `retryAfterMs`, `rateLimited` and `detail`. `metrics` is `WorkflowMetrics`. A termination's `outcome` is one of `success`, `error`, `canceled`, `timeout`, `skipped`. A `?` marks an optional field.
 
 | `type` | Payload fields | Written by | Meaning |
 | --- | --- | --- | --- |
@@ -74,11 +74,28 @@ The vocabulary is `EngineEvent` in `@declarative-ai/hw` `ports.ts`. `failure` is
 | `call.settled` | `instanceId, stateId, call, operationId, outcome` where `outcome` is `value` or `error` | engine | the deferred call ended; a cancelled wait is `error` |
 | `value.settled` | `instanceId, stateId, field, outcome, value?, error?, fallback?` | engine | a computed field such as `title` settled, with its value |
 | `fanout.made` | `instanceId, stateId, childKey, occurrence, kind, runs: [{element, id?, runId, title}]` where `kind` is `task` or `split` | fan-out host | the tasks a hosted fan-out made of its elements; `runId` is a task id |
-| `transition.taken` | `instanceId, stateId, to, index, iteration` | engine; chat turns | a transition fired; `index` counts every transition and `iteration` only backward ones |
+| `transition.taken` | `instanceId, stateId, to, index, iteration, by?, skip?, inputs?` where `by` is `person` or `control` | engine; chat turns | a transition fired; `index` counts every transition and `iteration` only backward ones. `by` is present exactly when the transition was directed |
 | `child.superseded` | `instanceId, stateId, childKey` | engine | the instance named dropped its child under `childKey` |
 | `instance.terminated` | `instanceId, stateId, outcome, failure?` | engine; fan-out host; chat turns | the instance ended |
 
 What the fan-out host makes around `fanout.made` and its mirrored rows is [fan-out-host-answers](fan-out-host-answers.md).
+
+### A directed transition is a rule-less `transition.taken` that says who asked, and the rows after it say what it stepped over
+
+A person's move ([decision 0005](../decisions/0005-connect.md)) reaches the engine as a directed transition, and the engine writes these rows synchronously, in this order, before it interrupts anything:
+
+| Row | Fields | Meaning |
+| --- | --- | --- |
+| `transition.taken` | `by`, and `skip: true` when the running state was interrupted rather than waited for; `inputs` when the asker or a `standing` rule handed the target any, with artifact content elided | the decision. A rule-taken transition never carries `by` |
+| `instance.terminated` with `outcome: "skipped"` | the `instanceId` of each running child a `skip` interrupted | written by the parent at the decision; the child writes no second end when it winds down. The elements of an interrupted fan-out write their own |
+| `instance.entered` with `inputs: {}`, then `instance.terminated` with `outcome: "skipped"` | a freshly minted `instanceId` per sequence member between the cursor and the target that was never entered, forward moves only | the member was stepped over; its entry counts as an occurrence |
+| `instance.entered` | the target | the ordinary entry, once every interrupted call has wound down |
+
+Three reading rules follow, and `load.ts`, `projection.ts` and every other folder of the journal share them:
+
+- `skipped` is an answer. `buildTaskLoad` never revives a skipped instance, although its row lands after the transition that decided it, which is the shape the revival rule otherwise brings back.
+- A directed `transition.taken` on an instance that had already written `instance.terminated` reopens it, and every ancestor with it, exactly as a chat turn's transition reopens its instance. The reopened instances write `instance.terminated` again when they end, so one instance can hold two ends with a directed transition between them.
+- A directed `transition.taken` with no later `instance.entered` under that instance for `to` is an entry still owed: the process died between the rows. `buildTaskLoad` hands it to the engine as `LoadedInstance.directed`, and the loaded run makes the entry without writing the transition again.
 
 ### A chat turn journals a synthetic child whose id is derived from its host
 
@@ -107,6 +124,7 @@ The first message writes `instance.entered` with `inputs: {}`, and each later on
 
 ## A change to any event or to the envelope breaks every stored journal, and no deprecation path exists
 
+- Dropping `by` from a directed `transition.taken`, or writing it on a rule-taken one, breaks reopening and the owed entry in `load.ts` and the reopened status in `projection.ts`.
 - Renaming or reshaping an upstream event breaks projections, load, cut and fork together. Stored payloads are never migrated, so a reader keeps accepting an old shape for as long as any journal holds it.
 - Changing the line envelope, its field names or the ordinal rule of `jaira.rewound` breaks replay of every committed journal file.
 - Changing the `chat:` prefix or the `ask` key breaks resume filtering in `load.ts`, the id mapping in `cut.ts` and the conversation readers for existing journals.

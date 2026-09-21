@@ -357,7 +357,8 @@ conversation's. Per-item workflows: items share one document.
 
 1. **`task_move` and the directed transition**, upstream: a host-published
    transition journaled as `transition.taken` with who asked; `skipped` as
-   an outcome. Reopen-to-take for a finished task.
+   an outcome. Reopen-to-take for a finished task. **Built 2026-09-21** —
+   see "What step 1 settled" below.
 2. **Provenance on recorded inputs** (bound, inferred, asked), and
    `outcome: "skipped"` readable from an expression.
 3. **Adopt**: mirror rows after the fact, backwards input inference, the
@@ -375,6 +376,32 @@ conversation's. Per-item workflows: items share one document.
 
 Each step is usable on its own. 1–3 already answer "one phase" and "use
 what ran".
+
+## What step 1 settled
+
+Built upstream (`@declarative-ai/hw`) and in JaiRA; the statement of record
+is upstream SPEC §3.3 and [journal-events](../contracts/journal-events.md).
+Four things the text above left open were decided in the building:
+
+- **How the engine knows a rule is a generated one.** It cannot read
+  `on_user_event`'s event name, so the three ordering rules hang on a mark
+  on the transition: `"standing": true`. The engine sorts standing rules
+  last, and their wait holds nothing — not the list, not the sequence, not
+  the state's end. The generator (step 4) writes the mark.
+- **A directed transition outranks the rules.** A held move is taken ahead
+  of every authored rule when its source ends, and answers for a failure
+  nobody had handled: a loop's own back-transition would otherwise swallow
+  it. A *standing rule's* answer, by contrast, is a rule's and sits last,
+  so an authored rule that fires in the same round wins and cancels it.
+- **Which of the two a published move becomes.** A wait offering exactly
+  that move is answered; else the running task takes a directed
+  transition; else the task is reopened with the move queued. A `skip`
+  always takes the directed route, since a rule's answer is held.
+- **An authored forward jump still leaves absence.** Only a directed
+  transition records what it steps over as `skipped`; changing what every
+  existing `{ "to": … }` leaves behind was not this step's to do.
+
+A held move lives in the engine's memory and is lost with the process.
 
 ## Open
 

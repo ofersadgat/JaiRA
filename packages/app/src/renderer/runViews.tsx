@@ -40,7 +40,7 @@ import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
-import { isComponentName, parseComponentConfig, readCall, TASK_DRAG, type ReadCall } from "@jaira/shared/browser";
+import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
 import { SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
@@ -316,7 +316,7 @@ export function runDragOffersOf(
   const keys = new Set(columns.map((c) => c.key));
   const offers = new Map<string, string>();
   for (const request of requests) {
-    if (request.event !== TASK_DRAG || request.taskId !== taskId) continue;
+    if (!MOVE_EVENTS.includes(request.event) || request.taskId !== taskId) continue;
     const to = advanceTargetOf(request);
     if (to === undefined || !keys.has(to) || offers.has(to)) continue;
     offers.set(to, request.requestId);
