@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="doc" content="ui/surfaces/debug-view">
 <meta name="state" content="first-run">
-<meta name="captured" content="2026-09-13">
+<meta name="captured" content="2026-09-21">
 <meta name="reflects" content="shipped">
 <title>debug-view · first-run</title>
 <link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
@@ -29,18 +29,15 @@
               <li><span class="mono">debug/hello_world/say</span><span class="sub">asks for the greeting, publishes it as </span><span class="mono">greeting: string</span></li>
               <li><span class="mono">debug/hello_world/check</span><span class="sub">reads </span><span class="mono">.children.say.output.greeting</span><span class="sub">, publishes </span><span class="mono">passed: boolean</span><span class="sub"> and </span><span class="mono">verdict: string</span></li>
             </ol>
-            <details class="debug-source"><summary>The state files, as they will be written</summary></details>
+            <details class="debug-source"><summary>The state files, as they load</summary></details>
           </section>
           <section>
-            <h3>Installed</h3>
-            <div class="notice">The self-test lives in the SHARED root, not in the open project — it is a fact about this installation, and three debug files in a checkout's <code>.jaira/</code> would be three files in its next commit.</div>
-            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world.json">debug/hello_world</span><span class="chip">installed</span><button class="link">open ↗</button></div>
-            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world\say.json">debug/hello_world/say</span><span class="chip">installed</span><button class="link">open ↗</button></div>
-            <div class="debug-file debug-file-installed"><span class="dot success"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world\check.json">debug/hello_world/check</span><span class="chip">installed</span><button class="link">open ↗</button></div>
-            <div class="sub mono ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world.json">C:\Users\Ofer\.jaira\workflows\debug\hello_world.json</div>
+            <h3>Where it comes from</h3>
+            <div class="notice">The self-test ships with JaiRA, so there is nothing to install and it runs with nothing in the shared root. A copy of one of its states in <code>~/.jaira</code> wins over the built-in one, as an override of any built-in does.</div>
+            <div class="debug-file debug-file-success"><span class="dot success"></span><span class="mono grow ellip" title="$SYSTEM/workflows/debug/hello_world.json">debug/hello_world</span><span class="chip">built in</span><button class="link">open ↗</button></div>
+            <div class="debug-file debug-file-success"><span class="dot success"></span><span class="mono grow ellip" title="$SYSTEM/workflows/debug/hello_world/say.json">debug/hello_world/say</span><span class="chip">built in</span><button class="link">open ↗</button></div>
+            <div class="debug-file debug-file-success"><span class="dot success"></span><span class="mono grow ellip" title="$SYSTEM/workflows/debug/hello_world/check.json">debug/hello_world/check</span><span class="chip">built in</span><button class="link">open ↗</button></div>
             <div class="pane-actions">
-              <button class="ghost" disabled>Install missing</button>
-              <button class="ghost">Reinstall</button>
               <button class="ghost">Re-check</button>
             </div>
           </section>

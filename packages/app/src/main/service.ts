@@ -30,6 +30,7 @@ import {
   InMemoryPersistence,
   loadBundle,
   moduleHash as moduleHashOf,
+  stateIdFromPath,
   type CallResult,
   type EngineEvent,
   type LoadedInstance,
@@ -63,6 +64,7 @@ import {
   boardForState,
   boardView,
   browseBaseWorkflows,
+  readWorkflowsTolerantly,
   browseSource,
   browseWorkflows,
   commitSync,
@@ -328,6 +330,7 @@ let installed: LogSink | undefined;
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
+import { identicalTo, SUPERSEDED } from "./shippedStates";
 import type {
   Scope,
   ApprovalScope,
@@ -411,6 +414,8 @@ import type {
   TaskDetail,
   TaskStatus,
   TaskSummary,
+  BuiltInLeftover,
+  BuiltInStanding,
   WorkflowBrowser,
   WorkflowLayer,
   WritableLayer,
@@ -731,9 +736,12 @@ function shortRoot(dir: string): string {
  *
  * Shape is taken from the first tree — the roots are the same directory walked the same way, so they
  * differ only in these marks.
+ *
+ * The same reduction serves the built-in root (decision 0006), which is likewise listed once beside
+ * every open project: a shipped state reads as overridden only where every project overrides it.
  */
-function sharedShadows(trees: readonly FileTree[]): FileNode[] {
-  const bases = trees.map((tree) => tree.roots.find((root) => root.layer === "base")?.nodes ?? []);
+function layerShadows(trees: readonly FileTree[], layer: WorkflowLayer): FileNode[] {
+  const bases = trees.map((tree) => tree.roots.find((root) => root.layer === layer)?.nodes ?? []);
   const merge = (lists: FileNode[][]): FileNode[] =>
     (lists[0] ?? []).map((node, index) => {
       const everywhere = node.shadowed === true && lists.every((list) => list[index]?.shadowed === true);
@@ -2396,7 +2404,16 @@ export class AppService {
     const trees = sessions.map((session) =>
       fileTree(session.project, this.browseWorkflowsIn(session), this.hiddenRulesFor(session.project.config)),
     );
-    return { roots: trees.flatMap((tree) => tree.roots.filter((root) => root.layer === "project")) };
+    // What ships closes every tree (decision 0006): it is behind all of them, it has no sidebar row
+    // to be reached by, and it is where an override starts. Listed ONCE, with its `shadowed` marks
+    // reduced across the projects shown, as the shared root's were when it was listed here.
+    const shipped = trees[0]?.roots.find((root) => root.layer === "system");
+    return {
+      roots: [
+        ...trees.flatMap((tree) => tree.roots.filter((root) => root.layer === "project")),
+        ...(shipped !== undefined ? [{ ...shipped, nodes: layerShadows(trees, "system") }] : []),
+      ],
+    };
   }
 
   /**
@@ -5894,13 +5911,83 @@ export class AppService {
   readWorkflow(request: ReadWorkflowRequest): WorkflowSource {
     const file = this.workflowFile(request.stateId, request.layer, request.project);
     const exists = existsSync(file);
+    const text = exists ? readFileSync(file, "utf8") : "";
+    const builtIn = exists ? this.builtInStanding(request.stateId, request.layer, text, request.project) : undefined;
     return {
       stateId: request.stateId,
       layer: request.layer,
       file,
-      text: exists ? readFileSync(file, "utf8") : "",
+      text,
       exists,
+      ...(builtIn !== undefined ? { builtIn } : {}),
     };
+  }
+
+  /**
+   * How one state file stands against what ships (decision 0006) — see `BuiltInStanding`.
+   *
+   * `undefined` for a state JaiRA does not ship, which is almost all of them, so this costs one
+   * `existsSync` on the ordinary path. The project layer is asked only where there is a project to
+   * ask: a shared or shipped file read with nothing open has no third layer to report.
+   */
+  private builtInStanding(
+    stateId: string,
+    layer: WorkflowLayer,
+    text: string,
+    project?: string,
+  ): BuiltInStanding | undefined {
+    const shipped = this.workflowFile(stateId, "system");
+    if (!existsSync(shipped)) return undefined;
+    const layers: WorkflowLayer[] = [];
+    // A USER project only: the shared root opened as a project is the `base` layer, asked next.
+    const session = project === SHARED_SESSION ? undefined : this.sessionOf(project);
+    if (session !== undefined && existsSync(resolvePath(session.project.paths.workflowsDir, `${stateId}.json`))) {
+      layers.push("project");
+    }
+    if (existsSync(this.workflowFile(stateId, "base"))) layers.push("base");
+    layers.push("system");
+    const identical = layer === "system" ? undefined : identicalTo(stateId, text, readFileSync(shipped, "utf8"));
+    return { layers, ...(identical !== undefined ? { identical } : {}) };
+  }
+
+  /**
+   * The copies of built-in states in the SHARED root that nobody changed (decision 0006).
+   *
+   * The shared root only, because that is the only place the install steps ever wrote. A project's
+   * copy is somebody's deliberate override even when it is identical today — it is in their
+   * repository, and whether it stays is a question for a commit rather than for a button here.
+   */
+  builtInLeftovers(): BuiltInLeftover[] {
+    const out: BuiltInLeftover[] = [];
+    const { files } = readWorkflowsTolerantly(jairaBuiltInPaths().workflowsDir);
+    const ids = new Set([...Object.keys(files).map(stateIdFromPath), ...Object.keys(SUPERSEDED)]);
+    for (const stateId of [...ids].sort()) {
+      const file = this.workflowFile(stateId, "base");
+      if (!existsSync(file)) continue;
+      const shipped = this.workflowFile(stateId, "system");
+      const identical = identicalTo(
+        stateId,
+        readFileSync(file, "utf8"),
+        existsSync(shipped) ? readFileSync(shipped, "utf8") : undefined,
+      );
+      if (identical !== undefined) out.push({ stateId, layer: "base", file, identical });
+    }
+    return out;
+  }
+
+  /**
+   * Delete the leftovers a person agreed to delete — and only those that are STILL leftovers.
+   *
+   * Re-derived from the disk rather than trusted from the request: the list the renderer showed is
+   * as old as the dialog it was shown in, and a file edited in the meantime is no longer a copy of
+   * anything. Such a file is skipped without a word; the answer names what actually went.
+   */
+  cleanupBuiltIn(request: { stateIds: string[] }): BuiltInLeftover[] {
+    const wanted = new Set(request.stateIds);
+    const gone = this.builtInLeftovers().filter((left) => wanted.has(left.stateId));
+    for (const left of gone) rmSync(left.file);
+    if (gone.length > 0) this.publish({ type: "store:invalidate", scope: "workflows" });
+    return gone;
   }
 
   /**
@@ -6150,6 +6237,12 @@ export class AppService {
     if (!isTextMime(mime)) throw this.refusal("file", `'${request.path}' is ${mime}, which is not text`);
     const exists = existsSync(file);
     if (exists && statSync(file).isDirectory()) throw this.refusal("file", `'${request.path}' is a directory`);
+    const text = exists ? readFileSync(file, "utf8") : "";
+    const state = this.stateIdOf(named);
+    // Which layers hold this state, and whether this copy is one JaiRA wrote — what the editor's
+    // top bar says about a built-in and about a file that overrides one (decision 0006).
+    const builtIn =
+      exists && state !== null ? this.builtInStanding(state.stateId, request.layer, text, request.project) : undefined;
     return {
       layer: request.layer,
       // Echoed back, so the document the panel holds knows which project it is in — the tree's
@@ -6158,9 +6251,10 @@ export class AppService {
       path: request.path,
       file,
       mime,
-      text: exists ? readFileSync(file, "utf8") : "",
+      text,
       exists,
-      ...(this.stateIdOf(named) ?? {}),
+      ...(state ?? {}),
+      ...(builtIn !== undefined ? { builtIn } : {}),
     };
   }
 

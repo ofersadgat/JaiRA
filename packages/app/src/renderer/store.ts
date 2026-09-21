@@ -57,6 +57,7 @@ import type {
   StateView,
   SyncDirection,
   TaskDetail,
+  BuiltInLeftover,
   WorkflowMutationResult,
   WorkflowSyncEdit,
   WorkflowSyncResult,
@@ -113,8 +114,8 @@ import {
   type RunField,
 } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
-import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
-import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
+import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
+import { CHAT_AGENT, CHAT_STATES, titleOf } from "./chatWorkflow";
 import { applyAppearance } from "./appearance";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
@@ -412,7 +413,7 @@ export interface AppState {
    * which one it read.
    */
   sync: SyncState;
-  /** The Chat view: which conversation is open, and whether its states are installed. */
+  /** The Chat view: which conversation is open. */
   chat: ChatState;
   /**
    * Which tasks have a call in flight RIGHT NOW, by task id and depth.
@@ -460,6 +461,8 @@ export interface AppState {
   view: View;
   /** Both layer roots as trees — the Files view's left panel. */
   tree: FileTree | null;
+  /** Copies of built-in states in the shared root that JaiRA wrote and nobody changed — see `refreshTree`. */
+  leftovers: BuiltInLeftover[];
   /**
    * The state the open file defines, when it defines one.
    *
@@ -658,17 +661,20 @@ export interface AppState {
 /**
  * One state file of the self-test, as the Debug view finds it on disk.
  *
- * `matches` is the third answer and the reason this is not a boolean: a file that exists but says
- * something else is a file somebody edited, and overwriting it without saying so would throw away
- * an experiment. The pane reports it and offers the overwrite as its own button.
+ * `layer` is the answer the pane leads with: the self-test SHIPS (decision 0006), so `system` is the
+ * ordinary case and anything else is a person's copy winning over it — which a run will use, and
+ * which is therefore the first thing to know about a self-test that behaves oddly.
  */
 export interface DebugFile {
   stateId: string;
-  /** Absolute path, for the "where did this land" line. */
+  /** Absolute path of the copy that loads, for the "where is this" line. Empty when none was found. */
   file: string;
-  exists: boolean;
-  /** True when the file on disk is byte-for-byte what {@link selfTestFiles} would write. */
-  matches: boolean;
+  /** The layer that copy is in, or `null` when no layer holds the state at all — a broken build. */
+  layer: WorkflowLayer | null;
+  /** The copy that loads, as text: what the pane shows under "the state files". */
+  text: string;
+  /** Set on a person's copy that is identical to a version JaiRA shipped — see `BuiltInStanding`. */
+  identical?: "current" | "superseded";
 }
 
 /**
@@ -683,7 +689,7 @@ export interface DebugState {
   files: DebugFile[];
   /** The self-test task this window started, if any. Null until the first run. */
   taskId: string | null;
-  /** True while installing or starting — the buttons say so rather than doing it twice. */
+  /** True while starting — the buttons say so rather than doing it twice. */
   busy: boolean;
   /** The last failure, kept beside the pane rather than in the global toast, which scrolls away. */
   error: string | null;
@@ -741,8 +747,8 @@ function applyAvailability(patch: (next: Partial<AppState>) => void, availabilit
  * Small on purpose. A conversation IS a task (see `chatWorkflow.ts`), so everything about the one on
  * screen — its detail, its instance tree, its transcript, the live turn streaming into it — is
  * already held above under the ordinary selection, and duplicating any of it here would be two
- * copies to keep in step. What is genuinely this view's is which conversation it is reading and
- * whether its files are on disk yet.
+ * copies to keep in step. What is genuinely this view's is which conversation it is reading. (It
+ * used to hold whether the chat states had been installed; they ship now, decision 0006.)
  *
  * `taskId` is held SEPARATELY from `selected` even though opening a conversation selects it: the
  * Tasks view selects too, and a person who goes to look at a board and comes back expects to find
@@ -753,8 +759,6 @@ export interface ChatState {
   taskId: string | null;
   /** Which project holds it — the checkout when one is open, JaiRA's own root otherwise. */
   project: string | null;
-  /** True once the built-in conversation states have been checked for and written if missing. */
-  installed: boolean;
   /** True while a conversation is being created and started — the first message is a run. */
   busy: boolean;
   /**
@@ -825,7 +829,7 @@ const EMPTY: AppState = {
   secrets: { keychain: false },
   schemaChoice: {},
   sync: { status: null, result: null, running: false, error: null, progress: [] },
-  chat: { taskId: null, project: null, installed: false, busy: false, opening: null, error: null },
+  chat: { taskId: null, project: null, busy: false, opening: null, error: null },
   producing: {},
   debug: { files: [], taskId: null, busy: false, error: null },
   drafts: {},
@@ -842,6 +846,7 @@ const EMPTY: AppState = {
   dir: null,
   view: "tasks",
   tree: null,
+  leftovers: [],
   stateId: null,
   state: null,
   inspect: "path",
@@ -1167,6 +1172,15 @@ export function useApp() {
     } catch {
       patch({ tree: null });
     }
+    // With the tree, because the tree is where it is offered: the copies of built-in states the old
+    // install steps left in the shared root (decision 0006), which the "Built in" root offers to
+    // delete. Every write that redraws the tree can change the list, and none of them knows it.
+    // Quiet on failure — this is housekeeping, and a tree must not fail to draw over it.
+    try {
+      patch({ leftovers: await invoke("builtin:leftovers", undefined) });
+    } catch {
+      patch({ leftovers: [] });
+    }
   }, [patch]);
 
   /**
@@ -1222,11 +1236,17 @@ export function useApp() {
           // Its own catch: the other layer may not be reachable at all — `project` with no project
           // open is an error, not an empty file — and a failed second look must leave the first
           // answer standing rather than turning it into "this does not parse".
-          try {
-            const elsewhere = await read(guess === "project" ? "base" : "project");
-            if (elsewhere.exists) source = elsewhere;
-          } catch {
-            /* the guess was the only layer that could be asked */
+          // In search order, so the first hit is the copy that would run — the built-in layer last
+          // (decision 0006), which is where a shipped child of a shipped root is found.
+          for (const layer of (["project", "base", "system"] as const).filter((one) => one !== guess)) {
+            try {
+              const elsewhere = await read(layer);
+              if (!elsewhere.exists) continue;
+              source = elsewhere;
+              break;
+            } catch {
+              /* a layer that cannot be asked — `project` with nothing open — is not where it is */
+            }
           }
         }
         patch({
@@ -2007,32 +2027,28 @@ export function useApp() {
   }, [patch]);
 
   /**
-   * Where the self-test's state files stand in the shared root.
+   * Which copy of each self-test state LOADS, and from which layer.
    *
-   * The SHARED root, not the project's: the self-test is a fact about this installation rather than
-   * about a checkout, and writing it into `.jaira/` would put three debug files into whatever
-   * repository happened to be open — and into its next commit. Written once, reachable from every
-   * project, and visible in the Files tree under the shared root like anything else there.
+   * The files ship in the built-in layer (decision 0006), so nothing is installed and nothing can be
+   * missing short of a broken build. What is worth reporting is an OVERRIDE: the self-test runs in
+   * the shared root's own project, whose search path is `~/.jaira` and then what ships, so a copy in
+   * `~/.jaira` — which is exactly what earlier builds wrote there — is the one a run uses. Asked in
+   * that order, first hit wins, the same rule reference resolution follows.
    */
   const refreshDebugFiles = useCallback(async () => {
-    const wanted = selfTestFiles();
     const files = await Promise.all(
       SELF_TEST_STATES.map(async (stateId): Promise<DebugFile> => {
-        const expected = JSON.stringify(wanted[stateId]);
-        try {
-          const source = await invoke("workflow:read", { stateId, layer: "base" });
-          let matches = false;
+        for (const layer of ["base", "system"] as const) {
           try {
-            // Compared as VALUES, not as bytes. Re-indenting a file is not editing it, and a pane
-            // that offered to overwrite a formatting change would be crying wolf.
-            matches = source.exists && JSON.stringify(JSON.parse(source.text) as unknown) === expected;
+            const source = await invoke("workflow:read", { stateId, layer });
+            if (!source.exists) continue;
+            const identical = source.builtIn?.identical;
+            return { stateId, file: source.file, layer, text: source.text, ...(identical !== undefined ? { identical } : {}) };
           } catch {
-            matches = false;
+            // An unreadable layer is an absent one as far as "which copy loads" goes.
           }
-          return { stateId, file: source.file, exists: source.exists, matches };
-        } catch {
-          return { stateId, file: "", exists: false, matches: false };
         }
+        return { stateId, file: "", layer: null, text: "" };
       }),
     );
     patchDebug({ files });
@@ -3060,8 +3076,7 @@ export function useApp() {
       },
 
       /**
-       * Start a conversation: install what is missing, create the task, and send the first message
-       * by running it.
+       * Start a conversation: create the task, and send the first message by running it.
        *
        * The first message is the RUN — the state's prompt is `{{.inputs.message}}` — which is what
        * makes a conversation an ordinary task with an ordinary journal rather than a special case
@@ -3079,34 +3094,19 @@ export function useApp() {
         // NAMED, both when there is a checkout to name and when there is not. `undefined` meant "the
         // focused project", which main resolves only while exactly one user project is open — so
         // creating a conversation with a second checkout open failed with "several projects are
-        // open, so this call must name one", and failed on the `task:create` after the workflow
-        // files had already been written. The address is the answer, and at the root it is the
+        // open, so this call must name one". The address is the answer, and at the root it is the
         // shared one (`runTargetOf`'s rule for base-layer workflows).
         const project = ref.current.at ?? SHARED_SESSION;
         try {
-          // Missing files only — never overwriting. These are ordinary editable files under the
-          // shared root, and a conversation must not silently discard somebody's changes to what a
-          // conversation IS. Written every time the view is used rather than once at startup: the
-          // shared root can be repointed, and an installation check that ran before that would be
-          // remembering a directory nobody is using any more.
-          if (!ref.current.chat.installed) {
-            const wanted = chatWorkflowFiles();
-            for (const stateId of CHAT_STATES) {
-              // Asked per state rather than off the workflow browser: the browser needs an open
-              // project and this must work on an empty window, which is exactly where somebody
-              // opens a chat first. Same probe the Debug pane makes of its own files.
-              const source = await invoke("workflow:read", { stateId, layer: "base" }).catch(() => null);
-              if (source?.exists === true) continue;
-              await invoke("workflow:write", { stateId, layer: "base", text: JSON.stringify(wanted[stateId], null, 2) });
-            }
-            patch({ chat: { ...ref.current.chat, installed: true } });
-          }
-
+          // Nothing is installed first (decision 0006): `chat/agent` ships in the built-in layer, the
+          // last of every project's search path, so it resolves on an empty window, under a
+          // repointed shared root and under a read-only one alike. A copy of it in `~/.jaira` or in
+          // the project still wins, which is what an override is.
           const summary = await invoke("task:create", {
             title: titleOf(text),
             // Always the working conversation — see `chatWorkflow.ts` on why the view stopped asking.
-            // Both states are still installed above: `chat/assistant` is what conversations already
-            // started as one continue to run under.
+            // `chat/assistant` still ships beside it: it is what conversations already started as one
+            // continue to run under.
             workflow: CHAT_AGENT,
             inputs: { message: text },
             project,
@@ -3971,6 +3971,29 @@ export function useApp() {
         }
       },
 
+      /**
+       * Delete copies of built-in states that JaiRA itself wrote (decision 0006) — after a person
+       * said yes to a dialog naming each file. Main re-checks every one against the disk, so a copy
+       * edited since the dialog opened is left alone; what comes back is what actually went.
+       */
+      cleanupBuiltIn: async (stateIds: string[]): Promise<BuiltInLeftover[]> => {
+        patch({ busy: true, error: null });
+        try {
+          const gone = await invoke("builtin:cleanup", { stateIds });
+          patch({ busy: false });
+          // The open document may have been one of them: re-read it where it now resolves from.
+          const open = ref.current.doc;
+          if (open !== null && gone.some((left) => left.layer === open.layer && left.stateId === open.stateId)) {
+            actionsRef.current.selectState(open.stateId ?? null);
+          }
+          await Promise.all([refreshTree(), refreshDebugFiles(), refreshWorkflows()]);
+          return gone;
+        } catch (e) {
+          fail(e);
+          return [];
+        }
+      },
+
       /** Delete a state file. Refused while anything references it, unless `force`. */
       deleteWorkflow: async (
         stateId: string,
@@ -4214,40 +4237,23 @@ export function useApp() {
 
       // --- the Debug view's self-test (DESIGN §11.3) --------------------------
 
-      /** Re-read the three state files — what the pane's status line reports. */
+      /** Re-read which copy of each self-test state loads — what the pane's status rows report. */
       debugRefresh: () => {
         void refreshDebugFiles();
       },
 
       /**
-       * Write the self-test's state files into the shared root.
+       * Run the self-test, in JaiRA's own project.
        *
-       * `force` is the difference between the two buttons. Without it only what is MISSING is
-       * written, so a file somebody edited to try something is left alone; with it all three are
-       * put back to what this build says they are.
-       */
-      debugInstall: async (force = false) => {
-        patchDebug({ busy: true, error: null });
-        try {
-          const wanted = selfTestFiles();
-          const present = new Map(ref.current.debug.files.map((f) => [f.stateId, f]));
-          for (const stateId of SELF_TEST_STATES) {
-            if (!force && present.get(stateId)?.exists === true) continue;
-            await invoke("workflow:write", {
-              stateId,
-              layer: "base",
-              text: JSON.stringify(wanted[stateId], null, 2),
-            });
-          }
-          patchDebug({ busy: false });
-          await Promise.all([refreshDebugFiles(), refreshTree()]);
-        } catch (e) {
-          patchDebug({ busy: false, error: (e as Error).message });
-        }
-      },
-
-      /**
-       * Install what is missing, make a task for the self-test, and start it.
+       * It always belonged there and said otherwise. The self-test is a fact about the INSTALLATION
+       * — its states ship with the app (decision 0006), and used to be written to the shared root
+       * for the same reason — and yet the run was recorded in the focused project, which put JaiRA's
+       * own runs on the user's board and, with no project open, refused with "Open a project first".
+       * That refusal was the wrong half of the contradiction to resolve: an empty window is exactly
+       * where someone reaches for a self-test, because it is what you press when nothing else is
+       * working yet.
+       *
+       * Same rule as everything else that lives in the shared root — see `runTargetOf`.
        *
        * `scripted` swaps the LLM for the canned replies in `selfTestScript()`. It is the FIRST thing
        * to try when a live run fails: everything but the provider is identical, so a scripted run
@@ -4258,34 +4264,11 @@ export function useApp() {
        * are different questions — "does it work now" versus "what changed since the last run" — so
        * the pane offers both rather than guessing.
        */
-      /**
-       * Run the self-test, in JaiRA's own project.
-       *
-       * It always belonged there and said otherwise. The self-test's states are written to the
-       * SHARED root — deliberately, so that "does any of this work" is a fact about the installation
-       * rather than three debug files in whatever repository happened to be open — and then the run
-       * was recorded in the focused project, which put JaiRA's own runs on the user's board and, with
-       * no project open, refused with "Open a project first". That refusal was the wrong half of the
-       * contradiction to resolve: an empty window is exactly where someone reaches for a self-test,
-       * because it is what you press when nothing else is working yet.
-       *
-       * Same rule as everything else that lives in the shared root — see `runTargetOf`.
-       */
       debugRun: async (options: { scripted?: boolean; fresh?: boolean } = {}) => {
         patchDebug({ busy: true, error: null });
         try {
-          // Missing files only. A run must never silently discard an edit somebody made to the
-          // workflow it is about to run — that is the one thing this pane is watching.
-          const wanted = selfTestFiles();
-          for (const stateId of SELF_TEST_STATES) {
-            const at = ref.current.debug.files.find((f) => f.stateId === stateId);
-            if (at?.exists === true) continue;
-            await invoke("workflow:write", {
-              stateId,
-              layer: "base",
-              text: JSON.stringify(wanted[stateId], null, 2),
-            });
-          }
+          // Nothing to install: the states ship. Re-read which copies load, so the rows above the
+          // button are true of the run that is about to start.
           await refreshDebugFiles();
 
           const reuse = options.fresh === true ? null : ref.current.debug.taskId;

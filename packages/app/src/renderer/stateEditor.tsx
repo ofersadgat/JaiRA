@@ -11,9 +11,10 @@
  * Rendering only. Every write goes through `applyForm`, which MERGES rather than rebuilds — see
  * `stateForm` for why that distinction is the whole safety property.
  */
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import {
   WORKFLOW_JSON,
+  isWritableLayer,
   type ExecutorInfo,
   type FileTree,
   type LintIssue,
@@ -22,6 +23,7 @@ import {
   type ValidateSchemaResult,
   type WorkflowLayer,
   type WorkflowSource,
+  type WritableLayer,
 } from "@jaira/shared/browser";
 import {
   applyForm,
@@ -35,7 +37,8 @@ import {
   type TransitionRow,
 } from "./stateForm";
 import { EditorActions, type EditorTab } from "./editorChrome";
-import { useReadOnly, useRunReading } from "./reading";
+import { ReadOnlyContext, useReadOnly, useRunReading } from "./reading";
+import { LayerBar, layerBarOf, overrideTarget, type LayerBarAction } from "./builtIn";
 import { ReadValue } from "./readValue";
 import { StateGraphView } from "./stateGraphView";
 import { anchorFor, fieldClass, FLASH_MS, formIssues, markFor, NO_ISSUES, type FormIssues } from "./issues";
@@ -57,6 +60,14 @@ import {
   linkTargets,
   operationOutputNames,
 } from "./completions";
+
+/**
+ * The diff editor, for "Compare with what ships". Loaded on first use, never with the form — Monaco
+ * is megabytes and touches `window` at module scope, so a static import would drag a browser global
+ * into every node-side test that renders this editor.
+ */
+const MonacoDiffPane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
+
 
 /**
  * The datalist every binding box completes against.
@@ -674,6 +685,7 @@ export function WorkflowEditor({
   readState,
   saveState,
   readFile,
+  layerActions,
 }: {
   source: WorkflowSource;
   /** Both layer roots, for completing child keys and state references. */
@@ -761,6 +773,22 @@ export function WorkflowEditor({
    * the shell can prove about a reference.
    */
   readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
+  /**
+   * What the top bar's layer buttons DO (decision 0006) — see `builtIn.tsx` for which are offered.
+   *
+   * Absent ⇒ the bar still says where the file came from and offers nothing, which is right for the
+   * graph's side panel and for a form rendered outside the shell: neither has a tree to follow an
+   * override into. "Compare with what ships" needs only {@link readFile}, so it is not in here.
+   */
+  layerActions?:
+    | {
+        hasProject: boolean;
+        /** Copy this shipped file up into a layer a person owns, and open the copy. */
+        onOverride: (toLayer: WritableLayer) => void;
+        /** Delete this copy of a built-in, after asking. Offered only for a copy JaiRA itself wrote. */
+        onDeleteCopy: () => void;
+      }
+    | undefined;
 }): JSX.Element {
   const [localTab, setLocalTab] = useState<EditorTab>("form");
   /**
@@ -785,7 +813,12 @@ export function WorkflowEditor({
    * the document is unmodified again the moment it does. Comparing against the mount value instead
    * would leave the editor claiming unsaved changes forever after the first save.
    */
-  const readOnly = useReadOnly();
+  // What ships is never edited (decision 0006): the form is a reading, there is no Save, and the
+  // provider at the foot of this component says so to every table below — the same switch the panel
+  // beside a finished run throws, for a different reason. `AppService.writable` would refuse the
+  // write anyway; this is the editor not offering it.
+  const shipped = !isWritableLayer(source.layer);
+  const readOnly = useReadOnly() || shipped;
   const onDisk = source.text || "{}";
   const held = onDraft
     ? (draft ?? null)
@@ -986,6 +1019,35 @@ export function WorkflowEditor({
     };
   }, [unknownKey, loadStateSlots]);
 
+  /**
+   * "Compare with what ships": this document beside the built-in file of the same id.
+   *
+   * Held here rather than by the host because it is a way of LOOKING at the open file, like a tab,
+   * and it ends when the file does — a comparison left up over the next file the tree selected
+   * would be comparing the wrong pair.
+   */
+  const [comparing, setComparing] = useState(false);
+  const [shippedText, setShippedText] = useState<string | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  useEffect(() => {
+    setComparing(false);
+    setShippedText(null);
+    setCompareError(null);
+  }, [source.file]);
+
+  const onLayerAction = (id: LayerBarAction["id"]): void => {
+    const toLayer = overrideTarget(id);
+    if (toLayer !== null) return layerActions?.onOverride(toLayer);
+    if (id === "delete-copy") return layerActions?.onDeleteCopy();
+    if (comparing) return setComparing(false);
+    setComparing(true);
+    if (shippedText !== null) return;
+    if (readFile === undefined) return setCompareError("This panel cannot read the built-in file.");
+    void readFile("system", `workflows/${source.stateId}.json`).then((found) =>
+      found === null ? setCompareError("The built-in file could not be read.") : setShippedText(found),
+    );
+  };
+
   // A named executor that exists but is switched off. An unknown name is NOT flagged: a `function`
   // may name a host function or a sub-workflow, neither of which is in this list.
   const namedFunction = form.operation.fields["functionRef"] ?? "";
@@ -1033,6 +1095,7 @@ export function WorkflowEditor({
   );
 
   return (
+    <ReadOnlyContext.Provider value={readOnly}>
     <LinkReaderProvider value={reader}>
     <div className="pane editor">
       {/* One line of chrome. All three of these are standing facts about the file rather than things
@@ -1041,17 +1104,24 @@ export function WorkflowEditor({
           of the form — so they share a line, and the warning keeps its sentence in its tooltip. */}
       <div className="edit-bar editor-top">
         <div className="sub file-path" title={source.file}>
-          {source.file}
-          {source.exists ? "" : " · new file"}
+          {/* A shipped file is named the way a reference names it. Where the app is installed is
+              nobody's business while reading a state, and it is one hover away. */}
+          {/* Isolated from the bar's `direction: rtl` (which exists to ellipsize at the START): without
+              it the bidi algorithm moves a leading `$` or `.` to the far end of the path. */}
+          <bdi>
+            {shipped ? `$SYSTEM/workflows/${source.stateId}.json` : source.file}
+            {source.exists ? "" : " · new file"}
+          </bdi>
         </div>
-        {source.layer === "base" ? (
-          <span
-            className="chip chip-warn"
-            title="Editing the shared copy. Every project that has not overridden this state will see the change."
-          >
-            shared copy
-          </span>
-        ) : null}
+        {/* Which layer supplied this file, and what can be done about it (decision 0006): a shipped
+            file is read-only and overridable, a file that overrides one can be compared with it, and
+            a shared file says — as it always has — that every project sees an edit to it. */}
+        <LayerBar
+          model={layerBarOf(source, layerActions?.hasProject === true)}
+          busy={busy}
+          comparing={comparing}
+          onAction={onLayerAction}
+        />
         {/* The two that EDIT first, in the order they are reached for; the reading is what you step
             out to, so it is last. A host may offer fewer — see {@link tabs}. */}
         <div className="tabs seg">
@@ -1072,7 +1142,19 @@ export function WorkflowEditor({
           and fit, which are ways of looking rather than ways of changing — and a graph you cannot
           zoom in a column this narrow is a picture of a state rather than a reading of one. It was
           inside the reading's fieldset for one round, which disabled all three buttons. */}
-      {tab === "graph" ? (
+      {comparing ? (
+        // The whole body, whatever tab was up: a comparison is of the DOCUMENT, and it is a way of
+        // looking rather than a fourth way of editing. The shipped file is the original, because the
+        // question is "what did I change", and both sides are read-only — the way to act on what it
+        // shows is the form, one click back.
+        shippedText === null ? (
+          <p className="empty">{compareError ?? "reading what ships…"}</p>
+        ) : (
+          <Suspense fallback={<div className="diff-pane-loading">loading the diff editor…</div>}>
+            <MonacoDiffPane original={shippedText} modified={text} mime={WORKFLOW_JSON} sideBySide readOnly />
+          </Suspense>
+        )
+      ) : tab === "graph" ? (
         <StateGraphView
           text={text}
           stateId={source.stateId}
@@ -1455,5 +1537,6 @@ export function WorkflowEditor({
       )}
     </div>
     </LinkReaderProvider>
+    </ReadOnlyContext.Provider>
   );
 }

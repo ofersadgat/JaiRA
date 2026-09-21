@@ -25,7 +25,7 @@ A quiet line of facts across the top of an editing surface and, pinned to its bo
 
 ## The document sits between a line of facts above and the two buttons below
 
-- **Top line.** One row, 8px gaps, never taller than its content. The host decides what it holds: the state editor puts the file path, a `shared copy` chip and its Form, JSON and Graph switch there; the JSON editor puts its schema picker and verdict there and lets them wrap; the graph puts its legend and zoom there. Nothing in the top line is part of the document.
+- **Top line.** One row, 8px gaps, never taller than its content. The host decides what it holds: the state editor puts the file path, a chip saying which layer supplied the file with the links that go with it, and its Form, JSON and Graph switch there; the JSON editor puts its schema picker and verdict there and lets them wrap; the graph puts its legend and zoom there. Nothing in the top line is part of the document.
 - **Bottom row.** `Save` as the primary button in `--fill-accent`, then `Revert` as a ghost button, 6px apart. After them sits one short phrase: `unsaved changes` in `.app-secondary`, or the reason saving is refused in `--bad` at the same size. A host can add its own phrase after that, such as `new file — saving creates it`.
 - **Ground.** The bottom row carries `--panel` and 8px of padding above its buttons, so a document scrolling under it disappears behind the rule.
 

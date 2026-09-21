@@ -181,9 +181,49 @@ What the build settled that the text above left open:
 - **The write refusal is one guard.** `AppService.writable` is called by every surface that takes
   a layer and changes a file; before it, a `system` layer fell through each
   `layer === "base" ? … : …` as `project`. A copy OUT of the layer is allowed — it is the override.
-- **The Files tree does not draw the third root yet.** The workflow listing and lint see three
-  layers; the tree is where files are made, and its read-only root belongs with steps 3–4.
-- The layer ships holding only a `README.md`. The install steps are untouched (step 2).
+- The layer shipped holding only a `README.md`, and the Files tree did not draw it. Both changed
+  with the steps below.
+
+**Steps 2 and 4 (2026-09-21).** `chat/assistant`, `chat/agent` and the three `debug/hello_world`
+states are files under `packages/shared/builtin/workflows/`. `chatWorkflowFiles`, `selfTestFiles`,
+the `chat.installed` flag, the Chat view's write before its first message and the Debug pane's
+`Install missing` / `Reinstall` are gone. The tree, the editor bar and the cleanup offer are built;
+the layer picker's third segment and "Reset to built in" are not, because no Settings pane holds a
+value the layer ships (it has no `settings.json`, and the Toolsets pane is 0007 step 6). Tests:
+`packages/app/test/builtInStates.test.ts`. What the build settled:
+
+- **The cleanup offer covers the shared root only.** That is the only place the install steps
+  wrote. A project's copy is in somebody's repository, so it is never listed, identical or not.
+- **Identical means the parsed value, with object keys in any order.** Array order is an edit.
+  The current version is read from the layer at the moment of asking; the versions earlier builds
+  installed are kept by hand in `packages/app/src/main/shippedStates.ts` (`SUPERSEDED`), and a
+  built-in file that changes adds the value it had to that list in the same commit. Forgetting
+  costs an offer that is not made, never a wrong deletion.
+- **Nothing is deleted without a yes that names the file.** `builtin:leftovers` lists;
+  `builtin:cleanup` re-derives the list from the disk and deletes only the named ids still on it,
+  so a copy edited while the dialog was open stays. The offer stands on the tree's `Built in`
+  root, in the editor bar of such a copy, and in the Debug pane.
+- **The tree's last root is the layer, in every tree.** A project's tree, the shared root's and
+  the all-projects tree each end with one `system` root labelled `Built in`. It has no sidebar row
+  to be reached by, which is why it is listed where the shared root is not. Its rows offer Open,
+  the two overrides, and the ways to copy or reveal a path.
+- **Which layer supplied a state is two marks.** A shipped row a person's file shadows is
+  `shadowed` and reads `overridden`; the person's row carries `overridesBuiltIn` and reads
+  `override`. The second exists because a project's tree does not hold the shared root, so the
+  shipped row alone could not say which of them won.
+- **A file reports its own standing.** `file:read` and `workflow:read` answer `builtIn`
+  (`BuiltInStanding`): every layer holding that state id in search order, and `identical` when a
+  person's copy is one JaiRA wrote. The editor bar is a pure function of that (`layerBarOf`).
+- **What ships is read, not edited.** The panel mounts every editor on a `system` document as the
+  reading of its type, the state editor wraps itself in `ReadOnlyContext` and draws no Save, and
+  `AppService.writable` refuses the write regardless.
+- **A shipped state runs where the person stands**: the open checkout, else the shared root
+  (`runTargetOf`). That is the routing the Chat view and the self-test already used.
+- **The suite sees an empty layer by default.** `test/setup.ts` registers an absent directory with
+  `setBuiltInDir`, so a listing asserted in a test is that test's own; `shippedLayer()` in
+  `test/testing.ts` opts one test into the real files.
+- **Not changed:** the self-test still records its run in the shared root's own project, so a
+  read-only shared root runs a conversation from an open checkout but not the self-test.
 
 ## Revisit when
 

@@ -195,7 +195,8 @@ describe("fileTree", () => {
   it("lists both layer roots, with state ids on the workflow files", () => {
     const tree = fileTree(project, browseWorkflows(project));
 
-    expect(tree.roots.map((r) => r.layer)).toEqual(["project", "base"]);
+    // The two a person owns, then what ships (decision 0006) — empty here, see `test/setup.ts`.
+    expect(tree.roots.map((r) => r.layer)).toEqual(["project", "base", "system"]);
     const projectRoot = tree.roots[0]!;
     // Rooted at the CHECKOUT, so the layer is a directory in it rather than the top of it.
     const layer = projectRoot.nodes.find((n) => n.name === ".jaira");
@@ -231,7 +232,7 @@ describe("fileTree", () => {
     try {
       const tree = fileTree(withBase, browseWorkflows(withBase));
 
-      expect(tree.roots.map((r) => r.layer)).toEqual(["project", "base"]);
+      expect(tree.roots.map((r) => r.layer)).toEqual(["project", "base", "system"]);
       const base = tree.roots[1]!;
       expect(base.exists).toBe(false);
       expect(base.nodes).toEqual([]);
@@ -325,8 +326,10 @@ describe("fileTree", () => {
       // Absent on a fresh machine, and still listed — this is the tree the Files view shows before
       // anyone has opened anything.
       const tree = baseFileTree(join(home, "shared"));
-      expect(tree.roots).toHaveLength(1);
+      expect(tree.roots.map((r) => r.layer)).toEqual(["base", "system"]);
       expect(tree.roots[0]).toMatchObject({ layer: "base", exists: false, nodes: [] });
+      // The suite's built-in layer is an absent directory: an empty root, still listed.
+      expect(tree.roots[1]).toMatchObject({ label: "Built in", exists: false, nodes: [] });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

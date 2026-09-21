@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { onTestFinished } from "vitest";
 import { resetUserModules } from "@jaira/persistence";
+import { defaultBuiltInDir, setBuiltInDir } from "@jaira/shared";
 
 /**
  * This test's base root — the same directory every time it is asked for, gone when the test ends.
@@ -67,4 +68,19 @@ export function testHome(): string {
     rmSync(dir, { recursive: true, force: true });
   });
   return dir;
+}
+
+/**
+ * Run this test against what JaiRA really SHIPS — `packages/shared/builtin/` — instead of the empty
+ * built-in layer `test/setup.ts` registers for everything else.
+ *
+ * For the tests that are about the shipped files: that the Chat view's states and the self-test
+ * resolve with nothing installed, that a copy of one is recognised as a copy. Callable from a test
+ * or from `beforeEach`, like {@link testHome}, and undone when the test ends, so the next test in
+ * the file is back on the floor whether or not it asks.
+ */
+export function shippedLayer(): void {
+  const floor = defaultBuiltInDir();
+  setBuiltInDir(undefined);
+  onTestFinished(() => setBuiltInDir(floor));
 }

@@ -99,6 +99,7 @@ import "./fenceRender";
 import type { FileSurfaceContext } from "./fileTypes";
 import { LogsPanel } from "./logs";
 import { LayerPicker, SettingsPane } from "./panes";
+import { leftoversAsk } from "./builtIn";
 import { ConfigPane } from "./configPane";
 import { ConfigPanel } from "./configPanel";
 import { DebugPane } from "./debugPane";
@@ -1376,6 +1377,23 @@ export default function App(): JSX.Element {
     readState: actions.readState,
     saveState: actions.saveState,
     readFile: actions.readFile,
+    builtInActions: {
+      hasProject: state.at !== null,
+      // The override IS a copy up a layer (decision 0006): same id, so it shadows what ships, and
+      // `moveWorkflow` follows the file — the editor lands on the copy, which is the one that loads.
+      onOverride: (stateId, toLayer) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer, copy: true }),
+      // Never silently: the dialog names the file. Only what main still finds identical goes.
+      onDeleteCopy: (stateId) => {
+        const left = state.leftovers.filter((one) => one.stateId === stateId);
+        if (left.length === 0) return;
+        setTaskAsk(
+          leftoversAsk(left, () => {
+            setTaskAsk(null);
+            void actions.cleanupBuiltIn([stateId]);
+          }),
+        );
+      },
+    },
     schemaChoice: state.schemaChoice,
     onSchemaChoice: actions.setSchemaChoice,
     drafts: state.drafts,
@@ -1636,6 +1654,9 @@ export default function App(): JSX.Element {
               onUnfold={(keys) => actions.unfold(OPENED.folders, keys)}
               // Which root goes unnamed: the one the drawer is hanging under. See the prop.
               project={state.at}
+              // What the old install steps left in the shared root, offered on the "Built in" root.
+              leftovers={state.leftovers}
+              onCleanup={(stateIds) => void actions.cleanupBuiltIn(stateIds)}
             />
           ),
         },
@@ -2210,10 +2231,19 @@ export default function App(): JSX.Element {
               hasProject={state.at !== null}
               onRun={(options) => void actions.debugRun(options)}
               onCancel={() => void actions.debugCancel()}
-              onInstall={(force) => void actions.debugInstall(force)}
+              onCleanup={(stateIds) => {
+                const left = state.leftovers.filter((one) => stateIds.includes(one.stateId));
+                if (left.length === 0) return;
+                setTaskAsk(
+                  leftoversAsk(left, () => {
+                    setTaskAsk(null);
+                    void actions.cleanupBuiltIn(left.map((one) => one.stateId));
+                  }),
+                );
+              }}
               onRecheck={actions.debugRefresh}
               onDismissError={actions.debugDismissError}
-              onOpenState={(stateId) => void actions.openWorkflow(stateId, "base")}
+              onOpenState={(stateId, layer) => void actions.openWorkflow(stateId, layer)}
               onShowSession={actions.showSession}
             />
           ) : null}

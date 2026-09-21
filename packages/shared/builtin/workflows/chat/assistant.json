@@ -1,0 +1,18 @@
+{
+  "label": "Conversation",
+  "description": "A conversation with a model, started from the Chat view. The first message is this state's prompt; the rest continue it. No tools: it reads what you give it and answers.",
+  "inputs": {
+    "message": {
+      "schema": {
+        "type": "string"
+      },
+      "description": "What the person typed to start the conversation."
+    }
+  },
+  "environment": {
+    "kind": "prompt"
+  },
+  "operation": {
+    "prompt": "{{.inputs.message}}"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "label": "Working conversation",
+  "description": "A conversation that works in the project, started from the Chat view. Same thread as the plain conversation, plus JaiRA's tools — so it can read files, write them and run commands, each gated by the project policy.",
+  "inputs": {
+    "message": {
+      "schema": {
+        "type": "string"
+      },
+      "description": "What the person typed to start the conversation."
+    }
+  },
+  "environment": {
+    "kind": "prompt",
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file"
+    ],
+    "permissions": {
+      "profile": "full",
+      "default": "ask"
+    }
+  },
+  "operation": {
+    "prompt": "{{.inputs.message}}"
+  }
+}

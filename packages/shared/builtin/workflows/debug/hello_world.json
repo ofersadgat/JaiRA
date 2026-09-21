@@ -1,0 +1,39 @@
+{
+  "label": "Hello-world self-test",
+  "description": "Two prompt states: one says hello world, the next reads what it said and judges it. Run from the Debug view.",
+  "environment": {
+    "kind": "prompt"
+  },
+  "outputs": {
+    "greeting": {
+      "schema": {
+        "type": "string"
+      },
+      "binding": ".children.say.output.greeting"
+    },
+    "passed": {
+      "schema": {
+        "type": "boolean"
+      },
+      "binding": ".children.check.output.passed"
+    },
+    "verdict": {
+      "schema": {
+        "type": "string"
+      },
+      "binding": ".children.check.output.verdict"
+    }
+  },
+  "children": {
+    "say": {},
+    "check": {
+      "inputs": {
+        "greeting": ".children.say.output.greeting"
+      }
+    }
+  },
+  "sequence": [
+    "say",
+    "check"
+  ]
+}

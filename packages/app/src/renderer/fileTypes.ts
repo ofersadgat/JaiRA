@@ -56,6 +56,7 @@ import type {
   SyncDirection,
   ValidateSchemaResult,
   WorkflowLayer,
+  WritableLayer,
   WorkflowSource,
   WorkflowSyncEdit,
   WorkflowSyncResult,
@@ -429,6 +430,20 @@ export interface FileSurfaceContext {
   saveState?: ((source: WorkflowSource, text: string) => void) | undefined;
   /** Any file's text, for showing what a LINKED property says — see `linkPreview.tsx`. */
   readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
+  /**
+   * What the state editor's layer buttons do about the built-in layer (decision 0006).
+   *
+   * `onOverride` copies a shipped state up into a layer a person owns and opens the copy;
+   * `onDeleteCopy` asks, then deletes a copy of a built-in that JaiRA itself wrote. Absent ⇒ the
+   * editor's top bar still says which layer supplied the file, and offers neither.
+   */
+  builtInActions?:
+    | {
+        hasProject: boolean;
+        onOverride: (stateId: string, toLayer: WritableLayer) => void;
+        onDeleteCopy: (stateId: string) => void;
+      }
+    | undefined;
   /**
    * The schema chosen per document, keyed by `layer:path`, and how to change one.
    *

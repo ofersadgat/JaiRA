@@ -696,6 +696,7 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
     file: doc.file,
     text: doc.text,
     exists: doc.exists,
+    ...(doc.builtIn !== undefined ? { builtIn: doc.builtIn } : {}),
   };
   const form = (
     <WorkflowEditor
@@ -735,6 +736,16 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
       {...(context.saveState !== undefined ? { saveState: context.saveState } : {})}
       // Reading any file: what a linked property's preview shows — see `linkPreview.tsx`.
       {...(context.readFile !== undefined ? { readFile: context.readFile } : {})}
+      // The built-in layer's buttons, bound to THIS state — see `FileSurfaceContext.builtInActions`.
+      {...(context.builtInActions !== undefined
+        ? {
+            layerActions: {
+              hasProject: context.builtInActions.hasProject,
+              onOverride: (toLayer) => context.builtInActions?.onOverride(source.stateId, toLayer),
+              onDeleteCopy: () => context.builtInActions?.onDeleteCopy(source.stateId),
+            },
+          }
+        : {})}
       onSave={(_stateId, _layer, text) => onSave(text)}
     />
   );
