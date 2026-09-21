@@ -191,12 +191,9 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
   if (!result.ok) {
     const missing = result.refusal.missing ?? [];
     for (const input of missing) facts.push([{ b: input.name }, ` is required and unbound — ${input.reason}`]);
-    const refused =
-      result.refusal.code === "fast-forward"
-        ? "Nothing here can run the states between."
-        : missing.length > 0
-          ? `${count(missing.length, "required input")} would not be bound.`
-          : result.refusal.message;
+    // A forward move the app cannot run says why in its own words — a running task with no
+    // conversation, nothing left to run — which is exactly what a hover should say.
+    const refused = missing.length > 0 ? `${count(missing.length, "required input")} would not be bound.` : result.refusal.message;
     return { kind: KIND[plan.resolution], say, facts, refused };
   }
   return { kind: KIND[plan.resolution], say, facts, drop };

@@ -4,7 +4,7 @@
  * A forward move inside a workflow RUNS THE MACHINE to the target. That is not a transition: the
  * states between where the work stands and where it was sent run normally, one after another, and
  * the only thing that is different about them is who answers their questions — the control
- * conversation, through `answer`, marked as such and rewindable. So there is nothing in the journal
+ * conversation, through `answer_question`, marked as such and rewindable. So there is nothing in the journal
  * that IS a fast-forward. It is a mode a task is in, held by the process driving it, and this is
  * what that mode looks like from outside.
  *
@@ -34,7 +34,7 @@ export interface FastForwardView {
   taskId: string;
   /** The conversation answering on the way, by its task — never the same thing as `taskId` unless the task IS one. */
   controlTaskId: string;
-  /** The target state id, as `workflows` spells it. */
+  /** The target state id, as `list_workflows` spells it. */
   target: string;
   /** What the strip calls it: the target's child key, or the tail of its id. */
   targetLabel: string;

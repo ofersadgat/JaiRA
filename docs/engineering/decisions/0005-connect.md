@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0005-connect
 type: decision
-status: proposed
+status: built
 updated: 2026-09-21
 decides_for: [engineering/units/adoption, engineering/units/fan-out-host, engineering/units/workflow-snapshots, engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/interaction-hub, engineering/units/workflow-browser]
 ---
@@ -381,10 +381,11 @@ conversation's. Per-item workflows: items share one document.
    task that becomes a dynamic workflow. **Built 2026-09-21** — see
    "What step 6 settled" below.
 7. **Fast-forward**: `answer_question`, `settled_by: control`, `autopilot.askBelow`,
-   the strip, Skip.
+   the strip, Skip. **Built 2026-09-21** — see "What step 7 settled" below.
 
 Each step is usable on its own. 1–3 already answer "one phase" and "use
-what ran".
+what ran". **The build order is complete**: all seven steps are built, and
+what they left undone is the Open list below.
 
 ## What step 1 settled
 
@@ -744,6 +745,106 @@ text above left open:
   the journal, and nothing in the journal says what a tool answered. A refused
   call draws no note — the row's mark and its result already say it once.
 
+## What step 7 settled
+
+Built in `@jaira/shared` (`fastForward.ts`, `config.ts`, `configSchema.ts`),
+`@jaira/runtime` (`autopilot.ts`), `@jaira/persistence` (`connect.ts`,
+`dynamicDocuments.ts`, `views.ts`) and the app (`main/fastForward.ts`,
+`AppService.fastForwardTask` and its neighbours, the strip, the gate, the
+notes, Settings), with no upstream change. The statement of record is
+[task-channels](../contracts/task-channels.md) (`task:fastForward`, `task:skip`,
+`task:answerYourself`), [gate-components](../contracts/gate-components.md) ("Who
+may answer"), [settings-json](../contracts/settings-json.md) (`autopilot`),
+[interaction-gateway](../units/interaction-gateway.md),
+[activity-strip](../../ui/components/activity-strip.md) and
+[gate-surface](../../ui/components/gate-surface.md). What the text above left
+open:
+
+- **A fast-forward is a mode, not a transition.** Nothing is handed to the
+  engine: the task is started or resumed and its own spine walks it to the
+  target. `connect`'s forward move asks the host for the MODE
+  (`ConnectHost.fastForward`), which is held in the memory of the process
+  driving the run (`ProjectSession.fastForwards`) and says four things — who
+  answers on the way, what the strip says, what Skip is aimed at, and when it
+  ends. Nothing in the journal is a fast-forward, so a process that did not
+  start one never answers for anybody: after a restart the task is where the
+  machine got to and its questions are the person's. A host that drives no run
+  (the CLI) has no `fastForward`, and there a forward move is still refused
+  with `fast-forward`: nobody there could answer on the way.
+- **"Adopted into one first" is a graft, not a wrapper.** Wrapping the task in
+  a new parent would make the PARENT the thing that moves, and a fast-forward
+  is a move of the task's own machine through its own workflow. So a task with
+  no conversation is given one on its own root — the conversation state's
+  operation grafted onto the task's frozen root with no child and no rule added
+  (`ensureControlConversation`, the same graft a clone does) — and is its own
+  control. The idle rule is what keeps that from spending a call. A task whose
+  root already speaks, or which stands under a task whose root does, is
+  answered by that one.
+- **A running task with no conversation is refused, before anything is
+  written.** Its engine holds the version it loaded and cannot pick up the
+  graft; the refusal says to pause it, as a new transition's does. The dry run
+  says it too (`ConnectHost.fastForwardBlocked`), so a hover never offers a
+  drop that will be refused. A running task that DOES have its conversation is
+  registered on the live run, and nothing is restarted.
+- **The conversation is asked for a value, and the host does the answering.**
+  One prompt call outside any run, as a follow-up round is made
+  (`autopilotOperation`): the conversation's thread read as context, the work
+  and where it is going, and the question exactly as the person would see it,
+  with the component's result shape. It returns `{answer, confidence, reason}`.
+  The HOST holds the confidence against `autopilot.askBelow` and only then
+  calls the same `answer` the `answer_question` tool is — because a model that
+  decides whether it is sure enough has been handed the setting. The call reads
+  the conversation and does not continue it, so nothing appears in the
+  conversation for an answer; the answer is drawn on the gate it settled.
+- **Never an approval, three times over.** The fast-forward is reached only from
+  the gate hub's and the question hub's `onRequest`; the approval hub's never
+  calls it and neither half is handed that hub, so a tool permission, a push, a
+  merge or `remote.publish` cannot get there. Of the gates, only
+  `ANSWERABLE_COMPONENTS` are offered — `confirm_action` and `review_artifacts`
+  are left to the person without a model seeing them. And `answer` refuses them
+  by component anyway.
+- **An answer is checked before it is recorded.** Step 6's `answer` journaled
+  first and submitted second, so an answer the contract refused left a
+  `jaira.answered` row claiming a settlement that never happened. It now asks
+  the contract first (`checkInteraction`), and names the instance it settled
+  (`askingInstance`: the one running operation that can be parked there, or
+  none when two could be).
+- **The mark is the row, folded.** `markAnswered` puts `settledBy` on the
+  instance the `jaira.answered` row names — the first such row, for a follow-up
+  round answered again — so it survives a restart, a reopen and a resume with
+  nothing else to keep. The resumed run does not ask an answered gate again
+  because the gate's completion is in the journal like any other.
+- **"Answer it yourself" rewinds to the ENTRY, not to the answer.** A cut keeps
+  the settle of a call that started before it (`partitionAt`, right for a
+  conversation cut mid-turn), so cutting at the answered row keeps the answer's
+  completion and asks nothing. `settledBy.at` is the seq of the state's entry;
+  the cut takes the entry, the answer and everything after, and the state asks
+  again. A fast-forward still going is ended and its run stopped first, since a
+  rewind refuses a running task, and the person has taken the work back.
+- **It ends on arrival, and on the run going anywhere else.** Arrival is the
+  entry of the target's child key (under the named composite at the top level);
+  a state on the way ending `error` or `timeout`, the run ending, a stop, and a
+  Skip end it too. A question parked after it ends is the person's — which is
+  what makes the target's own questions theirs.
+- **Skip is the existing Skip.** `task:skip` is `task:move` with `skip: true` to
+  the fast-forward's target, so the engine journals the transition and every
+  state it steps over `skipped` BEFORE it aborts anything: the interrupt trap's
+  answer is upstream's (`directedTransition.test.ts`, "SKIP decides before it
+  interrupts…"), and JaiRA asserts the order in the journal and that the run
+  does not walk into the next intermediate. The mode is ended first, so a
+  question raised on the way down is the person's.
+- **The stale inbox is closed where it can be told apart.** An agent's parked
+  approval and `AskUserQuestion` cannot see a skip — `Approver` and `AskUser`
+  take no signal, and a request names a task, not an instance — so each run's
+  journal is watched instead (`SkipWithdrawals`): when a child ends `skipped` and
+  every prompt operation still running is inside it, the task's questions are
+  dismissed and its approvals denied once. Every Skip gets this, not only a
+  fast-forward's.
+- **`autopilot` is a layered block, and a person's.** `{askBelow: 0.2}` by
+  default, strict from 0 to 1, drawn in Settings by the declared form beside
+  Memoization and Workflow lookup, and left out of the file `initProject`
+  writes, so a project does not silently override the shared root's answer.
+
 ## Open
 
 - A finished task publishes no runtime wait, so a "→ ui" chip offering a
@@ -754,8 +855,6 @@ text above left open:
   whose earlier passes ran in the adopted task).
 - An adopted child that fans out (`each: "inline"` or `"task"`) is refused:
   one task cannot stand for a batch. Adopting a whole batch is not designed.
-- A forward move on the board: refused until fast-forward exists (step 7),
-  because the board has nowhere to say `skip`.
 - A new transition for a task that is running: refused until it is paused.
   Stopping it and reopening it with the move is `skip` by another name, and
   was not taken without being asked for.
@@ -768,8 +867,23 @@ text above left open:
   for — and the board does not send it yet, so a drop of that shape is still
   refused with what is missing. The conversation's own `start_task` is what mounts
   the target afterwards.
-- The "fast-forward strip" and `answer_question`'s use by a fast-forward are step 7's;
-  `answer_question` is wired and callable now, and nothing calls it automatically.
+- A fast-forward of a task that is RUNNING with no conversation is refused
+  until it is paused, for the reason a new transition is.
+- A fast-forward lives in the process that started it: a restart ends it, and
+  the task resumes with its questions the person's. Moving it forward again
+  starts a new one.
+- A skip that lands while an agent OUTSIDE the skipped subtree is still running
+  (an `async` sibling) withdraws nothing — whose ask is whose cannot be told —
+  and those asks stay on the inbox until answered or the task is stopped. An
+  upstream signal on `Approver` and `AskUser`, or an instance on their requests,
+  would close it.
+- "Answered for you" draws on a GATE only. An agent's `AskUserQuestion` answered
+  by the conversation is journaled and marked on its instance, but the question
+  block inside the agent's transcript does not say who answered it.
+- The skipped notes draw one row per state; the mockup groups the states never
+  entered into one row.
+- A question stays on screen while the conversation considers it; a person who
+  answers first wins, and the conversation's answer is counted as left to them.
 - A control conversation's opening row is drawn as the tool's own note, not as
   a row on the rail beside the panel as the mockup has it.
 

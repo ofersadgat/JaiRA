@@ -141,7 +141,7 @@ tools do.
 | `move_task` in `to` | string | yes | the target state id |
 | `move_task` in `workflow` | string | no | which workflow the target is meant in, when more than one holds it |
 | `move_task` in `skip` | boolean | no | go directly, recording what is stepped over as `skipped` |
-| `move_task` out `ok: true` | `{task, resolution, modification?, workflow, standsAt, adoptedAs?, mount?, moved?}` | on success | `resolution` is `move`, `adopt` or `modify`; `moved` is how the transition landed |
+| `move_task` out `ok: true` | `{task, resolution, modification?, workflow, standsAt, adoptedAs?, mount?, moved?, answeredBy?, through?}` | on success | `resolution` is `move`, `adopt` or `modify`; `moved` is how the transition landed, or `fast-forwarding` when the target is ahead and the states between are running — `answeredBy` names the conversation answering them and `through` the states, and the transcript draws `fast-forwarding to {target} · through {…}` under the row |
 | `start_task`, `move_task` out `inputs-missing` | `{ok: false, code, reason, missing, schema, filled}` | on a required input nothing binds | NOTHING was done. `missing` is `{state, name, schema?, description?, reason}` each; `schema` is the target's whole input schema; `filled` is what the host settled itself. Supply the values and call again |
 | `move_task` out `candidates` | array of `{workflow, label?, childKey, targetKey?}` | on `ambiguous-workflow` | call again naming one |
 | `list_tasks` in `all` | boolean | no | every task of the project, shortly, instead of what was started here |

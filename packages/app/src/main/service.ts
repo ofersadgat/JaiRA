@@ -5322,6 +5322,7 @@ export class AppService {
       adopt: (adopt) => this.adoptTask(adopt),
       move: (move) => this.moveTask(move),
       fastForward: (forward) => this.fastForwardTask(forward),
+      fastForwardBlocked: (taskId) => this.fastForwardBlocked(open, taskId),
     });
     if (request.dryRun !== true) {
       this.connectBrowsers.delete(open.key);
@@ -5346,12 +5347,12 @@ export class AppService {
    * FAST-FORWARD ("task:fastForward"): run the machine to a state somebody sent the task to.
    *
    * What `connect` hands a forward move that would step over states, however it was asked for — the
-   * board's drop, `jaira task move`, a conversation's `move`. No transition is handed to anybody: the
+   * board's drop, `jaira task move`, a conversation's `move_task`. No transition is handed to anybody: the
    * task is started or resumed and its own spine walks it into the target. What makes it a
    * fast-forward is the MODE this registers:
    *
    *  - **the controlling conversation answers what comes up** (`offerToControl`), through the same
-   *    `answer` the tool is, each answer marked and a rewind point — and never an approval;
+   *    `answer_question` the tool is, each answer marked and a rewind point — and never an approval;
    *  - **Skip is showing** in the strip (`skipFastForward`);
    *  - **it ends on arrival** (`fastForwardSaw`), or on the run ending any other way.
    *
@@ -5370,20 +5371,11 @@ export class AppService {
     const meta = project.tasks.tryRead(taskId);
     if (row === undefined || meta === undefined) throw this.refusal("run", `cannot fast-forward unknown task '${taskId}'`, at);
     const live = open.live.has(taskId);
-    if (!live && (row.status === "running" || row.status === "stopping")) {
-      throw this.refusal("run", `task '${taskId}' is ${row.status} in another process — move it there`, at);
-    }
-    // Decided BEFORE anything is written: a task with nothing left to run cannot be run forward, and
-    // grafting it a conversation first would leave a document behind a refusal.
+    // Decided BEFORE anything is written — the same answer a dry run gave the hover.
+    const blocked = this.fastForwardBlocked(open, taskId);
+    if (blocked !== undefined) throw this.refusal("run", blocked, at);
     const plan = live ? undefined : this.resumable(taskId, open.dir);
-    if (plan !== undefined && plan.kind === "none") {
-      throw this.refusal(
-        "run",
-        `'${meta.title}' has nothing left to run on the way to '${request.target}'${plan.blocked !== undefined ? ` (${plan.blocked})` : ""} — say skip to go there directly`,
-        at,
-      );
-    }
-    const controlTaskId = await this.controlOf(open, taskId, live);
+    const controlTaskId = await this.controlOf(open, taskId);
     const through = request.through ?? [];
     const run: FastForwardRun = {
       taskId,
@@ -5426,7 +5418,15 @@ export class AppService {
    * the nearest task above it whose root does — a dynamic workflow's conversation over what it
    * adopted or started — else one grafted onto the task (see {@link fastForwardTask}).
    */
-  private async controlOf(open: ProjectSession, taskId: string, live: boolean): Promise<string> {
+  private async controlOf(open: ProjectSession, taskId: string): Promise<string> {
+    const found = this.speakingControlOf(open, taskId);
+    if (found !== undefined) return found;
+    await ensureControlConversation(open.project, { taskId, conversation: this.options.connectConversation ?? CONNECT_CONVERSATION });
+    return taskId;
+  }
+
+  /** The task's own root when it speaks, else the nearest task above it whose root does. Nothing is written. */
+  private speakingControlOf(open: ProjectSession, taskId: string): string | undefined {
     const project = open.project;
     const speaks = (id: string): boolean => {
       const row = project.runtime.get(id);
@@ -5443,15 +5443,32 @@ export class AppService {
       visited.add(id);
       if (speaks(id)) return id;
     }
+    return undefined;
+  }
+
+  /**
+   * Why this task cannot be FAST-FORWARDED now, if it cannot — asked by `connect`'s dry run as well,
+   * so a hover says it before a drop does.
+   *
+   *  - running in another process: move it there;
+   *  - running HERE with no conversation: its engine holds the version it loaded, and the graft that
+   *    would give it one is a version it cannot see — pause it, then move it;
+   *  - not running, with nothing left to run: the machine has nowhere to walk.
+   */
+  private fastForwardBlocked(open: ProjectSession, taskId: string): string | undefined {
+    const row = open.project.runtime.get(taskId);
+    const title = open.project.tasks.tryRead(taskId)?.title ?? taskId;
+    if (row === undefined) return `unknown task '${taskId}'`;
+    const live = open.live.has(taskId);
+    if (!live && (row.status === "running" || row.status === "stopping")) return `'${title}' is ${row.status} in another process — move it there`;
     if (live) {
-      throw this.refusal(
-        "run",
-        `task '${taskId}' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly`,
-        { project: open.key, taskId },
-      );
+      return this.speakingControlOf(open, taskId) === undefined
+        ? `'${title}' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly`
+        : undefined;
     }
-    await ensureControlConversation(project, { taskId, conversation: this.options.connectConversation ?? CONNECT_CONVERSATION });
-    return taskId;
+    const plan = this.resumable(taskId, open.dir);
+    if (plan.kind === "none") return `'${title}' has nothing left to run on the way there${plan.blocked !== undefined ? ` (${plan.blocked})` : ""} — say skip to go there directly`;
+    return undefined;
   }
 
   /**
@@ -5572,7 +5589,7 @@ export class AppService {
    * permission, a push, a merge or a `remote.publish` cannot get here at all. Then, of what does get
    * here, a gate whose component is not a QUESTION or a JUDGEMENT (`ANSWERABLE_COMPONENTS` —
    * `confirm_action` and `review_artifacts` are the two left out on purpose) is left to the person
-   * without a model ever seeing it. And `answer` itself checks the component a third time.
+   * without a model ever seeing it. And `answer_question` itself checks the component a third time.
    *
    * The question stays on screen while the conversation considers it: a person who answers first
    * simply wins, and the conversation's answer is refused as a question nobody is waiting on.
@@ -5601,7 +5618,7 @@ export class AppService {
    * scripted rules, so a headless test answers from its script.
    *
    * The confidence is judged HERE, against `autopilot.askBelow` — never by the model — and only an
-   * answer at or above it is handed to `answer`, which journals `jaira.answered` and settles.
+   * answer at or above it is handed to `answer_question`'s host operation, which journals `jaira.answered` and settles.
    */
   private async autopilotAnswer(
     open: ProjectSession,

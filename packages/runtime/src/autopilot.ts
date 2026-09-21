@@ -14,13 +14,13 @@
  *    Nothing here could reach an approval if it wanted to;
  *  - **whether the answer stands** is `autopilot.askBelow`, applied by the host to the confidence
  *    that comes back. A model saying it is sure is not the same as being allowed to act on it;
- *  - **settling it** is the `answer` tool's host operation, which journals `jaira.answered` and
+ *  - **settling it** is the `answer_question` tool's host operation, which journals `jaira.answered` and
  *    makes the whole thing a rewind point.
  *
  * ## Why a structured answer and not the tool
  *
- * The model could be handed `answer` and left to call it — it holds the tool in every other turn.
- * It is asked for a VALUE instead, and the host calls `answer` itself, for one reason: the
+ * The model could be handed `answer_question` and left to call it — it holds the tool in every other turn.
+ * It is asked for a VALUE instead, and the host calls `answer_question`'s operation itself, for one reason: the
  * threshold. A conversation that decides for itself whether it is confident enough has been handed
  * the setting, and `askBelow` exists precisely because that is not its decision to make.
  */

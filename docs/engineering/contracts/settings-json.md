@@ -2,7 +2,7 @@
 id: engineering/contracts/settings-json
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 visibility: public
 kind: format
 owned_by: [engineering/units/project-config]
@@ -34,7 +34,7 @@ The shared layer is `<base>/settings.json`. The project layer is `<project>/.jai
 - `agents.genericCli` merges by entry `name`, an absent name counting as `generic-cli`: a project entry with a base entry's name merges into it in the base's position, and a new name is appended.
 - A layer that is not a plain object yields the other layer.
 
-### The top-level keys are eleven blocks, and an unknown top-level key is ignored
+### The top-level keys are twelve blocks, and an unknown top-level key is ignored
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -49,6 +49,7 @@ The shared layer is `<base>/settings.json`. The project layer is `<project>/.jai
 | `agents` | object | no | the agent runtimes this project registers |
 | `workflows` | `{path?: string[]}` | no | the search path a bare workflow reference walks |
 | `files` | `{hidden?: string[]}` | no | the Files tree's shared hidden globs |
+| `autopilot` | `{askBelow?: number}` | no, default `{askBelow: 0.2}` | how sure a fast-forward's controlling conversation must be before its answer stands in for the person's ([decision 0005](../decisions/0005-connect.md) §6); `0`–`1`, `1` never answers for you and `0` always. It is no workflow's threshold and names no workflow input. Left out of the file `initProject` writes, because it is a person's setting and belongs in the shared root |
 
 ### A route block's allowed fields follow from its key
 
@@ -176,6 +177,7 @@ A `credential` anywhere must be a non-empty string with no whitespace.
 
 | Condition | Response | Caller does |
 | --- | --- | --- |
+| `autopilot.askBelow` is not a number from 0 to 1, or `autopilot` is not an object | `parseConfig` throws `config.autopilot.askBelow must be a number between 0 and 1` or `config.autopilot must be an object` | fix the field |
 | A field in a checked block has the wrong type, a refused name or a value outside its vocabulary | `parseConfig` throws `Error("config.<path> …")` naming the field and, for a moved or misplaced field, where it belongs | fix the field |
 | Either layer is not valid JSON | `readJsonFile` or `JSON.parse` throws | repair the file |
 | The merge fails to parse at a project open | the open throws; the project does not open | fix the layer and reopen |

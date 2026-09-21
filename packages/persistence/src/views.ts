@@ -610,7 +610,7 @@ function markProvenance(project: Project, taskId: string, nodes: readonly Instan
 /**
  * Stamp the gates a CONTROL CONVERSATION answered (decision 0005 §4) — see `InstanceNode.settledBy`.
  *
- * The `jaira.answered` row names the instance whose gate it settled, because `answer` looked it up
+ * The `jaira.answered` row names the instance whose gate it settled, because `answer_question` looked it up
  * at the moment it answered — the hub's park carries no instance, and joining after the fact would
  * be a guess about which of two parallel questions got which answer. A row that names none is
  * dropped rather than attached to whatever was waiting.

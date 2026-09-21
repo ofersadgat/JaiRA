@@ -4,7 +4,7 @@
  * A task stopped at the first state of a spine is sent to a later one. No transition is handed to
  * anybody: the task is given a conversation (grafted onto its own root) and resumed, and its spine
  * walks it forward. What makes that a fast-forward is who answers on the way — the CONTROLLING
- * CONVERSATION, through `answer`, each answer journaled `jaira.answered` with `settled_by: control`
+ * CONVERSATION, through `answer_question`, each answer journaled `jaira.answered` with `settled_by: control`
  * and its confidence — and what it never touches: an approval-shaped gate stays the person's.
  *
  * The conversation's answers are scripted (`fake`): the host asks it outside any run, as a follow-up
@@ -14,7 +14,7 @@
  *
  *  - the answer path: questions answered for you, marked, drawn with their confidence;
  *  - `autopilot.askBelow`: under it, the question waits for the person as it would have;
- *  - the APPROVAL exclusion: `confirm_action` is never offered, and `answer` refuses it by name;
+ *  - the APPROVAL exclusion: `confirm_action` is never offered, and `answer_question` refuses it by name;
  *  - arrival ends the mode: the target's own question is the person's;
  *  - a failure on the way ends it too;
  *  - Skip mid-state: the jump is journaled BEFORE the interrupt, and the run does not walk on;
@@ -263,7 +263,7 @@ describe("fast-forward — the machine runs to the target, and the conversation 
     expect(nodeByKey(taskId, "b")!.settledBy).toBeUndefined();
   });
 
-  it("can never be handed an approval: `answer` refuses `confirm_action` by component, and journals nothing", async () => {
+  it("can never be handed an approval: `answer_question` refuses `confirm_action` by component, and journals nothing", async () => {
     const taskId = await stoppedAtFirst();
     ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
     const approval = await nextGate(taskId);
@@ -274,9 +274,31 @@ describe("fast-forward — the machine runs to the target, and the conversation 
     expect(standing.asking ?? []).toEqual([]);
     // …and named anyway, it is refused by what it IS.
     const said = await host.answer({ request: approval.requestId, value: { confirmed: true }, confidence: 1 });
-    expect(said).toEqual({ ok: false, reason: "'confirm_action' is an approval, not a question — it is the person's to give, and `answer` cannot reach it" });
+    expect(said).toEqual({ ok: false, reason: "'confirm_action' is an approval, not a question — it is the person's to give, and `answer_question` cannot reach it" });
     expect(answeredRows(taskId)).toHaveLength(2); // a and b, and nothing for c
     expect(pendingFor(taskId).map(promptOf)).toEqual(["Publish c?"]);
+  });
+
+  it("runs a RUNNING task forward when it already has its conversation — nothing is restarted", async () => {
+    const taskId = await stoppedAtFirst();
+    // First to `c`: given a conversation, `a` and `b` answered on the way, and it arrives at the approval.
+    ok(await service.connectTask({ taskId, target: "ff/c", fake: answers() }));
+    const approval = await nextGate(taskId);
+    expect(promptOf(approval)).toBe("Publish c?");
+    expect(service.taskDetail(taskId).fastForward).toBeUndefined();
+    const runs = journal(taskId).filter((e) => e.type === "instance.entered" && e.parentInstanceId === undefined).length;
+
+    // Now, while it is RUNNING and speaks: on to `e`. The mode is registered on the live run.
+    const again = ok(await service.connectTask({ taskId, target: "ff/e" }));
+    expect(again).toMatchObject({ moved: "fast-forwarding", controlTaskId: taskId });
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", through: ["d"] });
+    // The approval it was already asking stays the person's; answered, `d` is answered for you.
+    service.submitInteraction(approval.requestId, { confirmed: true });
+    expect(promptOf(await nextGate(taskId))).toBe("Pick for e");
+    expect(nodeByKey(taskId, "d")!.settledBy).toMatchObject({ via: "control", confidence: 0.9 });
+    expect(service.taskDetail(taskId).fastForward).toBeUndefined();
+    // One run of the machine throughout — it was not restarted to be sent on.
+    expect(journal(taskId).filter((e) => e.type === "instance.entered" && e.parentInstanceId === undefined).length).toBe(runs);
   });
 
   it("ends when something on the way FAILS, and says nothing more for the person", async () => {

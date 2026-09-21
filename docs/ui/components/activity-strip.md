@@ -2,24 +2,24 @@
 id: ui/components/activity-strip
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 realizes: [ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/button-says-what-will-happen, ux/patterns/arm-the-cut-then-confirm, ux/patterns/follow-the-live-edge]
 serves: [product/watch-agents-work-live, product/pick-up-where-it-left-off, product/rewind-to-where-it-went-wrong, product/decisions-stay-yours, product/chat-with-agents, product/large-work-splits-into-independent-pieces]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/run-view, ui/surfaces/task-context, ui/surfaces/chat-view]
 reuses: []
 implemented_by: [packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/taskAction.ts, packages/app/src/renderer/transcriptView.tsx, packages/app/src/renderer/transcript.ts]
-verified_by: [packages/app/test/runViews.test.ts, packages/app/test/transcript.test.ts]
-mockups: [ui/assets/activity-strip/running.html, ui/assets/activity-strip/ended.html, ui/assets/activity-strip/rewind-armed.html, ui/assets/activity-strip/live-line.html]
+verified_by: [packages/app/test/runViews.test.ts, packages/app/test/transcript.test.ts, packages/app/test/fastForward.test.ts]
+mockups: [ui/assets/activity-strip/running.html, ui/assets/activity-strip/ended.html, ui/assets/activity-strip/rewind-armed.html, ui/assets/activity-strip/live-line.html, ui/assets/activity-strip/fast-forward.html]
 siblings: [ui/components/composer, ui/components/waiting-on-sheet, ui/components/status-pill, ui/components/letterhead]
 ---
 
 # Activity strip
 
-A one-line bar pinned under a conversation that says what is happening there now: under a run, a rounded strip with three pulsing dots or a still dot, a sentence such as `Running ux → critique · 4 m 2 s` and the one button that stops, resumes or retries it; under a chat, a thin blue-washed line with a bold blue verb such as `Thinking`, what it acts on in mono, and a counter.
+A one-line bar pinned under a conversation that says what is happening there now: under a run, a rounded strip with three pulsing dots or a still dot, a sentence such as `Running ux → critique · 4 m 2 s` and the one button that stops, resumes or retries it — or, while the run is being fast-forwarded, where it is going, where it stands, how far through, and `Skip` beside `Stop`; under a chat, a thin blue-washed line with a bold blue verb such as `Thinking`, what it acts on in mono, and a counter.
 
 ## The strip speaks where nothing can be typed, and the line speaks above a chat's composer
 
-**Use when.** A run's reading holds no conversation of its own, such as a state that only orchestrates its children: the run strip takes the composer's place and carries the run's Stop. A rewind is armed on a run: the strip becomes the confirmation, standing above the composer when the state does hold a conversation. A chat turn is in flight: the live line sits between the transcript and the composer.
+**Use when.** A run's reading holds no conversation of its own, such as a state that only orchestrates its children: the run strip takes the composer's place and carries the run's Stop. A rewind is armed on a run: the strip becomes the confirmation, standing above the composer when the state does hold a conversation. A task is being fast-forwarded to a state ahead of it ([decision 0005](../../engineering/decisions/0005-connect.md) §4): the strip stands above the composer too, whatever state is selected, because Skip is always showing. A chat turn is in flight: the live line sits between the transcript and the composer.
 
 **Do not use when.** The state holds a conversation and nothing is armed: the [composer](composer.md) stands there with its own stop. The run completed: nothing is drawn. The run waits for a move to its next stage: [waiting-on-sheet](waiting-on-sheet.md) offers that move in the conversation, while the strip only reports the wait. Many pieces of work are summarised at once: use [status-pill](status-pill.md).
 
@@ -41,6 +41,7 @@ A one-line bar pinned under a conversation that says what is happening there now
 | loading | Cannot occur: until the reading is known to hold no conversation, the composer stands in the strip's place. | |
 | running | Three forms with the pulsing dots. `Running {path}` with the clock and `Stop`. `Waiting for you in {path}` on an amber strip, its edge `--warn` at 42% and its ground at 7%, the dots stilled in `--warn`, whenever the deepest state waits on the person or a question is on offer. `Stopping {path}` on a `--warn` tint with `Force stop` and no clock, once a stop has been asked for. | [running.html](../assets/activity-strip/running.html) |
 | ended | A still dot and the one verb that fits. `Failed in {path}` on a `--bad` tint with `Retry` or `Try again`. `Interrupted in {path}` or `Stopped in {path}` on a `--warn` tint with `Resume` or `Start again`. A dashed edge with `Not started` and `Start`, or `Waiting` with `Start` or `Resume` for a task held until others finish. `Resume` and `Retry` appear when the record lets the run carry on; the start-over words appear when it does not. | [ended.html](../assets/activity-strip/ended.html) |
+| fast-forward | The pulsing dots and `Fast-forwarding to {target}`, the target at 600 in `--text`; then `· at {path}` once the run has entered something on the way; then `· {n} of {m}`, the states on the way entered so far over how many there are, in the data face at 11/12.5 in `--dim`. No clock: what it counts is states. A plain `Skip to {target}` beside the red-outlined `Stop`. It replaces the running forms for as long as the fast-forward lasts, and goes the moment the target is entered, a state on the way fails, the run stops, or Skip is pressed. | [fast-forward.html](../assets/activity-strip/fast-forward.html) |
 | rewind armed | A `--bad` tint and red dot, the sentence naming every state that goes and wrapping to as many lines as it needs, then `Cancel` and a filled `--bad` `Rewind` in white. It replaces whatever form the strip had. | [rewind-armed.html](../assets/activity-strip/rewind-armed.html) |
 | live line | Chat only. `Thinking` or `Answering` with a counter in tenths of a second; `Writing` with the file path or tool name and the size written so far; `Running` with `{tool} · {summary}` and a counter; `Working` alone before anything arrives. `Jump to live ↓` joins once the reader has scrolled away. | [live-line.html](../assets/activity-strip/live-line.html) |
 | error | Cannot occur as a look of its own: a failed run is the ended form, and a stop or send that fails puts a red line above the strip. | |
@@ -51,6 +52,8 @@ A one-line bar pinned under a conversation that says what is happening there now
 | On | Does | Feedback |
 | --- | --- | --- |
 | `Stop` | Stops the whole task, its children included, and withdraws a question it holds | The strip turns to `Stopping {path}`, then to the stopped form |
+| `Skip to {target}` | Interrupts the state that is running, records it and every state between as skipped, and enters the target at once; the fast-forward is over and the target's questions are the person's | The strip turns to `Running {path}` in the target; the conversation shows the skipped states on the grey |
+| `Stop` while fast-forwarding | Stops the run and ends the fast-forward | The strip turns to `Stopping {path}`, then to the stopped form |
 | `Force stop` | Sends the stop again | The strip keeps `Stopping {path}` until the run settles, then turns to the stopped form |
 | `Resume` or `Retry` | Carries the same task on, keeping every finished operation and running none again | The strip turns to `Running {path}` |
 | `Try again`, `Start again` or `Start` | Runs the workflow from the top; a task that cannot begin again in place runs as a copy, and the selection follows the copy | The strip turns to `Running {path}` |
@@ -67,6 +70,7 @@ A one-line bar pinned under a conversation that says what is happening there now
 | Going | `Running {path}` · `Waiting for you in {path}`, where `{path}` is `{child key} → {child key}`, or `this run` without one |
 | Clock | `{duration}`, such as `840 ms`, `2.4 s` or `4 m 2 s` |
 | Stopping | `Stopping {path} — waiting for the agent to finish what it is doing` |
+| Fast-forward | `Fast-forwarding to {target}` · `at {path}` · `{n} of {m}` · `Skip to {target}` · Skip's tooltip: `Stop what is running and go straight to {target}; what is between is recorded as skipped` |
 | Stop buttons | `Stop` · `Force stop` |
 | Stopped | `Failed` · `Interrupted` · `Stopped` · `Not started` · `Waiting`, then ` in {path}` when the run has a path |
 | Verbs | `Resume` · `Retry` · `Try again` · `Start again` · `Start` |

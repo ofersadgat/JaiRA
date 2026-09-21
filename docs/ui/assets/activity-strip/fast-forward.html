@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/activity-strip">
+<meta name="state" content="fast-forward">
+<meta name="captured" content="2026-09-21">
+<meta name="reflects" content="shipped">
+<title>activity-strip · fast-forward</title>
+<link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<p class="mockup-caption">ui/components/activity-strip · fast-forward — a forward move running the states between, with Skip beside Stop</p>
+<div class="mockup-stage" style="width: 720px">
+  <div class="cx-doing">
+    <div class="run-doing ffwd" data-testid="ffwd-strip">
+      <span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span class="ellip">Fast-forwarding to <b>implementation</b></span>
+      <span class="run-doing-cut">·</span>
+      <span class="ellip">at <b>ux → item</b></span>
+      <span class="run-doing-cut">·</span>
+      <span class="ffwd-steps" title="ux, ui, engineering">1 of 3</span>
+      <span class="grow"></span>
+      <button type="button" title="Stop what is running and go straight to implementation; what is between is recorded as skipped">Skip to implementation</button>
+      <button type="button" class="danger">Stop</button>
+    </div>
+  </div>
+</div>
+<p class="mockup-caption">before the first state on the way is entered — no place yet, and the count reads from the first</p>
+<div class="mockup-stage" style="width: 720px">
+  <div class="cx-doing">
+    <div class="run-doing ffwd">
+      <span class="ts-pulse" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span class="ellip">Fast-forwarding to <b>implementation</b></span>
+      <span class="run-doing-cut">·</span>
+      <span class="ffwd-steps" title="ux, ui, engineering">1 of 3</span>
+      <span class="grow"></span>
+      <button type="button">Skip to implementation</button>
+      <button type="button" class="danger">Stop</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

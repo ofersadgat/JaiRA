@@ -12,9 +12,11 @@
  *  1. **The target is in the task's workflow** (`resolveWithin`). The pinned definition is searched
  *     for a mount of the target; the shared ancestor is the deepest instance the task stands in that
  *     the path to the target passes through. Behind where it stands is a backward move. Ahead of it
- *     is a forward one, which the decision makes a FAST-FORWARD by default — step 7's — so until that
- *     exists a forward move that would step over states is refused unless it says `skip`. A rule of
- *     the workflow already waiting on exactly this move is answered instead, and steps over nothing.
+ *     is a forward one, which is a FAST-FORWARD by default (step 7): no transition at all — the host
+ *     is asked for the mode (`ConnectHost.fastForward`) and the machine runs the states between, its
+ *     conversation answering on the way. A host that drives no run has no such operation, and there a
+ *     forward move is refused unless it says `skip`. A rule of the workflow already waiting on
+ *     exactly this move is answered instead, and steps over nothing.
  *  2. **A real workflow holds both** (`candidatesFor`): a composite that mounts the task's root state
  *     and the target as children — or IS the target, and mounts the task's state. One such workflow
  *     adopts the task into a new task of it, and rule 1 takes that task to the target. More than one
@@ -114,6 +116,12 @@ export interface ConnectHost {
    * refusal is not a fallback so much as the truth: there is nobody here to answer on the way.
    */
   fastForward?(request: TaskFastForwardRequest): Promise<TaskFastForwardResult>;
+  /**
+   * Why THIS task cannot be run forward right now, if it cannot — asked before anything is written,
+   * and by a dry run too, so a hover says what a drop would be refused for. A running task with no
+   * conversation (its engine cannot pick one up), a task with nothing left to run.
+   */
+  fastForwardBlocked?(taskId: string): string | undefined;
 }
 
 const refused = (dryRun: boolean, refusal: ConnectRefusal, plan?: ConnectPlan): TaskConnectResult => ({ ok: false, dryRun, refusal, ...(plan !== undefined ? { plan } : {}) });
@@ -590,6 +598,8 @@ export async function connectTask(project: Project, request: TaskConnectRequest,
       // the host is asked for the MODE, and the spine walks itself into the target.
       const forward = within.move.direction === "forward" && !skipOf(request);
       if (forward && host.fastForward === undefined) return refused(dryRun, fastForwardRefusal(within.move), plan);
+      const blocked = forward ? host.fastForwardBlocked?.(taskId) : undefined;
+      if (blocked !== undefined) return refused(dryRun, { code: "fast-forward", message: blocked }, plan);
       const open = stillMissing(within.missing, request.supplied, target);
       if (open.length > 0 && within.move.answersRule !== true) {
         return refused(dryRun, { code: "inputs-missing", message: `moving '${meta.title}' to '${keys.join("/")}' leaves required inputs unbound: ${missingSentence(open)}`, missing: open }, plan);

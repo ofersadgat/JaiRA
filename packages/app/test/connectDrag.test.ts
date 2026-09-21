@@ -124,7 +124,7 @@ describe("previewOf", () => {
     expect(preview.refused).toBeUndefined();
   });
 
-  it("MOVE WITHIN: backward, next, a FAST-FORWARD, a skip, and a forward move a host that cannot run it refuses", () => {
+  it("MOVE WITHIN: backward, next, a FAST-FORWARD, a skip, and a forward move the host cannot run — refused in its own words", () => {
     const back = previewOf(answered({ ok: true, dryRun: true, plan: plan({ move: { direction: "backward", to: "ux", path: [], passes: [] } }) }), mine, column("ux"))!;
     expect([back.kind, text(back.say), back.drop]).toEqual(["Move within", "ux is behind where this task stands. It is entered again, as the next pass.", "Drop to go back"]);
     const next = previewOf(answered({ ok: true, dryRun: true, plan: plan({ move: { direction: "next", to: "ux", path: [], passes: [] } }) }), mine, column("ux"))!;
@@ -144,7 +144,7 @@ describe("previewOf", () => {
     expect(forward.facts.map(text)).toEqual(["runs ux → ui on the way, the conversation answering what comes up"]);
     expect(forward.drop).toBe("Drop to fast-forward");
     expect(over.drop).toBeUndefined();
-    expect(over.refused).toBe("Nothing here can run the states between.");
+    expect(over.refused).toBe("…");
   });
 
   it("NEW TRANSITION: which modification, the split that makes held tasks, and the inputs that would not bind", () => {

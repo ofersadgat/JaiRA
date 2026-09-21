@@ -107,7 +107,7 @@ export interface WorkflowHostDeps {
   submitInteraction(requestId: string, value: JsonValue): unknown;
   submitQuestion(requestId: string, answers?: Record<string, string | string[]>): unknown;
   /**
-   * Would this value settle that gate — the check `submitInteraction` makes, asked FIRST. `answer`
+   * Would this value settle that gate — the check `submitInteraction` makes, asked FIRST. `answer_question`
    * journals before it submits, so without it an answer the contract refuses would leave a
    * `jaira.answered` row claiming a settlement that never happened. Absent ⇒ unchecked here.
    */
@@ -192,7 +192,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
     for (const id of input.tasks) {
       const meta = project.tasks.tryRead(id);
       if (meta === undefined || project.runtime.get(id) === undefined) results.push({ task: id, ok: false, reason: `unknown task '${id}'` });
-      else if (!mine.has(id)) results.push({ task: id, ok: false, reason: `'${meta.title}' was not started from this conversation — \`tasks\` lists what was` });
+      else if (!mine.has(id)) results.push({ task: id, ok: false, reason: `'${meta.title}' was not started from this conversation — \`list_tasks\` lists what was` });
       else {
         try {
           results.push({ task: id, ok: true, did: await act(id, meta.title) });
@@ -258,7 +258,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       const meta = project.tasks.tryRead(taskId);
       if (row === undefined || meta === undefined) return { ok: false, code: "unknown-task", reason: `this conversation's task '${taskId}' is gone` };
       const target = sourceStateId(input.state);
-      if (targetSurface(target) === undefined) return { ok: false, code: "unknown-target", reason: `no state '${target}' was found on the workflow path — \`workflows\` lists what there is` };
+      if (targetSurface(target) === undefined) return { ok: false, code: "unknown-target", reason: `no state '${target}' was found on the workflow path — \`list_workflows\` lists what there is` };
       if (row.snapshotHash === undefined && row.documentId === undefined) return { ok: false, code: "never-run", reason: "this conversation has not run yet" };
       const supplied = suppliedOfTool(input);
       const literals = generatorSupplied(supplied);
@@ -397,7 +397,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       if (gate !== undefined) {
         if (!mine.has(gate.taskId)) return { ok: false, reason: "that question belongs to a task this conversation did not start" };
         if (!ANSWERABLE_COMPONENTS.has(gate.component)) {
-          return { ok: false, reason: `'${gate.component}' is an approval, not a question — it is the person's to give, and \`answer\` cannot reach it` };
+          return { ok: false, reason: `'${gate.component}' is an approval, not a question — it is the person's to give, and \`answer_question\` cannot reach it` };
         }
         if (input.value === undefined) return { ok: false, reason: `a '${gate.component}' gate is answered with \`value\`, in the shape it asks for` };
         // Checked BEFORE the row: an answer the contract refuses settles nothing, and must say nothing.
@@ -424,7 +424,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         }
         return { ok: true, request: input.request, settled_by };
       }
-      return { ok: false, reason: `no question '${input.request}' is waiting — \`tasks\` lists what is being asked. An approval is never listed and cannot be answered here` };
+      return { ok: false, reason: `no question '${input.request}' is waiting — \`list_tasks\` lists what is being asked. An approval is never listed and cannot be answered here` };
     },
 
     hold: (input) =>

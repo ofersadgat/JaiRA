@@ -203,14 +203,15 @@ describe("rule 1 — the target is in the task's workflow", () => {
     const taskId = await standingIn("flow", 0); // parked at a
     expect(ok(await service.connectTask({ taskId, target: "flow/b", dryRun: true })).plan.move).toMatchObject({ direction: "next", passes: [] });
 
-    // Forward past states is a FAST-FORWARD (decision 0005 §4, step 7) — the dry run says so.
-    const dry = ok(await service.connectTask({ taskId, target: "flow/d", dryRun: true }));
+    // Forward past states is a FAST-FORWARD (decision 0005 §4, step 7). This task is RUNNING and
+    // nothing speaks at its root: there is no conversation to answer on the way, and a running engine
+    // cannot pick one up. The dry run says so — a hover must not promise a drop that will be refused —
+    // and the real thing is refused the same way, having done nothing.
+    const message = "'In flow' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly";
+    const dry = no(await service.connectTask({ taskId, target: "flow/d", dryRun: true }));
+    expect(dry.refusal).toEqual({ code: "fast-forward", message });
     expect(dry.plan).toMatchObject({ resolution: "move", forward: "fast-forward", move: { direction: "forward", passes: ["b", "c"] } });
-    // This task is RUNNING and nothing speaks at its root: there is no conversation to answer on the
-    // way, and a running engine cannot pick one up. Refused, having done nothing.
-    await expect(service.connectTask({ taskId, target: "flow/d" })).rejects.toThrow(
-      "task '" + taskId + "' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly",
-    );
+    expect(no(await service.connectTask({ taskId, target: "flow/d" })).refusal).toEqual({ code: "fast-forward", message });
     expect(journal(taskId).some((e) => e.type === "transition.taken")).toBe(false);
     expect(documents()).toEqual([]);
 
@@ -226,9 +227,10 @@ describe("rule 1 — the target is in the task's workflow", () => {
 
   it("enters the ANCESTORS of a nested target on the way down, and goes straight to it", async () => {
     const taskId = await standingIn("deep", 0); // parked at one
-    const dry = ok(await service.connectTask({ taskId, target: "deep/two/y", dryRun: true }));
+    // Running with no conversation, it cannot be fast-forwarded — but the plan still says the way down.
+    const dry = no(await service.connectTask({ taskId, target: "deep/two/y", dryRun: true }));
     // `x` comes before `y` inside the composite: stepping over it is a skip like any other.
-    expect(dry.plan.move).toMatchObject({ direction: "forward", to: "two", path: ["y"], passes: ["two/x"] });
+    expect(dry.plan?.move).toMatchObject({ direction: "forward", to: "two", path: ["y"], passes: ["two/x"] });
 
     ok(await service.connectTask({ taskId, target: "deep/two/y", skip: true }));
     expect((await parked()).state).toBe("y");

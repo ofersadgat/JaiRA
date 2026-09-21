@@ -13,7 +13,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseComponentConfig, type ConversationTurn, type PendingInteraction, type SessionTurn, type SessionView, type TaskDetail } from "@jaira/shared/browser";
+import { SchemaForm } from "../src/renderer/schemaForm/SchemaForm";
+import type { Schema } from "../src/renderer/schemaForm/types";
+import { CONFIG_SECTIONS, parseComponentConfig, type ConversationTurn, type PendingInteraction, type SessionTurn, type SessionView, type TaskDetail } from "@jaira/shared/browser";
 import { AnsweredForYou, RunActivity } from "../src/renderer/runViews";
 import { entriesOf } from "../src/renderer/transcript";
 import { Transcript } from "../src/renderer/transcriptView";
@@ -120,10 +122,10 @@ const notes = h(
   ),
 );
 
-/** "ok, now implement it" — the `move` row, and the note it leaves: where it is going, and through what. */
+/** "ok, now implement it" — the `move_task` row, and the note it leaves: where it is going, and through what. */
 const conversation: SessionTurn[] = [
   { role: "user", at, text: "ok, now implement it" },
-  { role: "assistant", at: at + 1_000, parts: [{ type: "tool_use", id: "m1", name: "move", input: { to: "feature/implementation" } }] },
+  { role: "assistant", at: at + 1_000, parts: [{ type: "tool_use", id: "m1", name: "move_task", input: { to: "feature/implementation" } }] },
   {
     role: "user",
     at: at + 1_400,
@@ -146,6 +148,24 @@ const moved = h(
   ),
 );
 
+/** Settings → Fast-forward: the one number, through the declared form every other block uses. */
+const autopilot = CONFIG_SECTIONS.find((s) => s.key === "autopilot")!;
+const settings = h(
+  "div",
+  { className: "cfg-pane" },
+  h(
+    "section",
+    { className: "cfg-group" },
+    h("header", { className: "cfg-group-head" }, h("h4", null, autopilot.title), h("p", { className: "cfg-hint" }, autopilot.hint)),
+    h(SchemaForm, {
+      schema: autopilot.schema as Schema,
+      value: { askBelow: 0.2 },
+      onChange: () => undefined,
+      ctx: { path: "autopilot", disabled: false, isSet: () => false, setAt: () => undefined },
+    }),
+  ),
+);
+
 const section = (title: string, body: ReactElement): ReactElement =>
   h(
     "section",
@@ -157,11 +177,12 @@ const section = (title: string, body: ReactElement): ReactElement =>
 const page = h(
   "div",
   { style: { width: 760, margin: "24px auto", padding: 16 } },
-  section("the conversation · a forward `move` is a fast-forward, and says so under its row", moved),
+  section("the conversation · a forward `move_task` is a fast-forward, and says so under its row", moved),
   section("today · the activity strip", today),
   section("a fast-forward · the strip with its destination, and Skip beside Stop", forwarding),
   section("a gate the conversation answered · who, how sure, and the way back", answered),
   section("after Skip · what did not run says so, and the target is entered", notes),
+  section("Settings · autopilot.askBelow, through the declared form", settings),
 );
 
 const css = pathToFileURL(join(import.meta.dirname, "..", "src", "renderer", "styles.css")).href;

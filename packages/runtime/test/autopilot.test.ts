@@ -3,7 +3,7 @@
  *
  * The pure half: the one call's prompt, and reading its reply. The call is asked to answer AS THE
  * PERSON WOULD, from what they said, with the question exactly as they would have seen it — and it
- * returns a value and a confidence rather than calling `answer` itself, because the threshold is the
+ * returns a value and a confidence rather than calling `answer_question` itself, because the threshold is the
  * host's to apply, not the model's.
  */
 import { describe, expect, it } from "vitest";

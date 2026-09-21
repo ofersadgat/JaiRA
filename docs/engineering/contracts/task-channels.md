@@ -100,16 +100,24 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `held` | the task runs in this process and takes the move when its running state ends |
 | `reopened` | the task was not running and was started again by load with the move waiting; a `completed` task is reopened under its own id, and any other status steps past the state it stopped in |
 
+### `task:fastForward` runs a task to a state ahead of it, `task:skip` goes there directly, and `task:answerYourself` takes an answer back
+
+`task:fastForward` takes `TaskFastForwardRequest` — `{taskId, target, toState, instanceId?, path?, through?, by?, inputs?, interactions?, fake?, project?}` — and answers `{taskId, controlTaskId, status: "fast-forwarding"}` ([decision 0005](../decisions/0005-connect.md) §4). It is what `task:connect` hands a forward move; no transition is handed to anybody. The task's controlling conversation is found — its own root when that is a prompt, else the nearest task above it whose root is — or GIVEN one: `chat/control` is grafted onto the task's own frozen root, a diverged document, idle. Then the task is started or resumed and its spine walks it forward. While it does, `TaskDetail.fastForward` holds the strip's content, a gate or an agent's question that parks is first offered to the conversation, and an answer at or above `autopilot.askBelow` settles it, journaled `jaira.answered`. It ends when the target is entered, a state on the way ends `error` or `timeout`, the run ends, the task is stopped, or Skip is pressed. Rejected with the reason when the task runs in another process, runs here with no conversation, or has nothing left to run.
+
+`task:skip` takes `{taskId, project?}` and answers `TaskMoveResult`: the fast-forward's own move, as `task:move` with `skip: true`. Rejected when the task is not being fast-forwarded.
+
+`task:answerYourself` takes `{taskId, at, project?}` and answers `{taskId}`: a fast-forward still running is ended and the run stopped, then `task:rewind` to `at` — the seq of the ENTRY of the state whose gate the conversation answered (`InstanceNode.settledBy.at`), so the state asks again.
+
 ### `task:connect` sends a task to a state, and answers which of three things that was
 
-`task:connect` takes `TaskConnectRequest` and answers `TaskConnectResult` ([decision 0005](../decisions/0005-connect.md) §1). It composes `task:move`, `task:adopt` and the dynamic workflow generator and owns none of them; `connectTask` in `persistence/connect.ts` holds the order. The board's drop sends it, the conversation's `move` tool will, and `jaira task move` is the same call.
+`task:connect` takes `TaskConnectRequest` and answers `TaskConnectResult` ([decision 0005](../decisions/0005-connect.md) §1). It composes `task:move`, `task:adopt` and the dynamic workflow generator and owns none of them; `connectTask` in `persistence/connect.ts` holds the order. The board's drop sends it, the conversation's `move_task` tool does, and `jaira task move` is the same call.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `taskId` | string | yes | the task to send |
 | `target` | string | yes | a state id; a workflow's own root id means "into this workflow" |
 | `workflow` | string | no | the composite that holds the target; narrows the second resolution to it and skips the first when it is not the task's own |
-| `forward` | `"fast-forward"` or `"skip"` | no | how a forward move crosses the states between; absent reads `fast-forward`, which is refused until it is built |
+| `forward` | `"fast-forward"` or `"skip"` | no | how a forward move crosses the states between; absent reads `fast-forward`: the states between RUN, with the task's controlling conversation answering on the way (`task:fastForward`) |
 | `skip` | boolean | no | `true` is `forward: "skip"` |
 | `by` | `"person"` or `"control"` | no | who asked, journaled on the move |
 | `dryRun` | boolean | no | answer what would happen and change nothing: no task, no document, no pin, no journal row |
@@ -125,7 +133,7 @@ Resolution, in order, stopping at the first that applies:
 | `adopt` | one composite mounts the task's root state as a child and either is the target or mounts it as a child too; tried only for a task in no document that nothing made | `task:adopt` into a new task of that composite, then `task:move` of the new task unless the target is what comes next anyway |
 | `modify` | neither | `generateDocumentVersion`: `new` for a task that finished well, whose task is made and which adopts the source as its first child; `augmented` for a task already in a document; `cloned` for one standing inside a real workflow. Then `task:move` |
 
-`TaskConnectResult` is `{ok: true, dryRun, plan, taskId?, moved?, undo?}` or `{ok: false, dryRun, refusal, plan?}`. `taskId` is the task that stands at the target: the moved task, or the parent a connect made, absent from a dry run that would make one. `moved` is `task:move`'s status. A refusal carries `plan` wherever the resolution got far enough to have one, so a preview can say what was refused.
+`TaskConnectResult` is `{ok: true, dryRun, plan, taskId?, moved?, controlTaskId?, undo?}` or `{ok: false, dryRun, refusal, plan?}`. `taskId` is the task that stands at the target: the moved task, or the parent a connect made, absent from a dry run that would make one. `moved` is `task:move`'s status, or `fast-forwarding` for a forward move that runs the states between, when `controlTaskId` names the conversation answering on the way. A refusal carries `plan` wherever the resolution got far enough to have one, so a preview can say what was refused.
 
 | `ConnectPlan` field | Type | Meaning |
 | --- | --- | --- |
@@ -134,6 +142,7 @@ Resolution, in order, stopping at the first that applies:
 | `workflow`, `workflowLabel` | string | the workflow the task will stand in; `jaira:dynamic:…` from a `new` dry run, whose document does not exist yet |
 | `standsAt` | `{path: string[], stateId, label?}` | child keys from that workflow's root to where the task will stand |
 | `move` | `ConnectMove`, optional | the directed transition it ends in; absent where the adoption alone reaches the target |
+| `forward` | `"fast-forward"` or `"skip"`, optional | how a `forward` move crosses what it passes; absent for any other direction |
 | `adopt` | `AdoptPlan`, optional | the adoption that is part of it; absent from a `new` dry run |
 | `adoptedAs` | string, optional | the child key the task becomes |
 | `mount` | `"plain"` or `"split"`, optional | the mount a modification adds; `split` makes one held task per element |
@@ -156,7 +165,7 @@ Resolution, in order, stopping at the first that applies:
 | `already-there` | the target is the task's own root | |
 | `never-run` | the task has no journal, so it stands nowhere | |
 | `unloadable` | the task's pinned workflow or its journal does not load | |
-| `fast-forward` | a forward move would step over states and did not say `skip` | `plan` with `move.passes` |
+| `fast-forward` | a forward move would step over states, did not say `skip`, and cannot be run: from a host that drives no run (the CLI), or in the app for a task running with no conversation, running in another process, or with nothing left to run — the message says which | `plan` with `move.passes` |
 | `ambiguous-workflow` | more than one composite holds both | `candidates: [{workflow, label?, childKey, targetKey?}]`; call again with `workflow` |
 | `inputs-missing` | a required input of the target, of an ancestor entered on the way down, of the adopting workflow or of a new document's conversation would not be bound | `missing: [{state, name, schema?, description?, reason}]` |
 | `running` | the move is a new transition and an engine is running the task, which picks a new version up only at its next load | |

@@ -31,9 +31,10 @@ import type { TaskMoveResult } from "./userEvents";
  * How a forward move crosses the states between.
  *
  * `fast-forward` — the decision's default — RUNS them, with a control conversation answering what
- * comes up. It is step 7's, and until it exists a forward move that would step over states is
- * refused unless it says `skip`, which transitions directly and records what it passed `skipped`. A
- * forward move to the very next state needs neither.
+ * comes up (`TaskFastForwardRequest`, step 7). `skip` transitions directly and records what it
+ * passed `skipped`. A host that drives no run (the CLI) cannot fast-forward, and there a forward move
+ * that would step over states is refused unless it says `skip`. A forward move to the very next
+ * state needs neither.
  */
 export type ConnectForward = "fast-forward" | "skip";
 
