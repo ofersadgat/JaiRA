@@ -19,7 +19,7 @@ import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } fr
 import type { RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
-import type { TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
+import type { TaskFastForwardRequest, TaskFastForwardResult, TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
 import type { TaskConnectRequest, TaskConnectResult, TaskConnectUndoRequest, TaskConnectUndoResult } from "./connect";
 import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAdoptRequest, TaskAdoptResult, TaskOutputRef } from "./adopt";
 import type { ModuleApproval } from "./refusal";
@@ -1767,6 +1767,23 @@ export interface IpcContract {
    */
   "task:move": { request: TaskMoveRequest; response: TaskMoveResult };
   /**
+   * FAST-FORWARD (decision 0005 §4): run the task's machine to a state ahead of where it stands, with
+   * its controlling conversation answering what comes up — each answer marked and a rewind point,
+   * never an approval — and Skip showing. What `task:connect` hands a forward move; exposed on its
+   * own for a caller that already knows the move. Rejected with the reason when it cannot be run.
+   */
+  "task:fastForward": { request: TaskFastForwardRequest; response: TaskFastForwardResult };
+  /**
+   * SKIP, from the fast-forward strip: interrupt what is running and enter the target directly,
+   * recording what was stepped over `skipped`. The jump is journaled before anything is aborted.
+   */
+  "task:skip": { request: { taskId: string; project?: ProjectRef }; response: TaskMoveResult };
+  /**
+   * "Answer it yourself": take back an answer the conversation gave — stop a fast-forward still
+   * running, then rewind to the `jaira.answered` row (`at`), so the state asks the person again.
+   */
+  "task:answerYourself": { request: { taskId: string; at: number; project?: ProjectRef }; response: { taskId: string } };
+  /**
    * ADOPT (decision 0005 §2): a task that ran alone becomes the child of a NEW task in a workflow
    * that mounts its state — mirror rows in the parent's journal, nothing copied. With `dryRun` it
    * changes nothing and answers with the same shape, so a hover can say what a drop will do. A
@@ -2053,6 +2070,9 @@ export const IPC_CHANNELS = [
   "userEvent:pending",
   "userEvent:deliver",
   "task:move",
+  "task:fastForward",
+  "task:skip",
+  "task:answerYourself",
   "task:adopt",
   "task:connect",
   "task:connectUndo",

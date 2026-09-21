@@ -4,43 +4,9 @@
 /* `.connect-pop`, `.connect-kind`, `.connect-say`, `.connect-facts` and `.connect-drop` moved into
    styles.css with step 5 (the drop preview). */
 
-/* The connected line is an ordinary step note that is not a failure. */
-.sb-note.sb-connected,
-.sb-note.sb-connected .sb-note-icon,
-.sb-note.sb-skipped,
-.sb-note.sb-skipped .sb-note-icon {
-  color: var(--dim);
-}
-.sb-note.sb-connected b {
-  color: var(--text);
-  font-weight: 600;
-}
-
-/* A gate the control conversation answered says so in the settled-by box, in the accent rather than in `ok`:
-   it is a judgement somebody may want back, not a confirmation. */
-.gate-settled-by.by-control {
-  align-items: center;
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
-}
-.gate-settled-by.by-control svg {
-  color: var(--accent);
-  margin-top: 0;
-}
-.gate-settled-by .grow {
-  flex: 1;
-}
-/* `.conf` moved into styles.css with steps 2-3 (the confidence beside an inferred value). */
-
-/* The fast-forward strip is the activity strip with a destination and a way past it. */
-.run-doing.ffwd b + .run-doing-cut {
-  margin-left: 2px;
-}
-.run-doing .ffwd-steps {
-  font-family: var(--font-data);
-  font-size: calc(var(--size-app) * 11 / 12.5);
-  color: var(--dim);
-}
+/* `.sb-note.sb-connected`, `.sb-note.sb-skipped`, `.gate-settled-by.by-control`, `.gate-settled-by .grow`,
+   `.run-doing.ffwd` and `.ffwd-steps` moved into styles.css with step 7 (fast-forward, Skip, answered for you).
+   `.conf` moved with steps 2-3 (the confidence beside an inferred value). */
 
 /* `.prov`, `.prov-inferred` and `.prov-asked` moved into styles.css with steps 2-3. */
 

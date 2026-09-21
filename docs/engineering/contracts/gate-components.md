@@ -2,7 +2,7 @@
 id: engineering/contracts/gate-components
 type: engineering-contract
 status: proposed
-updated: 2026-08-24
+updated: 2026-09-21
 visibility: public
 kind: api
 owned_by: [engineering/units/interaction-hub]
@@ -326,6 +326,42 @@ in the dialog's sub-line rather than in the author's prompt.
 The action glyph repeats in shape what the badge already says in colour, which is
 what makes a chooser row scannable without separating two hues.
 
+### Who may answer: questions and judgements, never approvals
+
+A fast-forward ([decision 0005](../decisions/0005-connect.md) §4) runs the states
+between where a task stands and where it was sent, and its **controlling
+conversation** answers the gates on the way, through `answer_question`. Which
+gates it may answer is a property of the COMPONENT, fixed here and nowhere else
+(`ANSWERABLE_COMPONENTS`, `app/main/workflowHost.ts`):
+
+| Component | A conversation may answer it | Why |
+| --- | --- | --- |
+| `choose_option` | yes | a question |
+| `fill_form` | yes | a question |
+| `review_artifact` | yes | a judgement on a document |
+| `edit_artifact` | yes | a judgement on a document |
+| `confirm_action` | **no** | an approval — a publish, a push, a merge |
+| `review_artifacts` | **no** | applies, merges or publishes a changeset |
+
+A tool permission and an agent's parked approval are not gates at all: they are
+on the approval hub, which neither the workflow tools nor the fast-forward are
+handed. An answer given this way is held to the same result contract as a
+person's (checked BEFORE it is journaled), and recorded as
+
+```jsonc
+// journal row on the task that asked — host vocabulary, as `jaira.supplied` is
+{ "type": "jaira.answered", "requestId": "ui-7", "kind": "interaction",
+  "instanceId": "<the gate's instance>", "byTaskId": "<the conversation's task>",
+  "settled_by": { "via": "control", "confidence": 0.86 } }
+```
+
+which the projection folds onto the instance as `settledBy` — drawn on the gate
+as "Answered for you by the conversation", with "Answer it yourself", a rewind to
+where that state was entered. The RESULT is unchanged: a gate's outputs do not
+say who answered, so nothing downstream can tell and nothing downstream has to.
+The confidence is the one `autopilot.askBelow` was held against; below it the
+gate waits for the person as it would have.
+
 ## Errors
 
 | Condition | Response | Caller does |
@@ -337,6 +373,8 @@ what makes a chooser row scannable without separating two hues.
 | An `answers` key naming no question | Refused in the main process | Nothing on screen could have produced it |
 | `follow_up` beside `options` | ERROR at parse time | A single decision has no turn to ask more |
 | A `review_artifacts` result missing an artifact | Refused in the main process | The set must be complete |
+| A conversation's answer that does not fit the contract | Refused before anything is journaled; the gate stays parked for the person | Nothing — the fast-forward counts it as left to you |
+| A conversation naming a `confirm_action` or `review_artifacts` request | Refused by component: `'<component>' is an approval, not a question` | Nothing — it is the person's |
 
 Re-validation happens in main because the renderer is the untrusted side of the
 IPC boundary; the engine's own output-schema check is a second, independent

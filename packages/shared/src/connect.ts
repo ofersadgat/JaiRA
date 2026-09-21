@@ -31,9 +31,10 @@ import type { TaskMoveResult } from "./userEvents";
  * How a forward move crosses the states between.
  *
  * `fast-forward` — the decision's default — RUNS them, with a control conversation answering what
- * comes up. It is step 7's, and until it exists a forward move that would step over states is
- * refused unless it says `skip`, which transitions directly and records what it passed `skipped`. A
- * forward move to the very next state needs neither.
+ * comes up (`TaskFastForwardRequest`, step 7). `skip` transitions directly and records what it
+ * passed `skipped`. A host that drives no run (the CLI) cannot fast-forward, and there a forward move
+ * that would step over states is refused unless it says `skip`. A forward move to the very next
+ * state needs neither.
  */
 export type ConnectForward = "fast-forward" | "skip";
 
@@ -180,6 +181,12 @@ export interface ConnectPlan {
   standsAt: { path: string[]; stateId: string; label?: string };
   /** The move that takes it there. Absent when the adoption alone does (the target comes next, or is the workflow itself). */
   move?: ConnectMove;
+  /**
+   * How a FORWARD move crosses what lies between, when it steps over anything (§4): `fast-forward`
+   * runs those states with a conversation answering on the way; `skip` records them `skipped` and
+   * goes directly. Absent for any other move.
+   */
+  forward?: ConnectForward;
   /** `adopt`, and `modify` of a finished task: the adoption that is part of it. Absent from a `new` dry run, whose parent does not exist yet. */
   adopt?: AdoptPlan;
   /** `adopt`/`new`: the child key the task becomes. */
@@ -213,8 +220,14 @@ export type TaskConnectResult =
       plan: ConnectPlan;
       /** The task that stands at the target — the moved task, or the parent a connect made. Absent from a dry run that would make one. */
       taskId?: string;
-      /** How the move landed, when there was one to make. */
-      moved?: TaskMoveResult["status"];
+      /**
+       * How the move landed, when there was one to make. `fast-forwarding` is the forward case
+       * (§4): no transition was handed to anybody — the machine is running the states between, with
+       * a conversation answering on the way and Skip showing.
+       */
+      moved?: TaskMoveResult["status"] | "fast-forwarding";
+      /** The conversation answering on the way, when this started a fast-forward. */
+      controlTaskId?: string;
       undo?: ConnectUndo;
       /**
        * `askAfter`: the conversation exists and the task has NOT moved — these required inputs are

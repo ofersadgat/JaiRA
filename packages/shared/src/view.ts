@@ -7,6 +7,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { TaskStatus } from "./task";
 import type { InputProvenance } from "./adopt";
+import type { FastForwardView, SettledByView } from "./fastForward";
 import type { ModuleApproval } from "./refusal";
 
 /**
@@ -141,6 +142,14 @@ export interface InstanceNode {
    * recorded before provenance was.
    */
   inputProvenance?: Record<string, InputProvenance>;
+  /**
+   * The control conversation answered this instance's question FOR the person (decision 0005 §4).
+   *
+   * Only ever set on a state whose operation is an interactive one, and only from the
+   * `jaira.answered` row a fast-forward's `answer` wrote. It carries the journal seq it was written
+   * at, which is what "Answer it yourself" rewinds to.
+   */
+  settledBy?: SettledByView;
   /**
    * What to call this RUN, resolved from {@link inputs} — see `resolveLabel`.
    *
@@ -402,6 +411,13 @@ export interface TaskDetail {
    * service only folds a task's journal when there is a button whose wording depends on it.
    */
   resume?: ResumePlan;
+  /**
+   * The task is being FAST-FORWARDED (decision 0005 §4) — what the activity strip says while it is.
+   *
+   * Live only: the mode is held by the process driving the run, and nothing in the journal is a
+   * fast-forward. Absent the moment it arrives, is skipped, fails or is stopped.
+   */
+  fastForward?: FastForwardView;
 }
 
 /**

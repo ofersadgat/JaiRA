@@ -903,7 +903,7 @@ export function cutNameOf(note: BandNote, root: string): string {
  * is drawn as an annotation on the background the panels sit on: the same place a note would be
  * written in the margin of a printed transcript, at the point in the stack where it happened.
  */
-function NoteRow({
+export function NoteRow({
   note,
   root,
   onCut,
@@ -920,6 +920,9 @@ function NoteRow({
   // of thing — a fact about a state, written where the state has no page of its own — and reading a
   // run means reading them interleaved, in the order they happened.
   const moved = note.kind === "entered" || note.kind === "transition";
+  // A person's move stepped past it (decision 0005 §4): not a failure, and not the machine moving
+  // either — the step glyph, dimmed, and the reason (interrupted, never entered) as its text.
+  const skipped = note.kind === "skipped";
   const where = pathFrom(note.path, root);
   if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} />;
   return (
@@ -927,15 +930,18 @@ function NoteRow({
     // is where a person following the run wants to start reading — not the letterhead below it,
     // which is where the state started talking. See the focus effect in `SessionBandsView`.
     <div
-      className={moved ? "sb-note step" : "sb-note"}
+      className={skipped ? "sb-note step sb-skipped" : moved ? "sb-note step" : "sb-note"}
       role="note"
       {...(note.kind === "entered" && note.instanceId !== undefined ? { "data-entered": note.instanceId } : {})}
     >
-      <Icon name={moved ? "choice" : "alert"} className="sb-note-icon" />
+      <Icon name={moved ? "choice" : skipped ? "workflow" : "alert"} className="sb-note-icon" />
       {/* What HAPPENED, then where. A block is the negative of entering and says so in the same
           words — "could not enter product → explore" — rather than leaving a reason to stand on its
           own beside a name and leaving the reader to work out that the state never ran. */}
       {VERB[note.kind] === "" ? null : <span className="sb-note-verb">{VERB[note.kind]}</span>}
+      {/* A skip says HOW before where — "skipped · interrupted at 1 m 12 s · feature → ux" — because
+          the state is the same kind of name on every row and the reason is what differs. */}
+      {skipped && note.text.length > 0 ? <span className="sb-note-text">{note.text}</span> : null}
       {/* The ROOT has no path to draw — you are looking at it — so its own row is the sentence
           alone rather than a sentence with a blank column in front of it. */}
       {where === "" ? null : (
@@ -943,7 +949,7 @@ function NoteRow({
           {where}
         </span>
       )}
-      {note.kind === "entered" || note.text.length === 0 ? null : (
+      {note.kind === "entered" || skipped || note.text.length === 0 ? null : (
         <span className="sb-note-text">{note.kind === "blocked" ? `: ${note.text}` : note.text}</span>
       )}
       {/* The two verbs of a cut, on the row that IS the entry — every state has exactly one, which
@@ -1061,6 +1067,7 @@ const VERB: Record<BandNote["kind"], string> = {
   blocked: "could not enter",
   failure: "",
   made: "made",
+  skipped: "skipped",
 };
 
 /**

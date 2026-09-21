@@ -2,13 +2,13 @@
 id: engineering/units/interaction-gateway
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/everything-waiting-on-you-together, product/decisions-stay-yours, product/pick-up-where-it-left-off, ux/patterns/waiting-requests-gathered, ux/patterns/park-and-ask]
 layer: service
 owns_contracts: [engineering/contracts/inbox-channels]
 requires: [engineering/units/interaction-hub, engineering/units/component-contracts, engineering/units/task-lifecycle, engineering/units/run-load, engineering/units/executor-tree, engineering/units/engine-wiring, engineering/units/scripted-doubles, engineering/units/project-sessions, engineering/units/app-log]
-implemented_by: [packages/app/src/main/service.ts, packages/persistence/src/interactions.ts]
-verified_by: [packages/app/test/service.test.ts, packages/app/test/gateDurability.test.ts, packages/app/test/artifactGateReload.test.ts, packages/app/test/followUp.test.ts]
+implemented_by: [packages/app/src/main/service.ts, packages/app/src/main/fastForward.ts, packages/persistence/src/interactions.ts]
+verified_by: [packages/app/test/service.test.ts, packages/app/test/gateDurability.test.ts, packages/app/test/artifactGateReload.test.ts, packages/app/test/followUp.test.ts, packages/app/test/fastForward.test.ts]
 siblings: [engineering/units/interaction-hub, engineering/units/component-contracts, engineering/units/task-lifecycle, engineering/units/ipc-bridge]
 ---
 
@@ -25,7 +25,9 @@ siblings: [engineering/units/interaction-hub, engineering/units/component-contra
 - re-validates a gate answer in `submitInteraction` with `validateComponentResult`, against the live park's config and inputs or else the stored row's;
 - lists in `pendingInteractions` the live gates of every session, then the stored rows of tasks not running in this process, marked `resumes: true` with artifact references filled by `rehydrateArtifactInputs`; the live copy wins a shared id;
 - answers a stored gate in `answerRecoveredInteraction`: seeds the value on the hub, closes the row, publishes `interaction:resolved` and calls `resumeTask` without awaiting it;
-- runs the follow-up loop for a `choose_option` whose state says `follow_up` beside `questions`.
+- runs the follow-up loop for a `choose_option` whose state says `follow_up` beside `questions`;
+- offers a gate or an agent's question to a task's controlling conversation while the task is being FAST-FORWARDED ([decision 0005](../decisions/0005-connect.md) §4): `offerToControl` is called from `publishInteraction` and the question hub's `onRequest` — never the approval hub's — and skips a gate whose component is not in `ANSWERABLE_COMPONENTS`; `autopilotAnswer` makes one prompt call outside any run, as the follow-up loop does, and hands an answer at or above `autopilot.askBelow` to the workflow host's `answer`, which checks it against the contract before it journals `jaira.answered`, then submits it;
+- withdraws what a skip's interrupted agent parked (`withdrawSkipped`, fed by `SkipWithdrawals` over each run's journal): the task's questions dismissed and its approvals denied once, only when no prompt operation outside the skipped subtree is still running.
 
 The follow-up loop, in `followUp` and `askFollowUp`, holds the park, then:
 
@@ -72,6 +74,9 @@ It deliberately does not own:
 | 11 | Answering a stored gate seeds the answer, closes its row and resumes the task, which does not ask that gate again | unasserted |
 | 12 | The loop settles without calling the model once round five is answered | unasserted |
 | 13 | An approval, question or user-event answer reaches only the session that raised the request | unasserted |
+| 14 | A fast-forward's conversation answers what is at or above `autopilot.askBelow`, each answer marked `settled_by: control` with its confidence, and leaves the rest to the person as it would have been | `fastForward.test.ts` "answers the questions for you, marks each with its confidence, never offers the approval, and ends on arrival", "leaves a question to the person below autopilot.askBelow — a platform setting, very low by default" |
+| 15 | A fast-forward ends on arrival and on a failure on the way, and the target's own question is the person's | `fastForward.test.ts` "answers the questions for you…", "ends when something on the way FAILS, and says nothing more for the person" |
+| 16 | An answer the conversation gave survives a restart as the gate's mark, and the resumed run does not ask that gate again | `fastForward.test.ts` "keeps settled_by across a restart, and the resumed run does not ask the answered gates again" |
 
 ## A quit keeps the question, but a crash, a colliding id or a second process can lose or misroute it
 
@@ -90,6 +95,8 @@ It deliberately does not own:
 | A stored row's `inputs_json` does not parse | the row reads as `{}`, so its contract usually fails to parse and the answer is unchecked | none | the gate shows a config error |
 | The same gate is answered twice | the second finds no park and no row | none needed | the error notice `no pending interaction '<id>'` |
 | A person answers an approval | `onResolved` writes a `command_log` row only for a request in `ProjectSession.approvalRun`, which nothing fills | none | the command log shows the policy's escalation as `allowed` and nothing after it |
+| The app closes during a fast-forward | the mode is in memory and goes with the process; the task resumes as any suspended task does, and its questions are the person's | move it forward again | the strip's ordinary form, no Skip |
+| The fast-forward's model call fails or returns nothing usable | the question is left to the person and counted as left | none needed | the question, unmarked |
 
 ## The table was created by migration 11 and lost its run column in migration 16
 
@@ -103,4 +110,5 @@ It deliberately does not own:
 ## The gateway departs from the architecture's usual run discipline in two places
 
 - Only a gate is stored. An approval and a question end with the agent turn that asked them, and a wait is asked again by the run that resumes, so none of the three has a row.
+- A fast-forward's model call, like the follow-up call, runs outside any run with no session, record, tool or abort signal; its context is the controlling conversation's thread, read, not continued, so nothing it does appears in that conversation — the answer is drawn on the gate it settled instead.
 - The follow-up model call runs outside any run, with no session, record, journal, tool or abort signal, because the engine is still inside the gate's call and the question is about the person's answers rather than the state's work.

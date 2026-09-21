@@ -124,7 +124,7 @@ describe("previewOf", () => {
     expect(preview.refused).toBeUndefined();
   });
 
-  it("MOVE WITHIN: backward, next, and a forward move that is refused until fast-forward exists", () => {
+  it("MOVE WITHIN: backward, next, a FAST-FORWARD, a skip, and a forward move the host cannot run — refused in its own words", () => {
     const back = previewOf(answered({ ok: true, dryRun: true, plan: plan({ move: { direction: "backward", to: "ux", path: [], passes: [] } }) }), mine, column("ux"))!;
     expect([back.kind, text(back.say), back.drop]).toEqual(["Move within", "ux is behind where this task stands. It is entered again, as the next pass.", "Drop to go back"]);
     const next = previewOf(answered({ ok: true, dryRun: true, plan: plan({ move: { direction: "next", to: "ux", path: [], passes: [] } }) }), mine, column("ux"))!;
@@ -136,11 +136,15 @@ describe("previewOf", () => {
     )!;
     expect(text(over.say)).toBe("build is 2 states ahead in this task's workflow.");
     expect(over.facts.map(text)).toEqual(["ux → ui lie between"]);
-    const skipping = previewOf(answered({ ok: true, dryRun: true, plan: plan({ standsAt: { path: ["build"], stateId: "feature/build" }, move: { direction: "forward", to: "build", path: [], passes: ["ux"], stepsPast: "product" } }) }), mine, column("build"))!;
+    const skipping = previewOf(answered({ ok: true, dryRun: true, plan: plan({ standsAt: { path: ["build"], stateId: "feature/build" }, forward: "skip", move: { direction: "forward", to: "build", path: [], passes: ["ux"], stepsPast: "product" } }) }), mine, column("build"))!;
     expect(skipping.facts.map(text)).toEqual(["steps over ux, recorded as skipped", "steps past product, where it stopped"]);
     expect(skipping.drop).toBe("Drop to skip ahead");
+    // The board's own case (decision 0005 §4): a forward drop RUNS what is between.
+    const forward = previewOf(answered({ ok: true, dryRun: true, plan: plan({ standsAt: { path: ["build"], stateId: "feature/build" }, forward: "fast-forward", move: { direction: "forward", to: "build", path: [], passes: ["ux", "ui"] } }) }), mine, column("build"))!;
+    expect(forward.facts.map(text)).toEqual(["runs ux → ui on the way, the conversation answering what comes up"]);
+    expect(forward.drop).toBe("Drop to fast-forward");
     expect(over.drop).toBeUndefined();
-    expect(over.refused).toBe("Running the states between is not built yet.");
+    expect(over.refused).toBe("…");
   });
 
   it("NEW TRANSITION: which modification, the split that makes held tasks, and the inputs that would not bind", () => {

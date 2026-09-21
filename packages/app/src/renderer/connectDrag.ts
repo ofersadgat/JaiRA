@@ -146,11 +146,21 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
         : passes.length > 0
           ? [{ b: at }, ` is ${count(passes.length, "state")} ahead in this task's workflow.`]
           : [{ b: at }, move?.direction === "next" ? " is the state that comes next." : " is a state of this task's workflow."];
-    // A skip WILL step over them; a refused forward move only names what lies between.
-    if (passes.length > 0) facts.push(result.ok ? ["steps over ", { b: passes.join(" → ") }, ", recorded as skipped"] : [{ b: passes.join(" → ") }, passes.length === 1 ? " lies between" : " lie between"]);
+    // A FAST-FORWARD runs them (decision 0005 §4, the default for every forward move); a skip steps
+    // over them; a refused forward move only names what lies between.
+    const fastForward = result.ok && passes.length > 0 && plan.forward !== "skip";
+    if (passes.length > 0) {
+      facts.push(
+        !result.ok
+          ? [{ b: passes.join(" → ") }, passes.length === 1 ? " lies between" : " lie between"]
+          : fastForward
+            ? ["runs ", { b: passes.join(" → ") }, " on the way, the conversation answering what comes up"]
+            : ["steps over ", { b: passes.join(" → ") }, ", recorded as skipped"],
+      );
+    }
     if (move?.stepsPast !== undefined) facts.push(["steps past ", { b: move.stepsPast }, ", where it stopped"]);
     if (move?.answersRule === true) facts.push(["the workflow is waiting for exactly this move"]);
-    drop = move?.direction === "backward" ? "Drop to go back" : passes.length > 0 ? "Drop to skip ahead" : "Drop to move";
+    drop = move?.direction === "backward" ? "Drop to go back" : fastForward ? "Drop to fast-forward" : passes.length > 0 ? "Drop to skip ahead" : "Drop to move";
   } else {
     const own = last(card.workflow);
     say =
@@ -181,12 +191,9 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
   if (!result.ok) {
     const missing = result.refusal.missing ?? [];
     for (const input of missing) facts.push([{ b: input.name }, ` is required and unbound — ${input.reason}`]);
-    const refused =
-      result.refusal.code === "fast-forward"
-        ? "Running the states between is not built yet."
-        : missing.length > 0
-          ? `${count(missing.length, "required input")} would not be bound.`
-          : result.refusal.message;
+    // A forward move the app cannot run says why in its own words — a running task with no
+    // conversation, nothing left to run — which is exactly what a hover should say.
+    const refused = missing.length > 0 ? `${count(missing.length, "required input")} would not be bound.` : result.refusal.message;
     return { kind: KIND[plan.resolution], say, facts, refused };
   }
   return { kind: KIND[plan.resolution], say, facts, drop };

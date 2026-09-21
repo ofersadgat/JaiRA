@@ -365,6 +365,67 @@ export async function generateDocumentVersion(project: Project, request: Generat
 }
 
 /**
+ * Give a task a CONTROL CONVERSATION and nothing else (decision 0005 §3, §4, step 7).
+ *
+ * "A task with no controlling conversation is adopted into one first, because the conversation is
+ * what answers on the way." This is that, and the departure from §3's word "adopted" is deliberate:
+ * wrapping the task in a parent would make the PARENT the thing that moves, and a fast-forward is a
+ * move of the task's own machine through its own workflow. So the conversation is grafted onto the
+ * task's own frozen root — the same graft a clone does, with no child and no rule added — and the
+ * task's document is that copy. Its root now speaks; §3's idle rule (`load.ts`) is what keeps that
+ * from spending a model call on a conversation nobody has typed into.
+ *
+ * A root that already has an operation is left exactly as it is: a `chat/session`, a `chat/control`
+ * made by an earlier move, or an authored workflow whose root happens to run something. The first
+ * two ARE the conversation; the third is a root that is running its own work, and taking that over
+ * is not this function's to do.
+ */
+export interface ControlConversationResult {
+  /** The root already spoke — nothing was written. */
+  had: boolean;
+  /** The task's document, when it has one. Absent only for `had` with no document. */
+  document?: FrozenDocument;
+  version?: DocumentVersion;
+}
+
+export async function ensureControlConversation(
+  project: Project,
+  request: { taskId: string; conversation: string; functions?: ReadonlyMap<string, FunctionCapabilities>; nowMs?: number },
+): Promise<ControlConversationResult> {
+  const nowMs = request.nowMs ?? Date.now();
+  const { taskId } = request;
+  const row = project.runtime.get(taskId);
+  if (row === undefined) throw refusal(log, `unknown task '${taskId}'`, { taskId });
+  if (row.snapshotHash === undefined) throw refusal(log, `task '${taskId}' has never run, so it has no workflow to give a conversation to`, { taskId });
+  const meta = project.tasks.read(taskId);
+  const snapshotsDir = project.paths.snapshotsDir;
+  const existing = row.documentId !== undefined ? readDocument(snapshotsDir, row.documentId) : undefined;
+  const previous = loadSnapshot(snapshotsDir, existing !== undefined ? latestVersion(existing).snapshotHash : row.snapshotHash);
+  if (previous.states[previous.rootId]!.operation !== undefined) {
+    return { had: true, ...(existing !== undefined ? { document: existing, version: latestVersion(existing) } : {}) };
+  }
+  const nothing: GenerateResult = { ok: true, additions: { children: {}, transitions: [] }, targetKey: "", existing: false, mount: "plain", wires: [], literals: [], unsettled: [], deferred: true };
+  const bundle = graft(project, previous, nothing, existing?.conversation ?? request.conversation);
+  lintOrRefuse(bundle, `the copy of '${sourceStateId(previous.rootId)}' a conversation was grafted onto`, request.functions);
+  const snap = await snapshotWithModules(project, bundle);
+  const createdAt = new Date(nowMs).toISOString();
+  const next = { snapshotHash: snap.hash, createdAt, additions: nothing.additions, cause: { taskId, target: sourceStateId(previous.rootId) } };
+  if (existing !== undefined) {
+    const appended = appendVersion(snapshotsDir, existing.id, latestVersion(existing).version, next);
+    return { had: false, document: appended.document, version: appended.version };
+  }
+  const id = `d-${uuidv7(nowMs)}`;
+  const document = createDocument(
+    snapshotsDir,
+    { id, kind: "diverged", rootId: previous.rootId, conversation: request.conversation, divergedFrom: { workflow: meta.workflow, snapshotHash: row.snapshotHash }, createdAt },
+    next,
+  );
+  project.runtime.setPin(taskId, row.snapshotHash, id, nowMs);
+  log.info(`task ${taskId} was given the conversation '${request.conversation}' (${id})`);
+  return { had: false, document, version: latestVersion(document) };
+}
+
+/**
  * Lower a clone's additions through the loader, and move the lowered pieces onto the frozen root —
  * see the header. A root with no operation of its own is given `conversation`'s.
  */

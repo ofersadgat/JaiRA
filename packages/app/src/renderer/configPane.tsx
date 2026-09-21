@@ -110,7 +110,9 @@ export function ConfigPane({ config, layer, busy, editable, onSave, children }: 
       <DefaultEnvironment effective={effective} locked={locked} stated={stated} set={set} />
       <Policy effective={effective} locked={locked} stated={stated} set={set} />
 
-      {CONFIG_SECTIONS.filter((s) => s.key === "memo" || s.key === "workflows").map((section) => (
+      {/* `autopilot` (decision 0005 §6) through the same declared form: one number, and its description
+          is the whole explanation — the threshold a fast-forward's answers are held to. */}
+      {CONFIG_SECTIONS.filter((s) => s.key === "autopilot" || s.key === "memo" || s.key === "workflows").map((section) => (
         <section key={section.key} className="cfg-group">
           <header className="cfg-group-head">
             <h4>{section.title}</h4>
