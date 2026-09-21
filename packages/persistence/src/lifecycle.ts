@@ -7,7 +7,8 @@
 import { createLogger } from "@declarative-ai/log";
 import { ApprovalRequired, approvalRefusalMessage, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
-import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
+import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
+import { loadWorkflowBundle } from "./toolsets";
 import { newTaskId, isStartableStatus, type Holding, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
@@ -235,7 +236,7 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
     const modules = userModules();
     const watch = modules !== undefined ? watchingForUnapproved(modules) : undefined;
     try {
-      bundle = loadBundle(
+      bundle = loadWorkflowBundle(
         files,
         meta.workflow,
         workflowLoadOptions(project.paths, {

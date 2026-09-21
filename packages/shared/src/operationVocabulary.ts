@@ -16,6 +16,7 @@
  * thing for the same reason, and the schema reference panel wants exactly these words.
  */
 import type { Scope } from "./scopes";
+import type { ToolsetDecl } from "./toolsets";
 
 /**
  * The simple fields — one authored key, one text box.
@@ -82,9 +83,13 @@ export const SIMPLE_FIELDS: readonly SimpleField[] = [
   { name: "functionRef", key: "function", alias: "functionRef", type: "string", label: "Function", group: "operation",
     kinds: ["function"],
     placeholder: "claude-code, codex-cli, choose_option, …" },
+  // The LIST form. A toolset — a map from a subject to a mode, or a reference to one
+  // (`"$/toolsets/chat/read-only"`) — is the other thing this key holds (`toolsets.ts`, decision
+  // 0007). The form shows that one read-only, as it does any value it did not write, and the schema
+  // (`schemas.ts`) admits both.
   { name: "tools", key: "tools", type: "list", label: "Tools", group: "operation",
     placeholder: "read_file, run_command",
-    hint: "logical names resolved through the tool registry — an empty list drops the inherited ones" },
+    hint: "tool names — or, in JSON, a toolset: a map from a tool or a command to allow / ask / deny / smart, or a reference to one. An empty list drops the inherited ones" },
   { name: "model", key: "model", type: "string", label: "Model", group: "model",
     kinds: ["prompt"], prominent: true,
     placeholder: "claude-sonnet-5, or claude-cli/sonnet to pin the route",
@@ -183,7 +188,13 @@ export interface ReasoningDecl {
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
-/** The authored permission baseline: a profile, a default, and per-tool overrides. */
+/**
+ * The authored permission baseline: a profile, a default, and per-tool overrides.
+ *
+ * ⚠️ The LEGACY shape, and the shape the upstream engine takes. What an author writes now is a
+ * toolset in `tools` (`toolsets.ts`, decision 0007); `tools`, `default` and `profile` here are still
+ * read, and every consumer reads both forms through the one `Toolset` they fold into.
+ */
 export interface PermissionsDecl {
   profile?: string;
   default?: PermissionMode;
@@ -206,6 +217,16 @@ export interface PermissionsDecl {
    * sandbox and widening is the thing you have to write.
    */
   scopes?: Scope[];
+  /**
+   * WRITTEN BY LOWERING, never authored: a toolset's command subjects and `script`, with their modes
+   * (`"git commit": "allow"`). A map-form state reaches the engine as a list and this block, and
+   * these are the entries neither has a place for.
+   *
+   * ⚠️ Carried, not enforced — nothing judges a shell line against them yet (decision 0007 §4).
+   */
+  subjects?: Record<string, PermissionMode>;
+  /** WRITTEN BY LOWERING, never authored: a toolset entry's `implementation`, by tool. */
+  implementations?: Record<string, ToolImplementation>;
 }
 
 /** A tool a caller may be granted, and whether it can change anything. */
@@ -310,6 +331,14 @@ export interface ChatSettings {
    * built-in unless something displaces it.
    */
   implementations?: Record<string, ToolImplementation>;
+  /**
+   * The same three things as ONE map — a toolset, subject → mode (`toolsets.ts`, decision 0007).
+   *
+   * When present it is the whole answer and `tools`, `permissions.tools` / `default` / `other` and
+   * `implementations` are not read; `permissions.scopes` still is, because where a tool may act is
+   * not part of a toolset. The composer still writes the three; `toolsetOfSettings` reads either.
+   */
+  toolset?: ToolsetDecl;
 }
 
 /** Whose implementation runs — see {@link ChatSettings.implementations}. */

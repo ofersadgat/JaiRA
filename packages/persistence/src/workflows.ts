@@ -26,13 +26,14 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
-import { loadBundle, parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
+import { parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
 import { baseAsProjectPaths, componentConfigIssues, parseJsonText, type JairaPaths } from "@jaira/shared";
 import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
-import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
+import type { LintIssue, StateToolsetIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import { checkLabel } from "./runLabel";
 import { isStateFile } from "./snapshots";
+import { loadWorkflowBundle } from "./toolsets";
 import { userModules, watchingForUnapproved, withheldApprovalsOf } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
 
@@ -333,8 +334,15 @@ function browseLayers(
     // calls nothing would be reported as needing the approval its neighbour needs.
     const modules = userModules();
     const watch = modules !== undefined ? watchingForUnapproved(modules) : undefined;
+    // What is wrong with a TOOLSET (decision 0007) — a mode that is not one, a reference cycle, a
+    // tool nothing knows. Collected rather than thrown, so a bad entry is an issue against the
+    // state that wrote it and the rest of the workflow still lints.
+    const toolsetIssues: StateToolsetIssue[] = [];
     try {
-      bundle = loadBundle(effective, rootId, watch !== undefined ? { ...refOptions, symbols: watch.symbols } : refOptions);
+      bundle = loadWorkflowBundle(effective, rootId, {
+        ...(watch !== undefined ? { ...refOptions, symbols: watch.symbols } : refOptions),
+        onToolsetIssue: (issue) => toolsetIssues.push(issue),
+      });
     } catch (e) {
       // An unresolvable child reference or a malformed state: the closure is
       // unknown, so the only honest answer is the load error itself.
@@ -377,6 +385,15 @@ function browseLayers(
     // Scoped to THIS root's closure, not to every state on disk: `effective` is the whole layer, and
     // reporting a state outside this workflow against it would attribute the fault to a root that
     // never mounts it.
+    // Scoped to this root's closure for the same reason as the component check below: the lowering
+    // walks every file it is handed, and a state this root never mounts is not its fault.
+    const seenToolsetIssues = new Set<string>();
+    for (const issue of toolsetIssues) {
+      const key = `${issue.stateId} ${issue.path} ${issue.message}`;
+      if (!states.includes(issue.stateId) || seenToolsetIssues.has(key)) continue;
+      seenToolsetIssues.add(key);
+      issues.push({ stateId: issue.stateId, path: issue.path, message: issue.message, severity: issue.severity });
+    }
     const inClosure = Object.fromEntries(states.map((id) => [id, effective[id]]));
     for (const { severity, ...issue } of componentConfigIssues(inClosure)) {
       issues.push({ ...issue, severity: severity ?? "error" });

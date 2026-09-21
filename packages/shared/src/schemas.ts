@@ -346,15 +346,15 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
         default: {
           type: "string",
           enum: [...PERMISSION_MODES],
-          description: "the mode for tools the map below does not name",
+          description: "the older form — the mode for tools the map below does not name; in a toolset this is `other`",
         },
         tools: {
           type: "object",
-          description: "per-tool modes, keyed by tool name",
+          description: "the older form — per-tool modes, keyed by tool name; in a toolset these are its entries",
           additionalProperties: { type: "string", enum: [...PERMISSION_MODES] },
         },
       },
-      description: "authored permission baseline (§5.1)",
+      description: "where tools may act (`scopes`), and the older home of the modes a toolset in `tools` now holds (§5.1)",
     }),
     reasoning: leaf({
       type: "object",
@@ -365,6 +365,53 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
     }),
     fork: leaf({ type: "boolean", description: "start a new branch of the conversation rather than appending" }),
     limits: leaf({ type: "object", properties: { max_iterations: { type: "number" }, timeout: { type: "number" } } }),
+  };
+}
+
+/**
+ * `tools` — a toolset, or the list it replaces (decision 0007 §1; WORKFLOWS.md §5.1).
+ *
+ * A toolset is a map from a SUBJECT to a mode: a standard tool (`read_file`), a command
+ * (`git commit`, `git`), `script`, or `other`. The subject is not constrained here — a command is
+ * free text — so what the schema checks is the VALUE, and the linter checks the subject
+ * (`lowerStateToolsets`). A bare string is a reference to a toolset file, which the format already
+ * admits in an object position (§2.2); `$ref` beside the subjects starts from one and says more.
+ */
+export function toolsSchema(): SchemaDoc {
+  const mode: SchemaDoc = { type: "string", enum: [...PERMISSION_MODES] };
+  const entry: SchemaDoc = {
+    anyOf: [
+      mode,
+      {
+        type: "object",
+        properties: {
+          mode: { ...mode, description: "allow, ask, deny, or smart — decided per call by the approver" },
+          implementation: { type: "string", enum: ["app", "native"], description: "whose code runs the tool — JaiRA's, or the agent's own built-in" },
+        },
+        required: ["mode"],
+        additionalProperties: false,
+      },
+    ],
+  };
+  return {
+    description:
+      "what the agent may do (§5.1) — a toolset: a map from a tool, a command, `script` or `other` to a mode, or a reference to one (\"$/toolsets/chat/read-only\"). A list of tool names is the older form, and an empty list drops the inherited ones",
+    anyOf: [
+      { type: "array", items: { type: "string" }, description: "the list form: tool names, with modes in `permissions`" },
+      { type: "string", description: "a reference to a toolset file — $/toolsets/<bucket>/<name>" },
+      {
+        type: "object",
+        description: "subject → mode. Present means offered with that mode; absent means not offered; `other` is everything no entry names",
+        properties: {
+          $ref: { type: "string", description: "start from this toolset; the entries beside it override, per subject" },
+          other: { ...mode, description: "everything no entry names" },
+          script: { ...entry, description: "running a file — ./x.sh, npm run <name>, make <target>" },
+        },
+        // A binding form (`$expr`, `json`) is still a legal value here, so its keys are not entries.
+        patternProperties: { "^[^$]": entry },
+      },
+      ...BINDING_FORMS,
+    ],
   };
 }
 
@@ -386,6 +433,8 @@ export function operationSchema(kind?: "prompt" | "function"): SchemaDoc {
     if (kind !== undefined && !fieldAppliesTo(field, kind)) continue;
     properties[field.key] = { description: describe(field) };
   }
+  // `tools` holds one of two things, and the vocabulary's `list` type only says the first.
+  properties["tools"] = toolsSchema();
 
   properties["kind"] =
     kind === undefined

@@ -9,7 +9,8 @@
 import { createLogger } from "@declarative-ai/log";
 import { isTaskId, refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import { loadBundle, type StateDef, type WorkflowBundle } from "@declarative-ai/hw";
+import type { StateDef, WorkflowBundle } from "@declarative-ai/hw";
+import { loadWorkflowBundle } from "./toolsets";
 import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskMeta, TaskOrigin, TaskSummary, TimelineEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import type { TaskRuntimeRow } from "./runtime";
@@ -171,7 +172,7 @@ export function bundleFor(project: Project, workflow: string, snapshotHash?: str
   try {
     // Tolerant: a half-saved file the workflow does not reference must not blank the
     // board (the user is editing in another window).
-    return loadBundle(
+    return loadWorkflowBundle(
       readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }),
       workflow,
       workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path }),

@@ -25,7 +25,8 @@ import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
+import type { LoadedState, WorkflowBundle } from "@declarative-ai/hw";
+import { loadWorkflowBundle } from "./toolsets";
 import { isUnder } from "./descriptions";
 import type { Project } from "./project";
 import { browseSource, projectSource, readWorkflowsTolerantly, type LayerSource } from "./workflows";
@@ -274,7 +275,7 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
     }
     let bundle: WorkflowBundle;
     try {
-      bundle = loadBundle(
+      bundle = loadWorkflowBundle(
         files,
         entry.rootId,
         workflowLoadOptions(source.paths, { ...(source.searchPath !== undefined ? { path: source.searchPath } : {}) }),

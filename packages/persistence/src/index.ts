@@ -22,6 +22,7 @@ export * from "./prune";
 export * from "./workflows";
 export * from "./digest";
 export * from "./workflowRefs";
+export * from "./toolsets";
 // js/ts function modules: the approval store, the process-wide symbol index, and the freeze
 // (SPEC §7.5.5).
 export * from "./userModules";
