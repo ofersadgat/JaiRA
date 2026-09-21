@@ -531,3 +531,72 @@ describe("settled fields in the description", () => {
     expect(left.map((row) => row.type)).toEqual(["instance.entered", "value.settled", "operation.started"]);
   });
 });
+
+describe("a person's move in the journal (decision 0005)", () => {
+  /** A DIRECTED transition — `by` is what makes it one. */
+  function directed(id: string, stateId: string, to: string, index: number, extra: Record<string, unknown> = {}): void {
+    journal(id, { type: "transition.taken", instanceId: id, stateId, to, index, iteration: 0, by: "person", ...extra });
+  }
+
+  it("never revives what was skipped, wherever its row landed relative to the transition", () => {
+    // The revival rule brings back any non-success end nothing advanced past — and a skip's rows land
+    // AFTER the transition that decided them, which is exactly that shape. They are answers.
+    begin();
+    entered("i-root", "root");
+    entered("i-a", "root/a", "a", "i-root");
+    started("i-a", "root/a");
+    directed("i-root", "root", "c", 1, { skip: true });
+    terminated("i-a", "root/a", "skipped");
+    entered("i-b", "root/b", "b", "i-root");
+    terminated("i-b", "root/b", "skipped");
+    entered("i-c", "root/c", "c", "i-root"); // the process died in the target
+
+    const root = buildTaskLoad(project, "t", SHAPE).loaded!;
+    expect(root.children!.map((c) => [c.childKey, c.live, c.outcome])).toEqual([
+      ["a", false, "skipped"],
+      ["b", false, "skipped"],
+      ["c", true, undefined],
+    ]);
+    expect(root.index).toBe(1);
+    expect(root.cursor).toBe(2);
+    // The target entered, so nothing is owed.
+    expect(root.directed).toBeUndefined();
+  });
+
+  it("says which entry a directed transition still OWES when the target never entered", () => {
+    begin();
+    entered("i-root", "root");
+    entered("i-a", "root/a", "a", "i-root");
+    directed("i-root", "root", "c", 1, { skip: true, inputs: { note: "handed over" } });
+    terminated("i-a", "root/a", "skipped");
+    entered("i-b", "root/b", "b", "i-root");
+    terminated("i-b", "root/b", "skipped"); // …and the process died before `c` entered
+
+    const load = buildTaskLoad(project, "t", SHAPE);
+    expect(load.loaded!.directed).toEqual({ to: "c", inputs: { note: "handed over" } });
+    expect(load.loaded!.children!.every((c) => !c.live)).toBe(true);
+    expect(load.frontier.map((f) => [f.stateId, f.stopped])).toEqual([["root", "between-children"]]);
+  });
+
+  it("reads a directed transition on a finished instance as its REOPENING, with everything above it", () => {
+    // root → phase → x, all finished; then a person moved the task back into `phase`.
+    begin();
+    entered("i-root", "root");
+    entered("i-phase", "root/a", "a", "i-root");
+    entered("i-x", "root/a/x", "x", "i-phase");
+    terminated("i-x", "root/a/x", "success");
+    terminated("i-phase", "root/a", "success");
+    terminated("i-root", "root", "success");
+    directed("i-phase", "root/a", "x", 1);
+    entered("i-x2", "root/a/x", "x", "i-phase"); // the reopened run died in here
+
+    const root = buildTaskLoad(project, "t", SHAPE).loaded!;
+    expect(root.live).toBe(true);
+    const phase = root.children![0]!;
+    expect(phase).toMatchObject({ id: "i-phase", live: true, index: 1 });
+    expect(phase.children!.map((c) => [c.id, c.live, c.occurrence])).toEqual([
+      ["i-x", false, 0],
+      ["i-x2", true, 1],
+    ]);
+  });
+});

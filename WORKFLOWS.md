@@ -1407,8 +1407,9 @@ a task's card from one column to another on the board:
 ]
 ```
 
-`on_user_event(event, options?)` takes the event type first — today `'task_drag'`
-is the only one — and an options bag whose shape belongs to that event. It returns
+`on_user_event(event, options?)` takes the event type first — `'task_drag'`, or
+`'task_move'` (below), which share one vocabulary — and an options bag whose shape
+belongs to that event. It returns
 `true` when the gesture happens and `false` when it does not.
 
 | `task_drag` option | Meaning |
@@ -1498,6 +1499,53 @@ child of a deeper state offers nothing here.
 A CLI run, or a scheduled one, has nobody to make the gesture. Rather than hanging,
 the call answers `false` immediately and the rules behind it have their turn — so
 write a fallback rule after any wait that a headless run might reach.
+
+#### `task_move`: a move a person may make, which nobody has to — **built**
+
+`'task_move'` is the second event, and it is `task_drag`'s vocabulary exactly: the
+same options, the same `to_state`, the same board gesture. The difference is what
+the workflow says about it. `task_drag` is a gesture an author WAITS for — the
+state parks until somebody makes it. `task_move` is what JaiRA GENERATES for "this
+task may be sent there" (decision 0005), and it is written on a **standing** rule:
+
+```jsonc
+{ "when": "on_user_event('task_move', { to_state: 'ui' })", "to": "ui", "standing": true }
+```
+
+Everything under "Everything after it waits" is reversed for a standing rule
+(SPEC §3.3, EXPRESSIONS.md §18.3):
+
+- it is evaluated **last**, behind every authored rule, wherever it is written;
+- **nothing waits on it** — the sequence advances, and a state with nothing left to
+  do finishes, withdrawing the offer. A task nobody moves runs exactly as written;
+- an answer that arrives while the state's running child is still going is **held**
+  and taken when that child ends — unless an authored rule fires first.
+
+You can write one by hand, and the ⚠️ above does not apply to it.
+
+**Publishing a move.** A drop on the board — and, later, a conversation's `move`
+tool — publishes `task_move { to_state }` for a task (`task:move`). What happens
+is decided in this order:
+
+1. a transition of that task is waiting on exactly this (`task_move` or
+   `task_drag`, same `to_state`) → it gets its answer and **the workflow's rule**
+   moves the task;
+2. the task is running and no rule was offering it → the run takes a **directed
+   transition**: journaled `transition.taken` with `by: "person"` (or `"control"`),
+   held until the running state ends, then taken ahead of every rule. Forward, the
+   states stepped over without being entered are recorded **`skipped`**; backward,
+   the target is re-entered as its next occurrence with the usual reset. With
+   `skip`, the running state is interrupted at once and recorded `skipped` too —
+   its parked gate is withdrawn;
+3. the task is **not running** → it is **reopened** to take the move: loaded, like
+   a resume, with the move waiting. This is the one way a `completed` task runs
+   again under its own id. A stopped or failed task steps past the state it
+   stopped in, which is recorded `skipped` rather than continued.
+
+A skipped child reads as `.children.<key>.outcome === 'skipped'` — not as absent —
+and produced no outputs. A later state that wires a required input from it fails at
+entry with the missing input named; what to do about a skipped producer is the
+author's decision (an `optional` input, a default, or a rule on the outcome).
 
 ---
 
@@ -2465,6 +2513,29 @@ card is in `In review`, paused again, now offering `Done`.
 // dragging to the parking column records the decision and routes to a state that says so.
 { "to": "record_parked", "when": "on_user_event('task_drag', { to_state: 'parked' })" }
 ```
+
+**And the board that does NOT wait.** The three columns above park: a ticket sits in
+`Triage` until somebody moves it, because that is what the author wrote. The same
+three states in a plain `sequence` run straight through — and can still be moved,
+because a move is something a person may always publish (§7.4, `task_move`):
+
+```jsonc
+"sequence": ["triage", "in_review", "done"],
+"transitions": [
+  // What JaiRA generates; written by hand here. `standing` is what keeps it from
+  // parking the sequence or holding the state open at the end.
+  { "to": "done", "when": "on_user_event('task_move', { to_state: 'done' })", "standing": true }
+]
+```
+
+Dropped on `Done` while `triage` is still running, the ticket finishes `triage` and
+then goes to `done` — the rule's answer was held — and `in_review` never runs. Here
+the workflow's rule fired, so `in_review` is simply absent, as after any authored
+forward jump. Dropped there when NO rule was offering it, the run takes a directed
+transition instead and `in_review` is recorded `skipped`, which
+`.children.in_review.outcome` reads back. Dropped on `Triage` after the ticket
+finished, the task is reopened and `triage` runs again as its next occurrence, with
+`in_review` and `done` reset behind it.
 
 ---
 

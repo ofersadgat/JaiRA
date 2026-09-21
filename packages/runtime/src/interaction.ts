@@ -35,7 +35,7 @@ import {
   type JsonValue,
   type ResolvedValue,
 } from "@declarative-ai/exec";
-import type { WorkflowMetrics } from "@declarative-ai/hw";
+import { isSkipAbort, type WorkflowMetrics } from "@declarative-ai/hw";
 import { INTERACTIVE } from "./scriptedFunctions";
 
 export interface HubRequest {
@@ -154,7 +154,10 @@ export class InteractionHub {
   register(registry: CapabilityRegistry<WorkflowMetrics>, name: string, taskId?: string): this {
     registry.functions.set(
       name,
-      hostFunction(async (inputs: FunctionInputs) => this.park(name, inputs, taskId), INTERACTIVE),
+      hostFunction(
+        async (inputs: FunctionInputs, ctx: { abortSignal?: AbortSignal }) => this.park(name, inputs, taskId, undefined, ctx?.abortSignal),
+        INTERACTIVE,
+      ),
     );
     return this;
   }
@@ -182,6 +185,16 @@ export class InteractionHub {
     inputs: FunctionInputs,
     taskId?: string,
     onParked?: (requestId: string) => void,
+    /**
+     * The calling state's signal. Honoured for ONE reason: a SKIP (decision 0005) — a person stepped
+     * past the state that asked. The engine has already recorded the state `skipped` and is waiting
+     * for this call to wind down before it enters the target, and a gate has no process to kill:
+     * nothing else would ever settle it, so the move would wait on a question the person just walked
+     * away from. The question is OVER (`settled`), not abandoned — reopening the app must not ask it
+     * again. Every other abort is left to the paths that own it (a stop rejects the task's gates, a
+     * close abandons them), because what they tell the host about the row differs.
+     */
+    abortSignal?: AbortSignal,
   ): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
     // The answer somebody already gave, if this is the park it was given for — see {@link seeded}.
     // Consumed before a request id is minted, because there is no request: nothing is shown, nothing
@@ -203,6 +216,14 @@ export class InteractionHub {
       this.pending.set(requestId, { request, resolve });
       this.options.onRequest?.(request);
       onParked?.(requestId);
+      if (abortSignal !== undefined) {
+        const onAbort = (): void => {
+          if (!isSkipAbort(abortSignal.reason)) return;
+          this.settle(requestId, { error: { classification: "canceled", reason: "the state that asked was skipped" } }, "settled");
+        };
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+        if (abortSignal.aborted) onAbort();
+      }
     });
   }
 

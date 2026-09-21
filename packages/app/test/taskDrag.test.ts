@@ -114,3 +114,13 @@ describe("more than one offer", () => {
     expect(requestFor(offers, "t1", "deploy")).toBe("event-1");
   });
 });
+
+describe("`task_move` is the same vocabulary", () => {
+  it("offers the column a generated `task_move` rule is waiting on, exactly as a `task_drag` one", () => {
+    const view = board({ triage: ["t1"], deploy: [] });
+    const offers = dragOffersOf(view, [wait({ event: "task_move", requestId: "event-9" })]);
+    expect(requestFor(offers, "t1", "deploy")).toBe("event-9");
+    // And still nothing for an event that is not a move at all.
+    expect(canDrag(dragOffersOf(view, [wait({ event: "approve" })]), "t1")).toBe(false);
+  });
+});

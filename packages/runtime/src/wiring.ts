@@ -34,6 +34,7 @@ import {
   type LoadedInstance,
   type Persistence,
   type SplitEntry,
+  type DirectedTransitions,
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
@@ -279,6 +280,12 @@ export interface WorkflowRunConfig {
   fanOut?: FanOutHost;
   /** The lists this task is split on — hw's `EngineConfig.split`; a split mount over one of them narrows to this task's element. */
   split?: readonly SplitEntry[];
+  /**
+   * The port a person's MOVE reaches this run through — hw's `EngineConfig.directed` (decision 0005).
+   * The caller keeps it: a move handed over while the run is live goes straight to the engine, and
+   * one queued before the run began is claimed at load, which is how a finished task takes a move.
+   */
+  directed?: DirectedTransitions;
   abortSignal?: AbortSignal;
   /**
    * The filesystem the run acts within — a task's git worktree, or the project
@@ -413,6 +420,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
     ...(cfg.fanOut !== undefined ? { fanOut: cfg.fanOut } : {}),
     ...(cfg.split !== undefined ? { split: cfg.split } : {}),
+    ...(cfg.directed !== undefined ? { directed: cfg.directed } : {}),
   });
   const ctx: ExecServices = {
     validator: new SchemaValidator(),

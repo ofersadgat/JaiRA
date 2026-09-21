@@ -20,7 +20,9 @@ export type InstanceStatus =
   | "completed"
   | "failed"
   | "canceled"
-  | "timeout";
+  | "timeout"
+  /** A person's move stepped past it (decision 0005): interrupted by a Skip, or never entered. */
+  | "skipped";
 
 /** The operation an instance is running, as far as the journal shows. */
 export interface OperationView {

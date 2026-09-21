@@ -2,7 +2,7 @@
 id: engineering/units/run-load
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-21
 implements: [product/pick-up-where-it-left-off, ux/patterns/button-says-what-will-happen]
 layer: service
 owns_contracts: []
@@ -43,7 +43,7 @@ It deliberately does not own:
 - Boundary: workflow and run. `shape` is the pinned snapshot's states, because the journal records which child entered and only the definition knows its index in a `sequence`.
 - Callers: `AppService.resumeTask` and `resumable`, `jaira task start`, and the pending-gate listing in `service.ts` for `rehydrateArtifactInputs`.
 
-## The fold follows six rules, and each decides what a resume pays for again
+## The fold follows seven rules, and each decides what a resume pays for again
 
 1. **By instance id.** A second `instance.entered` for a known id clears its termination and does not advance its parent. A `chat:` instance is skipped with all its events. An id without `-` predates durable ids and sets `blocked`.
 2. **One root.** `task_runtime.root_instance_id` wins where stamped; otherwise the newest parentless entry is the machine.
@@ -51,6 +51,7 @@ It deliberately does not own:
 4. **Answers.** Only a `completed` record is an answer. A record whose content key a `call.waiting` named is neither an answer nor a loaded site. Every record's sequence raises its instance's `nextSite`, loaded or not.
 5. **Required reads.** A completed operation on a live instance or on one that succeeded must have a readable value, or it lands in `unreadable`. A failed instance's own record is not required.
 6. **Fields.** The last `value.settled` per field loads, a fallback's value included; a settle with no value removes the field.
+7. **A person's move.** A `transition.taken` carrying `by` was directed ([decision 0005](../decisions/0005-connect.md), [journal-events](../contracts/journal-events.md)). An instance that ended `skipped` is never revived, although its row lands after the transition that decided it. A directed transition on an instance that had terminated clears its termination and every ancestor's, so a reopened task that died loads live. A directed transition with no later entry of its `to` under that instance loads as `LoadedInstance.directed`, the entry the run still owes.
 
 A frontier entry is `mid-operation` when its operation started and never settled, or settled as an `interrupted` failure. Its cause is `failed` when the instance ended in `error` or `timeout`.
 

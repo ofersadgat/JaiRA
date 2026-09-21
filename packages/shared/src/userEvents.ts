@@ -23,6 +23,67 @@ export const ON_USER_EVENT = "on_user_event";
 export const TASK_DRAG = "task_drag";
 
 /**
+ * A person MOVED the task to a state (decision 0005) — by dropping its card there, or by saying so
+ * to a conversation that holds the workflow as a tool, whose tool call publishes this on their
+ * behalf.
+ *
+ * ONE vocabulary with {@link TASK_DRAG}: the same options, the same hub, the same `to_state`. The
+ * difference is what the workflow says about it. `task_drag` is a gesture an author WAITS for — the
+ * state parks until somebody makes it. `task_move` is what a host GENERATES for "this task may be
+ * sent there", written on a `standing` transition so a task nobody moves follows its workflow as
+ * though the rule were not there:
+ *
+ * ```jsonc
+ * { "when": "on_user_event('task_move', { to_state: 'ui' })", "to": "ui", "standing": true }
+ * ```
+ *
+ * A published move answers a pending wait of EITHER event for that task and that `to_state`; with no
+ * wait to answer it becomes a directed transition into the run (`TaskMoveRequest`).
+ */
+export const TASK_MOVE = "task_move";
+
+/** The events a move answers — see {@link TASK_MOVE}. */
+export const MOVE_EVENTS: readonly string[] = [TASK_DRAG, TASK_MOVE];
+
+/** `task_move`'s options — `task_drag`'s, because the two are one vocabulary. */
+export type TaskMoveOptions = TaskDragOptions;
+
+/**
+ * A move, as it is PUBLISHED — by the board's drop today, by a conversation's tool later.
+ *
+ * `toState` is a child key of the instance the move is for: the task's root state unless
+ * `instanceId` names a composite deeper in its tree.
+ */
+export interface TaskMoveRequest {
+  project?: string;
+  taskId: string;
+  toState: string;
+  /** Who asked: a person directly (the default), or a control conversation on their behalf. */
+  by?: "person" | "control";
+  /** Go NOW: interrupt the running state and record it, and every state stepped over, `skipped`. */
+  skip?: boolean;
+  /** What the asker hands the target, over the workflow's own wiring, per input name. */
+  inputs?: Record<string, JsonValue>;
+  /** The composite whose child `toState` is, by instance id. Absent ⇒ the task's root instance. */
+  instanceId?: string;
+}
+
+/**
+ * What became of a published move.
+ *
+ *  - `answered` — a transition was already waiting on exactly this, and it has its answer;
+ *  - `taking`   — the running task has the move and nothing stands in its way;
+ *  - `held`     — the running task has it, and takes it when the state now running ends;
+ *  - `reopened` — the task was not running: it was started again, by load, with the move waiting.
+ *
+ * A move that cannot be made is a refusal (an error naming why), never a fifth status.
+ */
+export interface TaskMoveResult {
+  taskId: string;
+  status: "answered" | "taking" | "held" | "reopened";
+}
+
+/**
  * `task_drag`'s options. The event type decides the shape of the bag, which is why this is named for
  * the event and not for the function.
  */
