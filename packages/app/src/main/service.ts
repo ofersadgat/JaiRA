@@ -55,7 +55,7 @@ import {
   forkTask as copyTaskPrefix,
   taskOriginOf,
   parseSessionRef,
-  loadSnapshot,
+  loadPinnedBundle,
   userModules,
   canonicalModulePath,
   prepareUserModules,
@@ -4930,7 +4930,7 @@ export class AppService {
     // call's record is deliberately NOT touched — it may be the only witness to turns already in
     // the remote stream, and the re-dispatch continues into it.
     releaseUnconsumedFailures(open.project, taskId);
-    const bundle = loadSnapshot(open.project.paths.snapshotsDir, row.snapshotHash);
+    const bundle = loadPinnedBundle(open.project, row);
     const load = buildTaskLoad(open.project, taskId, bundle.states);
     if (load.blocked !== undefined || load.loaded === undefined) {
       throw this.refusal("run", `task '${taskId}' cannot be resumed: ${load.blocked ?? "nothing was recorded"}`, at);
@@ -5084,7 +5084,7 @@ export class AppService {
     if (row.snapshotHash === undefined || !hasJournalHistory(open.project, taskId)) {
       return { taskId, kind: "fresh", replayed: 0, frontier: [] };
     }
-    const bundle = loadSnapshot(open.project.paths.snapshotsDir, row.snapshotHash);
+    const bundle = loadPinnedBundle(open.project, row);
     const load = buildTaskLoad(open.project, taskId, bundle.states);
     if (load.blocked !== undefined || load.loaded === undefined) {
       return { taskId, kind: "none", replayed: 0, frontier: [], ...(load.blocked !== undefined ? { blocked: load.blocked } : {}) };
@@ -5381,7 +5381,7 @@ export class AppService {
       throw this.refusal("run", `task '${taskId}' has never run, so it stands nowhere to be moved from — start it instead`, at);
     }
     releaseUnconsumedFailures(open.project, taskId);
-    const bundle = loadSnapshot(open.project.paths.snapshotsDir, row.snapshotHash);
+    const bundle = loadPinnedBundle(open.project, row);
     const load = buildTaskLoad(open.project, taskId, bundle.states);
     if (load.blocked !== undefined || load.loaded === undefined) {
       throw this.refusal("run", `task '${taskId}' cannot be moved: ${load.blocked ?? "nothing was recorded"}`, at);

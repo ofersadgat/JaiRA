@@ -2,7 +2,7 @@
 id: engineering/decisions/0005-connect
 type: decision
 status: proposed
-updated: 2026-09-20
+updated: 2026-09-21
 decides_for: [engineering/units/fan-out-host, engineering/units/workflow-snapshots, engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/interaction-hub, engineering/units/workflow-browser]
 ---
 
@@ -365,7 +365,8 @@ conversation's. Per-item workflows: items share one document.
    schema-fit and hole checks, taking up the child's branch. "From a
    task…" in New task.
 4. **Versioned frozen workflows** and the dynamic document: generate,
-   augment, clone-on-diverge, the generated `split`.
+   augment, clone-on-diverge, the generated `split`. **Built 2026-09-21** —
+   see "What step 4 settled" below.
 5. **`connect`** and the board drop with its hover preview and Undo. Until
    6, a drop whose inputs do not all bind is refused with what is missing.
 6. **The conversations** (needs 0006): the `workflow` toolset over
@@ -402,6 +403,86 @@ Four things the text above left open were decided in the building:
   existing `{ "to": … }` leaves behind was not this step's to do.
 
 A held move lives in the engine's memory and is lost with the process.
+
+## What step 4 settled
+
+Built in `@jaira/persistence` (`documents.ts`, `dynamicWorkflow.ts`,
+`dynamicDocuments.ts`) with one upstream change; the statement of record is
+[workflow-snapshots](../units/workflow-snapshots.md), its
+[contract](../contracts/workflow-snapshot.md) and the `workflow.version` row
+in [journal-events](../contracts/journal-events.md). What the text above
+left open:
+
+- **A version is a snapshot, and the document only lists them.** A
+  snapshot stays immutable and content-addressed; a document is
+  `system/snapshots/_documents/<id>.json`, an identity outside any task and
+  an ordered list of snapshot hashes. A task names its document
+  (`task_runtime.document_id`) and keeps `snapshot_hash` as the snapshot it
+  last ran under, so nothing that reads a pinned task had to learn about
+  documents. The one new question, "which hash, for this task, now", has one
+  answer in one place (`currentPin`).
+- **Records keep their version by where they sit in the journal.** Each
+  time a task loads under a version it did not last run under, a
+  `workflow.version` row is journaled ahead of the stretch. A row, and every
+  record it names, ran under the newest such row before it. It is a journal
+  row because a rewind, a fork and a replay from the journal file all carry
+  the journal faithfully already; a column keyed by seq would not survive
+  the file replay, which re-mints seqs.
+- **Rewind and fork read the version current at the cut.** A rewound task
+  goes back under it and picks the latest up again at its next load, saying
+  so. A cut behind the row that moved a task into a document puts it back
+  under the snapshot it had, in no document: rewinding past a divergence
+  un-diverges, as rewinding past a mirror row un-adopts. A fork's copy, and
+  so a split's, stands in the same document.
+- **Which of new and clone a move means is where the task stands.** A task
+  that finished well has outputs only a parent can read, so it is wrapped:
+  a new dynamic document mounting its root state and the target. A task
+  standing inside its workflow is cloned. `connect` may say otherwise
+  (`mode`). Making the new document does not adopt the task into it; that is
+  step 3's operation, composed by step 5.
+- **A fit is taken only when it is the only one.** Whole before element,
+  the nearest producer that has any, then the only fit or the only one that
+  holds both ways. Two outputs that fit equally are returned with the input
+  as candidates, not chosen between, since the only tie-break left would be
+  their names (§0). Nearest means where the task last stood, which is
+  structure and not a name.
+- **What already ran is mounted with what it ran with.** A new document's
+  first child carries its task's recorded inputs as literals with
+  `via: "recorded"`, which is what lets the document lint on its own and a
+  backward move re-enter the state as it was. Provenance sits on the
+  binding (`{ "json": …, "provenance": … }`), inside the version's hash.
+- **Nothing is generated while a required input is open.** A document with
+  an unwired required input does not lint, so the generator returns what is
+  unsettled and writes nothing. Asking after the drop (§What draws) is
+  therefore a second call with the answer supplied, which writes the version.
+- **A standing rule is outside the reachability proof** (upstream,
+  SPEC §6.2). Two things did not lint without it: a generated rule made every
+  authored wire of a cloned workflow unproven, because a rule with no child
+  in its guard could fire before anything ran; and a child entered only by
+  a move has no proven predecessor, so no wire into it could be written. A
+  standing rule now pre-empts nothing the sequence proves, and a child
+  entered only by standing rules has its wires typed and not held to the
+  proof. A wire that resolves to nothing blocks the entry with the input
+  named, as it does after any directed transition.
+- **A child that has run is carried, not reloaded.** A version is built by
+  the loader over live files, and then every state the previous version
+  held is put back as it was frozen. Only the root changes, and it only
+  grows.
+- **A clone is a graft.** A frozen root is a resolved state, and the loader
+  does not reproduce one from itself, so the additions are lowered by the
+  loader in a scaffold root with the same child keys and the lowered mount
+  and rules are moved onto the frozen root. Two consequences: the new child
+  does not inherit the cloned root's `environment`, and a diverged document
+  cannot be saved as a workflow, having no authored root.
+- **A diverged root is not given the control operation yet.** An instance
+  loaded with an operation it never ran dispatches it, so a standing task's
+  root would hold a conversation turn the moment it resumed. The document
+  records which conversation controls it; step 6 gives the root the
+  operation when the conversation states and their run semantics exist.
+- **The conversation state's `environment` reaches every child.** A dynamic
+  root is that state with children, and `environment` is a default for a
+  subtree. `chat/control` and `chat/session` must carry their model and
+  tools on `operation`, or the states they start inherit them.
 
 ## Open
 

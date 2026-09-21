@@ -1493,6 +1493,26 @@ Everything under "Everything after it waits" is reversed for a standing rule
 
 You can write one by hand, and the ⚠️ above does not apply to it.
 
+A standing rule is also **outside the reachability check** (§11), both ways. It
+pre-empts nothing: the wires your `sequence` proved before the rule was written are
+still proven. And a child entered *only* by standing rules — off the spine, named by
+no ordinary rule — may be wired from a sibling, because it is entered when somebody
+sends the task there and not on a path the checker could walk:
+
+```jsonc
+"children": {
+  "product": {},
+  "ui": { "inputs": { "brief": ".children.product.output.brief" } }
+},
+"sequence": ["product"],
+"transitions": [
+  { "when": "on_user_event('task_move', { to_state: 'ui' })", "to": "ui", "standing": true }
+]
+```
+
+If the task is sent to `ui` before `product` produced anything, the entry is refused
+with the input named — what happens after any move that steps over a producer.
+
 **Publishing a move.** A drop on the board — and, later, a conversation's `move`
 tool — publishes `task_move { to_state }` for a task (`task:move`). What happens
 is decided in this order:

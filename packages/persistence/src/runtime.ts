@@ -20,7 +20,15 @@ const log = createLogger("jaira.persistence.runtime");
 export interface TaskRuntimeRow {
   taskId: string;
   status: TaskStatus;
+  /** The snapshot this task last ran under. For a task in a document, the version it last PICKED UP. */
   snapshotHash?: string;
+  /**
+   * The versioned frozen document this task runs (migration 19, decision 0005 §3) — a dynamic
+   * workflow, or a real workflow's diverged copy. Absent for a task pinned to one immutable snapshot,
+   * which is every task a real workflow started. Present, the task picks up the document's latest
+   * version each time it loads (`documents.ts` `currentPin`).
+   */
+  documentId?: string;
   branch?: string;
   worktreePath?: string;
   /**
@@ -56,6 +64,7 @@ interface RawRuntime {
   task_id: string;
   status: string;
   snapshot_hash: string | null;
+  document_id?: string | null;
   branch: string | null;
   worktree_path: string | null;
   root_instance_id: string | number | null;
@@ -76,6 +85,7 @@ function toRuntime(row: RawRuntime): TaskRuntimeRow {
     taskId: row.task_id,
     status: row.status as TaskStatus,
     snapshotHash: row.snapshot_hash ?? undefined,
+    documentId: row.document_id ?? undefined,
     branch: row.branch ?? undefined,
     worktreePath: row.worktree_path ?? undefined,
     rootInstanceId: row.root_instance_id === null ? undefined : String(row.root_instance_id),
@@ -107,13 +117,13 @@ export class RuntimeStore {
     this.log?.appendFrom(this.db, taskId, "task_runtime", "task_id = ?", [taskId]);
   }
 
-  insert(taskId: string, nowMs: number, fields?: { branch?: string; parentTaskId?: string }): void {
+  insert(taskId: string, nowMs: number, fields?: { branch?: string; parentTaskId?: string; documentId?: string }): void {
     this.db
       .prepare(
-        `INSERT INTO task_runtime (task_id, status, branch, parent_task_id, created_at, updated_at)
-         VALUES (?, 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO task_runtime (task_id, status, branch, parent_task_id, document_id, created_at, updated_at)
+         VALUES (?, 'queued', ?, ?, ?, ?, ?)`,
       )
-      .run(taskId, fields?.branch ?? null, fields?.parentTaskId ?? null, nowMs, nowMs);
+      .run(taskId, fields?.branch ?? null, fields?.parentTaskId ?? null, fields?.documentId ?? null, nowMs, nowMs);
     this.logTask(taskId);
   }
 
@@ -141,6 +151,19 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE task_runtime SET snapshot_hash = ?, updated_at = ? WHERE task_id = ?`)
       .run(snapshotHash, nowMs, taskId);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
+    this.logTask(taskId);
+  }
+
+  /**
+   * What the task runs under, set whole: the snapshot, and the document it is a version of — `null`
+   * for none. Two callers: a real workflow's task DIVERGING into a document, and a rewind putting a
+   * task back under what was current at its cut (which, behind a divergence, is no document).
+   */
+  setPin(taskId: string, snapshotHash: string | null, documentId: string | null, nowMs: number): void {
+    const res = this.db
+      .prepare(`UPDATE task_runtime SET snapshot_hash = ?, document_id = ?, updated_at = ? WHERE task_id = ?`)
+      .run(snapshotHash, documentId, nowMs, taskId);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
@@ -205,6 +228,8 @@ export class RuntimeStore {
     taskId: string,
     fork: {
       snapshotHash: string;
+      /** The document the copy stands in — its parent's, since a copy is another item in the same workflow. */
+      documentId?: string | undefined;
       rootInstanceId?: string | undefined;
       forkedAtSeq: number;
       forkBoundarySeq: number;
@@ -218,12 +243,13 @@ export class RuntimeStore {
     const res = this.db
       .prepare(
         `UPDATE task_runtime
-            SET snapshot_hash = ?, root_instance_id = ?, forked_at_seq = ?, fork_boundary_seq = ?,
+            SET snapshot_hash = ?, document_id = ?, root_instance_id = ?, forked_at_seq = ?, fork_boundary_seq = ?,
                 status = ?, started_at = ?, ended_at = ?, outcome = ?, updated_at = ?
           WHERE task_id = ?`,
       )
       .run(
         fork.snapshotHash,
+        fork.documentId ?? null,
         fork.rootInstanceId ?? null,
         fork.forkedAtSeq,
         fork.forkBoundarySeq,
