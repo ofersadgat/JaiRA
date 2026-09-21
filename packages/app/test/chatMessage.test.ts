@@ -157,7 +157,7 @@ describe("the settings a message would run under", () => {
       ["read-only", "project"],
     ]);
     // The workflow tools are offered a line, and since step 6 something answers when one is called.
-    expect(control.available.tools.map((t) => t.name)).toEqual(expect.arrayContaining(["workflows", "start", "stop"]));
+    expect(control.available.tools.map((t) => t.name)).toEqual(expect.arrayContaining(["list_workflows", "start_task", "stop_task"]));
   });
 
   it("keeps a map as a NEW toolset — in a writable layer, under a name a reference can carry, never over another", async () => {

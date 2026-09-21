@@ -36,45 +36,45 @@ const result = (id: string, output: unknown, ms: number): SessionTurn =>
 /** A session that started the product state, then moved the task it made across workflows. */
 const session: SessionTurn[] = [
   said("user", "design pause and stop with me"),
-  call("c1", "workflows", {}, 1_000),
+  call("c1", "list_workflows", {}, 1_000),
   result("c1", { workflows: [{ id: "feature", label: "Feature workflow" }, { id: "explore" }, { id: "review" }] }, 1_200),
-  call("c2", "start", { state: "feature/product", inputs: { issue: "Let a person pause a running task and pick it up later" }, asked: ["issue"] }, 3_000),
+  call("c2", "start_task", { state: "feature/product", inputs: { issue: "Let a person pause a running task and pick it up later" }, asked: ["issue"] }, 3_000),
   result("c2", { ok: true, task: "t-1", key: "product", state: "feature/product", status: "started", mount: "plain", inputs: [{ name: "issue", via: "asked" }] }, 3_400),
   said("assistant", "I've started **Product** on it. It will ask us a few things as it goes.", 4_000),
 ];
 
 const later: SessionTurn[] = [
   said("user", "let's think about the ux for this"),
-  call("c3", "move", { task: "t-1", to: "feature/ux" }, 900),
+  call("c3", "move_task", { task: "t-1", to: "feature/ux" }, 900),
   result(
     "c3",
     { ok: true, task: "t-2", resolution: "adopt", workflow: "Feature workflow", standsAt: "ux", adoptedAs: "product", moved: "reopened" },
     1_500,
   ),
-  call("c4", "tasks", {}, 2_000),
+  call("c4", "list_tasks", {}, 2_000),
   result("c4", { tasks: [{ task: "t-3", title: "Pause and stop", status: "queued", workflow: "feature", held: true }] }, 2_200),
   said("assistant", "Product gave us three features, so there are three ux tasks, all held. Start them all, or tell me which.", 2_600),
   said("user", "just the first two", 60_000),
-  call("c5", "release", { tasks: ["t-3", "t-4"] }, 61_000),
+  call("c5", "release_task", { tasks: ["t-3", "t-4"] }, 61_000),
   result("c5", { results: [{ task: "t-3", ok: true, did: "started" }, { task: "t-4", ok: true, did: "started" }] }, 61_400),
 ];
 
 /** A control conversation: a task was moved somewhere no workflow related it to. */
 const control: SessionTurn[] = [
-  call("c6", "tasks", {}, 0),
+  call("c6", "list_tasks", {}, 0),
   result("c6", { tasks: [{ task: "t-9", title: "Rewind a run", status: "completed", relation: "adopted", outputs: { units: "task-lifecycle, process-exec" } }] }, 300),
-  call("c7", "workflows", { state: "explore" }, 600),
+  call("c7", "list_workflows", { state: "explore" }, 600),
   result("c7", { state: { id: "explore", inputs: { brief: { schema: { type: "string" }, required: true }, question: { schema: { type: "string" }, required: true } } } }, 800),
   said("assistant", "**Rewind a run** is now followed by **explore**. I've written its brief from what the feature shipped. What should it look into?", 1_200),
   said("user", "whether a fork should copy the worktree or branch from it", 90_000),
-  call("c8", "start", { state: "explore", inputs: { brief: "Rewind and fork shipped with…", question: "whether a fork should copy the worktree" }, asked: ["question"], confidence: 0.8 }, 91_000),
+  call("c8", "start_task", { state: "explore", inputs: { brief: "Rewind and fork shipped with…", question: "whether a fork should copy the worktree" }, asked: ["question"], confidence: 0.8 }, 91_000),
   result("c8", { ok: true, task: "t-10", key: "explore", state: "explore", status: "started", mount: "plain", inputs: [{ name: "brief", via: "inferred" }, { name: "question", via: "asked" }] }, 91_500),
 ];
 
 /** A `start` that could not settle a required input: the row is `bad`, and the refusal is the result. */
 const asking: SessionTurn[] = [
   said("user", "now implement it"),
-  call("c9", "start", { state: "feature/implementation" }, 800),
+  call("c9", "start_task", { state: "feature/implementation" }, 800),
   result(
     "c9",
     {

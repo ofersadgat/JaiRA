@@ -295,7 +295,7 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
     expect(environmentOf("plan")).toEqual({
       // The nine a conversation has always held, then the eight of decision 0005, served since its
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"],
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -307,14 +307,14 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
           bash: "smart",
           web_fetch: "allow",
           web_search: "allow",
-          workflows: "allow",
-          start: "deny",
-          move: "deny",
-          tasks: "allow",
-          answer: "deny",
-          hold: "deny",
-          release: "deny",
-          stop: "deny",
+          list_workflows: "allow",
+          start_task: "deny",
+          move_task: "deny",
+          list_tasks: "allow",
+          answer_question: "deny",
+          hold_task: "deny",
+          release_task: "deny",
+          stop_task: "deny",
           ...TOOLSET_MARKERS,
         },
         other: "deny",
@@ -327,10 +327,10 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
     // eight against its registry, and a project tool is not on the list to be handed over at all.
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat_control/ask-first" }));
     const control = environmentOf("plan") as { tools: string[]; permissions: { tools: Record<string, string>; other: string } };
-    expect(control.tools).toEqual(["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"]);
+    expect(control.tools).toEqual(["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"]);
     expect(control.tools).not.toContain("bash");
     expect(control.permissions.other).toBe("deny");
-    expect(control.permissions.tools).toMatchObject({ workflows: "ask", start: "ask", stop: "ask" });
+    expect(control.permissions.tools).toMatchObject({ list_workflows: "ask", start_task: "ask", stop_task: "ask" });
   });
 
   it("are READ for the composer with the layer that supplied each, a project's file winning and a `$ref` followed", () => {

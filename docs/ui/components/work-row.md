@@ -21,9 +21,9 @@ A dense single line between the messages of a conversation: a small glyph, a bol
 
 The eight workflow tools ([decision 0005](../../engineering/decisions/0005-connect.md) §3) are work rows like any other, with two differences a reader sees:
 
-- **The glyph is the forking path** — the one a `made` or an `entered` note wears — because a row that starts or moves work is the same kind of fact as the note it leaves behind. Matched by exact name, not by the family heuristic, which would otherwise read `tasks` as an agent and `move` and `release` as writes.
+- **The glyph is the forking path** — the one a `made` or an `entered` note wears — because a row that starts or moves work is the same kind of fact as the note it leaves behind. Matched by exact name, not by the family heuristic, which would otherwise read `list_tasks` as an agent and `move_task` and `release_task` as writes.
 - **The grey line is the call in its own words**, not its first string argument: `feature/product · issue: "Let a person pause…"`, `Pause and stop → feature/ux · skip`, `Pause and stop · Resume a paused run`. It is `workflowToolSummary` in `@jaira/shared`, pure over the arguments, so a record read a year later draws the same line.
-- **A `start` or a `move` that succeeded leaves a NOTE under its row** — "adopted into **Feature workflow** as `product` · standing at `ux`" — drawn from what the tool answered, in the note's own glyph, verb and monospace ending. A refused call draws none: the row's cross and its result say it once already.
+- **A `start_task` or a `move_task` that succeeded leaves a NOTE under its row** — "adopted into **Feature workflow** as `product` · standing at `ux`" — drawn from what the tool answered, in the note's own glyph, verb and monospace ending. A refused call draws none: the row's cross and its result say it once already.
 
 ## A work row is one thing that happened while an agent worked
 

@@ -330,9 +330,11 @@ preset that is a function.
    The function presets are gone; "which preset is this" is
    `matchToolset`. Two things a file has no place for are kept beside the
    code instead: the shipped toolsets' labels, hints and glyphs, and the
-   order the four names are listed in. **The tool names shadow command
-   subjects**: `start`, `move` and `stop` read as tools in a toolset, so
-   no entry can name a shell program of those names.
+   order the four names are listed in. The workflow tools were first named
+   `start`, `move`, `stop` and so on, which shadowed the shell programs of
+   those names as command subjects; they were renamed to `start_task`,
+   `move_task`, `stop_task` and the rest (2026-09-21), and a toolset can
+   name `start`, `move` and `stop` as commands again.
 5. **The composer**: Permissions rows from the bucket, the bucket picker,
    `+`; Execution's command lines. *Built 2026-09-21*
    ([composer-setting-chip](../../ui/components/composer-setting-chip.md)):

@@ -49,6 +49,15 @@ describe("a subject", () => {
     ["git push --force", "command"],
     ["git", "command"],
     ["apt-get", "command"],
+    // The workflow tools are named verb_object, so the shell programs they once shadowed are
+    // commands again: a toolset can say `start`, `move` and `stop` as it says `git`.
+    ["start_task", "tool"],
+    ["move_task", "tool"],
+    ["list_tasks", "tool"],
+    ["answer_question", "tool"],
+    ["start", "command"],
+    ["move", "command"],
+    ["stop", "command"],
     ["reed_file", "unknown-tool"],
     ["Glob", "unknown-tool"],
     ["mcp__github__create_issue", "unknown-tool"],

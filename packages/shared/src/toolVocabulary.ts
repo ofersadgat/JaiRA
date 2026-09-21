@@ -195,14 +195,14 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   // `chat_control/*` holds nothing else; `chat/*` holds them beside the project's tools. Served since
   // step 6 (`runtime/workflowTools.ts`, over the host the app lends) — the `unserved` mark they
   // carried until then is gone, and deleting it was the whole change here.
-  { name: "workflows", label: "workflows", category: "tasks", hint: "list workflows, and what a state takes and produces" },
-  { name: "start", label: "start", category: "tasks", hint: "start a task in a workflow, from this conversation" },
-  { name: "move", label: "move", category: "tasks", hint: "move a task to another state — forward, backward or across workflows" },
-  { name: "tasks", label: "tasks", category: "tasks", hint: "what was started here, where each stands and what it produced" },
-  { name: "answer", label: "answer", category: "tasks", hint: "settle a question a task is asking" },
-  { name: "hold", label: "hold", category: "tasks", hint: "hold a task where it stands" },
-  { name: "release", label: "release", category: "tasks", hint: "release a held task" },
-  { name: "stop", label: "stop", category: "tasks", hint: "stop a task" },
+  { name: "list_workflows", label: "list_workflows", category: "tasks", hint: "list workflows, and what a state takes and produces" },
+  { name: "start_task", label: "start_task", category: "tasks", hint: "start a task in a workflow, from this conversation" },
+  { name: "move_task", label: "move_task", category: "tasks", hint: "move a task to another state — forward, backward or across workflows" },
+  { name: "list_tasks", label: "list_tasks", category: "tasks", hint: "what was started here, where each stands and what it produced" },
+  { name: "answer_question", label: "answer_question", category: "tasks", hint: "settle a question a task is asking" },
+  { name: "hold_task", label: "hold_task", category: "tasks", hint: "hold a task where it stands" },
+  { name: "release_task", label: "release_task", category: "tasks", hint: "release a held task" },
+  { name: "stop_task", label: "stop_task", category: "tasks", hint: "stop a task" },
 ];
 
 /** By logical name — the lookup every consumer wants. */

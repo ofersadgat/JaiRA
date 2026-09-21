@@ -2,14 +2,14 @@
  * The workflow tools (decision 0005 §3, step 6) — what each takes and what each answers.
  *
  * Eight tools a conversation holds: all of what `chat/control` has, and part of what `chat/session`
- * has. Each is the HOST's operation and not a second implementation of it — `move` is `connectTask`,
- * `start` is the generator and a `task_move`, `hold` / `release` / `stop` are what the board's
+ * has. Each is the HOST's operation and not a second implementation of it — `move_task` is `connectTask`,
+ * `start_task` is the generator and a `task_move`, `hold_task` / `release_task` / `stop_task` are what the board's
  * gestures call — so the shapes here are the contract between the tool a model calls
  * (`runtime/workflowTools.ts`) and the host that serves it (`AppService.workflowHost`).
  *
  * ## Inputs are the target's own (§0, §4)
  *
- * `start` and `move` take `inputs`: an object keyed by the TARGET STATE'S declared input names. The
+ * `start_task` and `move_task` take `inputs`: an object keyed by the TARGET STATE'S declared input names. The
  * platform names none of them. A call whose `inputs` leave a required input open DOES NOTHING and
  * answers `ok: false` with `missing` — each open input with its declared schema, description and why
  * nothing binds it — and `schema`, the target's whole input schema with what the host could bind
@@ -24,10 +24,10 @@ import type { ConnectCandidate, ConnectMissingInput } from "./connect";
 import type { InputSettledVia } from "./adopt";
 
 /** The eight names, in the order the standard list has them. */
-export const WORKFLOW_TOOL_NAMES = ["workflows", "start", "move", "tasks", "answer", "hold", "release", "stop"] as const;
+export const WORKFLOW_TOOL_NAMES = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"] as const;
 export type WorkflowToolName = (typeof WORKFLOW_TOOL_NAMES)[number];
 
-/** Is this one of the eight — by its bare name, or as an agent spells an injected tool (`mcp__<server>__start`)? */
+/** Is this one of the eight — by its bare name, or as an agent spells an injected tool (`mcp__<server>__start_task`)? */
 export function workflowToolOf(name: string): WorkflowToolName | undefined {
   const bare = name.includes("__") ? name.slice(name.lastIndexOf("__") + 2) : name;
   return (WORKFLOW_TOOL_NAMES as readonly string[]).includes(bare) ? (bare as WorkflowToolName) : undefined;
@@ -43,7 +43,7 @@ export interface SuppliedInputs {
   confidence?: number;
 }
 
-/** One declared slot, as `workflows` says it. */
+/** One declared slot, as `list_workflows` says it. */
 export interface WorkflowSlotView {
   schema: JsonValue;
   description?: string;
@@ -84,7 +84,7 @@ export interface SettledInputView {
   from?: string;
 }
 
-/** The refusal `start` and `move` share when required inputs are open: nothing was done. */
+/** The refusal `start_task` and `move_task` share when required inputs are open: nothing was done. */
 export interface InputsMissing {
   ok: false;
   code: "inputs-missing";
@@ -162,7 +162,7 @@ export interface TaskStanding {
   held?: boolean;
   /** Titles of the tasks it waits for. */
   waitsFor?: string[];
-  /** What it is asking a person — what `answer` takes. Never an approval. */
+  /** What it is asking a person — what `answer_question` takes. Never an approval. */
   asking?: Array<{ request: string; kind: string; title?: string; questions?: JsonValue }>;
   /** What it produced, shortened. */
   outputs?: Record<string, string>;
@@ -173,7 +173,7 @@ export interface TasksResult {
 }
 
 export interface AnswerInput {
-  /** The request id, from `tasks` → `asking`. */
+  /** The request id, from `list_tasks` → `asking`. */
   request: string;
   /** A gate's value, in the shape its component returns. */
   value?: JsonValue;
@@ -200,7 +200,7 @@ export interface TaskGestureResult {
   results: Array<{ task: string; ok: boolean; did?: string; reason?: string }>;
 }
 
-/** The journal row an `answer` leaves on the task that asked — host vocabulary, as `workflow.version` is. */
+/** The journal row an `answer_question` leaves on the task that asked — host vocabulary, as `workflow.version` is. */
 export const ANSWERED_EVENT = "jaira.answered";
 
 export interface AnsweredEvent {
@@ -237,8 +237,8 @@ const shortly = (value: unknown, max = 40): string => {
 /**
  * A workflow tool's call, on one line — what its row in the conversation says beside the name.
  *
- * `start` → `feature/product · issue: “Let a person pause…”`; `move` → `<task> → feature/ux · skip`;
- * `release` → the tasks named. Pure over the call's arguments, so a record read a year later draws
+ * `start_task` → `feature/product · issue: “Let a person pause…”`; `move_task` → `<task> → feature/ux · skip`;
+ * `release_task` → the tasks named. Pure over the call's arguments, so a record read a year later draws
  * the same line.
  */
 export function workflowToolSummary(name: WorkflowToolName, args: unknown, titleOf: (taskId: string) => string | undefined = () => undefined): string {
@@ -247,19 +247,19 @@ export function workflowToolSummary(name: WorkflowToolName, args: unknown, title
   const inputs = a["inputs"] !== null && typeof a["inputs"] === "object" && !Array.isArray(a["inputs"]) ? Object.entries(a["inputs"] as Record<string, unknown>) : [];
   const supplied = inputs.map(([key, value]) => `${key}: ${Array.isArray(value) ? value.length : shortly(value)}`);
   switch (name) {
-    case "workflows":
+    case "list_workflows":
       return typeof a["state"] === "string" ? a["state"] : "all";
-    case "start":
+    case "start_task":
       return [typeof a["state"] === "string" ? a["state"] : "", ...supplied].filter((part) => part !== "").join(" · ");
-    case "move":
+    case "move_task":
       return [`${a["task"] !== undefined ? `${named(a["task"])} ` : ""}→ ${typeof a["to"] === "string" ? a["to"] : ""}`, ...(a["skip"] === true ? ["skip"] : []), ...supplied].join(" · ");
-    case "tasks":
+    case "list_tasks":
       return a["all"] === true ? "all" : "started here";
-    case "answer":
+    case "answer_question":
       return typeof a["request"] === "string" ? a["request"] : "";
-    case "hold":
-    case "release":
-    case "stop": {
+    case "hold_task":
+    case "release_task":
+    case "stop_task": {
       const tasks = Array.isArray(a["tasks"]) ? a["tasks"] : a["task"] !== undefined ? [a["task"]] : [];
       return tasks.map(named).join(" · ");
     }

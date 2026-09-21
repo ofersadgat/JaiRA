@@ -200,12 +200,17 @@ second implementation of them:
 
 | Tool | Does |
 | --- | --- |
-| `workflows` | lists workflows and a state's label, description and input and output schemas, a level at a time |
-| `start` | `connect` from the conversation itself: a new child. Its input schema **is the target state's input schema**, with what the host could bind already filled |
-| `move` | `connect(task, target)` — forward, backward, across workflows; `skip: true` goes directly |
-| `tasks` | what was started here, where each stands, what each produced |
-| `answer` | settles a question a child is asking (§4) |
-| `hold`, `release`, `stop` | what the board's gestures do |
+| `list_workflows` | lists workflows and a state's label, description and input and output schemas, a level at a time |
+| `start_task` | `connect` from the conversation itself: a new child. Its input schema **is the target state's input schema**, with what the host could bind already filled |
+| `move_task` | `connect(task, target)` — forward, backward, across workflows; `skip: true` goes directly |
+| `list_tasks` | what was started here, where each stands, what each produced |
+| `answer_question` | settles a question a child is asking (§4) |
+| `hold_task`, `release_task`, `stop_task` | what the board's gestures do |
+
+Each is named with a verb and what it acts on — `start_task`, not `start` — so a
+model reading the list knows what it does, and so the names cannot shadow a shell
+program a toolset names as a command subject (`start`, `move`, `stop`). Renamed
+after step 6, 2026-09-21.
 
 The drag calls `connect` directly. A model is involved in a drop only when
 something has to be supplied or asked.
@@ -248,7 +253,7 @@ is the default for every forward move, however it was asked for. A task
 with no control conversation is adopted into one first (§3), because the
 conversation is what answers on the way.
 
-- **The control conversation answers what comes up**, through `answer`:
+- **The control conversation answers what comes up**, through `answer_question`:
   questions (`choose_option`, `fill_form`, an agent's `AskUserQuestion`)
   and judgement gates on documents. It answers with the whole conversation
   behind it, which is the reason it is the one to do it. Each answer is
@@ -301,7 +306,7 @@ person's backward move is a `task_move`, not a forged output.
 Starting work from a conversation spends money on a model's say-so. What
 each workflow tool may do without asking is the conversation's **toolset**
 ([0007](0007-toolsets.md)): `chat_control/ask-first` and `chat/ask-first`
-ship asking, as a conversation does today; a project that wants `start` to
+ship asking, as a conversation does today; a project that wants `start_task` to
 go ahead overrides one file, or picks another toolset from the bucket.
 
 ### What draws
@@ -319,7 +324,7 @@ are in [0005-assets/](0005-assets/) against the app's own stylesheet
   conversation after the fact, and **Undo** on the card takes the move back
   (for an adoption, a rewind past the mirror row).
 - **The control conversation.** Work started from it draws the way a
-  tool call and a nested state already do: the `start` row, the child on
+  tool call and a nested state already do: the `start_task` row, the child on
   the rail beneath it with its own questions in its own sheet, and the
   composer still the conversation's. A move across workflows leaves a
   note: "adopted into **feature** as `product` · standing at `ux`"; a fan
@@ -375,7 +380,7 @@ conversation's. Per-item workflows: items share one document.
    `connect`; `chat/session` growing its first child; `chat/control` for a
    task that becomes a dynamic workflow. **Built 2026-09-21** — see
    "What step 6 settled" below.
-7. **Fast-forward**: `answer`, `settled_by: control`, `autopilot.askBelow`,
+7. **Fast-forward**: `answer_question`, `settled_by: control`, `autopilot.askBelow`,
    the strip, Skip.
 
 Each step is usable on its own. 1–3 already answer "one phase" and "use
@@ -562,7 +567,7 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
 - **`connect` owns an order, and no mechanism.** A move is `task:move`, an
   adoption is `task:adopt`, a modified workflow is the generator; `connectTask`
   is the order they are tried in and is handed the host's two operations, so
-  the drop, the CLI and — later — the conversation's `move` tool are one code
+  the drop, the CLI and — later — the conversation's `move_task` tool are one code
   path down to the same `task_move`. A waiting `on_user_event` rule still gets
   its answer first, and a drag a workflow offers is unchanged.
 - **A column is a target, and a workflow's own column means "into it".** At the
@@ -573,7 +578,7 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
 - **The seam for fast-forward is `forward: "fast-forward" | "skip"`**, absent
   reading `fast-forward`. Until step 7 a forward move that steps over states is
   refused with what lies between, unless it says `skip`; `skip: true` is the
-  same thing in the spelling the `move` tool and the CLI use. The very next
+  same thing in the spelling the `move_task` tool and the CLI use. The very next
   state needs neither. **The board never skips**: a preview has no controls
   and a drop that silently interrupts a running state is not a drop, so a
   column that is states ahead says so and refuses. `jaira task move --skip`
@@ -662,16 +667,16 @@ text above left open:
   the CLI, a test registry — gets `noWorkflowHost`, under which every name
   resolves and every call answers that it cannot be served there, so a state
   that holds one still loads and runs.
-- **`answer` cannot reach an approval, by wiring and not by check.** The host is
+- **`answer_question` cannot reach an approval, by wiring and not by check.** The host is
   handed the interaction hub's and the question hub's pending lists and never
   the approval hub, so there is no third lookup for an approval to be found
   through. On top of that the two lists are filtered to
   `ANSWERABLE_COMPONENTS` — `choose_option`, `fill_form`, `review_artifact`,
-  `edit_artifact` — in BOTH directions: an approval is not among what `tasks`
-  says a task is asking, so no `request` id exists to name, and `answer` refuses
+  `edit_artifact` — in BOTH directions: an approval is not among what `list_tasks`
+  says a task is asking, so no `request` id exists to name, and `answer_question` refuses
   one by component if a caller names it anyway. `confirm_action` and
   `review_artifacts` are the two that are excluded on purpose.
-- **A refusal is the ask.** `start` and `move` answer `inputs-missing` with
+- **A refusal is the ask.** `start_task` and `move_task` answer `inputs-missing` with
   `missing`, the target's whole input `schema` and what the host `filled`
   itself, and write NOTHING — no version, no child, no run. The conversation
   supplies the value from what was said, or asks the person in words, and calls
@@ -703,12 +708,12 @@ text above left open:
   above is what makes that safe. A root that already speaks — a `chat/session`
   that grew a child — keeps its own operation, which is the mechanism behind
   "a session that starts work stays a session".
-- **`start` is not a move across workflows.** It points the conversation's own
+- **`start_task` is not a move across workflows.** It points the conversation's own
   task at a document rooted in ITS OWN state: `mode: "clone"` for a task in no
   document (the frozen copy, conversation and all, gains the child and its
   standing rule), an augmentation for one already in a document. `chat/control`
   is what `CONNECT_CONVERSATION` names and is only ever made by a MOVE.
-- **A `start` made while an engine holds the task is queued.** A running engine
+- **A `start_task` made while an engine holds the task is queued.** A running engine
   runs the bundle it loaded, and a version written now is one it cannot see. So
   the version is written and the move is queued on `ProjectSession.afterRun`,
   taken by the run-end handler when that run ends WELL — the same place, and for
@@ -733,7 +738,7 @@ text above left open:
   time), and a conversation controlling work says how much: `TaskSummary.controls`
   counts the tasks filed under it, adopted by it or made by its fan-out.
 - **The note under a tool row is the tool's own answer.** "adopted into
-  **feature** as `product` · standing at `ux`" is drawn from what `move`
+  **feature** as `product` · standing at `ux`" is drawn from what `move_task`
   returned, inline under the row that returned it, in the glyph and words a
   `made` or `entered` note uses. It is not a rail row: a rail row is built from
   the journal, and nothing in the journal says what a tool answered. A refused
@@ -761,10 +766,10 @@ text above left open:
 - `connect`'s `askAfter` is built — a drop whose target's inputs do not all bind
   makes the conversation WITHOUT the target and answers what it is about to ask
   for — and the board does not send it yet, so a drop of that shape is still
-  refused with what is missing. The conversation's own `start` is what mounts
+  refused with what is missing. The conversation's own `start_task` is what mounts
   the target afterwards.
-- The "fast-forward strip" and `answer`'s use by a fast-forward are step 7's;
-  `answer` is wired and callable now, and nothing calls it automatically.
+- The "fast-forward strip" and `answer_question`'s use by a fast-forward are step 7's;
+  `answer_question` is wired and callable now, and nothing calls it automatically.
 - A control conversation's opening row is drawn as the tool's own note, not as
   a row on the rail beside the panel as the mockup has it.
 
