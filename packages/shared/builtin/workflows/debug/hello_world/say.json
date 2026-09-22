@@ -2,12 +2,17 @@
   "label": "Say hello",
   "outputs": {
     "greeting": {
-      "schema": {
-        "type": "string"
-      }
+      "binding": ".operation.output.greeting"
     }
   },
   "operation": {
-    "prompt": "Reply with exactly this and nothing else: Hello, world!"
+    "prompt": "Reply with exactly this and nothing else: Hello, world!",
+    "output": {
+      "greeting": {
+        "schema": {
+          "type": "string"
+        }
+      }
+    }
   }
 }
