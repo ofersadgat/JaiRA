@@ -178,16 +178,30 @@ An `askAfter` connect that answers `asking` makes, for `new`, the document, its 
 
 `ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made}` or `{kind: "move", taskId, after, pin?, wasCompleted?, asking?}`. `after` is the task's last journal seq before the move. `asking: true` marks an `askAfter` connect of a `cloned` or `augmented` task, which moved nothing.
 
-### `task:connectUndo` takes a connect back with the token it handed out
+### `task:connectUndo` takes back the drop a card's task keeps, while that drop is still the last thing it did
 
-`task:connectUndo` takes `{undo?: ConnectUndo, taskId?, project?}` and answers `{taskId, removed?}`. A real connect also KEEPS its token on the card's task file (`TaskMeta.connectUndo`, [task-file](task-file.md)), so it survives a restart: given a `taskId` whose task keeps one, the kept token is used — a move's `after` re-read from its place in the journal, counted in rows — whatever `undo` says. Neither kept nor given refuses with `task '<id>' has no connect to take back`. A use clears the kept token, and `TaskSummary.undoable` and `BoardCard.undoable` say which tasks still keep one.
+`task:connectUndo` takes `{taskId, project?}` and answers `{taskId, removed?}`. `taskId` is the card whose Undo was pressed. A real connect KEEPS its token on that card's task file (`TaskMeta.connectUndo`, [task-file](task-file.md)) — the moved task, or the parent an adoption made — replacing whatever an earlier drop kept there, so it survives a restart. The renderer holds no token; a card offers Undo exactly where `BoardCard.undoable` (and `TaskSummary.undoable`) says so.
+
+The token means only "take back what I just did" ([decision 0005](../decisions/0005-connect.md), "Made durable", amended 2026-09-22). Two things end it:
+
+- **The next decision about the task drops it where it is made.** A connect that is made (a board drop, `move_task`, `jaira task move`) drops the moved task's token, and the host then keeps the new connect's own; an adoption drops the adopted task's; `task:rewind` (and "Answer it yourself", and the Undo's own cut), `task:fork` and a split, `task:cancel` (a Stop, from any caller, including another process's cancel request and the `hold`/`stop` tools) and `task:rerun` drop the task's. A close is not a decision and drops nothing.
+- **The task's own progress past where the drop landed ends it**, judged from the journal every time the token is read (`@jaira/persistence` `connectUndo.ts`, `staleReason`), by `undoable` and by `task:connectUndo` alike. A later `task:move` is caught here by what it writes (a `jaira.moveHeld`, a reopening, an entry).
+
+| Kind | Past the landing |
+| --- | --- |
+| move | the state it landed in (`ConnectPlan.standsAt.path`) settles with any outcome but `canceled`; anything outside it is entered; a state of the task's own finishes `success` after the drop (the state a held move waited for); a turn of the task's conversation |
+| adoption | the same, on the parent's journal after the mirror row; or the adopted task enters or settles anything after the drop |
+| `asking` drop | the conversation's `start_task` mounts the target (`jaira.supplied`, `jaira.moved` with `start_task`, or any entry outside the conversation); its turns before that are the drop's |
+| fast-forward | nothing while it runs; when it ARRIVES the target is the landing, judged as a move's. A `skipped` or `stopped` end is a decision; a `failed` one leaves the Undo |
+
+A stale token is refused with `'<title>' has moved on since the drop (<why>), so it can no longer be undone — rewind it to take the drop back`, and dropped. A retry that deletes the landing's failure judges the token first (`settleConnectUndo`), so an Undo the failure ended does not come back.
 
 | `undo.kind` | Does |
 | --- | --- |
-| `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made that had entered nothing of its own is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. A parent that ran something is kept; a turn of its conversation is not something it ran |
-| `move` | `task:rewind` to `after + 1` when the journal holds anything later, which puts a cloned task back under its previous pin; a task that had completed is put back completed with the outputs its reopening cleared, read from the `jaira.reopened` row ([journal-events](journal-events.md)); then the pin is put back if it still differs. With `asking`, the journal is cut at `after + 1` WITHOUT a resume and the task's status and outcome are put back as they were. A kept token carries `asking` too, so an Undo after a restart still takes the conversation back |
+| `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. Everything it did since the drop was the drop's own, or the token would not stand |
+| `move` | `task:rewind` to the task's first journal row after `after`, which puts a cloned task back under its previous pin; a task that had completed is put back completed with the outputs its reopening cleared, read from the `jaira.reopened` row ([journal-events](journal-events.md)); then the pin is put back if it still differs. With `asking`, the journal is cut there WITHOUT a resume and the task's status and outcome are put back as they were. A kept token carries `asking` too, so an Undo after a restart still takes the conversation back |
 
-Either kind first stops a turn the task's conversation is taking and waits for it to land, up to the chat wait, so the opening turn an `askAfter` drop started cannot write after the cut.
+A run the drop started — the landing parked on a gate, a fast-forward on its way — is the drop's effect, so either kind first stops it in this process and waits for it to end; a run another process drives is refused. Either kind then stops a turn the task's conversation is taking and waits for it to land, up to the chat wait, so the opening turn an `askAfter` drop started cannot write after the cut.
 
 ### `task:adopt` takes a task up as a child, and answers the plan or the refusal
 
@@ -299,7 +313,7 @@ A completed task's output is offered when its value validates against the slot's
 | `task:resume` of a history that cannot load | `task '<id>' cannot be resumed: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Running it again would repeat them.` | rerun it |
 | `task:move` to a state that is not a child of the instance named, or naming an instance the task does not have | `cannot move task '<id>' to '<state>': '<state>' is not a declared child of '<stateId>'` for a running task, `… it is not a state of '<stateId>'` or `… it has no instance '<instanceId>'` for one that is not; nothing is started | pick a state of that level |
 | `task:move` of a task another process is running, or one that never ran and names no document | `task '<id>' is <status> in another process — move it there`, or `task '<id>' has never run, so it stands nowhere to be moved from — start it instead` | move it there, or start it |
-| `task:connectUndo` of a running task, or of an adoption whose mirror row is gone | `'<title>' is running — stop it before taking the move back`, `task '<id>' is running — …`, or `'<title>' no longer holds the task it adopted — there is nothing to take back` | stop it, or nothing |
+| `task:connectUndo` of a task that keeps no token, one that has moved on since the drop, one another process runs, or an adoption whose mirror row is gone | `task '<id>' has no connect to take back`, `'<title>' has moved on since the drop (<why>), so it can no longer be undone — rewind it to take the drop back`, `'<title>' is running in another process — take the drop back there`, or `'<title>' no longer holds the task it adopted — there is nothing to take back` | rewind the task, or take it back in the other process |
 | `task:move` of a history that cannot load | `task '<id>' cannot be moved: <blocked>`, or `… N operation(s) have no readable record (first: <state> — <reason>). Reopening it would repeat them.` | rerun it |
 | `task:create` names a source task that does not exist, or one that completed without that output | `input '<name>' is taken from task '<id>', which does not exist`, or `… from '<title>', which completed without producing '<output>'` | pick another source |
 | A start of a task whose source completed without the output it owed | `task '<id>' takes '<name>' from '<title>', which has not produced '<output>'` | create the task again with another source |
@@ -329,8 +343,8 @@ A completed task's output is offered when its value validates against the slot's
 - `task:resumable` and `task:detail` throw for a startable task with history whose snapshot is missing or corrupt, because the plan loads the snapshot without a fallback.
 - `task:connect` answers a refusal as data, as `task:adopt` does. A real connect writes in order — the document, its task, the adoption, the move — and a refusal or rejection part-way leaves what was written: the `adopt` refusal of a `new` names the document and the task already made, and a `task:move` that rejects after an adoption leaves the adoption.
 - `task:connect` decides whether inputs will bind statically, from the lowered wires and the loaded machine: a wire counts as bound when every child it reads has ended well, and a computed expression that reads nothing is taken to resolve. The engine's own entry is still the judge.
-- A `move` undo of a task that had completed restores `completed` and `success` but not the outputs the reopen cleared.
-- The `Undo` token lives in the renderer's memory: it does not survive a restart, after which `task:rewind` takes the same thing back.
+- `task:connectUndo` of a card whose drop is still running stops that run first: the run is the drop's, and a Stop from the card would have ended the Undo.
+- A kept Undo that has gone stale stays on the task file until something acts on it (`task:connectUndo`, or the next decision); only the read says it is stale, so `undoable` is absent at once.
 - `task:adopt` answers a refusal as data and rejects only for a broken installation, an unapproved module included. A real adoption whose parent then refuses to start has already written the parent and the mirror rows.
 - `task:rewind` and `task:delete` of a task that adopted others clear those tasks' `origin` and `parentTaskId` where the mirror row is gone.
 - `task:resumable` has no renderer caller. The renderer reads the same plan from `task:detail`'s `resume`, present only for a startable task.

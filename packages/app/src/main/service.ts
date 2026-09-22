@@ -52,6 +52,9 @@ import {
   askingMessage,
   connectTask as connectTaskIn,
   CONNECT_CONVERSATION,
+  dropConnectUndo,
+  keepConnectUndo,
+  keptConnectUndo,
   currentPin,
   ensureControlConversation,
   descentFollower,
@@ -382,9 +385,6 @@ import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITIN
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
 import { arrivedAt, fastForwardView, labelOfTarget, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
 import {
-  clearConnectUndo,
-  keepConnectUndo,
-  keptConnectUndo,
   noteFastForwardEnd,
   noteFastForwardStart,
   noteHeldMove,
@@ -5408,8 +5408,15 @@ export class AppService {
     });
     if (request.dryRun !== true) {
       this.connectBrowsers.delete(open.key);
-      // The card's Undo, kept on the task so it survives a restart (`hostModes.ts`).
-      if (result.ok && result.undo !== undefined) keepConnectUndo(project, result.taskId ?? request.taskId, result.undo);
+      // The card's Undo, kept on the task so it survives a restart — REPLACING whatever an earlier drop
+      // left there (`connectTaskIn` already dropped the moved task's). Kept with where the drop landed,
+      // which is what judges it from here on (`connectUndo.ts`).
+      if (result.ok && result.undo !== undefined) {
+        keepConnectUndo(project, result.taskId ?? request.taskId, result.undo, {
+          landing: result.plan.standsAt.path,
+          asking: result.asking !== undefined && result.asking.length > 0,
+        });
+      }
       this.log({
         level: result.ok ? "info" : "warn",
         source: "run",
@@ -5916,32 +5923,53 @@ export class AppService {
   }
 
   /**
-   * Take a connect back ("task:connectUndo"), with the token the connect handed out.
+   * Take a connect back ("task:connectUndo"), with the token the card's task keeps.
+   *
+   * The token means only "take back what I just did" (`@jaira/persistence` `connectUndo.ts`): it is
+   * judged against the journal HERE, as the board judges it, and one the task has moved on from is
+   * refused — and dropped — however it was reached, including by a window still offering it.
    *
    *  - An ADOPTION is undone by cutting the parent's journal at the mirror row, which un-adopts
    *    (`releaseUnmirroredAdoptions`). Nothing is resumed: the point is that the task is its own
-   *    again, not that the parent now runs the child. A parent the connect MADE that holds nothing
-   *    of its own afterwards is removed — its row and file only, because the worktree it stands in is
-   *    the adopted task's.
+   *    again, not that the parent now runs the child. A parent the connect MADE is removed — its row
+   *    and file only, because the worktree it stands in is the adopted task's. Everything it did since
+   *    the drop was the drop's own, or the token would not stand.
    *  - A MOVE is undone by the ordinary rewind to before it. A cut behind the row that moved a task
    *    into a document puts it back under its previous pin, which is how a clone is undone; a move
    *    nothing has journaled yet only has its pin put back.
    *
-   * Refused while the task runs, as a rewind is.
+   * A run the DROP started (the landing parked on a gate, a fast-forward on its way) is the drop's
+   * effect, so it is stopped here and waited out first — a person asked to stop it would have ended
+   * the Undo. A run another process is driving is refused: it is taken back there.
    */
   async undoConnect(request: TaskConnectUndoRequest): Promise<TaskConnectUndoResult> {
     const open = this.session(request.project);
     const project = open.project;
-    // The token the card's task KEEPS wins over one handed in: it is the one that survived a restart,
-    // and a move's place in the journal is re-read from it rather than trusted as a seq.
-    const kept = request.taskId !== undefined ? keptConnectUndo(project, request.taskId) : undefined;
-    const undo = kept ?? request.undo;
-    if (undo === undefined) throw this.refusal("run", `task '${request.taskId ?? "?"}' has no connect to take back`);
-    const keeper = request.taskId ?? (undo.kind === "adopt" ? undo.parentTaskId : undo.taskId);
-    const running = (taskId: string): boolean => open.live.has(taskId) || project.jobs.liveRunJob(taskId, Date.now()) !== undefined;
+    const keeper = request.taskId;
+    // The token the card's task KEEPS is the only one: it survived a restart, and a move's place in
+    // the journal is re-read from it rather than trusted as a seq.
+    const kept = keptConnectUndo(project, keeper);
+    if (kept === undefined) throw this.refusal("run", `task '${keeper}' has no connect to take back`);
+    if ("stale" in kept) {
+      dropConnectUndo(project, keeper);
+      this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(open, { type: "store:invalidate", scope: "board" });
+      throw this.refusal("run", `'${project.tasks.tryRead(keeper)?.title ?? keeper}' has moved on since the drop (${kept.stale}), so it can no longer be undone — rewind it to take the drop back`);
+    }
+    const { undo } = kept;
     const invalidate = (): void => {
       this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
       this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    };
+    /** The drop's own run is stopped and waited out; another process's is not ours to stop. */
+    const stopDropRun = async (taskId: string, title: string): Promise<void> => {
+      const live = open.live.get(taskId);
+      if (live !== undefined) {
+        this.cancelTaskIn(open, taskId);
+        await live.done;
+        return;
+      }
+      if (project.jobs.liveRunJob(taskId, Date.now()) !== undefined) throw this.refusal("run", `'${title}' is running in another process — take the drop back there`);
     };
     // A conversation the drop made, or gave a turn to, may be taking its opening turn: stopped, and
     // waited out, before its rows are cut — a turn that landed after the cut would write into a journal
@@ -5955,7 +5983,7 @@ export class AppService {
       const { parentTaskId, adoptedTaskId } = undo;
       const parent = project.tasks.tryRead(parentTaskId);
       if (parent === undefined || project.runtime.get(parentTaskId) === undefined) throw this.refusal("run", `unknown task '${parentTaskId}'`);
-      if (running(parentTaskId)) throw this.refusal("run", `'${parent.title}' is running — stop it before taking the move back`);
+      await stopDropRun(parentTaskId, parent.title);
       if (undo.made) await quiet(parentTaskId);
       const mirror = project.events.list(parentTaskId).find((row) => row.event.type === "instance.entered" && row.event.instanceId === adoptedTaskId);
       if (mirror === undefined) throw this.refusal("run", `'${parent.title}' no longer holds the task it adopted — there is nothing to take back`);
@@ -5963,43 +5991,40 @@ export class AppService {
         if (owner === parentTaskId) open.hub.reject(requestId, "the move that made this task was taken back");
       }
       open.questions.dismissFor(parentTaskId);
-      // What the parent has done of its OWN since: anything it entered that is not a mirror row.
-      // Everything it ran comes AFTER the mirror, so the cut takes it too — which is what rewinding
-      // past the mirror means — but a task that has done work is kept, to be looked at or resumed.
-      // A turn of its conversation is not work of its own: talking is what a conversation a drop made
-      // does first (`askAfterDrop`), and taking the drop back takes the conversation with it.
-      const own = project.events
-        .list(parentTaskId)
-        .some((row) => row.seq > mirror.seq && row.event.type === "instance.entered" && (row.event as { adopted?: boolean }).adopted !== true && !isChatInstance(row.event.instanceId));
+      // Everything the parent ran comes AFTER the mirror, so the cut takes it too — which is what
+      // rewinding past the mirror means. The token standing says all of it was the drop's own: the
+      // landing's run, or the opening turn of a conversation the drop made to ask.
       cutTaskJournal(project, parentTaskId, mirror.seq);
       releaseUnmirroredAdoptions(project, parentTaskId);
       let removed: string | undefined;
-      if (undo.made && !own) {
+      if (undo.made) {
         // Its worktree is the adopted task's (`writeAdoption`), so the row lets go of it rather than removing it.
         project.runtime.clearWorktree(parentTaskId, Date.now());
         deleteTask(project, parentTaskId);
         removed = parentTaskId;
       }
       this.log({ level: "info", source: "run", message: `took back the adoption of ${adoptedTaskId} into ${parentTaskId}${removed !== undefined ? ", and removed the task it had made" : ""}`, project: open.key, taskId: adoptedTaskId });
-      clearConnectUndo(project, keeper);
+      if (removed === undefined) dropConnectUndo(project, keeper);
       invalidate();
       return { taskId: adoptedTaskId, ...(removed !== undefined ? { removed } : {}) };
     }
     const { taskId } = undo;
-    const row = project.runtime.get(taskId);
-    if (row === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
-    if (running(taskId)) throw this.refusal("run", `task '${taskId}' is running — stop it before taking the move back`);
+    if (project.runtime.get(taskId) === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
+    await stopDropRun(taskId, project.tasks.tryRead(taskId)?.title ?? taskId);
     if (undo.asking === true) await quiet(taskId);
-    const moved = project.events.list(taskId).some((stored) => stored.seq > undo.after);
-    if (moved && undo.asking === true) {
+    const row = project.runtime.get(taskId)!;
+    // The cut is at the task's FIRST row after the drop — a seq of its own. `after + 1` need not be
+    // one: seqs are the table's, and a resume may have deleted rows the drop stood behind.
+    const moved = project.events.list(taskId).find((stored) => stored.seq > undo.after);
+    if (moved !== undefined && undo.asking === true) {
       // Nothing moved: what was written is the conversation's opening turn. Cut, and NOT resumed —
       // a rewind resumes a machine with something left to do, and this one was standing still.
       // The cut re-reads the status off the journal; the task goes back to standing exactly as it did.
-      cutTaskJournal(project, taskId, undo.after + 1);
+      cutTaskJournal(project, taskId, moved.seq);
       if (row.outcome !== undefined) project.runtime.endTask(taskId, row.outcome, Date.now());
       project.runtime.setStatus(taskId, row.status, Date.now());
-    } else if (moved) {
-      await this.rewindTask({ taskId, at: undo.after + 1, project: open.dir });
+    } else if (moved !== undefined) {
+      await this.rewindTask({ taskId, at: moved.seq, project: open.dir });
       // A task that had FINISHED goes back to having finished: the cut took away everything since.
       // The rewind already did that, outputs and all, when the reopening journaled what it cleared;
       // this is for a move made before reopenings were journaled.
@@ -6013,7 +6038,7 @@ export class AppService {
       project.runtime.setPin(taskId, undo.pin.snapshotHash, undo.pin.documentId ?? null, Date.now());
     }
     this.log({ level: "info", source: "run", message: `took back the move of ${taskId}`, project: open.key, taskId });
-    clearConnectUndo(project, keeper);
+    dropConnectUndo(project, keeper);
     invalidate();
     return { taskId };
   }
@@ -6256,6 +6281,8 @@ export class AppService {
     const row = open.project.runtime.get(request.taskId);
     if (row === undefined) throw this.refusal("run", `unknown task '${request.taskId}'`);
     if (row.status === "running") throw this.refusal("run", `task '${request.taskId}' is already running`);
+    // Running it again is a decision about it: a connect's Undo it kept is over (`connectUndo.ts`).
+    dropConnectUndo(open.project, request.taskId);
     const meta = open.project.tasks.read(request.taskId);
     const copy = createTask(open.project, {
       title: meta.title,
@@ -6328,6 +6355,9 @@ export class AppService {
   private cancelTaskIn(session: ProjectSession, taskId: string): { taskId: string } {
     // A stop is the later word about a fast-forward too: what is parked from here on is the person's.
     this.endFastForward(session, taskId, "stopped", "a person stopped the run");
+    // …and a decision about the task, which ends a connect's Undo it kept (`connectUndo.ts`). A close
+    // never comes through here: it is not a decision.
+    dropConnectUndo(session.project, taskId);
     const run = session.live.get(taskId);
     if (run) {
       // Fail any gate this task is parked on, or the abort would never be observed.

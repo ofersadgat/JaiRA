@@ -75,12 +75,12 @@ export function requestFor(offers: DragOffers, taskId: string, columnKey: string
 }
 
 /**
- * The cards on this board that carry **Undo** (decision 0005 step 5): the ones a connect in this
- * window made or moved (`window`, keyed by task id), and the ones whose task KEEPS a connect's token
- * (`BoardCard.undoable`) — which is what survives a restart.
+ * The cards on this board that carry **Undo** (decision 0005 step 5): exactly the ones the board
+ * says are `undoable`. The window keeps no token of its own — the task file keeps it, and main judges
+ * it against the journal on every read, so a card stops offering Undo the moment its task moves on.
  */
-export function undoableOn(board: BoardView, window: Readonly<Record<string, unknown>>): ReadonlySet<string> {
-  const out = new Set(Object.keys(window));
+export function undoableOn(board: BoardView): ReadonlySet<string> {
+  const out = new Set<string>();
   for (const card of [...board.columns.flatMap((column) => column.cards), ...board.atLevel]) if (card.undoable === true) out.add(card.taskId);
   return out;
 }

@@ -75,6 +75,7 @@ import { DYNAMIC_ROOT_PREFIX, loadPinnedBundle } from "./documents";
 import { generateDocumentVersion, type GenerateVersionResult } from "./dynamicDocuments";
 import { createTask, pinWorkflow } from "./lifecycle";
 import { buildTaskLoad } from "./load";
+import { dropConnectUndo } from "./connectUndo";
 import type { Project } from "./project";
 import { bundleFor } from "./views";
 import { browseWorkflows } from "./workflows";
@@ -571,8 +572,18 @@ function moveRequest(request: TaskConnectRequest, taskId: string, move: ConnectM
 /**
  * Send a task to a state — see the module header. A refusal is an answer; only a broken
  * installation (a module awaiting approval, a generator bug) rejects.
+ *
+ * A connect that was MADE is the next decision about the task, so an Undo it kept from an earlier
+ * drop is over (`connectUndo.ts`); a host that hands this connect's own Undo to a card keeps that
+ * one after this returns. A dry run and a refusal decide nothing.
  */
 export async function connectTask(project: Project, request: TaskConnectRequest, host: ConnectHost): Promise<TaskConnectResult> {
+  const result = await connectOnce(project, request, host);
+  if (result.ok && !result.dryRun) dropConnectUndo(project, request.taskId);
+  return result;
+}
+
+async function connectOnce(project: Project, request: TaskConnectRequest, host: ConnectHost): Promise<TaskConnectResult> {
   const dryRun = request.dryRun === true;
   const { taskId } = request;
   const meta = project.tasks.tryRead(taskId);

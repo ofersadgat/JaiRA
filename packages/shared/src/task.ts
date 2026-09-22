@@ -71,7 +71,10 @@ export interface TaskMeta {
   dependsOn?: string[];
   /**
    * How to take back the connect that last made or moved this task — the card's **Undo**, kept here
-   * so it survives a restart. Cleared when it is used.
+   * so it survives a restart. It means only "take back what I just did": the next decision about the
+   * task drops it (another connect replaces it), and it is judged against the journal whenever it is
+   * read — once the task has done work of its own past where the drop landed, it is neither offered
+   * nor used (`@jaira/persistence` `connectUndo.ts`).
    */
   connectUndo?: StoredConnectUndo;
   createdAt: string; // ISO 8601

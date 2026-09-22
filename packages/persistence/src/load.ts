@@ -92,6 +92,7 @@ import { hydrate } from "./blobStore";
 import type { JairaDb } from "./db";
 import type { Project } from "./project";
 import { adoptedStandInId } from "./adopt";
+import { settleConnectUndo } from "./connectUndo";
 
 /** A live leaf of the loaded machine: somewhere the continuing run picks up spending again. */
 export interface LoadFrontierEntry {
@@ -235,6 +236,9 @@ export function releaseRevivedFailures(project: Project, load: TaskLoad): number
   };
   walk(load.loaded);
   if (live.length === 0) return 0;
+  // The failure deleted here may be what ended a connect's Undo (the state a drop landed in failed):
+  // judged before it is forgotten, so a retry does not bring the Undo back (`connectUndo.ts`).
+  settleConnectUndo(project, load.taskId);
   const marks = live.map(() => "?").join(", ");
   const result = project.db
     .prepare(

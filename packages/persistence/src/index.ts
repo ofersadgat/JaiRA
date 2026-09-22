@@ -48,3 +48,5 @@ export * from "./dynamicDocuments";
 // `connect(task, target)`: the three resolutions and their composition (decision 0005 §1).
 export * from "./connect";
 export * from "./hostRows";
+// A connect's Undo: kept on the task file, dropped by the next decision, judged against the journal.
+export * from "./connectUndo";

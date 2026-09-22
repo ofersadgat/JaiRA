@@ -255,26 +255,42 @@ export type TaskConnectResult =
 
 export interface TaskConnectUndoRequest {
   project?: ProjectRef;
-  /** The token the connect handed out. Absent ⇒ the one the task named by {@link taskId} keeps. */
-  undo?: ConnectUndo;
   /**
-   * The card whose Undo was pressed. When that task keeps a token (`TaskMeta.connectUndo`), the kept
-   * one is used — it is the one that survives a restart, and its place in the journal is re-read.
+   * The card whose Undo was pressed. The token that card's task KEEPS (`TaskMeta.connectUndo`) is the
+   * only one there is: it is judged against the journal when it is used, and a stale one is refused.
    */
-  taskId?: string;
+  taskId: string;
 }
 
 /**
  * A connect's Undo as the task file KEEPS it, so it survives a restart (decision 0005 step 5, made
- * durable 2026-09-22).
+ * durable 2026-09-22) — and what it takes to judge whether it still means "take back what I just
+ * did" (2026-09-22, the same day: a card no longer offers Undo forever).
  *
- * `rows` is where a move's `after` stood, counted as the number of the task's journal rows at or
- * before it. A seq does not outlive the table that minted it — a file-backed journal re-mints every
- * seq at each open that replays — while the rows before a point stay the rows before it.
+ * The WATCHED journal is the moved task's for a move, and the parent's for an adoption. Every count
+ * is a number of journal rows rather than a seq: a seq does not outlive the table that minted it,
+ * while the rows before a point stay the rows before it.
  */
 export interface StoredConnectUndo {
   undo: ConnectUndo;
-  rows?: number;
+  /**
+   * A move: the moved task's journal rows at or before the move's `after` — where the Undo cuts back
+   * to, and where judging starts. An adoption: the ADOPTED task's journal rows at the drop — it must
+   * do nothing past them.
+   */
+  rows: number;
+  /**
+   * The watched journal's rows when the token was kept, the drop's own writes included. A held move,
+   * a fast-forward, a reopening or a supplied start written after this is a later move, not this drop.
+   */
+  kept: number;
+  /** Where the drop landed: `ConnectPlan.standsAt.path`, child keys from the watched task's root. */
+  landing: string[];
+  /**
+   * The drop opened a conversation that asks for the target's inputs (`askAfter`) and moved nothing:
+   * its turns are the drop's, and the conversation's `start_task` mounting the target ends the Undo.
+   */
+  asking?: true;
 }
 
 export interface TaskConnectUndoResult {

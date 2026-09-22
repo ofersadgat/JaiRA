@@ -491,6 +491,71 @@ describe("the answers can be taken back", () => {
     // `a`'s answer stands, `b`'s is gone with the cut.
     expect(answeredRows(taskId)).toHaveLength(1);
     expect(nodeByKey(taskId, "a")!.settledBy).toMatchObject({ via: "control" });
+    // A rewind is a decision about the task: the drop's Undo went with it.
+    expect(service.listTasks().find((t) => t.taskId === taskId)?.undoable).toBeUndefined();
+  });
+});
+
+describe("the drop's Undo — the fast-forward is the drop's while it runs, and the target is where it landed", () => {
+  const undoable = (taskId: string): boolean | undefined => service.listTasks().find((t) => t.taskId === taskId)?.undoable;
+
+  it("is offered on the way and on arrival, and is over once the target settles", async () => {
+    const taskId = await stoppedAtFirst();
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    // On the way: `a` and `b` answered for you, and the person's own answer to `c` is still the way there.
+    const approval = await nextGate(taskId);
+    expect(promptOf(approval)).toBe("Publish c?");
+    expect(undoable(taskId)).toBe(true);
+    service.submitInteraction(approval.requestId, { confirmed: true });
+    // Arrived: the target is where the drop landed, and standing there is still the drop's.
+    const target = await nextGate(taskId);
+    expect(promptOf(target)).toBe("Pick for e");
+    await settle();
+    expect(service.taskDetail(taskId).fastForward).toBeUndefined();
+    expect(endRow(taskId)).toMatchObject({ end: "arrived" });
+    expect(undoable(taskId)).toBe(true);
+    // The task moves on from it: the target settles, and Undo would throw that away.
+    service.submitInteraction(target.requestId, { decision: "go" });
+    await until(() => statusOf(taskId) === "completed", "the task to finish");
+    expect(undoable(taskId)).toBeUndefined();
+    await expect(service.undoConnect({ taskId })).rejects.toThrow(/has moved on since the drop \(the state the drop landed in has settled\)/);
+  });
+
+  it("taken back on the way: the run is stopped, the mode and its answers go with the cut, and the pin is put back", async () => {
+    const taskId = await stoppedAtFirst();
+    const pinned = read((p) => p.runtime.get(taskId)!);
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    await nextGate(taskId); // at `c`, still forwarding
+    expect(await service.undoConnect({ taskId })).toEqual({ taskId });
+    expect(ffRows(taskId)).toEqual([]);
+    expect(answeredRows(taskId)).toEqual([]);
+    const back = read((p) => p.runtime.get(taskId)!);
+    expect(back.documentId).toBeUndefined();
+    expect(back.snapshotHash).toBe(pinned.snapshotHash);
+    expect(service.taskDetail(taskId).fastForward).toBeUndefined();
+    expect(undoable(taskId)).toBeUndefined();
+  });
+
+  it("a SKIP is a decision: the Undo is over", async () => {
+    const taskId = await stoppedAtFirst();
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    await nextGate(taskId); // at `c`
+    expect(undoable(taskId)).toBe(true);
+    await service.skipFastForward({ taskId });
+    expect(promptOf(await nextGate(taskId))).toBe("Pick for e");
+    expect(undoable(taskId)).toBeUndefined();
+  });
+
+  it("a failure on the way is not work of the task's own: Undo stays offered", async () => {
+    const script: JsonValue = [
+      { promptIncludes: "Pick for a", output: { answer: { decision: "go" }, confidence: 0.9 } },
+      { model: "worker", error: "the model fell over" },
+    ];
+    const taskId = await stoppedAtFirst("work", script);
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: script }));
+    await until(() => statusOf(taskId) === "failed", "the failure");
+    expect(endRow(taskId)).toMatchObject({ end: "failed" });
+    expect(undoable(taskId)).toBe(true);
   });
 });
 

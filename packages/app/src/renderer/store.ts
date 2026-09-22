@@ -10,7 +10,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type {
   ApprovalScope,
-  ConnectUndo,
   TaskConnectResult,
   BoardView,
   ConfigLayer,
@@ -236,12 +235,6 @@ export interface AppState {
    * affordance appearing on a card somebody was already looking at.
    */
   userEvents: PendingUserEvent[];
-  /**
-   * How to take back what a board drop did, by the task it left standing (decision 0005): the token
-   * `task:connect` handed out. It lives here, for the session — the card it is drawn on is the one
-   * the drop made or moved, and a rewind from the task's own view takes the same thing back later.
-   */
-  connectUndo: Record<string, { project?: string; undo: ConnectUndo }>;
   /** Live event lines for the selected task, newest last. */
   stream: string[];
   /** How much history is stored, for the pruning panel. */
@@ -812,7 +805,6 @@ const EMPTY: AppState = {
   moduleApproval: null,
   questions: [],
   userEvents: [],
-  connectUndo: {},
   stream: [],
   history: null,
   prune: null,
@@ -3236,29 +3228,20 @@ export function useApp() {
       connectTask: async (project: string | undefined, taskId: string, target: string) => {
         try {
           const result = await invoke("task:connect", { taskId, target, start: false, askAfter: true, ...(project !== undefined ? { project } : {}) });
-          if (!result.ok) {
-            patch({ error: result.refusal.message });
-            return;
-          }
-          const at = result.taskId ?? taskId;
-          if (result.undo !== undefined) {
-            const undo = result.undo;
-            patch({ connectUndo: { ...ref.current.connectUndo, [at]: { ...(project !== undefined ? { project } : {}), undo } } });
-          }
+          // The token that takes it back is kept on the card's task in main; the board's refresh says
+          // whether the card carries Undo, for as long as the drop is still the last thing it did.
+          if (!result.ok) patch({ error: result.refusal.message });
         } catch (e) {
           fail(e);
         }
       },
-      /** **Undo** on the card a drop made or moved: un-adopt, or rewind to before the move. */
+      /**
+       * **Undo** on the card a drop made or moved: un-adopt, or rewind to before the move. Main uses the
+       * token the card's task keeps, and refuses it — saying why — once the task has moved on.
+       */
       undoConnect: async (taskId: string, project?: string) => {
-        // The card's task keeps its own token in main, which survives a restart; the one held here
-        // is this window's copy, and main prefers the kept one when both exist.
-        const kept = ref.current.connectUndo[taskId];
-        const at = kept?.project ?? project;
         try {
-          await invoke("task:connectUndo", { taskId, ...(kept !== undefined ? { undo: kept.undo } : {}), ...(at !== undefined ? { project: at } : {}) });
-          const { [taskId]: _used, ...rest } = ref.current.connectUndo;
-          patch({ connectUndo: rest });
+          await invoke("task:connectUndo", { taskId, ...(project !== undefined ? { project } : {}) });
         } catch (e) {
           fail(e);
         }

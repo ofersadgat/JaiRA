@@ -62,6 +62,7 @@ import type { StoredEvent } from "./eventLog";
 import { appendRewound, effectiveLines, journalFileFor } from "./journalFile";
 import { ConversationLog, type NameRow, type RecordRow, type SessionRow } from "./conversationFile";
 import { createTask } from "./lifecycle";
+import { dropConnectUndo } from "./connectUndo";
 import { pinAt, type Pin } from "./documents";
 import { isFileBacked } from "./shadow";
 
@@ -261,6 +262,8 @@ export function rewindTask(project: Project, taskId: string, seq: number, nowMs 
       project.runtime.setPin(taskId, pin.snapshotHash, pin.documentId ?? null, nowMs);
     }
   })();
+  // A rewind is a decision about the task: a connect's Undo it kept is over (`connectUndo.ts`).
+  dropConnectUndo(project, taskId);
   log.info(`rewound ${taskId} to before event ${seq}: ${part.dropped.length} event(s) and ${deletedRecords} record(s) deleted`);
   return { taskId, events: part.dropped.length, records: deletedRecords };
 }
@@ -652,7 +655,10 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
       nowMs,
     );
   })();
-  log.info(`forked ${taskId} before event ${seq} as ${copy.id}: ${part.kept.length} event(s), ${records.length} record(s), ${sessions.size} conversation(s)`);
+  // A fork — or a split, which is a fork per element — is a decision about the task copied: a
+  // connect's Undo it kept is over, and the copy never had one (`connectUndo.ts`).
+  dropConnectUndo(project, taskId);
+  log.info(`forked ${taskId} before event ${seq} as ${copy.id}:${part.kept.length} event(s), ${records.length} record(s), ${sessions.size} conversation(s)`);
   return { taskId: copy.id, boundarySeq, instanceIds };
 }
 

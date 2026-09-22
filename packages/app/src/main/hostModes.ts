@@ -14,31 +14,22 @@
  *  2. **A held move** — journaled when it is held, re-queued on the resumed run's port, and taken
  *     when the source state ends, exactly as the in-memory hold is. A run that ends without taking it
  *     (a Stop is the later word) writes that it dropped it.
- *  3. **A connect's Undo** — kept on the task file, its place in the journal counted in rows rather
- *     than by a seq a replay would re-mint; and a finished task's reopening journals the outputs it
- *     cleared, so a rewind to before it — an Undo — gives them back.
+ *  3. **A connect's Undo** — kept on the task file (`@jaira/persistence` `connectUndo.ts`, which also
+ *     holds the rule that ends it); and a finished task's reopening journals the outputs it cleared,
+ *     so a rewind to before it — an Undo — gives them back.
  *
  * The one rule they share: **a close is not a decision.** A session that is closing writes no end and
  * drops no hold (`ProjectSession.closing`); only a person, or the run itself, ends what a person began.
+ * A close does not drop a kept Undo either.
  */
 import { DirectedTransitions, type DirectedTransition, type EngineEvent } from "@declarative-ai/hw";
-import {
-  descentFollower,
-  heldMoves,
-  journalRowsThrough,
-  openFastForward,
-  recordHostRow,
-  seqAtJournalRow,
-  type Project,
-  type TaskRuntimeRow,
-} from "@jaira/persistence";
+import { descentFollower, heldMoves, openFastForward, recordHostRow, type Project, type TaskRuntimeRow } from "@jaira/persistence";
 import {
   FAST_FORWARD_ENDED_EVENT,
   FAST_FORWARD_EVENT,
   MOVE_DROPPED_EVENT,
   MOVE_HELD_EVENT,
   REOPENED_EVENT,
-  type ConnectUndo,
   type FastForwardEnd,
   type TaskMoveRequest,
 } from "@jaira/shared";
@@ -178,31 +169,4 @@ export function noteReopened(project: Project, row: TaskRuntimeRow): void {
     ...(row.endedAt !== undefined ? { endedAt: row.endedAt } : {}),
     ...(row.outputsJson !== undefined ? { outputsJson: row.outputsJson } : {}),
   });
-}
-
-// --- a connect's Undo -------------------------------------------------------------------------------
-
-/** Keep a connect's Undo on the card it made or moved, so it survives a restart. */
-export function keepConnectUndo(project: Project, taskId: string, undo: ConnectUndo): void {
-  const meta = project.tasks.tryRead(taskId);
-  if (meta === undefined) return;
-  const rows = undo.kind === "move" ? journalRowsThrough(project, undo.taskId, undo.after) : undefined;
-  project.tasks.write({ ...meta, connectUndo: { undo, ...(rows !== undefined ? { rows } : {}) } });
-}
-
-/** The Undo a task keeps, with a move's `after` re-read from its place in the journal. */
-export function keptConnectUndo(project: Project, taskId: string): ConnectUndo | undefined {
-  const kept = project.tasks.tryRead(taskId)?.connectUndo;
-  if (kept === undefined) return undefined;
-  const undo = kept.undo;
-  if (undo.kind === "move" && kept.rows !== undefined) return { ...undo, after: seqAtJournalRow(project, undo.taskId, kept.rows) };
-  return undo;
-}
-
-/** The Undo was used (or can no longer be): the card stops offering it. */
-export function clearConnectUndo(project: Project, taskId: string): void {
-  const meta = project.tasks.tryRead(taskId);
-  if (meta?.connectUndo === undefined) return;
-  const { connectUndo: _used, ...rest } = meta;
-  project.tasks.write(rest);
 }

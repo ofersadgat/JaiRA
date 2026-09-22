@@ -273,7 +273,10 @@ export interface BoardCard {
    * ordinary card otherwise.
    */
   under?: string;
-  /** A connect made or moved this task and can still be taken back — the card carries **Undo**. */
+  /**
+   * A connect made or moved this task and can still be taken back — the card carries **Undo**. Judged
+   * from the journal on every read: absent once the task has done anything past where the drop landed.
+   */
   undoable?: true;
   updatedAt: number;
   /**

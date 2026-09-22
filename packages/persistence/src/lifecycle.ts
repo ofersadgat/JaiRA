@@ -20,6 +20,7 @@ import { removeTaskJournal } from "./journalFile";
 import { removeTaskConversations } from "./conversationFile";
 import { removeTaskRows } from "./rowFile";
 import { isFileBacked } from "./shadow";
+import { dropConnectUndo } from "./connectUndo";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.lifecycle");
@@ -423,6 +424,8 @@ export function cancelTask(project: Project, taskId: string, nowMs = Date.now())
     project.runtime.endTask(taskId, "canceled", nowMs);
     project.runtime.setStatus(taskId, "canceled", nowMs);
   })();
+  // A stop is a decision about the task: a connect's Undo it kept is over (`connectUndo.ts`).
+  dropConnectUndo(project, taskId);
 }
 
 /**

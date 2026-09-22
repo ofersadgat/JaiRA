@@ -2133,8 +2133,8 @@ export default function App(): JSX.Element {
                           connect={{
                             ask: (card, column) => actions.connectPreview(p.project, card.taskId, column.stateId),
                             onDrop: (card, column) => void actions.connectTask(p.project, card.taskId, column.stateId),
-                            // This window's tokens, and the ones a task keeps — which survive a restart.
-                            undoable: undoableOn(state.boards[p.project]!, state.connectUndo),
+                            // Where the board says so: the task keeps the token, and main judges it.
+                            undoable: undoableOn(state.boards[p.project]!),
                             onUndo: (taskId) => void actions.undoConnect(taskId, p.project),
                           }}
                         />

@@ -46,7 +46,7 @@ A borderless rounded tile in a board column: the task's name in mono with a stat
 | success | Flat `--ok` pill `✓ done`; far end is the age, which becomes a date from seven days on. | [success.html](../assets/task-card/success.html) |
 | selected | Ground `--tint-accent` and the name at weight 600. On the Tasks view several cards can be selected at once, each tinted. | [selected.html](../assets/task-card/selected.html) |
 | adopted | A task another task took up as one of its children: drawn under that task's card, 14px in, with a 2px left edge of `--accent` mixed into `--line`. Its second line reads `adopted · {the state it ran}`; pill and far end as usual. It cannot be picked up: it moves with the task above it. | [adopted.html](../assets/task-card/adopted.html) |
-| undo | A task a drop has just made or moved: the far end of its second line is the link `Undo`, in place of the word or the age, until it is used or the app closes. | [undo.html](../assets/task-card/undo.html) |
+| undo | A task a drop has just made or moved: the far end of its second line is the link `Undo`, in place of the word or the age, while the drop is still the last thing the task did — through a restart, and while the run the drop started is going, but not once the task does anything past where the drop put it or anything else is decided about it. | [undo.html](../assets/task-card/undo.html) |
 | execution | One pass of a state on a run's board: the pass chip, the inputs, the duration and the raw status. Passes stack oldest first. | [execution.html](../assets/task-card/execution.html) |
 
 ## A single click describes the card and a double click enters it

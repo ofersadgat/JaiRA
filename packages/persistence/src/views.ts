@@ -15,6 +15,7 @@ import type { BoardView, InputProvenance, InputSettledVia, InstanceAddress, Inst
 import type { Project } from "./project";
 import type { TaskRuntimeRow } from "./runtime";
 import { holdingOf } from "./lifecycle";
+import { connectUndoStands } from "./connectUndo";
 import { workflowLoadOptions } from "./workflowRefs";
 import {
   activePathOf,
@@ -79,7 +80,7 @@ export function taskSummaries(project: Project): TaskSummary[] {
       ...(waitingFor.length > 0 ? { waitingFor } : {}),
       ...((under.get(row.taskId) ?? 0) > 0 ? { controls: under.get(row.taskId)! } : {}),
       ...(awaited !== undefined ? { inReview: { provider: awaited.provider, number: awaited.number!, url: awaited.url! } } : {}),
-      ...(meta?.connectUndo !== undefined ? { undoable: true as const } : {}),
+      ...(connectUndoStands(project, meta) ? { undoable: true as const } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
     };

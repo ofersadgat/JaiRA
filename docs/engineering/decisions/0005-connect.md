@@ -635,7 +635,9 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
   until it is used or the app closes; after that the task's own rewind takes
   the same thing back. It is not on the task file because it is not a fact
   about the task. *(Amended 2026-09-22: it is kept on the task file after all,
-  so it survives a restart — see "Made durable" below.)*
+  so it survives a restart — see "Made durable" below; and, the same day, it
+  lasts only while the drop is the last thing the task did, not until it is
+  used.)*
 - **An adopted task stays in sight.** Steps 2–3 left it off the roots board.
   It was a task of its own first, with a card somebody knows, so it files in
   its parent's column with `under` naming the parent, and the board draws it
@@ -913,6 +915,58 @@ of a task that outlives the process"; the code is `@jaira/persistence`
   A reopening of a finished task journals `jaira.reopened` with the row's
   outputs, and a rewind back past it — an Undo — puts the task back finished,
   outputs and all.
+
+**Amended 2026-09-22 — Undo means only "take back what I just did".** Kept
+that way, a card offered Undo until it was used, and an Undo pressed hours
+later would rewind the task to the drop and throw away everything it did since.
+The person's ruling: the token stays durable, and ends at the next decision
+about the task or at the task's own progress past where the drop landed.
+
+- **Where it lives.** `@jaira/persistence` `connectUndo.ts`. The judgement is
+  ONE rule, `staleReason`, run on every read: by `undoable` on the board and
+  task list, and by `undoConnect`, which refuses a stale token plainly and
+  drops it, whatever window still offers it. The renderer keeps no token; it
+  draws Undo where the board says `undoable`. Judged on read because progress
+  is only visible in the journal, and a rule on read cannot be forgotten by a
+  future action that moves the task on.
+- **Decisions are dropped where they are made**, because most of them leave
+  nothing in the task's own journal to judge afterwards (a fork's source, a
+  re-run's predecessor, a stop of a task that is not running, a rewind inside
+  the landing): in the primitives every host shares — `rewindTask` and
+  `forkTask` (so a split too) in `cut.ts`, `cancelTask`, `writeAdoption` for
+  the adopted task, and `connectTask` for the task it moved — and in the app's
+  `cancelTaskIn` and `rerunTask`. A connect REPLACES the token: the host keeps
+  its own after the primitive dropped the old one. A later `task:move` needs no
+  site of its own: what it writes (a `jaira.moveHeld`, a reopening, an entry
+  outside the landing) is caught by the rule. A close is not a decision.
+- **Past the landing, per kind.** The token now carries `landing`
+  (`standsAt.path`), `kept` (the watched journal's rows once the drop's own
+  writes were in) and `asking`. *A move:* the landing settles with any outcome
+  but `canceled` (an unwinding — a close, a crash, the Stop that already ended
+  it — not a settle); anything outside it is entered; a state of the task's own
+  finishes `success` after the drop, which is the state a held move waited for;
+  or a turn of the task's conversation is taken. The way down to a nested
+  landing, the landing's children, and states stepped past are the drop's.
+  *An adoption:* the same on the parent's journal from the mirror row on, and
+  the adopted task entering or settling anything after the drop. *An `asking`
+  drop:* its conversation's turns are the drop's; its `start_task` mounting the
+  target (a `jaira.supplied` or a `jaira.moved` of `start_task`, or any entry
+  outside the conversation) ends it — from then on taking the drop back is a
+  rewind. *A fast-forward:* everything while it runs is the drop's; on arrival
+  the target is the landing; a Skip or a Stop ends it; a failure on the way
+  leaves it offered.
+- **The drop's own run is stopped by Undo.** Undo used to refuse a running
+  task, which a Stop would now end — so a landing parked on its gate could
+  never be taken back. The run a drop started is the drop's effect: Undo stops
+  it in this process and waits it out, then takes the drop back. A run another
+  process drives is refused. A parent the drop made is always removed, since
+  everything it did was the drop's.
+- **A retry does not bring it back.** A retry deletes the failure it revives
+  (`releaseRevivedFailures`); the token is judged first (`settleConnectUndo`),
+  so an Undo the landing's failure ended stays ended.
+- **Cut at the task's own first row after the drop**, not at `after + 1`: seqs
+  are the table's, and the drop's own resume deletes the unwound rows it stood
+  behind.
 
 What stays in memory: the descent follower of a move to a nested target, so a
 process that dies after such a move was taken and before the way down was

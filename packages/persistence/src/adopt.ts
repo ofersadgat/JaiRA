@@ -671,7 +671,8 @@ export function writeAdoption(project: Project, pin: { bundle: WorkflowBundle; h
   }
 
   for (const child of children) {
-    const meta = project.tasks.read(child.taskId);
+    // Adopted is connected again: an Undo the task kept from an earlier drop is over (`connectUndo.ts`).
+    const { connectUndo: _over, ...meta } = project.tasks.read(child.taskId);
     project.tasks.write({
       ...meta,
       parentTaskId: parent.id,

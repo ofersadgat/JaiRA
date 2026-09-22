@@ -335,7 +335,7 @@ describe("rule 2 — a real workflow holds both", () => {
     const product = await ran("feat/product", 1);
     const done = ok(await service.connectTask({ taskId: product, target: "feat", start: false }));
     const parent = done.taskId!;
-    const back = await service.undoConnect({ undo: done.undo! });
+    const back = await service.undoConnect({ taskId: parent });
     expect(back).toEqual({ taskId: product, removed: parent });
     expect(metaOf(parent)).toBeUndefined();
     const freed = metaOf(product)!;
@@ -346,21 +346,30 @@ describe("rule 2 — a real workflow holds both", () => {
     expect(ok(await service.connectTask({ taskId: product, target: "feat", dryRun: true })).plan.resolution).toBe("adopt");
   });
 
-  it("UNDO keeps a parent that has run something of its own, and only un-adopts", async () => {
+  it("UNDO while the parent runs where it landed stops that run — the drop's own — and takes it all back", async () => {
     const product = await ran("feat/product", 1);
     const done = ok(await service.connectTask({ taskId: product, target: "feat" }));
     const parent = done.taskId!;
-    expect(await answer()).toBe("ux");
-    await parked(); // build
-    // Running: refused, with the reason.
-    await expect(service.undoConnect({ undo: done.undo! })).rejects.toThrow(/is running — stop it before taking the move back/);
-    await service.cancelTask(parent);
-    await until(() => statusOf(parent) === "canceled", "the parent to stop");
-    const back = await service.undoConnect({ undo: done.undo! });
-    expect(back).toEqual({ taskId: product });
+    expect(await parked()).toMatchObject({ state: "ux" }); // the landing, running: the drop's effect
+    expect(service.listTasks().find((t) => t.taskId === parent)?.undoable).toBe(true);
+    const back = await service.undoConnect({ taskId: parent });
+    expect(back).toEqual({ taskId: product, removed: parent });
+    expect(metaOf(parent)).toBeUndefined();
     expect(metaOf(product)?.origin).toBeUndefined();
-    expect(metaOf(parent)).toBeDefined();
-    expect(journal(parent).some((e) => e.type === "instance.entered" && e.instanceId === product)).toBe(false);
+    expect(service.pendingInteractions()).toEqual([]);
+  });
+
+  it("UNDO is over once the parent has done work of its own — the landing settled — and a stale one is refused", async () => {
+    const product = await ran("feat/product", 1);
+    const done = ok(await service.connectTask({ taskId: product, target: "feat" }));
+    const parent = done.taskId!;
+    expect(await answer()).toBe("ux"); // the state it landed in settles…
+    await parked(); // …and build is entered
+    expect(service.listTasks().find((t) => t.taskId === parent)?.undoable).toBeUndefined();
+    await expect(service.undoConnect({ taskId: parent })).rejects.toThrow(/has moved on since the drop \(the state the drop landed in has settled\), so it can no longer be undone — rewind it/);
+    // Refused plainly, and dropped: the card does not offer it again.
+    expect(metaOf(parent)?.connectUndo).toBeUndefined();
+    expect(metaOf(product)?.origin).toMatchObject({ kind: "adopt", taskId: parent });
   });
 });
 
@@ -407,18 +416,27 @@ describe("rule 3 — the workflow is modified", () => {
     expect(ok(await service.connectTask({ taskId: parent, target: "lib/second", dryRun: true })).plan).toMatchObject({ resolution: "move", move: { direction: "aside", to: "second" } });
   });
 
-  it("NEW is undone by un-adopting: the source is its own again, and a made task that ran something is kept", async () => {
+  it("NEW is undone by un-adopting: the source is its own again, and the task the drop made goes, run and all", async () => {
     const product = await ran("feat/product", 1);
     const done = ok(await service.connectTask({ taskId: product, target: "lib/second" }));
     const parent = done.taskId!;
-    await parked();
-    await service.cancelTask(parent);
-    await until(() => statusOf(parent) === "canceled", "the document's task to stop");
-    const back = await service.undoConnect({ undo: done.undo! });
-    // It ran `second` itself, so it is kept — only the adoption is taken back.
-    expect(back).toEqual({ taskId: product });
+    await parked(); // `second`, where the drop landed: what it ran is the drop's own
+    const back = await service.undoConnect({ taskId: parent });
+    expect(back).toEqual({ taskId: product, removed: parent });
     expect(metaOf(product)?.origin).toBeUndefined();
-    expect(metaOf(parent)).toBeDefined();
+    expect(metaOf(parent)).toBeUndefined();
+  });
+
+  it("a STOP is a decision: the Undo it would have taken is over", async () => {
+    const product = await ran("feat/product", 1);
+    const parent = ok(await service.connectTask({ taskId: product, target: "lib/second" })).taskId!;
+    await parked();
+    expect(metaOf(parent)?.connectUndo).toBeDefined();
+    service.cancelTask(parent);
+    await until(() => statusOf(parent) === "canceled", "the document's task to stop");
+    expect(metaOf(parent)?.connectUndo).toBeUndefined();
+    expect(service.listTasks().find((t) => t.taskId === parent)?.undoable).toBeUndefined();
+    await expect(service.undoConnect({ taskId: parent })).rejects.toThrow(/has no connect to take back/);
   });
 
   it("roots a new document in the SHIPPED conversation, opened with what happened — an input filled by schema, never by name", async () => {
@@ -463,9 +481,8 @@ describe("rule 3 — the workflow is modified", () => {
     expect(await parked()).toMatchObject({ state: "second", inputs: { flag: true } });
     expect(read((p) => p.runtime.get(taskId)!.documentId)).toBeDefined();
 
-    await service.cancelTask(taskId);
-    await until(() => statusOf(taskId) === "canceled", "the diverged task to stop");
-    await service.undoConnect({ undo: done.undo! });
+    // Still parked where it landed: Undo stops that run itself, and takes it back.
+    await service.undoConnect({ taskId });
     const back = read((p) => p.runtime.get(taskId)!);
     expect(back.documentId).toBeUndefined();
     expect(back.snapshotHash).toBe(pinned.snapshotHash);
@@ -562,7 +579,7 @@ describe("askAfter — a drop whose target needs what nothing binds (decision 00
     const parent = done.taskId!;
     await until(() => chatTurnsSettled(parent) === 1, "the opening question");
     // A turn of its conversation is not work of its own: the task is removed, not kept.
-    expect(await service.undoConnect({ undo: done.undo! })).toEqual({ taskId: product, removed: parent });
+    expect(await service.undoConnect({ taskId: parent })).toEqual({ taskId: product, removed: parent });
     expect(metaOf(parent)).toBeUndefined();
     expect(metaOf(product)?.origin).toBeUndefined();
     expect(statusOf(product)).toBe("completed");
@@ -581,7 +598,7 @@ describe("askAfter — a drop whose target needs what nothing binds (decision 00
     expect(thread(taskId).at(-1)).toMatchObject({ role: "assistant", text: QUESTION });
 
     expect(done.undo).toMatchObject({ kind: "move", taskId, asking: true, pin: { snapshotHash: pinned.snapshotHash } });
-    await service.undoConnect({ undo: done.undo! });
+    await service.undoConnect({ taskId });
     const back = read((p) => p.runtime.get(taskId)!);
     expect(back.documentId).toBeUndefined();
     expect(back.status).toBe("canceled");
@@ -596,6 +613,24 @@ describe("askAfter — a drop whose target needs what nothing binds (decision 00
     expect(no(await service.connectTask({ taskId: product, target: "feat/ship", skip: true, askAfter: true })).refusal.code).toBe("inputs-missing");
     const running = await standingIn("flow", 1);
     expect(no(await service.connectTask({ taskId: running, target: "lib/needs", askAfter: true })).refusal.code).toBe("running");
+  });
+
+  it("offers Undo while the conversation asks and is answered, and ends it when its start_task mounts the target", async () => {
+    const product = await ran("feat/product", 1);
+    const parent = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake })).taskId!;
+    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
+    const undoable = (): boolean | undefined => service.listTasks().find((t) => t.taskId === parent)?.undoable;
+    expect(undoable()).toBe(true);
+    // The person answering in words is still the conversation the drop opened…
+    const host = journal(parent).flatMap((e) => (e.type === "instance.entered" && e.parentInstanceId === undefined ? [e.instanceId] : []))[0]!;
+    await service.sendChatMessage({ taskId: parent, instanceId: host, message: "Call it Widget.", fake });
+    expect(undoable()).toBe(true);
+    // …its start_task mounting the target is not: from here, taking the drop back is a rewind.
+    await createWorkflowTools(service.workflowHostFor(dir, parent))["start_task"]!.run({ state: "lib/needs", inputs: { text: "Widget" }, asked: ["text"] } as never, {} as never);
+    expect(await parked()).toMatchObject({ state: "needs" });
+    expect(undoable()).toBeUndefined();
+    await expect(service.undoConnect({ taskId: parent })).rejects.toThrow(/has moved on since the drop \(the conversation started the target\)/);
+    expect(metaOf(product)?.origin).toMatchObject({ kind: "adopt", taskId: parent });
   });
 });
 
@@ -613,20 +648,22 @@ describe("UNDO outlives the process that handed it out", () => {
     expect(metaOf(taskId)?.connectUndo?.undo).toEqual(done.undo);
     expect(service.listTasks().find((t) => t.taskId === taskId)?.undoable).toBe(true);
     expect((await parked()).state).toBe("a");
-    service.cancelTask(taskId);
-    await until(() => statusOf(taskId) === "canceled", "the reopened task to stop");
     expect(outputsOf(taskId)).toBeUndefined();
 
-    // A restart: nothing in this process was handed the token, and the card still offers it.
+    // A restart while it stands where it landed: a close is not a decision, so nothing in this
+    // process was handed the token, the run is resumed to its gate, and the card still offers it.
     await service.close();
     service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
     await service.open(dir);
+    seen.clear();
+    expect((await parked()).state).toBe("a");
     const card = service
       .boardRoots()
       .columns.flatMap((column) => column.cards)
       .find((c) => c.taskId === taskId);
     expect(card).toMatchObject({ taskId, undoable: true });
 
+    // Pressed while the landing runs: that run is the drop's, so Undo stops it and takes it all back.
     expect(await service.undoConnect({ taskId })).toEqual({ taskId });
     // Finished again, with the outputs it had — not a finished task with none.
     expect(statusOf(taskId)).toBe("completed");
@@ -674,5 +711,113 @@ describe("UNDO outlives the process that handed it out", () => {
     expect(back.status).toBe("canceled");
     expect(chatTurnsSettled(taskId)).toBe(0);
     expect(metaOf(taskId)?.connectUndo).toBeUndefined();
+  });
+});
+
+describe("UNDO means only 'take back what I just did'", () => {
+  const undoable = (taskId: string): boolean | undefined => service.listTasks().find((t) => t.taskId === taskId)?.undoable;
+  const hostRows = (taskId: string, type: string): number => journal(taskId).filter((e) => (e as { type: string }).type === type).length;
+
+  it("a held move is the drop's until the state it waits for FINISHES — that is the task's own work, and Undo is over", async () => {
+    const taskId = await standingIn("flow", 2); // parked at c
+    const done = ok(await service.connectTask({ taskId, target: "flow/a" }));
+    expect(done.moved).toBe("held");
+    expect(undoable(taskId)).toBe(true);
+    service.submitInteraction(service.pendingInteractions()[0]!.requestId, { confirmed: true }); // c finishes
+    expect((await parked()).state).toBe("a");
+    expect(undoable(taskId)).toBeUndefined();
+    await expect(service.undoConnect({ taskId })).rejects.toThrow(/has moved on since the drop \('c' finished after the drop\)/);
+    expect(metaOf(taskId)?.connectUndo).toBeUndefined();
+  });
+
+  it("taken back while held: the run is stopped, the move goes, and the task stands where it stood", async () => {
+    const taskId = await standingIn("flow", 2); // parked at c
+    ok(await service.connectTask({ taskId, target: "flow/a" }));
+    expect(hostRows(taskId, "jaira.moveHeld")).toBe(1);
+    expect(await service.undoConnect({ taskId })).toEqual({ taskId });
+    seen.clear();
+    expect((await parked()).state).toBe("c");
+    expect(hostRows(taskId, "jaira.moveHeld")).toBe(0);
+    expect(journal(taskId).some((e) => e.type === "transition.taken")).toBe(false);
+    expect(metaOf(taskId)?.connectUndo).toBeUndefined();
+  });
+
+  it("the task progressing past where it landed ends it — not offered, and a stale undoConnect is refused plainly", async () => {
+    const taskId = await ran("flow", 4);
+    ok(await service.connectTask({ taskId, target: "flow/b" }));
+    expect((await parked()).state).toBe("b"); // landed, running: still the drop's
+    expect(undoable(taskId)).toBe(true);
+    service.submitInteraction(service.pendingInteractions()[0]!.requestId, { confirmed: true });
+    expect((await parked()).state).toBe("c");
+    expect(undoable(taskId)).toBeUndefined();
+    expect(
+      service
+        .boardRoots()
+        .columns.flatMap((column) => column.cards)
+        .find((c) => c.taskId === taskId)?.undoable,
+    ).toBeUndefined();
+    // The token is still on the file until something acts on it — and acting on it refuses.
+    expect(metaOf(taskId)?.connectUndo).toBeDefined();
+    await expect(service.undoConnect({ taskId })).rejects.toThrow(/has moved on since the drop \(the state the drop landed in has settled\)/);
+    expect(metaOf(taskId)?.connectUndo).toBeUndefined();
+    // Nothing was cut.
+    expect(journal(taskId).filter((e) => e.type === "transition.taken")).toMatchObject([{ to: "b", by: "person" }]);
+  });
+
+  it("a second connect REPLACES the token: only the new one is kept, and Undo takes back only it", async () => {
+    const taskId = await ran("flow", 4);
+    ok(await service.connectTask({ taskId, target: "flow/b" }));
+    expect((await parked()).state).toBe("b");
+    const second = ok(await service.connectTask({ taskId, target: "flow/a" }));
+    expect(second.moved).toBe("held");
+    expect(metaOf(taskId)?.connectUndo?.undo).toEqual(second.undo);
+    expect(undoable(taskId)).toBe(true);
+    expect(await service.undoConnect({ taskId })).toEqual({ taskId });
+    // Back to before the SECOND drop: standing at b, where the first one put it.
+    seen.clear();
+    expect((await parked()).state).toBe("b");
+    expect(hostRows(taskId, "jaira.moveHeld")).toBe(0);
+    expect(journal(taskId).filter((e) => e.type === "transition.taken")).toMatchObject([{ to: "b", by: "person" }]);
+    expect(metaOf(taskId)?.connectUndo).toBeUndefined();
+  });
+
+  it("a plain MOVE of the task (task_move) is the next decision about it, held or taken", async () => {
+    const taskId = await ran("flow", 4);
+    ok(await service.connectTask({ taskId, target: "flow/b" }));
+    expect((await parked()).state).toBe("b");
+    expect(undoable(taskId)).toBe(true);
+    const moved = await service.moveTask({ taskId, toState: "a" });
+    expect(moved.status).toBe("held");
+    expect(undoable(taskId)).toBeUndefined();
+    await expect(service.undoConnect({ taskId })).rejects.toThrow(/has moved on since the drop \(the task was moved again\)/);
+  });
+
+  it("a rewind, or a fork, of the task is the next decision about it", async () => {
+    const rewound = await ran("feat/product", 1);
+    const p1 = ok(await service.connectTask({ taskId: rewound, target: "feat", start: false })).taskId!;
+    expect(undoable(p1)).toBe(true);
+    const last1 = read((p) => new SqliteEventLog(p.db).list(p1).at(-1)!.seq);
+    await service.rewindTask({ taskId: p1, at: last1 });
+    expect(metaOf(p1)?.connectUndo).toBeUndefined();
+    expect(undoable(p1)).toBeUndefined();
+
+    const forked = await ran("feat/product", 1);
+    const p2 = ok(await service.connectTask({ taskId: forked, target: "feat", start: false })).taskId!;
+    expect(undoable(p2)).toBe(true);
+    // Forked before the mirror row: the copy is the workflow's own walk, with nothing adopted.
+    const mirror2 = read((p) => new SqliteEventLog(p.db).list(p2).find((row) => row.type === "instance.entered" && row.instanceId === forked)!.seq);
+    const copy = await service.forkTask({ taskId: p2, at: mirror2 });
+    expect(metaOf(p2)?.connectUndo).toBeUndefined();
+    expect(metaOf(copy.taskId)?.connectUndo).toBeUndefined();
+    expect(undoable(p2)).toBeUndefined();
+  });
+
+  it("a re-run of the task is a decision about it too", async () => {
+    const product = await ran("feat/product", 1);
+    const parent = ok(await service.connectTask({ taskId: product, target: "feat", start: false })).taskId!;
+    expect(undoable(parent)).toBe(true);
+    const again = await service.rerunTask({ taskId: parent });
+    expect(metaOf(parent)?.connectUndo).toBeUndefined();
+    expect(metaOf(again.taskId)?.connectUndo).toBeUndefined();
   });
 });
