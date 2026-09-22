@@ -18,7 +18,7 @@ import { mkdirSync, readFileSync, rmSync, mkdtempSync, writeFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { hashText, initProject, stateHashes } from "@jaira/persistence";
+import { initProject } from "@jaira/persistence";
 import { specPlanningFiles, syncRules, REVIEW_ARTIFACTS, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
 import { WORKFLOW_DESCRIPTION, WORKFLOW_DESCRIPTION_PATH } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
@@ -115,29 +115,6 @@ describe("syncStatus", () => {
     const status = service.syncStatus({ layer: "base", path: WORKFLOW_DESCRIPTION_PATH });
     expect(status).toMatchObject({ layer: "base", exists: false });
     expect(status.blocked).toMatch(/empty/);
-  });
-
-  it("reads a baseline written in the older single-record shape", () => {
-    // A project that synced before descriptions could nest must not be told, on its first open,
-    // that everything has drifted.
-    const text = readFileSync(descriptionFile(), "utf8");
-    writeFileSync(
-      syncFile(),
-      JSON.stringify({
-        document: WORKFLOW_DESCRIPTION_PATH,
-        documentHash: hashText(text),
-        states: stateHashes(join(dir, ".jaira", "workflows")),
-        at: 1,
-        direction: "document",
-      }),
-      "utf8",
-    );
-
-    expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH })).toMatchObject({
-      synced: true,
-      documentChanged: false,
-      statesChanged: false,
-    });
   });
 
   it("says which side moved once there is a baseline", async () => {

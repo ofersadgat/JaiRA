@@ -102,12 +102,6 @@ describe("answers read back from a recorded value", () => {
 });
 
 describe("the agent's answer text", () => {
-  it("parses the wire spelling, quotes and commas inside the halves included", () => {
-    const text =
-      'The user answered: "Which, then?"="A \\"quoted\\" one", "Second"="plain"';
-    expect(answersOfAnsweredText(text)).toEqual({ "Which, then?": 'A "quoted" one', Second: "plain" });
-  });
-
   it("reads the current spelling by the questions it knows — nothing inside the halves is quoted", () => {
     // Verbatim shape from a feature run (2026-09-10): the first question quotes the issue, the second
     // answer has commas and a question mark, and the closing sentence follows the last quote.
@@ -161,7 +155,7 @@ describe("an agent's question read off its call", () => {
       name: "AskUserQuestion",
       summary: "",
       args,
-      result: "The user answered: \"Where should the logger live?\"=\"New package (recommended)\"",
+      result: "User has answered your questions: \"Where should the logger live?\"=\"New package (recommended)\". You can now continue with the user's answers in mind.",
       detail: { questions: (args as { questions: JsonValue }).questions, answers: { "Where should the logger live?": "Keep it where it is" } },
     });
     expect(asked?.questions[0]?.options.map((o) => o.label)).toEqual(["New package (recommended)", "Keep it where it is"]);
@@ -176,7 +170,7 @@ describe("an agent's question read off its call", () => {
       name: "AskUserQuestion",
       summary: "",
       args,
-      result: [{ type: "text", text: "The user answered: \"Where should the logger live?\"=\"neither, inline it\"" }],
+      result: [{ type: "text", text: "User has answered your questions: \"Where should the logger live?\"=\"neither, inline it\". You can now continue with the user's answers in mind." }],
     });
     expect(asked?.answers).toEqual({ "Where should the logger live?": "neither, inline it" });
     const choices = choicesOfQuestions(asked!.questions);

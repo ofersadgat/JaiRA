@@ -1,5 +1,5 @@
 /**
- * The journal as files — one JSONL per run (DESIGN §4.4).
+ * The journal as files — one JSONL per task (DESIGN §4.4).
  *
  * This is the write half of the storage policy, for the first concern to get one. The file is the
  * TRUTH and the table is an index replayed from it: an event is appended here synchronously and
@@ -13,8 +13,7 @@
  * a resume continues the same journal and a re-run is a new task with a new directory — so the
  * per-run split has nothing left to separate. Two people running tasks on one branch still write
  * different filenames (different task ids), so their appends never conflict — and after a pull,
- * both replay into the same table and appear on the board. Files written before the collapse are
- * named `<runId>.jsonl`; they replay first, in run order, and nothing writes them any more.
+ * both replay into the same table and appear on the board.
  *
  * ## The line, and why it is JaiRA's own shape
  *
@@ -48,10 +47,7 @@ export interface JournalLine {
   /** ISO 8601, because a file is read by people. `created_at` keeps the epoch millis. */
   timestamp: string;
   taskId: string;
-  /** Only on lines written before the runs collapse (migration 16) — read, never written. */
-  runId?: number;
-  /** `number` only on lines journaled before instance ids became durable strings. */
-  instanceId?: string | number;
+  instanceId?: string;
   event: EngineEvent | RewoundEvent;
 }
 
@@ -109,20 +105,8 @@ export function journalFiles(journalDir: string): Array<{ taskId: string; file: 
   if (!existsSync(journalDir)) return [];
   const out: Array<{ taskId: string; file: string }> = [];
   for (const taskId of readdirSync(journalDir).sort()) {
-    const dir = join(journalDir, taskId);
-    let names: string[];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      continue; // a file where a task directory was expected — not ours to explain
-    }
-    // Legacy per-run files first, in run order, then the task file — so `seq` is re-minted in the
-    // order things happened: the old runs, then everything the collapsed journal appended.
-    const legacy = names
-      .filter((n) => n.endsWith(".jsonl") && Number.isInteger(Number(n.slice(0, -".jsonl".length))))
-      .sort((a, b) => Number(a.slice(0, -".jsonl".length)) - Number(b.slice(0, -".jsonl".length)));
-    for (const name of legacy) out.push({ taskId, file: join(dir, name) });
-    if (names.includes("journal.jsonl")) out.push({ taskId, file: join(dir, "journal.jsonl") });
+    const file = join(journalDir, taskId, "journal.jsonl");
+    if (existsSync(file)) out.push({ taskId, file });
   }
   return out;
 }
@@ -177,8 +161,7 @@ export function replayJournal(db: JairaDb, journalDir: string): number | undefin
       for (const { line } of effectiveLines(file)) {
         insert.run(
           line.taskId,
-          // Stringified for lines journaled before ids were strings; `-1` was a sentinel for absence.
-          line.instanceId === undefined || line.instanceId === -1 ? null : String(line.instanceId),
+          line.instanceId ?? null,
           line.type,
           JSON.stringify(line.event),
           Date.parse(line.timestamp) || 0,

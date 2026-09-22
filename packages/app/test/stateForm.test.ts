@@ -708,11 +708,7 @@ describe("child wiring", () => {
   });
 });
 
-/**
- * `model` sits FLAT on the operation — "the operation IS the call" (REFERENCES.md §7.2). hw hoists
- * every field it does not own into the call config, so the nested spelling this form used to write
- * reached the provider as `config.model` and the state silently ran on the default model.
- */
+/** `model` sits FLAT on the operation — "the operation IS the call" (REFERENCES.md §7.2). */
 describe("model", () => {
   it("writes model as a flat operation field", () => {
     const out = roundOp({ operation: { kind: "prompt", prompt: "hi" } }, { model: "anthropic/claude-sonnet-5" });
@@ -723,18 +719,5 @@ describe("model", () => {
     const flat = { operation: { kind: "prompt", prompt: "hi", model: "planner" } };
     expect(opField(flat, "model")).toBe("planner");
     expect(round(flat)).toEqual(flat);
-  });
-
-  it("migrates the nested spelling an earlier form wrote", () => {
-    const nested = { operation: { kind: "prompt", prompt: "hi", config: { model: "planner" } } };
-
-    expect(opField(nested, "model")).toBe("planner");
-    // Left in place the stale copy would also shadow the flat field on the next read.
-    expect(round(nested)["operation"]).toEqual({ kind: "prompt", prompt: "hi", model: "planner" });
-  });
-
-  it("keeps the rest of a config block while migrating", () => {
-    const nested = { operation: { kind: "prompt", config: { model: "planner", seed: 7 } } };
-    expect(round(nested)["operation"]).toEqual({ kind: "prompt", model: "planner", config: { seed: 7 } });
   });
 });

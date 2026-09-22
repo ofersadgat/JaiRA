@@ -110,7 +110,7 @@ function runCrumbOf(step: TrailStep, index: number, taskTitle: string | undefine
  *
  * The TAIL, never the head: a UUIDv7 leads with its timestamp, so every id minted in one run opens
  * with the same characters and a head-truncated label would read identically across the whole bar.
- * The random bits are at the end. A short legacy id passes through whole.
+ * The random bits are at the end. A short id passes through whole.
  */
 function shortId(id: string): string {
   return id.length > 12 ? id.slice(-8) : id;

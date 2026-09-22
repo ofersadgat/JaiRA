@@ -338,14 +338,6 @@ describe("recorded call sites and answers", () => {
 });
 
 describe("what cannot be loaded", () => {
-  it("refuses history that predates durable ids", () => {
-    begin();
-    entered("7", "root");
-    const load = buildTaskLoad(project, "t", SHAPE);
-    expect(load.loaded).toBeUndefined();
-    expect(load.blocked).toMatch(/durable instance ids/);
-  });
-
   it("describes nothing when nothing was recorded", () => {
     const load = buildTaskLoad(project, "t", SHAPE);
     expect(load.loaded).toBeUndefined();

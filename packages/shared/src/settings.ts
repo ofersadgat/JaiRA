@@ -167,9 +167,7 @@ export interface JairaSettings {
    * is "the same KIND of thing as the theme"; that argument was right and it was never only about
    * JSON. Every editor in the app has the same handful of questions to answer — does it number its
    * lines, does it wrap, how far apart are they — and answering them one boolean at a time is how a
-   * settings file grows a field per editor per knob. A file written before this existed still says
-   * `wrapJson`, and {@link parseEditors} reads it into `editors.json.wrap` once; nothing else needs
-   * to know the field ever existed.
+   * settings file grows a field per editor per knob.
    */
   editors: Record<EditorKind, EditorLook>;
   /**
@@ -650,8 +648,7 @@ export function parseSettings(raw: unknown): JairaSettings {
     theme: THEMES.includes(theme as JairaTheme) ? (theme as JairaTheme) : "light",
     ui: parseUiState(doc["ui"]),
     appearance: parseAppearance(doc["appearance"]),
-    // The legacy field travels IN rather than being read beside the new one — see `editors`.
-    editors: parseEditors(doc["editors"], doc["wrapJson"] === true),
+    editors: parseEditors(doc["editors"]),
     renderers: parseRenderers(doc["renderers"]),
     projects: parseProjects(doc["projects"]),
     logging: parseLogPolicy(doc["logging"]),
@@ -715,18 +712,10 @@ function parseAppearance(raw: unknown): Appearance {
 
 /**
  * Parse the per-editor looks, per surface and per knob, keeping whatever is readable.
- *
- * `legacyWrap` is the `wrapJson` boolean this block replaced, and it is applied ONLY where the new
- * document says nothing about the JSON editor's wrapping. That ordering is the whole migration: a
- * person who turned wrap on before the change keeps it, a person who has since turned it off in the
- * new place keeps THAT, and the stale field in their file — which nothing rewrites away, because
- * `writeSettings` merges rather than replaces — cannot come back and overrule them.
  */
-function parseEditors(raw: unknown, legacyWrap: boolean): Record<EditorKind, EditorLook> {
+function parseEditors(raw: unknown): Record<EditorKind, EditorLook> {
   const out = defaultEditors();
   const doc = objectOf(raw);
-  const stated = objectOf(doc["json"]);
-  if (legacyWrap && typeof stated["wrap"] !== "boolean") out.json.wrap = true;
   for (const kind of EDITOR_KINDS) {
     const look = objectOf(doc[kind]);
     for (const knob of EDITOR_KNOBS[kind]) {
@@ -758,12 +747,7 @@ function parseEditors(raw: unknown, legacyWrap: boolean): Record<EditorKind, Edi
  * IS checked is the shape, so a hand-edited file cannot put an object where a renderer id goes.
  */
 /**
- * The renderer preferences, per key, accepting the shape that came before.
- *
- * The older file said `"application/json:data": "form"` — one renderer for one type and kind, with
- * no way to say that a file READS one way and is WRITTEN another. That value migrates to the read
- * view, which is what it always meant: it was resolved for the half of the panel that shows the
- * document, and the editor was picked by a rule nobody could see or change.
+ * The renderer preferences, per key.
  *
  * Forgiving per ENTRY, like the rest of this file. A malformed line costs its own type rather than
  * the other forty, because this is a document a person may have edited by hand and one bad key is
@@ -773,12 +757,6 @@ function parseRenderers(raw: unknown): RendererChoices {
   const out: RendererChoices = {};
   for (const [key, value] of Object.entries(objectOf(raw))) {
     if (!key.includes(":")) continue;
-    // The value the older file held. Not a special case for long: it becomes the same shape here,
-    // and everything downstream only ever sees the new one.
-    if (typeof value === "string") {
-      if (value.length > 0) out[key] = { ...defaultRendererChoice(), read: value };
-      continue;
-    }
     const doc = objectOf(value);
     const choice = defaultRendererChoice();
     const read = doc["read"];

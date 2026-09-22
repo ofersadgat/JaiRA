@@ -16,7 +16,7 @@ siblings: [engineering/units/project-store, engineering/units/project-config, en
 
 ## The layout computes every path a root holds and the key a project opens under, and creates nothing
 
-`jairaPaths(projectDir, baseDir?, builtInDir?)` in `paths.ts` returns a project's `JairaPaths`: its `.jaira/` directory, `settings.json`, `workflows/` and `skills/`, the generated children of `.jaira/system/`, the shared root's layout as `base`, the built-in layer's as `builtIn`, the ordered layer `roots`, and `worktreesDir` outside the checkout. `jairaBasePaths(baseDir?)` returns the shared root's `JairaBasePaths`, which adds `user-settings.json`, `functions/`, `.env`, `.env.local`, `system/machine.key` and the legacy `system/approvals.local.json`. `baseAsProjectPaths(baseDir?, builtInDir?)` maps the shared root onto the project shape so it can be opened as a project. Each path, what it holds and whether git ignores it are [jaira-layout](../contracts/jaira-layout.md).
+`jairaPaths(projectDir, baseDir?, builtInDir?)` in `paths.ts` returns a project's `JairaPaths`: its `.jaira/` directory, `settings.json`, `workflows/` and `skills/`, the generated children of `.jaira/system/`, the shared root's layout as `base`, the built-in layer's as `builtIn`, the ordered layer `roots`, and `worktreesDir` outside the checkout. `jairaBasePaths(baseDir?)` returns the shared root's `JairaBasePaths`, which adds `user-settings.json`, `functions/`, `.env`, `.env.local` and `system/machine.key`. `baseAsProjectPaths(baseDir?, builtInDir?)` maps the shared root onto the project shape so it can be opened as a project. Each path, what it holds and whether git ignores it are [jaira-layout](../contracts/jaira-layout.md).
 
 ### There are three layers, and the third is what ships
 
@@ -29,7 +29,7 @@ siblings: [engineering/units/project-store, engineering/units/project-config, en
 - `$SYSTEM/…` names the shipped copy of a document: a prompt, an operation document, a toolset. It does not pin a state. A state reference that lands under any search directory folds back to its bare id, as `$BASE/workflows/…` always has, so `$SYSTEM/workflows/chat/hello` is the state `chat/hello` and a person's copy shadows it.
 - `setBuiltInDir(dir)` names the directory for the process. No environment variable and no settings key does, because a file under the layer skips the approval gate, so whatever can name the directory can run code unasked.
 - `$SYSTEM` means something else in an artifact destination, where it is a root's generated `system/` directory: [artifact-destination-template](../contracts/artifact-destination-template.md). A destination template is not a reference, so the two never meet. `JairaPaths` calls the layer `builtIn` and the generated directory `systemDir`.
-- The layer ships `chat/assistant`, `chat/agent` and the three `debug/hello_world` states under `workflows/`, beside its `README.md`. Nothing installs them anywhere: the Chat view and the self-test name the ids and the search path finds the files. A copy an earlier build wrote into the shared root still wins, as any override does; `AppService.builtInLeftovers` lists the shared copies whose parsed value equals a shipped version, and `cleanupBuiltIn` deletes the ones a person names that are still on that list. The shipped versions are the layer's current files plus `SUPERSEDED` in `packages/app/src/main/shippedStates.ts`.
+- The layer ships `chat/assistant`, `chat/agent` and the three `debug/hello_world` states under `workflows/`, beside its `README.md`. Nothing installs them anywhere: the Chat view and the self-test name the ids and the search path finds the files. A copy of one in the shared root or a project wins, as any override does.
 - Under vitest the layer is an absent directory, registered by `test/setup.ts`, so a test's listings hold only what it wrote. `shippedLayer()` in `test/testing.ts` gives one test the real files.
 
 Beside the path builders it owns:
@@ -110,7 +110,6 @@ It deliberately does not own:
 ## No path carries a version, and a moved path strands what was at the old one
 
 - Nothing migrates files between layouts. Generated files moved under `system/` on 2026-08-24, and a root still holding `jaira.db`, `tasks/` or `snapshots/` at its top opens with no history, because every store reads the new paths.
-- `approvalsFile` stays in `JairaBasePaths` only so [module-approvals](module-approvals.md) can import a legacy file into an empty approvals table; nothing writes it.
 
 ## Hidden rules layer by concatenation and show what no rule names, unlike configuration arrays and scopes
 

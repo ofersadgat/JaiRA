@@ -346,20 +346,16 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
   /**
    * Reading a run's calls back — what a derivation resolves its impure bindings against.
    *
-   * The pair of claims worth pinning: a list is one row per record (the LATEST attempt, so a retried
-   * call is one call), and the read is scoped to the run that wrote it.
+   * The pair of claims worth pinning: a list is one row per record, in start order, and the read is
+   * scoped to the run that wrote it.
    */
-  it("lists a run's calls once each — a legacy id's attempts fold to their base, latest kept", () => {
+  it("lists a run's calls once each, in start order", () => {
     const at = (id: string, started: number, status: string, result: unknown): void => {
       db.prepare(
         `INSERT INTO operation_records (id, task_id, status, request_json, result_json, started_at)
          VALUES (?, 'tr', ?, ?, ?, ?)`,
       ).run(id, status, JSON.stringify({ functionRef: id }), JSON.stringify(result), started);
     };
-    // Migration 13's legacy shape: a retried content-hash id kept its history under `~~` suffixes,
-    // the newest row holding the bare id. The call is the same call, so a list that returned both
-    // rows would show one call twice with different answers, which reads as two.
-    at("a~~1", 10, "failed", { error: { reason: "first try" } });
     at("a", 30, "completed", { value: "second try" });
     at("b", 20, "completed", { value: 1 });
 
@@ -575,13 +571,13 @@ describe("the migration runner", () => {
     const migrated = openDb(file);
     try {
       const reader = new SqliteSessionStore(migrated, { taskId: "t1" }) as unknown as Store;
-      expect(await reader.messages("old")).toEqual([turn("kept")]);
+      expect(await reader.messages("t1/3/old")).toEqual([turn("kept")]);
       // The provider handle rode `external_id` and the migration carries it into its own column —
       // as EVIDENCE. It is not offered as a resume identity: the old shape recorded no provider, and
       // half a pair names nothing a consumer may act on (Identity and Resume §03). The conversation
       // still reads; the next call replays its prefix rather than resuming a handle it cannot
       // attribute.
-      expect((await reader.resolve({ ref: "old" })).providerSessionId).toBeUndefined();
+      expect((await reader.resolve({ ref: "t1/3/old" })).providerSessionId).toBeUndefined();
       // The turn row became a record whose request carries its seat (migration 14 folded the
       // position table it first landed in).
       expect(
@@ -642,9 +638,6 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
       expect(after.prepare(`SELECT id, session_id, session_seq FROM operation_records WHERE session_id IS NOT NULL`).all()).toEqual([
         { id: "conv:0~~1", session_id: "t1/1/conv", session_seq: 0 },
       ]);
-      // And it still finds its record — the assertion the rowid used to carry, carried by the id.
-      const reader = new SqliteSessionStore(after, { taskId: "t1" }) as unknown as Store;
-      expect(await reader.messages("conv")).toEqual([turn("first")]);
     } finally {
       after.close();
     }
@@ -763,11 +756,10 @@ describe("stateSessions — a run the process died inside", () => {
     ).run(JSON.stringify({ instanceId, stateId, op: "prompt" }), at);
   };
   const record = (recordId: string, status = "interrupted"): void => {
-    // The position rides INSIDE the request now (migration 14), scoped the way a pre-15 store
-    // wrote it (`task/run/name`) so the legacy read is exercised too. Written out here rather than
-    // through the store because these rows stand in for a process that died mid-run.
+    // The position rides INSIDE the request (migration 14). Written out here rather than through
+    // the store because these rows stand in for a process that died mid-run.
     const cut = recordId.lastIndexOf(":");
-    const session = { id: `t3/1/${recordId.slice(0, cut)}`, seq: Number(recordId.slice(cut + 1)) };
+    const session = { id: recordId.slice(0, cut), seq: Number(recordId.slice(cut + 1)) };
     db.prepare(
       `INSERT INTO operation_records (id, task_id, status, request_json, started_at)
        VALUES (?, 't3', ?, ?, 5)`,
@@ -922,7 +914,7 @@ describe("stateSessions — a run the process died inside", () => {
     db.prepare(`INSERT INTO task_runtime (task_id, status, started_at, created_at, updated_at) VALUES ('t3','running',1,1,1)`).run();
     const placed = (recordId: string, instanceId: number, status: string): void => {
       const cut = recordId.lastIndexOf(":");
-      const session = { id: `t3/1/${recordId.slice(0, cut)}`, seq: Number(recordId.slice(cut + 1)) };
+      const session = { id: recordId.slice(0, cut), seq: Number(recordId.slice(cut + 1)) };
       db.prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at) VALUES (?, 't3', ?, ?, 5)`).run(
         `${recordId}#${instanceId}`,
         status,

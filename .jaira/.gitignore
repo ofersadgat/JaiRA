@@ -10,10 +10,9 @@ system/jaira.db-wal
 system/jaira.db-shm
 system/logs/
 
-# Machine-local: what this disk has agreed to RUN (SPEC §7.5.5). An approval is a
-# statement about a file on ONE disk, so syncing it would let one machine confer
-# trust on the rest.
-system/approvals.local.json
+# The key that signs this machine's approvals (SPEC §7.5.5). Committing it would hand
+# every clone the ability to mint approvals for this disk.
+system/machine.key
 
 # Credentials. .env.local is machine-local by convention and is the first project link of the
 # secret chain (DESIGN §8.1). Its sibling .env is deliberately NOT ignored: a project that wants

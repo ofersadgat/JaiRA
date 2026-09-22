@@ -785,8 +785,6 @@ export function WorkflowEditor({
         hasProject: boolean;
         /** Copy this shipped file up into a layer a person owns, and open the copy. */
         onOverride: (toLayer: WritableLayer) => void;
-        /** Delete this copy of a built-in, after asking. Offered only for a copy JaiRA itself wrote. */
-        onDeleteCopy: () => void;
       }
     | undefined;
 }): JSX.Element {
@@ -1038,7 +1036,6 @@ export function WorkflowEditor({
   const onLayerAction = (id: LayerBarAction["id"]): void => {
     const toLayer = overrideTarget(id);
     if (toLayer !== null) return layerActions?.onOverride(toLayer);
-    if (id === "delete-copy") return layerActions?.onDeleteCopy();
     if (comparing) return setComparing(false);
     setComparing(true);
     if (shippedText !== null) return;

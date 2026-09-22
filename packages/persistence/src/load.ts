@@ -13,13 +13,9 @@
  * ## The fold is by INSTANCE ID, across runs
  *
  * A continuing run journals nothing that already happened — a loaded instance is not entered again.
- * It USED to re-state `instance.entered` for the live spine (same ids) so a resume's own journal
- * could stand alone, from when a resume was a separate run; after runs collapsed into one journal
- * per task that meant a fresh "entered" per live state on every reload of a waiting task, and hw
- * stopped emitting it (2026-09-08). Journals written before then still carry the re-statements, and
- * older history holds several trees from in-place restarts, so folding every event into one table
- * keyed by id is still what yields one tree: a re-stated entry merges into the instance it
- * continues, and history entered once stays entered once. The machine's root is the task's NEWEST parentless entry — a task is one
+ * Folding every event into one table keyed by id is what yields one tree: a revived instance's
+ * re-entry merges into the instance it continues, and history entered once stays entered once.
+ * The machine's root is the task's NEWEST parentless entry — a task is one
  * machine now, so there is normally exactly one, and where history holds several trees (an
  * in-place restart) the newest attempt is the task's own. `task_runtime.root_instance_id`
  * (stamped by migration 16 while run boundaries still existed) wins where present.
@@ -133,7 +129,7 @@ export interface TaskLoad {
    * double-apply nobody asked for. Non-empty means resume is unsafe and the caller should say so.
    */
   unreadable: readonly { stateId: string; reason: string }[];
-  /** Why the task cannot be loaded at all, when it cannot — legacy history, or nothing recorded. */
+  /** Why the task cannot be loaded at all, when it cannot — nothing recorded, or an open adoption. */
   blocked?: string;
 }
 
@@ -352,7 +348,6 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
    */
   let lastRootId: string | undefined;
   const deferredOps = new Set<string>();
-  let legacy = false;
   for (const row of rows) {
     const event = row.event;
     const at = row.seq;
@@ -365,15 +360,10 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         // of the host's own op. Skipping the entry here drops the whole chat quietly — its other
         // events find no node — and deliberately does NOT advance the host.
         if (event.instanceId.startsWith(CHAT_INSTANCE_PREFIX)) break;
-        // Durable ids are UUIDs; a counter id ("5") predates them, collides across runs, and keys
-        // nothing in the record store. Such history cannot be loaded — only re-run.
-        if (!event.instanceId.includes("-")) legacy = true;
         const existing = nodes.get(event.instanceId);
         if (existing !== undefined) {
-          // The live spine re-stated by a continuing run (journals written before hw stopped doing
-          // that) or a revived instance re-entered: the structure is already known, and the entry
-          // means it is LIVE again. Deliberately not an advancement of the parent — a re-statement
-          // answers nothing.
+          // A revived instance re-entered: the structure is already known, and the entry means it is
+          // LIVE again. Deliberately not an advancement of the parent — a re-entry answers nothing.
           delete existing.terminated;
           break;
         }
@@ -493,9 +483,6 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       default:
         break;
     }
-  }
-  if (legacy) {
-    return none("this task's history predates durable instance ids — run it again instead");
   }
   // The machine's root: the newest parentless tree (see `lastRootId`). The migration's
   // `root_instance_id` stamp — written for pre-collapse history while run boundaries still existed

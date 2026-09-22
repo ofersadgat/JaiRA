@@ -29,8 +29,7 @@ export interface StoredEvent {
 interface RawEvent {
   seq: number;
   task_id: string;
-  /** `number` only on rows journaled before instance ids became durable strings. */
-  instance_id: string | number | null;
+  instance_id: string | null;
   type: string;
   payload_json: string;
   created_at: number;
@@ -39,24 +38,6 @@ interface RawEvent {
 /** The event's instance id, when the event names one — `instance.blocked` never does. */
 function instanceIdOf(event: EngineEvent): string | undefined {
   return (event as { instanceId?: string }).instanceId;
-}
-
-/**
- * Payloads journaled before instance ids became durable strings carry NUMBERS — a counter id, or
- * the retired `-1` sentinel on `instance.blocked`. Coerced at the one read boundary every fold goes
- * through, so a legacy task still projects; `-1` is dropped outright, because absence is what the
- * sentinel always meant.
- */
-function normalizeLegacyIds(event: EngineEvent): EngineEvent {
-  const raw = event as { instanceId?: unknown; parentInstanceId?: unknown };
-  if (typeof raw.instanceId !== "number" && typeof raw.parentInstanceId !== "number") return event;
-  const out = { ...raw };
-  if (typeof out.instanceId === "number") {
-    if (out.instanceId === -1) delete out.instanceId;
-    else out.instanceId = String(out.instanceId);
-  }
-  if (typeof out.parentInstanceId === "number") out.parentInstanceId = String(out.parentInstanceId);
-  return out as EngineEvent;
 }
 
 export class SqliteEventLog {
@@ -110,14 +91,12 @@ export class SqliteEventLog {
     }
     const rows = this.db.prepare(sql).all(...params) as RawEvent[];
     return rows.map((row) => {
-      const event = normalizeLegacyIds(JSON.parse(row.payload_json) as EngineEvent);
+      const event = JSON.parse(row.payload_json) as EngineEvent;
       const operationId = (event as { operationId?: string }).operationId;
       return {
         seq: row.seq,
         taskId: row.task_id,
-        // `String(...)` for rows journaled before ids were strings — a legacy `5` and a UUID read
-        // back through one type. `-1` was only ever a sentinel meaning absence, so it reads as one.
-        instanceId: row.instance_id === null || row.instance_id === -1 ? undefined : String(row.instance_id),
+        instanceId: row.instance_id ?? undefined,
         type: row.type as EngineEvent["type"],
         event,
         createdAt: row.created_at,

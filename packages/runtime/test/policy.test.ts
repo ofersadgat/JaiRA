@@ -406,11 +406,11 @@ async function verdict(policy: JairaPolicy, tool: string, input: Record<string, 
 
 describe("compilePolicy", () => {
   it("puts command tools in smart mode and keeps authored tool modes", () => {
-    const compiled = compilePolicy({ tools: { write_file: "ask" }, toolDefault: "allow", profile: "read-only" });
+    const compiled = compilePolicy({ tools: { write_file: "ask" }, toolDefault: "allow" });
     expect(compiled.baseline?.tools?.["bash"]).toBe("smart");
     expect(compiled.baseline?.tools?.["write_file"]).toBe("ask");
     expect(compiled.baseline?.default).toBe("allow");
-    expect(compiled.baseline?.profile).toBe("read-only");
+    expect(compiled.baseline?.profile).toBeUndefined();
     expect(Object.keys(compiled.smart ?? {})).toContain("bash");
   });
 

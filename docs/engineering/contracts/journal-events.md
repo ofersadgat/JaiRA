@@ -38,18 +38,17 @@ A task's journal is the append-only record of its state machine: each row of `st
 
 ### A journal file line wraps the same event in an envelope a person can grep
 
-The file is `system/journal/<taskId>/journal.jsonl`: UTF-8, one JSON object per line, each ended by a newline. Characters of a task id outside `A-Za-z0-9._-` become `_` in the directory name. Files written before migration 16 are `system/journal/<taskId>/<runId>.jsonl`.
+The file is `system/journal/<taskId>/journal.jsonl`: UTF-8, one JSON object per line, each ended by a newline. Characters of a task id outside `A-Za-z0-9._-` become `_` in the directory name.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `type` | string | yes | the event's `type`, or `jaira.rewound` |
 | `timestamp` | ISO 8601 string | yes | becomes `created_at` on replay |
 | `taskId` | string | yes | the task a replay inserts the row under |
-| `instanceId` | string, or a number on legacy lines | no | written when the event has one; a legacy number is read as its string and `-1` as absent |
-| `runId` | number | no | on legacy per-run files only; never written |
+| `instanceId` | string | no | written when the event has one |
 | `event` | `EngineEvent` or `RewoundEvent` | yes | the event, verbatim |
 
-A replay reads task directories in name order; inside each, legacy `<runId>.jsonl` files by run number, then `journal.jsonl`; lines in file order once tombstones are applied. `seq` is minted by that insert order.
+A replay reads each task directory's `journal.jsonl` in directory-name order; lines in file order once tombstones are applied. `seq` is minted by that insert order.
 
 ### JaiRA's own line names the lines a rewind removed
 
@@ -163,18 +162,17 @@ The first message writes `instance.entered` with `inputs: {}`, and each later on
 | A journal file cannot be read | treated as empty | nothing |
 | A line's `timestamp` does not parse | `created_at` becomes 0 | nothing |
 | A rewind finds the file's surviving line count differs from the table's row count | `rewindTask` refuses with `task '<id>': the journal file holds N events and the table M — refusing to cut a journal that disagrees with its file` | reopen the project so the table is replayed from the file |
-| A rewind or fork is asked of a file-backed task with legacy per-run files | refused with `task '<id>' has history in per-run journal files, which a cut cannot address` | re-run the task as a new task |
 | The table insert in `record` throws | the error reaches the engine or the caller; a file-backed line is already written | the run fails; the next open replays the line |
 
 ## A change to any event or to the envelope breaks every stored journal, and no deprecation path exists
 
 - Dropping `by` from a directed `transition.taken`, or writing it on a rule-taken one, breaks reopening and the owed entry in `load.ts`, the reopened status in `projection.ts`, and the end of a held move in `hostRows.ts`.
 - Renaming a `jaira.fastForward*`, `jaira.move*` or `jaira.reopened` row, or giving one a top-level `instanceId`, loses every open fast-forward and held move in stored journals, or files the row under an instance every reader then sees.
-- Renaming or reshaping an upstream event breaks projections, load, cut and fork together. Stored payloads are never migrated, so a reader keeps accepting an old shape for as long as any journal holds it.
+- Renaming or reshaping an upstream event breaks projections, load, cut and fork together. Stored journals are migrated to the new shape first; no reader keeps accepting the old one.
 - Changing the line envelope, its field names or the ordinal rule of `jaira.rewound` breaks replay of every committed journal file.
 - Changing the `chat:` prefix or the `ask` key breaks resume filtering in `load.ts`, the id mapping in `cut.ts` and the conversation readers for existing journals.
 - Changing `fanout.made` breaks the fan-out host's reuse of recorded ids and the line at the mount for existing tasks.
-- Legacy forms are read indefinitely rather than deprecated: `runId` lines, per-run files, numeric instance ids and re-stated entries.
+- A re-stated `instance.entered` for a known id merges into that instance rather than growing a second one.
 
 ## Sequence numbers, ordinals and operation ids each mean less than their names suggest
 

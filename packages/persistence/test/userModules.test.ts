@@ -35,11 +35,10 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A scratch base root: the three paths the store takes, under one temp directory. */
+/** A scratch base root: the two paths the store takes, under one temp directory. */
 const base = (dir = scratch()): ApprovalPaths => ({
   dbFile: join(dir, "jaira.db"),
   machineKeyFile: join(dir, "machine.key"),
-  approvalsFile: join(dir, "approvals.local.json"),
 });
 
 /** Put a row straight into the table, as another process (or another application) would. */
@@ -248,40 +247,6 @@ describe("a row nobody signed", () => {
     const reopened = approvalsIn(paths);
     stores.push(reopened);
     expect(reopened.approved("/p/x.ts")).toBeUndefined();
-  });
-});
-
-describe("the move off the JSON file", () => {
-  it("imports what the old file approved, once, and signs it on the way in", () => {
-    const paths = base();
-    mkdirSync(dirname(paths.approvalsFile), { recursive: true });
-    writeFileSync(paths.approvalsFile, JSON.stringify({ approved: { "/p/x.ts": "h" } }), "utf8");
-
-    const approvals = open(paths);
-    // Not merely present: VERIFIED, which is what makes it survive the next open.
-    expect(approvals.approved("/p/x.ts")).toBe("h");
-    expect(approvals.unverified()).toEqual([]);
-  });
-
-  it("does not import again over a store somebody has since revoked from", () => {
-    // The import is guarded on the table being EMPTY, not on a flag: a second import would put back
-    // exactly the approval a person had just taken away.
-    const paths = base();
-    mkdirSync(dirname(paths.approvalsFile), { recursive: true });
-    writeFileSync(paths.approvalsFile, JSON.stringify({ approved: { "/p/x.ts": "h", "/p/y.ts": "h2" } }), "utf8");
-
-    const first = open(paths);
-    first.revoke("/p/x.ts");
-    expect(open(paths).approved("/p/x.ts")).toBeUndefined();
-  });
-
-  it("treats a CORRUPT old file as an empty one, never as a permissive one", () => {
-    const paths = base();
-    mkdirSync(dirname(paths.approvalsFile), { recursive: true });
-    writeFileSync(paths.approvalsFile, "{ this is not json", "utf8");
-    // The failure mode of guessing here is running unapproved code, so "cannot tell" must read as
-    // "nothing is approved".
-    expect(open(paths).approved("/p/x.ts")).toBeUndefined();
   });
 });
 

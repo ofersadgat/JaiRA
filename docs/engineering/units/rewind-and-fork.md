@@ -85,7 +85,6 @@ It deliberately does not own:
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
 | The task runs in this process or another, or is `stopping` | refused: `is running — stop it before rewinding it` or `forking it`, or `is stopping — stop it before cutting its journal` | stop it and let it settle | refusal |
-| The task has legacy per-run journal files | refused before anything is written | rerun as a new task | refusal naming per-run journal files |
 | The journal file's surviving lines disagree with the table, as after a retry while file-backed | the rewind refuses after `cutSession` and `dropRecords` ran, and the transaction rolls back | reopen the project before rewinding | refusal naming both counts |
 | A rewind's transaction does not commit after a file append: that refusal, or a kill | SQLite rolls back, and the files keep every line already appended: `jaira.tombstone` and cut session rows, and `jaira.rewound` once the check passed | none | after reopen the files win: records are gone while journal events still name them, and a resume can refuse as unreadable |
 | The fork's transaction throws, or the process is killed inside it | `createTask` already wrote the copy's file and `queued` row, and conversation lines appended before the throw stay in the copy's file | delete the copy | an extra queued task with the parent's title |
@@ -101,7 +100,6 @@ It deliberately does not own:
 
 - Migration 17 added `sessions.cut_at`, `task_runtime.forked_at_seq` and `task_runtime.fork_boundary_seq`. It does not roll back.
 - `forked_at_seq` is a seq of the parent's journal, which a file-backed replay re-mints at each open; [journal-events](../contracts/journal-events.md) says what that does to the label.
-- A task with history in per-run journal files is never cut.
 
 ## A cut appends tombstones and copies rows, where a store would ordinarily delete and share
 

@@ -74,7 +74,7 @@ Primary key `id`. Indexes: the claim `op_position`, UNIQUE on `(session_id, sess
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `id` | TEXT | yes | the hash of the scoped request; legacy rows may carry `<id>~~<n>` |
+| `id` | TEXT | yes | the hash of the scoped request; rows migration 13 found colliding carry `<id>~~<n>` |
 | `task_id` | TEXT | no | the task that made the call; NULL only for an unscoped store |
 | `status` | TEXT | yes, default `open` | `open`, `completed`, `failed` or `interrupted` |
 | `request_json` | TEXT | no | the operation as asked, with `scope {instanceId, sequence}` and `session {id, seq, providerSessionId?}` beside its fields |

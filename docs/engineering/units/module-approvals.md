@@ -37,7 +37,7 @@ It deliberately does not own:
 
 - Layer `service`, package `@jaira/persistence`, with the registry merge in `@jaira/runtime` `userFunctions.ts`. It calls `openDb`, `node:crypto`, `node:child_process` for PowerShell, and hw.
 - Upstream seams: `ModuleIndexOptions.approved(file)` on `createSymbolIndex`, and `ApprovalStore.approved(file)` as `DiscoverOptions.approvals` for `pendingApprovals` and `freezeModules`.
-- Boundary: derived and committed. The store and the key are machine-local; the `.gitignore` JaiRA writes hides `system/jaira.db`, `system/machine.key` and `system/approvals.local.json`.
+- Boundary: derived and committed. The store and the key are machine-local; the `.gitignore` JaiRA writes hides `system/jaira.db` and `system/machine.key`.
 - Callers: the app when it opens a project and after `functions:approve` with `rebuild`, every CLI command that opens a project through `openWithRecoveryNote`, and `beginTaskRunAsking` with `rebuild` after a yes. `workflowLoadOptions` reads the pair synchronously for every load.
 
 ## An approval is true only as the row and the key together, and the pair lives in memory
@@ -46,7 +46,6 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | `module_approvals` in `<base>/system/jaira.db`: `path` primary key, `hash`, `mac`, `approved_at` | upserted by `approve`, deleted by `revoke`; verified afresh on every `approved`, `all` and `unverified` call | the row together with the key | `jaira functions`, `beginTaskRunAsking`, the app's `functionsApprove` |
 | `<base>/system/machine.key` | created on first need with flag `wx`; rewritten with flag `w` when a `plain` key is wrapped | the file | nothing else |
-| `<base>/system/approvals.local.json` | read once, when the table is empty; never written | the legacy file | nothing else |
 | The process's `UserModules` pair | built once per process, replaced on `rebuild` | this process | `beginTaskRun`, `workflowLoadOptions` and lint read it through `userModules()` |
 
 ## The invariants hold that no file runs unless this machine's key signed its path and its exact bytes
@@ -83,7 +82,6 @@ It deliberately does not own:
 
 ## The legacy approvals file is imported once and the key is upgraded in place, and neither rolls back
 
-- A pre-table `approvals.local.json` is imported and signed on the first open that finds `module_approvals` empty. The file is left where it is and never written again.
 - A bare-hex key file reads as `plain`. A `plain` key is rewritten as `dpapi` with the same bytes, so every existing row still verifies; the rewritten file cannot be unwrapped by another Windows account.
 - `module_approvals` is declared in the base schema in `db.ts`, so every JaiRA database has the table and only the shared root's is read.
 

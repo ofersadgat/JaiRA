@@ -1040,9 +1040,6 @@ export function Composer({
   const resetToolset = (): void => {
     const next = { ...overrides };
     delete next.toolset;
-    delete next.tools;
-    delete next.permissions;
-    delete next.implementations;
     setParked({});
     // …and to the bucket that declaration opens on: the rows are part of what was chosen here.
     setPicked(undefined);

@@ -35,7 +35,7 @@
  * whatever is approved, and the hard refusal happens once, at task start, in {@link freezeForRun}.
  */
 import { createHmac } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 
 import {
@@ -113,22 +113,13 @@ export interface Approvals extends ApprovalStore {
   close(): void;
 }
 
-/** What {@link approvalsIn} needs off a base root — the three paths, so a test can pass a scratch. */
+/** What {@link approvalsIn} needs off a base root — the two paths, so a test can pass a scratch. */
 export interface ApprovalPaths {
   dbFile: string;
   machineKeyFile: string;
-  /** The pre-move JSON store, read once if the table is empty. Nothing writes it. */
-  approvalsFile: string;
 }
 
-/**
- * Open the store against a base root.
- *
- * Imports a pre-move `approvals.local.json` exactly once — on the first open that finds the table
- * empty and the file present. Those entries are signed on the way in, and the file is left where it
- * is: it WAS the trust store until this change, so importing it trusts nothing that was not already
- * trusted, and deleting a file somebody may still want to read is not an import's decision.
- */
+/** Open the store against a base root. */
 export function approvalsIn(base: ApprovalPaths): Approvals {
   // The directory, before the database. Creating the key used to do this on the way past, and the
   // key is lazy now — so without this a root that does not exist yet fails on `openDb` instead of
@@ -150,23 +141,6 @@ export function approvalsIn(base: ApprovalPaths): Approvals {
   const write = (path: string, hash: string): void => {
     put.run(path, hash, macOf(key(), path, hash), Date.now());
   };
-
-  if (existsSync(base.approvalsFile) && rows().length === 0) {
-    try {
-      const parsed = JSON.parse(readFileSync(base.approvalsFile, "utf8")) as { approved?: Record<string, string> };
-      const table = parsed?.approved;
-      if (table !== undefined && table !== null && typeof table === "object") {
-        db.transaction(() => {
-          for (const [path, hash] of Object.entries(table)) {
-            if (typeof hash === "string") write(canonicalModulePath(path), hash);
-          }
-        })();
-      }
-    } catch {
-      // A corrupt store is an EMPTY store, never a permissive one: the failure mode of guessing here
-      // is running unapproved code, so the safe reading of "cannot tell" is "nothing is approved".
-    }
-  }
 
   /** The verified table, read fresh — another process may have approved something since. */
   const verified = (): Map<string, string> => {

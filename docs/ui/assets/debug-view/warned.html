@@ -52,12 +52,11 @@
           <section>
             <h3>Where it comes from</h3>
             <div class="notice">The self-test ships with JaiRA, so there is nothing to install and it runs with nothing in the shared root. A copy of one of its states in <code>~/.jaira</code> wins over the built-in one, as an override of any built-in does.</div>
-            <div class="debug-file debug-file-unknown"><span class="dot unknown"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world.json">debug/hello_world</span><span class="chip">old copy</span><button class="link">open ↗</button></div>
+            <div class="debug-file debug-file-unknown"><span class="dot unknown"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world.json">debug/hello_world</span><span class="chip">overridden</span><button class="link">open ↗</button></div>
             <div class="debug-file debug-file-unknown"><span class="dot unknown"></span><span class="mono grow ellip" title="C:\Users\Ofer\.jaira\workflows\debug\hello_world\say.json">debug/hello_world/say</span><span class="chip">overridden</span><button class="link">open ↗</button></div>
             <div class="debug-file debug-file-success"><span class="dot success"></span><span class="mono grow ellip" title="$SYSTEM/workflows/debug/hello_world/check.json">debug/hello_world/check</span><span class="chip">built in</span><button class="link">open ↗</button></div>
-            <div class="notice warn">2 states load from the shared root instead of from what ships, and a run uses what loads. 1 of them is identical to what JaiRA itself installed there.</div>
+            <div class="notice warn">2 states load from the shared root instead of from what ships, and a run uses what loads.</div>
             <div class="pane-actions">
-              <button class="ghost">Delete the old copy…</button>
               <button class="ghost">Re-check</button>
             </div>
           </section>

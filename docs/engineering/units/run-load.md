@@ -45,7 +45,7 @@ It deliberately does not own:
 
 ## The fold follows nine rules, and each decides what a resume pays for again
 
-1. **By instance id.** A second `instance.entered` for a known id clears its termination and does not advance its parent. A `chat:` instance is skipped with all its events. An id without `-` predates durable ids and sets `blocked`.
+1. **By instance id.** A second `instance.entered` for a known id clears its termination and does not advance its parent. A `chat:` instance is skipped with all its events.
 2. **One root.** `task_runtime.root_instance_id` wins where stamped; otherwise the newest parentless entry is the machine.
 3. **Revival.** Under a live parent, a child is live when it never terminated, or when it ended without success after the parent's last advancement, which is a transition taken or a new child entered. A child that succeeded after that advancement is listed in the parent's `unanswered`. A superseded child is not loaded and still counts toward the next occurrence under its key. The root is live unless it ended with success.
 4. **Answers.** Only a `completed` record is an answer. A record whose content key a `call.waiting` named is neither an answer nor a loaded site. Every record's sequence raises its instance's `nextSite`, loaded or not.
@@ -79,7 +79,7 @@ A frontier entry is `mid-operation` when its operation started and never settled
 | 6 | A superseded instance is not loaded and still counts its entry | `persistence/test/load.test.ts` "skips a superseded instance and still counts its entry" |
 | 7 | The elements of one fan-out batch share one occurrence and each carries its element | `persistence/test/load.test.ts` "gives the elements of one batch one occurrence, and each its element" |
 | 8 | Answers are keyed by scoped identity, and a deferred call is never an answer | `persistence/test/load.test.ts` "rebuilds an instance's sites and answers repeats by scoped identity", `"never answers a deferred call — an event is not a memo"` |
-| 9 | History with counter instance ids is blocked, and an empty journal loads nothing | `persistence/test/load.test.ts` "refuses history that predates durable ids", "describes nothing when nothing was recorded" |
+| 9 | An empty journal loads nothing | `persistence/test/load.test.ts` "describes nothing when nothing was recorded" |
 | 10 | Only `failed` records with no provider session are freed | `persistence/test/load.test.ts` "deletes failed records with no provider handle, and keeps every witness" |
 | 11 | Only live instances lose failure rows, a fallback's settle stays, and nothing is deleted when nothing is live | `persistence/test/load.test.ts` "removes the terminations of the revived chain and the failed call, and keeps handled history", "keeps a fallback's journal row when the retry revives its instance", "touches nothing when nothing is live" |
 | 12 | A settled field loads and is not evaluated again, and a field that failed with nothing standing in is left to evaluate | `persistence/test/load.test.ts` "loads the last settled value per field, a fallback's value included, on the instance it settled on", "drops a field whose binding failed with nothing standing in, so the retry evaluates it again"; `titleResume.test.ts` "hands the settled title back as a field, and the continuing run never asks for it again" |
@@ -93,7 +93,6 @@ A frontier entry is `mid-operation` when its operation started and never settled
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
 | A completed operation's record is missing or unreadable | `unreadable` lists it; `resumeTask` refuses, and `resumable` answers `none` with the first reason as `blocked` | rerun as a new task | refusal naming the state; the strip's hint says resuming is unavailable |
-| The history predates durable instance ids | `blocked` is set and nothing loads | rerun as a new task | refusal |
 | The releases run and the start then refuses, as `resumeTask` does on holding or a git failure and `jaira task start` does on any `beginTaskRun` refusal | the freed records and failure rows stay deleted; the next load reads the failed chain as never terminated, so its cause becomes `interrupted` | none needed: the next resume continues the same chain | the failure note leaves the conversation, and Retry reads Resume |
 | The journal or conversations are file-backed | both releases delete table rows only, and the next open replays them from the files | none | the old failure is drawn again beside the retry |
 | The process is killed between the two releases | each release is one `DELETE`, and the failure rows stay until the next resume deletes them | resume again | none beyond the resume |

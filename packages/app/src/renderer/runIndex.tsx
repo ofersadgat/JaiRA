@@ -68,11 +68,7 @@ function useNow(live: boolean): number | undefined {
 }
 
 /**
- * A node's identity across the whole task.
- *
- * A durable id cannot repeat across runs, but a LEGACY journal's counter ids can — a task's folded
- * tree can then hold two nodes with the same one. The pair is the key everything here joins on —
- * the same rule the projection states for its consumers.
+ * A node's identity across the whole task: its durable instance id, which cannot repeat.
  */
 export function keyOfNode(node: InstanceNode): string {
   return node.instanceId;

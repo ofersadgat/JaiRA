@@ -745,7 +745,6 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
             layerActions: {
               hasProject: context.builtInActions.hasProject,
               onOverride: (toLayer) => context.builtInActions?.onOverride(source.stateId, toLayer),
-              onDeleteCopy: () => context.builtInActions?.onDeleteCopy(source.stateId),
             },
           }
         : {})}

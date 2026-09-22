@@ -53,7 +53,5 @@ shipped one is called on the composer's Permissions card, and the sentence under
 it, live in `../src/toolsetBuckets.ts`. When a tool is added to the standard
 list, add it to the four `chat` files, or it answers to their `other`.
 
-Nothing installs these anywhere. Earlier builds wrote them into `~/.jaira`; such
-a copy still wins, and the app offers to delete one whose value is a version it
-shipped. When a file here changes, add the value it HAD to `SUPERSEDED` in
-`packages/app/src/main/shippedStates.ts`, so copies of it stay recognisable.
+Nothing installs these anywhere. A copy of one in `~/.jaira` or a project's
+`.jaira/` is an override, and wins as any override does.

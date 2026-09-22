@@ -208,11 +208,6 @@ function recordOf(raw: unknown): WorkflowSyncRecord | undefined {
 
 /**
  * The whole file, keyed by lower-cased document path.
- *
- * Reads the older single-record shape as a one-entry map, so a project that synced before
- * per-workflow descriptions existed keeps its baseline instead of being told, on its next open,
- * that everything has drifted. Nothing migrates it eagerly — the next accepted sync writes the new
- * shape, and until then the old one is read exactly as it was meant.
  */
 function readSyncFile(file: string): WorkflowSyncFile {
   let parsed: unknown;
@@ -225,17 +220,15 @@ function readSyncFile(file: string): WorkflowSyncFile {
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { documents: {} };
   const documents = (parsed as Partial<WorkflowSyncFile>).documents;
-  if (documents !== undefined) {
-    if (documents === null || typeof documents !== "object" || Array.isArray(documents)) return { documents: {} };
-    const out: Record<string, WorkflowSyncRecord> = {};
-    for (const [key, value] of Object.entries(documents)) {
-      const record = recordOf(value);
-      if (record !== undefined) out[key.toLowerCase()] = record;
-    }
-    return { documents: out };
+  if (documents === undefined || documents === null || typeof documents !== "object" || Array.isArray(documents)) {
+    return { documents: {} };
   }
-  const legacy = recordOf(parsed);
-  return { documents: legacy === undefined ? {} : { [legacy.document.toLowerCase()]: legacy } };
+  const out: Record<string, WorkflowSyncRecord> = {};
+  for (const [key, value] of Object.entries(documents)) {
+    const record = recordOf(value);
+    if (record !== undefined) out[key.toLowerCase()] = record;
+  }
+  return { documents: out };
 }
 
 /**

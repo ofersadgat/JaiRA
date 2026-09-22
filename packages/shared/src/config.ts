@@ -174,9 +174,6 @@ export interface JairaClaudeCliConfig extends JairaExecutorConfig {
   credential?: never;
 }
 
-/** @deprecated The two Claude adapters no longer share a shape — see the two types above. */
-export type JairaClaudeAgentConfig = JairaClaudeCodeConfig & { command?: string };
-
 /**
  * A non-Claude coding-agent CLI (DESIGN §8.1's `generic-cli`, §16).
  *
@@ -285,11 +282,6 @@ export interface JairaConfig {
    * across every provider and agent" — the tree JaiRA used to build by hand and could not express.
    */
   executors: Record<string, JairaOperationNode>;
-  /**
-   * @deprecated Use `artifacts.dir`. Kept because it was the original §15 Q1
-   * surface and existing configs set it; it seeds `artifacts.dir` when present.
-   */
-  artifactDir: string;
   /** Where artifacts are stored (DESIGN §7.6). */
   artifacts: JairaArtifactConfig;
   /** Which kinds of run state live on disk and which in SQLite (DESIGN §4.4). */
@@ -531,7 +523,6 @@ export function defaultConfig(): JairaConfig {
   return {
     models: {},
     memo: { enabled: false },
-    artifactDir: DEFAULT_ARTIFACT_DIR,
     artifacts: {
       destination: DEFAULT_ARTIFACT_DESTINATION,
       dir: DEFAULT_ARTIFACT_DIR,
@@ -600,8 +591,7 @@ function parseWorkflows(raw: unknown): JairaWorkflowConfig {
 }
 
 /**
- * Parse the artifact block (DESIGN §7.6). `artifactDir` seeds `artifacts.dir` when
- * the newer block does not set it, so an existing config keeps working.
+ * Parse the artifact block (DESIGN §7.6).
  *
  * The destination template is NOT validated here — that needs the variable
  * vocabulary, which lives in `@jaira/runtime` (shared must stay free of it so the
@@ -621,10 +611,10 @@ function parseMemo(raw: unknown): JairaMemoConfig {
   return { enabled: enabled ?? false };
 }
 
-function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig {
+function parseArtifacts(raw: unknown): JairaArtifactConfig {
   const fallback: JairaArtifactConfig = {
     destination: DEFAULT_ARTIFACT_DESTINATION,
-    dir: artifactDir,
+    dir: DEFAULT_ARTIFACT_DIR,
     inlineMaxBytes: DEFAULT_INLINE_MAX_BYTES,
     askAboveBytes: DEFAULT_ASK_ABOVE_BYTES,
   };
@@ -1038,10 +1028,6 @@ export function parseConfig(raw: unknown): JairaConfig {
 
   const models = parseModels(cfg["models"]);
 
-  const artifactDir = cfg["artifactDir"] ?? DEFAULT_ARTIFACT_DIR;
-  if (typeof artifactDir !== "string" || artifactDir.length === 0) {
-    throw new Error("config.artifactDir must be a non-empty string");
-  }
   const rawPolicy = cfg["policy"];
   if (rawPolicy !== undefined && (rawPolicy === null || typeof rawPolicy !== "object" || Array.isArray(rawPolicy))) {
     throw new Error("config.policy must be an object");
@@ -1049,8 +1035,7 @@ export function parseConfig(raw: unknown): JairaConfig {
   return {
     models,
     memo: parseMemo(cfg["memo"]),
-    artifactDir,
-    artifacts: parseArtifacts(cfg["artifacts"], artifactDir),
+    artifacts: parseArtifacts(cfg["artifacts"]),
     storage: parseStorage(cfg["storage"]),
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
     policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},

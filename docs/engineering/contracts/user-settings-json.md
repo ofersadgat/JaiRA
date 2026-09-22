@@ -39,7 +39,6 @@ The file is `<base>/user-settings.json`, UTF-8 JSON written with two-space inden
 | `appearance` | object | no | typefaces, sizes and the editor palette, see below |
 | `filesHidden` | string array | no, default `[]` | personal Files tree globs applied after `files.hidden`, last match wins; trimmed, blanks and a lone `!` dropped, de-duplicated |
 | `conversation` | `{sequentialBatches: "stacked" or "band"}` | no, default `"stacked"` | whether a fan-out batch whose elements ran one after another is drawn down the page or as a band |
-| `wrapJson` | boolean | no | legacy; `true` reads as `editors.json.wrap: true` unless `editors.json.wrap` is a boolean, and it is dropped at the next write |
 
 ### The layout block is six maps keyed by ids the renderer owns
 
@@ -88,7 +87,7 @@ A key is `"<mime>:<kind>"` for one type or `"family:<family>:<kind>"` for a fami
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `renderers.<key>` | object, or a non-empty string | no | a bare string is the older form and reads as `{read: <string>}` |
+| `renderers.<key>` | object | no | a value that is not an object is dropped |
 | `….read` | non-empty string or `null` | no, default `null` | the renderer for the view that cannot be typed into; `null` is the app's own |
 | `….write` | non-empty string or `null` | no, default `null` | the renderer for the editable view |
 | `….off` | string array | no, default `[]` | renderers taken off this type's menu; de-duplicated |
@@ -118,10 +117,10 @@ A choice whose four statements are all at their defaults is dropped.
 | `settings:write` is sent any patch | written without validation and returned as sent | read again for the parsed value |
 | The directory cannot be created or the file written | `writeSettings` throws the filesystem error | the renderer shows it, except its layout write, which ignores it; `remember` logs a warning |
 
-## A renamed field silently resets that preference, and the deprecation path is a legacy read
+## A renamed field silently resets that preference unless the file is migrated first
 
 - The file is never validated, so a renamed or retyped field raises nothing: every file holding the old form reads with the default.
-- The path used is to read the old form into the new field on every read, as `wrapJson` and the string renderer choice do. The next write persists the new form, so an older build loses that preference.
+- The path is to migrate the file to the new form and then read only that form; no reader keeps the old form alive.
 - A `ui` id that is retired and later reused inherits whatever value a file still holds for it.
 - Narrowing a bound such as `SIZE_LIMITS` changes what existing files read as.
 

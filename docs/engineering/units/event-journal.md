@@ -16,7 +16,7 @@ siblings: [engineering/units/storage-policy, engineering/units/run-load, enginee
 
 ## The journal stores what a task's machine did, and leaves the vocabulary, the reading and the deleting to others
 
-`SqliteEventLog` in `eventLog.ts` is the engine's persistence port for one task. `recorder(taskId)` returns a `record(event, atMs)` that appends the event as one line to `system/journal/<taskId>/journal.jsonl` when the journal is file-backed, then inserts it into `state_machine_events`. `list(taskId, {afterSeq, limit})` returns the task's rows in `seq` order as `StoredEvent`, with legacy numeric instance ids read as strings and the `-1` sentinel read as absent.
+`SqliteEventLog` in `eventLog.ts` is the engine's persistence port for one task. `recorder(taskId)` returns a `record(event, atMs)` that appends the event as one line to `system/journal/<taskId>/journal.jsonl` when the journal is file-backed, then inserts it into `state_machine_events`. `list(taskId, {afterSeq, limit})` returns the task's rows in `seq` order as `StoredEvent`.
 
 `journalFile.ts` owns the line and its replay: `appendJournal`, `readJournalFile`, `journalFiles` with its read order, `replayJournal`, the `jaira.rewound` tombstone written by `appendRewound`, `effectiveLines` that applies tombstones, and `removeTaskJournal`. The stored shapes are [journal-events](../contracts/journal-events.md).
 
@@ -41,7 +41,6 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | `state_machine_events`: `seq`, `task_id`, `instance_id`, `type`, `payload_json`, `created_at`, generated `session_ref` and `operation_id` | inserted by `record` and `replayJournal`; read by `list` | the table under `db`; the file under `file` and `both` | deleted by `rewindTask`, `releaseRevivedFailures`, `deleteTask`, `pruneHistory`; copied by `forkTask` through a recorder; queried directly by `views.ts`, `hasJournalHistory`, `prune.ts` |
 | `system/journal/<taskId>/journal.jsonl` | appended by `record` and `appendRewound`; read by `replayJournal` and `effectiveLines` | the file, when file-backed | removed whole by `deleteTask` and `pruneHistory` |
-| Legacy `system/journal/<taskId>/<runId>.jsonl` | read by replay, never written | the file | `rewindTask` and `forkTask` refuse a task that has one |
 
 ## The invariants hold the file ahead of the table and keep one unreadable line from costing the history
 
@@ -50,13 +49,11 @@ It deliberately does not own:
 | 1 | When file-backed, no row reaches the table before its line is in the file | unasserted |
 | 2 | A file-backed journal replayed into a new database gives back every event with its type, instance and time | `journalFile.test.ts` "survives the database being thrown away, which is what 'truth' means" |
 | 3 | Two tasks never append to one file, and no line carries `seq` | `journalFile.test.ts` "writes one file per task, which is what makes two people's appends not conflict" |
-| 4 | Replay inserts legacy per-run files first in run order, then the task file | `journalFile.test.ts` "replays legacy per-run files first, oldest run first, then the task file" |
-| 5 | A line that does not parse costs that line only, never the file or the open | `journalFile.test.ts` `"drops a line it cannot parse and keeps the rest — a merge left one in the middle"` |
-| 6 | Under `db` no journal file or directory is written | `journalFile.test.ts` "writes nothing to disk when the journal is a table, which is the default" |
-| 7 | An event recorded through the port lists back verbatim, with its instance and time, and only under its own task | `stores.test.ts` "records EngineEvents through the Persistence port and lists them back" |
-| 8 | A journal switched to files with no files yet keeps its database history, and once a file exists the files win over rows only the database holds | `journalFile.test.ts` "seeds from the database the first time, so the history does not read as deleted", "prefers the files once there are any, because that is what truth means" |
-| 9 | A line a `jaira.rewound` tombstone names never reaches the table on replay | `cut.test.ts` `"survives a reopen — the file, replayed, holds what the table held"` |
-| 10 | A legacy numeric instance id lists back as a string, and `-1` as absent | unasserted |
+| 4 | A line that does not parse costs that line only, never the file or the open | `journalFile.test.ts` `"drops a line it cannot parse and keeps the rest — a merge left one in the middle"` |
+| 5 | Under `db` no journal file or directory is written | `journalFile.test.ts` "writes nothing to disk when the journal is a table, which is the default" |
+| 6 | An event recorded through the port lists back verbatim, with its instance and time, and only under its own task | `stores.test.ts` "records EngineEvents through the Persistence port and lists them back" |
+| 7 | A journal switched to files with no files yet keeps its database history, and once a file exists the files win over rows only the database holds | `journalFile.test.ts` "seeds from the database the first time, so the history does not read as deleted", "prefers the files once there are any, because that is what truth means" |
+| 8 | A line a `jaira.rewound` tombstone names never reaches the table on replay | `cut.test.ts` `"survives a reopen — the file, replayed, holds what the table held"` |
 
 ## Every failure leaves the file whole, and a table that disagrees with it is corrected at the next open
 
@@ -70,13 +67,11 @@ It deliberately does not own:
 | Two processes append to one database under `db` | SQLite serializes the inserts and `seq` orders them by commit; one task is never driven by two processes, because `beginTaskRun` refuses a task that is not startable | none needed | each process sees the other's events |
 | Two processes append while file-backed | both append to the files, but each inserts into its own connection's shadow table, so neither lists the other's new events | reopen the project | another process's progress appears only after reopen |
 | A retry records an event that is already in the journal | the journal has no idempotency key and keeps both rows; hw has not re-stated entries since 2026-09-08, and readers merge the re-stated `instance.entered` rows older journals hold by instance id | none needed | the entry is drawn once |
-| A task has legacy per-run files | replay reads them; `rewindTask` and `forkTask` refuse the task | re-run it as a new task | refusal naming per-run journal files |
 
 ## Payloads are stored verbatim, so an upstream vocabulary change needs no migration, and nothing rolls back
 
 - A new or changed `EngineEvent` needs no migration: `payload_json` is the event as the engine wrote it, and `session_ref` and `operation_id` are generated from it.
 - Legacy payloads with numeric ids are coerced at read, in `list` and in `replayJournal`, and never rewritten.
-- Legacy `<runId>.jsonl` files and the `runId` field on their lines are read and never written.
 - Migration 12 rebuilt the table with a `TEXT` `instance_id`, and migration 16 dropped `run_id`. Neither rolls back.
 
 ## The file is the truth and the database an index, which reverses the architecture's usual store

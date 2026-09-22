@@ -60,7 +60,6 @@ import type {
   StateView,
   SyncDirection,
   TaskDetail,
-  BuiltInLeftover,
   WorkflowMutationResult,
   WorkflowSyncEdit,
   WorkflowSyncResult,
@@ -480,8 +479,6 @@ export interface AppState {
   view: View;
   /** Both layer roots as trees — the Files view's left panel. */
   tree: FileTree | null;
-  /** Copies of built-in states in the shared root that JaiRA wrote and nobody changed — see `refreshTree`. */
-  leftovers: BuiltInLeftover[];
   /**
    * The state the open file defines, when it defines one.
    *
@@ -543,9 +540,8 @@ export interface AppState {
    * children produced. Fetched on expand rather than up front, because rendering a list of eight
    * folded headers would otherwise cost eight round trips before anyone had asked to read one.
    *
-   * Keyed by RUN and instance (`sessionKey`) — see that function's note: durable ids no longer
-   * collide across runs, but the record a transcript is read from is still filed per run, and legacy
-   * journals hold counter ids that do repeat. Still cleared whenever the selected task changes.
+   * Keyed by RUN and instance (`sessionKey`) — see that function's note. Still cleared whenever the
+   * selected task changes.
    */
   sessions: Record<string, SessionView>;
   /**
@@ -692,8 +688,6 @@ export interface DebugFile {
   layer: WorkflowLayer | null;
   /** The copy that loads, as text: what the pane shows under "the state files". */
   text: string;
-  /** Set on a person's copy that is identical to a version JaiRA shipped — see `BuiltInStanding`. */
-  identical?: "current" | "superseded";
 }
 
 /**
@@ -867,7 +861,6 @@ const EMPTY: AppState = {
   dir: null,
   view: "tasks",
   tree: null,
-  leftovers: [],
   stateId: null,
   state: null,
   inspect: "path",
@@ -1192,15 +1185,6 @@ export function useApp() {
       patch({ tree: await invoke("files:tree", at === null ? {} : { project: at }) });
     } catch {
       patch({ tree: null });
-    }
-    // With the tree, because the tree is where it is offered: the copies of built-in states the old
-    // install steps left in the shared root (decision 0006), which the "Built in" root offers to
-    // delete. Every write that redraws the tree can change the list, and none of them knows it.
-    // Quiet on failure — this is housekeeping, and a tree must not fail to draw over it.
-    try {
-      patch({ leftovers: await invoke("builtin:leftovers", undefined) });
-    } catch {
-      patch({ leftovers: [] });
     }
   }, [patch]);
 
@@ -2060,7 +2044,7 @@ export function useApp() {
    * The files ship in the built-in layer (decision 0006), so nothing is installed and nothing can be
    * missing short of a broken build. What is worth reporting is an OVERRIDE: the self-test runs in
    * the shared root's own project, whose search path is `~/.jaira` and then what ships, so a copy in
-   * `~/.jaira` — which is exactly what earlier builds wrote there — is the one a run uses. Asked in
+   * `~/.jaira` is the one a run uses. Asked in
    * that order, first hit wins, the same rule reference resolution follows.
    */
   const refreshDebugFiles = useCallback(async () => {
@@ -2070,8 +2054,7 @@ export function useApp() {
           try {
             const source = await invoke("workflow:read", { stateId, layer });
             if (!source.exists) continue;
-            const identical = source.builtIn?.identical;
-            return { stateId, file: source.file, layer, text: source.text, ...(identical !== undefined ? { identical } : {}) };
+            return { stateId, file: source.file, layer, text: source.text };
           } catch {
             // An unreadable layer is an absent one as far as "which copy loads" goes.
           }
@@ -4075,29 +4058,6 @@ export function useApp() {
         } catch (e) {
           fail(e);
           return null;
-        }
-      },
-
-      /**
-       * Delete copies of built-in states that JaiRA itself wrote (decision 0006) — after a person
-       * said yes to a dialog naming each file. Main re-checks every one against the disk, so a copy
-       * edited since the dialog opened is left alone; what comes back is what actually went.
-       */
-      cleanupBuiltIn: async (stateIds: string[]): Promise<BuiltInLeftover[]> => {
-        patch({ busy: true, error: null });
-        try {
-          const gone = await invoke("builtin:cleanup", { stateIds });
-          patch({ busy: false });
-          // The open document may have been one of them: re-read it where it now resolves from.
-          const open = ref.current.doc;
-          if (open !== null && gone.some((left) => left.layer === open.layer && left.stateId === open.stateId)) {
-            actionsRef.current.selectState(open.stateId ?? null);
-          }
-          await Promise.all([refreshTree(), refreshDebugFiles(), refreshWorkflows()]);
-          return gone;
-        } catch (e) {
-          fail(e);
-          return [];
         }
       },
 

@@ -158,12 +158,6 @@ export interface JairaBasePaths {
   envFile: string;
   envLocalFile: string;
   /**
-   * @deprecated The approvals moved into the base database's `module_approvals` table, where each
-   * row carries an HMAC (see {@link machineKeyFile}). This path is kept only so the store can find
-   * a pre-move file and import it once; nothing writes here any more.
-   */
-  approvalsFile: string;
-  /**
    * The machine's integrity key — a secret generated at first use and never leaving this disk.
    *
    * It keys the HMAC on every approval row. The point is the SEPARATION: what a person has agreed
@@ -395,9 +389,7 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     envLocalFile: join(root, ".env.local"),
     systemDir: system,
     // Generated, machine-local and never read by a person — the three properties everything under
-    // `system/` shares. The approvals store is the one that used to sit at the top of the root
-    // anyway, where its `.local.json` suffix was doing the explaining this directory now does.
-    approvalsFile: join(system, "approvals.local.json"),
+    // `system/` shares.
     machineKeyFile: join(system, "machine.key"),
     dbFile: join(system, "jaira.db"),
     snapshotsDir: join(system, "snapshots"),

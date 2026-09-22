@@ -61,11 +61,11 @@ It deliberately does not own:
 | 2 | A write reads back, and a patch leaves every field it omits as it was | `settings.test.ts` "persists a change and reads it back", "keeps the layout out of the way of the other preferences", "leaves the rest of the preferences alone" |
 | 3 | A patch carrying `ui` replaces all six maps rather than merging into them | `settings.test.ts` "remembers the window layout, and writes it whole" |
 | 4 | A layout entry of the wrong shape costs only itself; a pane size is capped at 4000, a read mark must be finite and positive, and fold lists are de-duplicated | `settings.test.ts` "drops layout entries of the wrong shape rather than the whole layout" |
-| 5 | A legacy `wrapJson` reads into `editors.json.wrap` unless the file states that field | `settings.test.ts` "carries a wrapJson written before the editor looks existed into its new home", "reads a settings file written before wrapJson existed", "keeps the JSON editor's wrap preference, and defaults it off" |
+| 5 | A file that states only a theme reads every other field as its default, and the JSON editor's wrap defaults off | `settings.test.ts` "reads a settings file that states only a theme", "keeps the JSON editor's wrap preference, and defaults it off" |
 | 6 | The project list keeps strings only, trimmed and de-duplicated in order | `settings.test.ts` "reads a hand-edited project list without throwing any of it away" |
 | 7 | A size outside `SIZE_LIMITS` is clamped, a size that is not a number keeps the default, and a family list is de-duplicated | `appearance.test.ts` "clamps a size rather than dropping it", "ignores a size that is not a number at all, keeping the default", "de-duplicates a family list, because a repeat can never be reached", "keeps the readable fields of a half-broken document" |
 | 8 | A tab width snaps to 2, 4 or 8, a line height is clamped, and a knob a surface lacks is ignored | `editorLook.test.ts` "snaps a tab width to one the control offers, rather than clamping it", "clamps line spacing instead of dropping it", "ignores a knob the surface does not have, however the file spells it", "keeps the readable knobs of a half-broken document" |
-| 9 | A renderer key without `:` or a choice saying nothing is dropped, an older string value reads as `read`, and an unknown renderer id is kept | `fileTypes.test.ts` "keeps a choice, and drops what is not one", "reads the single value the older file held as the READING", "drops a line that says nothing at all", "keeps a key for a renderer this build no longer has" |
+| 9 | A renderer key without `:` or a choice saying nothing is dropped, and an unknown renderer id is kept | `fileTypes.test.ts` "keeps a choice, and drops what is not one", "drops a line that says nothing at all", "keeps a key for a renderer this build no longer has" |
 | 10 | A `logging` write governs the very next log entry without a restart | `service.test.ts` "traces a run's MIDDLE, not just that it started and stopped"; `diagnostics.test.ts` "changes what is kept without a restart, which is the whole point of the control" |
 | 11 | A log override with an unknown match or level, a blank key or a sampling rate outside 0 to 1 is dropped, and one override is kept per match and key | unasserted |
 | 12 | `JAIRA_HOME` wins over a saved `baseDir` | unasserted |
@@ -81,13 +81,12 @@ It deliberately does not own:
 | A retry sends the same patch | the same document is written again; `remember` skips a project already listed | none needed | none |
 | The file cannot be written | `writeSettings` throws; `remember` logs a warning and the project still opens; the renderer's layout write swallows the error | fix the directory's permissions | the preference is not kept across a restart |
 | A patch holds values of the wrong shape | written as sent and returned unparsed; the next read parses them away | none needed | the value reverts at the next read |
-| The file holds a field the parser does not know, or a legacy `wrapJson` | any write rewrites the file from the parsed document, so the field is dropped and `wrapJson` survives only as `editors.json.wrap` | none needed | none |
+| The file holds a field the parser does not know | any write rewrites the file from the parsed document, so the field is dropped | none needed | none |
 | `baseDir` is saved in a relocated root's file | `settingsBaseDir` reads only `~/.jaira/user-settings.json`, so it is ignored | save it in `~/.jaira/user-settings.json` or set `JAIRA_HOME` | the app opens the default root |
 
-## Older files read without migration, and the next write rewrites them in the current shape
+## A file missing a field reads with its default, and the next write rewrites it in the current shape
 
 - A file written before any field existed reads with that field's default.
-- `wrapJson` and a renderer choice held as a bare string are read into their current homes on every read, and a write persists the current shape. Nothing rolls back, and an older build reading the new shape takes the fields it knows.
 
 ## The preferences file is forgiving where settings.json is strict
 

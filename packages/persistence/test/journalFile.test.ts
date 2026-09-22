@@ -167,23 +167,4 @@ describe("what a file can arrive looking like", () => {
     expect(readJournalFile(file).map((l) => l.type)).toEqual(["before", "after"]);
     expect(project("file").events.list("t-1").map((e) => e.type)).toEqual(["before", "after"]);
   });
-
-  it("replays legacy per-run files first, oldest run first, then the task file", () => {
-    // Files written before the runs collapse are named `<runId>.jsonl`. `seq` is not in any file,
-    // so replay re-mints it — and the read order is what keeps a re-minted seq meaning something:
-    // the old attempts in the order they happened, then everything the collapsed journal appended.
-    const p = project("file");
-    createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    record(p, "t-1", ["current"]);
-    p.close();
-    open.pop();
-
-    const taskDir = join(dir, "repo", ".jaira", "system", "journal", "t-1");
-    const legacy = (runId: number, type: string): string =>
-      JSON.stringify({ type, timestamp: "1970-01-01T00:00:00.500Z", taskId: "t-1", runId, event: { type } }) + "\n";
-    writeFileSync(join(taskDir, "2.jsonl"), legacy(2, "second-run"), "utf8");
-    writeFileSync(join(taskDir, "1.jsonl"), legacy(1, "first-run"), "utf8");
-
-    expect(project("file").events.list("t-1").map((e) => e.type)).toEqual(["first-run", "second-run", "current"]);
-  });
 });

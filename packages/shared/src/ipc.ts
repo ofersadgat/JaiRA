@@ -459,22 +459,6 @@ export interface BuiltInStanding {
    * copy, and copying over it is refused.
    */
   layers: WorkflowLayer[];
-  /**
-   * Set on a PERSON's file whose parsed value equals one JaiRA shipped: `current` is what ships
-   * now, `superseded` a version an earlier build installed into the shared root. Compared as values,
-   * not bytes — re-indenting a file is not editing it. Such a copy changes nothing (or pins an old
-   * version for no reason), which is why it is the one kind of override the app OFFERS to delete.
-   */
-  identical?: "current" | "superseded";
-}
-
-/** One copy the app may offer to delete — see {@link BuiltInStanding.identical}. */
-export interface BuiltInLeftover {
-  stateId: string;
-  layer: WritableLayer;
-  /** Absolute path, for display: the offer has to say exactly which file would go. */
-  file: string;
-  identical: "current" | "superseded";
 }
 
 /**
@@ -1934,16 +1918,6 @@ export interface IpcContract {
     response: WorkflowMutationResult;
   };
   /**
-   * The shared root's copies of built-in states that are identical to a version JaiRA shipped
-   * (decision 0006): what the install steps left behind. A read — listing is not an offer taken.
-   */
-  "builtin:leftovers": { request: void; response: BuiltInLeftover[] };
-  /**
-   * Delete the named leftovers. Each is re-checked against the disk first, so a file edited since it
-   * was listed is left alone and is simply absent from the answer.
-   */
-  "builtin:cleanup": { request: { stateIds: string[] }; response: BuiltInLeftover[] };
-  /**
    * Show a file in the OS file manager.
    *
    * Here rather than in the renderer because opening a file manager is Electron's `shell`, and the
@@ -2085,8 +2059,6 @@ export const IPC_CHANNELS = [
   "workflow:write",
   "workflow:move",
   "workflow:delete",
-  "builtin:leftovers",
-  "builtin:cleanup",
   "workflow:syncStatus",
   "workflow:sync",
   "workflow:syncCancel",

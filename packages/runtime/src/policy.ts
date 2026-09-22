@@ -92,8 +92,6 @@ export interface JairaPolicy {
   tools?: Record<string, PermissionMode>;
   /** Mode for tools with no entry. Unset ⇒ upstream's own default (`ask`). */
   toolDefault?: PermissionMode;
-  /** Starting permission profile for a session (`read-only`, `plan`, `full`). */
-  profile?: string;
 }
 
 /** Tools whose input is a command line, and therefore parsed rather than trusted. */
@@ -782,7 +780,6 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       // answer for "any other command" on a line that is taken apart — not a mode for the tool.
       ...(options.toolset !== undefined ? gateToolModes(options.toolset) : {}),
     },
-    ...(policy.profile !== undefined ? { profile: policy.profile } : {}),
   };
 
   const smart: Record<string, (req: PermissionRequest) => SmartVerdict> = {};

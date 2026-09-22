@@ -132,12 +132,6 @@ ${SYS}/logs/
 # state: it is a secret.
 ${SYS}/machine.key
 
-# Machine-local: what this disk has agreed to RUN. The approvals themselves live in
-# the database above now, and are ignored with it; this line is for the file older
-# roots still carry. An approval is a statement about a file on ONE disk, so syncing
-# it would let one machine confer trust on the rest.
-${SYS}/approvals.local.json
-
 # Credentials. .env.local is machine-local by convention and is the first project link of the
 # secret chain (DESIGN §8.1). Its sibling .env is deliberately NOT ignored: a project that wants
 # to commit a non-secret default has to be able to.

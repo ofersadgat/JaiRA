@@ -32,7 +32,6 @@ import {
   loadBundle,
   moduleHash as moduleHashOf,
   sourceStateId,
-  stateIdFromPath,
   type CallResult,
   type DirectedTransition,
   type EngineEvent,
@@ -82,7 +81,6 @@ import {
   boardForState,
   boardView,
   browseBaseWorkflows,
-  readWorkflowsTolerantly,
   browseSource,
   browseWorkflows,
   commitSync,
@@ -394,7 +392,6 @@ import {
   restoreHostModes,
   settleHostRowsAtRunEnd,
 } from "./hostModes";
-import { identicalTo, SUPERSEDED } from "./shippedStates";
 import type {
   Scope,
   ApprovalScope,
@@ -494,7 +491,6 @@ import type {
   TaskDetail,
   TaskStatus,
   TaskSummary,
-  BuiltInLeftover,
   BuiltInStanding,
   WorkflowBrowser,
   WorkflowLayer,
@@ -2800,11 +2796,7 @@ export class AppService {
   sessionView(request: { taskId: string; instanceId?: string; project?: string }): SessionView {
     const session = this.session(request.project);
     const history = this.sessionHistory({ taskId: request.taskId, ...(request.project !== undefined ? { project: request.project } : {}) });
-    // The LAST match, not the first. The history spans the task's whole life, and a legacy journal's
-    // counter ids restarted at 1 on each run — so `#i2` named the second instance of every run there
-    // had ever been. Durable UUIDs cannot collide like that, but old rows are still read here, and
-    // taking the first match showed run 1's conversation for a card belonging to run 4 — the same
-    // failure as showing none except that it looks like an answer.
+    // The newest row for the instance: the history spans the task's whole life.
     const row =
       request.instanceId === undefined
         ? history.at(-1)
@@ -2820,11 +2812,11 @@ export class AppService {
     if (row === undefined) {
       return { ...base, empty: "this state ran no model call, so there is no conversation to show" };
     }
-    // Scoped to the task that wrote it, which is where its aliases and legacy spellings resolve.
+    // Scoped to the task that wrote it, which is where its aliases resolve.
     const store = sessionStoreFor(session.project, { taskId: request.taskId });
     const record = store.at(row.sessionId, row.seq);
     if (record === undefined) {
-      return { ...base, empty: "this run was recorded before conversations were kept" };
+      return { ...base, empty: "no record of this conversation was kept" };
     }
     // Through the SAME reader the thread uses. This panel had its own fold, and the two drifted: it
     // grew the interrupted call's trailing fragment and never grew the message that PROVOKED the
@@ -4081,8 +4073,7 @@ export class AppService {
     const id = position.slice(0, at);
     const seq = Number(position.slice(at + 1));
     if (!Number.isInteger(seq)) return undefined;
-    // Scoped to the task that wrote it, exactly as sessionView is — where its aliases and legacy
-    // spellings resolve.
+    // Scoped to the task that wrote it, exactly as sessionView is — where its aliases resolve.
     const store = sessionStoreFor(open.project, { taskId });
     // The position is where the NEXT turn goes, so the last one written is the seq below it.
     const record = store.at(id, seq - 1) ?? store.at(id, seq);
@@ -7222,7 +7213,7 @@ export class AppService {
     const file = this.workflowFile(request.stateId, request.layer, request.project);
     const exists = existsSync(file);
     const text = exists ? readFileSync(file, "utf8") : "";
-    const builtIn = exists ? this.builtInStanding(request.stateId, request.layer, text, request.project) : undefined;
+    const builtIn = exists ? this.builtInStanding(request.stateId, request.project) : undefined;
     return {
       stateId: request.stateId,
       layer: request.layer,
@@ -7240,12 +7231,7 @@ export class AppService {
    * `existsSync` on the ordinary path. The project layer is asked only where there is a project to
    * ask: a shared or shipped file read with nothing open has no third layer to report.
    */
-  private builtInStanding(
-    stateId: string,
-    layer: WorkflowLayer,
-    text: string,
-    project?: string,
-  ): BuiltInStanding | undefined {
+  private builtInStanding(stateId: string, project?: string): BuiltInStanding | undefined {
     const shipped = this.workflowFile(stateId, "system");
     if (!existsSync(shipped)) return undefined;
     const layers: WorkflowLayer[] = [];
@@ -7256,48 +7242,7 @@ export class AppService {
     }
     if (existsSync(this.workflowFile(stateId, "base"))) layers.push("base");
     layers.push("system");
-    const identical = layer === "system" ? undefined : identicalTo(stateId, text, readFileSync(shipped, "utf8"));
-    return { layers, ...(identical !== undefined ? { identical } : {}) };
-  }
-
-  /**
-   * The copies of built-in states in the SHARED root that nobody changed (decision 0006).
-   *
-   * The shared root only, because that is the only place the install steps ever wrote. A project's
-   * copy is somebody's deliberate override even when it is identical today — it is in their
-   * repository, and whether it stays is a question for a commit rather than for a button here.
-   */
-  builtInLeftovers(): BuiltInLeftover[] {
-    const out: BuiltInLeftover[] = [];
-    const { files } = readWorkflowsTolerantly(jairaBuiltInPaths().workflowsDir);
-    const ids = new Set([...Object.keys(files).map(stateIdFromPath), ...Object.keys(SUPERSEDED)]);
-    for (const stateId of [...ids].sort()) {
-      const file = this.workflowFile(stateId, "base");
-      if (!existsSync(file)) continue;
-      const shipped = this.workflowFile(stateId, "system");
-      const identical = identicalTo(
-        stateId,
-        readFileSync(file, "utf8"),
-        existsSync(shipped) ? readFileSync(shipped, "utf8") : undefined,
-      );
-      if (identical !== undefined) out.push({ stateId, layer: "base", file, identical });
-    }
-    return out;
-  }
-
-  /**
-   * Delete the leftovers a person agreed to delete — and only those that are STILL leftovers.
-   *
-   * Re-derived from the disk rather than trusted from the request: the list the renderer showed is
-   * as old as the dialog it was shown in, and a file edited in the meantime is no longer a copy of
-   * anything. Such a file is skipped without a word; the answer names what actually went.
-   */
-  cleanupBuiltIn(request: { stateIds: string[] }): BuiltInLeftover[] {
-    const wanted = new Set(request.stateIds);
-    const gone = this.builtInLeftovers().filter((left) => wanted.has(left.stateId));
-    for (const left of gone) rmSync(left.file);
-    if (gone.length > 0) this.publish({ type: "store:invalidate", scope: "workflows" });
-    return gone;
+    return { layers };
   }
 
   /**
@@ -7549,10 +7494,9 @@ export class AppService {
     if (exists && statSync(file).isDirectory()) throw this.refusal("file", `'${request.path}' is a directory`);
     const text = exists ? readFileSync(file, "utf8") : "";
     const state = this.stateIdOf(named);
-    // Which layers hold this state, and whether this copy is one JaiRA wrote — what the editor's
-    // top bar says about a built-in and about a file that overrides one (decision 0006).
-    const builtIn =
-      exists && state !== null ? this.builtInStanding(state.stateId, request.layer, text, request.project) : undefined;
+    // Which layers hold this state — what the editor's top bar says about a built-in and about a
+    // file that overrides one (decision 0006).
+    const builtIn = exists && state !== null ? this.builtInStanding(state.stateId, request.project) : undefined;
     return {
       layer: request.layer,
       // Echoed back, so the document the panel holds knows which project it is in — the tree's

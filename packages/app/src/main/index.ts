@@ -455,8 +455,6 @@ const handlers: Record<IpcChannel, Handler> = {
   "workflow:syncCancel": (() => service.cancelSync()) as Handler,
   "workflow:delete": ((request: Parameters<typeof service.deleteWorkflow>[0]) =>
     service.deleteWorkflow(request)) as Handler,
-  "builtin:leftovers": (() => service.builtInLeftovers()) as Handler,
-  "builtin:cleanup": ((request: Parameters<typeof service.cleanupBuiltIn>[0]) => service.cleanupBuiltIn(request)) as Handler,
   "schema:validate": ((request: Parameters<typeof service.validateSchema>[0]) =>
     service.validateSchema(request)) as Handler,
   "schema:check": ((request: Parameters<typeof service.checkValues>[0]) => service.checkValues(request)) as Handler,

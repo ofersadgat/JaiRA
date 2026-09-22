@@ -20,11 +20,10 @@
  * nothing but the final newline. Compaction, if it is ever wanted, is a rewrite of a file nobody is
  * appending to and can be added without changing the reader.
  *
- * ## Three kinds of line, because there are three tables
+ * ## A kind of line per table
  *
- * `record` (an `operation_records` row, keyed by task/run/record/attempt), `position` (a
- * `session_positions` row, keyed by session and seq), `session` (a `sessions` lineage row, keyed by
- * id). They share a file because they share a lifetime: the conversations concern is one concern
+ * `record` (an `operation_records` row, keyed by task and record), `session` (a `sessions` lineage
+ * row, keyed by id), `name` (a `session_names` alias) and `tombstone` (a row taken back). They share a file because they share a lifetime: the conversations concern is one concern
  * precisely so a fork cannot lose the parent row its prefix hangs off.
  *
  * ## Dialects, and what is and is not being claimed
@@ -66,17 +65,11 @@ import type { JairaDb } from "./db";
 export interface RecordRow {
   record_id: string;
   task_id: string | null;
-  /** Legacy lines only — files written before the runs collapse stamped rows per run. */
-  run_id?: number | null;
-  /** Legacy lines only — files written before the scoped id retired the attempt column. */
-  attempt?: number;
   status: string;
   request_json: string | null;
   result_json: string | null;
   error_json: string | null;
   metrics_json: string | null;
-  /** Legacy lines only — the column migration 14 folded into `result_json` and dropped. */
-  session_outcome_json?: string | null;
   provider_session_id: string | null;
   /** Where the call demonstrably ran, when that is not where it was asked to (migration 14). */
   landed_session_id?: string | null;
@@ -85,25 +78,14 @@ export interface RecordRow {
   ended_at: number | null;
 }
 
-/** A `session_positions` row — the claim, and what it points at. */
-export interface PositionRow {
-  session_id: string;
-  seq: number;
-  task_id: string | null;
-  run_id: number | null;
-  record_id: string;
-  /** Legacy lines only — see {@link RecordRow.attempt}. */
-  attempt?: number;
-}
-
 /** A `sessions` row — the lineage a fork's prefix hangs off, and its remote identity (migration 14). */
 export interface SessionRow {
   id: string;
   parent: string | null;
   cursor: number;
-  /** Who owns the handle below — absent on legacy lines. */
+  /** Who owns the handle below. */
   provider?: string | null;
-  /** The conversation's current handle; NULL on a fork until it earns one. Absent on legacy lines. */
+  /** The conversation's current handle; NULL on a fork until it earns one. */
   provider_session_id?: string | null;
   /** Where the remote is to be cut before it is next used  set by a rewind or a fork copy (migration 17). */
   cut_at?: string | null;
@@ -132,7 +114,6 @@ export interface TombstoneRow {
 
 export type ConversationEntry =
   | { kind: "record"; row: RecordRow }
-  | { kind: "position"; row: PositionRow }
   | { kind: "session"; row: SessionRow }
   | { kind: "name"; row: NameRow }
   | { kind: "tombstone"; row: TombstoneRow };
@@ -172,14 +153,12 @@ function messagesOf(row: RecordRow): Array<{ role?: string; content?: unknown }>
 /** `jaira.record` and friends — namespaced so neither agent's reader mistakes one for its own. */
 const TYPE_OF: Record<ConversationEntry["kind"], string> = {
   record: "jaira.record",
-  position: "jaira.position",
   session: "jaira.session",
   name: "jaira.name",
   tombstone: "jaira.tombstone",
 };
 const KIND_OF: Record<string, ConversationEntry["kind"]> = {
   "jaira.record": "record",
-  "jaira.position": "position",
   "jaira.session": "session",
   "jaira.name": "name",
   "jaira.tombstone": "tombstone",
@@ -271,9 +250,7 @@ function decodeLine(line: Record<string, unknown>): ConversationEntry | undefine
 
 /**
  * One file per task, like the journal and for the same reason: two people running tasks on one
- * branch write different filenames, so their appends never conflict. Files written before the runs
- * collapse (migration 16) are named `<runId>.jsonl`; the replay reads every file in the task's
- * directory, so they stay legible and nothing writes them any more.
+ * branch write different filenames, so their appends never conflict.
  *
  * An unscoped store — no task — writes nowhere, because it has nothing to write. It is a read
  * that has already been narrowed (see `SessionScope`), and giving it a file would invent a task to
@@ -323,18 +300,13 @@ export class ConversationLog {
   }
 }
 
-/** Every conversation file — per-task, plus legacy per-run ones — in a deterministic order. */
+/** Every task's conversation file, in a deterministic order. */
 export function conversationFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
   const out: string[] = [];
   for (const taskId of readdirSync(dir).sort()) {
-    let names: string[];
-    try {
-      names = readdirSync(join(dir, taskId));
-    } catch {
-      continue;
-    }
-    for (const name of names.filter((n) => n.endsWith(".jsonl")).sort()) out.push(join(dir, taskId, name));
+    const file = join(dir, taskId, "conversations.jsonl");
+    if (existsSync(file)) out.push(file);
   }
   return out;
 }
@@ -384,88 +356,23 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
   if (files.length === 0) return undefined;
 
   const records = new Map<string, RecordRow>();
-  const positions = new Map<string, PositionRow>();
   const sessions = new Map<string, SessionRow>();
   const names = new Map<string, NameRow>();
   for (const file of files) {
     for (const entry of readConversationFile(file)) {
       if (entry.kind === "record") {
-        records.set(`${entry.row.task_id ?? ""} ${entry.row.run_id ?? ""} ${entry.row.record_id} ${entry.row.attempt ?? 1}`, entry.row);
-      } else if (entry.kind === "position") {
-        positions.set(`${entry.row.session_id} ${entry.row.seq}`, entry.row);
+        records.set(`${entry.row.task_id ?? ""} ${entry.row.record_id}`, entry.row);
       } else if (entry.kind === "name") {
         names.set(entry.row.task_id + " " + entry.row.name, entry.row);
       } else if (entry.kind === "tombstone") {
-        // Last wins, so a tombstone after the row it names takes the row out of the fold. A
-        // current-format record line keys with no run and attempt 1  the shape every line since
-        // migration 16 has, and the only shape a rewind ever deletes.
-        if (entry.row.record_id !== undefined) records.delete(`${entry.row.task_id ?? ""}  ${entry.row.record_id} 1`);
+        // Last wins, so a tombstone after the row it names takes the row out of the fold.
+        if (entry.row.record_id !== undefined) records.delete(`${entry.row.task_id ?? ""} ${entry.row.record_id}`);
         if (entry.row.session_id !== undefined) sessions.delete(entry.row.session_id);
       } else {
         sessions.set(entry.row.id, entry.row);
       }
     }
   }
-
-  // LEGACY lines carry an attempt, and a legacy content-hash id repeats across attempts and runs 
-  // the same collision migration 13 resolves in the table, resolved here the same way: per content
-  // id, the newest (greatest run, then attempt) keeps the bare id, and every other row moves to
-  // '<id>~~<run>.<attempt>'. Computable from either table's columns, which is what lets a position
-  // line name the same id its record line got. A current-format line has no attempt and passes
-  // through untouched  its id is already unique.
-  // The rank carries the TASK too, as tiebreak and as suffix: a content hash collides across tasks
-  // exactly as it does across runs (two tasks running one workflow hash identical requests), the
-  // rebuilt table's id is a primary key, and the DB migration's disambiguator — the old rowid,
-  // "unique by construction" — has no counterpart in a file. (task, run, attempt) is the file's own
-  // unique key, so folding all three in restores the same construction.
-  const newest = new Map();
-  const rankOf = (row: { task_id?: string | null; run_id?: number | null; attempt?: number }): [number, number, string] => [
-    row.run_id ?? -1,
-    row.attempt ?? 1,
-    row.task_id ?? "",
-  ];
-  const outranks = (rank: [number, number, string], seen: [number, number, string]): boolean =>
-    rank[0] !== seen[0] ? rank[0] > seen[0] : rank[1] !== seen[1] ? rank[1] > seen[1] : rank[2] > seen[2];
-  for (const row of records.values()) {
-    if (row.attempt === undefined) continue;
-    const rank = rankOf(row);
-    const seen = newest.get(row.record_id) as [number, number, string] | undefined;
-    if (seen === undefined || outranks(rank, seen)) newest.set(row.record_id, rank);
-  }
-  const idOf = (row: { record_id: string; task_id?: string | null; run_id?: number | null; attempt?: number }): string => {
-    if (row.attempt === undefined) return row.record_id;
-    const [run, attempt, task] = rankOf(row);
-    const top = newest.get(row.record_id) as [number, number, string] | undefined;
-    return top !== undefined && (top[0] !== run || top[1] !== attempt || top[2] !== task)
-      ? `${row.record_id}~~${task}.${run}.${attempt}`
-      : row.record_id;
-  };
-
-  // LEGACY position lines fold into their record's request — where a position lives now (migration
-  // 14). Keyed the way the old table joined, so each record collects the one seat it claimed.
-  const seatOf = new Map<string, { id: string; seq: number }>();
-  for (const row of positions.values()) {
-    const key = `${row.task_id ?? ""} ${row.run_id ?? ""} ${idOf(row)}`;
-    seatOf.set(key, { id: row.session_id, seq: row.seq });
-  }
-
-  /** A legacy record's request with its seat spliced in; a current line already carries its own. */
-  const requestOf = (row: RecordRow, id: string): string | null => {
-    const seat = seatOf.get(`${row.task_id ?? ""} ${row.run_id ?? ""} ${id}`);
-    if (seat === undefined) return row.request_json;
-    const request = (parsedObject(row.request_json) ?? {}) as Record<string, unknown>;
-    if (request["session"] !== undefined) return row.request_json;
-    return JSON.stringify({ ...request, session: seat });
-  };
-
-  /** Migration 14's fold, restated for legacy lines: the outcome's one earned case joins the result. */
-  const resultOf = (row: RecordRow): string | null => {
-    const outcome = parsedObject(row.session_outcome_json ?? null) as { messages?: unknown } | undefined;
-    if (outcome?.messages === undefined) return row.result_json;
-    const result = (parsedObject(row.result_json) ?? {}) as { value?: { entries?: unknown } };
-    if (result.value?.entries !== undefined) return row.result_json;
-    return JSON.stringify({ ...result, messages: outcome.messages });
-  };
 
   let rows = 0;
   db.transaction(() => {
@@ -485,13 +392,12 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const row of records.values()) {
-      const id = idOf(row);
       record.run(
-        id,
+        row.record_id,
         row.task_id,
         row.status,
-        requestOf(row, id),
-        resultOf(row),
+        row.request_json,
+        row.result_json,
         row.error_json,
         row.metrics_json,
         row.provider_session_id,
@@ -511,17 +417,6 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
     }
   })();
   return rows;
-}
-
-/** JSON that should be an object, or nothing — a helper the legacy folds above share. */
-function parsedObject(json: string | null): unknown {
-  if (json === null) return undefined;
-  try {
-    const value = JSON.parse(json) as unknown;
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Delete a task's whole conversation directory, for the same reason. */

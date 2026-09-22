@@ -26,7 +26,7 @@ siblings: [engineering/units/conversation-lookup, engineering/units/rewind-and-f
 - **Cutting.** `cutSession(sessionId, seq)` deletes every row at or after the seat and every branch that left at or after it with its aliases, then stamps the last kept handle with `cut_at` or clears the handle. `dropRecords(ids)` deletes records that hold no seat. Both release blob references and write tombstones.
 - **Derived conversations.** `compact` and `resync` write a `completed` record at seat 0 of a new session `<id>~<word><n>` whose request is `{kind: "derive", word, from, session}`. Upstream declares both optional, and no production code in either repository calls them.
 - **Crash recovery.** `recoverable(taskId)` lists `interrupted` or `failed` rows with a provider handle and no `"capturedAt"` in their result; `foldNativeCapture(id, fold)` stores what the caller's fold returns for a record-shaped value.
-- **Calls as data.** `record(id)` and `records()` return hydrated `RecordedCall`s for the task, folding legacy `<id>~~<n>` rows to their base id.
+- **Calls as data.** `record(id)` and `records()` return hydrated `RecordedCall`s for the task.
 
 `blobStore.ts` replaces each string leaf of 1024 characters or more with `{"$blob": <sha256>}`, stores the bytes once in `blobs` with `refs` counting the records that name them, hydrates a value in one query, and `collectBlobs` deletes rows at zero. `SqliteMemoCache` in `memoCache.ts` implements upstream `MemoCache` over `call_memo`.
 
@@ -87,11 +87,9 @@ It deliberately does not own:
 | A reader reads a record while its call streams | each write is one statement, so the reader sees a whole partial with status `open`, and `bySession` and replayed history leave it out | none needed | the turn so far shows as in progress |
 | A referenced blob row is missing | hydration leaves `{"$blob": <hash>}` in the value | none | a reference object shows where the text was |
 | An executor with a `memoize` step makes a call identical to an earlier success, including in a re-run | the earlier answer is returned; `memo.enabled` in `settings.json` gates nothing | remove the `memoize` step | the run repeats an earlier answer |
-## Legacy ids stay readable and are never written, and the tables migrate only forward
+## The tables migrate only forward, and no reader keeps an old id form
 
 - Migrations 2, 4, 8, 10, 13, 14, 15 and 17 shaped these tables, as [sqlite-schema](../contracts/sqlite-schema.md) records.
-- Sessions recorded before migration 15 under `task/run/name` resolve read-only through `legacyTwin` and `bareSessionId`, with the run segment matched as digits. A new `resolve` of such a name mints a new session.
-- Records suffixed `<id>~~<n>` by migration 13 are read through `record` and folded by `records`.
 - A handle stored without a provider before migration 14 is kept on the record and never offered as a resume identity.
 
 ## Budgets are the blob threshold and one hydration query per value

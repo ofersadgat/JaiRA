@@ -118,28 +118,22 @@ function answerFrom(choice: Choice, given: JsonValue, comments: string | undefin
 /**
  * The answers out of the text an agent's question tool RETURNED, when no richer record was kept.
  *
- * Two spellings have shipped. The older reads `The user answered: "question"="answer", …` with each
- * half JSON-quoted, so the quotes inside are escaped and the pairs parse on their own. The current
- * one reads `User has answered your questions: "question"="answer", …. You can now continue with the
- * user's answers in mind.` and quotes NOTHING inside the halves — a question that itself quotes the
- * issue, or an answer with a comma in it, defeats any parse that goes by punctuation, and one such
- * question drew as never answered. So when the caller knows the questions (it always can: they are
- * the call's own arguments) each is looked up VERBATIM as `"question"=`, and its answer runs to the
- * next question's marker or to the closing sentence. The quoted parse remains for the older spelling
- * and for text with no known question in it. Anything else — a dismissal, a refusal — answers
- * nothing.
+ * The text reads `User has answered your questions: "question"="answer", …. You can now continue
+ * with the user's answers in mind.` and quotes NOTHING inside the halves — a question that itself
+ * quotes the issue, or an answer with a comma in it, defeats any parse that goes by punctuation, and
+ * one such question drew as never answered. So when the caller knows the questions (it always can:
+ * they are the call's own arguments) each is looked up VERBATIM as `"question"=`, and its answer runs
+ * to the next question's marker or to the closing sentence. A quoted-pair parse remains for text
+ * with no known question in it. Anything else — a dismissal, a refusal — answers nothing.
  */
 export function answersOfAnsweredText(text: string, questions: readonly string[] = []): Record<string, string> | undefined {
-  const legacyAt = text.indexOf("The user answered:");
-  const currentAt = text.indexOf("User has answered your questions:");
-  if (legacyAt < 0 && currentAt < 0) return undefined;
-  if (currentAt >= 0) {
-    const anchored = answersAnchoredOn(text.slice(currentAt), questions);
-    if (anchored !== undefined) return anchored;
-  }
+  const at = text.indexOf("User has answered your questions:");
+  if (at < 0) return undefined;
+  const anchored = answersAnchoredOn(text.slice(at), questions);
+  if (anchored !== undefined) return anchored;
   const out: Record<string, string> = {};
   const pair = /"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"/g;
-  for (const match of text.slice(legacyAt >= 0 ? legacyAt : currentAt).matchAll(pair)) {
+  for (const match of text.slice(at).matchAll(pair)) {
     try {
       out[JSON.parse(`"${match[1]!}"`) as string] = JSON.parse(`"${match[2]!}"`) as string;
     } catch {

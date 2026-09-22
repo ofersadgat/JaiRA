@@ -39,7 +39,7 @@ It deliberately does not own:
 - Layer `data`, package `@jaira/persistence`. It calls `@jaira/shared` for paths, `parseConfig`, `mergeConfigDocuments` and `refusal`, then `applyStorage`, the replay sources and every store constructor.
 - No upstream seam. The engine reaches the stores it builds, never the open.
 - The app opens one `Project` per open directory through `openProject` and the shared root through `openSharedProject`. The CLI opens through `openWithRecoveryNote`, which prints `recovered N interrupted task(s)` and a `process left running by a previous session` warning per orphan.
-- Boundary: derived and committed. The `.gitignore` it writes names the line: `system/jaira.db` with its `-wal` and `-shm` files, `system/logs/`, `system/machine.key`, `system/approvals.local.json` and `.env.local` stay out, and everything else under `system/` is meant to be committed.
+- Boundary: derived and committed. The `.gitignore` it writes names the line: `system/jaira.db` with its `-wal` and `-shm` files, `system/logs/`, `system/machine.key` and `.env.local` stay out, and everything else under `system/` is meant to be committed.
 
 ## The database is the truth for the schema, and each open computes what it recovered
 
@@ -80,7 +80,7 @@ It deliberately does not own:
 | A migration step throws | the step rolls back and the error leaves `openDb` | fix the cause and reopen | the project does not open |
 | The process is killed between the recovery transaction and the task row line under `storage.tasks: file` | the change dies with the connection and the file still says `running` | the next open recovers the task again | the task reads `interrupted` after that open |
 | The same project is opened again, by a second window or a retry | layout creation, `initBase`, migrations and recovery are idempotent; a task another process claimed within the stale window is left `running` | none needed | none |
-| A setting in the shared root's `settings.json` that `defaultConfig()` also states, such as `storage.*`, `memo.enabled`, `artifacts.*`, `artifactDir` or `execEnvironment` | `initProject` wrote the default into the project file, and the project layer wins the merge | delete the key from the project's `settings.json` | the shared value silently never applies to a project created by `init` |
+| A setting in the shared root's `settings.json` that `defaultConfig()` also states, such as `storage.*`, `memo.enabled`, `artifacts.*` or `execEnvironment` | `initProject` wrote the default into the project file, and the project layer wins the merge | delete the key from the project's `settings.json` | the shared value silently never applies to a project created by `init` |
 
 ## Migrations only append, the older build cannot read a newer database, and nothing rolls back
 

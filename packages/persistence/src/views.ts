@@ -28,7 +28,7 @@ import {
   type WorkflowShape,
 } from "./projection";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
-import { EFFECTIVE_SEQ, EFFECTIVE_SESSION, bareSessionId } from "./sessionStore";
+import { EFFECTIVE_SEQ, EFFECTIVE_SESSION } from "./sessionStore";
 import { workflowShape } from "./shape";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -409,7 +409,6 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
         ORDER BY seq`,
     )
     .all(taskId) as Array<{ type: string; payload_json: string; session_ref: string | null; created_at: number }>;
-  const scope = { taskId };
   const started = new Map<string, { stateId: string; at: number }>();
   /**
    * The POSITIONS the journal already accounts for — one back from the end each terminal event
@@ -451,10 +450,7 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
   // The records those calls left: placed ones — an unplaced call has no conversation to list —
   // that no terminal event accounts for. Asking the journal rather than the record's status is what
   // finds a call that SETTLED and then lost its event; a status test would call that one listed and
-  // leave the answer it holds unreachable. Ordered by insertion, which is start order. Matched
-  // under BOTH spellings: a new ref carries the session's own id — the row's key since ids became
-  // assigned (migration 15) — while a legacy row carries the run namespace in front of it, taken
-  // back off with `bareSessionId`.
+  // leave the answer it holds unreachable. Ordered by insertion, which is start order.
   const records = (
     project.db
       .prepare(
@@ -466,8 +462,7 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
   ).filter(
     (record) =>
       (record.instance_id === null || !failed.has(String(record.instance_id))) &&
-      !listed.has(`${record.session_id}@${record.seq}`) &&
-      !listed.has(`${bareSessionId(scope, record.session_id)}@${record.seq}`),
+      !listed.has(`${record.session_id}@${record.seq}`),
   );
   if (records.length !== started.size) return []; // ambiguous — see the header
   const out: StateSession[] = [];
@@ -477,7 +472,7 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
     out.push({
       instanceId,
       stateId: where.stateId,
-      sessionId: bareSessionId(scope, record.session_id),
+      sessionId: record.session_id,
       seq: record.seq,
       at: where.at,
       // Read off the record rather than assumed. `completed` is the one status that means the call

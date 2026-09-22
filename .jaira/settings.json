@@ -3,7 +3,6 @@
   "memo": {
     "enabled": false
   },
-  "artifactDir": "artifacts",
   "artifacts": {
     "destination": "$DEFAULT",
     "dir": "artifacts",

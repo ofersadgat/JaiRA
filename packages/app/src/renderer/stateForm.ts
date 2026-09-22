@@ -285,13 +285,6 @@ export function formOf(doc: unknown): FormModel {
   const operation = state["operation"];
   const operationKind = operationKindOf(operation);
   const op = operationFieldsOf(operation);
-
-  // The nested spelling an earlier version of this form wrote. `model` is a FLAT operation field —
-  // hw hoists every field it does not own into the call config, so `operation.config.model` reached
-  // the model as `config.config.model` and did nothing. Read here only so those files migrate.
-  const legacyModel = asRecord(asRecord(operation)["config"])["model"];
-  if (op.fields["model"] === "" && typeof legacyModel === "string") op.fields["model"] = legacyModel;
-
   const limits = asRecord(state["limits"]);
   return {
     label: typeof state["label"] === "string" ? state["label"] : "",
@@ -502,7 +495,6 @@ export function applyForm(doc: unknown, form: FormModel): unknown {
   if (form.operationKind === "function" && form.operation.structured["prompt"] !== true) {
     if (typeof op["prompt"] === "string" || readRef(op["prompt"], "string") !== undefined) delete op["prompt"];
   }
-  if (form.operation.structured["model"] !== true) dropLegacyModel(op);
 
   state["operation"] = op;
   return state;
@@ -521,22 +513,4 @@ function applyLimits(state: Record<string, unknown>, form: LimitsForm): void {
   }
   if (Object.keys(limits).length > 0) state["limits"] = limits;
   else delete state["limits"];
-}
-
-/**
- * Remove `operation.config.model`, the nested spelling an earlier version of this form wrote.
- *
- * `model` sits FLAT on the operation — "the operation IS the call" — and hw hoists every field it
- * does not own into the call config, so the nested form arrived at the provider as `config.model`
- * and the state ran on the default model instead. Left in place it would also shadow the correct
- * field on the next read. The rest of a `config` block is not touched, and the block goes only when
- * emptying it leaves nothing behind.
- */
-function dropLegacyModel(op: Record<string, unknown>): void {
-  const config = op["config"];
-  if (!isPlainObject(config) || !("model" in (config as Record<string, unknown>))) return;
-  const rest = { ...(config as Record<string, unknown>) };
-  delete rest["model"];
-  if (Object.keys(rest).length > 0) op["config"] = rest;
-  else delete op["config"];
 }

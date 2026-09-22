@@ -41,7 +41,7 @@ It deliberately does not own:
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `artifacts.destination`, `artifacts.dir`, `artifacts.inlineMaxBytes` | read by `artifactWiring` at each run start and each turn | layered `settings.json`, defaults `$DEFAULT`, `artifacts` and 65536; a legacy `artifactDir` seeds `dir` | project-config checks only that the destination is a non-empty string |
+| `artifacts.destination`, `artifacts.dir`, `artifacts.inlineMaxBytes` | read by `artifactWiring` at each run start and each turn | layered `settings.json`, defaults `$DEFAULT`, `artifacts` and 65536 | project-config checks only that the destination is a non-empty string |
 | `artifacts` rows | `put` upserts, `get` and `list` read | the project database, or `system/artifactRows/<taskId>.jsonl` when `storage.artifacts` is file-backed | host-tools puts and gets; uri-and-artifact-reads lists and serves; task-lifecycle deletes |
 | Bytes at `$WORKTREE/<logical path>` under `$DEFAULT` | written | the filesystem, as the person's work | git, agents and the person |
 | Bytes under `<project>/.jaira/system/<dir>/<taskId>/` under `$CENTRAL` and `$CENTRAL_FLAT` | written | the filesystem | uri-and-artifact-reads serves them |
@@ -79,8 +79,6 @@ It deliberately does not own:
 
 - Migration 6 added `artifacts.interactive` with default 0, so a row written before it reads as not scriptable.
 - Migration 12 did not rebuild `artifacts.instance_id`; a legacy numeric value is read through `String`.
-- Migration 16 dropped `artifacts.run_id`. A template naming `$RUN_ID` resolves it empty rather than refusing.
-- A legacy top-level `artifactDir` seeds `artifacts.dir`. None of these rolls back.
 
 ## Placement keeps three small numbers in code
 

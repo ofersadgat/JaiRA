@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { BuiltInLeftover, FileNode, FileTree, WorkflowLayer, WorkflowSource } from "@jaira/shared";
+import type { FileNode, FileTree, WorkflowLayer, WorkflowSource } from "@jaira/shared";
 import { DebugPane } from "../src/renderer/debugPane";
 import { FileTreePanel } from "../src/renderer/files";
 import { WorkflowEditor } from "../src/renderer/stateEditor";
@@ -86,11 +86,6 @@ const tree: FileTree = {
   ],
 };
 
-const leftovers: BuiltInLeftover[] = [
-  { stateId: "chat/assistant", layer: "base", file: "C:/Users/me/.jaira/workflows/chat/assistant.json", identical: "superseded" },
-  { stateId: "debug/hello_world", layer: "base", file: "C:/Users/me/.jaira/workflows/debug/hello_world.json", identical: "current" },
-];
-
 const noop = (): undefined => undefined;
 const never = async (): Promise<null> => null;
 
@@ -119,8 +114,6 @@ const treeHtml = renderToStaticMarkup(
     onDeleteFile: never,
     onReveal: noop,
     project: "C:/w/atlas",
-    leftovers,
-    onCleanup: noop,
   } as unknown as Parameters<typeof FileTreePanel>[0]),
 );
 
@@ -132,7 +125,7 @@ const editor = (source: WorkflowSource, hasProject = true): string =>
       executors: [],
       busy: false,
       onSave: noop,
-      layerActions: { hasProject, onOverride: noop, onDeleteCopy: noop },
+      layerActions: { hasProject, onOverride: noop },
     } as unknown as Parameters<typeof WorkflowEditor>[0]),
   );
 
@@ -140,7 +133,7 @@ const debugHtml = renderToStaticMarkup(
   createElement(DebugPane, {
     debug: {
       files: [
-        { stateId: "debug/hello_world", file: "C:/Users/me/.jaira/workflows/debug/hello_world.json", layer: "base", text: shipped("debug/hello_world"), identical: "current" },
+        { stateId: "debug/hello_world", file: "C:/Users/me/.jaira/workflows/debug/hello_world.json", layer: "base", text: shipped("debug/hello_world") },
         { stateId: "debug/hello_world/say", file: "$SYSTEM/workflows/debug/hello_world/say.json", layer: "system", text: shipped("debug/hello_world/say") },
         { stateId: "debug/hello_world/check", file: "$SYSTEM/workflows/debug/hello_world/check.json", layer: "system", text: shipped("debug/hello_world/check") },
       ],
@@ -159,7 +152,6 @@ const debugHtml = renderToStaticMarkup(
     hasProject: true,
     onRun: noop,
     onCancel: noop,
-    onCleanup: noop,
     onRecheck: noop,
     onDismissError: noop,
     onOpenState: noop,
@@ -184,8 +176,8 @@ writeFileSync(
     stage(editor({ stateId: "chat/agent", layer: "system", file: "x", text: shipped("chat/agent"), exists: true, builtIn: { layers: ["project", "base", "system"] } }), 760, 60) +
     caption("the editor on a project file that overrides a built-in") +
     stage(editor({ stateId: "chat/agent", layer: "project", file: "C:/w/atlas/.jaira/workflows/chat/agent.json", text: shipped("chat/agent"), exists: true, builtIn: { layers: ["project", "system"] } }), 760, 60) +
-    caption("the editor on a shared copy JaiRA itself installed") +
-    stage(editor({ stateId: "chat/assistant", layer: "base", file: "C:/Users/me/.jaira/workflows/chat/assistant.json", text: shipped("chat/assistant"), exists: true, builtIn: { layers: ["base", "system"], identical: "superseded" } }), 760, 60) +
+    caption("the editor on a shared copy of a shipped id") +
+    stage(editor({ stateId: "chat/assistant", layer: "base", file: "C:/Users/me/.jaira/workflows/chat/assistant.json", text: shipped("chat/assistant"), exists: true, builtIn: { layers: ["base", "system"] } }), 760, 60) +
     caption("the editor on an ordinary shared file") +
     stage(editor({ stateId: "review/step", layer: "base", file: "C:/Users/me/.jaira/workflows/review/step.json", text: "{}", exists: true }), 760, 60) +
     caption("the Debug pane") +

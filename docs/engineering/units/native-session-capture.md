@@ -91,7 +91,6 @@ It deliberately does not own:
 ## Nothing migrates, and the old capture field is left where it lies
 
 - A record captured before the fold wrote into `entries` holds a `nativeLines` field, and nothing reads it: `nativeOf` derives native lines from `entries`.
-- `recoverable` accepts `failed` rows as well as `interrupted` ones, because an older sweep settled interrupted calls as `failed`.
 - There is no migration and nothing to roll back.
 
 ## A capture failure is logged rather than raised, which departs from failing fast

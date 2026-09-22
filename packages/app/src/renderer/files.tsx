@@ -25,7 +25,6 @@ import {
 } from "react";
 import type {
   BoardCard,
-  BuiltInLeftover,
   FileMutationResult,
   FileNode,
   FileRoot,
@@ -40,7 +39,6 @@ import type {
   WorkflowMutationResult,
 } from "@jaira/shared/browser";
 import { isTextMime, isWritableLayer } from "@jaira/shared/browser";
-import { leftoversAsk } from "./builtIn";
 import { Badge } from "./board";
 import { CrumbBar, alternatives, runCrumbs, shortRunName, type Crumb } from "./crumbs";
 import { TaskPanel } from "./detail";
@@ -492,8 +490,6 @@ export function standingRoot(tree: FileTree | null, project: string | null): Fil
   return tree.roots.find((root) => root.layer === "base") ?? tree.roots[0] ?? null;
 }
 
-const NO_LEFTOVERS: readonly BuiltInLeftover[] = [];
-
 /**
  * The verbs a row under "Built in" offers: READ and OVERRIDE, and nothing else (decision 0006).
  *
@@ -685,8 +681,6 @@ export function FileTreePanel({
   onDraft,
   onUnfold,
   project = null,
-  leftovers = NO_LEFTOVERS,
-  onCleanup,
 }: {
   tree: FileTree | null;
   selected: FileSelection | null;
@@ -779,12 +773,6 @@ export function FileTreePanel({
    * name, printed it twice. The one you are standing in is the one that needs no introduction.
    */
   project?: string | null;
-  /**
-   * Copies of built-in states in the shared root that JaiRA wrote and nobody changed, and how to
-   * delete the ones named (decision 0006). The "Built in" root offers it; with neither, it does not.
-   */
-  leftovers?: readonly BuiltInLeftover[];
-  onCleanup?: ((stateIds: string[]) => void) | undefined;
 }): JSX.Element {
   /** Used only when the host does not control the folding — see the prop's own note. */
   const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -1197,32 +1185,9 @@ export function FileTreePanel({
                   +
                 </button>
                 ) : (
-                  <>
-                    <span className="chip" title="What ships with JaiRA. Read it here; change it by overriding it.">
-                      read-only
-                    </span>
-                    {/* The offer to clear out what the old install steps left in the shared root
-                        (decision 0006). Here because this is the root those files are copies OF, and
-                        a button rather than a sweep because the shared root is a person's: every
-                        file is named in the dialog, and nothing goes without a yes. */}
-                    {leftovers.length > 0 && onCleanup !== undefined ? (
-                      <button
-                        type="button"
-                        className="link tree-leftovers"
-                        title={`${leftovers.length === 1 ? "A file" : `${leftovers.length} files`} in the shared root identical to what JaiRA installed there — not needed any more`}
-                        onClick={() =>
-                          setAsk(
-                            leftoversAsk(leftovers, () => {
-                              setAsk(null);
-                              onCleanup(leftovers.map((left) => left.stateId));
-                            }),
-                          )
-                        }
-                      >
-                        {leftovers.length === 1 ? "1 old copy…" : `${leftovers.length} old copies…`}
-                      </button>
-                    ) : null}
-                  </>
+                  <span className="chip" title="What ships with JaiRA. Read it here; change it by overriding it.">
+                    read-only
+                  </span>
                 )}
               </li>
               ) : null}

@@ -22,9 +22,9 @@ describe("the defaults", () => {
     }
   });
 
-  it("hides the four JSON files at the root, and only at the root", () => {
+  it("hides the three JSON files at the root, and only at the root", () => {
     const rules = compileHidden(hiddenRules(undefined));
-    for (const path of ["settings.json", "user-settings.json", "sync.json", "approvals.local.json"]) {
+    for (const path of ["settings.json", "user-settings.json", "sync.json"]) {
       expect(isHiddenPath(path, rules)).toBe(true);
     }
     // A bare name matches from the root, so a file somebody authored deeper keeps its row. Hiding

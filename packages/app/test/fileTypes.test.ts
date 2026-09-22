@@ -289,15 +289,6 @@ describe("reading the renderer choices back", () => {
     expect(renderers).toEqual({ "text/markdown:preview": { ...defaultRendererChoice(), read: "none" } });
   });
 
-  it("reads the single value the older file held as the READING", () => {
-    // What that value always meant. It was resolved for the half of the panel that shows the
-    // document, and the editor was picked by a rule nobody could see or change — so a person who
-    // said "draw my markdown as source" keeps having said exactly that.
-    expect(parseSettings({ renderers: { "text/markdown:text": "monaco" } }).renderers).toEqual({
-      "text/markdown:text": { ...defaultRendererChoice(), read: "monaco" },
-    });
-  });
-
   it("keeps the four statements apart, including the palette each view is painted in", () => {
     expect(
       parseSettings({

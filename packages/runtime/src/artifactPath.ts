@@ -70,7 +70,6 @@ const BASE_VARIABLES = [
   "SYSTEM",
   "ARTIFACT_DIR",
   "TASK_ID",
-  "RUN_ID",
   "INSTANCE_ID",
   "STATE_ID",
   "SLOT",
@@ -203,9 +202,6 @@ export function resolveDestination(
     SYSTEM: `${vars.jaira}/${SYSTEM_DIR_NAME}`,
     ARTIFACT_DIR: vars.artifactDir,
     TASK_ID: sanitizeSegment(vars.taskId),
-    // Legacy template variable: run ids left the schema with the runs collapse (Identity and
-    // Resume §05), so an authored `$RUN_ID` resolves empty rather than refusing the template.
-    RUN_ID: "",
     INSTANCE_ID: vars.instanceId !== undefined ? sanitizeSegment(String(vars.instanceId)) : "",
     STATE_ID: vars.stateId !== undefined ? sanitizeSegment(vars.stateId) : "",
     SLOT: vars.slot !== undefined ? sanitizeSegment(vars.slot) : "",

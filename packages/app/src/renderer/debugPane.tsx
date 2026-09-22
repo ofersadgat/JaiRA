@@ -92,15 +92,14 @@ function Readiness({ availability }: { availability: AvailabilitySnapshot }): JS
 }
 
 /** What a self-test row says about the copy that loads: which layer it is in, in the pane's words. */
-export function debugFileStatus(file: Pick<DebugFile, "layer" | "identical">): {
+export function debugFileStatus(file: Pick<DebugFile, "layer">): {
   word: string;
   tone: "success" | "unknown" | "error";
 } {
   if (file.layer === null) return { word: "missing", tone: "error" };
   if (file.layer === "system") return { word: "built in", tone: "success" };
-  // A person's copy wins over what ships. One JaiRA itself wrote is worth telling apart: it is not
-  // an experiment somebody is running, it is what an earlier build left behind.
-  return file.identical !== undefined ? { word: "old copy", tone: "unknown" } : { word: "overridden", tone: "unknown" };
+  // A person's copy wins over what ships.
+  return { word: "overridden", tone: "unknown" };
 }
 
 /** One state file's row: which copy loads, and where it is. */
@@ -134,8 +133,6 @@ export interface DebugPaneProps {
   hasProject: boolean;
   onRun: (options: { scripted?: boolean; fresh?: boolean }) => void;
   onCancel: () => void;
-  /** Offer to delete the copies of the self-test an earlier build left in the shared root. */
-  onCleanup: (stateIds: string[]) => void;
   onRecheck: () => void;
   onDismissError: () => void;
   /** Open the copy that LOADS — the row knows which layer that is. */
@@ -156,7 +153,6 @@ export function DebugPane({
   hasProject,
   onRun,
   onCancel,
-  onCleanup,
   onRecheck,
   onDismissError,
   onOpenState,
@@ -171,7 +167,6 @@ export function DebugPane({
   const running = mine?.status === "running" || run?.outcome === "running";
   const missing = debug.files.filter((f) => f.layer === null).length;
   const overridden = debug.files.filter((f) => f.layer !== null && f.layer !== "system");
-  const oldCopies = overridden.filter((f) => f.identical !== undefined);
 
   return (
     // `view` is what makes this a two-column grid the height of the viewport — without it the
@@ -240,23 +235,9 @@ export function DebugPane({
             <div className="notice warn">
               {overridden.length === 1 ? "One state loads" : `${overridden.length} states load`} from the shared
               root instead of from what ships, and a run uses what loads.
-              {oldCopies.length === 0
-                ? ""
-                : ` ${
-                    oldCopies.length < overridden.length
-                      ? `${oldCopies.length} of them ${oldCopies.length === 1 ? "is" : "are"}`
-                      : oldCopies.length === 1
-                        ? "It is"
-                        : "They are"
-                  } identical to what JaiRA itself installed there.`}
             </div>
           ) : null}
           <div className="pane-actions">
-            {oldCopies.length > 0 ? (
-              <button className="ghost" disabled={debug.busy} onClick={() => onCleanup(oldCopies.map((f) => f.stateId))}>
-                {oldCopies.length === 1 ? "Delete the old copy…" : `Delete ${oldCopies.length} old copies…`}
-              </button>
-            ) : null}
             <button className="ghost" disabled={debug.busy} onClick={onRecheck}>
               Re-check
             </button>

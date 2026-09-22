@@ -56,14 +56,13 @@ The shared root has no `.jaira/` inside it, and the built-in layer is not a root
 | `system/jaira.db`, `-wal`, `-shm` | SQLite | yes | the database, created at open: [sqlite-schema](sqlite-schema.md) |
 | `system/tasks/<taskId>.json` | JSON file | directory yes | one task's metadata: [task-file](task-file.md) |
 | `system/snapshots/<hash>/` | directory | directory yes | one pinned workflow: [workflow-snapshot](workflow-snapshot.md) |
-| `system/journal/<taskId>/journal.jsonl` | JSONL | when `storage.journal` is file-backed | the task's journal; legacy `<runId>.jsonl` beside it: [journal-events](journal-events.md) |
+| `system/journal/<taskId>/journal.jsonl` | JSONL | when `storage.journal` is file-backed | the task's journal: [journal-events](journal-events.md) |
 | `system/conversations/<taskId>/conversations.jsonl` | JSONL | when `storage.conversations` is file-backed | the task's records and positions: [storage-files](storage-files.md) |
 | `system/taskRows/<taskId>.jsonl`, `system/artifactRows/<taskId>.jsonl` | JSONL | when `storage.tasks` or `storage.artifacts` is file-backed | runtime rows and the artifact map: [storage-files](storage-files.md) |
 | `system/artifacts/<taskId>/` | directory | no | where `$CENTRAL` and `$CENTRAL_FLAT` put artifact bytes, through `$SYSTEM/$ARTIFACT_DIR` with `artifacts.dir` defaulting to `artifacts`: [artifact-destination-template](artifact-destination-template.md) |
 | `system/sync.json` | JSON file | no | the last agreed state of each description: [sync-record](sync-record.md) |
 | `system/logs/jaira-<utc date>.log` | JSONL | no | the app's diagnostics, one entry per line and one file per UTC day, written under the shared root only |
 | `system/machine.key` | text file | shared root, once approvals are used | the approval HMAC key as `dpapi:<base64>` or `plain:<hex>`, written with mode `0600` |
-| `system/approvals.local.json` | JSON file | no | legacy approvals, read once into an empty approvals table and never written |
 
 ### A task's worktree sits beside the project, never inside it
 
@@ -81,7 +80,6 @@ system/jaira.db-wal
 system/jaira.db-shm
 system/logs/
 system/machine.key
-system/approvals.local.json
 .env.local
 ```
 
@@ -96,7 +94,6 @@ settings.json
 .jaira/settings.json
 user-settings.json
 sync.json
-approvals.local.json
 **/.env
 **/.env.*
 .git
@@ -125,11 +122,10 @@ approvals.local.json
 - No code moves files between layouts. The move of generated files under `system/` on 2026-08-24 left a root with `jaira.db`, `tasks/` or `snapshots/` at its top opening with no history.
 - Renaming `.jaira`, `system` or a file name breaks the `.gitignore` of every existing root, which is written only when absent. The one line back-filled into an existing file is `system/machine.key`.
 - Renaming `.jaira-worktrees` leaves existing worktrees in place, because each task's recorded `worktree_path` is used.
-- Legacy forms are read indefinitely rather than deprecated: `<runId>.jsonl` journal and conversation files, and `approvals.local.json`.
 
 ## Committable is not the same as listed, and several paths are computed and never used
 
-- Everything under `system/` except the database, logs, machine key and legacy approvals file is committable, snapshots and artifacts included. A task file that arrives by a pull without its runtime row is not listed: [task-file](task-file.md).
+- Everything under `system/` except the database, logs and machine key is committable, snapshots and artifacts included. A task file that arrives by a pull without its runtime row is not listed: [task-file](task-file.md).
 - The `.gitignore` sits inside the layer root, so its `.env.local` line does not cover the checkout's own `.env.local`, which the secret chain also reads.
 - The default artifact destination `$DEFAULT` is `$WORKTREE/$RELPATH`, so nothing lands under `system/artifacts/` unless a destination names `$CENTRAL`, `$CENTRAL_FLAT` or `$SYSTEM`.
 - A project's `system/logs/` is computed and never written; the app logs under the shared root.

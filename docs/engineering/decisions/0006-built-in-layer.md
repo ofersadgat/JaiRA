@@ -76,8 +76,9 @@ $SYSTEM/workflows/chat/control.json      ← what ships
   built-in it started with across an app upgrade.
 - **The install steps go.** `chatWorkflowFiles`, `chat.installed` and the
   self-test's write are removed. A file they already wrote to `~/.jaira`
-  stays, and now reads as what it is: an override. The app offers to delete
-  one that is byte-identical to a version it once shipped.
+  stays, and now reads as what it is: an override. (The app offered to delete
+  one that is byte-identical to a version it once shipped; that offer was
+  removed on 2026-09-22 once no such copy remained.)
 
 ### Toolsets are fragments in the layers
 
@@ -143,7 +144,7 @@ person owns.
    app's resources; the approval gate's exemption; lint and snapshot tests
    across three layers.
 2. Move `chat/assistant`, `chat/agent` and `debug/hello_world` into it;
-   delete the install steps; the identical-copy cleanup offer.
+   delete the install steps; the identical-copy cleanup offer (since removed).
 3. `toolsets/` as referenced fragments; the linter resolving them; the
    third segment of the layer picker.
 4. The editor bar, the Workflows pane's layer mark, the Tools chip.
@@ -193,17 +194,11 @@ value the layer ships (it has no `settings.json`). **Both landed with 0007 step 
 the pane that gave them something to show — see the note at the end of this file. Tests:
 `packages/app/test/builtInStates.test.ts`. What the build settled:
 
-- **The cleanup offer covers the shared root only.** That is the only place the install steps
-  wrote. A project's copy is in somebody's repository, so it is never listed, identical or not.
-- **Identical means the parsed value, with object keys in any order.** Array order is an edit.
-  The current version is read from the layer at the moment of asking; the versions earlier builds
-  installed are kept by hand in `packages/app/src/main/shippedStates.ts` (`SUPERSEDED`), and a
-  built-in file that changes adds the value it had to that list in the same commit. Forgetting
-  costs an offer that is not made, never a wrong deletion.
-- **Nothing is deleted without a yes that names the file.** `builtin:leftovers` lists;
-  `builtin:cleanup` re-derives the list from the disk and deletes only the named ids still on it,
-  so a copy edited while the dialog was open stays. The offer stands on the tree's `Built in`
-  root, in the editor bar of such a copy, and in the Debug pane.
+- **The cleanup offer is gone (2026-09-22).** It offered to delete a shared-root copy whose parsed
+  value equalled a version JaiRA shipped, and kept the old versions by hand in
+  `shippedStates.ts` (`SUPERSEDED`). Once no such copy remained in `~/.jaira`, the offer, its
+  `builtin:leftovers` / `builtin:cleanup` channels, `BuiltInStanding.identical` and that list were
+  removed: backward-compatibility code is not kept once the data it served is gone.
 - **The tree's last root is the layer, in every tree.** A project's tree, the shared root's and
   the all-projects tree each end with one `system` root labelled `Built in`. It has no sidebar row
   to be reached by, which is why it is listed where the shared root is not. Its rows offer Open,
@@ -213,8 +208,8 @@ the pane that gave them something to show — see the note at the end of this fi
   `override`. The second exists because a project's tree does not hold the shared root, so the
   shipped row alone could not say which of them won.
 - **A file reports its own standing.** `file:read` and `workflow:read` answer `builtIn`
-  (`BuiltInStanding`): every layer holding that state id in search order, and `identical` when a
-  person's copy is one JaiRA wrote. The editor bar is a pure function of that (`layerBarOf`).
+  (`BuiltInStanding`): every layer holding that state id in search order. The editor bar is a pure
+  function of that (`layerBarOf`).
 - **What ships is read, not edited.** The panel mounts every editor on a `system` document as the
   reading of its type, the state editor wraps itself in `ReadOnlyContext` and draws no Save, and
   `AppService.writable` refuses the write regardless.
@@ -274,9 +269,6 @@ already started as one keeps running. What the build settled:
 - **Neither names a model**, as `chat/agent` and `chat/assistant` do not: a
   conversation that pinned one would ignore the machine it runs on, and the
   run's start-time route check would refuse it on a machine set up differently.
-- **Nothing was added to `SUPERSEDED`.** These two files are new, and that list
-  is for a shipped file that CHANGED: it holds the versions earlier builds
-  installed into `~/.jaira`, and no build ever installed either of these.
 ## Revisit when
 
 Overrides of built-ins go stale often enough that people are running old

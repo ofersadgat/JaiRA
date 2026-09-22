@@ -26,7 +26,7 @@ The drawer under the open project's `FILES` row in the sidebar: a scrolling list
 ## The standing checkout reads first, then each other root under its own name
 
 - **Roots.** The checkout the drawer hangs under, or every open project at the root of the address, or `~/.jaira` when that is where the person stands; then `Built in`, the states and files JaiRA ships, last in every tree. The root the drawer hangs under has no heading; each other root starts with its name in `.data-secondary`, uppercased in `--dim` with wide tracking, and a `+` at its end.
-- **Built in.** Always headed. In place of the `+` its heading ends with a hairline `read-only` chip in the app face at its own case, and, while the shared root holds copies of shipped states that JaiRA itself wrote, a link in `--accent` data type reading `{n} old copies…`. Its folders have no `+`.
+- **Built in.** Always headed. In place of the `+` its heading ends with a hairline `read-only` chip in the app face at its own case. Its folders have no `+`.
 - **Row.** 3px by 6px padding, 5px radius, 5px gaps. One 13px guide per level: the innermost a `--rule` hairline, the ancestors `--line`. Then a 13px glyph column in `--dim`: `▸` or `▾` for a folder, `◻` a state file, `◈` a prompt, `✦` a skill, `⚙` settings, `·` anything else. Then the name in the data face at 11.5/12 of its base, one line.
 - **End of row.** In order: an `--accent` dot for unsaved edits, a `--bad` or `--warn` dot for problems, one outlined pill chip in the app face, a `shadowed`, `overridden` or `override` chip, and on a folder a 16px `+` that shows only under the pointer or on focus but keeps its width.
 - **Folding.** Every folder starts shut, and opening one shows only its own entries. What is open is kept for the person and restored next time.
@@ -56,7 +56,6 @@ The drawer under the open project's `FILES` row in the sidebar: a scrolling list
 | Right-click a root heading or the space under a root | Opens the root's menu | Menu at the pointer |
 | Right-click a row under `Built in` | Opens the read-only menu: Open, the two overrides, and the copy and reveal items; a folder or a file that is not a state gets only the last two | Menu at the pointer |
 | Override for all projects, Override here | Copies the shipped state into `~/.jaira` or the project's `.jaira/` under the same id and opens the copy; refused when that layer already has one | The copy selected in its root; the shipped row gains `overridden`. A refusal shows in the error notice |
-| `{n} old copies…` on the `Built in` heading | Asks in a [confirm-dialog](../surfaces/confirm-dialog.md), naming every file; on yes deletes the copies that are still identical | The link goes once none are left; an open copy is replaced by the shipped file |
 | `+` on a folder or root, or `+` on the `FILES` row | Offers New file…, New folder…, and New state… or New workflow… where one belongs | Menu under the button |
 | Pick a New item | Opens the folders on the way and starts a row to name it in, under the deepest one that exists | Field focused |
 | Enter, or leaving the field | Creates the file, folder or state from the trimmed name; an empty name creates nothing | The typed row is replaced by the new entry; a new state opens |
@@ -77,7 +76,7 @@ A state's name drops a typed `.json`, `.jsonc`, `.yaml` or `.yml` and any leadin
 | Find field | placeholder `Filter…` |
 | No tree | `Open a project to browse its files.` |
 | Root empty | `empty` · `not created yet — adding a state here will create it` · under `Built in`: `nothing ships with this build` |
-| Built in heading | `Built in` · chip `read-only`, tooltip `What ships with JaiRA. Read it here; change it by overriding it.` · link `1 old copy…` or `{n} old copies…`, tooltip `{n} files in the shared root identical to what JaiRA installed there — not needed any more` |
+| Built in heading | `Built in` · chip `read-only`, tooltip `What ships with JaiRA. Read it here; change it by overriding it.` |
 | `+` | tooltip `new file, folder or workflow in {name}`; label `New in {name}` |
 | Dots | tooltip `unsaved edits` · `unsaved edits below here` |
 | Row tooltip | `{n} errors, {n} warnings`, with ` below here` on a folder · `not validated — no workflow root reaches this state` · `{read or parse error}` · `{path}` |
@@ -88,7 +87,6 @@ A state's name drops a typed `.json`, `.jsonc`, `.yaml` or `.yml` and any leadin
 | State menu | `Open` · `New child state…`, note `{id}/` · `Duplicate…` · `Rename…` · `Override in this project` or `Copy to shared root`, disabled when shadowed or with no project open · `Copy state id` · `Copy path` · `Reveal in file explorer` · `Delete` |
 | Root menu | the New items, then `Copy path` · `Reveal in file explorer`, disabled when the root is not on disk; under `Built in` the last two only |
 | Built in state menu | `Open`, note `read-only` · `Override for all projects`, note `~/.jaira` · `Override here`, note `.jaira`, disabled with no project open · `Copy state id` · `Copy path` · `Reveal in file explorer` |
-| Delete old copies | title `Delete {n} copies of built-in states?` or `Delete 1 copy of a built-in state?`; note `JaiRA used to install its own states into the shared root. These files are identical to {what ships now, so deleting them changes nothing that runs / a version an earlier JaiRA installed, so deleting them goes back to what ships now}. Nothing else is touched.` then every absolute path; confirm `Delete {n} copies` or `Delete the copy` |
 | Rename a path | title `Rename '{name}'`; field `Path`, filled with its path; note `Relative to ~/.jaira/` or `Relative to .jaira/`; confirm `Rename` |
 | Delete a path | title `Delete this folder?` or `Delete this file?`; note `{absolute path} — and everything inside it.` or `{absolute path}`; confirm `Delete` |
 | Path refused | title `{verb} '{path}' anyway?`; note `{states} declares it as a child. They will name a state that no longer exists.`, or `They will fail to load without it.` after a delete, with `{n} states inside it` for a folder; confirm `{verb} anyway` |

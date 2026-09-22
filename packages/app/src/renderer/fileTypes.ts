@@ -433,15 +433,13 @@ export interface FileSurfaceContext {
   /**
    * What the state editor's layer buttons do about the built-in layer (decision 0006).
    *
-   * `onOverride` copies a shipped state up into a layer a person owns and opens the copy;
-   * `onDeleteCopy` asks, then deletes a copy of a built-in that JaiRA itself wrote. Absent ⇒ the
-   * editor's top bar still says which layer supplied the file, and offers neither.
+   * `onOverride` copies a shipped state up into a layer a person owns and opens the copy. Absent ⇒
+   * the editor's top bar still says which layer supplied the file, and offers no override.
    */
   builtInActions?:
     | {
         hasProject: boolean;
         onOverride: (stateId: string, toLayer: WritableLayer) => void;
-        onDeleteCopy: (stateId: string) => void;
       }
     | undefined;
   /**

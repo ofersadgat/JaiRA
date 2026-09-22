@@ -40,7 +40,6 @@ The shared layer is `<base>/settings.json`. The project layer is `<project>/.jai
 | --- | --- | --- | --- |
 | `models` | object | no | how each route prefix is reached, and named presets |
 | `executors` | object of operation nodes | no | sparse overlays over derived executor trees; only `executors.default` is used |
-| `artifactDir` | non-empty string | no, default `"artifacts"` | the older spelling of `artifacts.dir`, which it seeds when `artifacts.dir` is absent |
 | `artifacts` | object | no | where artifact bytes land and when a producer asks first |
 | `storage` | object | no | whether each concern's truth is a file, the database or both |
 | `memo` | object | no | `{enabled?: boolean}`, default `false`; parsed and read by nothing |
@@ -123,7 +122,7 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `artifacts.destination` | non-empty string | no, default `"$DEFAULT"` | the template in [artifact-destination-template](artifact-destination-template.md), checked only when a run is wired |
-| `artifacts.dir` | non-empty string | no, default `artifactDir` | what `$ARTIFACT_DIR` expands to |
+| `artifacts.dir` | non-empty string | no, default `"artifacts"` | what `$ARTIFACT_DIR` expands to |
 | `artifacts.inlineMaxBytes` | non-negative integer | no, default `65536` | content below this is kept inline as well as placed; not a size limit |
 | `artifacts.askAboveBytes` | non-negative integer | no, default `4194304` | producing more than this asks a person; `0` never asks |
 | `storage.journal`, `storage.conversations`, `storage.tasks`, `storage.artifacts` | `"file"`, `"db"` or `"both"` | no, default `"db"` | where that concern's truth is; the modes are [storage-policy](../units/storage-policy.md) |
@@ -145,7 +144,6 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `policy.builtins` | boolean | no | `false` turns off the built-in destructive-git denies and risky-command approvals |
 | `policy.tools` | object of `allow`, `deny`, `ask` or `smart` by tool name | no | modes for tools; command tools are `smart` unless named here |
 | `policy.toolDefault` | mode | no | the mode for a tool with no entry |
-| `policy.profile` | string | no | the starting permission profile |
 
 ### An agent block names a runtime and refuses the other runtime's fields
 
@@ -187,8 +185,8 @@ A `credential` anywhere must be a non-empty string with no whitespace.
 
 ## A renamed or retyped field breaks every committed document, and the path is a named refusal
 
-- Documents are never migrated. Renaming a field breaks every checkout that carries the old name.
-- The deprecation path is to refuse the old name with the new place in the message, as `models.default` does, or to keep reading the old name, as `artifactDir` does.
+- Nothing migrates a document at open. Renaming a field breaks every checkout that carries the old name until its documents are migrated.
+- The deprecation path is to migrate the documents and then refuse the old name with the new place in the message, as `models.default` does. The old name is not kept readable.
 - Loosening a strict block to ignore unknown fields hides the misspelling it used to report. Tightening a lenient block refuses documents that open today.
 - Changing a merge rule changes the effective configuration of every project that has both layers.
 
@@ -200,7 +198,7 @@ A `credential` anywhere must be a non-empty string with no whitespace.
 - `memo.enabled` is parsed and read by nothing.
 - A `local` route with no `baseURL` parses.
 - Arrays replace. A project that sets `files.hidden` to one entry shows `system/`, `settings.json` and every `.env` file the defaults hid, and a project `workflows.path` replaces the generated path entirely, though the project's own `workflows` directory is still searched first.
-- A `null` in the project layer replaces the base's block and then fails parse, except `artifactDir: null`, which reads as the default.
+- A `null` in the project layer replaces the base's block and then fails parse.
 - An `execEnvironment` object in one layer and `"windows"` in the other resolves to whichever the project layer holds.
-- A project created by `initProject` holds every default, so it overrides the shared layer's `storage`, `memo`, `artifactDir`, `artifacts` and `execEnvironment` until those keys are deleted.
+- A project created by `initProject` holds every default, so it overrides the shared layer's `storage`, `memo`, `artifacts` and `execEnvironment` until those keys are deleted.
 - `STORAGE_CONCERN_TABLES.conversations` reads `operation_records + session_positions`, and the comment on `both` says it has no staleness check. The concern is `operation_records`, `sessions` and `session_names`, and `both` replays when the file's fingerprint moves.

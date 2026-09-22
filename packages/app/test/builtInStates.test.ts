@@ -1,17 +1,14 @@
 /**
  * What JaiRA ships is the bottom of the search path, not files it writes (decision 0006, steps 2 and 4).
  *
- * Four claims, each with its own block:
+ * Three claims, each with its own block:
  *
  *  1. The Chat view's states and the self-test resolve with NOTHING installed — an empty project over
  *     an empty shared root, and an empty shared root with no project at all — and running one writes
  *     no state file anywhere.
- *  2. A copy the old install steps left in the shared root is OFFERED for deletion when its value is
- *     one JaiRA shipped, is never offered when it differs, and is deleted only on request and only
- *     if it is still such a copy at that moment.
- *  3. The state editor does not edit what ships: it says "built in · read-only", offers the two
+ *  2. The state editor does not edit what ships: it says "built in · read-only", offers the two
  *     overrides and no Save; a person's file of a shipped id says "overrides built in".
- *  4. The Files tree ends with a read-only "Built in" root, marks which rows are overridden and which
+ *  3. The Files tree ends with a read-only "Built in" root, marks which rows are overridden and which
  *     override, and its menus offer reading and overriding only.
  *
  * Unlike `builtInLayer.test.ts`, which registers a fixture layer, this file runs against the REAL
@@ -28,8 +25,7 @@ import { initProject } from "@jaira/persistence";
 import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type PushMessage, type WorkflowSource } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
-import { identicalTo, sameValue, SUPERSEDED } from "../src/main/shippedStates";
-import { layerBarOf, leftoversAsk } from "../src/renderer/builtIn";
+import { layerBarOf } from "../src/renderer/builtIn";
 import { CHAT_AGENT, CHAT_STATES, titleOf } from "../src/renderer/chatWorkflow";
 import { debugFileStatus } from "../src/renderer/debugPane";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "../src/renderer/debugWorkflow";
@@ -78,7 +74,7 @@ function stateFiles(workflowsDir: string, rel = ""): string[] {
 const shippedText = (stateId: string): string =>
   readFileSync(join(jairaBuiltInPaths().workflowsDir, `${stateId}.json`), "utf8");
 
-/** Put a copy of a state into the test's shared root, the way the old install steps did. */
+/** Put a copy of a state into the test's shared root. */
 function installInShared(stateId: string, text: string): string {
   const file = join(testHome(), "workflows", `${stateId}.json`);
   mkdirSync(dirname(file), { recursive: true });
@@ -149,93 +145,6 @@ describe("starting with nothing installed", () => {
   });
 });
 
-describe("the identical-copy offer", () => {
-  it("compares VALUES: formatting and key order are not edits, array order and content are", () => {
-    expect(sameValue({ a: 1, b: [1, 2] }, JSON.parse('{\n  "b": [1, 2],\n      "a": 1 }'))).toBe(true);
-    expect(sameValue({ a: [1, 2] }, { a: [2, 1] })).toBe(false);
-    expect(sameValue({ a: 1 }, { a: 1, b: null })).toBe(false);
-  });
-
-  it("recognises the current version and every superseded one, and nothing else", () => {
-    const shipped = shippedText(CHAT_AGENT);
-    expect(identicalTo(CHAT_AGENT, shipped, shipped)).toBe("current");
-    expect(identicalTo(CHAT_AGENT, JSON.stringify(SUPERSEDED[CHAT_AGENT]![0]), shipped)).toBe("superseded");
-    const edited = { ...(JSON.parse(shipped) as Record<string, unknown>), label: "Working conversation (mine)" };
-    expect(identicalTo(CHAT_AGENT, JSON.stringify(edited), shipped)).toBeUndefined();
-    // Somebody's work in progress is identical to nothing.
-    expect(identicalTo(CHAT_AGENT, "{ not json", shipped)).toBeUndefined();
-    // A superseded value is still recognised after the layer stops shipping that id.
-    expect(identicalTo(CHAT_AGENT, JSON.stringify(SUPERSEDED[CHAT_AGENT]![0]), undefined)).toBe("superseded");
-  });
-
-  it("keeps no superseded value that is what ships today", () => {
-    // Otherwise a `current` copy would be reported as an old one. This is also what fails when a
-    // built-in file is reverted to an older text without the list being looked at.
-    for (const [stateId, versions] of Object.entries(SUPERSEDED)) {
-      for (const old of versions) expect(sameValue(old, JSON.parse(shippedText(stateId)))).toBe(false);
-    }
-  });
-
-  it("lists a re-indented copy and an old version, and not an edited file", () => {
-    // What the installer wrote, then re-indented by an editor with the keys the other way round.
-    const current = JSON.parse(shippedText(CHAT_AGENT)) as Record<string, unknown>;
-    const reordered = Object.fromEntries(Object.entries(current).reverse());
-    const agent = installInShared(CHAT_AGENT, JSON.stringify(reordered, null, 4));
-    const root = installInShared(SELF_TEST_ROOT, JSON.stringify(SUPERSEDED[SELF_TEST_ROOT]![0], null, 2));
-    installInShared("chat/assistant", JSON.stringify({ ...current, description: "changed by a person" }));
-
-    expect(service.builtInLeftovers()).toEqual([
-      { stateId: CHAT_AGENT, layer: "base", file: agent, identical: "current" },
-      { stateId: SELF_TEST_ROOT, layer: "base", file: root, identical: "superseded" },
-    ]);
-  });
-
-  it("never lists a PROJECT's copy, identical or not", () => {
-    const file = join(dir, ".jaira", "workflows", `${CHAT_AGENT}.json`);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, shippedText(CHAT_AGENT), "utf8");
-    expect(service.builtInLeftovers()).toEqual([]);
-  });
-
-  it("deletes nothing by listing, and only what was asked for by cleaning up", () => {
-    const agent = installInShared(CHAT_AGENT, shippedText(CHAT_AGENT));
-    const assistant = installInShared("chat/assistant", shippedText("chat/assistant"));
-    expect(service.builtInLeftovers()).toHaveLength(2);
-    expect(existsSync(agent)).toBe(true);
-
-    expect(service.cleanupBuiltIn({ stateIds: [CHAT_AGENT] }).map((left) => left.stateId)).toEqual([CHAT_AGENT]);
-    expect(existsSync(agent)).toBe(false);
-    expect(existsSync(assistant)).toBe(true);
-    // What ships is untouched, and is what now loads.
-    expect(service.browseWorkflows().files.find((f) => f.stateId === CHAT_AGENT)?.layer).toBe("system");
-  });
-
-  it("leaves a copy alone when it was edited between the offer and the yes", () => {
-    const agent = installInShared(CHAT_AGENT, shippedText(CHAT_AGENT));
-    expect(service.builtInLeftovers().map((left) => left.stateId)).toEqual([CHAT_AGENT]);
-    writeFileSync(agent, JSON.stringify({ label: "edited while the dialog was open" }), "utf8");
-    expect(service.cleanupBuiltIn({ stateIds: [CHAT_AGENT] })).toEqual([]);
-    expect(existsSync(agent)).toBe(true);
-    // And a state id that was never a leftover is not a way to delete a file.
-    expect(service.cleanupBuiltIn({ stateIds: ["../../outside", "feature/plan"] })).toEqual([]);
-  });
-
-  it("names every file in the question it asks, and asks as a dangerous thing", () => {
-    const ask = leftoversAsk(
-      [
-        { stateId: CHAT_AGENT, layer: "base", file: "/home/me/.jaira/workflows/chat/agent.json", identical: "current" },
-        { stateId: SELF_TEST_ROOT, layer: "base", file: "/home/me/.jaira/workflows/debug/hello_world.json", identical: "superseded" },
-      ],
-      () => undefined,
-    );
-    expect(ask.title).toBe("Delete 2 copies of built-in states?");
-    expect(ask.note).toContain("/home/me/.jaira/workflows/chat/agent.json");
-    expect(ask.note).toContain("/home/me/.jaira/workflows/debug/hello_world.json");
-    expect(ask.danger).toBe(true);
-    expect(ask.field).toBeUndefined();
-  });
-});
-
 describe("how a file stands against what ships", () => {
   it("says which layers hold a shipped state, in search order", () => {
     expect(service.readWorkflow({ stateId: CHAT_AGENT, layer: "system" }).builtIn).toEqual({ layers: ["system"] });
@@ -249,7 +158,6 @@ describe("how a file stands against what ships", () => {
     });
     expect(service.readFile({ layer: "base", path: `workflows/${CHAT_AGENT}.json` }).builtIn).toEqual({
       layers: ["project", "base", "system"],
-      identical: "current",
     });
     expect(service.readFile({ layer: "project", path: `.jaira/workflows/${CHAT_AGENT}.json` }).builtIn).toEqual({
       layers: ["project", "base", "system"],
@@ -279,7 +187,7 @@ describe("the state editor on the three kinds of file", () => {
         executors: [],
         busy: false,
         onSave: (stateId: string) => saved.push(stateId),
-        layerActions: { hasProject: true, onOverride: () => undefined, onDeleteCopy: () => undefined },
+        layerActions: { hasProject: true, onOverride: () => undefined },
       } as unknown as Parameters<typeof WorkflowEditor>[0]),
     );
 
@@ -305,7 +213,6 @@ describe("the state editor on the three kinds of file", () => {
     const html = editor(source({ layer: "project", builtIn: { layers: ["project", "system"] } }));
     expect(html).toContain("overrides built in");
     expect(html).toContain("Compare with what ships");
-    expect(html).not.toContain("Delete this copy");
   });
 
   it("decides the bar from the file alone", () => {
@@ -321,14 +228,9 @@ describe("the state editor on the three kinds of file", () => {
       "override-base (off)",
       "override-project (off)",
     ]);
-    // Only a SHARED copy that JaiRA itself wrote is offered for deletion.
-    expect(actions(layerBarOf({ layer: "base", builtIn: { layers: ["base", "system"], identical: "superseded" } }, true))).toEqual([
-      "compare",
-      "delete-copy",
-    ]);
-    expect(actions(layerBarOf({ layer: "project", builtIn: { layers: ["project", "system"], identical: "current" } }, true))).toEqual([
-      "compare",
-    ]);
+    // An override, shared or in a project, offers the comparison and nothing else.
+    expect(actions(layerBarOf({ layer: "base", builtIn: { layers: ["base", "system"] } }, true))).toEqual(["compare"]);
+    expect(actions(layerBarOf({ layer: "project", builtIn: { layers: ["project", "system"] } }, true))).toEqual(["compare"]);
     // What the bar always said about a shared file, and nothing at all about an ordinary project one.
     expect(layerBarOf({ layer: "base" }, true)?.chip.text).toBe("shared copy");
     expect(layerBarOf({ layer: "project" }, true)).toBeNull();
@@ -452,7 +354,6 @@ describe("the Debug pane's rows", () => {
   it("names the layer the copy that loads is in", () => {
     expect(debugFileStatus({ layer: "system" })).toEqual({ word: "built in", tone: "success" });
     expect(debugFileStatus({ layer: "base" })).toEqual({ word: "overridden", tone: "unknown" });
-    expect(debugFileStatus({ layer: "base", identical: "superseded" })).toEqual({ word: "old copy", tone: "unknown" });
     expect(debugFileStatus({ layer: null })).toEqual({ word: "missing", tone: "error" });
   });
 });

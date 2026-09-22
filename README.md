@@ -177,7 +177,7 @@ against `\\wsl$` — that is slow and permission-fragile.
 ### Real providers
 
 Set a route-prefixed model — `models.default` in `.jaira/settings.json`, or a
-state's `operation.config.model` — and export `ANTHROPIC_API_KEY` (or
+state's `operation.model` — and export `ANTHROPIC_API_KEY` (or
 `OPENROUTER_API_KEY`); keys live in the environment, never in the repo. Without
 `--fake`, prompt states execute through `@declarative-ai/promptop` over
 `@declarative-ai/llm`. A failed run prints `causes`: the operation-level reasons

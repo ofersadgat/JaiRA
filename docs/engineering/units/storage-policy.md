@@ -22,7 +22,7 @@ siblings: [engineering/units/event-journal, engineering/units/project-store, eng
 - It then fills each concern one of three ways, tried in order. Reuse: the mode is `both` and the files' fingerprint equals the one in `storage_index`, so the shadow is seeded from `main`. Replay: files exist, so the source folds them in; under `both` the result is written back to `main` children first and the new fingerprint stored. Seed: no files exist, so `seedFromMain` copies `main`'s rows with their identities.
 - `CONCERN_TABLES` groups tables: `journal` is `state_machine_events`; `conversations` is `operation_records`, `sessions` and `session_names`; `tasks` is `task_runtime`; `artifacts` is `artifacts`.
 - `rowFile.ts` holds the task and artifact files. `RowLog.appendFrom` re-reads the written row from the table with `SELECT *` and appends it; `replayRows` keeps the last line per key and inserts it with `INSERT OR REPLACE`, keeping only columns the table still has; `fingerprintOf` hashes each file's path, size and modification time; `removeTaskRows` deletes a task's file.
-- `conversationFile.ts` holds the conversation file. `ConversationLog.append` writes one `jaira.<kind>` line in the configured dialect, followed by native turn lines when the line is a record that is not `open`. `replayConversations` keeps the last line per key, applies tombstones, folds legacy lines the way migrations 13, 14 and 16 fold the table, and inserts sessions, then records, then names in one transaction. `removeTaskConversations` deletes a task's directory.
+- `conversationFile.ts` holds the conversation file. `ConversationLog.append` writes one `jaira.<kind>` line in the configured dialect, followed by native turn lines when the line is a record that is not `open`. `replayConversations` keeps the last line per key, applies tombstones, and inserts sessions, then records, then names in one transaction. `removeTaskConversations` deletes a task's directory.
 
 The line shapes, keys and replay order are [storage-files](../contracts/storage-files.md).
 
@@ -85,9 +85,8 @@ It deliberately does not own:
 | A file is rewritten with its size and modification time unchanged under `both` | the stale index is reused | delete that concern's `storage_index` row | stale rows until the files change |
 | A store appends the same state twice, such as a flush repeated after a settle | the file gains another whole line and replay keeps the last | none needed | none |
 
-## Legacy files are read and never written, and switching a concern back to `db` returns to what `main` held
+## Switching a concern back to `db` returns to what `main` held
 
-- Legacy per-run `<runId>.jsonl` conversation files, `run_id` and `attempt` fields, `jaira.position` lines, `session_outcome_json`, and `runs` lines in task row files are read and folded, never written.
 - Switching a concern from `file` to `db` reads `main`, which holds the rows as of the switch to `file`; from `both` it holds the rows as of the last replay. What was written since stays only in the files.
 - A concern whose files are all removed seeds from `main` again, so under `file` the rows `main` held at the switch reappear.
 - Choosing `file` or `both` gives up the foreign keys SQLite enforced for that concern's tables.

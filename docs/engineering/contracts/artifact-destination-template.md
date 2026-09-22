@@ -65,7 +65,6 @@ A variable is `$` followed by an uppercase letter or `_`, then uppercase letters
 | `$RELPATH` | path | no | the logical path, with `\` turned into `/` and a leading `./` removed; its directories are kept |
 | `$BASENAME` | one segment | no | the last segment of the logical path before its final dot |
 | `$EXT` | one segment | no | the text after that dot; empty when there is none |
-| `$RUN_ID` | empty text | no | retired; resolves empty |
 
 In a one-segment variable, `/` and `\` become `-` and `..` becomes `-`.
 
@@ -92,9 +91,9 @@ In a one-segment variable, `/` and `\` become `-` and `..` becomes `-`.
 | Any of these in `write_file`, `edit` or `show_artifact` | `{error: <message>}` returned to the model | the model names another path |
 | Any of these while placing a returned blob | reported through `onError`: an unjournaled `artifact.failed` push in the app, a `warning: could not store artifact` line in the CLI | fix the template and run again |
 
-## A renamed variable refuses every project that names it, and a retired one resolves empty
+## A renamed or removed variable refuses every project that names it
 
-- Renaming or removing a variable or alias makes every `settings.json` that names it refuse its next run with an unknown-variable error. The one retired variable, `$RUN_ID`, stays in the list and resolves empty, which is the deprecation path.
+- Renaming or removing a variable or alias makes every `settings.json` that names it refuse its next run with an unknown-variable error, so the documents are migrated first.
 - Changing an alias's expansion moves where every project using it places new artifacts. Existing records keep the absolute `physical_path` they were written with.
 - Loosening either containment rule lets a model's path or a configured value write outside what the template names.
 

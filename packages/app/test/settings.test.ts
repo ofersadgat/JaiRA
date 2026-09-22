@@ -93,22 +93,7 @@ describe("user settings", () => {
     expect(service.readSettings().theme).toBe("light");
   });
 
-  it("carries a wrapJson written before the editor looks existed into its new home", () => {
-    // The migration, and the only thing that makes moving the field safe: a person who turned wrap
-    // on keeps it, with nothing to re-set and nothing rewriting their file behind them.
-    writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ wrapJson: true }), "utf8");
-    expect(service.readSettings().editors.json.wrap).toBe(true);
-    // …and the NEW field wins where both are present, so a stale key cannot overrule a choice made
-    // since. `writeSettings` merges rather than replaces, so that key does outlive the change.
-    writeFileSync(
-      join(baseDir, "user-settings.json"),
-      JSON.stringify({ wrapJson: true, editors: { json: { wrap: false } } }),
-      "utf8",
-    );
-    expect(service.readSettings().editors.json.wrap).toBe(false);
-  });
-
-  it("reads a settings file written before wrapJson existed", () => {
+  it("reads a settings file that states only a theme", () => {
     writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
     expect(service.readSettings()).toEqual({ theme: "dark", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [], logging: defaultLogPolicy(), conversation: defaultConversationLook() });
   });
@@ -406,14 +391,14 @@ describe("configuration with a project", () => {
 
   it("reports both layers and the merged result", () => {
     writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
-    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ artifactDir: "from-project" }), "utf8");
+    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ artifacts: { dir: "from-project" } }), "utf8");
 
     const view = service.readConfig();
 
     expect(view.base).toEqual({ memo: { enabled: true } });
-    expect(view.project).toEqual({ artifactDir: "from-project" });
+    expect(view.project).toEqual({ artifacts: { dir: "from-project" } });
     // The question this pane exists to answer: what will actually run.
-    expect(view.effective).toMatchObject({ memo: { enabled: true }, artifactDir: "from-project" });
+    expect(view.effective).toMatchObject({ memo: { enabled: true }, artifacts: { dir: "from-project" } });
   });
 
   it("writes the base layer, creating the shared root if needed", () => {
@@ -425,11 +410,11 @@ describe("configuration with a project", () => {
   it("writes the project layer without copying the base's values into it", () => {
     writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
 
-    service.writeConfig({ layer: "project", config: { artifactDir: "mine" } });
+    service.writeConfig({ layer: "project", config: { artifacts: { dir: "mine" } } });
 
     // Only what was authored: saving the MERGED document would freeze today's base values into the
     // project and quietly sever it from future base changes.
-    expect(JSON.parse(readFileSync(join(dir, ".jaira", "settings.json"), "utf8"))).toEqual({ artifactDir: "mine" });
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "settings.json"), "utf8"))).toEqual({ artifacts: { dir: "mine" } });
   });
 
   it("refuses an invalid document and leaves the file untouched", () => {

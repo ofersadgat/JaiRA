@@ -99,7 +99,6 @@ export const DEFAULT_HIDDEN_PATHS: readonly string[] = [
   `${JAIRA_DIR_NAME}/${SETTINGS_FILE_NAME}`,
   USER_SETTINGS_FILE_NAME,
   "sync.json",
-  "approvals.local.json",
   // Secrets, anywhere.
   "**/.env",
   "**/.env.*",

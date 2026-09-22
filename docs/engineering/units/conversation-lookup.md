@@ -19,7 +19,7 @@ siblings: [engineering/units/operation-record-store, engineering/units/live-turn
 A reader is handed a task id and never a session id. The journal is the index that leads to the records, and the records hold what was said. This unit owns that path:
 
 - **The index.** `stateSessions(project, taskId)` in `views.ts` returns one `StateSession {instanceId, stateId, sessionId, seq, at, outcome}` per operation that ran in a conversation, in time order. `interruptedSessions` adds the calls that have no terminal event. `parseSessionRef` splits `<id>@<seq>` on the last `@`.
-- **The store's reads** on `SqliteSessionStore`: `transcript(ref)` returns the rows along the lineage, oldest first, each ancestor only up to where its child left it; `forks(ref)` returns, per seam on that path, the parent's own tail and any sibling branch the path did not take; `lineageOf(id)`, `at(sessionId, seq)`, and `messages(ref)` and `bySession`, which skip `open` rows. `rowsOf` keeps one row per effective seat, the live claimant when there is one and else the newest dead row, and `projectValue` turns a result's reported `messages` into `entries`. A read resolves a name through `session_names` or a legacy `task/run/name` id and never mints a session.
+- **The store's reads** on `SqliteSessionStore`: `transcript(ref)` returns the rows along the lineage, oldest first, each ancestor only up to where its child left it; `forks(ref)` returns, per seam on that path, the parent's own tail and any sibling branch the path did not take; `lineageOf(id)`, `at(sessionId, seq)`, and `messages(ref)` and `bySession`, which skip `open` rows. `rowsOf` keeps one row per effective seat, the live claimant when there is one and else the newest dead row, and `projectValue` turns a result's reported `messages` into `entries`. A read resolves a name through `session_names` and never mints a session.
 - **The wire history.** `messagesOfRecord` in `recordMessages.ts` is a record's finished main-chain `message` entries as `{role, content}`, without sidechain, event or partial entries. It is what a resume sends back to a provider and what native turn lines are written from.
 - **The readers**, in main `service.ts`. `sessionHistory` joins `stateSessions` with each call's start time, cost, lineage and instance address into `SessionRef[]` for `session:history`. `sessionView` reads one instance's record through `store.at` for `session:view`. `chatThread` walks `store.transcript` from the conversation's position for `chat:thread`, adds edit `points` and `forks`, and joins each record to the journal seq its turn began at. Every view is derived from a record's one `entries` array by `turnsSaidBy`, `sidechainsOf`, `recordEventsOf`, `nativeOf` and `structuredOutputOf`.
 
@@ -81,8 +81,7 @@ A typed chat message is recorded on its host's session under instance `chat:<hos
 | 8 | A state's turns are read straight off its record, with nothing subtracted | `service.test.ts` "reads a state's turns straight off its record, without subtracting a phantom prefix" |
 | 9 | `sessionView` and `chatThread` show the same stopped turn: its question, its tool traffic and its half-written answer | `chatDurability.test.ts` "is recovered for the run's transcript too, not only the chat's", `"stays on screen — the half-written answer is part of the conversation"`, "survives an agent's tool traffic, which is user-role messages nobody typed" |
 | 10 | An edited message branches, the thread follows the new branch, and the side it replaced is reported | `chatConversation.test.ts` `"replaces it — the branch keeps what came before and drops what came after"`, "says WHERE the conversation split, and what it said down the other side" |
-| 11 | A conversation recorded under a legacy run-scoped session id still reads by its bare name within its task | `sessionStore.test.ts` "normalises an old turn store into records plus positions, keeping every conversation readable" |
-| 12 | A thread already on screen is never replaced by a read that answers nothing | `chatDurability.test.ts` "never replaces a conversation with an empty one" |
+| 11 | A thread already on screen is never replaced by a read that answers nothing | `chatDurability.test.ts` "never replaces a conversation with an empty one" |
 
 ## A call with a missing event is recovered by pairing, and an ambiguous pairing shows nothing rather than the wrong state
 
@@ -93,15 +92,13 @@ A typed chat message is recorded on its host's session under instance `chat:<hos
 | The engine throws after a call returned | the record is `completed` and no event names it | the same pairing, reading `success` | the transcript reads normally |
 | An operation that holds no seat is in flight beside an unterminated call, such as a gate waiting on a person | the start and record counts differ, so `interruptedSessions` lists nothing | none; the call is listed once the other operation settles | the in-flight conversation is missing from the history |
 | A composite or a task that never ran is read | `chatThread` answers null; `sessionView` answers `empty: "this state ran no model call, so there is no conversation to show"` | none needed | the stated absence |
-| A listed seat has no record | `sessionView` answers `empty: "this run was recorded before conversations were kept"` | none | that sentence |
+| A listed seat has no record | `sessionView` answers `empty: "no record of this conversation was kept"` | none | that sentence |
 | `chat:thread` answers null or rejects while a thread is on screen | `kept` in `chatPane.tsx` keeps the thread, and the rejection is swallowed | the next read replaces it | the last thread stays |
 | A reader runs while a call is writing | every query is one SQLite read, so the reader sees a whole state before or after that write; readers write nothing, so two readers cannot conflict | none needed | an `open` turn shows what has streamed so far |
-| A legacy journal reuses a counter instance id across runs | `sessionView` takes the last history row for the instance | none | the newest conversation for that id |
 | The branch a thread's path took at a seam holds no record yet, as just after an edit is sent | `chatThread` cannot place the seam as a turn and drops it from `forks` | none; the seam is reported once the branch's first record lands | no marker for that split until then |
 
 ## Readers accept every shape older databases hold and migrate nothing
 
-- Legacy `task/run/name` session ids resolve through `legacyTwin` and are reported bare through `bareSessionId`.
 - A result whose conversation rides as a `messages` sibling, which migration 14 folded out of `session_outcome_json`, is read as `entries` by `projectValue`.
 - A numeric instance id on an old failed event is matched against a record's text `instance_id` as a string in `interruptedSessions`.
 

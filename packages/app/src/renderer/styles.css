@@ -1312,33 +1312,16 @@ button.side-twist:hover:not(:disabled) {
   text-transform: uppercase;
   padding: 8px 6px 4px;
 }
-/* What the "Built in" root carries beside its name (decision 0006): a chip saying it is read-only,
-   and — only while there is something to offer — the link that asks about the copies earlier builds
-   left in the shared root. Both are sentences, so neither takes the root's small-caps voice. */
-.tree-root > .chip,
-.tree-root > .tree-leftovers {
+/* What the "Built in" root carries beside its name (decision 0006): a chip saying it is read-only.
+   It is a word, so it does not take the root's small-caps voice. */
+.tree-root > .chip {
   text-transform: none;
   letter-spacing: 0;
   flex: none;
 }
-/* In a 250px drawer the three do not all fit, and the NAME is the one that must: it is what says
-   these rows are not yours. So on this heading the name keeps its width and the offer is what gives
-   way — it ellipsizes, and says itself in full in its tooltip. */
+/* In a 250px drawer the NAME is what must fit: it is what says these rows are not yours. */
 .tree-root.is-readonly > .data-secondary {
   flex: none;
-}
-.tree-root > .tree-leftovers {
-  font-size: inherit;
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-left: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* A button is a centring flex box, and centred content that overflows is cut at BOTH ends with no
-     ellipsis at either. A block cuts at the end and says so. */
-  display: block;
-  text-align: left;
 }
 .tree-item {
   display: flex;

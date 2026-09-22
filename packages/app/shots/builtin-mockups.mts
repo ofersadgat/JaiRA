@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { BuiltInLeftover, FileNode, FileTree, WorkflowLayer, WorkflowSource } from "@jaira/shared";
+import type { FileNode, FileTree, WorkflowLayer, WorkflowSource } from "@jaira/shared";
 import { FileTreePanel } from "../src/renderer/files";
 import { WorkflowEditor } from "../src/renderer/stateEditor";
 
@@ -81,11 +81,6 @@ const tree: FileTree = {
   ],
 };
 
-const leftovers: BuiltInLeftover[] = [
-  { stateId: "chat/assistant", layer: "base", file: "C:/Users/Ofer/.jaira/workflows/chat/assistant.json", identical: "superseded" },
-  { stateId: "debug/hello_world", layer: "base", file: "C:/Users/Ofer/.jaira/workflows/debug/hello_world.json", identical: "current" },
-];
-
 const noop = (): undefined => undefined;
 const never = async (): Promise<null> => null;
 
@@ -114,8 +109,6 @@ const treeHtml = renderToStaticMarkup(
     onDeleteFile: never,
     onReveal: noop,
     project: "C:/UbuntuCode/JaiRA",
-    leftovers,
-    onCleanup: noop,
   } as unknown as Parameters<typeof FileTreePanel>[0]),
 );
 
@@ -127,7 +120,7 @@ const editor = (source: WorkflowSource, hasProject = true): string =>
       executors: [],
       busy: false,
       onSave: noop,
-      layerActions: { hasProject, onOverride: noop, onDeleteCopy: noop },
+      layerActions: { hasProject, onOverride: noop },
     } as unknown as Parameters<typeof WorkflowEditor>[0]),
   );
 
@@ -197,8 +190,8 @@ ${stage(
     editor({ stateId: "chat/agent", layer: "project", file: "C:/UbuntuCode/JaiRA/.jaira/workflows/chat/agent.json", text: shipped("chat/agent"), exists: true, builtIn: { layers: ["project", "system"] } }),
     34,
   )}${stage(
-    "a shared copy that JaiRA itself installed: comparing and deleting are both one click away",
-    editor({ stateId: "chat/assistant", layer: "base", file: "C:/Users/Ofer/.jaira/workflows/chat/assistant.json", text: shipped("chat/assistant"), exists: true, builtIn: { layers: ["base", "system"], identical: "superseded" } }),
+    "a shared copy of a shipped id: the comparison is one click away",
+    editor({ stateId: "chat/assistant", layer: "base", file: "C:/Users/Ofer/.jaira/workflows/chat/assistant.json", text: shipped("chat/assistant"), exists: true, builtIn: { layers: ["base", "system"] } }),
     34,
   )}</div>
 </body>

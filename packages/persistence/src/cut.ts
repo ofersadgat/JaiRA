@@ -59,7 +59,7 @@ import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { Project } from "./project";
 import { sessionStoreFor } from "./project";
 import type { StoredEvent } from "./eventLog";
-import { appendRewound, effectiveLines, journalFileFor, journalFiles } from "./journalFile";
+import { appendRewound, effectiveLines, journalFileFor } from "./journalFile";
 import { ConversationLog, type NameRow, type RecordRow, type SessionRow } from "./conversationFile";
 import { createTask } from "./lifecycle";
 import { pinAt, type Pin } from "./documents";
@@ -156,12 +156,6 @@ function journalOf(project: Project, taskId: string, seq: number, ofLiveTask = f
   if (row === undefined) throw refusal(log, `unknown task '${taskId}'`, { taskId });
   if (!ofLiveTask && (row.status === "running" || row.status === "stopping")) {
     throw refusal(log, `task '${taskId}' is ${row.status} — stop it before cutting its journal`, { taskId });
-  }
-  if (isFileBacked(project.config.storage.journal)) {
-    const legacy = journalFiles(project.paths.journalDir).some(
-      (entry) => entry.taskId === taskId && entry.file !== journalFileFor(project.paths.journalDir, taskId),
-    );
-    if (legacy) throw refusal(log, `task '${taskId}' has history in per-run journal files, which a cut cannot address`, { taskId });
   }
   const events = project.events.list(taskId);
   const last = events.length > 0 ? events[events.length - 1]!.seq : 0;
