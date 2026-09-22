@@ -33,6 +33,7 @@ import {
   type SessionOutput,
   type SessionTurn,
   type SessionView,
+  type SettledByView,
   type TurnKind,
   type WritingTool,
 } from "@jaira/shared/browser";
@@ -112,6 +113,12 @@ export interface ToolEntry {
    * under the row costs a duplicate if that ever happens; replacing the row would cost a call.
    */
   output?: { value: JsonValue; schema?: JsonValue; name?: string };
+  /**
+   * An agent's `AskUserQuestion` the CONTROL CONVERSATION answered (decision 0005 §4) — stamped by
+   * {@link markAnsweredQuestions} from the instance's `jaira.answered` rows, so the question block
+   * says who answered it, as a gate does.
+   */
+  settledBy?: SettledByView;
 }
 
 /**
@@ -512,6 +519,9 @@ const EVENT_TONE: Record<TurnKind, EventEntry["tone"] | undefined> = {
   // A task the machine made is the grey's to draw too — a line with a link (`MadeRow`), not a
   // transcript event.
   made: undefined,
+  // What a conversation's workflow tool did is the rail's row too (`jaira.moved`), and the call's own
+  // row is already in this transcript.
+  moved: undefined,
 };
 
 function eventOf(turn: ConversationTurn): EventEntry | undefined {
@@ -1268,4 +1278,58 @@ export function endOfBlock(block: TranscriptBlock | undefined): number | undefin
     return undefined;
   }
   return block.kind === "live" ? undefined : block.at;
+}
+
+/** Is this call an agent's question to the person — `AskUserQuestion`, bare or as a transport prefixes it? */
+export function isAskUserQuestion(entry: ToolEntry): boolean {
+  return entry.name === "AskUserQuestion" || entry.name.endsWith("__AskUserQuestion");
+}
+
+/** The question texts a call asked, in its order — what a `jaira.answered` row names them by. */
+function questionTextsOf(entry: ToolEntry): string[] {
+  const args = entry.args;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return [];
+  const questions = (args as Record<string, JsonValue>)["questions"];
+  if (!Array.isArray(questions)) return [];
+  return questions.flatMap((q) =>
+    q !== null && typeof q === "object" && !Array.isArray(q) && typeof (q as Record<string, JsonValue>)["question"] === "string"
+      ? [(q as Record<string, JsonValue>)["question"] as string]
+      : [],
+  );
+}
+
+/**
+ * Mark the `AskUserQuestion` blocks the control conversation answered — decision 0005 §4, the agent's
+ * half of "Answered for you".
+ *
+ * The marks are the instance's (`InstanceNode.answeredQuestions`, one per `jaira.answered` row of kind
+ * `question`), and each names the question TEXTS it answered: the hub's park carries no call id, and
+ * the texts are what the call and the parked request both hold. A call takes the first unused mark
+ * asking the same questions, so an agent that asks twice — once answered by a person — gets one mark,
+ * on the block that earned it.
+ *
+ * A mark written before the row carried its texts pairs only when nothing else could be meant: the
+ * instance has exactly one mark, it has no texts, and exactly one question block was answered.
+ * Anything more is a guess about which of several blocks got the answer, and none is drawn.
+ *
+ * The same array back when nothing is marked; new entries (never mutated ones) where something is.
+ */
+export function markAnsweredQuestions(entries: TranscriptEntry[], marks: readonly SettledByView[] | undefined): TranscriptEntry[] {
+  if (marks === undefined || marks.length === 0) return entries;
+  const same = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((text, i) => text === b[i]);
+  const unused = [...marks];
+  const asked = entries.flatMap((entry, index) => (entry.kind === "tool" && isAskUserQuestion(entry) && entry.ok !== false ? [{ entry, index }] : []));
+  const stamped = new Map<number, SettledByView>();
+  for (const { entry, index } of asked) {
+    const texts = questionTextsOf(entry);
+    const at = unused.findIndex((mark) => mark.questions !== undefined && same(mark.questions, texts));
+    if (at >= 0) stamped.set(index, unused.splice(at, 1)[0]!);
+  }
+  const answered = asked.filter(({ entry, index }) => !stamped.has(index) && entry.result !== undefined);
+  if (marks.length === 1 && marks[0]!.questions === undefined && answered.length === 1) stamped.set(answered[0]!.index, marks[0]!);
+  if (stamped.size === 0) return entries;
+  return entries.map((entry, index) => {
+    const by = stamped.get(index);
+    return by === undefined || entry.kind !== "tool" ? entry : { ...entry, settledBy: by };
+  });
 }

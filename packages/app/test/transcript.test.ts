@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 import type { ConversationTurn, InstanceNode, SessionView } from "@jaira/shared/browser";
 import { foldWriting, isStreamBookkeeping, writingPath, type WritingTool } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { producedArtifact, unfoldable } from "../src/renderer/transcriptView";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { producedArtifact, Transcript, unfoldable } from "../src/renderer/transcriptView";
 import {
   agentTitleOf,
   blocksOf,
@@ -17,6 +19,7 @@ import {
   iconOf,
   journalFor,
   liveStatusOf,
+  markAnsweredQuestions,
   messagePartsOf,
   previewOf,
   resultValueOf,
@@ -941,5 +944,83 @@ describe("a structured output that arrived through a tool", () => {
     const kept = unfoldable([answer, ...noise], 5).map(({ entry }) => entry);
     expect(kept).toContain(answer);
     expect(kept).toHaveLength(6);
+  });
+});
+
+describe("an agent's question the control conversation answered (decision 0005 §4)", () => {
+  const ask = (question: string, answered = true): ToolEntry => ({
+    kind: "tool",
+    name: "AskUserQuestion",
+    summary: "",
+    ok: true,
+    callId: question,
+    args: { questions: [{ question, options: [{ label: "left" }, { label: "right" }] }] },
+    ...(answered ? { detail: { answers: { [question]: "left" } }, result: `User has answered your questions: "${question}"="left".` } : {}),
+  });
+  const mark = (confidence: number, questions?: string[]) => ({ via: "control" as const, confidence, byTaskId: "t-conv", at: 7, ...(questions !== undefined ? { questions } : {}) });
+
+  it("marks the block whose questions the row names — and not the one the person answered", () => {
+    const entries: TranscriptEntry[] = [ask("Which way?"), { kind: "message", role: "assistant", text: "ok" }, ask("How far?")];
+    const marked = markAnsweredQuestions(entries, [mark(0.86, ["How far?"])]);
+    expect(marked.map((e) => (e.kind === "tool" ? e.settledBy?.confidence : undefined))).toEqual([undefined, undefined, 0.86]);
+    // Nothing is mutated: the input list still says nothing.
+    expect((entries[2] as ToolEntry).settledBy).toBeUndefined();
+  });
+
+  it("hands each mark out once, so the same question asked twice gets one mark per answer", () => {
+    const marked = markAnsweredQuestions([ask("Which way?"), ask("Which way?")], [mark(0.9, ["Which way?"])]);
+    expect(marked.map((e) => (e.kind === "tool" ? e.settledBy?.confidence : undefined))).toEqual([0.9, undefined]);
+  });
+
+  it("pairs a mark written before rows carried their texts only when nothing else could be meant", () => {
+    expect((markAnsweredQuestions([ask("Which way?")], [mark(0.5)])[0] as ToolEntry).settledBy?.confidence).toBe(0.5);
+    // Two answered blocks and one untexted mark: which one got it is a guess, and none is drawn.
+    const two = markAnsweredQuestions([ask("Which way?"), ask("How far?")], [mark(0.5)]);
+    expect(two.every((e) => e.kind !== "tool" || e.settledBy === undefined)).toBe(true);
+    // A block still in flight was answered by nobody yet.
+    expect((markAnsweredQuestions([ask("Which way?", false)], [mark(0.5)])[0] as ToolEntry).settledBy).toBeUndefined();
+  });
+
+  it("returns the very same list when there is nothing to mark", () => {
+    const entries: TranscriptEntry[] = [ask("Which way?")];
+    expect(markAnsweredQuestions(entries, undefined)).toBe(entries);
+    expect(markAnsweredQuestions(entries, [mark(0.9, ["Something else?"])])).toBe(entries);
+  });
+
+  it("draws who answered under the block, and the way back only where the host lends one", () => {
+    const [marked] = markAnsweredQuestions([ask("Which way?")], [mark(0.86, ["Which way?"])]);
+    const bare = renderToStaticMarkup(createElement(Transcript, { entries: [marked!] }));
+    expect(bare).toContain('data-testid="asked"');
+    expect(bare).toContain('data-testid="answered-for-you"');
+    expect(bare).toContain("Answered for you by <b>the conversation</b>");
+    expect(bare).toContain("confidence 0.86");
+    expect(bare).not.toContain("Answer it yourself");
+    const hosted = renderToStaticMarkup(createElement(Transcript, { entries: [marked!], calls: { onAnswerYourself: () => undefined } }));
+    expect(hosted).toContain("Answer it yourself");
+    // A block the person answered says nothing of the sort.
+    expect(renderToStaticMarkup(createElement(Transcript, { entries: [ask("Which way?")] }))).not.toContain("answered-for-you");
+  });
+});
+
+describe("a workflow tool's note, where the host puts it", () => {
+  const moved: ToolEntry = {
+    kind: "tool",
+    name: "move_task",
+    summary: "",
+    ok: true,
+    args: { to: "feature/ux" },
+    result: JSON.stringify({ ok: true, task: "t-2", resolution: "adopt", workflow: "Feature workflow", standsAt: "ux", adoptedAs: "product" }),
+  };
+
+  it("is under the call by default — a one-column conversation has nowhere else", () => {
+    const html = renderToStaticMarkup(createElement(Transcript, { entries: [moved] }));
+    expect(html).toContain("adopted into");
+    expect(html).toContain('<b>Feature workflow</b> as <span class="mono">product</span>');
+  });
+
+  it("is left to the rail when the host draws it there, so the call's row says nothing more", () => {
+    const html = renderToStaticMarkup(createElement(Transcript, { entries: [moved], calls: { outcomes: "rail" } }));
+    expect(html).toContain("move_task");
+    expect(html).not.toContain("adopted into");
   });
 });

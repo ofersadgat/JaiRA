@@ -620,6 +620,8 @@ function markProvenance(project: Project, taskId: string, nodes: readonly Instan
  */
 function markAnswered(nodes: readonly InstanceNode[], rows: readonly { seq: number; event: EngineEvent }[]): void {
   const byInstance = new Map<string, AnsweredEvent & { seq: number }>();
+  /** Every agent-question row per instance — `InstanceNode.answeredQuestions`. An agent asks more than once. */
+  const questions = new Map<string, AnsweredEvent[]>();
   /**
    * Where each instance was ENTERED — the rewind point. Not the answered row itself: a cut keeps the
    * settle of a call that had started before it (`partitionAt`, which is right for a conversation cut
@@ -634,12 +636,19 @@ function markAnswered(nodes: readonly InstanceNode[], rows: readonly { seq: numb
     // The FIRST: a follow-up round answered again is the same question, and taking it back means
     // going back to where it was first asked.
     if (!byInstance.has(event.instanceId)) byInstance.set(event.instanceId, { ...event, seq: row.seq });
+    if (event.kind === "question") questions.set(event.instanceId, [...(questions.get(event.instanceId) ?? []), event]);
   }
   if (byInstance.size === 0) return;
   const walk = (list: readonly InstanceNode[]): void => {
     for (const node of list) {
       const said = byInstance.get(node.instanceId);
-      if (said !== undefined) node.settledBy = { ...said.settled_by, byTaskId: said.byTaskId, at: enteredAt.get(node.instanceId) ?? said.seq };
+      const at = enteredAt.get(node.instanceId) ?? said?.seq ?? 0;
+      if (said !== undefined) node.settledBy = { ...said.settled_by, byTaskId: said.byTaskId, at };
+      // The same rewind point for each: taking back any of an agent's answers re-enters the state.
+      const asked = questions.get(node.instanceId);
+      if (asked !== undefined) {
+        node.answeredQuestions = asked.map((row) => ({ ...row.settled_by, byTaskId: row.byTaskId, at, ...(row.questions !== undefined ? { questions: row.questions } : {}) }));
+      }
       walk(node.children);
     }
   };

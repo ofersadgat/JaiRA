@@ -45,6 +45,7 @@ import {
   type MadeBatch,
   type SequentialBatchLayout,
   type SessionRef,
+  type WorkflowOutcome,
 } from "@jaira/shared/browser";
 
 /**
@@ -469,11 +470,23 @@ export interface BandNote {
    * "could not enter X" — rather than as a bare reason, because that is what it is. `failure` is
    * everything else that went wrong: a call that failed, a state that gave up.
    */
-  kind: "failure" | "blocked" | "entered" | "transition" | "made" | "skipped";
+  kind: "failure" | "blocked" | "entered" | "transition" | "made" | "skipped" | "moved";
   /** The state DEFINITION the note is about, when the journal named one — what the title shows. */
   stateId?: string;
   /** For a `made` note: the runs the batch's elements became — see `MadeBatch`. */
   made?: MadeBatch;
+  /**
+   * For a `moved` note: what the conversation's `start_task` / `move_task` did, from the host's
+   * `jaira.moved` row — the row the mockup draws beside the panel, in the tool note's own words.
+   */
+  moved?: WorkflowOutcome;
+  /**
+   * For a `skipped` note that stands for SEVERAL states never entered: their child keys, in the order
+   * they were stepped over, the first being the note's own. One Skip steps over a run of siblings, and
+   * "skipped · never entered · ui, engineering" is one fact about one gesture — a row per state read
+   * as three things happening. Absent on an interrupted state, which keeps its own row.
+   */
+  keys?: string[];
   /**
    * The instance the note is about, when it became one.
    *
@@ -686,6 +699,12 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
       out.push({ seq: turn.seq, at: turn.at, kind: "made", ...named, path, text: "", made: turn.made });
       continue;
     }
+    // What the conversation's own workflow tool did (`jaira.moved`, decision 0005 §3). At the ROOT —
+    // the conversation is the root — and never a lane: nothing was entered by saying so.
+    if (turn.kind === "moved") {
+      if (turn.moved !== undefined) out.push({ seq: turn.seq, at: turn.at, kind: "moved", path: "", text: "", moved: turn.moved });
+      continue;
+    }
     if (turn.kind === "transition") {
       // `text` is the TARGET the rule went to (see `conversationView`) — a child key, or one of the
       // `terminate.*` pseudo-states. A transition GOES somewhere, so the row is addressed by where it
@@ -708,7 +727,83 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
     seen.add(key);
     out.push({ seq: turn.seq, at: turn.at, kind: blocked ? "blocked" : "failure", ...named, path, text });
   }
-  return out.sort((a, b) => a.at - b.at || a.seq - b.seq);
+  return groupNeverEntered(out.sort((a, b) => a.at - b.at || a.seq - b.seq));
+}
+
+/** The mount a path sits in: `feature/ui` → `feature`, `ui` → the root. */
+function parentOf(path: string): string {
+  const at = path.lastIndexOf("/");
+  return at < 0 ? "" : path.slice(0, at);
+}
+
+/**
+ * One row for the states a Skip stepped over without entering (decision 0005 §4, the mockup's
+ * "skipped · never entered · ui, engineering").
+ *
+ * A run of never-entered notes that follow each other with nothing between and sit in the same mount
+ * is one gesture's work, so it is one row: the first note, carrying every key in `keys`. The state that
+ * was INTERRUPTED is not folded in — it ran, and how long it had run is its own sentence — and neither
+ * is a never-entered state in a different mount, whose path the row could not say in one breath.
+ */
+export function groupNeverEntered(notes: readonly BandNote[]): BandNote[] {
+  const out: BandNote[] = [];
+  const keyOf = (note: BandNote): string => note.path.slice(note.path.lastIndexOf("/") + 1);
+  for (const note of notes) {
+    const last = out[out.length - 1];
+    const never = note.kind === "skipped" && note.text === "never entered";
+    if (never && last !== undefined && last.kind === "skipped" && last.text === "never entered" && parentOf(last.path) === parentOf(note.path)) {
+      out[out.length - 1] = { ...last, keys: [...(last.keys ?? [keyOf(last)]), keyOf(note)] };
+      continue;
+    }
+    out.push(note);
+  }
+  return out;
+}
+
+/**
+ * Split a conversation's band where a `moved` note falls between two of its turns, so the note is a
+ * row BETWEEN the turns it came after and before — the mockup's "adopted into Feature workflow …"
+ * beside the panel that said it, with the conversation carrying on underneath.
+ *
+ * Needed because consecutive turns of one conversation are one band (see the module comment), and a
+ * note is placed between bands; unsplit, every tool note of a long conversation would pile up after
+ * its last turn. Only a band holding ONE conversation splits: across several, the turns overlap by
+ * definition, and there is no "between" to put the row in. The split is at turn granularity — a note
+ * written during a turn follows that turn — because a turn's record is one transcript and the rows
+ * inside it are not the rail's to cut.
+ *
+ * Nothing about the conversation changes: no pause or resume mark is drawn at the split, because
+ * nothing else ran in the gap. The halves keep the marks the band had at its two ends.
+ */
+export function splitAtNotes(bands: readonly SessionBand[], notes: readonly BandNote[]): SessionBand[] {
+  const cuts = notes.filter((note) => note.kind === "moved").map((note) => note.at);
+  if (cuts.length === 0) return [...bands];
+  const out: SessionBand[] = [];
+  for (const band of bands) {
+    const only = band.segments.length === 1 ? band.segments[0]! : undefined;
+    if (only === undefined || only.pieces.length < 2) {
+      out.push(band);
+      continue;
+    }
+    let rest = only.pieces;
+    const halves: SessionPiece[][] = [];
+    for (let k = 0; k < rest.length - 1; ) {
+      const next = rest[k + 1]!;
+      if (cuts.some((at) => rest[k]!.startedAt <= at && at < next.startedAt)) {
+        halves.push(rest.slice(0, k + 1));
+        rest = rest.slice(k + 1);
+        k = 0;
+      } else k += 1;
+    }
+    halves.push(rest);
+    halves.forEach((pieces, i) => {
+      out.push({
+        startedAt: pieces[0]!.startedAt,
+        segments: [{ ...only, pieces, resumed: i === 0 && only.resumed, paused: i === halves.length - 1 && only.paused }],
+      });
+    });
+  }
+  return out;
 }
 
 /**

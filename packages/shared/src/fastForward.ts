@@ -69,4 +69,9 @@ export interface SettledByView {
   /** The conversation's task. */
   byTaskId: string;
   at: number;
+  /**
+   * For an agent's `AskUserQuestion`: the question texts the answer was for — what picks the question
+   * block it settled out of the agent's transcript (`jaira.answered`'s `questions`). Absent on a gate.
+   */
+  questions?: string[];
 }

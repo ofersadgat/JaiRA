@@ -809,4 +809,38 @@ describe("the runs a fan-out made, as a line at the mount", () => {
     expect(hosted).not.toContain("aria-expanded");
   });
 
+  it("draws the states a Skip never entered as ONE row — the mount, then their keys", () => {
+    const grouped: BandNote = { seq: 22, at: 30, kind: "skipped", stateId: "feature/ui", instanceId: "i5", path: "ui", text: "never entered", keys: ["ui", "engineering"] };
+    const interrupted: BandNote = { seq: 20, at: 29, kind: "skipped", stateId: "feature/ux/item", instanceId: "i3", path: "ux/item", text: "interrupted at 1 m 12 s" };
+    const html = drawWith(undefined, [], { notes: [interrupted, grouped] });
+    expect(html.match(/sb-skipped/g)).toHaveLength(2);
+    expect(html).toContain(">interrupted at 1 m 12 s<");
+    expect(html).toContain(">ux → item<");
+    expect(html).toContain(">never entered<");
+    expect(html).toContain(">ui, engineering<");
+    // Nested, the mount leads: "feature → ui, engineering" read from above `feature`.
+    const nested = drawWith(undefined, [], { notes: [{ ...grouped, path: "feature/ui" }] });
+    expect(nested).toContain(">feature → ui, engineering<");
+  });
+
+  it("draws what a conversation's tool did as a ROW between its turns, not under the call", () => {
+    // One conversation, three turns — one band until a `moved` note falls between the first two.
+    const conversation = parentOf([
+      { id: 2, from: 0, to: 10 },
+      { id: 3, from: 20, to: 30 },
+      { id: 4, from: 40, to: 50 },
+    ]);
+    const refs3 = [ref(2, "C", 0, 10), ref(3, "C", 20, 30), ref(4, "C", 40, 50)];
+    const moved: BandNote = { seq: 9, at: 5, kind: "moved", path: "", text: "", moved: { verb: "adopted into", standsAt: "feature → ux", workflow: "Feature workflow", adoptedAs: "product" } };
+    const html = drawWith(conversation, refs3, { notes: [moved] });
+    expect(html).toContain("sb-connected");
+    expect(html).toContain(">adopted into<");
+    expect(html).toContain('<b>Feature workflow</b> as <span class="mono">product</span> · standing at');
+    const [first, second, row] = [html.indexOf("said by #2"), html.indexOf("said by #3"), html.indexOf("sb-connected")];
+    expect(row).toBeGreaterThan(first);
+    expect(row).toBeLessThan(second);
+    // A rail row like any other note, at the conversation's own level: it opens no lane.
+    expect(stepOfNote(moved, "")).toMatchObject({ opens: false, at: [] });
+  });
+
 });

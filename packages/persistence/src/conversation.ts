@@ -19,7 +19,7 @@
  * agent was doing when it asked.
  */
 import { createLogger } from "@declarative-ai/log";
-import { refusal } from "@jaira/shared";
+import { MOVED_EVENT, refusal, type MovedEvent } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent } from "@declarative-ai/hw";
 import { isTaskId, type ConversationTurn, type ConversationView, type MadeBatch } from "@jaira/shared";
@@ -155,6 +155,13 @@ export function conversationView(project: Project, taskId: string, options: Conv
       ...mountedAt(pathOf.get(instanceId)),
       instanceId,
     });
+    // What the conversation's own `start_task` / `move_task` did (host vocabulary, decision 0005 §3):
+    // a fact about the conversation, so it sits at the ROOT, which is the conversation.
+    if ((event as { type: string }).type === MOVED_EVENT) {
+      const row = event as unknown as MovedEvent;
+      turns.push({ seq, at, kind: "moved", path: "", text: row.tool, moved: row.outcome });
+      continue;
+    }
     switch (event.type) {
       case "instance.entered": {
         // A RE-STATED entry is not a step. Until 2026-09-08 a continuing run re-entered the live

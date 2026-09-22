@@ -32,7 +32,7 @@ import {
 import { Badge } from "./board";
 import { TaskName } from "./taskName";
 import { CompositeView, SidechainConversation } from "./runViews";
-import { entriesOf, journalFor } from "./transcript";
+import { entriesOf, journalFor, markAnsweredQuestions } from "./transcript";
 import { useStickToBottom } from "./stickToBottom";
 import { nodeAt } from "./trail";
 import { Paper, Transcript } from "./transcriptView";
@@ -573,16 +573,19 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
   const { session, liveTurn } = context;
   // The whole tail: text, thinking, items — and the sidechains, which are what turns a Task row
   // into a doorway while its subagent is still talking.
+  // The host of any doorway in THIS transcript is the instance whose session is on screen — what a
+  // sidechain step has to name for the walk to keep resolving. See `TrailStep.sidechain`.
+  const host = context.sessionInstance !== null ? nodeAt(context.detail?.instances ?? [], context.sessionInstance) : undefined;
+  // An agent question the control conversation answered says so here too — the same marks the run
+  // conversation reads (`markAnsweredQuestions`).
+  const marks = host?.answeredQuestions;
   const entries = useMemo(
-    () => entriesOf(session, journalFor(conversation?.turns ?? [], state?.stateId), liveTurn),
-    [session, conversation, state?.stateId, liveTurn],
+    () => markAnsweredQuestions(entriesOf(session, journalFor(conversation?.turns ?? [], state?.stateId), liveTurn), marks),
+    [session, conversation, state?.stateId, liveTurn, marks],
   );
   // Follow the live edge while the reader is standing on it. The selected run is the reset: another
   // task's conversation is another conversation, and is read from its end.
   const follow = useStickToBottom<HTMLDivElement>([entries], [selected]);
-  // The host of any doorway in THIS transcript is the instance whose session is on screen — what a
-  // sidechain step has to name for the walk to keep resolving. See `TrailStep.sidechain`.
-  const host = context.sessionInstance !== null ? nodeAt(context.detail?.instances ?? [], context.sessionInstance) : undefined;
   const onWalkIntoSidechain = context.onWalkIntoSidechain;
   // Standing on a sidechain step: the panel is that subagent conversation, exactly as it is for a
   // composite — a leaf's walk is shorter, not different.

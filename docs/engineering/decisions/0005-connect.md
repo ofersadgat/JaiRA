@@ -909,15 +909,35 @@ yet". The statement of record is [task-channels](../contracts/task-channels.md)
   and those asks stay on the inbox until answered or the task is stopped. An
   upstream signal on `Approver` and `AskUser`, or an instance on their requests,
   would close it.
-- "Answered for you" draws on a GATE only. An agent's `AskUserQuestion` answered
-  by the conversation is journaled and marked on its instance, but the question
-  block inside the agent's transcript does not say who answered it.
-- The skipped notes draw one row per state; the mockup groups the states never
-  entered into one row.
 - A question stays on screen while the conversation considers it; a person who
   answers first wins, and the conversation's answer is counted as left to them.
-- A control conversation's opening row is drawn as the tool's own note, not as
-  a row on the rail beside the panel as the mockup has it.
+
+Closed 2026-09-22 (three drawing gaps from step 7's list, no upstream change):
+
+- **"Answered for you" draws under an agent's `AskUserQuestion` too.** A
+  `jaira.answered` row of kind `question` now carries the question TEXTS it
+  answered; the projection keeps every such row on the instance
+  (`InstanceNode.answeredQuestions`), and the transcript marks the block asking
+  exactly those questions (`markAnsweredQuestions`) with the gate's own line and
+  "Answer it yourself" — the same rewind to the state's entry. The texts are the
+  join because the question hub's park carries no tool-call id; a row written
+  before this, with no texts, is drawn only where nothing else could be meant.
+- **The states a Skip never entered are one row** —
+  "skipped · never entered · feature → ui, engineering" — and the interrupted
+  state keeps its own ("skipped · interrupted at 1 m 12 s"). Grouped in
+  `notesOf` (`groupNeverEntered`): consecutive, same mount, nothing between.
+- **What a conversation's `start_task` / `move_task` did is a row on the rail.**
+  The host now journals it on the conversation's own task as `jaira.moved`
+  (`{tool, task, outcome}`, host vocabulary like `jaira.answered`), the
+  conversation view projects it as a `moved` turn, and the band builder draws it
+  as a note — cutting the conversation's band after the turn that made it
+  (`splitAtNotes`) so the row sits between that turn and the next, as the mockup
+  has it. Chosen over teaching the band builder to read record contents: the
+  rail is built from the journal, and a fact about the work belongs in the
+  journal, where a rewind cuts it with everything else. The one-column Chat view
+  has no rail and still draws the same words under the call; which of the two a
+  transcript does is its host's choice (`CallSurface.outcomes`). The cut is at
+  turn granularity: a note follows the whole turn that moved, reply included.
 
 ## Revisit when
 

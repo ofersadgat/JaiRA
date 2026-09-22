@@ -8,6 +8,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import type { TaskStatus } from "./task";
 import type { InputProvenance } from "./adopt";
 import type { FastForwardView, SettledByView } from "./fastForward";
+import type { WorkflowOutcome } from "./workflowTools";
 import type { ModuleApproval } from "./refusal";
 
 /**
@@ -150,6 +151,14 @@ export interface InstanceNode {
    * at, which is what "Answer it yourself" rewinds to.
    */
   settledBy?: SettledByView;
+  /**
+   * The agent's `AskUserQuestion` batches the control conversation answered on this instance, oldest
+   * first — one per `jaira.answered` row of kind `question`, each carrying the question texts it
+   * answered, so the transcript can mark the block it settled rather than every question the agent
+   * asked. A gate's mark is {@link settledBy}; an agent can ask several times and a person may answer
+   * some of them, which one instance-wide mark cannot say.
+   */
+  answeredQuestions?: SettledByView[];
   /**
    * What to call this RUN, resolved from {@link inputs} — see `resolveLabel`.
    *
@@ -914,7 +923,12 @@ export type TurnKind =
    * entering states. One line at the mount, carried by every task in the batch; `made` says what
    * was made, and the line links to every run but the reader's own.
    */
-  | "made";
+  | "made"
+  /**
+   * A conversation's `start_task` / `move_task` took effect (decision 0005 §3) — the host's
+   * `jaira.moved` row. At the conversation's root; `moved` is what the note says.
+   */
+  | "moved";
 
 export interface ConversationTurn {
   seq: number;
@@ -957,6 +971,8 @@ export interface ConversationTurn {
   data?: JsonValue;
   /** For a `made` turn: the runs the batch's elements became. */
   made?: MadeBatch;
+  /** For a `moved` turn: what the conversation's workflow tool did (`jaira.moved`). */
+  moved?: WorkflowOutcome;
 }
 
 /**

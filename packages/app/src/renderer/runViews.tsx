@@ -35,13 +35,13 @@ import { Board, Column, Tile } from "./board";
 import { ApprovalSurface, GateSurface, QuestionSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
-import { entriesOf, journalFor, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
+import { entriesOf, journalFor, markAnsweredQuestions, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
 import { ValueView } from "./valueView";
 import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
 import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
-import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
+import { AnsweredForYou, Paper, Pulse, Transcript, clockOf, durationOf, useElapsed, type CallSurface } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
@@ -532,30 +532,9 @@ function settledGateOf(call: ReadCall, node: InstanceNode, taskId: string | unde
   return pending;
 }
 
-/**
- * A gate the CONTROL CONVERSATION answered (decision 0005 §4): who, how sure, and the way back.
- *
- * In the accent and not in `ok`: it is a judgement somebody may want back, not a confirmation. The
- * confidence is the number the conversation gave and the one `autopilot.askBelow` was held against.
- * "Answer it yourself" is a REWIND to the answer — the question is asked again and the fast-forward,
- * if it is still going, is over.
- */
-export function AnsweredForYou({ by, onAnswerYourself }: { by: SettledByView; onAnswerYourself?: (() => void) | undefined }): JSX.Element {
-  return (
-    <div className="gate-settled-by by-control" data-testid="answered-for-you">
-      <Icon name="think" />
-      <div>
-        Answered for you by <b>the conversation</b> <span className="conf">· confidence {by.confidence.toFixed(2)}</span>
-      </div>
-      <span className="grow" />
-      {onAnswerYourself !== undefined ? (
-        <button type="button" className="quiet" onClick={onAnswerYourself} title="Rewind to this question, so it is asked again and answered by you">
-          Answer it yourself
-        </button>
-      ) : null}
-    </div>
-  );
-}
+// "Answered for you" lives beside the question block it also marks (`transcriptView.tsx`); the gate
+// here and the shots import it from this module, as they always have.
+export { AnsweredForYou };
 
 /** A settled gate in its state's panel: the control as answered, and the record behind a toggle. */
 function SettledGate({
@@ -944,6 +923,26 @@ export function RunConversation({
     };
   }, [detail, onRewind, onFork, notes, rootPath]);
 
+  /**
+   * What this conversation's call rows are lent: the workflow tools' notes are drawn on the RAIL, from
+   * the `jaira.moved` rows (`notesOf`), so the rows themselves say nothing more; and "Answer it
+   * yourself" under an agent's question is the gate's own rewind.
+   */
+  const detailTaskId = detail?.taskId;
+  const calls = useMemo<CallSurface>(
+    () => ({
+      outcomes: "rail",
+      ...(detailTaskId !== undefined
+        ? {
+            onAnswerYourself: (by: SettledByView) => {
+              void invoke("task:answerYourself", { taskId: detailTaskId, at: by.at, ...(context.project !== undefined && context.project !== "" ? { project: context.project } : {}) }).catch(() => undefined);
+            },
+          }
+        : {}),
+    }),
+    [detailTaskId, context.project],
+  );
+
   // Every panel is open, so every transcript in them is needed — fetched in one round rather than
   // on expand, which is what the folded card design paid for and this one does not.
   useEffect(() => {
@@ -1021,12 +1020,15 @@ export function RunConversation({
     // they belong in this panel the moment they happen rather than when the record closes —
     // sidechains included, which is what lets a doorway row show its subagent talking live.
     const live = matches ? liveTurn : null;
-    const entries = entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live);
+    // The agent's questions the control conversation answered say so, as a gate does — the marks are
+    // the instance's `jaira.answered` rows, joined to the blocks by question text.
+    const entries = markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions);
     const transcript = (
       <Transcript
         session={view}
         entries={entries}
         live={live}
+        calls={calls}
         // The SESSION, not the task: a turn number is only unique inside one, so a run's several
         // conversations would otherwise overwrite each other's type corrections at turn 3. A piece
         // with no session id yet is one still being written, and gets the control without the

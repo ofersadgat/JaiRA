@@ -42,7 +42,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
-import { clockOf, durationOf } from "./transcriptView";
+import { clockOf, durationOf, OutcomeNote } from "./transcriptView";
 import { signatureOf } from "./transcript";
 import { addressSegment, segmentKey, type InstanceNode, type MadeBatch, type MadeTask, type TaskOrigin } from "@jaira/shared/browser";
 import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
@@ -51,6 +51,7 @@ import {
   pathFrom,
   placeNotes,
   placeOf,
+  splitAtNotes,
   segmentsFrom,
   startersOf,
   type BandNote,
@@ -923,8 +924,15 @@ export function NoteRow({
   // A person's move stepped past it (decision 0005 §4): not a failure, and not the machine moving
   // either — the step glyph, dimmed, and the reason (interrupted, never entered) as its text.
   const skipped = note.kind === "skipped";
-  const where = pathFrom(note.path, root);
+  // Several states never entered are ONE row: the mount they share, then their keys —
+  // "feature → ui, engineering". See `groupNeverEntered`.
+  const where =
+    note.keys !== undefined && note.keys.length > 1
+      ? [pathFrom(note.path.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "", root), note.keys.join(", ")].filter((part) => part !== "").join(" → ")
+      : pathFrom(note.path, root);
   if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} />;
+  // What the conversation's workflow tool did — the tool note's own words, as a row on the rail.
+  if (note.kind === "moved" && note.moved !== undefined) return <OutcomeNote outcome={note.moved} />;
   return (
     // `data-entered` is what a bookmark lands on: the row where the run went INTO the state, which
     // is where a person following the run wants to start reading — not the letterhead below it,
@@ -1068,6 +1076,7 @@ const VERB: Record<BandNote["kind"], string> = {
   failure: "",
   made: "made",
   skipped: "skipped",
+  moved: "",
 };
 
 /**
@@ -1104,7 +1113,7 @@ export function stepOfNote(note: BandNote, root: string): RailStep {
 
 /** The whole conversation: bands down the page, in the order they happened. */
 export function SessionBandsView({
-  bands,
+  bands: given,
   render,
   notes = [],
   root = "",
@@ -1240,12 +1249,15 @@ export function SessionBandsView({
       window.clearTimeout(clear);
       found.classList.remove("sb-panel-lit");
     };
-  }, [focus?.instance, focus?.at, bands, notes]);
+  }, [focus?.instance, focus?.at, given, notes]);
 
   // Notes even with no bands, and that is the case worth having: a run whose first child was blocked
   // never opened a conversation at all, so "this run has not said anything yet" was the whole screen
   // — a true sentence standing where the reason belonged.
-  if (bands.length === 0 && notes.length === 0) return <p className="empty">{empty ?? "This run has not said anything yet."}</p>;
+  if (given.length === 0 && notes.length === 0) return <p className="empty">{empty ?? "This run has not said anything yet."}</p>;
+  // A conversation's band is cut where one of its workflow tools took effect, so the row saying what
+  // it did sits between the turns it came between. See `splitAtNotes`.
+  const bands = splitAtNotes(given, notes);
   const bare = isSolo(bands);
   const placed = placeNotes(notes, bands);
   const starters = startersOf(bands);

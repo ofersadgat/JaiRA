@@ -2,7 +2,7 @@
 id: ui/components/gate-surface
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 realizes: [ux/patterns/park-and-ask, ux/patterns/absence-is-stated, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/decisions-stay-yours, product/decide-with-the-context-in-front-of-you, product/complete-record-of-every-run, product/pick-up-where-it-left-off]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
@@ -30,7 +30,7 @@ A process's question to a person: the author's prompt as a heading with a small 
 - **Heading elsewhere.** In the fallback section at the end of a task's conversation and in the modal: the prompt in `--text` at 17/12.5 of the app size, line height 1.35, sentence case, with a 16px glyph in `--dim` 4px before it. The fallback section has a 2px `--accent` rule above it.
 - **Note under the heading.** `Answering this continues the task.` at 11/12.5 in `--dim` on a live question that outlasted the app closing. `Never answered.` in italic `--dim` on a settled question nobody answered.
 - **Control.** Drawn by the component for the kind: [choose-option-gate](choose-option-gate.md), [review-artifact-gate](review-artifact-gate.md), [edit-artifact-gate](edit-artifact-gate.md), [fill-form-gate](fill-form-gate.md), [confirm-action-gate](confirm-action-gate.md) or [changeset-review](changeset-review.md).
-- **Answered for you.** Settled in a session sheet, when a fast-forward's controlling conversation gave the answer ([decision 0005](../../engineering/decisions/0005-connect.md) §4): the settled-by box under the control, 8px above it, in the accent rather than in `ok` — 8% `--accent` over `--panel`, a 1px edge at 32% — with a two-star glyph in `--accent`, `Answered for you by the conversation`, the confidence in the data face after a `·`, and a quiet `Answer it yourself` at the far right.
+- **Answered for you.** Settled in a session sheet, when a fast-forward's controlling conversation gave the answer ([decision 0005](../../engineering/decisions/0005-connect.md) §4) — the same box an agent's answered `AskUserQuestion` draws under its block in a [work-row](work-row.md): the settled-by box under the control, 8px above it, in the accent rather than in `ok` — 8% `--accent` over `--panel`, a 1px edge at 32% — with a two-star glyph in `--accent`, `Answered for you by the conversation`, the confidence in the data face after a `·`, and a quiet `Answer it yourself` at the far right.
 - **Record.** Settled in a session sheet only: a quiet `Show the record` button 12px under the control, opening the call as [computed-state-body](computed-state-body.md) draws it.
 
 ## A settled question is the same control, lit and inert

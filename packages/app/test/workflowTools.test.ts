@@ -28,7 +28,7 @@ import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
 import { writeWorkflowFiles, createWorkflowTools, type FakeRule } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
-import type { MoveResult, StartResult, TasksResult, WorkflowsResult } from "@jaira/shared";
+import { ANSWERED_EVENT, MOVED_EVENT, type AnsweredEvent, type MovedEvent, type MoveResult, type StartResult, type TasksResult, type WorkflowsResult } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { ANSWERABLE_COMPONENTS } from "../src/main/workflowHost";
@@ -115,6 +115,8 @@ const metaOf = (taskId: string) => read((p) => p.tasks.tryRead(taskId));
 const journal = (taskId: string): EngineEvent[] => read((p) => new SqliteEventLog(p.db).list(taskId).map((row) => row.event));
 /** Model calls this task's own machine dispatched — the number a drop must leave at zero. */
 const prompts = (taskId: string): number => journal(taskId).filter((e) => e.type === "operation.started" && e.op === "prompt").length;
+/** The `jaira.moved` rows a conversation's tools left on its task — what its rail draws the notes from. */
+const movedRows = (taskId: string): MovedEvent[] => journal(taskId).filter((e) => (e as { type: string }).type === MOVED_EVENT) as unknown as MovedEvent[];
 const documentOf = (taskId: string): string | undefined => read((p) => p.runtime.get(taskId)?.documentId);
 /** The machine's root instance — the one a composer addresses when a conversation is selected. */
 const rootInstanceOf = (taskId: string): string =>
@@ -269,6 +271,15 @@ describe("start_task", () => {
     expect(metaOf(session)?.workflow).not.toBe("chat/control");
   });
 
+  it("journals what it started on the conversation's own task, and nothing for the ask that wrote nothing", async () => {
+    const session = await conversation("chat/session");
+    await call(session, "start_task", { state: "lib/needs" });
+    expect(movedRows(session)).toEqual([]);
+    const done = (await call(session, "start_task", { state: "lib/needs", inputs: { text: "the thing" }, asked: ["text"] })) as unknown as StartResult;
+    await parked();
+    expect(movedRows(session)).toEqual([{ type: MOVED_EVENT, tool: "start_task", task: session, outcome: { verb: "entered", standsAt: (done as { key: string }).key } }]);
+  });
+
   it("dispatches no second model call of its own: what it starts is a CHILD, not another turn", async () => {
     const session = await conversation("chat/session");
     const opening = prompts(session);
@@ -294,6 +305,21 @@ describe("move_task", () => {
     const parent = (moved as { task: string }).task;
     expect(await parked()).toMatchObject({ state: "next", inputs: { flag: true } });
     expect(journal(parent).filter((e) => e.type === "transition.taken").length + 1).toBeGreaterThan(0);
+  });
+
+  it("journals what it did on the CONVERSATION's task — the row its rail draws — and nothing for a refusal", async () => {
+    const session = await conversation("chat/session");
+    const done = await ran("lib/done", 1, "Pause and stop");
+    const refused = await call(session, "move_task", { task: done, to: "lib/needs" });
+    expect(refused).toMatchObject({ ok: false });
+    expect(movedRows(session)).toEqual([]);
+    const moved = (await call(session, "move_task", { task: done, to: "lib/next" })) as unknown as MoveResult;
+    await parked();
+    expect(movedRows(session)).toEqual([
+      { type: MOVED_EVENT, tool: "move_task", task: (moved as { task: string }).task, outcome: { verb: "adopted into", standsAt: "next", workflow: "feat", adoptedAs: "done" } },
+    ]);
+    // The row is on the conversation, not on the task that moved.
+    expect(movedRows(done)).toEqual([]);
   });
 
   it("hands back the refusal whole, so the conversation can say what is missing rather than guess", async () => {
@@ -368,6 +394,25 @@ describe("answer_question", () => {
       ok: false,
       reason: expect.stringContaining("did not start"),
     });
+  });
+
+  it("journals an agent's answered questions WITH their texts — what the transcript marks the block by", async () => {
+    const session = await conversation("chat/session");
+    // What an agent in this conversation's own task would park: the hub's asker, as a run hands it on.
+    const open = (service as unknown as { session(p?: string): { questions: { asker(c: { taskId?: string }): (r: unknown) => Promise<unknown> } } }).session();
+    const asked = open.questions.asker({ taskId: session })({
+      questions: [
+        { question: "Which way?", options: [{ label: "left" }, { label: "right" }] },
+        { question: "How far?", options: [{ label: "near" }, { label: "far" }] },
+      ],
+      sessionId: "s",
+    });
+    await until(() => service.pendingQuestions().some((p) => p.taskId === session), "the agent's question");
+    const request = service.pendingQuestions().find((p) => p.taskId === session)!.requestId;
+    expect(await call(session, "answer_question", { request, confidence: 0.8, answers: { "Which way?": "left", "How far?": "near" } })).toMatchObject({ ok: true });
+    await expect(asked).resolves.toMatchObject({ "Which way?": "left" });
+    const row = journal(session).find((e) => (e as { type: string }).type === ANSWERED_EVENT) as unknown as AnsweredEvent;
+    expect(row).toMatchObject({ kind: "question", questions: ["Which way?", "How far?"], settled_by: { via: "control", confidence: 0.8 } });
   });
 
   it("leaves a question nobody answered parked DURABLY, across a close and an open", async () => {

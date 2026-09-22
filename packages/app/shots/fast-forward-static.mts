@@ -17,7 +17,7 @@ import { SchemaForm } from "../src/renderer/schemaForm/SchemaForm";
 import type { Schema } from "../src/renderer/schemaForm/types";
 import { CONFIG_SECTIONS, parseComponentConfig, type ConversationTurn, type PendingInteraction, type SessionTurn, type SessionView, type TaskDetail } from "@jaira/shared/browser";
 import { AnsweredForYou, RunActivity } from "../src/renderer/runViews";
-import { entriesOf } from "../src/renderer/transcript";
+import { entriesOf, markAnsweredQuestions } from "../src/renderer/transcript";
 import { Transcript } from "../src/renderer/transcriptView";
 import { GateSurface } from "../src/renderer/components";
 import { notesOf } from "../src/renderer/sessionBands";
@@ -97,6 +97,50 @@ const answered = h(
         h(GateSurface, { pending: gate, onSubmit: () => undefined, settled: { value: { decision: "go ahead" } } }),
         h(AnsweredForYou, { by: { via: "control", confidence: 0.86, byTaskId: "t-1", at: 14 }, onAnswerYourself: () => undefined }),
       ),
+    ),
+  ),
+);
+
+/**
+ * An agent's `AskUserQuestion` the conversation answered: the block drawn from the call, marked by
+ * `markAnsweredQuestions` from the instance's `jaira.answered` row — the same line the gate has.
+ */
+const agentAsked: SessionTurn[] = [
+  { role: "user", at, text: "Draft the pattern for a paused run." },
+  {
+    role: "assistant",
+    at: at + 2_000,
+    parts: [
+      {
+        type: "tool_use",
+        id: "q1",
+        name: "AskUserQuestion",
+        input: { questions: [{ question: "Should a paused run keep its worktree?", header: "Worktree", options: [{ label: "keep it", description: "resume where it stopped" }, { label: "release it" }] }] },
+      },
+    ],
+  },
+  {
+    role: "user",
+    at: at + 9_000,
+    parts: [{ type: "tool_result", tool_use_id: "q1", content: 'User has answered your questions: "Should a paused run keep its worktree?"="keep it". You can now continue with the user\'s answers in mind.' }],
+  },
+] as unknown as SessionTurn[];
+const agentAnswered = h(
+  "div",
+  { className: "sb-panel" },
+  h(
+    "section",
+    { className: "sb-sheet" },
+    h(
+      "div",
+      { className: "sb-body" },
+      h(Transcript, {
+        entries: markAnsweredQuestions(entriesOf({ taskId: "t", instanceId: "i", stateId: "feature/ux/item", sessionId: "s", seq: 1, turns: agentAsked } as SessionView), [
+          { via: "control", confidence: 0.86, byTaskId: "t-1", at: 11, questions: ["Should a paused run keep its worktree?"] },
+        ]),
+        live: null,
+        calls: { outcomes: "rail", onAnswerYourself: () => undefined },
+      }),
     ),
   ),
 );
@@ -181,6 +225,7 @@ const page = h(
   section("today · the activity strip", today),
   section("a fast-forward · the strip with its destination, and Skip beside Stop", forwarding),
   section("a gate the conversation answered · who, how sure, and the way back", answered),
+  section("an agent's AskUserQuestion the conversation answered · the same line, under the block in its transcript", agentAnswered),
   section("after Skip · what did not run says so, and the target is entered", notes),
   section("Settings · autopilot.askBelow, through the declared form", settings),
 );

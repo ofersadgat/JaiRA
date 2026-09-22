@@ -54,7 +54,7 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, workflowToolOf, type AgentQuestion } from "@jaira/shared/browser";
+import { choicesOfQuestions, workflowOutcomeOf, workflowToolOf, type AgentQuestion, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfAnsweredText, answersOfValue, ChoiceList, ChoiceSteps, type Answer } from "./choices";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
@@ -519,39 +519,28 @@ function AskedQuestions({ questions, answers }: { questions: AgentQuestion[]; an
  * mark plus its result, and saying it twice in different words is worse than saying it once.
  */
 function WorkflowOutcome({ result }: { result: JsonValue }): JSX.Element | null {
-  // A tool result reaches a transcript as whatever the provider wrote down: our own object, or
-  // the JSON text of it in a `tool_result` block. Both are the same answer, so both are read.
-  const parsed: JsonValue | undefined =
-    typeof result === "string" && result.trimStart().startsWith("{")
-      ? ((): JsonValue | undefined => {
-          try {
-            return JSON.parse(result) as JsonValue;
-          } catch {
-            return undefined;
-          }
-        })()
-      : result;
-  if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const r = parsed as Record<string, JsonValue>;
-  if (r["ok"] !== true) return null;
-  const standsAt = typeof r["standsAt"] === "string" ? r["standsAt"] : undefined;
-  const key = typeof r["key"] === "string" ? r["key"] : undefined;
-  const workflow = typeof r["workflow"] === "string" ? r["workflow"] : undefined;
-  const adoptedAs = typeof r["adoptedAs"] === "string" ? r["adoptedAs"] : undefined;
-  const where = standsAt ?? key;
-  if (where === undefined) return null;
+  const outcome = workflowOutcomeOf(result);
+  return outcome === undefined ? null : <OutcomeNote outcome={outcome} />;
+}
+
+/**
+ * The note itself — one reading of `WorkflowOutcome`, drawn wherever the caller puts it: under the call
+ * in a one-column transcript, or as a row on the rail (`NoteRow`, from the `jaira.moved` row) where the
+ * conversation has one. The words are the same in both places because the reading is.
+ */
+export function OutcomeNote({ outcome }: { outcome: WorkflowOutcome }): JSX.Element {
+  const { verb, standsAt: where, workflow, adoptedAs, held, through } = outcome;
   // A FAST-FORWARD (decision 0005 §4): the move did not land anywhere yet — the states between are
   // running, and this conversation is what answers them. The note says where it is going and
   // through what, in the words the strip below uses.
-  if (r["moved"] === "fast-forwarding") {
-    const through = Array.isArray(r["through"]) ? (r["through"] as JsonValue[]).filter((step): step is string => typeof step === "string") : [];
+  if (verb === "fast-forwarding to") {
     return (
       <div className="sb-note step sb-connected" role="note">
         <Icon name="workflow" className="sb-note-icon" />
         <span className="sb-note-verb">fast-forwarding to</span>
         <span className="sb-note-text">
           <b>{where.split("/").pop()}</b>
-          {through.length > 0 ? ` · through ${through.join(", ")}` : null}
+          {through !== undefined && through.length > 0 ? ` · through ${through.join(", ")}` : null}
         </span>
         {workflow !== undefined ? (
           <span className="sb-note-state mono ellip" title={workflow}>
@@ -563,9 +552,6 @@ function WorkflowOutcome({ result }: { result: JsonValue }): JSX.Element | null 
   }
   // `start` says what was mounted and how; `move` says which of the three resolutions happened, and
   // an adoption says what the task became in the workflow that took it.
-  const verb =
-    adoptedAs !== undefined ? "adopted into" : r["resolution"] === "modify" ? "connected to" : r["resolution"] === "move" ? "moved to" : "entered";
-  const held = r["mount"] === "split";
   return (
     <div className="sb-note step sb-connected" role="note">
       <Icon name="workflow" className="sb-note-icon" />
@@ -574,7 +560,7 @@ function WorkflowOutcome({ result }: { result: JsonValue }): JSX.Element | null 
         <span className="sb-note-text">
           <b>{workflow}</b> as <span className="mono">{adoptedAs}</span> · standing at
         </span>
-      ) : held ? (
+      ) : held === true ? (
         <span className="sb-note-text">one task per element, held · standing at</span>
       ) : null}
       <span className="sb-note-state mono ellip" title={where}>
@@ -584,16 +570,59 @@ function WorkflowOutcome({ result }: { result: JsonValue }): JSX.Element | null 
   );
 }
 
+/**
+ * A question the CONTROL CONVERSATION answered (decision 0005 §4): who, how sure, and the way back —
+ * under a settled gate, and under an agent's `AskUserQuestion` block alike.
+ *
+ * In the accent and not in `ok`: it is a judgement somebody may want back, not a confirmation. The
+ * confidence is the number the conversation gave and the one `autopilot.askBelow` was held against.
+ * "Answer it yourself" is a REWIND to the state's entry — the question is asked again and the
+ * fast-forward, if it is still going, is over.
+ */
+export function AnsweredForYou({ by, onAnswerYourself }: { by: SettledByView; onAnswerYourself?: (() => void) | undefined }): JSX.Element {
+  return (
+    <div className="gate-settled-by by-control" data-testid="answered-for-you">
+      <Icon name="think" />
+      <div>
+        Answered for you by <b>the conversation</b> <span className="conf">· confidence {by.confidence.toFixed(2)}</span>
+      </div>
+      <span className="grow" />
+      {onAnswerYourself !== undefined ? (
+        <button type="button" className="quiet" onClick={onAnswerYourself} title="Rewind to this question, so it is asked again and answered by you">
+          Answer it yourself
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What a surface lends the CALL rows of its transcript — the placement decisions a transcript cannot
+ * make for itself (a component has no opinion about its place).
+ */
+export interface CallSurface {
+  /**
+   * Where a workflow tool's note goes. `inline` (the default) draws it under the call — right for a
+   * one-column conversation. `rail`: the host draws it as a row beside the panel, from the journal
+   * (`jaira.moved`), so the call's row says nothing more.
+   */
+  outcomes?: "inline" | "rail";
+  /** Take back an answer the conversation gave — the rewind "Answer it yourself" is. Absent ⇒ no button. */
+  onAnswerYourself?: ((by: SettledByView) => void) | undefined;
+}
+
 function Tool({
   entry,
   sidechainOf,
   onOpenSidechain,
   artifacts,
+  calls,
 }: {
   entry: ToolEntry;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
   artifacts?: ArtifactSurface | undefined;
+  calls?: CallSurface | undefined;
 }): JSX.Element {
   const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
   const asked = askedOf(entry);
@@ -613,14 +642,28 @@ function Tool({
       tone={entry.ok === false ? "bad" : "plain"}
       mark={entry.ok === undefined ? "waiting" : entry.ok ? "ok" : "bad"}
       {...(workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false
-        ? { shown: <WorkflowOutcome result={entry.result} /> }
+        ? // The host draws the note on its rail when it has one; then the row is only the call.
+          calls?.outcomes === "rail"
+          ? {}
+          : { shown: <WorkflowOutcome result={entry.result} /> }
         : asked !== undefined
         ? {
             // The question the agent put to the person, and their answer, drawn under the line
             // without being asked for: it is the one call in a transcript whose arguments a person
             // wrote half of. Keyed on whether it has been answered, so a row that was in flight
-            // redraws with the answer rather than keeping its empty state.
-            shown: <AskedQuestions key={asked.answers === undefined ? "asking" : "answered"} questions={asked.questions} answers={asked.answers} />,
+            // redraws with the answer rather than keeping its empty state. When the control
+            // conversation gave the answer, the block says so — as a settled gate does.
+            shown: (
+              <>
+                <AskedQuestions key={asked.answers === undefined ? "asking" : "answered"} questions={asked.questions} answers={asked.answers} />
+                {entry.settledBy !== undefined ? (
+                  <AnsweredForYou
+                    by={entry.settledBy}
+                    {...(calls?.onAnswerYourself !== undefined ? { onAnswerYourself: () => calls.onAnswerYourself!(entry.settledBy!) } : {})}
+                  />
+                ) : null}
+              </>
+            ),
           }
         : produced !== undefined
         ? {
@@ -820,6 +863,7 @@ function Work({
   onOpenSidechain,
   artifacts,
   narrated,
+  calls,
 }: {
   entry: WorkEntry;
   sidechainOf?: SidechainOf | undefined;
@@ -827,6 +871,7 @@ function Work({
   artifacts?: ArtifactSurface | undefined;
   /** A status bar is saying what is happening now — see `narrated` on {@link Transcript}. */
   narrated?: boolean | undefined;
+  calls?: CallSurface | undefined;
 }): JSX.Element {
   if (entry.kind === "tool") {
     return (
@@ -835,6 +880,7 @@ function Work({
         {...(sidechainOf !== undefined ? { sidechainOf } : {})}
         {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
         {...(artifacts !== undefined ? { artifacts } : {})}
+        {...(calls !== undefined ? { calls } : {})}
       />
     );
   }
@@ -904,6 +950,7 @@ function WorkBlockView({
   onOpenSidechain,
   artifacts,
   narrated,
+  calls,
 }: {
   entries: WorkEntry[];
   sidechainOf?: SidechainOf | undefined;
@@ -911,6 +958,7 @@ function WorkBlockView({
   artifacts?: ArtifactSurface | undefined;
   /** A status bar is saying what is happening now — see `narrated` on {@link Transcript}. */
   narrated?: boolean | undefined;
+  calls?: CallSurface | undefined;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const hidden = foldsAt(entries.length);
@@ -939,6 +987,7 @@ function WorkBlockView({
           {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
           {...(artifacts !== undefined ? { artifacts } : {})}
           {...(narrated === true ? { narrated } : {})}
+          {...(calls !== undefined ? { calls } : {})}
         />
       ))}
     </div>
@@ -1548,6 +1597,7 @@ export function Transcript({
   narrated,
   scope,
   doomedFrom,
+  calls,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
@@ -1600,6 +1650,8 @@ export function Transcript({
    * abandoned branch — where a stored preference would be keyed to something that never comes back.
    */
   scope?: string | undefined;
+  /** Placement decisions for the call rows — see {@link CallSurface}. Absent ⇒ every note inline, no rewind. */
+  calls?: CallSurface | undefined;
 }): JSX.Element {
   // Dropped rather than never built: `entriesOf` has one reading of the tail and every surface gets
   // the same one, so which rows a surface DRAWS is a rendering decision and belongs here.
@@ -1653,6 +1705,7 @@ export function Transcript({
                 {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
                 {...(artifacts !== undefined ? { artifacts } : {})}
                 {...(narrated === true ? { narrated } : {})}
+                {...(calls !== undefined ? { calls } : {})}
               />
               </div>
             </Fragment>

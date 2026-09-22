@@ -33,7 +33,10 @@ import type { JsonValue } from "@declarative-ai/json";
 import { sourceStateId } from "@declarative-ai/hw";
 import {
   ANSWERED_EVENT,
+  MOVED_EVENT,
+  workflowOutcomeOf,
   type AnsweredEvent,
+  type MovedEvent,
   type AnswerInput,
   type AnswerResult,
   type ConnectMissingInput,
@@ -205,6 +208,25 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
     return { results };
   };
 
+  /**
+   * Journal what a successful `start_task` / `move_task` did, on THIS conversation's task
+   * (`jaira.moved`), and hand the answer back unchanged. The row is what the conversation's rail draws
+   * the note from; a refusal writes nothing, because it did nothing.
+   */
+  const journalMoved = <R extends StartResult | MoveResult>(tool: MovedEvent["tool"], result: R): R => {
+    const outcome = workflowOutcomeOf(result);
+    const settled: StartResult | MoveResult = result;
+    if (outcome !== undefined && settled.ok) {
+      const event: MovedEvent = { type: MOVED_EVENT, tool, task: settled.task, outcome };
+      try {
+        project.events.recorder(taskId).record(event as unknown as EngineEvent, Date.now());
+      } catch {
+        // The move happened; a row that could not be written loses the rail's note, not the move.
+      }
+    }
+    return result;
+  };
+
   const release = async (id: string): Promise<string> => {
     const plan = deps.resumable(id);
     if (plan.kind === "fresh") {
@@ -284,7 +306,8 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       const handed = made.generated.existing ? Object.fromEntries(Object.entries(supplied ?? {}).map(([name, entry]) => [name, entry.value])) : {};
       recordSupplied(project, taskId, { to: key }, supplied, made.generated.existing ? Object.keys(handed) : made.generated.literals.map((literal) => literal.input));
       const request: TaskMoveRequest = { project: deps.projectRef, taskId, toState: key, by: "control", ...(Object.keys(handed).length > 0 ? { inputs: handed } : {}) };
-      const answer = (status: "started" | "queued" | "held"): StartResult => ({ ok: true, task: taskId, key, state: target, status, mount: made.generated.mount, inputs: settledOf(made.generated, supplied) });
+      const answer = (status: "started" | "queued" | "held"): StartResult =>
+        journalMoved("start_task", { ok: true, task: taskId, key, state: target, status, mount: made.generated.mount, inputs: settledOf(made.generated, supplied) });
       try {
         if (deps.isLive(taskId)) {
           const engineHolds = made.document === undefined || latestVersion(made.document).snapshotHash === project.runtime.get(taskId)?.snapshotHash;
@@ -330,7 +353,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         return { ok: false, code: refusal.code, reason: refusal.message, ...(refusal.candidates !== undefined ? { candidates: refusal.candidates } : {}) };
       }
       const { plan } = result;
-      return {
+      return journalMoved("move_task", {
         ok: true,
         task: result.taskId ?? moved,
         resolution: plan.resolution,
@@ -342,7 +365,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         ...(result.moved !== undefined ? { moved: result.moved } : {}),
         ...(result.controlTaskId !== undefined ? { answeredBy: result.controlTaskId } : {}),
         ...(result.moved === "fast-forwarding" && plan.move !== undefined && plan.move.passes.length > 0 ? { through: [...plan.move.passes] } : {}),
-      };
+      });
     },
 
     tasks(input: TasksInput): TasksResult {
@@ -387,8 +410,16 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
     answer(input: AnswerInput): AnswerResult {
       const mine = family();
       const settled_by = { via: "control" as const, confidence: input.confidence };
-      const journal = (askedTaskId: string, kind: AnsweredEvent["kind"], instanceId?: string): void => {
-        const event: AnsweredEvent = { type: ANSWERED_EVENT, requestId: input.request, kind, ...(instanceId !== undefined ? { instanceId } : {}), byTaskId: taskId, settled_by };
+      const journal = (askedTaskId: string, kind: AnsweredEvent["kind"], instanceId?: string, questions?: string[]): void => {
+        const event: AnsweredEvent = {
+          type: ANSWERED_EVENT,
+          requestId: input.request,
+          kind,
+          ...(instanceId !== undefined ? { instanceId } : {}),
+          ...(questions !== undefined ? { questions } : {}),
+          byTaskId: taskId,
+          settled_by,
+        };
         project.events.recorder(askedTaskId).record(event as unknown as EngineEvent, Date.now());
       };
       // The two lists a QUESTION can be on. There is no third lookup: an approval — a tool
@@ -417,7 +448,14 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         if (question.taskId === undefined || !mine.has(question.taskId)) return { ok: false, reason: "that question belongs to a task this conversation did not start" };
         if (input.answers === undefined) return { ok: false, reason: "an agent's questions are answered with `answers`: question text → the chosen label" };
         try {
-          journal(question.taskId, "question", deps.askingInstance?.(question.taskId, "question"));
+          // The question TEXTS ride the row: they are what the agent's `AskUserQuestion` call holds
+          // too, and so what the transcript marks its block by — the park carries no call id.
+          journal(
+            question.taskId,
+            "question",
+            deps.askingInstance?.(question.taskId, "question"),
+            question.questions.map((q) => q.question),
+          );
           deps.submitQuestion(input.request, input.answers);
         } catch (e) {
           return { ok: false, reason: (e as Error).message };

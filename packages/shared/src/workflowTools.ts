@@ -217,9 +217,88 @@ export interface AnsweredEvent {
   /** `interaction` — a gate component; `question` — an agent's AskUserQuestion. */
   kind: "interaction" | "question";
   instanceId?: string;
+  /**
+   * For `question`: the texts of the questions it answered, in the agent's order — what joins the row
+   * to the `AskUserQuestion` call in the agent's transcript. The hub's park carries no tool-call id, and
+   * the texts are what the call and the parked request both hold. Absent on a row written before
+   * 2026-09-22.
+   */
+  questions?: string[];
   /** The conversation's task. */
   byTaskId: string;
   settled_by: SettledByControl;
+}
+
+/**
+ * What a `start_task` or `move_task` DID, as the note drawn for it says it (decision 0005 "What draws") —
+ * "adopted into **feature** as `product` · standing at `ux`", "fast-forwarding to **implementation** ·
+ * through ux, ui, engineering".
+ *
+ * One reading of a tool's answer, used twice: the host journals it (`jaira.moved`) so the conversation's
+ * rail can draw the row, and a one-column transcript with no rail (the Chat view) draws it under the
+ * call. Pure over the answer, so both say the same words.
+ */
+export interface WorkflowOutcome {
+  /** The sentence's verb. */
+  verb: "entered" | "moved to" | "connected to" | "adopted into" | "fast-forwarding to";
+  /** Where it stands now — child keys joined by `/`, or the workflow when it stands at the root. */
+  standsAt: string;
+  workflow?: string;
+  /** An adoption: what the task became in the workflow that took it. */
+  adoptedAs?: string;
+  /** A split mount: one task per element, made held. */
+  held?: boolean;
+  /** A fast-forward: the states it runs on the way. */
+  through?: string[];
+}
+
+/**
+ * The note a successful workflow tool answer makes — `undefined` for a refusal or a call that only
+ * looked, because a refusal is already the row's `bad` mark plus its result. Reads our own object or
+ * the JSON text of it, which is how a provider may have written it down.
+ */
+export function workflowOutcomeOf(result: unknown): WorkflowOutcome | undefined {
+  let parsed: unknown = result;
+  if (typeof result === "string") {
+    if (!result.trimStart().startsWith("{")) return undefined;
+    try {
+      parsed = JSON.parse(result) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const r = parsed as Record<string, unknown>;
+  if (r["ok"] !== true) return undefined;
+  const text = (key: string): string | undefined => (typeof r[key] === "string" ? (r[key] as string) : undefined);
+  const standsAt = text("standsAt") ?? text("key");
+  if (standsAt === undefined) return undefined;
+  const workflow = text("workflow");
+  const adoptedAs = text("adoptedAs");
+  const base = { standsAt, ...(workflow !== undefined ? { workflow } : {}) };
+  if (r["moved"] === "fast-forwarding") {
+    const through = Array.isArray(r["through"]) ? r["through"].filter((step): step is string => typeof step === "string") : [];
+    return { verb: "fast-forwarding to", ...base, ...(through.length > 0 ? { through } : {}) };
+  }
+  const verb: WorkflowOutcome["verb"] =
+    adoptedAs !== undefined ? "adopted into" : r["resolution"] === "modify" ? "connected to" : r["resolution"] === "move" ? "moved to" : "entered";
+  return { verb, ...base, ...(adoptedAs !== undefined ? { adoptedAs } : {}), ...(r["mount"] === "split" ? { held: true } : {}) };
+}
+
+/**
+ * The journal row a successful `start_task` / `move_task` leaves on the CONVERSATION's own task — host
+ * vocabulary, as `jaira.answered` is. It is what lets the conversation's rail draw what the tool did as a
+ * row beside the panel (decision 0005's mockup): a rail row is built from the journal, and before this
+ * nothing in the journal said what a tool answered.
+ */
+export const MOVED_EVENT = "jaira.moved";
+
+export interface MovedEvent {
+  type: typeof MOVED_EVENT;
+  tool: "start_task" | "move_task";
+  /** The task that stands at the target. */
+  task: string;
+  outcome: WorkflowOutcome;
 }
 
 /** The journal row that says how values a conversation handed an entry were settled. */

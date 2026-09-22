@@ -2,14 +2,14 @@
 id: ui/components/work-row
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/stream-then-settle, ux/patterns/nested-under-what-caused-it, ux/patterns/drill-in-and-back-out]
 serves: [product/watch-agents-work-live, product/complete-record-of-every-run, product/failures-explain-themselves, product/agents-ask-instead-of-guessing, product/read-what-work-produced]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
 reuses: [ui/components/value-view, ui/components/choice-list, ui/components/question-stepper, ui/components/transcript, ui/components/icon]
 implemented_by: [packages/app/src/renderer/transcriptView.tsx, packages/app/src/renderer/transcript.ts]
 verified_by: [packages/app/test/transcript.test.ts, packages/app/test/choices.test.ts]
-mockups: [ui/assets/work-row/success.html, ui/assets/work-row/live.html, ui/assets/work-row/error.html, ui/assets/work-row/open.html, ui/assets/work-row/subagent.html, ui/assets/work-row/shown.html, ui/assets/work-row/workflow-tools.html]
+mockups: [ui/assets/work-row/success.html, ui/assets/work-row/live.html, ui/assets/work-row/error.html, ui/assets/work-row/open.html, ui/assets/work-row/subagent.html, ui/assets/work-row/shown.html, ui/assets/work-row/workflow-tools.html, ui/assets/work-row/answered-for-you.html]
 siblings: [ui/components/message, ui/components/run-step-note, ui/components/computed-state-body, ui/components/agent-question]
 ---
 
@@ -23,7 +23,9 @@ The eight workflow tools ([decision 0005](../../engineering/decisions/0005-conne
 
 - **The glyph is the forking path** — the one a `made` or an `entered` note wears — because a row that starts or moves work is the same kind of fact as the note it leaves behind. Matched by exact name, not by the family heuristic, which would otherwise read `list_tasks` as an agent and `move_task` and `release_task` as writes.
 - **The grey line is the call in its own words**, not its first string argument: `feature/product · issue: "Let a person pause…"`, `Pause and stop → feature/ux · skip`, `Pause and stop · Resume a paused run`. It is `workflowToolSummary` in `@jaira/shared`, pure over the arguments, so a record read a year later draws the same line.
-- **A `start_task` or a `move_task` that succeeded leaves a NOTE under its row** — "adopted into **Feature workflow** as `product` · standing at `ux`" — drawn from what the tool answered, in the note's own glyph, verb and monospace ending. A refused call draws none: the row's cross and its result say it once already.
+- **A `start_task` or a `move_task` that succeeded leaves a NOTE** — "adopted into **Feature workflow** as `product` · standing at `ux`" — in the note's own glyph, verb and monospace ending. WHERE is the host's choice (`CallSurface.outcomes`): the one-column Chat view draws it under the row, from what the tool answered; a run conversation, which has a rail, draws it as a [run-step-note](run-step-note.md) row between the turn that moved and the next, from the `jaira.moved` row the host journals, and the call's own row then says nothing more. A refused call draws none anywhere: the row's cross and its result say it once already.
+
+An agent's `AskUserQuestion` the control conversation answered ([decision 0005](../../engineering/decisions/0005-connect.md) §4) draws the gate's own settled-by box under the asked question: `Answered for you by the conversation · confidence {0.00}`, and `Answer it yourself` where the host lends the rewind — back to the state's entry, exactly as the gate's. The mark is the instance's `jaira.answered` row of kind `question`, matched to the block by the question texts it carries; a person's answer draws nothing.
 
 ## A work row is one thing that happened while an agent worked
 
@@ -56,6 +58,7 @@ The eight workflow tools ([decision 0005](../../engineering/decisions/0005-conne
 | open | The chevron turned over and the payloads or the reasoning hung off the rule. | [open.html](../assets/work-row/open.html) |
 | subagent | A call that started a subagent reads `⑂ {what it was asked}`. Opened, its conversation comes first inside a 2px `--accent` rule under `SUBAGENT CONVERSATION · {n} ENTRIES` with `WALK IN →` at the right, drawn as a nested [transcript](transcript.md) that streams while the subagent works. | [subagent.html](../assets/work-row/subagent.html) |
 | shown | An asked question under its row with the answers lit, or empty while still asked; a produced page or a delivered output drawn under its row. These rows are never folded away. | [shown.html](../assets/work-row/shown.html) |
+| answered for you | An asked question the control conversation answered: the settled-by box under the choices, 8% `--accent` over `--panel`, the two-star glyph, the confidence in the data face and a quiet `Answer it yourself` at the right. | [answered-for-you.html](../assets/work-row/answered-for-you.html) |
 
 ## Clicking the line opens it in place and the doorway leads into the subagent
 
@@ -79,6 +82,7 @@ The eight workflow tools ([decision 0005](../../engineering/decisions/0005-conne
 | Nothing recorded | `no {label} was recorded` · `still running` |
 | Subagent | `subagent conversation · {n} entries`, drawn uppercase · `walk in →` |
 | Facts | `went to {state id}` · `went to the next state` · `policy` · `interaction` · `failure` · `blocked` · `session started` · `context compacted` · `{type}: {subtype}` · `provider event` · `{n} stream events were dropped before anything could show them` · `unreadable native line` · `context: {sub}` · `queued: {operation}` |
+| Answered for you | `Answered for you by the conversation` · `· confidence {0.00}` · `Answer it yourself`, tooltip `Rewind to this question, so it is asked again and answered by you` |
 | How a call ended | `the process ended before this call finished — everything above is what had been recorded` · `this call failed` |
 
 ## The line never wraps and the time column stays aligned

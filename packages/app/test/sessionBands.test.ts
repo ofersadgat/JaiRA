@@ -21,6 +21,7 @@ import {
   pathFrom,
   piecesOf,
   placeNotes,
+  splitAtNotes,
   startersOf,
   type BandNote,
   type SessionPiece,
@@ -334,7 +335,7 @@ describe("bandsOf", () => {
 describe("piecesOf over a continued task", () => {
   /**
    * What the projection hands over after a stop and its resume: ONE tree, the same durable ids,
-   * with the continuation's calls landing on the instances they continue (Identity and Resume �05).
+   * with the continuation's calls landing on the instances they continue (Identity and Resume �05).
    */
   const folded = (): InstanceNode =>
     node({
@@ -546,6 +547,78 @@ describe("notesOf", () => {
       turn({ seq: 2, kind: "output", instanceId: "1", stateId: "plan", path: "", ok: true }),
     ]);
     expect(notes).toEqual([]);
+  });
+});
+
+/**
+ * After a Skip (decision 0005 §4): the state that was running keeps its row and says how long it had
+ * run; the states stepped over without being entered are ONE row, as the approved mockup has them.
+ */
+describe("the notes a Skip leaves", () => {
+  // The journal a Skip at `ux → item` writes: `item` interrupted, `ui` and `engineering` each an entry
+  // and a `skipped` end back to back, then the target entered.
+  const skip = (extra: ConversationTurn[] = []): ConversationTurn[] => [
+    turn({ seq: 10, at: 0, kind: "entered", stateId: "feature/ux", instanceId: "i2", path: "ux" }),
+    turn({ seq: 11, at: 1_000, kind: "entered", stateId: "feature/ux/item", instanceId: "i3", path: "ux/item" }),
+    turn({ seq: 20, at: 72_000, kind: "terminated", stateId: "feature/ux/item", instanceId: "i3", path: "ux/item", ok: false, text: "skipped" }),
+    turn({ seq: 21, at: 72_001, kind: "entered", stateId: "feature/ui", instanceId: "i5", path: "ui" }),
+    turn({ seq: 22, at: 72_001, kind: "terminated", stateId: "feature/ui", instanceId: "i5", path: "ui", ok: false, text: "skipped" }),
+    turn({ seq: 23, at: 72_002, kind: "entered", stateId: "feature/engineering", instanceId: "i6", path: "engineering" }),
+    turn({ seq: 24, at: 72_002, kind: "terminated", stateId: "feature/engineering", instanceId: "i6", path: "engineering", ok: false, text: "skipped" }),
+    ...extra,
+    turn({ seq: 30, at: 72_003, kind: "entered", stateId: "feature/implementation", instanceId: "i7", path: "implementation" }),
+  ];
+
+  it("keeps the interrupted state's own row, and groups the states never entered into one", () => {
+    const notes = notesOf(skip()).filter((n) => n.kind === "skipped");
+    expect(notes.map((n) => [n.path, n.text, n.keys])).toEqual([
+      ["ux/item", "interrupted at 1 m 11 s", undefined],
+      ["ui", "never entered", ["ui", "engineering"]],
+    ]);
+  });
+
+  it("does not group across a mount, or across anything that happened in between", () => {
+    // A never-entered state in ANOTHER mount cannot share the row's path, and a note between two
+    // never-entered runs means they were not one stretch of stepping over.
+    const other = notesOf(skip([turn({ seq: 25, at: 72_002, kind: "entered", stateId: "x/y", instanceId: "i8", path: "impl/y" }), turn({ seq: 26, at: 72_002, kind: "terminated", stateId: "x/y", instanceId: "i8", path: "impl/y", ok: false, text: "skipped" })]));
+    expect(other.filter((n) => n.kind === "skipped").map((n) => [n.path, n.keys])).toEqual([
+      ["ux/item", undefined],
+      ["ui", ["ui", "engineering"]],
+      ["impl/y", undefined],
+    ]);
+  });
+});
+
+describe("what a conversation's workflow tool did, on the rail", () => {
+  it("is a `moved` note at the root, carrying the tool note's words", () => {
+    const notes = notesOf([turn({ seq: 5, kind: "moved", path: "", text: "move_task", moved: { verb: "adopted into", standsAt: "ux", workflow: "feature", adoptedAs: "product" } })]);
+    expect(notes).toEqual([{ seq: 5, at: 50, kind: "moved", path: "", text: "", moved: { verb: "adopted into", standsAt: "ux", workflow: "feature", adoptedAs: "product" } }]);
+  });
+
+  // One conversation, three turns in a row — one band, as consecutive turns of a session are.
+  const conversation = () => bandsOf(piecesOf(tree([{ id: 2, from: 0, to: 10 }, { id: 3, from: 20, to: 30 }, { id: 4, from: 40, to: 50 }]), [ref(2, "C", 0, 10), ref(3, "C", 20, 30), ref(4, "C", 40, 50)]));
+  const moved = (at: number): BandNote => ({ seq: at, at, kind: "moved", path: "", text: "", moved: { verb: "moved to", standsAt: "ux" } });
+
+  it("cuts the conversation's band after the turn that made it, so the row sits between the turns", () => {
+    const bands = conversation();
+    expect(shape(bands)).toEqual([[["C", 3]]]);
+    const cut = splitAtNotes(bands, [moved(25)]);
+    expect(shape(cut)).toEqual([[["C", 2]], [["C", 1]]]);
+    // No pause is invented at the cut — nothing else ran in the gap.
+    expect(cut.flatMap((band) => band.segments.map((s) => [s.resumed, s.paused]))).toEqual([
+      [false, false],
+      [false, false],
+    ]);
+    // …and the row is placed between the halves.
+    expect(placeNotes([moved(25)], cut).map((bucket) => bucket.length)).toEqual([0, 1, 0]);
+  });
+
+  it("leaves a band alone for any other note, for a note after its last turn, and across several conversations", () => {
+    const bands = conversation();
+    expect(shape(splitAtNotes(bands, [{ ...moved(25), kind: "entered" }]))).toEqual([[["C", 3]]]);
+    expect(shape(splitAtNotes(bands, [moved(45)]))).toEqual([[["C", 3]]]);
+    const across = bandsOf(piecesOf(tree([{ id: 2, from: 0, to: 30 }, { id: 3, from: 5, to: 10 }, { id: 4, from: 20, to: 25 }]), [ref(2, "A", 0, 30), ref(3, "B", 5, 10), ref(4, "B", 20, 25)]));
+    expect(shape(splitAtNotes(across, [moved(15)]))).toEqual(shape(across));
   });
 });
 

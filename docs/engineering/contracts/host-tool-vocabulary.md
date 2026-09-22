@@ -2,7 +2,7 @@
 id: engineering/contracts/host-tool-vocabulary
 type: engineering-contract
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 visibility: public
 kind: api
 owned_by: [engineering/units/host-tools]
@@ -141,7 +141,7 @@ tools do.
 | `move_task` in `to` | string | yes | the target state id |
 | `move_task` in `workflow` | string | no | which workflow the target is meant in, when more than one holds it |
 | `move_task` in `skip` | boolean | no | go directly, recording what is stepped over as `skipped` |
-| `move_task` out `ok: true` | `{task, resolution, modification?, workflow, standsAt, adoptedAs?, mount?, moved?, answeredBy?, through?}` | on success | `resolution` is `move`, `adopt` or `modify`; `moved` is how the transition landed, or `fast-forwarding` when the target is ahead and the states between are running — `answeredBy` names the conversation answering them and `through` the states, and the transcript draws `fast-forwarding to {target} · through {…}` under the row |
+| `move_task` out `ok: true` | `{task, resolution, modification?, workflow, standsAt, adoptedAs?, mount?, moved?, answeredBy?, through?}` | on success | `resolution` is `move`, `adopt` or `modify`; `moved` is how the transition landed, or `fast-forwarding` when the target is ahead and the states between are running — `answeredBy` names the conversation answering them and `through` the states, and the note reads `fast-forwarding to {target} · through {…}` |
 | `start_task`, `move_task` out `inputs-missing` | `{ok: false, code, reason, missing, schema, filled}` | on a required input nothing binds | NOTHING was done. `missing` is `{state, name, schema?, description?, reason}` each; `schema` is the target's whole input schema; `filled` is what the host settled itself. Supply the values and call again |
 | `move_task` out `candidates` | array of `{workflow, label?, childKey, targetKey?}` | on `ambiguous-workflow` | call again naming one |
 | `list_tasks` in `all` | boolean | no | every task of the project, shortly, instead of what was started here |
@@ -153,6 +153,13 @@ tools do.
 | `answer_question` out | `{ok: true, request, settled_by: {via: "control", confidence}}` | on success | also journaled on the task that asked, as `jaira.answered` |
 | `hold_task`, `release_task`, `stop_task` in `tasks` | string array | yes | task ids, from `list_tasks`; a bare `task` string is read as a list of one |
 | `hold_task`, `release_task`, `stop_task` out `results` | array of `{task, ok, did?, reason?}` | yes | one entry per task named, in order |
+
+**A successful `start_task` or `move_task` is journaled on the CONVERSATION's own task** as
+`{type: "jaira.moved", tool, task, outcome}` — host vocabulary, like `jaira.answered` — where `outcome` is
+`WorkflowOutcome` (`verb`, `standsAt`, `workflow?`, `adoptedAs?`, `held?`, `through?`), the one reading
+`workflowOutcomeOf` makes of the answer. `conversationView` projects it as a `moved` turn at the root, and the
+run conversation draws it as a note on its rail between the turn that moved and the next; a one-column
+transcript with no rail draws the same words under the call. A refusal writes nothing.
 
 **An approval is not reachable through `answer`.** Only a question or a judgement on a document can be
 settled by a conversation ([0005](../decisions/0005-connect.md) §4), and that holds in two places at once:
