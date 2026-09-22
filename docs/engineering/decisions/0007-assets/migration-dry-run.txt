@@ -1,59 +1,42 @@
 THE SHARED ROOT (~/.jaira/workflows), DRY RUN — READ ONLY. Nothing was written.
 
-Produced 2026-09-21 on the worktree for decision 0007 step 7, with:
+Regenerated 2026-09-22, after decision 0007's amendment (a denied shell is withheld; a run reads the
+map's shell), which changed how the migration chooses. It replaces the 2026-09-21 run, which it no
+longer matches (then: 12 refused, 2 by reference-plus-lines; now: 14 refused, 0).
 
     jaira workflow migrate-toolsets --base
     jaira workflow migrate-toolsets --base --accept shell-judged --accept unlisted-shell
 
-`--base` reads the shared root WITHOUT opening it as a project, because opening one creates its
-layout; the run holds no database open and writes nothing. The person runs the real migration
-themselves, with --write --shared-root, which backs workflows/ up first, timestamped.
+`--base` reads the shared root WITHOUT opening it as a project; nothing under ~/.jaira was written
+(the newest workflow file is still dated 2026-09-19, and no backup or toolsets folder exists). The
+person runs the real migration, with --write --shared-root, which backs workflows/ up first.
 
-Two passes are recorded. The FIRST is the default, which assumes nothing: 12 of the 33 blocks are
-refused, every one of them because of the shell, and each refusal names the consent that would go
-on. The SECOND is the same run with both consents given, which migrates all 33.
+THE 14 REFUSALS ARE TWO KINDS, and they want different consents:
 
-WHAT THE CONSENTS MEAN, because they are the whole decision the person is being asked to make:
+  A — the state GRANTED the shell (2): chat/agent, feature/acceptance/mutate.
+      Its lines were answered whole; a map takes each line apart, so what was allowed would ASK.
+      Only --accept shell-judged migrates it.
 
-  unlisted-shell  The state never granted `bash`, and claude kept its own Bash, every line of it
-                  put to a person. No map can hold a tool the list never granted, so the map takes
-                  the shell away. TIGHTENS: the state loses a shell it never asked for.
+  B — the list never granted the shell; claude kept its own Bash, every line put to a person (12).
+      --accept shell-judged KEEPS the shell and judges each part of a line.
+      --accept unlisted-shell TAKES THE SHELL AWAY.
+      Several of these USE that shell — feature/implementation/implement, unit_tests, sync_docs,
+      and feature/ui/item/render run builds and tests — so taking it away would break them.
+      shell-judged is the choice that preserves what they do.
 
-  shell-judged    The state pinned the shell to a mode of its own, so every line was put to a
-                  person. A map cannot say that in a RUN: its shell entry is the answer for any
-                  other command on a line taken apart, and the engine hands the policy a state's
-                  tools, default, other and scopes only — `permissions.subjects`, which the
-                  authored mode travels in, never arrives. The line is judged by the project's
-                  command policy instead. MAY LOOSEN: a line a person used to be asked about can
-                  now run. That judgement is what decision 0007 §4 is FOR, but it is a change, so
-                  it is said yes to rather than assumed.
+Also: chat/agent, chat/assistant and debug/hello_world in ~/.jaira are leftover copies an old
+installer wrote. They now SHIP BUILT IN, and these copies shadow the shipped ones (chat/agent is an
+older version). Deleting them — the app offers to — lets the shipped states take effect and takes
+chat/agent out of this migration.
 
-In this root the two coincide: each of the 12 refused blocks both never granted the shell AND had
-every line asked about, so `--accept unlisted-shell` alone settles all 12 — the shell is taken
-away, and there are then no lines left to judge. The second pass below passes both anyway.
+19 blocks share one identical inline map; saving it as a toolset and re-running would turn them into
+references.
 
 ====================================================================================================
 PASS 1 — the default: nothing accepted
 ====================================================================================================
-toolset migration — C:\Users\Ofer\.jaira\workflows
 
---- chat\agent.json
-+++ chat\agent.json
-@@ line 13 @@
-   "environment": {
-     "kind": "prompt",
--    "tools": [
--      "bash",
--      "read_file",
--      "write_file"
--    ],
--    "permissions": {
--      "profile": "full"
-+    "tools": {
-+      "$ref": "$/toolsets/chat/ask-first",
-+      "bash": "smart"
-     }
-   },
+toolset migration — C:\Users\Ofer\.jaira\workflows
 
 --- explore\brief.json
 +++ explore\brief.json
@@ -100,23 +83,6 @@ toolset migration — C:\Users\Ofer\.jaira\workflows
 +      "other": "deny"
      },
      "output": {
-
---- feature\acceptance\mutate.json
-+++ feature\acceptance\mutate.json
-@@ line 33 @@
-       "$ref": "$/prompts/feature/acceptance/mutate.md"
-     },
--    "tools": [
--      "read_file",
--      "write_file",
--      "bash"
--    ],
-+    "tools": {
-+      "$ref": "$/toolsets/chat/ask-first",
-+      "bash": "smart"
-+    },
-     "output": {
-       "diagnosability": {
 
 --- feature\documentation\draft.json
 +++ feature\documentation\draft.json
@@ -523,26 +489,28 @@ toolset migration — C:\Users\Ofer\.jaira\workflows
 
 blocks
 
-  chat/agent (environment): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+  chat/agent (environment): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:read: allow → ask; shell:write: allow → ask; shell:script: allow → ask. Its shell's lines were answered as a whole — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; leave `bash` out of the map by hand to take the shell away
   explore/brief (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   explore/candidates (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/acceptance/link (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
-  feature/acceptance/mutate (operation): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+  feature/acceptance/mutate (operation): REFUSED
+      no toolset map hands a claude agent what this block does today: shell:read: allow → ask; shell:write: allow → ask; shell:script: allow → ask. Its shell's lines were answered as a whole — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; leave `bash` out of the map by hand to take the shell away
   feature/documentation/correct (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/documentation/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/documentation/publish (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/engineering/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/engineering/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/engineering/item/publish (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/engineering/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/implementation/classify (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
@@ -550,13 +518,13 @@ blocks
   feature/implementation/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/implementation/implement (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/implementation/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/implementation/sync_docs (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/implementation/unit_tests (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/product/context (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/product/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
@@ -564,19 +532,19 @@ blocks
   feature/product/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/product/publish (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/review/conformance (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/review/correct (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/ui/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/ui/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/ui/item/publish (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/ui/item/render (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/ui/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/ux/item/critique (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
@@ -584,7 +552,7 @@ blocks
   feature/ux/item/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/ux/item/publish (operation): REFUSED
-      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow; shell:script: ask → allow. Its shell answered every line with a person, through claude's own Bash, which the list never granted. A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
+      no toolset map hands a claude agent what this block does today: shell:command: ask → allow; shell:read: ask → allow; shell:write: ask → allow. Its shell's lines were answered as a whole, through claude's own Bash, which the list never granted — by a person, or by the project's command policy. A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to `script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; --accept unlisted-shell takes the shell away, which is the grant the list wrote down
   feature/ux/plan (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
 
@@ -593,12 +561,12 @@ summary
   state files read        90
   blocks in the old form  33  (in 33 files)
     → by reference        0
-    → reference + lines   2
+    → reference + lines   0
     → inline map          19
-    → refused             12
+    → refused             14
   already toolsets        0
-  files that would change 21
-  measurements            156 (every state, every chain, every level, before and after)
+  files that would change 19
+  measurements            160 (every state, every chain, every level, before and after)
   unproven                0
 
 differences no map can avoid (each is listed on the block it applies to)
@@ -610,12 +578,12 @@ the same inline map, more than once — save it as toolsets/<bucket>/<name>.json
   {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
     19 blocks: explore/brief (operation), explore/candidates (operation), feature/documentation/draft (operation), feature/engineering/item/critique (operation), feature/engineering/item/draft (operation), feature/engineering/plan (operation), feature/implementation/classify (operation), feature/implementation/critique (operation), feature/implementation/plan (operation), feature/product/context (operation), feature/product/critique (operation), feature/product/draft (operation), feature/review/conformance (operation), feature/ui/item/critique (operation), feature/ui/item/draft (operation), feature/ui/plan (operation), feature/ux/item/critique (operation), feature/ux/item/draft (operation), feature/ux/plan (operation)
 
-this was a DRY RUN. Nothing was written. Pass --write to rewrite 21 file(s), with --shared-root beside it.
-
+this was a DRY RUN. Nothing was written. Pass --write to rewrite 19 file(s), with --shared-root beside it.
 
 ====================================================================================================
-PASS 2 — the same run with --accept shell-judged --accept unlisted-shell
+PASS 2 — both consents given
 ====================================================================================================
+
 toolset migration — C:\Users\Ofer\.jaira\workflows
 
 --- chat\agent.json
@@ -631,8 +599,15 @@ toolset migration — C:\Users\Ofer\.jaira\workflows
 -    "permissions": {
 -      "profile": "full"
 +    "tools": {
-+      "$ref": "$/toolsets/chat/ask-first",
-+      "bash": "smart"
++      "read_file": "ask",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "ask",
++      "bash": "smart",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
      }
    },
 
@@ -720,8 +695,15 @@ toolset migration — C:\Users\Ofer\.jaira\workflows
 -      "bash"
 -    ],
 +    "tools": {
-+      "$ref": "$/toolsets/chat/ask-first",
-+      "bash": "smart"
++      "read_file": "ask",
++      "glob": "ask",
++      "grep": "ask",
++      "edit": "ask",
++      "write_file": "ask",
++      "bash": "smart",
++      "web_fetch": "ask",
++      "web_search": "ask",
++      "other": "ask"
 +    },
      "output": {
        "diagnosability": {
@@ -1405,14 +1387,16 @@ toolset migration — C:\Users\Ofer\.jaira\workflows
 
 blocks
 
-  chat/agent (environment): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+  chat/agent (environment): an inline map  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","bash":"smart","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: shell:read: allow → ask; shell:write: allow → ask; shell:script: allow → ask
   explore/brief (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   explore/candidates (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
       differs, unavoidably: other: ask → deny
   feature/acceptance/link (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
       differs, unavoidably: bash: reachable, judged by line → not reachable
-  feature/acceptance/mutate (operation): a toolset plus lines  {"$ref":"$/toolsets/chat/ask-first","bash":"smart"}
+  feature/acceptance/mutate (operation): an inline map  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","bash":"smart","web_fetch":"ask","web_search":"ask","other":"ask"}
+      differs, unavoidably: shell:read: allow → ask; shell:write: allow → ask; shell:script: allow → ask
   feature/documentation/correct (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
       differs, unavoidably: bash: reachable, judged by line → not reachable
   feature/documentation/draft (operation): an inline map  {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
@@ -1475,21 +1459,24 @@ summary
   state files read        90
   blocks in the old form  33  (in 33 files)
     → by reference        0
-    → reference + lines   2
-    → inline map          31
+    → reference + lines   0
+    → inline map          33
     → refused             0
   already toolsets        0
   files that would change 33
-  measurements            156 (every state, every chain, every level, before and after)
+  measurements            160 (every state, every chain, every level, before and after)
   unproven                0
 
 differences no map can avoid (each is listed on the block it applies to)
 
+  shell-judged: ACCEPTED BY FLAG: the list's shell lines were answered as a whole; a map's are taken apart and each part answers to the map, which MAY RUN what a person used to be asked about, or refuse what the policy ran (decision 0007 §4)
   profile-unknown-name: a tool name nobody declared was put to a person under the old profile and is refused by `other: deny` (tightened; `ask` would hand back Task, Agent and SlashCommand)
   unlisted-shell: ACCEPTED BY FLAG: the list never named `bash` and claude kept its own, which no map can hold — the shell is taken away (tightened)
 
 the same inline map, more than once — save it as toolsets/<bucket>/<name>.json and run again to get references
 
+  {"read_file":"ask","glob":"ask","grep":"ask","edit":"ask","write_file":"ask","bash":"smart","web_fetch":"ask","web_search":"ask","other":"ask"}
+    2 blocks: chat/agent (environment), feature/acceptance/mutate (operation)
   {"read_file":"allow","glob":"ask","grep":"ask","web_fetch":"ask","web_search":"ask","other":"deny"}
     19 blocks: explore/brief (operation), explore/candidates (operation), feature/documentation/draft (operation), feature/engineering/item/critique (operation), feature/engineering/item/draft (operation), feature/engineering/plan (operation), feature/implementation/classify (operation), feature/implementation/critique (operation), feature/implementation/plan (operation), feature/product/context (operation), feature/product/critique (operation), feature/product/draft (operation), feature/review/conformance (operation), feature/ui/item/critique (operation), feature/ui/item/draft (operation), feature/ui/plan (operation), feature/ux/item/critique (operation), feature/ux/item/draft (operation), feature/ux/plan (operation)
   {"read_file":"allow","glob":"ask","grep":"ask","edit":"ask","write_file":"allow","web_fetch":"ask","web_search":"ask","other":"ask"}
