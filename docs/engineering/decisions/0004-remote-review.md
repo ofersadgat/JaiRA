@@ -549,6 +549,10 @@ because the renderer has no DOM test infrastructure; `remoteStripView.tsx` only 
 - **The gallery has a `remote` variant** on both components it touches — the gate with its second
   door, and the `confirm_action` question that door asks — sharing ONE new word in the variant
   vocabulary, since they are one knob. The config schemas gained `remote`, `details` and `options`.
+  The gallery's gate gets its second door from the GALLERY, not from main (`galleryRemote`, over
+  `gateServices`): its project is a placeholder main has never opened, so the IPC door was refused
+  every ten seconds into the log. The variant's `forge` fixture — a commenter, a running quiet
+  window, one thread on the forge — is what its status answers, so the strip draws in full.
 
 Fixtures are of two kinds and each says which in `_source`: recorded from the public API with an
 unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both

@@ -31,6 +31,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { Changeset } from "./changeset";
 import { COMPONENT_NAMES, type ComponentName } from "./components";
+import type { ReviewNote } from "./reviewNotes";
 import { registerSchema, type SchemaDoc } from "./schemas";
 
 /** What raises the surface — see the module note. */
@@ -48,6 +49,23 @@ export interface GalleryVariant {
   sample: JsonValue;
   /** The state's other resolved inputs — see {@link GallerySurface.inputs}. */
   inputs?: Record<string, JsonValue>;
+  /** What the forge has said, for a gate with a second door — see {@link GallerySurface.forge}. */
+  forge?: GalleryForge;
+}
+
+/**
+ * What a forge has said about a gate's merge request, as the gallery pretends it.
+ *
+ * A live gate hears this from main, which polls the forge; the gallery has no main to ask (its
+ * project is a placeholder), so the card answers the gate's `remote.status` from this instead.
+ */
+export interface GalleryForge {
+  /** Who has commented there, in order of first appearance. */
+  commenters: string[];
+  /** The threads the forge holds, by change id — laid over the reviewer's own notes. */
+  notes?: Record<string, ReviewNote[]>;
+  /** A quiet window is running: it ends `settle_after` after the card is drawn. */
+  settling?: boolean;
 }
 
 /** One surface and everything its config can express. */
@@ -108,6 +126,8 @@ export interface GallerySurface {
    * finds its changeset among them by shape. A component that reads none declares none.
    */
   inputs?: Record<string, JsonValue>;
+  /** What the forge has said about the request, for a card whose gate has a `remote`. */
+  forge?: GalleryForge;
 }
 
 // --- schema helpers ----------------------------------------------------------
@@ -916,7 +936,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       {
         id: "remote",
         title: "Also open on the forge",
-        note: "`remote` gives the gate a second door (decision 0004): the review is pushed, a merge request is opened, and whichever side settles first answers the state. The strip under the base line says where the request lives. This is the gate AS PARKED — the host has already filled in the request's number and link. Here nothing is watching a forge, so the strip has no commenters, no deadline and no Check now.",
+        note: "`remote` gives the gate a second door (decision 0004): the review is pushed, a merge request is opened, and whichever side settles first answers the state. The strip under the base line says where the request lives, who has commented there and when the quiet window sends it back; a thread written on the forge sits on its change, marked as such. This is the gate AS PARKED — the host has already filled in the request's number and link. What the forge has said is the gallery's own fixture: nothing here reaches a forge, so Check now reads it again and a reply stays on this card.",
         sample: {
           prompt: "Review the probe cache before it merges.",
           tree: "proposal",
@@ -935,6 +955,24 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
           },
         },
         inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
+        forge: {
+          commenters: ["mara"],
+          settling: true,
+          notes: {
+            c1: [
+              {
+                artifact: "c1",
+                quote: "  cached = await probeEverything();",
+                side: "after",
+                body: "Two readers arriving together both probe here. Worth a single in-flight promise?",
+                author: "mara",
+                at: "2026-09-19T10:42:00Z",
+                source: "gitlab",
+                thread: "gallery-thread-1",
+              },
+            ],
+          },
+        },
       },
     ],
   },
@@ -1118,6 +1156,7 @@ export function surfacesOfGroups(groups: readonly GalleryGroup[]): GallerySurfac
       schemaId: group.schemaId,
       sample: variant.sample,
       ...(variant.inputs === undefined ? {} : { inputs: variant.inputs }),
+      ...(variant.forge === undefined ? {} : { forge: variant.forge }),
     })),
   );
 }

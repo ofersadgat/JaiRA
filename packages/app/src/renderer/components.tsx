@@ -43,7 +43,7 @@ import { docKey, useDraftBox, type DraftBox, type Drafts, type SetDraft } from "
 import { EditorActions } from "./editorChrome";
 import { SchemaJsonEditor } from "./schemaEditor";
 import { answerOf, answersOfValue, ChoiceList, ChoiceSteps, EMPTY_ANSWER, initialAnswers, submitsOnClick, type Answer } from "./choices";
-import { mountChangesetReview, rendererServices, type ComponentServices } from "./changesetReview";
+import { gateServices, mountChangesetReview, type ComponentServices } from "./changesetReview";
 import { ValueView } from "./valueView";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import { useSchemaCheck, useTouched } from "./schemaForm/check";
@@ -800,32 +800,7 @@ export function ChangesetGate({
         mountChangesetReview(node, {
           config,
           inputs,
-          services: {
-            ...rendererServices((channel, request) => invoke(channel, request), {
-              ...(about !== undefined ? { taskId: about } : {}),
-              ...(project !== undefined ? { project } : {}),
-            }),
-            author,
-            // The second door, for a gate that has one and a host that can reach main.
-            ...(gate !== undefined && config.remote?.number !== undefined
-              ? {
-                  remote: {
-                    status: () => invoke("remote:status", { taskId: gate.taskId, ...(gate.project !== undefined ? { project: gate.project } : {}) }),
-                    check: () => invoke("remote:check", { taskId: gate.taskId, ...(gate.project !== undefined ? { project: gate.project } : {}) }),
-                    reply: (thread, body, resolve) =>
-                      invoke("remote:reply", {
-                        taskId: gate.taskId,
-                        key: config.remote?.key ?? "review",
-                        thread,
-                        body,
-                        ...(resolve === true ? { resolve: true } : {}),
-                        ...(gate.project !== undefined ? { project: gate.project } : {}),
-                      }),
-                  },
-                }
-              : {}),
-            ...(services ?? {}),
-          },
+          services: gateServices((channel, request) => invoke(channel, request), { config, about, project, author, gate }, services),
           onSubmit,
           ...(settled !== undefined ? { settled: settled.value } : {}),
         })

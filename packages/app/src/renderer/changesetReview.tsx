@@ -221,6 +221,55 @@ export function rendererServices(
 }
 
 /**
+ * Everything a parked changeset gate is wired to: the renderer defaults, the second door when the
+ * gate has one, and then the HOST's own services over both — so a host that must not reach main
+ * (the Components view, whose project is a placeholder) replaces a door rather than guarding it.
+ */
+export function gateServices(
+  invoke: <C extends "uri:read" | "file:check" | "file:release" | "remote:status" | "remote:check" | "remote:reply">(
+    channel: C,
+    request: IpcRequest<C>,
+  ) => Promise<IpcResponse<C>>,
+  wiring: {
+    config: ReviewArtifactsConfig;
+    about?: string | undefined;
+    project?: string | undefined;
+    author: string;
+    /** The task that parked the gate, and its project — see `ChangesetGate`'s `gate`. */
+    gate?: { taskId: string; project?: string | undefined } | undefined;
+  },
+  host: Partial<ComponentServices> = {},
+): ComponentServices {
+  const { config, about, project, gate } = wiring;
+  const parked = gate === undefined ? undefined : { taskId: gate.taskId, ...(gate.project !== undefined ? { project: gate.project } : {}) };
+  return {
+    ...rendererServices(invoke, {
+      ...(about !== undefined ? { taskId: about } : {}),
+      ...(project !== undefined ? { project } : {}),
+    }),
+    author: wiring.author,
+    // The second door, for a gate that has one and a host that can reach main.
+    ...(parked !== undefined && config.remote?.number !== undefined
+      ? {
+          remote: {
+            status: () => invoke("remote:status", parked),
+            check: () => invoke("remote:check", parked),
+            reply: (thread: string, body: string, resolve?: boolean) =>
+              invoke("remote:reply", {
+                ...parked,
+                key: config.remote?.key ?? "review",
+                thread,
+                body,
+                ...(resolve === true ? { resolve: true } : {}),
+              }),
+          },
+        }
+      : {}),
+    ...host,
+  };
+}
+
+/**
  * What a change's file holds RIGHT NOW, read through the anchors a review can be about, most
  * specific first: the reviewed task's worktree, then the layer roots. An anchor that does not
  * resolve for this review (no worktree; a path outside the layer) is simply the next one's turn,
