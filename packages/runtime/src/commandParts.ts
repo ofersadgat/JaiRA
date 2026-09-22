@@ -12,7 +12,9 @@
 import {
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
+  carriedShellSubjects,
   isAbsolutePath,
+  isToolsetMarkKey,
   shellSubjects,
   subjectKindOf,
   toolModes,
@@ -263,9 +265,32 @@ export function shellToolsetOf(toolset: Toolset): ShellToolset | undefined {
  * says nothing about the parts of a line, and its shell answers to the command policy as it did.
  */
 export function shellToolsetOfBlock(block: PermissionsDecl | undefined): ShellToolset | undefined {
-  if (block?.subjects === undefined) return undefined;
+  return shellToolsetsOfBlock(block)[0]?.toolset;
+}
+
+/** One map a line is judged against, and where it came from. */
+export interface JudgingToolset {
+  toolset: ShellToolset;
+  source?: string;
+}
+
+/**
+ * EVERY map a lowered block judges a line against.
+ *
+ * A block that still has its `subjects` — a conversation turn's, or a state read straight off its
+ * file — is one map. A RUN's block has lost them to upstream `literalPermissions`, and finds them
+ * again in the keys lowering carried them in (`SHELL_SUBJECTS_KEY_PREFIX` in `@jaira/shared`). Upstream
+ * merges `permissions.tools` per key down the `environment` chain, so a child can hold its parent's
+ * key beside its own: each is a map, and the caller keeps the strictest answer. Empty for a block no
+ * lowering wrote, which is the unmigrated state's "the command policy decides".
+ */
+export function shellToolsetsOfBlock(block: PermissionsDecl | undefined): JudgingToolset[] {
+  if (block === undefined) return [];
   const other = block.other ?? block.default;
-  return { entries: { ...block.tools, ...block.subjects }, ...(other !== undefined ? { other } : {}) };
+  const tools = Object.fromEntries(Object.entries(block.tools ?? {}).filter(([name]) => !isToolsetMarkKey(name)));
+  const of = (subjects: Record<string, PermissionMode>): ShellToolset => ({ entries: { ...tools, ...subjects }, ...(other !== undefined ? { other } : {}) });
+  if (block.subjects !== undefined) return [{ toolset: of(block.subjects), ...(block.source !== undefined ? { source: block.source } : {}) }];
+  return carriedShellSubjects(block.tools).map((carried) => ({ toolset: of(carried.subjects), ...(carried.source !== undefined ? { source: carried.source } : {}) }));
 }
 
 export interface ToolsetAnswer {

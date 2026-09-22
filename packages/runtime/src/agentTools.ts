@@ -74,6 +74,8 @@ import type { ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permi
 import {
   nativesOfStandard,
   offeredTools,
+  SHELL_DENIED_MARKERS,
+  SHELL_TOOL,
   standardOfNative,
   TOOLSET_MARKERS,
   TOOL_SPEC_BY_NAME,
@@ -207,16 +209,23 @@ export function viewOfToolset(toolset: Toolset): ToolsetView {
 export function viewOfServices(ctx: ExecServices): ToolsetView {
   const held = new Set(Object.keys(ctx.tools ?? {}));
   const baseline = ctx.policy?.baseline?.tools;
-  const modeOf = (name: string): PermissionMode | undefined =>
+  const gated = (name: string): PermissionMode | undefined =>
     ctx.gate?.modeOf({ name }) ?? (baseline !== undefined && Object.hasOwn(baseline, name) ? baseline[name] : undefined);
-  const marks = Object.keys(TOOLSET_MARKERS).map((name) => ctx.gate?.modeOf({ name }));
-  const isMap = ctx.gate !== undefined && new Set(marks).size === marks.length;
+  const marked = (marks: Readonly<Record<string, PermissionMode>>): boolean => {
+    const answers = Object.keys(marks).map((name) => ctx.gate?.modeOf({ name }));
+    return ctx.gate !== undefined && new Set(answers).size === answers.length;
+  };
+  const isMap = marked(TOOLSET_MARKERS);
+  // An offered shell whose own entry is `deny` reaches the gate as `smart`, so its lines are read;
+  // the AUTHORED mode is what a switch is derived from, as a conversation turn derives it.
+  const shellDenied = isMap && marked(SHELL_DENIED_MARKERS);
+  const modeOf = (name: string): PermissionMode | undefined => (shellDenied && name === SHELL_TOOL ? "deny" : gated(name));
   return {
     legacy: !isMap,
     declared: isMap,
     held: (standard) => (held.has(standard) ? "app" : undefined),
     modeOf,
-    otherFor: modeOf,
+    otherFor: gated,
     otherIsAuthored: false,
   };
 }

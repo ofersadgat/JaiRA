@@ -248,12 +248,13 @@ export type ToleratedDifference =
    */
   | "unlisted-shell"
   /**
-   * OPT-IN, never assumed, and it may LOOSEN. A list that pinned the shell to a mode of its own
-   * (`permissions.tools.bash`, or a `default` that reached it) asked before EVERY line. A map cannot
-   * say that in a run: its shell entry lowers as `smart` with the authored mode in
-   * `permissions.subjects`, and the engine hands the policy a state's `tools`, `default`, `other`
-   * and `scopes` only (`literalPermissions`) — the subjects never arrive, so the line is judged by
-   * the project's own command policy, which may run what a person used to be asked about.
+   * OPT-IN, never assumed, and it may LOOSEN as well as tighten. A list answered a shell LINE as a
+   * whole — before every line where it pinned the shell to a mode of its own, by the project's
+   * command policy where it did not. A map's line is taken apart and each part answers to the map
+   * (decision 0007 §4), in a run as in a conversation turn (the subjects reach a run's policy in the
+   * key lowering carries them in): a file utility to the file tool's own entry, running a file to
+   * `script`, any other command to its own entry or the shell's. So a list whose `read_file` allowed
+   * while its shell asked about `cat`, or whose policy ran an `rm` the map does not hold, has no map.
    *
    * That judgement is what decision 0007 §4 is FOR, so this is the intended destination and not a
    * defect; it is opt-in because it is a change in what happens, and migrating is where a state's

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { shippedLayer, testHome } from "@jaira/testing";
-import { TOOLSET_MARKERS } from "@jaira/shared";
+import { SHELL_DENIED_MARKERS, shellCarriedKey, TOOLSET_MARKERS } from "@jaira/shared";
 import { loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
@@ -70,7 +70,21 @@ describe("a toolset, referenced from a state", () => {
       // The two marks say the block was a MAP, which is how a run tells it from a legacy list.
       // `source` rides beside `subjects`: the FILE those subjects came from, which is what an approval
       // names and what "add to the toolset" writes into.
-      permissions: { tools: { read_file: "allow", glob: "allow", bash: "smart", ...TOOLSET_MARKERS }, other: "deny", subjects: { bash: "deny", "git status": "allow" }, source: "$/toolsets/chat/read-only" },
+      // A RUN is handed `tools` and loses `subjects` and `source`, so the offered shell carries both
+      // in a key of `tools` too, and the pair that says its own entry is `deny`.
+      permissions: {
+        tools: {
+          read_file: "allow",
+          glob: "allow",
+          bash: "smart",
+          ...TOOLSET_MARKERS,
+          ...SHELL_DENIED_MARKERS,
+          [shellCarriedKey({ subjects: { bash: "deny", "git status": "allow" }, source: "$/toolsets/chat/read-only" })]: "allow",
+        },
+        other: "deny",
+        subjects: { bash: "deny", "git status": "allow" },
+        source: "$/toolsets/chat/read-only",
+      },
     });
   });
 
@@ -81,7 +95,12 @@ describe("a toolset, referenced from a state", () => {
       tools: ["read_file", "bash", "write_file"],
       // A `$ref` that says more is written on the STATE: a sibling is an entry no file holds, so a
       // line added to the file could be shadowed here, and the source says `inline`.
-      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "ask", ...TOOLSET_MARKERS }, other: "deny", subjects: { bash: "smart" }, source: "inline" },
+      permissions: {
+        tools: { read_file: "allow", bash: "smart", write_file: "ask", ...TOOLSET_MARKERS, [shellCarriedKey({ subjects: { bash: "smart" }, source: "inline" })]: "allow" },
+        other: "deny",
+        subjects: { bash: "smart" },
+        source: "inline",
+      },
     });
   });
 
@@ -143,7 +162,10 @@ describe("legacy equivalence", () => {
     write(project.paths.workflowsDir, "oldsh.json", state({ tools: ["bash"], permissions: { tools: { bash: "ask" } } }));
     write(project.paths.workflowsDir, "newsh.json", state({ tools: { bash: "ask" } }));
     expect(environmentOf("oldsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "ask" } } });
-    expect(environmentOf("newsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "smart", ...TOOLSET_MARKERS }, subjects: { bash: "ask" }, source: "inline" } });
+    expect(environmentOf("newsh")).toEqual({
+      tools: ["bash"],
+      permissions: { tools: { bash: "smart", ...TOOLSET_MARKERS, [shellCarriedKey({ subjects: { bash: "ask" }, source: "inline" })]: "allow" }, subjects: { bash: "ask" }, source: "inline" },
+    });
     // Through the door and around it: the wrapper changes nothing about a state in the old form.
     const files = readWorkflowFiles(project.paths.workflowsDir);
     const direct = loadBundle(files, "old", workflowLoadOptions(project.paths));
@@ -295,7 +317,9 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
     expect(environmentOf("plan")).toEqual({
       // The nine a conversation has always held, then the eight of decision 0005, served since its
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      // The shell is HELD and not on the list: `"bash": "deny"` with no command that allows anything
+      // is a shell with nothing to run, and it is withheld — `deny` at the gate.
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "web_fetch", "web_search", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -304,7 +328,7 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
           edit: "deny",
           write_file: "deny",
           show_artifact: "allow",
-          bash: "smart",
+          bash: "deny",
           web_fetch: "allow",
           web_search: "allow",
           list_workflows: "allow",

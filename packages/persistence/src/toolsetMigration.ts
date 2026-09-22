@@ -55,6 +55,7 @@ import {
   rewriteToolsBlocksText,
   rewriteToolsBlocksValue,
   SHELL_TOOL,
+  shellWithheld,
   stateFileFormatOf,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
@@ -141,8 +142,8 @@ export interface PlanToolsetMigrationOptions {
   maxLines?: number;
   /**
    * The opt-in differences the caller accepts, both of them about the SHELL — `unlisted-shell` takes
-   * away one claude kept and no map can hold, `shell-judged` lets a line be judged by the project's
-   * command policy where a person used to be asked. Nothing is accepted unless named here, and a
+   * away one claude kept and no map can hold, `shell-judged` lets a line's parts be judged by the map
+   * where the line used to be answered as a whole. Nothing is accepted unless named here, and a
    * block that needs one it was not given is refused with the flag in the reason.
    */
   accept?: readonly ToleratedDifference[];
@@ -440,10 +441,13 @@ function linesOver(choice: ToolsetChoice, map: Record<string, PermissionMode>, f
     if (entry.implementation === "native") return undefined;
     const want = full[subject];
     if (want === undefined) {
-      // `"bash": "deny"` still OFFERS the shell — a held entry is a door, whatever its mode, and a
-      // line cannot take a subject out of a map. A base that holds the shell is therefore no base
-      // for a state that has none, `chat/read-only` included.
-      if (subject === SHELL_TOOL) return undefined;
+      // A base whose shell is WITHHELD (`"bash": "deny"` with no command that allows anything,
+      // `chat/read-only` among them) offers none, and is a base for a state that has none. One that
+      // offers a shell is not: a line cannot take a subject out of a map.
+      if (subject === SHELL_TOOL) {
+        if (shellWithheld(parsed.toolset)) continue;
+        return undefined;
+      }
       if (entry.mode === "deny") continue;
       lines[subject] = "deny";
     } else if (want !== entry.mode) {
@@ -709,10 +713,10 @@ function shellHint(measured: AgentHanded, differences: readonly HandedDifference
     : "leave `bash` out of the map by hand to take the shell away";
   if (failures.some((subject) => subject.startsWith("shell:"))) {
     return (
-      `. Its shell answered every line with a person${unlisted ? ", through claude's own Bash, which the list never granted" : ""}. ` +
-      "A map's shell entry is the answer for any other command on a line that is taken apart, and a RUN never sees it — the engine " +
-      "hands the policy a state's tools, default, other and scopes, and drops the `permissions.subjects` the authored mode travels " +
-      `in — so the line is judged by the project's command policy instead. --accept shell-judged migrates the block on those terms; ${away}`
+      `. Its shell's lines were answered as a whole${unlisted ? ", through claude's own Bash, which the list never granted" : ""} — by a person, or by the project's command policy. ` +
+      "A map's lines are taken apart and each part answers to the map: a file utility to the file tool's own entry, running a file to " +
+      "`script`, any other command to its own entry or the shell's (decision 0007 §4) — which may run what a person used to be asked " +
+      `about, or refuse what the policy used to run. --accept shell-judged migrates the block on those terms; ${away}`
     );
   }
   if (failures.includes(SHELL_TOOL)) {
@@ -798,7 +802,7 @@ const CASE_WORDS: Record<BlockMigration["outcome"], string> = {
 const TOLERATED_WORDS: Record<string, string> = {
   "profile-unknown-name": "a tool name nobody declared was put to a person under the old profile and is refused by `other: deny` (tightened; `ask` would hand back Task, Agent and SlashCommand)",
   "unlisted-shell": "ACCEPTED BY FLAG: the list never named `bash` and claude kept its own, which no map can hold — the shell is taken away (tightened)",
-  "shell-judged": "ACCEPTED BY FLAG: the list asked before every shell line; a map's lines are judged by the project's command policy instead, which MAY RUN what a person used to be asked about (decision 0007 §4)",
+  "shell-judged": "ACCEPTED BY FLAG: the list's shell lines were answered as a whole; a map's are taken apart and each part answers to the map, which MAY RUN what a person used to be asked about, or refuse what the policy ran (decision 0007 §4)",
 };
 
 /** The dry run, as text: a diff per file, what each block became, and the proof's tally. */

@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TOOLSET_MARKERS, jairaPaths, setBuiltInDir, type JairaPaths } from "@jaira/shared";
+import { shellCarriedKey, TOOLSET_MARKERS, jairaPaths, setBuiltInDir, type JairaPaths } from "@jaira/shared";
 import { initProject } from "../src/project";
 import { readWorkflowFiles } from "../src/snapshots";
 import { addToToolset, loadWorkflowBundle, toolsetIdOfReference, toolsetWriteTargets } from "../src/toolsets";
@@ -136,8 +136,14 @@ describe("writing the line", () => {
     const loaded = loadPlan();
     expect(loaded.issues).toEqual([]);
     expect(loaded.permissions).toEqual({
-      // The two marks say the block was a MAP, which is how a run tells it from a legacy list.
-      tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS },
+      // The two marks say the block was a MAP, which is how a run tells it from a legacy list; the
+      // offered shell's subjects are carried again in a key of `tools`, which is all a run is handed.
+      tools: {
+        read_file: "allow",
+        bash: "smart",
+        ...TOOLSET_MARKERS,
+        [shellCarriedKey({ subjects: { bash: "ask", "git status": "allow", "terraform plan": "allow" }, source: REF })]: "allow",
+      },
       other: "deny",
       subjects: { bash: "ask", "git status": "allow", "terraform plan": "allow" },
       source: REF,

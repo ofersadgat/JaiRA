@@ -27,7 +27,7 @@ import type { AgentQuery, AgentQueryOptions } from "@declarative-ai/agents-api";
 import type { ExecServices, InlineFamily, PromptOp, Tool } from "@declarative-ai/exec";
 import type { Approver } from "@declarative-ai/permissions";
 import { lowerStateToolsets, parseToolset } from "@jaira/shared";
-import { planAgentTools, withToolsetService } from "../src/agentTools";
+import { CODEX_TOOLS, planAgentTools, withToolsetService } from "../src/agentTools";
 import { AgentCliExecutor, AgentCodexExecutor } from "@declarative-ai/agents-cli";
 import { agentPromptRoutes, normaliseAgentModel } from "../src/modelRoutes";
 import { gateTools } from "../src/tools";
@@ -107,9 +107,9 @@ const ask = (opts: AgentQueryOptions, toolName: string, input: Record<string, un
 
 /** The legacy form 19 authored states still use, and the map it reads as. */
 const LEGACY_READ_ONLY = { tools: ["read_file"], permissions: { profile: "read-only", tools: { read_file: "allow" } } };
-// `bash` is ABSENT, not `deny`: a map's `bash` entry is the answer for "any other command" on a line
-// that is taken apart (decision 0007 §4), so `"bash": "deny"` still OFFERS the shell. Not holding it
-// is what takes it away.
+// `bash` is ABSENT. `"bash": "deny"` would take the shell away just the same — with no command that
+// allows anything it is withheld — but a map's `bash` entry is the answer for "any other command" on
+// a line that is taken apart (decision 0007 §4), and one allowed command would put the shell back.
 const READ_ONLY_MAP = { tools: { read_file: "allow", edit: "deny", write_file: "deny", other: "deny" } };
 
 /** Everything about a spawn a toolset could have changed. */
@@ -203,8 +203,8 @@ describe("a read-only toolset MAP reaches claude holding everything `profile: \"
     );
     const environment = (lowered.def as { environment: { tools: string[]; permissions: Record<string, unknown> } }).environment;
     expect(environment.permissions).not.toHaveProperty("profile");
-    // The shell's refusal is carried as its SUBJECT, behind the `smart` every shell entry lowers to.
-    expect(environment.permissions).toMatchObject({ tools: { edit: "deny", write_file: "deny", bash: "smart" }, subjects: { bash: "deny" }, other: "deny" });
+    // The shell's refusal is carried as its SUBJECT, and with nothing left to run it is withheld: `deny` at the gate.
+    expect(environment.permissions).toMatchObject({ tools: { edit: "deny", write_file: "deny", bash: "deny" }, subjects: { bash: "deny" }, other: "deny" });
     expect(environment.tools).toEqual(["read_file"]);
     // …and says so where the author can see it.
     expect(lowered.issues.map((issue) => issue.message).join("\n")).toMatch(/permissions\.profile beside a toolset map/);
@@ -236,6 +236,37 @@ describe("a read-only toolset reaches codex as the same sandbox flag", () => {
     expect((await run({ tools: { other: "ask" } }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
     // The legacy LIST keeps the configured sandbox, as it always did.
     expect((await run({ tools: ["read_file"] }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
+  });
+
+  it("leaves the writing sandbox OFF for a shell the toolset denies — in a RUN, as in a conversation turn", async () => {
+    // Denied outright: the shell is withheld, so nothing unlocks the switch.
+    const withheld = { read_file: "allow", bash: "deny", other: "deny" };
+    expect((await run({ tools: withheld }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
+    // "No shell but these commands": the shell is OFFERED, the gate is told `smart` so the lines are
+    // read — and the switch still follows the entry's authored `deny`, which the run reads off the
+    // pair lowering leaves beside it.
+    const commandsOnly = { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" };
+    expect((await run({ tools: commandsOnly }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
+    // …which is what a conversation turn, holding the toolset itself, derives.
+    for (const decl of [withheld, commandsOnly]) {
+      expect(planAgentTools(parseToolset(decl).toolset, {}, CODEX_TOOLS).switches).toEqual({ "workspace-write": false });
+    }
+    // A shell that asks is a shell that may write: the switch is on, from either path.
+    expect((await run({ tools: { read_file: "allow", bash: "ask" } }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
+  });
+});
+
+describe("a shell the toolset denies outright is WITHHELD, in a run", () => {
+  it("hands claude no shell at all: ours is not served, and its own Bash is on the deny list", async () => {
+    const { opts } = await run({ tools: { read_file: "allow", bash: "deny", other: "deny" } });
+    expect(Object.keys(opts!.mcpTools ?? {})).not.toContain("bash");
+    expect(opts!.disallowedTools).toContain("Bash");
+  });
+
+  it("keeps the shell for a map that allows commands through it, and judges its lines by the MAP", async () => {
+    const { opts } = await run({ tools: { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" } });
+    expect(Object.keys(opts!.mcpTools ?? {})).toContain("bash");
+    expect(opts!.disallowedTools).toContain("Bash");
   });
 });
 

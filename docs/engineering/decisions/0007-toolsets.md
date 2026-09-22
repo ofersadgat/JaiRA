@@ -2,7 +2,7 @@
 id: engineering/decisions/0007-toolsets
 type: decision
 status: built
-updated: 2026-09-21
+updated: 2026-09-22
 decides_for: [engineering/units/tool-policy, engineering/units/host-tools, engineering/units/agent-executors, engineering/units/executor-tree, engineering/units/chat-turns, engineering/contracts/host-tool-vocabulary, engineering/contracts/settings-json]
 ---
 
@@ -467,6 +467,63 @@ preset that is a function.
      for the shell alone, 0 unproven; with both consents, all 33 migrate. 19 of
      them are the same map, which wants a toolset file of its own. Nothing under
      `~/.jaira` was written.
+
+### Amended 2026-09-22: a denied shell is withheld, and a run reads the map's shell
+
+Steps 3 and 7 left a safety defect, recorded as a failure row in
+[tool-policy](../units/tool-policy.md): `"bash": "deny"` is a present entry,
+so the shell was offered and lowered as `smart` with the authored mode in
+`permissions.subjects`, and a RUN never saw `subjects` (upstream
+`literalPermissions` hands the policy a block's `tools`, `default`, `other`,
+`profile` and `scopes` only). In a run the deny was lost: claude's lines were
+judged by the project's command policy, and codex's writing sandbox was
+turned on by a held shell. The shipped `chat/read-only` handed an agent a
+shell. What changed:
+
+- **A shell the map denies outright is withheld.** `"bash": "deny"` with no
+  command subject or `script` entry that allows, asks or defers (`smart`)
+  anything is held and handed to nobody (`shellWithheld`): it is left off the
+  lowered `tools` list, the gate answers `deny` for it, claude's `Bash` is on
+  the deny list and codex's writing sandbox stays off. The entry is still
+  what the author wrote and reads back as held, so a toolset still matches
+  itself (invariant 43). A `cat` or `ls` that a file tool would have allowed
+  through the shell goes with it; the file tools serve those directly.
+  Measured with `handedToClaude`: `chat/read-only` now hands claude no shell.
+- **"No shell but these commands" is judged by the map in a run too.** When a
+  command subject does let something through (`"bash": "deny", "git status":
+  "allow"`) the shell stays offered, and lowering carries the subjects a
+  second time in a key of `permissions.tools`, `jaira:shell:{…}`, which
+  `literalPermissions` passes whole. The policy's narrowing reads that key
+  where `subjects` is gone. Upstream merges `permissions.tools` per key, so a
+  child can inherit a parent's key beside its own; the line is then judged
+  under each and the strictest answer kept. A pair of marks,
+  `jaira:bash-deny±`, tells a run's gate that the offered shell's own entry is
+  `deny`, so codex's sandbox follows the authored mode as a conversation
+  turn's does. This is host-side and needs no upstream change; the upstream
+  change that would retire the key is for `literalPermissions` to pass
+  `subjects` and `source` through. A refusing run was considered and not
+  chosen: the map can be enforced, so refusing it would only take away a
+  toolset the decision's own §1 example writes.
+- **Consequences for the migration (step 7).** `chat/read-only` IS now a base
+  for a state with no shell, and the migration picks it by reference where it
+  measures the same. `shell-judged` changes meaning: a map's `bash: "ask"`
+  now asks in a run as it does in a conversation, so a list that asked before
+  every line and whose tools all ask needs no consent; what still needs it is
+  a line whose parts the map answers differently from how the list answered
+  the whole line (a policy-judged `rm` the map does not hold, a `cat` that
+  asked beside a `read_file` that allowed). The dry run above predates this.
+- **`chat/read-only` does not ship `git status`, `git log` or `git diff`.**
+  §1's example had them. They are left out on purpose: `git diff --output=<file>`
+  and `git log --output` write a file, `--ext-diff` and a configured pager run
+  another program, and `git diff --no-index` reads outside the workspace
+  where no scope table sees it — a per-part judgement of `git diff` cannot
+  tell those apart without flag entries nobody has written, and a toolset
+  named read-only should not need them. Its shell is withheld instead, and
+  the file tools do the reading. A person who wants them adds the lines with
+  "add to the toolset"; that map is then safe in a run by the carried key.
+  Invariant 17 is unchanged: the shipped file is the preset's map.
+- A task started before this keeps its pinned snapshot, lowered the old way,
+  and runs as it did.
 
 ## Open
 

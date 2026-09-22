@@ -81,6 +81,34 @@ describe("compilePolicy", () => {
     // …and an agent's own shell is the same tool under another name.
     expect(policy.scopeOf!({ name: "Bash" }, { command: "git commit -m x" } as never, block as never)).toBe("deny");
   });
+
+  it("reads them in a RUN too, where upstream hands the narrowing the block without `subjects` or `source`", () => {
+    const policy = compilePolicy({});
+    const lowered = lowerToolset(parseToolset({ bash: "deny", "git status": "allow", read_file: "allow", other: "deny" }).toolset, undefined, "$/toolsets/x/y");
+    // What `literalPermissions` keeps: `tools`, `default`, `other`, `profile`, `scopes`.
+    const { subjects: _subjects, source: _source, ...literal } = lowered.permissions!;
+    const narrowed = (command: string) => {
+      const input = { command };
+      const mode = policy.scopeOf!({ name: "bash" }, input as never, literal as never);
+      return { mode, toolset: commandDecisionOf(input)?.parts.toolset, parts: commandDecisionOf(input)?.parts.parts.map((p) => `${p.subject}:${p.verdict}`) };
+    };
+    expect(narrowed("git status")).toEqual({ mode: undefined, toolset: "$/toolsets/x/y", parts: ["git status:allowed"] });
+    // The project's policy alone would run both; the toolset refuses them.
+    expect(narrowed("rm notes.txt")).toMatchObject({ mode: "deny", parts: ["write_file:denied"] });
+    expect(narrowed("npm install")).toMatchObject({ mode: "deny" });
+  });
+
+  it("answers to the STRICTEST of the subjects a child inherited beside its own", () => {
+    // Upstream merges `permissions.tools` per key, so a child can hold its parent's carried key too.
+    const policy = compilePolicy({});
+    const parent = lowerToolset(parseToolset({ bash: "allow", git: "allow" }).toolset).permissions!.tools!;
+    const child = lowerToolset(parseToolset({ bash: "deny", "git status": "allow" }).toolset).permissions!.tools!;
+    const merged = { tools: { ...parent, ...child } };
+    const mode = (command: string) => policy.scopeOf!({ name: "bash" }, { command } as never, merged as never);
+    expect(mode("git status")).toBeUndefined();
+    // The parent's `git` would run it; the child's own map falls to its `bash: "deny"`.
+    expect(mode("git log")).toBe("deny");
+  });
 });
 
 describe("planAgentTools", () => {

@@ -129,9 +129,10 @@ describe("the three forms a block takes", () => {
     expect(environmentOf("draft.json").tools).toEqual({ $ref: "$/toolsets/docs/reader", glob: "deny" });
   });
 
-  it('never starts from a toolset that HOLDS a shell the state has not got — `bash: "deny"` still offers one', async () => {
-    // `chat/read-only` is exactly this state's grant but for the shell it holds at `deny`, which is
-    // still a door: a held entry is offered, and a map's shell lowers as `smart` whatever it says.
+  it('starts from a toolset whose shell is WITHHELD for a state that has none — `bash: "deny"` offers nothing', async () => {
+    // `chat/read-only` is exactly this state's grant, and its shell, held at `deny` with no command
+    // allowed, is withheld: not offered, removed from the agent, `deny` at the gate. It used to lower
+    // as `smart` and hand a run a shell the project's policy judged, which made it no base at all.
     write(
       paths.workflowsDir,
       "draft.json",
@@ -139,8 +140,33 @@ describe("the three forms a block takes", () => {
     );
     const made = await plan();
     expect(unprovenOf(made)).toEqual([]);
-    expect(made.blocks[0]!.outcome).toBe("inline");
+    expect(made.blocks[0]!.outcome).toBe("reference");
+    expect(made.blocks[0]!.tools).toBe("$/toolsets/chat/read-only");
+  });
+
+  it("never starts from a toolset that OFFERS a shell the state has not got", async () => {
+    // The same state, with a `chat/read-only` that lets one command through: now the shell is offered
+    // for `git status`, which this state never had, and a line cannot take a subject out of a map.
+    write(paths.jairaDir, "toolsets/chat/read-only.json", {
+      read_file: "allow",
+      glob: "allow",
+      grep: "allow",
+      show_artifact: "allow",
+      web_fetch: "allow",
+      web_search: "allow",
+      bash: "deny",
+      "git status": "allow",
+      other: "deny",
+    });
+    write(
+      paths.workflowsDir,
+      "draft.json",
+      legacyState({ tools: ["read_file", "glob", "grep", "show_artifact", "web_fetch", "web_search"], permissions: { default: "allow", other: "deny" } }),
+    );
+    const made = await plan();
+    expect(unprovenOf(made)).toEqual([]);
     expect(made.blocks[0]!.tools).not.toHaveProperty("$ref");
+    expect(made.blocks[0]!.tools).not.toBe("$/toolsets/chat/read-only");
     expect(made.blocks[0]!.tools).not.toHaveProperty("bash");
   });
 
@@ -216,27 +242,31 @@ describe("the shell, which no map can say twice over", () => {
     expect(renderToolsetMigration(accepted)).toContain("ACCEPTED BY FLAG");
   });
 
-  it("REFUSES a state that asked before every shell line, because a run never sees a map's shell entry", async () => {
+  it("needs NO consent where the list asked before every shell line and a map asks the same, now that a run reads the map's shell", async () => {
+    // Every tool asks, so every part of a line asks too: `bash: "ask"` for a command, `read_file` for
+    // `cat`, `write_file` for `rm`, `other` for `script`. A run judges those parts by the map since
+    // lowering carries the subjects in `permissions.tools`; before that it judged by the policy alone.
     write(paths.workflowsDir, "draft.json", legacyState({ tools: ALL_TOOLS, permissions: { default: "ask", other: "ask" } }));
-    const made = await plan();
-    expect(made.blocks[0]!.outcome).toBe("refused");
-    expect(made.blocks[0]!.reason).toMatch(/--accept shell-judged/);
-    expect(made.blocks[0]!.reason).toMatch(/permissions.subjects/);
-
-    const accepted = await planToolsetMigration({ paths, accept: ["shell-judged"] });
-    expect(unprovenOf(accepted)).toEqual([]);
-    expect(accepted.blocks[0]!.tolerated.map((difference) => difference.subject)).toEqual(expect.arrayContaining(["shell:command"]));
-  });
-
-  it("needs NO consent where the shell was already judged by the project's policy", async () => {
-    // A list that names `bash` and gives it no mode of its own resolves to the baseline's `smart`,
-    // which is the policy deciding the line — exactly what a map's shell entry means.
-    write(paths.workflowsDir, "draft.json", legacyState({ tools: ["read_file", "bash"], permissions: { tools: { read_file: "allow" }, other: "deny" } }));
     const made = await plan();
     expect(unprovenOf(made)).toEqual([]);
     expect(made.blocks[0]!.outcome).not.toBe("refused");
     expect(made.blocks[0]!.tolerated).toEqual([]);
-    expect(made.blocks[0]!.tools).toEqual({ read_file: "allow", bash: "smart", other: "deny" });
+  });
+
+  it("REFUSES a state whose shell the project's policy judged, because a map judges each PART by the map", async () => {
+    // A list that names `bash` with no mode of its own let the project's policy decide the whole
+    // line. The map's `bash: "smart"` still defers a COMMAND to that policy, but `rm` is `write_file`
+    // — which this map does not hold, so `other: "deny"` refuses it where the policy ran it.
+    write(paths.workflowsDir, "draft.json", legacyState({ tools: ["read_file", "bash"], permissions: { tools: { read_file: "allow" }, other: "deny" } }));
+    const made = await plan();
+    expect(made.blocks[0]!.outcome).toBe("refused");
+    expect(made.blocks[0]!.reason).toMatch(/--accept shell-judged/);
+    expect(made.blocks[0]!.reason).toMatch(/shell:write/);
+
+    const accepted = await planToolsetMigration({ paths, accept: ["shell-judged"] });
+    expect(unprovenOf(accepted)).toEqual([]);
+    expect(accepted.blocks[0]!.tools).toEqual({ read_file: "allow", bash: "smart", other: "deny" });
+    expect(accepted.blocks[0]!.tolerated.map((difference) => difference.subject)).toEqual(expect.arrayContaining(["shell:write"]));
   });
 });
 

@@ -906,8 +906,13 @@ the same rule.
   and refuses everything else: `bash`'s mode is the answer for a command nothing
   else names, not a switch on the tool. (It reaches the engine as `smart`, with the
   mode you wrote carried in `permissions.subjects` — that is what makes the gate
-  read the line before it answers.) **`smart`** on a shell subject defers to the
-  project's command policy.
+  read the line before it answers, in a run as in a conversation.) **`smart`** on a
+  shell subject defers to the project's command policy.
+
+  `"bash": "deny"` with no command and no `script` entry that allows, asks or is
+  `smart` leaves nothing for the shell to run, so the shell is **withheld**: the
+  agent gets no shell at all, not even its own, and codex's writing sandbox stays
+  off. Reading a file goes through `read_file`, `glob` and `grep`.
 
   **How it composes with `policy` in settings.** Per part: `.jaira/` is denied;
   then the first matching `policy.rules` rule, else the built-in destructive floor

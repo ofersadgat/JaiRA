@@ -37,6 +37,16 @@
  * runs `git status`; every reader that wants the authored mode back goes through
  * {@link toolsetOfEnvironment}.
  *
+ * Two exceptions keep that from being a door a run cannot see through:
+ *
+ *  - A shell the map denies OUTRIGHT — `"bash": "deny"` and no command subject or `script` that
+ *    allows, asks or defers — is WITHHELD ({@link shellWithheld}): held as written, left off the
+ *    lowered list, `deny` at the gate, so an agent loses its own shell and codex's writing sandbox
+ *    stays off.
+ *  - An OFFERED shell's subjects are carried a second time, in a key of `permissions.tools`
+ *    ({@link SHELL_SUBJECTS_KEY_PREFIX}), because a run's policy is handed `tools` and never
+ *    `subjects`; and where its own entry is `deny`, {@link SHELL_DENIED_MARKERS} say so to a run's gate.
+ *
  * `implementation: "native"` on a state the ENGINE runs is still carried and not enforced — the chat
  * path honours it through `planAgentTools`; a run injects ours, which is the governed choice, because
  * the engine hands an executor a state's tool LIST and a gate, and neither can say whose code was
@@ -83,6 +93,64 @@ export const TOOLSET_REF_KEY = "$ref";
  * a toolset MAP" — see the module header. Not tools, never offered, and stripped by every reader.
  */
 export const TOOLSET_MARKERS: Readonly<Record<string, PermissionMode>> = { "jaira:toolset+": "allow", "jaira:toolset-": "deny" };
+
+/**
+ * WRITTEN BY LOWERING, never authored: the pair that says "this map's shell is OFFERED and its own
+ * entry is `deny`" — `"bash": "deny", "git status": "allow"`, no shell but the named commands. The
+ * gate is told `smart` for the shell, so the line is read; a run that must know the AUTHORED mode (the
+ * codex sandbox, which has no per-line channel) asks the gate about this pair, which disagrees only
+ * where it was written — the same argument as {@link TOOLSET_MARKERS}.
+ */
+export const SHELL_DENIED_MARKERS: Readonly<Record<string, PermissionMode>> = { "jaira:bash-deny+": "allow", "jaira:bash-deny-": "deny" };
+
+/**
+ * WRITTEN BY LOWERING, never authored: the prefix of the one `permissions.tools` key that carries an
+ * offered shell's command subjects (and where they came from) into a RUN.
+ *
+ * The engine hands the policy a state's block through upstream `literalPermissions`, which keeps
+ * `tools`, `default`, `other`, `profile` and `scopes` and drops the rest — `subjects` and `source`
+ * among them — so a run's narrowing would judge the line by the project's policy alone. `tools`
+ * arrives whole, so the subjects ride in a KEY of it: `jaira:shell:` + the JSON of
+ * {@link ShellCarried}, with the mode `allow`, which means nothing. Upstream merges `permissions.tools`
+ * per key down the `environment` chain, so a child can inherit a parent's key beside its own; the
+ * policy then judges the line under each and keeps the strictest answer.
+ */
+export const SHELL_SUBJECTS_KEY_PREFIX = "jaira:shell:";
+
+/** What {@link SHELL_SUBJECTS_KEY_PREFIX} carries. */
+export interface ShellCarried {
+  subjects: Record<string, PermissionMode>;
+  source?: string;
+}
+
+/** The `permissions.tools` key that carries one {@link ShellCarried}. */
+export function shellCarriedKey(carried: ShellCarried): string {
+  return SHELL_SUBJECTS_KEY_PREFIX + JSON.stringify({ subjects: carried.subjects, ...(carried.source !== undefined ? { source: carried.source } : {}) });
+}
+
+/** Is this `permissions.tools` key one lowering WROTE — a mark or carried subjects — rather than a tool? */
+export function isToolsetMarkKey(name: string): boolean {
+  return name.startsWith("jaira:");
+}
+
+/** Every {@link ShellCarried} a block's `permissions.tools` holds, in key order. */
+export function carriedShellSubjects(tools: Readonly<Record<string, unknown>> | undefined): ShellCarried[] {
+  const out: ShellCarried[] = [];
+  for (const key of Object.keys(tools ?? {})) {
+    if (!key.startsWith(SHELL_SUBJECTS_KEY_PREFIX)) continue;
+    try {
+      const value = JSON.parse(key.slice(SHELL_SUBJECTS_KEY_PREFIX.length)) as unknown;
+      if (isPlainObject(value) && isPlainObject(value["subjects"])) {
+        const subjects: Record<string, PermissionMode> = {};
+        for (const [subject, mode] of Object.entries(value["subjects"])) if (isMode(mode)) subjects[subject] = mode;
+        out.push({ subjects, ...(typeof value["source"] === "string" ? { source: value["source"] } : {}) });
+      }
+    } catch {
+      // Not one lowering wrote. It is still a reserved key, and still no tool.
+    }
+  }
+  return out;
+}
 
 /** Does a block in the upstream shape carry the marks a lowered MAP leaves? */
 export function isLoweredToolset(permissions: Pick<PermissionsDecl, "tools"> | undefined): boolean {
@@ -364,7 +432,7 @@ export function toolsetOfLegacy(
     entries[name] = { kind: "tool", ...(mode !== undefined ? { mode } : {}), ...(implementation !== undefined ? { implementation } : {}) };
   }
   for (const [name, mode] of Object.entries(permissions?.tools ?? {})) {
-    if (Object.hasOwn(entries, name) || Object.hasOwn(TOOLSET_MARKERS, name)) continue;
+    if (Object.hasOwn(entries, name) || isToolsetMarkKey(name)) continue;
     entries[name] = { kind: "tool", mode, offered: false };
   }
   const other = permissions?.other ?? permissions?.default;
@@ -381,7 +449,29 @@ export function toolsetOfLegacy(
  * (`ToolSpec.unserved`) is never in it. {@link heldTools} is the list a person reads.
  */
 export function offeredTools(toolset: Toolset): string[] {
-  return heldTools(toolset).filter((name) => TOOL_SPEC_BY_NAME.get(name)?.unserved !== true);
+  const withheld = shellWithheld(toolset);
+  return heldTools(toolset).filter((name) => TOOL_SPEC_BY_NAME.get(name)?.unserved !== true && !(withheld && name === SHELL_TOOL));
+}
+
+/**
+ * Is this map's shell HELD and yet handed to nobody — a shell the toolset denies outright?
+ *
+ * Present means offered, and a map's `bash` entry is the answer for "any other command" on a line
+ * taken apart (decision 0007 §4). When that answer is `deny` and no command subject and no `script`
+ * entry allows, asks or defers (`smart`) anything, every line the shell could run is refused — or
+ * duplicates a standard tool the toolset serves directly (`cat` is `read_file`). Offering such a shell
+ * is a door with nothing behind it that a RUN cannot see is shut: the gate is told `smart`, and on
+ * codex a held shell turns the writing sandbox on. So it is withheld: {@link offeredTools} leaves it
+ * out, {@link gateToolModes} answers `deny` for it, and an agent loses its own shell with it. The
+ * entry is still HELD — it is what the author wrote, and it is what a person reads and matches.
+ *
+ * A map only: the legacy reading is a grant and runs as it did.
+ */
+export function shellWithheld(toolset: Toolset): boolean {
+  if (toolset.legacy === true) return false;
+  const shell = Object.hasOwn(toolset.entries, SHELL_TOOL) ? toolset.entries[SHELL_TOOL] : undefined;
+  if (shell === undefined || shell.kind !== "tool" || shell.mode !== "deny") return false;
+  return Object.values(toolset.entries).every((entry) => entry.kind === "tool" || entry.mode === "deny");
 }
 
 /**
@@ -442,7 +532,8 @@ export function toolModes(toolset: Toolset): Record<string, PermissionMode> {
 }
 
 /**
- * {@link toolModes} as the GATE takes them: the shell's entry is `smart`, whatever it says.
+ * {@link toolModes} as the GATE takes them: the shell's entry is `smart`, whatever it says — or
+ * `deny` where the shell is withheld ({@link shellWithheld}), since there is then no line to read.
  *
  * Any other mode would answer for the tool before its line was read — `deny` would refuse the
  * `git status` the same toolset allows, `allow` would pre-approve a delegated agent's shell so that
@@ -451,7 +542,8 @@ export function toolModes(toolset: Toolset): Record<string, PermissionMode> {
  */
 export function gateToolModes(toolset: Toolset): Record<string, PermissionMode> {
   const modes = toolModes(toolset);
-  if (Object.hasOwn(modes, SHELL_TOOL)) modes[SHELL_TOOL] = "smart";
+  // A withheld shell has no line to read: nothing is offered, and the gate refuses it by name.
+  if (Object.hasOwn(modes, SHELL_TOOL)) modes[SHELL_TOOL] = shellWithheld(toolset) ? "deny" : "smart";
   return modes;
 }
 
@@ -483,16 +575,27 @@ export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> 
  * used to answer for a name nobody registered is what `other` says. `scopes` are not part of a
  * toolset and pass through beside it.
  */
-export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[] | undefined): PermissionsDecl {
+export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[] | undefined, source?: string | undefined): PermissionsDecl {
+  const subjects = shellSubjects(toolset);
+  const hasSubjects = Object.keys(subjects).length > 0;
+  // What a RUN needs to judge an OFFERED shell's lines as this map says, in the one field it is
+  // handed: see {@link SHELL_SUBJECTS_KEY_PREFIX} and {@link SHELL_DENIED_MARKERS}.
+  const map = toolset.legacy !== true;
+  const offeredShell = map && hasSubjects && holdsTool(toolset, SHELL_TOOL) && !shellWithheld(toolset);
+  const carried: Record<string, PermissionMode> = offeredShell ? { [shellCarriedKey({ subjects, ...(source !== undefined ? { source } : {}) })]: "allow" } : {};
   // A MAP leaves its marks, so a run — which sees this block only through a gate — can tell it from
   // the legacy reading. See the module header and {@link TOOLSET_MARKERS}.
-  const tools = { ...gateToolModes(toolset), ...(toolset.legacy === true ? {} : TOOLSET_MARKERS) };
-  const subjects = shellSubjects(toolset);
+  const tools = {
+    ...gateToolModes(toolset),
+    ...(map ? TOOLSET_MARKERS : {}),
+    ...(offeredShell && subjects[SHELL_TOOL] === "deny" ? SHELL_DENIED_MARKERS : {}),
+    ...carried,
+  };
   const implementations = toolImplementations(toolset);
   return {
     ...(Object.keys(tools).length > 0 ? { tools } : {}),
     ...(toolset.other !== undefined ? { other: toolset.other } : {}),
-    ...(Object.keys(subjects).length > 0 ? { subjects } : {}),
+    ...(hasSubjects ? { subjects, ...(source !== undefined ? { source } : {}) } : {}),
     ...(Object.keys(implementations).length > 0 ? { implementations } : {}),
     ...(scopes !== undefined && scopes.length > 0 ? { scopes: [...scopes] } : {}),
   };
@@ -512,11 +615,17 @@ export function toolsetOfEnvironment(
 ): Toolset {
   const toolset = toolsetOfLegacy(tools, permissions, { ...permissions?.implementations, ...implementations });
   // The marks a lowered MAP left say this block was never the legacy reading.
-  if (isLoweredToolset(permissions)) delete toolset.legacy;
+  const lowered = isLoweredToolset(permissions);
+  if (lowered) delete toolset.legacy;
   for (const [subject, mode] of Object.entries(permissions?.subjects ?? {})) {
     if (Object.hasOwn(toolset.entries, subject)) {
-      // The shell's entry was lowered as `smart`; its authored mode is the one carried here.
-      if (subject === SHELL_TOOL) toolset.entries[subject] = { ...toolset.entries[subject]!, mode };
+      if (subject === SHELL_TOOL) {
+        const { offered: _offered, ...entry } = toolset.entries[subject]!;
+        // The shell's entry was lowered as `smart`; its authored mode is the one carried here. A map
+        // that WITHHELD its shell ({@link shellWithheld}) left it off the list with the gate's `deny`,
+        // and it was held all the same.
+        toolset.entries[subject] = lowered ? { ...entry, mode } : { ...toolset.entries[subject]!, mode };
+      }
       continue;
     }
     // …and a block that carries the shell's mode without granting the shell keeps it un-offered.
@@ -544,9 +653,9 @@ export interface LoweredToolset {
  * `scopes`. A legacy `profile` beside the map is folded INTO the map ({@link applyLegacyProfile}) and
  * is not written out — the engine is never handed one by a lowering.
  */
-export function lowerToolset(toolset: Toolset, rest?: PermissionsDecl | undefined): LoweredToolset {
+export function lowerToolset(toolset: Toolset, rest?: PermissionsDecl | undefined, source?: string | undefined): LoweredToolset {
   const narrowed = applyLegacyProfile(toolset, rest?.profile);
-  const permissions = permissionsOfToolset(narrowed, rest?.scopes);
+  const permissions = permissionsOfToolset(narrowed, rest?.scopes, source);
   return { tools: offeredTools(narrowed), ...(Object.keys(permissions).length > 0 ? { permissions } : {}) };
 }
 
@@ -639,11 +748,10 @@ export function lowerStateToolsets(
     for (const issue of found) {
       issues.push({ ...issue, stateId, path: issue.path === "" ? `${at}.tools` : `${at}.tools.${issue.path}` });
     }
-    const lowered = lowerToolset(parsed.toolset, rest);
-    // Where the shell's subjects came from, beside them — see `PermissionsDecl.source`. A bare
-    // reference names a FILE; a map, and a `$ref` that says more, are written on the state.
-    const permissions =
-      lowered.permissions?.subjects !== undefined ? { ...lowered.permissions, source: typeof node === "string" ? node : INLINE_TOOLSET } : lowered.permissions;
+    // Where the shell's subjects came from, written beside them — see `PermissionsDecl.source`. A
+    // bare reference names a FILE; a map, and a `$ref` that says more, are written on the state.
+    const lowered = lowerToolset(parsed.toolset, rest, typeof node === "string" ? node : INLINE_TOOLSET);
+    const permissions = lowered.permissions;
     const { permissions: _permissions, ...others } = block;
     return { ...others, tools: lowered.tools, ...(permissions !== undefined ? { permissions } : {}) };
   };
