@@ -72,8 +72,8 @@ export function toolsetTextFollows(text: string, follows: string): boolean {
 /**
  * `text` with the entries set, everything else as it was written.
  *
- * Throws when the file is not a toolset MAP — unparsable, a list (the legacy form has no place for
- * a command subject), or a bare reference. `other` and `$ref` are never written: a remembered answer
+ * Throws when the file is not a toolset MAP — unparsable, a list (which is no toolset, and has no
+ * place for a command subject), or a bare reference. `other` and `$ref` are never written: a remembered answer
  * is about a subject.
  */
 export function addToToolsetText(text: string, entries: ToolsetAddition): string {

@@ -12,7 +12,6 @@ import {
   replacementsOf,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
-  toolsetOfLegacy,
   unmappedNatives,
   withAlwaysGranted,
 } from "@jaira/shared";
@@ -36,24 +35,8 @@ describe("planAgentTools", () => {
     expect(plan.askNatives).toEqual([]);
   });
 
-  it("removes NOTHING a legacy list merely did not mention — a list was a grant, and still is", () => {
-    // The workflows people run today are lists, and lean on the agent's own `Glob`, `Grep` and web
-    // tools. Which reading a state means is chosen when it is migrated (0007 step 7), not inferred.
-    for (const plan of [planAgentTools([]), planAgentTools(["read_file"]), planAgentTools(toolsetOfLegacy(["read_file"], { tools: { read_file: "allow" } }))]) {
-      expect(plan.denyNatives).toEqual([]);
-      expect(plan.askNatives).toEqual([]);
-    }
-    // What it removes is what the old code removed: the built-in our injected tool stands in for…
-    expect(planAgentTools(["read_file"]).displaced).toEqual(["Read"]);
-    // …and what an old `profile: "read-only"` denied — upstream's own list, name for name.
-    const readOnly = planAgentTools(toolsetOfLegacy(["read_file"], { profile: "read-only", tools: { read_file: "allow" } }));
-    expect([...readOnly.denyNatives].sort()).toEqual(["Agent", "Bash", "Edit", "MultiEdit", "NotebookEdit", "SlashCommand", "Task", "Write"]);
-    expect(readOnly.denyNatives).not.toContain("Glob");
-    expect(readOnly.denyNatives).not.toContain("WebFetch");
-  });
-
   it("declares ours for `app`, so the built-in is displaced", () => {
-    const plan = planAgentTools(["read_file"], { read_file: "app" });
+    const plan = planAgentTools(mapOf(["read_file"], { read_file: "app" }));
     expect(plan.inject).toEqual(["read_file", ...ALWAYS_GRANTED_TOOLS]);
     // Not asked about — an injected tool is gated by `withPermission` where it executes.
     expect(plan.askNatives).not.toContain("Read");
@@ -66,7 +49,7 @@ describe("planAgentTools", () => {
   it("leaves the built-in for `native` but forces it to our gate", () => {
     // "Native" names the implementation, never the access. Without the ask-rule Claude Code's own
     // policy auto-allows its read-only built-ins and our callback never fires.
-    const plan = planAgentTools(["read_file"], { read_file: "native" });
+    const plan = planAgentTools(mapOf(["read_file"], { read_file: "native" }));
     expect(plan.inject).toEqual([...ALWAYS_GRANTED_TOOLS]);
     expect(plan.askNatives).toEqual(["Read"]);
     expect(plan.denyNatives).not.toContain("Read");
@@ -75,8 +58,8 @@ describe("planAgentTools", () => {
   it("defaults a granted tool to `app`", () => {
     // DECLARING a tool has always meant injecting ours, and every authored state relies on it.
     // `native` is the opt-out and it is the one that needs saying.
-    expect(planAgentTools(["glob"]).inject).toEqual(["glob", ...ALWAYS_GRANTED_TOOLS]);
-    expect(planAgentTools(["glob"]).askNatives).toEqual([]);
+    expect(planAgentTools(mapOf(["glob"])).inject).toEqual(["glob", ...ALWAYS_GRANTED_TOOLS]);
+    expect(planAgentTools(mapOf(["glob"])).askNatives).toEqual([]);
   });
 
   it("keeps the two axes independent", () => {
@@ -125,18 +108,18 @@ describe("alwaysGranted", () => {
     expect(TOOL_SPEC_BY_NAME.get("show_artifact")?.alwaysGranted).toBe(true);
   });
 
-  it("is injected by a list that never mentions it", () => {
-    expect(planAgentTools(["bash", "read_file", "write_file"]).inject).toContain("show_artifact");
+  it("is injected by a toolset that never mentions it", () => {
+    expect(planAgentTools(mapOf(["bash", "read_file", "write_file"])).inject).toContain("show_artifact");
   });
 
-  it("is injected by no list at all — the conversation with no tools is the one that draws", () => {
-    expect(planAgentTools([]).inject).toContain("show_artifact");
+  it("is injected by a toolset that holds nothing — the conversation with no tools is the one that draws", () => {
+    expect(planAgentTools(mapOf([])).inject).toContain("show_artifact");
   });
 
   it("is not doubled when the list does mention it", () => {
     // `withAlwaysGranted` is the fold, and a list that already names the tool must come back the
     // same length — a duplicate declaration is a second tool as far as an agent's schema is concerned.
-    expect(planAgentTools(["show_artifact"]).inject).toEqual(["show_artifact"]);
+    expect(planAgentTools(mapOf(["show_artifact"])).inject).toEqual(["show_artifact"]);
     expect(withAlwaysGranted(["show_artifact", "bash"])).toEqual(["show_artifact", "bash"]);
   });
 });
@@ -267,7 +250,7 @@ describe("the implementation choice, per tool", () => {
 
 describe("a coarse transport's switch is derived from the toolset", () => {
   const toolset = (map: Record<string, unknown>) => parseToolset(map).toolset;
-  const on = (grant: Parameters<typeof planAgentTools>[0]) => planAgentTools(grant, {}, CODEX_TOOLS).switches[CODEX_WRITE_SWITCH];
+  const on = (grant: Parameters<typeof planAgentTools>[0]) => planAgentTools(grant, CODEX_TOOLS).switches[CODEX_WRITE_SWITCH];
 
   it("leaves codex's writing sandbox OFF unless the toolset holds a subject it unlocks", () => {
     expect(on(toolset({ read_file: "allow", glob: "allow", other: "deny" }))).toBe(false);
@@ -276,16 +259,12 @@ describe("a coarse transport's switch is derived from the toolset", () => {
     // Held and refused is not held.
     expect(on(toolset({ read_file: "allow", bash: "deny", write_file: "deny" }))).toBe(false);
   });
-
-  it("is off for the map an old `profile: \"read-only\"` reads as, whatever the list granted", () => {
-    expect(on(toolsetOfLegacy(["read_file", "bash", "write_file"], { profile: "read-only" }))).toBe(false);
-    expect(on(toolsetOfLegacy(["read_file", "bash"]))).toBe(true);
-  });
 });
 
 describe("what a transport that enforces nothing cannot run", () => {
   it("is a toolset that REFUSES something — named, so the refusal can say what", () => {
-    expect(refusalsOf(viewOfToolset(toolsetOfLegacy(["read_file"], { profile: "read-only" })))).toEqual(["edit", "write_file", "bash", "other"]);
-    expect(refusalsOf(viewOfToolset(toolsetOfLegacy(["read_file", "bash"])))).toEqual([]);
+    const refusing = parseToolset({ read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", other: "deny" }).toolset;
+    expect(refusalsOf(viewOfToolset(refusing))).toEqual(["edit", "write_file", "bash", "other"]);
+    expect(refusalsOf(viewOfToolset(parseToolset({ read_file: "ask", bash: "ask" }).toolset))).toEqual([]);
   });
 });

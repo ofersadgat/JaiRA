@@ -29,7 +29,7 @@ const files: Record<string, unknown> = {
       model: "root/model",
       temperature: 0.4,
       tools: ["bash"],
-      permissions: { profile: "read-only" },
+      permissions: { tools: { bash: "smart" }, other: "deny" },
       conversation: { mode: "summary" },
       system: "You are careful.",
     },
@@ -64,7 +64,7 @@ describe("the loader really does merge the chain into each state", () => {
     const plan = chatPlanFor([stateOf("chat/review")]);
     expect(plan.settings.model).toBe("root/model");
     expect(plan.settings.tools).toEqual(["bash"]);
-    expect(plan.settings.permissions).toMatchObject({ profile: "read-only" });
+    expect(plan.settings.permissions).toMatchObject({ other: "deny" });
     expect(plan.origin.model).toBe("inherited");
   });
 

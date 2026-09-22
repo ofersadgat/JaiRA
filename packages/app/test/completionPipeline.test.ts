@@ -100,7 +100,7 @@ describe("inside the other nested blocks", () => {
   });
 
   it("offers the operation's nested blocks", () => {
-    expect(offered(state(), '{ "operation": { "permissions": { "|')).toEqual(["profile", "default", "tools"]);
+    expect(offered(state(), '{ "operation": { "permissions": { "|')).toEqual(["scopes"]);
     expect(offered(state(), '{ "operation": { "conversation": { "|')).toEqual(["mode", "artifacts"]);
   });
 

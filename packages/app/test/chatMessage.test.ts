@@ -137,7 +137,7 @@ describe("the settings a message would run under", () => {
     const { edit: _edit, ...unticked } = shipped("chat/read-only") as Record<string, ToolsetDecl[string]>;
     expect(posture({ toolset: unticked })).toBe("custom");
 
-    // The same map in the three legacy fields is the same toolset: read FROM the shipped file rather
+    // The same map as the lowered fields a state's declaration arrives as is the same toolset: read FROM the shipped file rather
     // than derived, because the file is what the match is against and the modes it gives the workflow
     // tools (decision 0005 step 6) are its own — `READ_ONLY_PRESET_TOOLS` predates them.
     const readOnly = shipped("chat/read-only") as Record<string, PermissionMode>;

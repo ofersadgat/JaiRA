@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { declOfToolset, parseToolset, toolsetOfSettings, type ChatPlanView, type ChatSettings, type Toolset, type ToolsetChoice, type ToolsetDecl } from "@jaira/shared/browser";
+import { declOfToolset, lowerToolset, parseToolset, type ChatPlanView, type ChatSettings, type Toolset, type ToolsetChoice, type ToolsetDecl } from "@jaira/shared/browser";
 import { Composer } from "../src/renderer/composer";
 import {
   commandGroupsOf,
@@ -24,13 +24,9 @@ import {
   sectionModeOf,
   toolModeOf,
   withCommand,
-  withOther,
-  withoutSubject,
   withSectionMode,
   withSubject,
-  withSubjectMode,
   withToolHeld,
-  withToolImplementation,
 } from "../src/renderer/composerToolset";
 
 const plan = (): ChatPlanView =>
@@ -75,7 +71,7 @@ const TOOLSETS: ToolsetChoice[] = [
 ];
 const TOOLS = ["read_file", "write_file", "bash", "start_task", "move_task"].map((name) => ({ name }));
 
-/** A plan whose toolset is the person's own choice (`toolset`), or what a state declared (the legacy three). */
+/** A plan whose toolset is the person's own choice (`toolset`), or what a state declared (its lowered list and block). */
 const toolsetPlan = (settings: ChatSettings, bucket?: string): ChatPlanView =>
   ({
     ...plan(),
@@ -105,8 +101,9 @@ describe("the Permissions card holds the toolsets of one bucket", () => {
     expect(html).toContain("your choice for this message");
   });
 
-  it("matches a state's OWN declaration too — the list and the block, never having been a map", () => {
-    const html = draw({ plan: toolsetPlan({ tools: ["read_file", "write_file", "bash"], permissions: { default: "ask" } }) });
+  it("matches a state's OWN declaration too — the lowered list and block it arrives as", () => {
+    const lowered = lowerToolset(parseToolset({ read_file: "ask", write_file: "ask", bash: "ask", other: "ask" }).toolset);
+    const html = draw({ plan: toolsetPlan({ tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) }) });
     expect(chipOf(html)).toBe("ask first");
   });
 
@@ -275,15 +272,6 @@ describe("what a click on the Tools card does to the map", () => {
     expect(declOfToolset(files.toolset)["read_file"]).toBe("ask");
     expect(declOfToolset(files.toolset)).not.toHaveProperty("write_file");
     expect(files.parked["write_file"]).toEqual({ mode: "ask" });
-  });
-
-  it("whatever is written is a MAP — a legacy list edited here stops being the legacy reading", () => {
-    const legacy = toolsetOfSettings({ tools: ["bash"], permissions: { default: "ask" } }).toolset;
-    expect(legacy.legacy).toBe(true);
-    expect(withSubjectMode(legacy, "bash", "deny").legacy).toBeUndefined();
-    expect(withOther(legacy, "deny").legacy).toBeUndefined();
-    expect(withoutSubject(legacy, "bash").legacy).toBeUndefined();
-    expect(withToolImplementation(legacy, "bash", "native").entries["bash"]).toMatchObject({ implementation: "native" });
   });
 });
 

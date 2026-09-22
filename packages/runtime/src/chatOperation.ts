@@ -263,8 +263,8 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
       // The WHOLE list, as everywhere else — `[]` is how the composer says "no tools", and merging
       // it with what the file declared would make that the one instruction it cannot give.
       ...(settings.tools !== undefined ? { tools: [...settings.tools] } : {}),
-      // A block that carries `subjects` came from a toolset (inherited, the shell's mode shown as
-      // authored), so it is lowered again; a block written the old way goes in as it was written.
+      // A block that carries `subjects` holds a shell whose mode the plan showed as authored, so it
+      // is lowered again (the shell back to `smart`); any other block goes in as it came.
       ...(settings.permissions?.subjects !== undefined
         ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions.scopes) }
         : settings.permissions !== undefined
@@ -330,10 +330,9 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
       // policy with the same primitive the engine uses. Declaring them without that would be worse
       // than dropping them: the model would be told about tools nothing had gated.
       ...tools.environment,
-      // A toolset travels as the block it lowers to; the legacy block travels as it was written. A
-      // block INHERITED from a state that wrote a toolset carries its `subjects`, and is a toolset in
-      // the old clothes: it is lowered again, which puts the shell's entry back to the `smart` the
-      // plan showed as its authored mode (decision 0007 §4).
+      // A toolset travels as the block it lowers to. An INHERITED block that carries `subjects` is
+      // lowered again, which puts the shell's entry back to the `smart` the plan showed as its
+      // authored mode (decision 0007 §4); any other block travels as it came.
       ...(settings.toolset !== undefined || settings.permissions?.subjects !== undefined
         ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions?.scopes) }
         : settings.permissions !== undefined

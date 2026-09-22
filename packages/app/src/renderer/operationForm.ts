@@ -97,18 +97,6 @@ export interface ConversationForm {
   artifacts: string;
 }
 
-export interface PermissionToolRow {
-  tool: string;
-  mode: string;
-}
-
-export interface PermissionsForm {
-  profile: string;
-  /** The default mode for tools the map does not name. */
-  default: string;
-  tools: PermissionToolRow[];
-}
-
 export type { ToolsFieldForm };
 
 export interface ReasoningForm {
@@ -142,7 +130,6 @@ export interface OperationFieldsForm {
   output: SlotRow[];
   session: SessionForm;
   conversation: ConversationForm;
-  permissions: PermissionsForm;
   reasoning: ReasoningForm;
   structured: StructuredFields;
   /** See {@link RefFields}. Only {@link SimpleField.linkable} fields ever appear here. */
@@ -150,10 +137,10 @@ export interface OperationFieldsForm {
   /**
    * `tools` as ONE field — a toolset and the lines written over it (decision 0007 §6).
    *
-   * Present only for a block this form may edit that way: `undefined` is an UNMIGRATED block — a
-   * `tools` LIST, or an old `permissions` block — which keeps the two separate fields it has always
-   * had, unchanged. See `toolsFieldForm.ts` `showsToolsField`; which of the two a state means is
-   * chosen when it is migrated (0007 step 7), never by opening it in a form.
+   * Present only for a block this form may edit that way: `undefined` is a `tools` value that is no
+   * toolset (a binding), which the `tools` box shows read-only. See `toolsFieldForm.ts`
+   * `showsToolsField`. The block's `permissions` (its `scopes`) is not a field here, and survives an
+   * edit untouched.
    */
   toolsField?: ToolsFieldForm;
 }
@@ -167,7 +154,6 @@ export const EMPTY_OPERATION_FIELDS: OperationFieldsForm = {
   output: [],
   session: { mode: "absent", name: "", text: "" },
   conversation: { mode: "", artifacts: "" },
-  permissions: { profile: "", default: "", tools: [] },
   reasoning: { effort: "", budgetTokens: "" },
   structured: {},
 };
@@ -207,16 +193,6 @@ function readConversation(raw: unknown): ConversationForm {
   };
 }
 
-function readPermissions(raw: unknown): PermissionsForm {
-  const decl = asRecord(raw);
-  const tools = asRecord(decl["tools"]);
-  return {
-    profile: typeof decl["profile"] === "string" ? decl["profile"] : "",
-    default: typeof decl["default"] === "string" ? decl["default"] : "",
-    tools: Object.entries(tools).map(([tool, mode]) => ({ tool, mode: typeof mode === "string" ? mode : "" })),
-  };
-}
-
 /** Read one `operation`/`environment` block into the form's model. */
 export function operationFieldsOf(raw: unknown): OperationFieldsForm {
   const op = asRecord(raw);
@@ -230,8 +206,12 @@ export function operationFieldsOf(raw: unknown): OperationFieldsForm {
       fields[spec.name] = "";
       continue;
     }
+    // `tools` is never the list box's: a toolset is the Tools field's, and anything else there (a
+    // binding, or a list the linter refuses) is shown as it is, read-only.
     const ours =
-      spec.type === "list" ? Array.isArray(value) : spec.type === "number" ? typeof value === "number" : typeof value === "string";
+      spec.name === "tools"
+        ? false
+        : spec.type === "list" ? Array.isArray(value) : spec.type === "number" ? typeof value === "number" : typeof value === "string";
     if (!ours) {
       // A plain `{"$ref": …}` on a linkable field is a LINK, and the form owns it: the link control
       // shows the target and can retarget or unlink it. This is the case that used to fall through to
@@ -275,7 +255,6 @@ export function operationFieldsOf(raw: unknown): OperationFieldsForm {
     output: slotsOf(op["output"]),
     session: readSession(op["session"]),
     conversation: readConversation(op["conversation"]),
-    permissions: readPermissions(op["permissions"]),
     reasoning: {
       effort: typeof reasoning["effort"] === "string" ? reasoning["effort"] : "",
       budgetTokens: typeof reasoning["budgetTokens"] === "number" ? String(reasoning["budgetTokens"]) : "",
@@ -376,25 +355,6 @@ function applyConversation(op: Record<string, unknown>, conversation: Conversati
   op["conversation"] = decl;
 }
 
-function applyPermissions(op: Record<string, unknown>, permissions: PermissionsForm): void {
-  const decl: Record<string, unknown> = { ...asRecord(op["permissions"]) };
-  if (permissions.profile.trim().length > 0) decl["profile"] = permissions.profile.trim();
-  else delete decl["profile"];
-  if (permissions.default.trim().length > 0) decl["default"] = permissions.default.trim();
-  else delete decl["default"];
-
-  const tools: Record<string, unknown> = {};
-  for (const row of permissions.tools) {
-    if (row.tool.trim().length === 0 || row.mode.length === 0) continue;
-    tools[row.tool.trim()] = row.mode;
-  }
-  if (Object.keys(tools).length > 0) decl["tools"] = tools;
-  else delete decl["tools"];
-
-  if (Object.keys(decl).length > 0) op["permissions"] = decl;
-  else delete op["permissions"];
-}
-
 function applyReasoning(op: Record<string, unknown>, reasoning: ReasoningForm): void {
   const decl: Record<string, unknown> = { ...asRecord(op["reasoning"]) };
   if (reasoning.effort.length > 0) decl["effort"] = reasoning.effort;
@@ -450,7 +410,6 @@ export function applyOperationFields(previous: unknown, form: OperationFieldsFor
 
   applySession(op, form.session);
   applyConversation(op, form.conversation);
-  applyPermissions(op, form.permissions);
   applyReasoning(op, form.reasoning);
   return op;
 }

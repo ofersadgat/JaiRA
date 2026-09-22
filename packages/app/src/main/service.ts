@@ -4440,8 +4440,8 @@ export class AppService {
      * The message's own choice wins over the project's: it is the narrower, later statement.
      */
     //
-    // ONE map is read for all of it (decision 0007): the message's toolset, or the list, the
-    // `permissions` block and the implementations a state's own declaration arrives as, folded into one.
+    // ONE map is read for all of it (decision 0007): the message's toolset, or the lowered list and
+    // `permissions` block a state's own declaration arrives as, read back into one.
     const { toolset } = toolsetOfSettings(plan.settings);
     const policy: ExecPolicy = compilePolicy(config.policy, {
       execEnv: config.execEnvironment,
@@ -4467,11 +4467,10 @@ export class AppService {
       sessionId: sessionOf(context.position),
       policy,
       approve,
-      // A message that carries a toolset hands it over as it is. One that carries the legacy block
-      // leaves the fold to `gateTools`, which folds it over the names actually INJECTED — so an
-      // always-granted tool the list never mentioned still takes the block's `default`, as it did.
-      // `authored` goes either way, for its `scopes`: where a tool may act is not part of a toolset.
-      ...(plan.settings.toolset !== undefined ? { toolset } : {}),
+      // The toolset, when the message declares one — the composer's map, or a state's lowered block
+      // read back. `authored` goes either way, for its `scopes`: where a tool may act is not part of
+      // a toolset.
+      ...(declaresTools(plan.settings) ? { toolset } : {}),
       ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
       // What a relative scope glob and a relative call path resolve against — see `scopeNarrowingFor`.
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
@@ -9838,9 +9837,6 @@ function sessionOf(position: string): string {
  * says `custom` when it is nobody's. A reader comparing the chip against the Tools card sees the same
  * fact twice, which is the point. The composer asks the same question again for whichever bucket the
  * person picks; both go through `matchToolset`.
- *
- * There is no profile to report any more: an old `read-only` is folded into the map as the denies it
- * meant (`toolsetOfSettings`), so it shows up as lines of the map like everything else.
  *
  * A call that declares no tools at all has no map to match. It names what decides instead — the
  * compiled baseline's default, which is where every tool falls — because `custom` there would claim

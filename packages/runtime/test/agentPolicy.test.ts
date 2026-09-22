@@ -10,17 +10,18 @@
  * configured, displayed, and ignored.
  *
  * The chain under test: `executeWorkflow` → engine (delegation decided by the tree's
- * `capabilitiesFor`, gate built off the services seam) → `AgentCliExecutor` (profile → up-front
- * deny of claude's write-capable built-ins) → the query options a real `claude` would be spawned
- * with. A fake QUERY stands in for the binary alone.
+ * `capabilitiesFor`, gate built off the services seam) → `withAgentToolset` (the state's toolset →
+ * up-front deny of every built-in it does not hold) → `AgentCliExecutor` → the query options a real
+ * `claude` would be spawned with. A fake QUERY stands in for the binary alone.
  */
 import { describe, expect, it } from "vitest";
 import { loadBundle } from "@declarative-ai/hw";
 import type { AgentQuery, AgentQueryOptions } from "@declarative-ai/agents-api";
+import { lowerToolset, parseToolset } from "@jaira/shared";
 import { agentPromptRoutes } from "../src/modelRoutes";
 import { buildPromptExecutor, executeWorkflow, newRegistry } from "../src/wiring";
 
-/** The sync shape: one prompt state, one declared read-only tool, and the authored fence. */
+/** The sync shape: one prompt state, a read-only toolset holding one tool, lowered as the loader lowers it. */
 const files: Record<string, unknown> = {
   digest: {
     label: "Read and report",
@@ -30,10 +31,7 @@ const files: Record<string, unknown> = {
       prompt: "Summarize the workflows.",
       model: "claude-cli/default",
     },
-    environment: {
-      tools: ["read_file"],
-      permissions: { profile: "read-only", tools: { read_file: "allow" } },
-    },
+    environment: lowerToolset(parseToolset({ read_file: "allow", other: "deny" }).toolset),
   },
 };
 

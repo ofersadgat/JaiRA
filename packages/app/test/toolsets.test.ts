@@ -6,8 +6,8 @@
  *
  *  - what the RAIL lists, and which toolset stays open through a write;
  *  - what a section's add-menu offers and what its minus takes away (`composerToolset.ts`);
- *  - the state field's ROUND TRIP — `$ref` plus siblings in, the same document out, and an
- *    unmigrated state left with the two fields it has always had.
+ *  - the state field's ROUND TRIP — `$ref` plus siblings in, the same document out, and a value it
+ *    cannot draw kept as it was.
  *
  * Plus one render: the pane and the field are drawn to static markup, which is what a still picture
  * of them is, and is enough to catch a component that throws on a shape the model allows.
@@ -224,30 +224,27 @@ describe("the state editor's one Tools field", () => {
     expect(applyToolsField(odd, { ...form, lines: { edit: "ask" } })).toEqual({ $ref: "$/toolsets/chat/read-only", read_file: "sometimes", edit: "ask" });
   });
 
-  it("is not the form's field for a LIST, a binding, or a block with the old permissions in it", () => {
+  it("is not the form's field for a binding, or for a list (which the linter refuses)", () => {
     expect(toolsFieldOf(["read_file"])).toBeUndefined();
     expect(toolsFieldOf({ $expr: ".inputs.tools" })).toBeUndefined();
     expect(showsToolsField({ tools: ["read_file"] })).toBe(false);
-    expect(showsToolsField({ permissions: { profile: "read-only" } })).toBe(false);
-    expect(showsToolsField({ permissions: { tools: { read_file: "allow" } } })).toBe(false);
-    // A `permissions` block holding something else entirely (scopes) is not the legacy statement.
+    // Whatever sits in `permissions` has no say in it.
     expect(showsToolsField({ permissions: { scopes: [] } })).toBe(true);
-    expect(showsToolsField({ tools: "$/toolsets/chat/read-only", permissions: { profile: "read-only" } })).toBe(true);
+    expect(showsToolsField({ tools: "$/toolsets/chat/read-only" })).toBe(true);
     expect(showsToolsField({})).toBe(true);
   });
 
-  it("round-trips through the whole operation form, leaving an unmigrated block's two fields alone", () => {
+  it("round-trips through the whole operation form, and keeps a value it cannot draw as it was", () => {
     const migrated = { kind: "prompt", prompt: "go", tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask" } };
     const form = operationFieldsOf(migrated);
     expect(form.toolsField).toEqual({ reference: "$/toolsets/chat/read-only", lines: { write_file: "ask" }, unread: {} });
     expect(applyOperationFields(migrated, form)).toEqual(migrated);
 
-    const legacy = { kind: "prompt", prompt: "go", tools: ["read_file"], permissions: { profile: "read-only", tools: { read_file: "allow" } } };
-    const legacyForm = operationFieldsOf(legacy);
-    expect(legacyForm.toolsField).toBeUndefined();
-    expect(legacyForm.fields["tools"]).toBe("read_file");
-    expect(legacyForm.permissions).toEqual({ profile: "read-only", default: "", tools: [{ tool: "read_file", mode: "allow" }] });
-    expect(applyOperationFields(legacy, legacyForm)).toEqual(legacy);
+    const bound = { kind: "prompt", prompt: "go", tools: { $expr: ".inputs.tools" } };
+    const boundForm = operationFieldsOf(bound);
+    expect(boundForm.toolsField).toBeUndefined();
+    expect(boundForm.structured["tools"]).toBe(true);
+    expect(applyOperationFields(bound, boundForm)).toEqual(bound);
   });
 
   it("writes the toolset the picker chose, and the lines the rows changed", () => {

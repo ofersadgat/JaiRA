@@ -10,8 +10,8 @@
  *    toolset has to become `tools: string[]` + a `permissions` block before the engine sees it. Every
  *    load of AUTHORED files goes through this, for the reason `workflowRefs.ts` gives for its
  *    options: the browser, the pre-run gate, the snapshotter and the CLI must agree on what a state
- *    says, or a workflow would lint as one thing and run as another. (The built-in sync, review and
- *    conformance workflows are generated in the list form and call `loadBundle` directly.)
+ *    says, or a workflow would lint as one thing and run as another. (The built-in generated
+ *    workflows call `loadBundle` directly: sync lowers its own toolset, and the rest declare none.)
  *  - {@link listToolsets} — the BUCKETS: `toolsets/<bucket>/<name>.json` under each layer root,
  *    first layer winning, a bucket free to nest.
  *

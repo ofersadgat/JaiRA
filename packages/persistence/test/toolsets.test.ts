@@ -67,7 +67,7 @@ describe("a toolset, referenced from a state", () => {
       tools: ["read_file", "glob", "bash"],
       // The shell is offered and its LINES are judged: the gate is handed `smart` for it, and the
       // `deny` its author wrote is the answer for any command no entry names (decision 0007 §4).
-      // The two marks say the block was a MAP, which is how a run tells it from a legacy list.
+      // The two marks say the block was a MAP, which is how a run tells it from a state that declared none.
       // `source` rides beside `subjects`: the FILE those subjects came from, which is what an approval
       // names and what "add to the toolset" writes into.
       // A RUN is handed the block whole (upstream `ExecServices.authored`), so nothing is carried twice.
@@ -119,7 +119,7 @@ describe("a toolset, referenced from a state", () => {
     expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow", ...TOOLSET_MARKERS } } });
   });
 
-  it("is inherited by a child exactly as a list is, and a child's own toolset replaces it", () => {
+  it("is inherited by a child, and a child's own toolset replaces it", () => {
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.workflowsDir, "wf.json", {
       environment: { tools: "$/toolsets/chat/read-only" },
@@ -136,38 +136,13 @@ describe("a toolset, referenced from a state", () => {
   });
 });
 
-describe("legacy equivalence", () => {
-  it("the same state in old and new form loads to the same environment, and an old one is untouched", () => {
-    const legacy = { tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "ask" }, other: "deny" } };
-    write(project.paths.workflowsDir, "old.json", state(legacy));
-    write(project.paths.workflowsDir, "new.json", state({ tools: { read_file: "allow", glob: "ask", other: "deny" } }));
-    // The same list and the same modes — and the MAP leaves its marks, which is how a run tells it
-    // from the legacy reading: a map is the whole grant on a delegated agent, a list never was.
-    expect(environmentOf("new")).toEqual({
-      tools: legacy.tools,
-      permissions: { ...legacy.permissions, tools: { ...legacy.permissions.tools, ...TOOLSET_MARKERS } },
-    });
-    expect(environmentOf("old")).toEqual(legacy);
-    // The shell is the one tool the two forms load differently, on purpose: an old `bash: "ask"` is a
-    // mode for the TOOL and asks before every line, as it always did; the map's is the answer for any
-    // command nothing else names, on a line that is taken apart (decision 0007 §4).
-    write(project.paths.workflowsDir, "oldsh.json", state({ tools: ["bash"], permissions: { tools: { bash: "ask" } } }));
-    write(project.paths.workflowsDir, "newsh.json", state({ tools: { bash: "ask" } }));
-    expect(environmentOf("oldsh")).toEqual({ tools: ["bash"], permissions: { tools: { bash: "ask" } } });
-    expect(environmentOf("newsh")).toEqual({
-      tools: ["bash"],
-      permissions: { tools: { bash: "smart", ...TOOLSET_MARKERS }, subjects: { bash: "ask" }, source: "inline" },
-    });
-    // Through the door and around it: the wrapper changes nothing about a state in the old form.
+describe("a state that declares no toolset", () => {
+  it("loads untouched, through the door and around it", () => {
+    write(project.paths.workflowsDir, "plain.json", state({ model: "claude-sonnet-5" }));
     const files = readWorkflowFiles(project.paths.workflowsDir);
-    const direct = loadBundle(files, "old", workflowLoadOptions(project.paths));
-    expect(load("old").states["old"]).toEqual(direct.states["old"]);
-    expect(snapshotHash(load("old"))).toBe(snapshotHash(direct));
-  });
-
-  it("still loads the old profile block, profile and all", () => {
-    write(project.paths.workflowsDir, "sync.json", state({ tools: ["read_file"], permissions: { profile: "read-only", tools: { read_file: "allow" } } }));
-    expect(environmentOf("sync")).toEqual({ tools: ["read_file"], permissions: { profile: "read-only", tools: { read_file: "allow" } } });
+    const direct = loadBundle(files, "plain", workflowLoadOptions(project.paths));
+    expect(load("plain").states["plain"]).toEqual(direct.states["plain"]);
+    expect(snapshotHash(load("plain"))).toBe(snapshotHash(direct));
   });
 });
 
@@ -191,13 +166,26 @@ describe("the snapshot", () => {
 describe("the linter", () => {
   const issuesOf = (rootId: string) => browseWorkflows(project).workflows.find((w) => w.rootId === rootId)!;
 
-  it("is quiet about a good toolset, in either form", () => {
+  it("is quiet about a good toolset", () => {
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "allow", "git log": "allow", script: "ask", other: "deny" });
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
-    write(project.paths.workflowsDir, "old.json", state({ tools: ["read_file"], permissions: { tools: { read_file: "allow" } } }));
     expect(issuesOf("plan").loadError).toBeUndefined();
     expect(issuesOf("plan").issues).toEqual([]);
-    expect(issuesOf("old").issues).toEqual([]);
+  });
+
+  it("refuses the old LIST form and the old `permissions` modes, and a run will not start under either", () => {
+    write(project.paths.workflowsDir, "old.json", state({ tools: ["read_file"], permissions: { tools: { read_file: "allow" } } }));
+    write(project.paths.workflowsDir, "ro.json", state({ permissions: { profile: "read-only" } }));
+    expect(issuesOf("old").issues).toEqual([
+      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/the list form was removed/) }),
+      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/permissions\.tools is no longer read/) }),
+    ]);
+    expect(issuesOf("ro").issues).toEqual([
+      expect.objectContaining({ stateId: "ro", path: "environment.permissions", severity: "error", message: expect.stringMatching(/permissions\.profile is no longer read/) }),
+    ]);
+    expect(() => load("old")).toThrow(/the list form was removed/);
+    rmSync(join(project.paths.workflowsDir, "old.json"));
+    expect(() => load("ro")).toThrow(/permissions\.profile is no longer read/);
   });
 
   it("WARNS that an unknown tool name falls to `other`, and still loads", () => {

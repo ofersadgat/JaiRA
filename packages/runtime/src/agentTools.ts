@@ -36,30 +36,14 @@
  * so the toolset is read back from those ({@link viewOfServices}) — the block for what was WRITTEN
  * (implementations, a written `other`, the shell's authored mode), the tools for what is held.
  *
- * ## The rule is a MAP's. The legacy reading runs exactly as it did
+ * ## A state that declares no toolset is handed on untouched
  *
- * "Not in the toolset → the native is removed" is what a toolset MAP says — an inline map, a
- * `$/toolsets/…` reference, a `$ref` with overrides. A state still written as a LIST (with or without
- * the old `permissions` block), and a state that declares no tools at all, is the LEGACY reading: on
- * a delegated agent its list was a grant and never a fence, the workflows people run today are
- * written that way and lean on the agent's own `Glob`, `Grep` and web tools, and which reading a
- * state means is chosen when it is migrated (decision 0007 step 7) — never inferred here.
- *
- *  - **A legacy RUN is passed through untouched.** What was removed before is removed now, by the
- *    same code: the engine still seeds a list-form file's `profile`, and the upstream executor still
- *    denies claude's write-capable built-ins under it, maps it onto codex's read-only sandbox and
- *    refuses it on a transport that enforces nothing. Nothing is added and nothing translated.
- *  - **A legacy conversation turn** no longer has a profile to seed (`gateTools` registers none), so
- *    the plan removes what the old profile removed — the `deny` entries `applyLegacyProfile` wrote,
- *    and `Task` and its kind under its `other: "deny"` — displaces the built-in of a tool of ours it
- *    injects, keeps a `native` choice under an ask rule, and leaves every built-in the list simply
- *    did not mention where it was, under the gate.
- *
- * A run tells the two apart by the marks a lowered map leaves in its `permissions.tools`
- * (`TOOLSET_MARKERS` in `@jaira/shared`), read off `ctx.authored`. Where only a gate is in hand they
- * are asked of the gate: two entries with DIFFERENT modes, and a gate answers `other` for a name it
- * has no entry for, so two answers that disagree can only be entries. With neither, nothing of a
- * state's block is visible, and the call is read as legacy.
+ * The rule is a MAP's, and a state whose `environment` chain names no toolset has made no statement
+ * about tools at all — which is not the statement "nothing": an empty map removes every built-in. So
+ * such a call is passed through exactly as the engine built it, the agent keeping its own tools under
+ * the gate. A run tells the two apart by the marks a lowered map leaves in its `permissions.tools`
+ * (`TOOLSET_MARKERS` in `@jaira/shared`), read off `ctx.authored`; a conversation turn that declares
+ * nothing publishes no toolset and reads the same way.
  */
 import {
   finishedHandle,
@@ -72,16 +56,13 @@ import {
 import { emptyWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
 import type { ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permissions";
 import {
+  isLoweredToolset,
   nativesOfStandard,
   offeredTools,
-  SHELL_DENIED_MARKERS,
-  SHELL_TOOL,
   standardOfNative,
-  TOOLSET_MARKERS,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
   toolsetOfEnvironment,
-  toolsetOfLegacy,
   unmappedNatives,
   type AgentToolDeclaration,
   type PermissionsDecl,
@@ -160,18 +141,8 @@ export function standardOfAnyNative(native: string): string | undefined {
 
 // --- the toolset, as a call sees it ---------------------------------------------
 
-/** One call's toolset, reduced to the four questions the plan asks of it. */
+/** One call's toolset, reduced to the questions the plan asks of it. */
 export interface ToolsetView {
-  /**
-   * Is this the LEGACY reading — a list, the old block, or nothing declared at all? See the module
-   * header: a legacy call keeps the built-ins it does not mention, and a legacy RUN is not touched.
-   */
-  legacy: boolean;
-  /**
-   * Is this a toolset MAP, which is the whole grant? `false` is the legacy reading — the agent keeps
-   * what the list did not mention, under the gate — and is NOT the same as a map that holds nothing.
-   */
-  declared: boolean;
   /** Whose code runs a standard tool the toolset HOLDS; `undefined` when it does not hold it. */
   held(standard: string): ToolImplementation | undefined;
   /** The mode a standard tool resolves to, where anything says. */
@@ -191,8 +162,6 @@ export function viewOfToolset(toolset: Toolset): ToolsetView {
   const offered = new Set(offeredTools(toolset));
   const entry = (name: string) => (Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined);
   return {
-    legacy: toolset.legacy === true,
-    declared: toolset.legacy !== true,
     held: (standard) => (offered.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
     modeOf: (standard) => entry(standard)?.mode,
     otherFor: () => toolset.other,
@@ -201,7 +170,8 @@ export function viewOfToolset(toolset: Toolset): ToolsetView {
 }
 
 /**
- * A toolset read back off what the ENGINE hands an executor — a run's.
+ * A toolset read back off what the ENGINE hands an executor — a run's — or `undefined` when the
+ * state declared none (see the module header).
  *
  * `ctx.tools` is the state's resolved tool list, so membership is exact. `ctx.authored` is the
  * state's resolved block, so what was WRITTEN is exact: a map's marks, whose code serves a tool, a
@@ -209,55 +179,22 @@ export function viewOfToolset(toolset: Toolset): ToolsetView {
  * through `toolsetOfEnvironment`, the reader a conversation turn uses for the same block. `ctx.gate`
  * resolves a mode through that block, the run's ledger and the project baseline, and answers where
  * the block says nothing.
- *
- * Without `ctx.authored` — an engine older than declarative-ai 3f5e5cc — the marks are asked of the
- * gate (two that disagree can only be entries), the shell's `deny` of the pair lowering used to leave
- * beside it, `other` cannot be told from the gate's last resort, and every held tool is ours.
  */
-export function viewOfServices(ctx: ExecServices): ToolsetView {
+export function viewOfServices(ctx: ExecServices): ToolsetView | undefined {
+  const authored = ctx.authored as PermissionsDecl | undefined;
+  if (!isLoweredToolset(authored)) return undefined;
   const held = new Set(Object.keys(ctx.tools ?? {}));
   const baseline = ctx.policy?.baseline?.tools;
   const gated = (name: string): PermissionMode | undefined =>
     ctx.gate?.modeOf({ name }) ?? (baseline !== undefined && Object.hasOwn(baseline, name) ? baseline[name] : undefined);
-  const authored = ctx.authored as PermissionsDecl | undefined;
-  if (authored !== undefined) {
-    const toolset = toolsetOfEnvironment([...held], authored);
-    const isMap = toolset.legacy !== true;
-    const entry = (name: string) => (Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined);
-    // A block with no `subjects` may be a snapshot lowered before 3f5e5cc, whose shell `deny` rode
-    // in the pair beside it. A block WITH `subjects` is its own statement, and an inherited pair is not.
-    const oldShellDenied = isMap && authored.subjects === undefined && hasMarks(authored.tools, SHELL_DENIED_MARKERS);
-    return {
-      legacy: !isMap,
-      declared: isMap,
-      held: (standard) => (held.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
-      modeOf: (name) => (oldShellDenied && name === SHELL_TOOL ? "deny" : (entry(name)?.mode ?? gated(name))),
-      otherFor: (name) => toolset.other ?? gated(name),
-      otherIsAuthored: toolset.other !== undefined,
-    };
-  }
-  const marked = (marks: Readonly<Record<string, PermissionMode>>): boolean => {
-    const answers = Object.keys(marks).map((name) => ctx.gate?.modeOf({ name }));
-    return ctx.gate !== undefined && new Set(answers).size === answers.length;
-  };
-  const isMap = marked(TOOLSET_MARKERS);
-  // An offered shell whose own entry is `deny` reaches the gate as `smart`, so its lines are read;
-  // the AUTHORED mode is what a switch is derived from, as a conversation turn derives it.
-  const shellDenied = isMap && marked(SHELL_DENIED_MARKERS);
-  const modeOf = (name: string): PermissionMode | undefined => (shellDenied && name === SHELL_TOOL ? "deny" : gated(name));
+  const toolset = toolsetOfEnvironment([...held], authored);
+  const entry = (name: string) => (Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined);
   return {
-    legacy: !isMap,
-    declared: isMap,
-    held: (standard) => (held.has(standard) ? "app" : undefined),
-    modeOf,
-    otherFor: gated,
-    otherIsAuthored: false,
+    held: (standard) => (held.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
+    modeOf: (name) => entry(name)?.mode ?? gated(name),
+    otherFor: (name) => toolset.other ?? gated(name),
+    otherIsAuthored: toolset.other !== undefined,
   };
-}
-
-/** Does a block's `permissions.tools` carry every entry of a mark pair, at its mode? */
-function hasMarks(tools: Readonly<Record<string, unknown>> | undefined, marks: Readonly<Record<string, PermissionMode>>): boolean {
-  return tools !== undefined && Object.entries(marks).every(([name, mode]) => Object.hasOwn(tools, name) && tools[name] === mode);
 }
 
 // --- the plan -----------------------------------------------------------------
@@ -290,18 +227,11 @@ export interface AgentToolPlan {
  * A tool marked `alwaysGranted` is held whether the toolset names it or not: its absence is an
  * omission, never a decision. It still answers to the gate.
  *
- * Takes a toolset, a {@link ToolsetView}, or the legacy pair a toolset is folded from (the granted
- * list and the composer's implementations map). The declaration defaults to claude's, which is what
- * every caller meant before there was more than one.
+ * Takes a toolset or a {@link ToolsetView}. The declaration defaults to claude's, which is what every
+ * caller meant before there was more than one.
  */
-export function planAgentTools(
-  grant: readonly string[] | Toolset | ToolsetView,
-  legacyImplementations: Readonly<Record<string, ToolImplementation>> = {},
-  declaration: AgentToolDeclaration = CLAUDE_TOOLS,
-): AgentToolPlan {
-  const view: ToolsetView = isView(grant)
-    ? grant
-    : viewOfToolset(isToolList(grant) ? toolsetOfLegacy(grant, undefined, legacyImplementations) : grant);
+export function planAgentTools(grant: Toolset | ToolsetView, declaration: AgentToolDeclaration = CLAUDE_TOOLS): AgentToolPlan {
+  const view: ToolsetView = isView(grant) ? grant : viewOfToolset(grant);
   const plan: AgentToolPlan = { inject: [], displaced: [], askNatives: [], denyNatives: [], switches: {} };
   const holds = (standard: string): ToolImplementation | undefined =>
     view.held(standard) ?? (TOOL_SPEC_BY_NAME.get(standard)?.alwaysGranted === true ? "app" : undefined);
@@ -313,9 +243,8 @@ export function planAgentTools(
     const natives = nativesOfStandard(declaration, spec.name);
     const implementation = holds(spec.name);
     if (implementation === undefined) {
-      // NOT IN THE TOOLSET. A MAP removes it. The legacy reading never did: a list was a grant, so
-      // only an explicit `deny` — an old profile's, or the block's own — removes anything.
-      if (view.declared || view.modeOf(spec.name) === "deny") plan.denyNatives.push(...natives);
+      // NOT IN THE TOOLSET: removed.
+      plan.denyNatives.push(...natives);
       continue;
     }
     // A tool we cannot serve has no `app` to choose, whatever the entry recorded.
@@ -338,9 +267,7 @@ export function planAgentTools(
 
   for (const [name, subjects] of Object.entries(declaration.switches ?? {})) {
     const open = (subject: string): boolean => view.modeOf(subject) !== "deny";
-    plan.switches[name] = view.declared
-      ? subjects.some((subject) => holds(subject) !== undefined && open(subject))
-      : subjects.some(open);
+    plan.switches[name] = subjects.some((subject) => holds(subject) !== undefined && open(subject));
   }
   return plan;
 }
@@ -351,12 +278,8 @@ export function refusalsOf(view: ToolsetView): string[] {
   return view.otherFor("other") === "deny" ? [...denied, "other"] : denied;
 }
 
-function isToolList(grant: readonly string[] | Toolset | ToolsetView): grant is readonly string[] {
-  return Array.isArray(grant);
-}
-
-function isView(grant: readonly string[] | Toolset | ToolsetView): grant is ToolsetView {
-  return !Array.isArray(grant) && typeof (grant as ToolsetView).held === "function";
+function isView(grant: Toolset | ToolsetView): grant is ToolsetView {
+  return typeof (grant as ToolsetView).held === "function";
 }
 
 // --- the wrapper --------------------------------------------------------------
@@ -418,10 +341,10 @@ export function withAgentToolset(
       if (op.kind !== "prompt") return executor.start(op, ctx);
       const known = toolsetOf(ctx);
       const view = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
-      // A LEGACY RUN is handed on exactly as the engine built it — see the module header. What was
-      // removed from it before is still removed, upstream, by the code that always removed it.
-      if (known === undefined && view.legacy) return executor.start(op, ctx);
-      const plan = planAgentTools(view, {}, declaration);
+      // A state that declared no toolset is handed on exactly as the engine built it — see the
+      // module header.
+      if (view === undefined) return executor.start(op, ctx);
+      const plan = planAgentTools(view, declaration);
 
       if (declaration.channel === "none") {
         const refused = refusalsOf(view);
@@ -476,9 +399,9 @@ export function agentServices(declaration: AgentToolDeclaration, ctx: ExecServic
   if (declaration.channel !== "tools") return ctx;
   const known = toolsetOf(ctx);
   const read = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
-  if (known === undefined && read.legacy) return ctx;
+  if (read === undefined) return ctx;
   const view: ToolsetView = { ...read, held: (standard) => (read.held(standard) === undefined ? undefined : "app") };
-  const plan = planAgentTools(view, {}, declaration);
+  const plan = planAgentTools(view, declaration);
   return servicesUnder(ctx, declaration, [...new Set([...plan.displaced, ...plan.denyNatives])]);
 }
 
@@ -495,14 +418,14 @@ export type AgentFunctionRun = (inputs: Record<string, unknown>, ctx: ExecServic
  *    read-only executor. A switch that is on leaves the call as it was: the configured sandbox.
  *  - `none` (a generic CLI): a toolset that refuses anything is refused, by name, as the route does.
  *
- * A legacy call is handed on untouched, as {@link withAgentToolset} hands a legacy run on.
+ * A call whose state declared no toolset is handed on untouched, as {@link withAgentToolset} hands one on.
  */
 export function holdAgentFunction<R extends AgentFunctionRun>(declaration: AgentToolDeclaration, run: R, label: string): R {
   return (async (inputs: Record<string, unknown>, ctx: ExecServices) => {
     if (declaration.channel === "tools") return run(inputs, agentServices(declaration, ctx));
     const known = toolsetOf(ctx);
     const view = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
-    if (known === undefined && view.legacy) return run(inputs, ctx);
+    if (view === undefined) return run(inputs, ctx);
     if (declaration.channel === "none") {
       const refused = refusalsOf(view);
       if (refused.length === 0) return run(inputs, ctx);
@@ -517,7 +440,7 @@ export function holdAgentFunction<R extends AgentFunctionRun>(declaration: Agent
         metrics: emptyWorkflowMetrics(),
       };
     }
-    const plan = planAgentTools(view, {}, declaration);
+    const plan = planAgentTools(view, declaration);
     const shut = Object.values(plan.switches).some((on) => !on);
     return run(shut ? { ...inputs, permissionMode: "plan" } : inputs, ctx);
   }) as R;

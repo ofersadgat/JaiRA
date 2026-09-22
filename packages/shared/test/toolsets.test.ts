@@ -1,21 +1,16 @@
 /**
- * The toolset data model (decision 0007 §1): the map, its references, the legacy reader, and the
- * lowering that hands a map-form state to an engine that only takes a list and a block.
+ * The toolset data model (decision 0007 §1): the map, its references, and the lowering that hands a
+ * map-form state to an engine that only takes a list and a block — and reads it back.
  */
 import { Ajv } from "ajv";
 import { describe, expect, it } from "vitest";
 import { operationSchema, toolsSchema } from "../src/schemas";
 import {
-  applyLegacyProfile,
-  carriedShellSubjects,
   declOfToolset,
   heldTools,
   isLoweredToolset,
-  SHELL_DENIED_MARKERS,
-  shellCarriedKey,
   shellWithheld,
   declaresTools,
-  LEGACY_NON_READ_ONLY_TOOLS,
   lowerStateToolsets,
   lowerToolset,
   offeredTools,
@@ -29,7 +24,6 @@ import {
   toolModes,
   TOOLSET_MARKERS,
   toolsetOfEnvironment,
-  toolsetOfLegacy,
   toolsetOfSettings,
   type ToolsetIssue,
   type ToolsetReader,
@@ -97,8 +91,6 @@ describe("parsing the map", () => {
       expect(gateToolModes(offered)).toEqual({ bash: "smart" });
     }
     expect(shellWithheld(parseToolset({ bash: "deny", script: "ask" }).toolset)).toBe(false);
-    // The legacy reading is a grant, and runs as it did.
-    expect(offeredTools(toolsetOfLegacy(["bash"], { tools: { bash: "deny" } }))).toEqual(["bash"]);
   });
 
   it("round-trips a WITHHELD shell through the lowered block: held, not offered, and its authored mode", () => {
@@ -111,32 +103,12 @@ describe("parsing the map", () => {
     expect(declOfToolset(back)).toEqual({ read_file: "allow", bash: "deny", other: "deny" });
   });
 
-  it("no longer CARRIES an offered shell's subjects in `permissions.tools` — a run is handed `subjects` itself", () => {
+  it("carries an offered shell's subjects in `subjects` alone — `permissions.tools` holds tools and the marks", () => {
     const lowered = lowerToolset(parseToolset({ bash: "deny", "git status": "allow", other: "deny" }).toolset, undefined, "$/toolsets/x/y");
     const tools = lowered.permissions!.tools!;
-    expect(tools["bash"]).toBe("smart");
-    // Neither the carried key nor the pair: upstream hands a run's policy and executor the block
-    // whole since declarative-ai 3f5e5cc, and `subjects` merges per key down the chain, so a child's
-    // own replaces an inherited one where a carried key sat beside it.
-    expect(carriedShellSubjects(tools)).toEqual([]);
-    expect(Object.keys(tools)).not.toContain(Object.keys(SHELL_DENIED_MARKERS)[0]);
+    expect(tools).toEqual({ bash: "smart", ...TOOLSET_MARKERS });
     expect(lowered.permissions).toMatchObject({ subjects: { bash: "deny", "git status": "allow" }, source: "$/toolsets/x/y" });
     expect(Object.keys(toolsetOfEnvironment(lowered.tools, lowered.permissions).entries)).toEqual(["bash", "git status"]);
-  });
-
-  it("still READS a block lowered the old way — the carried key and the pair a pinned snapshot holds", () => {
-    const subjects = { bash: "deny" as const, "git status": "allow" as const };
-    const old = {
-      tools: { bash: "smart" as const, ...TOOLSET_MARKERS, ...SHELL_DENIED_MARKERS, [shellCarriedKey({ subjects, source: "inline" })]: "allow" as const },
-      subjects,
-      source: "inline",
-    };
-    expect(carriedShellSubjects(old.tools)).toEqual([{ subjects, source: "inline" }]);
-    // No reader takes a mark for a tool: the block reads back as the toolset it was.
-    const back = toolsetOfEnvironment(["bash"], old);
-    expect(Object.keys(back.entries)).toEqual(["bash", "git status"]);
-    expect(back.entries["bash"]!.mode).toBe("deny");
-    expect(back.legacy).toBeUndefined();
   });
 
   it("reads an object entry, with the implementation chosen too", () => {
@@ -256,127 +228,40 @@ describe("references", () => {
   });
 });
 
-describe("the legacy reader", () => {
-  it("folds the list and the permissions block into the same map", () => {
-    const toolset = toolsetOfLegacy(["read_file", "bash"], { tools: { read_file: "allow", write_file: "deny" }, default: "ask", profile: "full" });
-    expect(toolset.entries).toEqual({
-      read_file: { kind: "tool", mode: "allow" },
-      // No mode of its own, so it takes the block's `default`.
-      bash: { kind: "tool", mode: "ask" },
-      // Named by the block and NOT granted by the list: the mode is kept, the tool is not offered.
-      write_file: { kind: "tool", mode: "deny", offered: false },
-    });
-    // `default` → `other`.
-    expect(toolset.other).toBe("ask");
-    // `full` excluded nothing, so it leaves nothing behind — and a toolset has no profile to carry.
-    expect(Object.keys(toolset)).not.toContain("profile");
-    expect(offeredTools(toolset)).toEqual(["read_file", "bash"]);
-  });
-
-  it("reads an old `profile: \"read-only\"` as the MAP it meant: every writer denied, `other` deny", () => {
-    // The 19 authored states that still say it. `bash` is LISTED here and refused anyway, which is
-    // what the profile did: it ran ahead of the mode and no `allow` beside it rescued a writer.
-    const toolset = toolsetOfLegacy(["read_file", "bash"], { profile: "read-only", tools: { read_file: "allow", bash: "allow" }, default: "ask" });
-    expect(toolset).toEqual({
-      entries: {
-        read_file: { kind: "tool", mode: "allow" },
-        bash: { kind: "tool", mode: "deny", offered: false },
-        edit: { kind: "tool", mode: "deny", offered: false },
-        write_file: { kind: "tool", mode: "deny", offered: false },
-      },
-      other: "deny",
-      // …and it is still the LEGACY reading: on a delegated agent it removes what the profile
-      // removed and nothing a list merely did not mention.
-      legacy: true,
-    });
-    expect(offeredTools(toolset)).toEqual(["read_file"]);
-    // `plan` narrowed identically; a custom name was never registered by JaiRA and changes nothing.
-    expect(toolsetOfLegacy(["bash"], { profile: "plan" }).entries["bash"]).toEqual({ kind: "tool", mode: "deny", offered: false });
-    expect(toolsetOfLegacy(["bash"], { profile: "search" })).toEqual({ entries: { bash: { kind: "tool" } }, legacy: true });
-  });
-
-  it("freezes what `readOnly` said, for that reader alone", () => {
-    expect(LEGACY_NON_READ_ONLY_TOOLS).toEqual(["edit", "write_file", "bash"]);
-    expect(applyLegacyProfile({ entries: {} }, undefined)).toEqual({ entries: {} });
-    expect(applyLegacyProfile({ entries: {} }, "full")).toEqual({ entries: {} });
-  });
-
-  it("never LOWERS a profile: a map beside one takes its denies, and the engine is handed none", () => {
-    const { toolset } = parseToolset({ read_file: "allow", bash: "allow" });
-    const lowered = lowerToolset(toolset, { profile: "read-only" });
-    expect(lowered.tools).toEqual(["read_file"]);
-    expect(lowered.permissions).toEqual({
-      // The shell's refusal rides as its SUBJECT, behind the gate mode every shell entry lowers to.
-      // …and a shell refused with nothing left to run is WITHHELD: its gate mode is `deny`.
-      tools: { read_file: "allow", bash: "deny", edit: "deny", write_file: "deny", ...TOOLSET_MARKERS },
-      other: "deny",
-      subjects: { bash: "deny" },
-    });
-  });
-
-  it("lets an authored `other` win over `default`, and leaves a mode absent when nothing said one", () => {
-    const toolset = toolsetOfLegacy(["bash"], { default: "ask", other: "deny" });
-    expect(toolset.other).toBe("deny");
-    expect(toolsetOfLegacy(["bash"]).entries["bash"]).toEqual({ kind: "tool" });
-    expect(toolModes(toolsetOfLegacy(["bash"]))).toEqual({});
-  });
-
-  it("keeps a listed name it does not know — an unregistered tool is still refused where it always was", () => {
-    expect(offeredTools(toolsetOfLegacy(["echo_tool", "git"]))).toEqual(["echo_tool", "git"]);
-  });
-
-  it("folds the composer's implementations map onto the entries", () => {
-    expect(toolImplementations(toolsetOfLegacy(["read_file", "glob"], undefined, { read_file: "native" }))).toEqual({ read_file: "native" });
-  });
-});
-
-describe("legacy equivalence", () => {
-  const legacy = { tools: ["read_file", "bash", "write_file"], permissions: { tools: { read_file: "allow", bash: "ask", write_file: "deny" }, other: "deny" } } as const;
+describe("reading a lowered block back", () => {
   const map = { read_file: "allow", bash: "ask", write_file: "deny", other: "deny" };
 
-  it("the same state in old and new form is the same GRANT and the same MODES — and only the old one is `legacy`", () => {
-    // What differs is what a delegated agent KEEPS: the legacy reading leaves it the built-ins the
-    // list did not mention, as it always did; a map is the whole grant (decision 0007 §3).
-    const fromMap = parseToolset(map).toolset;
-    const fromLegacy = toolsetOfLegacy(legacy.tools, legacy.permissions);
-    expect(fromMap.legacy).toBeUndefined();
-    expect(fromLegacy.legacy).toBe(true);
-    expect({ ...fromMap, legacy: true }).toEqual(fromLegacy);
-  });
-
-  it("and lowers to the block the old form wrote by hand — but for the shell, whose mode is a SUBJECT, and the marks that say it was a MAP", () => {
+  it("lowers the shell's mode as a SUBJECT, and leaves the marks that say a toolset was declared", () => {
     // `bash: "ask"` is the answer for any command nothing else names, not a mode for the tool: the
     // gate is handed `smart` so the line is taken apart first, and the authored mode rides beside it.
-    const lowered = { tools: legacy.tools, permissions: { tools: { ...legacy.permissions.tools, bash: "smart" }, other: "deny", subjects: { bash: "ask" } } };
-    // …and the marks. A run reads `subjects` off the block itself, so nothing is carried a second time.
-    const marked = {
-      ...lowered,
-      permissions: { ...lowered.permissions, tools: { ...lowered.permissions.tools, ...TOOLSET_MARKERS } },
-    };
-    expect(lowerToolset(parseToolset(map).toolset)).toEqual(marked);
-    // The legacy reading lowers with NO marks, so a run reads it as legacy.
-    expect(lowerToolset(toolsetOfLegacy(legacy.tools, legacy.permissions))).toEqual(lowered);
-    // Without the shell, the legacy block is the same block to the letter.
-    const { bash: _bash, ...tools } = legacy.permissions.tools;
-    const quiet = { tools: ["read_file", "write_file"], permissions: { tools, other: "deny" as const } };
-    expect(lowerToolset(toolsetOfLegacy(quiet.tools, quiet.permissions))).toEqual(quiet);
-    // Either spelling reads back as the toolset it was — a map as a map, a list as the legacy reading.
-    expect(toolsetOfEnvironment(marked.tools, marked.permissions as never)).toEqual(parseToolset(map).toolset);
-    expect(toolsetOfEnvironment(lowered.tools, lowered.permissions as never)).toEqual({ ...parseToolset(map).toolset, legacy: true });
+    expect(lowerToolset(parseToolset(map).toolset)).toEqual({
+      tools: ["read_file", "bash", "write_file"],
+      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "deny", ...TOOLSET_MARKERS }, other: "deny", subjects: { bash: "ask" } },
+    });
   });
 
-  it("tells a lowered MAP from a legacy block by the marks, and strips them on the way back", () => {
+  it("tells a lowered MAP by its marks, and strips them on the way back", () => {
     const lowered = lowerToolset(parseToolset(map).toolset);
     expect(isLoweredToolset(lowered.permissions)).toBe(true);
-    expect(isLoweredToolset(legacy.permissions)).toBe(false);
-    // One mark, or a mark with the wrong mode, is somebody's tool entry and not a mark.
+    // A block with no marks declared no toolset; one mark, or a mark with the wrong mode, is not the pair.
+    expect(isLoweredToolset({ tools: { read_file: "allow" } })).toBe(false);
     expect(isLoweredToolset({ tools: { "jaira:toolset+": "allow" } })).toBe(false);
     const back = toolsetOfEnvironment(lowered.tools, lowered.permissions);
-    expect(back.legacy).toBeUndefined();
-    expect(Object.keys(back.entries)).toEqual(["read_file", "bash", "write_file"]);
-    expect(toolsetOfEnvironment(legacy.tools, legacy.permissions).legacy).toBe(true);
-    // Two marks that DISAGREE, because a gate answers `other` for a name it has no entry for.
-    expect(new Set(Object.values(TOOLSET_MARKERS)).size).toBe(2);
+    expect(back).toEqual(parseToolset(map).toolset);
+    // An empty map still says it was one.
+    expect(lowerToolset(parseToolset({}).toolset)).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS } } });
+  });
+
+  it("keeps a mode for a tool the list does not offer as an UN-offered entry — a child's inherited key", () => {
+    // `permissions.tools` merges per key down the chain, and the list is replaced whole.
+    const back = toolsetOfEnvironment(["glob"], { tools: { glob: "allow", read_file: "allow", ...TOOLSET_MARKERS } });
+    expect(back.entries).toEqual({ glob: { kind: "tool", mode: "allow" }, read_file: { kind: "tool", mode: "allow", offered: false } });
+    expect(offeredTools(back)).toEqual(["glob"]);
+  });
+
+  it("gives a listed tool no mode where the block gives none — a turn that declared no toolset", () => {
+    expect(toolsetOfEnvironment(["show_artifact"]).entries).toEqual({ show_artifact: { kind: "tool" } });
+    expect(toolModes(toolsetOfEnvironment(["show_artifact"]))).toEqual({});
   });
 
   it("round-trips through the lowered shape, command subjects and implementations included", () => {
@@ -391,17 +276,10 @@ describe("legacy equivalence", () => {
     expect(toolsetOfEnvironment(lowered.tools, lowered.permissions)).toEqual(authored);
   });
 
-  it("keeps `scopes` beside a toolset, folds a legacy `profile` INTO it, and never writes `default` or a profile", () => {
+  it("keeps `scopes` beside a toolset, and never writes `default` or a profile", () => {
     const scopes = [{ path: "app/**", default: "allow" as const }];
-    const lowered = lowerToolset(parseToolset({ read_file: "allow" }).toolset, { scopes, profile: "read-only", default: "ask" });
-    // `bash` is refused like the other two — and with nothing left to run it is withheld, `deny` at the gate.
-    expect(lowered.permissions).toEqual({
-      tools: { read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", ...TOOLSET_MARKERS },
-      other: "deny",
-      subjects: { bash: "deny" },
-      scopes,
-    });
-    expect(permissionsOfToolset(toolsetOfLegacy(["bash"], { default: "ask" }))).toEqual({ tools: { bash: "smart" }, other: "ask", subjects: { bash: "ask" } });
+    const lowered = lowerToolset(parseToolset({ read_file: "allow" }).toolset, { scopes });
+    expect(lowered.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, scopes });
   });
 });
 
@@ -411,15 +289,41 @@ describe("lowering a state file", () => {
     "$/lib/list": ["bash"],
   });
 
-  it("leaves an unmigrated state as the SAME object", () => {
+  it("leaves a state with no toolset as the SAME object", () => {
     const def = {
-      environment: { tools: ["read_file"], permissions: { profile: "read-only", tools: { read_file: "allow" } } },
+      environment: { model: "m", permissions: { scopes: [{ path: "app/**", default: "allow" }] } },
       operation: { kind: "prompt", prompt: "go" },
-      children: { a: { environment: { tools: [] } } },
+      children: { a: { environment: { model: "n" } } },
     };
     const lowered = lowerStateToolsets("wf", def, NO_FILES);
     expect(lowered.def).toBe(def);
     expect(lowered.issues).toEqual([]);
+  });
+
+  it("refuses the LIST form — written, or in a file a reference names — and lowers it to nothing", () => {
+    for (const tools of [["read_file"], [], "$/lib/list", { $ref: "$/lib/list" }]) {
+      const { def, issues } = lowerStateToolsets("wf", { environment: { tools } }, read);
+      expect(issues, JSON.stringify(tools)).toEqual([expect.objectContaining({ stateId: "wf", path: "environment.tools", severity: "error" })]);
+      expect(issues[0]!.message).toMatch(/the list form was removed/);
+      expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS } } });
+    }
+  });
+
+  it("refuses the old `permissions` modes, beside a map or on their own, and keeps the scopes", () => {
+    const scopes = [{ path: "app/**", default: "allow" }];
+    const beside = lowerStateToolsets(
+      "wf",
+      { environment: { tools: { read_file: "allow" }, permissions: { tools: { read_file: "deny" }, default: "deny", scopes } } },
+      read,
+    );
+    expect(beside.issues).toEqual([expect.objectContaining({ severity: "error", path: "environment.tools" })]);
+    expect(beside.issues[0]!.message).toMatch(/permissions\.tools, permissions\.default are no longer read/);
+    expect((beside.def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, scopes } });
+
+    const alone = lowerStateToolsets("wf", { operation: { kind: "prompt", permissions: { profile: "read-only", scopes } } }, read);
+    expect(alone.issues).toEqual([expect.objectContaining({ severity: "error", path: "operation.permissions" })]);
+    expect(alone.issues[0]!.message).toMatch(/permissions\.profile is no longer read/);
+    expect((alone.def as { operation: unknown }).operation).toEqual({ kind: "prompt", permissions: { scopes } });
   });
 
   it("lowers a reference, an inline map and a `$ref` with overrides — in all three positions", () => {
@@ -455,8 +359,8 @@ describe("lowering a state file", () => {
     });
   });
 
-  it("leaves what is the engine's: a binding, a scoped name, a list fragment", () => {
-    for (const tools of [{ $expr: ".inputs.tools" }, "review", { $ref: "review" }, { $any: [] }, "$/lib/list", { $ref: "$/lib/list" }]) {
+  it("leaves what is the engine's: a binding, a scoped name", () => {
+    for (const tools of [{ $expr: ".inputs.tools" }, "review", { $ref: "review" }, { $any: [] }]) {
       const def = { environment: { tools } };
       expect(lowerStateToolsets("wf", def, read).def).toBe(def);
     }
@@ -476,33 +380,18 @@ describe("lowering a state file", () => {
     expect(issues).toEqual([expect.objectContaining({ path: "environment.tools", severity: "error" })]);
     expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS } } });
   });
-
-  it("warns that the block's own modes are ignored beside a map, and keeps its scopes", () => {
-    const scopes = [{ path: "app/**", default: "allow" }];
-    const { def, issues } = lowerStateToolsets(
-      "wf",
-      { environment: { tools: { read_file: "allow" }, permissions: { tools: { read_file: "deny" }, default: "deny", scopes } } },
-      read,
-    );
-    expect(issues).toHaveLength(1);
-    expect(issues[0]).toMatchObject({ severity: "warning", path: "environment.tools" });
-    expect(issues[0]!.message).toMatch(/permissions\.tools, permissions\.default beside a toolset map are ignored/);
-    expect((def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, scopes } });
-  });
 });
 
 describe("a message's settings", () => {
-  it("reads the legacy three fields and the map form as the same toolset", () => {
-    const legacy = toolsetOfSettings({
+  it("reads a state's lowered declaration and the map form as the same toolset", () => {
+    const inherited = toolsetOfSettings({
       tools: ["read_file", "bash"],
-      permissions: { tools: { read_file: "allow", bash: "ask" }, other: "deny" },
+      permissions: { tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS }, other: "deny", subjects: { bash: "ask" } },
       implementations: { read_file: "native" },
     });
     const map = toolsetOfSettings({ toolset: { read_file: { mode: "allow", implementation: "native" }, bash: "ask", other: "deny" } });
     expect(map.issues).toEqual([]);
-    // The same grant, modes and implementations; the three fields are the LEGACY reading and the map is not.
-    expect(legacy.toolset.legacy).toBe(true);
-    expect({ ...map.toolset, legacy: true }).toEqual(legacy.toolset);
+    expect(inherited.toolset).toEqual(map.toolset);
   });
 
   it("tells saying nothing about tools from granting none", () => {
@@ -517,17 +406,16 @@ describe("the operation schema", () => {
   const validate = new Ajv({ strict: false, allErrors: true }).compile(toolsSchema());
 
   it.each([
-    [["read_file", "bash"]],
     ["$/toolsets/chat/read-only"],
     [{ read_file: "allow", "git status": "allow", script: "ask", other: "deny" }],
     [{ $ref: "$/toolsets/chat/read-only", write_file: { mode: "ask", implementation: "native" } }],
     [{ $expr: ".inputs.tools" }],
-    [[]],
+    [{}],
   ])("admits %j", (tools) => {
     expect(validate(tools)).toBe(true);
   });
 
-  it.each([[{ read_file: "sometimes" }], [{ read_file: { implementation: "native" } }], [{ read_file: { mode: "ask", implementation: "theirs" } }], [7], [[1]]])(
+  it.each([[{ read_file: "sometimes" }], [{ read_file: { implementation: "native" } }], [{ read_file: { mode: "ask", implementation: "theirs" } }], [7], [[1]], [["read_file", "bash"]], [[]]])(
     "refuses %j",
     (tools) => {
       expect(validate(tools)).toBe(false);

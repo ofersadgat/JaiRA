@@ -41,7 +41,7 @@ export interface ToolsetChoice {
 /**
  * A toolset reduced to what it SAYS, in one order — two toolsets are the same iff these are equal.
  *
- *  - only HELD tools count ({@link holdsTool}): a legacy mode for a tool its list never granted is
+ *  - only HELD tools count ({@link holdsTool}): a mode for a tool the list does not offer is
  *    not a line of the map;
  *  - a tool `registered` does not list is left out on BOTH sides. A map carrying a line for something
  *    this project no longer registers is stale rather than custom, and letting a dead key hold the

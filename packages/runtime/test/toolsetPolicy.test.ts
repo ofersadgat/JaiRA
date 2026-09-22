@@ -1,34 +1,32 @@
 /**
- * The consumers of a grant and its modes read ONE map (decision 0007 §1) — and a state in the old
- * form and the same state in the new form come out of each of them the same.
+ * The consumers of a grant and its modes read ONE map (decision 0007 §1) — and a toolset, and the
+ * lowered block a loaded state holds for it, come out of each of them the same.
  */
 import { describe, expect, it } from "vitest";
 import type { Approver } from "@declarative-ai/permissions";
 import type { LoadedState } from "@declarative-ai/hw";
-import { lowerToolset, parseToolset, shellCarriedKey, TOOLSET_MARKERS, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
+import { lowerToolset, parseToolset, TOOLSET_MARKERS, toolsetOfEnvironment, type ChatSettings } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, stateWithChatSettings } from "../src/chatOperation";
 import { commandDecisionOf, compilePolicy } from "../src/policy";
 import { planAgentTools } from "../src/agentTools";
 import { gateTools, registerAllTools } from "../src/tools";
 import { newRegistry } from "../src/wiring";
 
-const LEGACY = {
-  tools: ["read_file", "bash", "write_file"],
-  permissions: { tools: { read_file: "allow", bash: "ask", write_file: "deny" }, other: "deny" },
-} as const;
 const MAP = { read_file: "allow", bash: "ask", write_file: "deny", other: "deny" } as const;
 
-const legacyToolset = toolsetOfLegacy(LEGACY.tools, LEGACY.permissions);
 const mapToolset = parseToolset(MAP).toolset;
+const LOWERED = lowerToolset(mapToolset);
+/** The map read back off the block a loaded state holds for it. */
+const loweredToolset = toolsetOfEnvironment(LOWERED.tools, LOWERED.permissions);
 
 describe("compilePolicy", () => {
-  it("compiles the same state in old and new form to the same ExecPolicy", () => {
+  it("compiles a toolset and its lowered block, read back, to the same ExecPolicy", () => {
     const policy = { tools: { glob: "allow" as const }, toolDefault: "ask" as const };
-    const fromLegacy = compilePolicy(policy, { toolset: legacyToolset });
+    const fromLowered = compilePolicy(policy, { toolset: loweredToolset });
     const fromMap = compilePolicy(policy, { toolset: mapToolset });
-    expect(fromMap.baseline).toEqual(fromLegacy.baseline);
-    expect(Object.keys(fromMap.smart ?? {}).sort()).toEqual(Object.keys(fromLegacy.smart ?? {}).sort());
-    expect(typeof fromMap.scopeOf).toBe(typeof fromLegacy.scopeOf);
+    expect(fromMap.baseline).toEqual(fromLowered.baseline);
+    expect(Object.keys(fromMap.smart ?? {}).sort()).toEqual(Object.keys(fromLowered.smart ?? {}).sort());
+    expect(typeof fromMap.scopeOf).toBe(typeof fromLowered.scopeOf);
   });
 
   it("folds the call's modes OVER the project's, and leaves the project's alone where it says nothing", () => {
@@ -74,10 +72,10 @@ describe("compilePolicy", () => {
     expect(narrowed("git commit -m x")).toMatchObject({ mode: "deny", parts: ["git commit:denied"] });
     expect(narrowed("cd src && cat a.ts")).toMatchObject({ mode: undefined, smart: "allow", parts: ["read_file:allowed"] });
     expect(narrowed("cat a.ts > b.ts")).toMatchObject({ mode: "deny", parts: ["read_file:allowed", "write_file:denied"] });
-    // An unmigrated block says nothing about parts: only a deny narrows, and the approver decides as it did.
-    const legacy = { tools: { bash: "allow" } };
-    expect(policy.scopeOf!({ name: "bash" }, { command: "git push" } as never, legacy as never)).toBeUndefined();
-    expect(policy.scopeOf!({ name: "bash" }, { command: "git reset --hard" } as never, legacy as never)).toBe("deny");
+    // A block with no `subjects` says nothing about parts: only a deny narrows, and the approver decides.
+    const silent = { tools: { read_file: "allow" } };
+    expect(policy.scopeOf!({ name: "bash" }, { command: "git push" } as never, silent as never)).toBeUndefined();
+    expect(policy.scopeOf!({ name: "bash" }, { command: "git reset --hard" } as never, silent as never)).toBe("deny");
     // …and an agent's own shell is the same tool under another name.
     expect(policy.scopeOf!({ name: "Bash" }, { command: "git commit -m x" } as never, block as never)).toBe("deny");
   });
@@ -95,27 +93,15 @@ describe("compilePolicy", () => {
     // The project's policy alone would run both; the toolset refuses them.
     expect(narrowed("rm notes.txt", lowered.permissions)).toMatchObject({ mode: "deny", parts: ["write_file:denied"] });
     expect(narrowed("npm install", lowered.permissions)).toMatchObject({ mode: "deny" });
-
-    // A snapshot lowered between 2026-09-22 and 3f5e5cc, as an OLDER engine handed it: the subjects
-    // only in the carried key. Still judged by the map.
-    const subjects = { bash: "deny" as const, "git status": "allow" as const, read_file: "allow" as const };
-    const oldCarried = { tools: { ...lowered.permissions!.tools, [shellCarriedKey({ subjects, source: "$/toolsets/x/y" })]: "allow" }, other: "deny" };
-    expect(narrowed("git status", oldCarried)).toMatchObject({ mode: undefined, toolset: "$/toolsets/x/y" });
-    expect(narrowed("rm notes.txt", oldCarried)).toMatchObject({ mode: "deny" });
   });
 
-  it("lets a child's OWN subjects win over a carried key it inherited — not the strictest of both", () => {
-    // A parent pinned from a snapshot lowered the old way still carries its subjects in a key of
-    // `tools`, which upstream merges per key into the child's block. `subjects` merges per key of
-    // `permissions`, so the child's own replaces the parent's — and it is what judges the line.
+  it("lets a child's OWN subjects win over its parent's", () => {
+    // Upstream merges `permissions` per key down the chain (and `tools` one level deeper), so the
+    // child's `subjects` replaces the parent's — and it is what judges the line.
     const policy = compilePolicy({});
-    const parentSubjects = { bash: "deny" as const, "git status": "allow" as const };
-    const parentOld = {
-      tools: { bash: "smart", ...TOOLSET_MARKERS, [shellCarriedKey({ subjects: parentSubjects })]: "allow" },
-      subjects: parentSubjects,
-    };
+    const parent = lowerToolset(parseToolset({ bash: "deny", "git status": "allow" }).toolset).permissions!;
     const child = lowerToolset(parseToolset({ bash: "allow", git: "allow" }).toolset).permissions!;
-    const merged = { ...parentOld, ...child, tools: { ...parentOld.tools, ...child.tools } };
+    const merged = { ...parent, ...child, tools: { ...parent.tools, ...child.tools } };
     expect(merged.subjects).toEqual({ bash: "allow", git: "allow" });
     const mode = (command: string) => policy.scopeOf!({ name: "bash" }, { command } as never, merged as never);
     // The parent's `bash: "deny"` would refuse it; the child's own map runs it.
@@ -125,13 +111,12 @@ describe("compilePolicy", () => {
 });
 
 describe("planAgentTools", () => {
-  it("serves and keeps the same tools from a toolset as from the list it was folded from — and only the MAP removes the rest", () => {
-    const fromLegacy = planAgentTools(["read_file", "glob", "bash"], { glob: "native" });
-    const fromMap = planAgentTools(parseToolset({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, bash: "smart" }).toolset);
-    expect({ ...fromMap, denyNatives: [] }).toEqual(fromLegacy);
-    // The legacy reading leaves the agent what the list did not mention, exactly as it always did.
-    expect(fromLegacy.denyNatives).toEqual([]);
-    expect(fromMap.inject).toEqual(["read_file", "glob", "show_artifact", "bash"].filter((n) => n !== "glob"));
+  it("serves and keeps the same tools from a toolset as from its lowered block — and removes the rest", () => {
+    const toolset = parseToolset({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, bash: "smart" }).toolset;
+    const lowered = lowerToolset(toolset);
+    const fromMap = planAgentTools(toolset);
+    expect(planAgentTools(toolsetOfEnvironment(lowered.tools, lowered.permissions))).toEqual(fromMap);
+    expect(fromMap.inject).toEqual(["read_file", "show_artifact", "bash"]);
     expect(fromMap.askNatives).toEqual(["Glob"]);
     expect(fromMap.denyNatives).toEqual(expect.arrayContaining(["Write", "Edit", "WebFetch"]));
   });
@@ -141,8 +126,8 @@ describe("planAgentTools", () => {
     expect(plan.inject).toEqual(["show_artifact", "bash"]);
   });
 
-  it("does not offer a tool the legacy block only gave a mode", () => {
-    const plan = planAgentTools(toolsetOfLegacy(["read_file"], { tools: { write_file: "deny" } }));
+  it("does not offer a tool a block only gives a mode — a key a child inherited beside its own list", () => {
+    const plan = planAgentTools(toolsetOfEnvironment(["read_file"], { tools: { read_file: "allow", write_file: "allow", ...TOOLSET_MARKERS } }));
     expect(plan.inject).not.toContain("write_file");
     expect(plan.denyNatives).toContain("Write");
   });
@@ -160,9 +145,9 @@ describe("gateTools", () => {
     return gateTools({ registry, names: ["read_file", "write_file"], sessionId: "s1", approve, ...options });
   };
 
-  it("resolves the same modes from a toolset as from the block it replaces", async () => {
+  it("resolves the same modes from a toolset as from the block it lowers to", async () => {
     const outcomes: unknown[] = [];
-    for (const options of [{ toolset: mapToolset }, { authored: { ...LEGACY.permissions } }]) {
+    for (const options of [{ toolset: mapToolset }, { authored: { ...LOWERED.permissions } }]) {
       asked.length = 0;
       const { gate } = gated(options);
       outcomes.push({
@@ -179,25 +164,9 @@ describe("gateTools", () => {
     expect(outcomes[0]).toEqual({ read: true, write: false, unknown: false, asked: [] });
   });
 
-  it("still honours the legacy `default`, as a listed tool's mode and as `other`", async () => {
-    const { gate } = gated({ authored: { default: "deny" } });
-    expect(await gate.check({ name: "read_file" }, { path: "a.ts" })).toMatchObject({ allow: false });
-    expect(await gate.check({ name: "SomeMcpTool" }, {})).toMatchObject({ allow: false });
-  });
-
-  it("seeds NO profile: an old `read-only` is the denies it meant, decided by the map", async () => {
-    asked.length = 0;
-    const { gate, tools } = gated({ authored: { profile: "read-only", tools: { read_file: "allow", write_file: "allow" } } });
-    expect(gate.profile).toBe("full");
+  it("seeds NO profile: the restriction is the map", () => {
     expect(gated({ toolset: mapToolset }).gate.profile).toBe("full");
-    // The writer the block ALLOWED is refused, as the profile refused it — by the gate a delegated
-    // agent asks, and by the wrapped tool a composed runtime runs.
-    expect(await gate.check({ name: "write_file" }, { path: "a.ts" })).toMatchObject({ allow: false });
-    expect(await tools["write_file"]!.run({ path: "a.ts", content: "x" }, {})).toMatchObject({ denied: true });
-    expect((await gate.check({ name: "read_file" }, { path: "a.ts" })).allow).toBe(true);
-    // And a name nothing registered answers to the `other` the profile reads as.
-    expect(await gate.check({ name: "Task" }, {})).toMatchObject({ allow: false });
-    expect(asked).toEqual([]);
+    expect(gated({ authored: { ...LOWERED.permissions } }).gate.profile).toBe("full");
   });
 });
 
@@ -205,14 +174,16 @@ describe("a conversation turn", () => {
   const host = (environment: LoadedState["environment"]): LoadedState =>
     ({ id: "plan", operation: { kind: "prompt", user: "go", config: {}, input: {}, output: { name: "text", kind: "text" } }, environment }) as unknown as LoadedState;
 
-  it("runs the same operation from a toolset as from the three fields it replaces", () => {
-    const legacy: ChatSettings = { tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "ask" } }, implementations: { glob: "native" } };
-    const map: ChatSettings = { toolset: { read_file: "allow", glob: { mode: "ask", implementation: "native" } } };
+  it("runs the same operation from a toolset as from the lowered block a state's declaration arrives as", () => {
+    const decl = { read_file: "allow", glob: { mode: "ask", implementation: "native" } } as const;
+    const lowered = lowerToolset(parseToolset(decl).toolset);
+    const inherited: ChatSettings = { tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) };
+    const map: ChatSettings = { toolset: decl };
     const args = { message: "hi", session: { id: "s@1" } };
-    const fromLegacy = chatOperationOf(chatPlanFor([], legacy), args);
+    const fromInherited = chatOperationOf(chatPlanFor([], inherited), args);
     const fromMap = chatOperationOf(chatPlanFor([], map), args);
-    expect(fromMap.operation).toEqual(fromLegacy.operation);
-    expect(fromMap.environment.tools).toEqual(fromLegacy.environment.tools);
+    expect(fromMap.operation).toEqual(fromInherited.operation);
+    expect(fromMap.environment.tools).toEqual(fromInherited.environment.tools);
     expect(fromMap.environment.permissions).toMatchObject({ tools: { read_file: "allow", glob: "ask" } });
   });
 

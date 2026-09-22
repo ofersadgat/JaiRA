@@ -35,7 +35,7 @@
  */
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { describeCommand, takeApart, type CommandDialect, type ParsedCommand } from "./command";
-import { SHELL_SUBJECT, classifyRequest, lookUp, shellToolsetOf, shellToolsetsOfBlock, subjectWordSpans, type ClassifiedPart, type ShellToolset } from "./commandParts";
+import { SHELL_SUBJECT, classifyRequest, lookUp, shellToolsetOf, shellToolsetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellToolset } from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
 import {
   DEFAULT_ASK_ABOVE_BYTES,
@@ -716,15 +716,14 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   /** The state's own block first — it is the nearer statement — then the toolset this policy was compiled for. */
   const compiledFor = options.toolset !== undefined ? shellToolsetOf(options.toolset) : undefined;
   /**
-   * Every map the line is judged against. The state's own block says where its subjects came from
-   * — on `subjects` and `source`, in a conversation and (since declarative-ai 3f5e5cc) in a run; in
-   * the carried keys of a snapshot an older engine handed over without them. A toolset this policy
-   * was compiled for is a message's, which has no file behind it.
+   * The map the line is judged against. The state's own block says where its subjects came from, on
+   * `subjects` and `source`, in a conversation and in a run. A toolset this policy was compiled for is
+   * a message's, which has no file behind it.
    */
-  const toolsetsFor = (authored: PermissionsDecl | undefined): Array<{ toolset: ShellToolset; source: string }> => {
-    const own = shellToolsetsOfBlock(authored);
-    if (own.length > 0) return own.map((judging) => ({ toolset: judging.toolset, source: judging.source ?? INLINE_TOOLSET }));
-    return compiledFor !== undefined ? [{ toolset: compiledFor, source: INLINE_TOOLSET }] : [];
+  const toolsetFor = (authored: PermissionsDecl | undefined): { toolset: ShellToolset; source: string } | undefined => {
+    const own = shellToolsetOfBlock(authored);
+    if (own !== undefined) return { toolset: own.toolset, source: own.source ?? INLINE_TOOLSET };
+    return compiledFor !== undefined ? { toolset: compiledFor, source: INLINE_TOOLSET } : undefined;
   };
 
   const lineDecisionFor = (input: Record<string, unknown>, authored: PermissionsDecl | undefined): CommandDecision => {
@@ -740,14 +739,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
       });
-    // More than one map only for an old block with no `subjects`, where a child inherited its
-    // parent's carried key beside its own: the nearer one cannot be told apart, so the line answers
-    // to the STRICTEST, never the loosest.
-    const judging = toolsetsFor(authored);
-    const decision =
-      judging.length === 0
-        ? decideUnder(undefined)
-        : judging.map(decideUnder).reduce((a, b) => (RANK[b.action] > RANK[a.action] ? b : a));
+    const decision = decideUnder(toolsetFor(authored));
     LINE_DECISIONS.set(input, decision);
     return decision;
   };
@@ -768,7 +760,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     if (line === undefined) return undefined;
     const block = authored as PermissionsDecl | undefined;
     const decision = lineDecisionFor(args, block);
-    const judged = toolsetsFor(block).length > 0;
+    const judged = toolsetFor(block) !== undefined;
     if (decision.action === "allow" || (decision.action === "require_approval" && !judged)) return undefined;
     // The approver will not run, so this is the only place the decision can be written down.
     auditLine(name, line, decision, "");

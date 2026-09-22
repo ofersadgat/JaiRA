@@ -28,8 +28,8 @@ export * from "./approval";
 export * from "./questions";
 export * from "./agents";
 export * from "./agentTools";
-// What a claude agent is handed under one effective environment, MEASURED through the real chain —
-// the proof a list-to-toolset migration is held to (decision 0007 step 7).
+// What a claude or codex agent is handed under one effective environment, MEASURED through the real
+// chain — how a toolset's effect on an agent is tested (decision 0007).
 export * from "./agentHanded";
 export * from "./tools";
 export * from "./sessionServices";

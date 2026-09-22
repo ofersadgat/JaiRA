@@ -170,7 +170,7 @@ describe("toolsetUsers", () => {
     write(paths.workflowsDir, "sync/review.json", { environment: { tools: "$/toolsets/chat/read-only" } });
     write(paths.workflowsDir, "feature/plan.json", { operation: { kind: "prompt", tools: { $ref: "$/toolsets/chat/read-only", edit: "ask" } } });
     write(paths.workflowsDir, "feature.json", { children: { build: { state: "feature/build", environment: { tools: "$SYSTEM/toolsets/chat/full.json" } } } });
-    write(paths.workflowsDir, "legacy.json", { environment: { tools: ["read_file"] } });
+    write(paths.workflowsDir, "listed.json", { environment: { tools: ["read_file"] } });
     write(paths.workflowsDir, "broken.json", "{ nope");
     // Shadowed by the project's own copy of the same state, so it is not what runs.
     write(join(home, "workflows"), "sync/review.json", { environment: { tools: "$/toolsets/chat/full" } });

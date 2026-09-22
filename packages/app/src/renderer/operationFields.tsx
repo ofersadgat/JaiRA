@@ -12,12 +12,9 @@ import type { JSX } from "react";
 import {
   CONVERSATION_MODES,
   JSON_FIELDS,
-  PERMISSION_MODES,
   SIMPLE_FIELDS,
   type ConversationForm,
   type OperationFieldsForm,
-  type PermissionsForm,
-  type PermissionToolRow,
   type SessionForm,
   type JsonField,
   type SimpleField,
@@ -272,84 +269,6 @@ function ConversationControl({
   );
 }
 
-/** The authored permission baseline (DESIGN §5.1) — profile, default mode, and per-tool overrides. */
-function PermissionsControl({
-  value,
-  onChange,
-}: {
-  value: PermissionsForm;
-  onChange: (permissions: PermissionsForm) => void;
-}): JSX.Element | null {
-  const readOnly = useReadOnly();
-  if (readOnly && value.profile.trim().length === 0 && value.default.length === 0 && value.tools.length === 0) return null;
-  const editTool = (index: number, patch: Partial<PermissionToolRow>): void =>
-    onChange({ ...value, tools: value.tools.map((row, i) => (i === index ? { ...row, ...patch } : row)) });
-  return (
-    <div className="slots">
-      <div className="slots-head">
-        <span>Permissions</span>
-        {readOnly ? null : (
-          <button
-            type="button"
-            className="ghost sm"
-            onClick={() => onChange({ ...value, tools: [...value.tools, { tool: "", mode: "ask" }] })}
-          >
-            + Tool
-          </button>
-        )}
-      </div>
-      <div className="row-controls">
-        <input
-          value={value.profile}
-          placeholder="profile (legacy)"
-          spellCheck={false}
-          title="Legacy, still read: read-only means edit, write_file and bash are denied and any other tool is denied. Write those modes instead — a profile is no longer a concept (decision 0007)."
-          onChange={(e) => onChange({ ...value, profile: e.target.value })}
-        />
-        <select
-          value={value.default}
-          title="how a tool in scope is authorized when the map below does not name it"
-          onChange={(e) => onChange({ ...value, default: e.target.value })}
-        >
-          <option value="">default mode…</option>
-          {PERMISSION_MODES.map((mode) => (
-            <option key={mode} value={mode}>
-              {mode}
-            </option>
-          ))}
-        </select>
-      </div>
-      {value.tools.map((row, i) => (
-        <div className="slot-row permission-row" key={i}>
-          <input
-            value={row.tool}
-            placeholder="tool name"
-            spellCheck={false}
-            onChange={(e) => editTool(i, { tool: e.target.value })}
-          />
-          <select value={row.mode} onChange={(e) => editTool(i, { mode: e.target.value })}>
-            {PERMISSION_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {mode}
-              </option>
-            ))}
-          </select>
-          {readOnly ? null : (
-            <button
-              type="button"
-              className="ghost sm"
-              title="remove"
-              onClick={() => onChange({ ...value, tools: value.tools.filter((_, j) => j !== i) })}
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /**
  * One `operation` or `environment` block, in full.
  *
@@ -403,7 +322,7 @@ export function OperationFieldsEditor({
   const visible = (spec: SimpleField): boolean =>
     (spec.name !== "prompt" || show.prompt) &&
     (spec.name !== "functionRef" || show.function) &&
-    // A migrated block says its tools ONCE, in the field below — see {@link ToolsFieldControl}.
+    // A block says its tools ONCE, in the field below — see {@link ToolsFieldControl}.
     (spec.name !== "tools" || form.toolsField === undefined);
 
   // The block's OWN anchor, so a diagnostic against `operation` has somewhere to scroll to and
@@ -425,10 +344,8 @@ export function OperationFieldsEditor({
           />
         ))}
 
-      {/* ONE Tools field, where the block is written the way decision 0007 says: the toolset it
-          starts from, and the lines it writes over that. It stands where the `tools` list box stood,
-          and the Permissions control below is not drawn at all — the two of them said one thing
-          between them, and this is that thing. An UNMIGRATED block gets neither and keeps both. */}
+      {/* ONE Tools field (decision 0007): the toolset the block starts from, and the lines it writes
+          over that. A `tools` value it cannot draw — a binding — shows read-only in the box above. */}
       {form.toolsField !== undefined ? (
         <ToolsFieldControl
           value={form.toolsField}
@@ -510,10 +427,6 @@ export function OperationFieldsEditor({
       )}
 
       <ConversationControl value={form.conversation} onChange={(conversation) => onChange({ ...form, conversation })} />
-      {/* The old baseline, for an UNMIGRATED block only. A migrated one says all of it above. */}
-      {form.toolsField === undefined ? (
-        <PermissionsControl value={form.permissions} onChange={(permissions) => onChange({ ...form, permissions })} />
-      ) : null}
 
       {/* Thirteen empty boxes when nothing is tuned, which is nearly always. A fold hides them from
           an author; a reading should not carry them at all — and when it does carry them, it opens

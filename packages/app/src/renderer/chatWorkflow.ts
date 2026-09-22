@@ -29,10 +29,10 @@
  *
  *  - {@link CHAT_ASSISTANT} declares no tools. It is a conversation with a model: it reads what you
  *    paste and writes what it says, and cannot run a command or open a file on its own.
- *  - {@link CHAT_AGENT} declares JaiRA's three, a `full` profile and an `ask` default, so the same
- *    conversation works in the project — the reading, editing, command-running loop, with each call
- *    gated by the project policy exactly as a workflow's would be, and every one of them stopping to
- *    ask until somebody says otherwise.
+ *  - {@link CHAT_AGENT} declares a toolset of the file, shell and web tools, each `ask`, and `other`
+ *    `ask`, so the same conversation works in the project — the reading, editing, command-running
+ *    loop, with each call gated by the project policy exactly as a workflow's would be, and every one
+ *    of them stopping to ask until somebody says otherwise.
  *
  * The Chat view starts every new conversation as the AGENT one. Asking first was asking a permission
  * question in the shape of an identity question, before the person had typed the thing that would

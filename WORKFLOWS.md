@@ -840,25 +840,16 @@ the same rule.
   own `Glob`, `Grep`, `Bash`, `Edit`, `Write` or web tools. A state that searches
   holds `glob` and `grep`; JaiRA serves both.
 
-  ⚠️ **That is what a MAP says. The list form is the legacy reading, and keeps
-  what it does not mention.** `"tools": ["read_file"]` — with or without the old
-  `permissions` block — and a state that declares no tools at all run **exactly
-  as they did before toolsets**: on a delegated agent the list is a grant, not a
-  fence, so claude keeps its own `Glob`, `Grep`, `WebFetch`, `WebSearch` and the
-  rest, each under the permission callback as before, and only an old
-  `"profile": "read-only"` takes the writers away. Nothing infers that a list
-  "must have meant" the strict reading: a state **chooses** it by being rewritten
-  as a map, which is the migration (decision 0007 step 7). An inline map, a
-  `$/toolsets/…` reference and a `$ref` with overrides are all maps.
+  ⚠️ **A state that declares no toolset at all has said nothing about tools** —
+  which is not the same as `"tools": {}`. Nothing in its `environment` chain names
+  one, so its agent is handed over as the executor built it: claude keeps its own
+  tools, each under the permission callback, and codex keeps its configured
+  sandbox. An empty map, by contrast, offers nothing and removes every built-in.
 
-  **`jaira workflow migrate-toolsets` does the rewriting**, and it does not
-  rewrite what a state *says* — it measures what the state **does**, by running
-  its effective block through the engine and the agent wrapper to the options a
-  real `claude` would be spawned with, and writes the map that measures the same.
-  So a read-only list keeps the `Glob`, `Grep`, `WebFetch` and `WebSearch` claude
-  had, at the mode they had, and a rewrite it cannot prove equal is refused
-  rather than written. It is a dry run unless you pass `--write`. See
-  [the CLI contract](docs/engineering/contracts/jaira-cli.md).
+  `tools` is a map, a reference or a `$ref` with overrides. A **list**
+  (`"tools": ["read_file"]`) is the old form, removed once every workflow had been
+  rewritten as a map (decision 0007); the linter refuses it as an **error**, and a
+  run will not start under it.
 
   | Transport | How a toolset reaches it |
   | --- | --- |
@@ -940,12 +931,8 @@ the same rule.
   to put the ask rule a kept built-in needs, so `"native"` there gets JaiRA's
   implementation — reach the agent through a model prefix to keep its own.
 
-  ⚠️ **The old form's `bash` mode is still a mode for the tool.** A state written
-  as a list with `permissions.tools.bash: "ask"` asks before every line, as it
-  always did, and `"allow"` runs every line the destructive floor and a rule's
-  `deny` do not refuse; only the map form is judged part by part. `run_command`
-  is a host function with no state toolset in reach: its line answers to `policy`
-  alone.
+  `run_command` is a host function with no state toolset in reach: its line
+  answers to `policy` alone.
 
   ⚠️ **Across layers a toolset replaces the offered TOOLS, and only those.** It
   reaches the engine as a list and a `permissions` block, and the block merges per
@@ -957,49 +944,17 @@ the same rule.
   "app" }`), which replaces the parent's choices whole. Say `other` in a toolset that means to stand alone. The shell is the
   exception that needs no care: a child's own shell entries replace its parent's
   whole, so its lines are judged by its own map.
-
-  **The older form still loads, unchanged**: a list of tool names
-  (`"tools": ["read_file"]`) with the modes in `permissions`. A state written that
-  way is handed to the engine exactly as it was written. Everything that reads a
-  grant and its modes folds the two forms into one map first —
-  `permissions.tools` become entries, `default` becomes `other`.
 - **`conversation.mode`** — `full_history` | `summary` | `fresh` |
   `selected_artifacts` (the last takes `artifacts: [names]`).
   ⚠️ `summary` is **per session, not per state**: one session has one transcript,
   so a session mixing `summary` and `full_history` is summarized for both. The
   lint surface warns — and it reads the *effective* mode, so an inherited one is
   caught too.
-- **`permissions`** — **where** tools may act (`scopes`), and the older home of
-  what a toolset now says: per-tool modes (`tools`), a `default` for unlisted
-  tools, and an `other` for a tool nothing registers. Beside a toolset map,
-  `permissions.tools`, `default` and `other` are **ignored with a lint warning** —
-  a mode is an entry of the map — while `scopes` still apply.
-
-  **There is no `profile` any more** (decision 0007). `read-only` | `plan` |
-  `full` was a second way to say what a toolset says, and "read-only" is now a
-  toolset: the tools that change anything are `deny`, and so is `other`. An old
-  `"profile": "read-only"` is still **read**, as exactly that map:
-
-  | An old block says | It is read as |
-  | --- | --- |
-  | `"profile": "read-only"` (or `"plan"`) | `edit`, `write_file` and `bash` are `deny` and not offered, whatever the list granted and whatever mode sat beside them; `other` is `deny` |
-  | `"profile": "full"`, or none | nothing |
-
-  Beside a toolset **map** the profile is folded into the map with a lint warning
-  and is not handed to the engine. A state still in the **list** form reaches the
-  engine as written, profile included, so the engine's own handling of it (claude's
-  write-capable built-ins denied up front, codex's read-only sandbox, a
-  `generic-cli` refusal) still applies on top — the two agree. Write the entries;
-  `jaira workflow migrate-toolsets` writes them for you, and removes the profile.
-
-  ⚠️ **The one thing a map cannot say is "ask before every shell line."** A
-  toolset's `bash` entry is the answer for *any other command* on a line that is
-  taken apart, not a mode for the tool, and a **run** never sees it: lowering puts
-  it in `permissions.subjects`, and the engine hands the policy a state's `tools`,
-  `default`, `other` and `scopes` and drops the rest. So a line under a map is
-  judged by the project's command policy — which is what §4 of the decision is
-  for, and which is why the migration refuses such a state until you say
-  `--accept shell-judged`.
+- **`permissions`** — **where** tools may act (`scopes`), and nothing else. A
+  tool's mode is an entry of the toolset in `tools`: `permissions.tools`,
+  `default`, `other` and `profile` are the old form, and the linter refuses each
+  as an **error** (`default` is the toolset's `other`; `"profile": "read-only"` is
+  a toolset whose writers and `other` are `deny`).
 
   The sync workflow is the worked example: its states' toolset is the map
   `{ "read_file": "allow", "glob": "allow", "grep": "allow", "other": "deny" }` —
@@ -2690,11 +2645,10 @@ Every one of these fails **silently or misleadingly**:
 14. `tools` is what subjects an agent's commands to the policy. As a **map** it
     is the WHOLE grant: a delegated agent loses the built-in of every standard
     tool the map does not hold, so a map holding only `read_file` cannot `Glob`
-    or `Grep` either — hold `glob` and `grep`. As a **list** it is the legacy
-    reading, a grant and not a fence: the agent keeps the built-ins the list does
-    not mention, exactly as before, until the state is migrated to a map. There
-    is no `profile` to write; a map that must not write does not hold `edit`,
-    `write_file` or `bash`, and says `"other": "deny"`.
+    or `Grep` either — hold `glob` and `grep`. A **list** is refused. A state
+    that declares no `tools` at all leaves its agent as the executor built it.
+    There is no `profile` to write; a map that must not write does not hold
+    `edit`, `write_file` or `bash`, and says `"other": "deny"`.
 15. A `generic-cli` state is refused outright while the policy can escalate to a
     human — which `policy.builtins: false` alone does not settle: a `default` or a
     rule of `require_approval` keeps it escalating.

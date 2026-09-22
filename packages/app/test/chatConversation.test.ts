@@ -137,9 +137,10 @@ describe("the settings of a conversation that has not started yet", () => {
   it("reads them off the state file — what the first message would inherit, and from where", () => {
     const plan = service.chatStartPlan({ stateId: CHAT_AGENT });
     expect(plan.from).toBe(CHAT_AGENT);
-    expect(plan.settings.tools).toEqual(["bash", "read_file", "write_file"]);
+    // The file's toolset, as the lowered list and block a loaded state holds.
+    expect(plan.settings.tools).toEqual(["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search"]);
     expect(plan.origin.tools).toBe("inherited");
-    expect(plan.settings.permissions).toMatchObject({ profile: "full", default: "ask" });
+    expect(plan.settings.permissions).toMatchObject({ tools: { read_file: "ask", bash: "ask" }, other: "ask", subjects: { bash: "ask" } });
     // Nothing is in flight before anything has started, and the machine's offer is still an offer.
     expect(plan.live).toBe("idle");
     expect(plan.available.tools.map((t) => t.name)).toContain("bash");
@@ -174,10 +175,10 @@ describe("the settings of a conversation that has not started yet", () => {
     // conversation IS. The SHIPPED file, since nothing installs a copy (decision 0006) — and no copy
     // appeared because of the pick.
     const state = JSON.parse(service.readWorkflow({ stateId: CHAT_AGENT, layer: "system" }).text) as {
-      environment: { tools: string[] };
+      environment: { tools: Record<string, string> };
     };
     expect(service.readWorkflow({ stateId: CHAT_AGENT, layer: "project" }).exists).toBe(false);
-    expect(state.environment.tools).toEqual(["bash", "read_file", "write_file"]);
+    expect(state.environment.tools).toMatchObject({ bash: "ask", read_file: "ask", write_file: "ask", other: "ask" });
   });
 });
 

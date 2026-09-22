@@ -20,7 +20,7 @@ import {
   toolsetSummary,
   type ToolsetChoice,
 } from "../src/toolsetBuckets";
-import { declOfToolset, lowerToolset, parseToolset, toolsetOfEnvironment, toolsetOfLegacy, type ToolsetDecl } from "../src/toolsets";
+import { declOfToolset, lowerToolset, parseToolset, toolsetOfEnvironment, type ToolsetDecl } from "../src/toolsets";
 
 const choice = (id: string, decl: ToolsetDecl, layer: ToolsetChoice["layer"] = "system"): ToolsetChoice => {
   const cut = id.lastIndexOf("/");
@@ -74,23 +74,16 @@ describe("which toolset a map is", () => {
   });
 
   it("IGNORES a line for a tool no longer registered — stale is not custom", () => {
-    // `presetOf`'s contract, kept. A legacy list that still grants a tool this project retired is a
-    // map with a dead line in it; letting that hold the label at `custom` for ever would make every
-    // toolset look unselectable for no reason the reader could see.
-    const stale = toolsetOfLegacy(["read_file", "bash", "retired_tool"], { tools: { read_file: "ask", bash: "ask", retired_tool: "deny" }, other: "ask" });
+    // `presetOf`'s contract, kept. A block that still holds a tool this project retired is a map with
+    // a dead line in it; letting that hold the label at `custom` for ever would make every toolset
+    // look unselectable for no reason the reader could see.
+    const stale = toolsetOfEnvironment(["read_file", "bash", "retired_tool"], { tools: { read_file: "ask", bash: "ask", retired_tool: "deny" }, other: "ask" });
     expect(matchToolset(stale, CHOICES, "chat", REGISTERED)?.id).toBe("chat/ask-first");
-    // …and a stale MODE for a tool the list never granted is not a line of the map at all.
-    const unGranted = toolsetOfLegacy(["read_file", "bash"], { tools: { read_file: "ask", bash: "ask", write_file: "deny" }, other: "ask" });
+    // …and a MODE for a tool the list does not offer (a key inherited from a parent) is not a line.
+    const unGranted = toolsetOfEnvironment(["read_file", "bash"], { tools: { read_file: "ask", bash: "ask", write_file: "deny" }, other: "ask" });
     expect(matchToolset(unGranted, CHOICES, "chat", REGISTERED)?.id).toBe("chat/ask-first");
     // The same line for a tool that IS registered is a real difference.
-    expect(matchToolset(toolsetOfLegacy(["read_file", "bash", "write_file"], { default: "ask" }), CHOICES, "chat", REGISTERED)).toBeUndefined();
-  });
-
-  it("reads the legacy list form and the map as the same toolset", () => {
-    const legacy = toolsetOfLegacy(["read_file", "bash"], { default: "ask" });
-    expect(legacy.legacy).toBe(true);
-    expect(sameToolset(legacy, of(ASK_FIRST), REGISTERED)).toBe(true);
-    expect(matchToolset(legacy, CHOICES, "chat", REGISTERED)?.id).toBe("chat/ask-first");
+    expect(matchToolset(of({ read_file: "ask", bash: "ask", write_file: "ask", other: "ask" }), CHOICES, "chat", REGISTERED)).toBeUndefined();
   });
 
   it("still matches after a state LOWERED it — the shell's `smart`, the marks, and a tool nothing serves", () => {
@@ -108,7 +101,7 @@ describe("which toolset a map is", () => {
   it("matches nothing when the map holds nothing — undeclared is not a toolset", () => {
     const empty = [...CHOICES, choice("chat/nothing", {})];
     expect(matchToolset(of({}), empty, "chat", REGISTERED)).toBeUndefined();
-    expect(matchToolset(toolsetOfLegacy(undefined), empty, "chat", REGISTERED)).toBeUndefined();
+    expect(matchToolset(toolsetOfEnvironment(undefined), empty, "chat", REGISTERED)).toBeUndefined();
   });
 });
 
@@ -120,7 +113,7 @@ describe("the bucket a conversation opens on", () => {
   });
 
   it("is `chat` for a state that names none", () => {
-    expect(bucketOf(toolsetOfLegacy(["bash", "read_file", "write_file"], { default: "ask" }), CHOICES, REGISTERED)).toBe("chat");
+    expect(bucketOf(toolsetOfEnvironment(undefined), CHOICES, REGISTERED)).toBe("chat");
     expect(bucketOf(of({}), [], REGISTERED)).toBe("chat");
   });
 });

@@ -58,6 +58,20 @@ export const SUPERSEDED: Readonly<Record<string, readonly JsonValue[]>> = {
       },
       operation: { prompt: "{{.inputs.message}}" },
     },
+    // As of cd92ec6 — the old tools LIST and `permissions` block; decision 0007's removal of that
+    // form rewrote it as a toolset map.
+    {
+      label: "Working conversation",
+      description:
+        "A conversation that works in the project, started from the Chat view. Same thread as the plain conversation, plus JaiRA's tools — so it can read files, write them and run commands, each gated by the project policy.",
+      inputs: MESSAGE_INPUT,
+      environment: {
+        kind: "prompt",
+        tools: ["bash", "read_file", "write_file"],
+        permissions: { profile: "full", default: "ask" },
+      },
+      operation: { prompt: "{{.inputs.message}}" },
+    },
   ],
   // As of 586be8a — bindings still read a child's `.outputs.`; de5b5bb made them `.output.`.
   "debug/hello_world": [

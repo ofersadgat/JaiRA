@@ -12,7 +12,6 @@
 import {
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
-  carriedShellSubjects,
   isAbsolutePath,
   isToolsetMarkKey,
   shellSubjects,
@@ -259,15 +258,6 @@ export function shellToolsetOf(toolset: Toolset): ShellToolset | undefined {
   return { entries: { ...toolModes(toolset), ...subjects }, ...(toolset.other !== undefined ? { other: toolset.other } : {}) };
 }
 
-/**
- * The same map from a LOWERED `permissions` block — what the engine hands the policy at the moment
- * of decision. `undefined` for a block lowering did not write (no `subjects`): an unmigrated state
- * says nothing about the parts of a line, and its shell answers to the command policy as it did.
- */
-export function shellToolsetOfBlock(block: PermissionsDecl | undefined): ShellToolset | undefined {
-  return shellToolsetsOfBlock(block)[0]?.toolset;
-}
-
 /** One map a line is judged against, and where it came from. */
 export interface JudgingToolset {
   toolset: ShellToolset;
@@ -275,26 +265,21 @@ export interface JudgingToolset {
 }
 
 /**
- * EVERY map a lowered block judges a line against.
+ * The map a lowered block judges a line against, or `undefined` when the block carries no shell
+ * subjects — a state that declared no toolset, or a map that holds no shell — and the command policy
+ * decides.
  *
- * A block with `subjects` is one map, and only that one: a conversation turn's, a state read straight
- * off its file, and a RUN's since upstream `literalPermissions` passes a host's keys through
- * (declarative-ai 3f5e5cc). `subjects` merges per key of `permissions`, so a child's own replaces its
- * parent's, and a carried key it inherited beside them is not read.
- *
- * A block WITHOUT `subjects` is a snapshot lowered between 2026-09-22 and 3f5e5cc, handed over by an
- * older engine: its subjects are found in the keys lowering carried them in
- * (`SHELL_SUBJECTS_KEY_PREFIX` in `@jaira/shared`), and a child could hold its parent's key beside its
- * own — each is a map, and the caller keeps the strictest answer. Empty for a block no lowering wrote,
- * which is the unmigrated state's "the command policy decides".
+ * The block is a conversation turn's, a state read straight off its file, or a RUN's (upstream
+ * `literalPermissions` passes a host's keys through, declarative-ai 3f5e5cc and later). `subjects`
+ * merges per key of `permissions`, so a child's own replaces its parent's.
  */
-export function shellToolsetsOfBlock(block: PermissionsDecl | undefined): JudgingToolset[] {
-  if (block === undefined) return [];
-  const other = block.other ?? block.default;
+export function shellToolsetOfBlock(block: PermissionsDecl | undefined): JudgingToolset | undefined {
+  if (block?.subjects === undefined) return undefined;
   const tools = Object.fromEntries(Object.entries(block.tools ?? {}).filter(([name]) => !isToolsetMarkKey(name)));
-  const of = (subjects: Record<string, PermissionMode>): ShellToolset => ({ entries: { ...tools, ...subjects }, ...(other !== undefined ? { other } : {}) });
-  if (block.subjects !== undefined) return [{ toolset: of(block.subjects), ...(block.source !== undefined ? { source: block.source } : {}) }];
-  return carriedShellSubjects(block.tools).map((carried) => ({ toolset: of(carried.subjects), ...(carried.source !== undefined ? { source: carried.source } : {}) }));
+  return {
+    toolset: { entries: { ...tools, ...block.subjects }, ...(block.other !== undefined ? { other: block.other } : {}) },
+    ...(block.source !== undefined ? { source: block.source } : {}),
+  };
 }
 
 export interface ToolsetAnswer {

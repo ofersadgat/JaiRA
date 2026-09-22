@@ -40,11 +40,11 @@ const FULL = {
   maxOutputTokens: 16000,
   stopSequences: ["</done>"],
   reasoning: { effort: "high", budgetTokens: 4000 },
-  tools: ["read_file", "run_command"],
+  tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask" },
   session: "review",
   fork: true,
   conversation: { mode: "selected_artifacts", artifacts: ["plan_doc"] },
-  permissions: { profile: "read-only", default: "ask", tools: { run_command: "deny" } },
+  permissions: { scopes: [{ path: "app/**", default: "allow" }] },
   input: { plan: { schema: { type: "string" }, binding: ".inputs.plan" } },
   output: { report: { schema: { type: "string", contentMediaType: "text/markdown" } } },
   path: ["./ops", "$INHERITED"],
@@ -183,18 +183,15 @@ describe("links", () => {
 });
 
 describe("lists", () => {
-  it("round-trips tools through the list box — the UNMIGRATED reading", () => {
-    expect(operationFieldsOf({ tools: ["a", "b"] }).fields["tools"]).toBe("a, b");
-    expect(withFields({ tools: ["a"] }, { tools: "read_file, run_command" })["tools"]).toEqual(["read_file", "run_command"]);
-  });
-
-  it("drops the key when the box is emptied", () => {
-    expect(withFields({ tools: ["a"] }, { tools: "" })).toEqual({});
+  it("never edits `tools` in a list box: a value the Tools field cannot draw is shown read-only, and kept", () => {
+    expect(operationFieldsOf({ tools: ["a", "b"] }).structured["tools"]).toBe(true);
+    expect(withFields({ tools: ["a"] }, { tools: "read_file, run_command" })["tools"]).toEqual(["a"]);
+    expect(withFields({ tools: { $expr: ".inputs.tools" } }, { tools: "" })["tools"]).toEqual({ $expr: ".inputs.tools" });
   });
 
   /**
-   * A block that says NOTHING about tools has nothing to migrate, so it gets the one Tools field
-   * (decision 0007 §6) and draws no list box at all. Typing into a box that is not there writes
+   * A block that says NOTHING about tools gets the one Tools field (decision 0007 §6) and draws no
+   * list box at all. Typing into a box that is not there writes
    * nothing — which is the point: an empty list beside a toolset picker would be a second, silent
    * way to say "no tools".
    */
@@ -256,31 +253,10 @@ describe("conversation", () => {
 });
 
 describe("permissions", () => {
-  it("round-trips the profile, the default and the per-tool map", () => {
-    const decl = { permissions: { profile: "plan", default: "ask", tools: { run_command: "deny" } } };
+  it("is not a field: the block's `scopes` survive an edit untouched", () => {
+    const decl = { permissions: { scopes: [{ path: "app/**", default: "allow" }] } };
     expect(round(decl)).toEqual(decl);
-  });
-
-  it("builds a tool map from rows and drops the half-typed ones", () => {
-    const out = round(
-      {},
-      {
-        permissions: {
-          profile: "",
-          default: "allow",
-          tools: [
-            { tool: "run_command", mode: "ask" },
-            { tool: "", mode: "deny" },
-          ],
-        },
-      },
-    );
-    expect(out["permissions"]).toEqual({ default: "allow", tools: { run_command: "ask" } });
-  });
-
-  it("removes the block once nothing is left in it", () => {
-    const emptied = { permissions: { profile: "", default: "", tools: [] } };
-    expect(round({ permissions: { profile: "full" } }, emptied)).toEqual({});
+    expect(round(decl, { fork: true })).toEqual({ ...decl, fork: true });
   });
 });
 

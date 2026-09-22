@@ -84,13 +84,13 @@ export const SIMPLE_FIELDS: readonly SimpleField[] = [
   { name: "functionRef", key: "function", alias: "functionRef", type: "string", label: "Function", group: "operation",
     kinds: ["function"],
     placeholder: "claude-code, codex-cli, choose_option, …" },
-  // The LIST form. A toolset — a map from a subject to a mode, or a reference to one
-  // (`"$/toolsets/chat/read-only"`) — is the other thing this key holds (`toolsets.ts`, decision
-  // 0007). The form shows that one read-only, as it does any value it did not write, and the schema
-  // (`schemas.ts`) admits both.
+  // A toolset — a map from a subject to a mode, or a reference to one (`"$/toolsets/chat/read-only"`,
+  // `toolsets.ts`, decision 0007). The state editor draws it as its own Tools field; this entry is
+  // what shows a value that field cannot draw (a binding), read-only, and what claims `tools`
+  // diagnostics for the block.
   { name: "tools", key: "tools", type: "list", label: "Tools", group: "operation",
-    placeholder: "read_file, run_command",
-    hint: "tool names — or, in JSON, a toolset: a map from a tool or a command to allow / ask / deny / smart, or a reference to one. An empty list drops the inherited ones" },
+    placeholder: "a toolset map, in JSON",
+    hint: "a toolset: a map from a tool or a command to allow / ask / deny / smart, or a reference to one — `{}` drops the inherited ones" },
   { name: "model", key: "model", type: "string", label: "Model", group: "model",
     kinds: ["prompt"], prominent: true,
     placeholder: "claude-sonnet-5, or claude-cli/sonnet to pin the route",
@@ -187,20 +187,15 @@ export interface ReasoningDecl {
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /**
- * The authored permission baseline: a default, and per-tool overrides.
+ * A `permissions` block in the shape the upstream engine takes — what a toolset LOWERS to.
  *
- * ⚠️ The LEGACY shape, and the shape the upstream engine takes. What an author writes now is a
- * toolset in `tools` (`toolsets.ts`, decision 0007); `tools` and `default` here are still read, and
- * every consumer reads both forms through the one `Toolset` they fold into.
+ * An author writes a toolset in `tools` (`toolsets.ts`, decision 0007) and, here, only `scopes`;
+ * everything else in this block is written by lowering (`permissionsOfToolset`) and read back by
+ * `toolsetOfEnvironment`. The engine still knows a `profile` and a `default`; nothing JaiRA writes
+ * carries either, and the linter refuses an authored one.
  */
 export interface PermissionsDecl {
-  /**
-   * LEGACY, read and never written. A profile is no longer a concept (decision 0007 §1): an old
-   * `"read-only"` is read as the `deny` entries and the `other` it used to mean — `applyLegacyProfile`
-   * in `toolsets.ts` — and no lowering hands one to the engine.
-   */
-  profile?: string;
-  default?: PermissionMode;
+  /** WRITTEN BY LOWERING: each tool entry's mode — the shell's as `smart` (see {@link subjects}). */
   tools?: Record<string, PermissionMode>;
   /**
    * The mode for a tool that is not in the vocabulary at all — see `toolVocabulary.ts`.
@@ -227,8 +222,7 @@ export interface PermissionsDecl {
    *
    * What a shell line's PARTS are judged against (decision 0007 §4). The shell's own entry is here
    * too — `bash`, the mode for any command nothing else names — because `tools.bash` is lowered as
-   * `smart` so that the line is read before anything answers for the tool. Its presence is also what
-   * tells a lowered toolset from an unmigrated block, whose shell answers as it always did.
+   * `smart` so that the line is read before anything answers for the tool.
    */
   subjects?: Record<string, PermissionMode>;
   /**

@@ -11,14 +11,16 @@
   },
   "environment": {
     "kind": "prompt",
-    "tools": [
-      "bash",
-      "read_file",
-      "write_file"
-    ],
-    "permissions": {
-      "profile": "full",
-      "default": "ask"
+    "tools": {
+      "read_file": "ask",
+      "glob": "ask",
+      "grep": "ask",
+      "edit": "ask",
+      "write_file": "ask",
+      "bash": "ask",
+      "web_fetch": "ask",
+      "web_search": "ask",
+      "other": "ask"
     }
   },
   "operation": {

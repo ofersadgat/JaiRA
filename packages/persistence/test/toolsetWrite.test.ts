@@ -136,7 +136,7 @@ describe("writing the line", () => {
     const loaded = loadPlan();
     expect(loaded.issues).toEqual([]);
     expect(loaded.permissions).toEqual({
-      // The two marks say the block was a MAP, which is how a run tells it from a legacy list.
+      // The two marks say the block was a MAP, which is how a run tells it from a state that declared none.
       tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS },
       other: "deny",
       subjects: { bash: "ask", "git status": "allow", "terraform plan": "allow" },
@@ -194,7 +194,7 @@ describe("writing the line", () => {
     expect(loadPlan().issues).toEqual([]);
   });
 
-  it("REFUSES, writing nothing: the built-in layer, a map with no file, a legacy list file, and an empty answer", () => {
+  it("REFUSES, writing nothing: the built-in layer, a map with no file, a list file, and an empty answer", () => {
     const shipped = write(builtIn, "toolsets/chat/ask-first.json", SHIPPED);
     const before = readFileSync(shipped, "utf8");
     expect(() => addToToolset(paths, REF, "system", { git: "allow" })).toThrow(/read-only/);
@@ -205,7 +205,7 @@ describe("writing the line", () => {
     expect(() => addToToolset(paths, REF, "project", {})).toThrow(/nothing to add/);
     expect(existsSync(join(paths.jairaDir, "toolsets"))).toBe(false);
 
-    // The legacy LIST form has no place for a command subject, and is left exactly as it was.
+    // A LIST is no toolset and has no place for a command subject: it is left exactly as it was.
     const list = write(paths.jairaDir, "toolsets/chat/ask-first.json", ["bash", "read_file"]);
     const listBefore = readFileSync(list, "utf8");
     expect(() => addToToolset(paths, REF, "project", { git: "allow" })).toThrow(/not a map/);

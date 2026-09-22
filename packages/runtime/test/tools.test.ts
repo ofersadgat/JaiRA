@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPermissionDenied, PermissionLedger, withPermission, type Approver } from "@declarative-ai/permissions";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
-import { LEGACY_NON_READ_ONLY_TOOLS, READ_ONLY_PRESET_TOOLS } from "@jaira/shared";
+import { READ_ONLY_PRESET_TOOLS } from "@jaira/shared";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 import { createBashTool, gateTools, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
 import { registerFileTools } from "../src/fileTools";
@@ -235,17 +235,18 @@ describe("JAIRA_TOOLS — the gateable set", () => {
     }
   });
 
-  it("keeps the frozen legacy facts true of the tools as built", () => {
-    // `LEGACY_NON_READ_ONLY_TOOLS` and the read-only preset's list are what `readOnly` said on the day
-    // it was removed. They are frozen, not derived — so this is the one place that notices if a tool
-    // they call a reader starts writing.
+  it("keeps the read-only preset's frozen list true of the tools as built", () => {
+    // The read-only preset's list is what `readOnly` said on the day the flag left the vocabulary.
+    // It is frozen, not derived — so this is the one place that notices if a tool it calls a reader
+    // starts writing.
+    const writers = ["edit", "write_file", "bash"];
     const registry = registered();
-    for (const name of LEGACY_NON_READ_ONLY_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(false);
+    for (const name of writers) expect(registry.tools.get(name)!.readOnly, name).toBe(false);
     for (const name of READ_ONLY_PRESET_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(true);
-    // The two frozen lists are the tools that existed THEN, which is the whole of what they claim.
-    // The workflow tools (decision 0005 §3) were served afterwards and say `readOnly` for themselves:
-    // the two that only look are readers, the six that steer work are not.
-    expect([...LEGACY_NON_READ_ONLY_TOOLS, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
+    // The frozen list and the writers are the tools that existed THEN, which is the whole of what
+    // they claim. The workflow tools (decision 0005 §3) were served afterwards and say `readOnly` for
+    // themselves: the two that only look are readers, the six that steer work are not.
+    expect([...writers, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
     for (const name of WORKFLOW_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(name === "list_workflows" || name === "list_tasks");
   });
 

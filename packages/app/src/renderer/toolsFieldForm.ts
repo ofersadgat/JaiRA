@@ -8,10 +8,9 @@
  * "tools": { "read_file": "allow", "other": "deny" }                     // lines of its own only
  * ```
  *
- * All three are this form: a `reference` (empty for none) and `lines`. A state still written the old
- * way — `tools` as a LIST, or a `permissions` block — is NOT: {@link toolsFieldOf} answers
- * `undefined` for it, and the editor keeps showing the two old fields unchanged. Which of the two a
- * state means is chosen when it is migrated (0007 step 7), never by opening it in a form.
+ * All three are this form: a `reference` (empty for none) and `lines`. A value that is not a toolset —
+ * a binding the engine resolves — is NOT: {@link toolsFieldOf} answers `undefined` for it, and the
+ * editor shows it read-only.
  *
  * Pure, and beside the component rather than in it, because there is no DOM harness here: the
  * round-trip (document → form → document) is the part that can lose somebody's line, so it is the
@@ -48,9 +47,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Read a `tools` value into the form, or `undefined` when it is not the form's to edit: the LIST of
- * an unmigrated state, or an object carrying an instruction other than `$ref` (a binding, which the
- * engine reads a non-array `tools` as and a toolset never is).
+ * Read a `tools` value into the form, or `undefined` when it is not the form's to edit: an object
+ * carrying an instruction other than `$ref` (a binding, which the engine reads a non-array `tools` as
+ * and a toolset never is), or anything else that is no toolset — a list included, which the linter
+ * refuses.
  */
 export function toolsFieldOf(raw: unknown): ToolsFieldForm | undefined {
   if (raw === undefined) return NO_TOOLS;
@@ -73,17 +73,9 @@ export function toolsFieldOf(raw: unknown): ToolsFieldForm | undefined {
   return { reference: reference ?? "", lines, unread };
 }
 
-/**
- * Does a block show the ONE Tools field? Yes when its `tools` is the form's — and, where it has no
- * `tools` at all, only when it has no old `permissions` block either: that block is the other half
- * of the legacy statement, and a state that carries one is unmigrated whatever its `tools` says.
- */
+/** Does a block show the ONE Tools field? Yes when its `tools` is the form's to edit. */
 export function showsToolsField(op: Record<string, unknown>): boolean {
-  const field = toolsFieldOf(op["tools"]);
-  if (field === undefined) return false;
-  if (op["tools"] !== undefined) return true;
-  const permissions = op["permissions"];
-  return !isPlainObject(permissions) || (permissions["profile"] === undefined && permissions["default"] === undefined && permissions["tools"] === undefined);
+  return toolsFieldOf(op["tools"]) !== undefined;
 }
 
 /**

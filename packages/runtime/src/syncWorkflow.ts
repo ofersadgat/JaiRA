@@ -360,14 +360,10 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   // nothing here unlocks the writing one, and a transport that can hold the agent to none of it
   // refuses the state.
   //
-  // This block used to say `profile: "read-only"` over `tools: ["read_file"]`, and leaned on the
-  // agent's own `Glob` and `Grep` to find anything — ungoverned, since Claude Code auto-allows its
-  // readers without consulting the callback. `glob` and `grep` are held now because a tool a MAP
-  // does not hold is a tool the agent does not have.
-  //
   // A MAP, lowered here because these files go to `loadBundle` directly and the engine takes a list
   // and a block. Lowered by the same function the loader uses, so the block carries the marks that
-  // tell a run it was a map — the legacy reading of a bare list would leave claude its own `Glob`.
+  // tell a run a toolset was declared — a bare list would read as a state that declared none, and
+  // leave claude every built-in it has.
   const environment = {
     kind: "prompt",
     ...lowerToolset(parseToolset(SYNC_TOOLSET).toolset),

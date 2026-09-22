@@ -9,15 +9,18 @@
  * names. A value may be an object when whose code runs the tool is chosen too:
  * `{ "mode": "ask", "implementation": "native" }`.
  *
- * What a tool list, a `permissions` block and the composer's `implementations` map said in three
- * places is said here in one, and this module is the one place the three are read:
+ * This module is the one place a toolset is read and written:
  *
  *  - {@link parseToolset} reads the MAP an author writes in `environment.tools`;
- *  - {@link toolsetOfLegacy} reads the old LIST and the old `permissions` block into the same shape,
- *    so everything downstream has one thing to consume and an unmigrated state runs as it did;
- *  - {@link lowerStateToolsets} writes a map-form state back out in the shape the upstream engine
- *    takes (`tools: string[]` + a `permissions` block), because the engine reads a non-array `tools`
- *    as a BINDING and refuses a map outright (`unrecognized binding form`).
+ *  - {@link lowerStateToolsets} writes a state's maps out in the shape the upstream engine takes
+ *    (`tools: string[]` + a `permissions` block), because the engine reads a non-array `tools` as a
+ *    BINDING and refuses a map outright (`unrecognized binding form`);
+ *  - {@link toolsetOfEnvironment} reads that lowered shape back — what a loaded state, a message's
+ *    inherited declaration and a run's resolved block all arrive as.
+ *
+ * A map is the only form. The old LIST form of `tools` and the old `permissions` block (`tools`,
+ * `default`, `profile`) were read until every workflow had been migrated (decision 0007 step 7, and
+ * the note of 2026-09-22 there); the linter now refuses them.
  *
  * Pure: no filesystem and no upstream import, so the renderer can read a toolset too. Following a
  * `$ref` needs a file, and that is handed in as a {@link ToolsetReader} — `@jaira/persistence` builds
@@ -44,41 +47,19 @@
  * ## What a run reads
  *
  * The engine hands a run's policy and its executor the state's RESOLVED block, host keys included
- * (upstream `literalPermissions` and `ExecServices.authored`, since declarative-ai 3f5e5cc) — so
+ * (upstream `literalPermissions` and `ExecServices.authored`, declarative-ai 3f5e5cc and later) — so
  * `subjects`, `source`, `implementations` and a written `other` reach a run exactly as they reach a
  * conversation turn, and `implementation: "native"` is honoured in a run too (`withAgentToolset`).
  *
- * Before that, a run was handed only `tools`, `default`, `other`, `profile` and `scopes`, and lowering
- * carried an offered shell's subjects a second time in a key of `permissions.tools`
- * ({@link SHELL_SUBJECTS_KEY_PREFIX}) with {@link SHELL_DENIED_MARKERS} beside a `deny` entry. Nothing
- * WRITES those any more — `permissions` merges per key down the `environment` chain and `tools` one
- * level deeper, so a child's own `subjects` replaces its parent's where a carried key was inherited
- * beside the child's own. Every reader still READS them, for a task pinned to a snapshot lowered the
- * old way.
+ * ## A state that declares no toolset
  *
- * ## The LEGACY reading, and how a run tells it from a map
- *
- * A state still written as a LIST (with or without the old `permissions` block) is the legacy
- * reading, and it runs EXACTLY as it did: on a delegated agent its list is a grant and not a fence,
- * so the built-ins of standard tools the list does not mention stay, under the gate. "Not in the
- * toolset → the native is removed" (decision 0007 §3) is what a MAP says — an inline map, a
- * `$/toolsets/…` reference, a `$ref` with overrides. Which one a state means is chosen when it is
- * migrated (0007 step 7), never inferred. {@link Toolset.legacy} carries the difference.
- *
- * A lowered map says it WAS a map with {@link TOOLSET_MARKERS}, two entries in the lowered
- * `permissions.tools` that no tool is named by, and a legacy block never has them. A run reads them
- * off the block it is handed (`ExecServices.authored`); where only a GATE is in hand they can still be
- * asked about, which is why they are a PAIR with different modes: a gate answers `other` for a name it
- * has no entry for, so one marker could not be told from an `other` that happened to agree with it,
- * and two that DISAGREE can only be entries. They stay the discriminator — a key of their own would
- * inherit down the chain exactly as they do, and every migrated state's lowered block would change
- * for nothing.
- *
- * ## There is no profile
- *
- * `permissions.profile` (`read-only` | `plan` | `full`) is gone as a concept (decision 0007 §1): what
- * it restrained is said by `deny` entries and `other`. An old block that still carries one is READ —
- * {@link applyLegacyProfile} turns it into the entries it used to mean — and nothing here writes one.
+ * A state whose `environment` chain names no toolset at all has said nothing about tools, which is
+ * not the same statement as an empty map: an empty map offers nothing, and a delegated agent loses
+ * every built-in; saying nothing leaves the agent as its executor built it, under the gate. Both
+ * lower to a block with no tools in it, so a lowered map says it WAS one with {@link TOOLSET_MARKERS},
+ * two entries in `permissions.tools` that no tool is named by. A run reads them off the block it is
+ * handed (`ExecServices.authored`); `permissions.tools` merges per key down the `environment` chain,
+ * so a child that inherits its parent's map inherits its marks with it.
  */
 import { INLINE_TOOLSET } from "./commandParts";
 import { PERMISSION_MODES, type ChatSettings, type PermissionMode, type PermissionsDecl, type ToolImplementation } from "./operationVocabulary";
@@ -96,68 +77,16 @@ export const TOOLSET_REF_KEY = "$ref";
 
 /**
  * WRITTEN BY LOWERING, never authored: the two `permissions.tools` entries that say "this block was
- * a toolset MAP" — see the module header. Not tools, never offered, and stripped by every reader.
+ * a toolset MAP" rather than a state that declared none — see the module header. Not tools, never
+ * offered, and stripped by every reader. A pair only because that is what every block lowered since
+ * the migration carries; one would do, and changing it would turn every pinned snapshot's map into
+ * a state that declared nothing.
  */
 export const TOOLSET_MARKERS: Readonly<Record<string, PermissionMode>> = { "jaira:toolset+": "allow", "jaira:toolset-": "deny" };
 
-/**
- * WRITTEN BY LOWERING UNTIL declarative-ai 3f5e5cc, and READ ONLY since: the pair that says "this
- * map's shell is OFFERED and its own entry is `deny`" — `"bash": "deny", "git status": "allow"`, no
- * shell but the named commands. The gate is told `smart` for the shell, so the line is read; a run
- * that had to know the AUTHORED mode (the codex sandbox, which has no per-line channel) asked the gate
- * about this pair. A run now reads the authored mode off `subjects` on the block it is handed; a
- * snapshot lowered before still carries the pair, and is read by it where it has no `subjects`.
- */
-export const SHELL_DENIED_MARKERS: Readonly<Record<string, PermissionMode>> = { "jaira:bash-deny+": "allow", "jaira:bash-deny-": "deny" };
-
-/**
- * WRITTEN BY LOWERING UNTIL declarative-ai 3f5e5cc, and READ ONLY since: the prefix of the one
- * `permissions.tools` key that carried an offered shell's command subjects (and where they came from)
- * into a RUN.
- *
- * Upstream `literalPermissions` used to keep `tools`, `default`, `other`, `profile` and `scopes` and
- * drop the rest — `subjects` and `source` among them — so the subjects rode in a KEY of `tools`:
- * `jaira:shell:` + the JSON of {@link ShellCarried}, with the mode `allow`, which means nothing. It
- * passes a host's keys through now, so `subjects` reaches a run itself, and nothing writes the key.
- * A snapshot lowered before still carries it: a block with `subjects` is judged by `subjects` alone,
- * and one without is judged under every carried key, strictest kept — a child could inherit a
- * parent's key beside its own, since `permissions.tools` merges per key down the chain.
- */
-export const SHELL_SUBJECTS_KEY_PREFIX = "jaira:shell:";
-
-/** What {@link SHELL_SUBJECTS_KEY_PREFIX} carries. */
-export interface ShellCarried {
-  subjects: Record<string, PermissionMode>;
-  source?: string;
-}
-
-/** The `permissions.tools` key that carries one {@link ShellCarried}. */
-export function shellCarriedKey(carried: ShellCarried): string {
-  return SHELL_SUBJECTS_KEY_PREFIX + JSON.stringify({ subjects: carried.subjects, ...(carried.source !== undefined ? { source: carried.source } : {}) });
-}
-
-/** Is this `permissions.tools` key one lowering WROTE — a mark or carried subjects — rather than a tool? */
+/** Is this `permissions.tools` key one of the {@link TOOLSET_MARKERS} rather than a tool? */
 export function isToolsetMarkKey(name: string): boolean {
-  return name.startsWith("jaira:");
-}
-
-/** Every {@link ShellCarried} a block's `permissions.tools` holds, in key order. */
-export function carriedShellSubjects(tools: Readonly<Record<string, unknown>> | undefined): ShellCarried[] {
-  const out: ShellCarried[] = [];
-  for (const key of Object.keys(tools ?? {})) {
-    if (!key.startsWith(SHELL_SUBJECTS_KEY_PREFIX)) continue;
-    try {
-      const value = JSON.parse(key.slice(SHELL_SUBJECTS_KEY_PREFIX.length)) as unknown;
-      if (isPlainObject(value) && isPlainObject(value["subjects"])) {
-        const subjects: Record<string, PermissionMode> = {};
-        for (const [subject, mode] of Object.entries(value["subjects"])) if (isMode(mode)) subjects[subject] = mode;
-        out.push({ subjects, ...(typeof value["source"] === "string" ? { source: value["source"] } : {}) });
-      }
-    } catch {
-      // Not one lowering wrote. It is still a reserved key, and still no tool.
-    }
-  }
-  return out;
+  return Object.hasOwn(TOOLSET_MARKERS, name);
 }
 
 /** Does a block in the upstream shape carry the marks a lowered MAP leaves? */
@@ -180,15 +109,17 @@ export type SubjectKind = "tool" | "command" | "script" | "other" | "unknown-too
 export interface ToolsetEntry {
   kind: "tool" | "command" | "script";
   /**
-   * The entry's mode. Absent ONLY from the legacy list form, where a tool could be granted with no
-   * mode of its own and resolve through the project baseline; an authored map entry always has one.
+   * The entry's mode. An authored map entry always has one. Absent only where a block read back
+   * ({@link toolsetOfEnvironment}) lists a tool it gives no mode — the always-granted tools of a turn
+   * that declared no toolset — which resolves through the project baseline.
    */
   mode?: PermissionMode;
   implementation?: ToolImplementation;
   /**
-   * `false` ONLY from the legacy reader: `permissions.tools` named a tool the `tools` list did not
-   * grant. The mode still matters — a delegated agent's deny floor is built from it — so it is kept,
-   * and the tool is still not offered. A map cannot say this, and has no need to: `deny` is an entry.
+   * `false` only from {@link toolsetOfEnvironment}: the lowered `permissions.tools` gives a mode for
+   * a tool the lowered list does not offer — a withheld shell ({@link shellWithheld}), a tool nothing
+   * serves yet, or an entry a child inherited per key from its parent's map beside its own list. The
+   * mode is kept and the tool is not offered. An authored map never says this: `deny` is an entry.
    */
   offered?: false;
 }
@@ -197,15 +128,8 @@ export interface ToolsetEntry {
 export interface Toolset {
   /** Subject → entry, in authored order. Never holds `other`. */
   entries: Record<string, ToolsetEntry>;
-  /** The mode for everything no entry names. Legacy: `permissions.other ?? permissions.default`. */
+  /** The mode for everything no entry names. */
   other?: PermissionMode;
-  /**
-   * `true` ONLY from {@link toolsetOfLegacy}: this came from a LIST and/or the old `permissions`
-   * block, with no map. A legacy toolset is a GRANT on a delegated agent, as it always was — the
-   * built-ins of standard tools it does not mention stay, under the gate — where a map is the whole
-   * grant and what it does not hold is removed (decision 0007 §3). A map never has this.
-   */
-  legacy?: true;
 }
 
 export interface ToolsetIssue {
@@ -381,72 +305,6 @@ export function resolveToolsetDecl(
   return { ...base, ...siblings };
 }
 
-// --- the legacy reader -------------------------------------------------------
-
-/**
- * FROZEN — the tools `ToolSpec.readOnly` called NOT read-only on the day that flag was removed.
- *
- * Read by {@link applyLegacyProfile} and by nothing else, and never to be extended: it is a record of
- * what `"profile": "read-only"` MEANT when the states that still say it were written, not a fact
- * about tools. A tool registered after this was frozen was never covered by a profile, and a state
- * that wants it refused writes `deny`, or leaves it out of its toolset.
- */
-export const LEGACY_NON_READ_ONLY_TOOLS: readonly string[] = ["edit", "write_file", "bash"];
-
-/** FROZEN — the profile names that narrowed. `full` excluded nothing; any other name was custom. */
-export const LEGACY_NARROWING_PROFILES: readonly string[] = ["read-only", "plan"];
-
-/**
- * An old `permissions.profile`, as the MAP it used to mean (decision 0007 §1).
- *
- * `read-only` — and `plan`, which narrowed identically and which nothing authored — refused every tool
- * that could change anything, whatever the list granted and whatever mode sat beside it, and had no
- * opinion a person could rely on about a name it had never heard of. As a toolset that is: every tool
- * in {@link LEGACY_NON_READ_ONLY_TOOLS} is `deny` and NOT offered, and `other` is `deny`. `full` and
- * an absent profile change nothing. A custom name changes nothing either: JaiRA never registered one.
- *
- * Returns the SAME object when there is nothing to apply.
- */
-export function applyLegacyProfile(toolset: Toolset, profile: string | undefined): Toolset {
-  if (profile === undefined || !LEGACY_NARROWING_PROFILES.includes(profile)) return toolset;
-  const entries: Record<string, ToolsetEntry> = { ...toolset.entries };
-  for (const name of LEGACY_NON_READ_ONLY_TOOLS) entries[name] = { kind: "tool", mode: "deny", offered: false };
-  return { entries, other: "deny", ...(toolset.legacy === true ? { legacy: true as const } : {}) };
-}
-
-/**
- * The old LIST form of `tools` and the old `permissions` block, as the same {@link Toolset}.
- *
- *  - every listed tool is an offered entry, with `permissions.tools[name] ?? permissions.default` as
- *    its mode — or none, when neither said, which resolves through the project baseline as it did;
- *  - a `permissions.tools` name the list did NOT grant is kept as an un-offered entry: its mode
- *    still reaches the baseline a delegated agent builds its deny floor from;
- *  - `default` becomes `other` (`permissions.other` wins where both were written);
- *  - `profile` becomes the entries it used to mean — see {@link applyLegacyProfile}.
- *
- * `implementations` is the composer's third map, folded onto the entries it names.
- */
-export function toolsetOfLegacy(
-  tools: readonly string[] | undefined,
-  permissions?: Pick<PermissionsDecl, "tools" | "default" | "other" | "profile"> | undefined,
-  implementations?: Readonly<Record<string, ToolImplementation>> | undefined,
-): Toolset {
-  const entries: Record<string, ToolsetEntry> = {};
-  const own = <T>(map: Readonly<Record<string, T>> | undefined, name: string): T | undefined =>
-    map !== undefined && Object.hasOwn(map, name) ? map[name] : undefined;
-  for (const name of tools ?? []) {
-    const mode = own(permissions?.tools, name) ?? permissions?.default;
-    const implementation = own(implementations, name);
-    entries[name] = { kind: "tool", ...(mode !== undefined ? { mode } : {}), ...(implementation !== undefined ? { implementation } : {}) };
-  }
-  for (const [name, mode] of Object.entries(permissions?.tools ?? {})) {
-    if (Object.hasOwn(entries, name) || isToolsetMarkKey(name)) continue;
-    entries[name] = { kind: "tool", mode, offered: false };
-  }
-  const other = permissions?.other ?? permissions?.default;
-  return applyLegacyProfile({ entries, ...(other !== undefined ? { other } : {}), legacy: true }, permissions?.profile);
-}
-
 // --- what consumers read -----------------------------------------------------
 
 /**
@@ -472,11 +330,8 @@ export function offeredTools(toolset: Toolset): string[] {
  * codex a held shell turns the writing sandbox on. So it is withheld: {@link offeredTools} leaves it
  * out, {@link gateToolModes} answers `deny` for it, and an agent loses its own shell with it. The
  * entry is still HELD — it is what the author wrote, and it is what a person reads and matches.
- *
- * A map only: the legacy reading is a grant and runs as it did.
  */
 export function shellWithheld(toolset: Toolset): boolean {
-  if (toolset.legacy === true) return false;
   const shell = Object.hasOwn(toolset.entries, SHELL_TOOL) ? toolset.entries[SHELL_TOOL] : undefined;
   if (shell === undefined || shell.kind !== "tool" || shell.mode !== "deny") return false;
   return Object.values(toolset.entries).every((entry) => entry.kind === "tool" || entry.mode === "deny");
@@ -485,10 +340,10 @@ export function shellWithheld(toolset: Toolset): boolean {
 /**
  * Does the toolset HOLD this tool — is its line ticked?
  *
- * An un-offered entry is the legacy reader's "a mode for a tool the list did not grant", and is not
- * held. The one exception is a tool nothing serves yet: lowering leaves it out of the `tools` list
- * (see {@link offeredTools}) and keeps its mode, so a lowered block read back has it un-offered —
- * and it was held. With no list it could ever be on, its entry is the whole of the statement.
+ * An un-offered entry (see {@link ToolsetEntry.offered}) is not held. The one exception is a tool
+ * nothing serves yet: lowering leaves it out of the `tools` list (see {@link offeredTools}) and keeps
+ * its mode, so a lowered block read back has it un-offered — and it was held. With no list it could
+ * ever be on, its entry is the whole of the statement.
  */
 export function holdsTool(toolset: Toolset, name: string): boolean {
   const entry = Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined;
@@ -504,9 +359,8 @@ export function heldTools(toolset: Toolset): string[] {
 /**
  * The mode a line with none of its own reads as — the permission ledger's own last resort.
  *
- * Only the legacy list form can produce such a line (a tool granted with no mode anywhere); it is
- * what the composer has always drawn for it, and what {@link declOfToolset} writes when the map is
- * kept.
+ * What a new line starts at, what the composer draws for a tool listed with no mode (a turn that
+ * declared no toolset), and what {@link declOfToolset} writes for `other` when nothing said.
  */
 export const MODE_WHEN_UNSET: PermissionMode = "ask";
 
@@ -514,8 +368,8 @@ export const MODE_WHEN_UNSET: PermissionMode = "ask";
  * A {@link Toolset} as the MAP an author would write — the inverse of {@link parseToolset}.
  *
  * What the composer sends (`ChatSettings.toolset`) and what `+` keeps as a file. Only what is HELD is
- * written, because in a map present means offered: a legacy un-offered mode has no spelling here and
- * is dropped. An implementation is written only where it is the agent's own, since ours is the
+ * written, because in a map present means offered: an un-offered mode has no spelling here and is
+ * dropped. An implementation is written only where it is the agent's own, since ours is the
  * default. `other` is always written, so the map a person kept says what happens to everything it
  * does not name instead of leaving it to whoever reads it next.
  */
@@ -586,13 +440,9 @@ export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> 
 export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[] | undefined, source?: string | undefined): PermissionsDecl {
   const subjects = shellSubjects(toolset);
   const hasSubjects = Object.keys(subjects).length > 0;
-  // A MAP leaves its marks, so a run can tell it from the legacy reading. See the module header and
-  // {@link TOOLSET_MARKERS}. The shell's subjects are NOT carried a second time in `tools` any more:
-  // a run is handed `subjects` itself (see "What a run reads").
-  const tools = {
-    ...gateToolModes(toolset),
-    ...(toolset.legacy !== true ? TOOLSET_MARKERS : {}),
-  };
+  // A MAP leaves its marks, so a run can tell it from a state that declared none. See the module
+  // header and {@link TOOLSET_MARKERS}.
+  const tools = { ...gateToolModes(toolset), ...TOOLSET_MARKERS };
   const implementations = toolImplementations(toolset);
   return {
     ...(Object.keys(tools).length > 0 ? { tools } : {}),
@@ -606,38 +456,56 @@ export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[]
 /**
  * Read a block in the UPSTREAM shape back into a toolset — the inverse of {@link lowerToolset}.
  *
- * What a loaded state holds is always this shape, whichever form its author wrote, so this is how
- * the chat path gets from a state's environment to the one map. The carried `subjects` and
- * `implementations` come back as the entries they were.
+ * What a loaded state holds is always this shape, so this is how the chat path and a run get from a
+ * state's environment to the one map:
+ *
+ *  - every listed tool is an offered entry, at its `permissions.tools` mode — none where the block
+ *    gives none (the always-granted tools of a turn that declared no toolset);
+ *  - a `permissions.tools` mode for a tool the list does not offer is an un-offered entry
+ *    ({@link ToolsetEntry.offered});
+ *  - `other`, and the carried `subjects` and `implementations`, come back as what they were — the
+ *    shell's entry at its AUTHORED mode, which lowering carried in `subjects` beside the `smart` (or
+ *    the withheld shell's `deny`) it wrote for the gate.
+ *
+ * `implementations` is the composer's map, folded over the block's own.
  */
 export function toolsetOfEnvironment(
   tools: readonly string[] | undefined,
   permissions?: PermissionsDecl | undefined,
   implementations?: Readonly<Record<string, ToolImplementation>> | undefined,
 ): Toolset {
-  const toolset = toolsetOfLegacy(tools, permissions, { ...permissions?.implementations, ...implementations });
-  // The marks a lowered MAP left say this block was never the legacy reading.
-  const lowered = isLoweredToolset(permissions);
-  if (lowered) delete toolset.legacy;
+  const entries: Record<string, ToolsetEntry> = {};
+  const own = <T>(map: Readonly<Record<string, T>> | undefined, name: string): T | undefined =>
+    map !== undefined && Object.hasOwn(map, name) ? map[name] : undefined;
+  const chosen = { ...permissions?.implementations, ...implementations };
+  for (const name of tools ?? []) {
+    const mode = own(permissions?.tools, name);
+    const implementation = own(chosen, name);
+    entries[name] = { kind: "tool", ...(mode !== undefined ? { mode } : {}), ...(implementation !== undefined ? { implementation } : {}) };
+  }
+  for (const [name, mode] of Object.entries(permissions?.tools ?? {})) {
+    if (Object.hasOwn(entries, name) || isToolsetMarkKey(name)) continue;
+    entries[name] = { kind: "tool", mode, offered: false };
+  }
   for (const [subject, mode] of Object.entries(permissions?.subjects ?? {})) {
-    if (Object.hasOwn(toolset.entries, subject)) {
-      if (subject === SHELL_TOOL) {
-        const { offered: _offered, ...entry } = toolset.entries[subject]!;
-        // The shell's entry was lowered as `smart`; its authored mode is the one carried here. A map
-        // that WITHHELD its shell ({@link shellWithheld}) left it off the list with the gate's `deny`,
-        // and it was held all the same.
-        toolset.entries[subject] = lowered ? { ...entry, mode } : { ...toolset.entries[subject]!, mode };
+    const held = Object.hasOwn(entries, subject) ? entries[subject] : undefined;
+    if (subject === SHELL_TOOL) {
+      // The shell's entry was lowered as `smart` (or, WITHHELD — {@link shellWithheld} — left off the
+      // list with the gate's `deny`, and held all the same); its authored mode is the one carried
+      // here. A block that carries the shell's mode and holds no entry for it keeps it un-offered.
+      if (held === undefined) {
+        entries[subject] = { kind: "tool", mode, offered: false };
+      } else {
+        const { offered: _offered, ...entry } = held;
+        entries[subject] = { ...entry, mode };
       }
       continue;
     }
-    // …and a block that carries the shell's mode without granting the shell keeps it un-offered.
-    if (subject === SHELL_TOOL) {
-      toolset.entries[subject] = { kind: "tool", mode, offered: false };
-      continue;
-    }
-    toolset.entries[subject] = { kind: subject === SCRIPT_SUBJECT ? "script" : "command", mode };
+    if (held !== undefined) continue;
+    entries[subject] = { kind: subject === SCRIPT_SUBJECT ? "script" : "command", mode };
   }
-  return toolset;
+  const other = permissions?.other;
+  return { entries, ...(other !== undefined ? { other } : {}) };
 }
 
 // --- lowering: a map-form state, in the shape the engine takes ----------------
@@ -652,13 +520,11 @@ export interface LoweredToolset {
  * One toolset, as `tools: string[]` and a `permissions` block.
  *
  * `rest` is the block's OWN `permissions`, of which only what a toolset does not say survives: its
- * `scopes`. A legacy `profile` beside the map is folded INTO the map ({@link applyLegacyProfile}) and
- * is not written out — the engine is never handed one by a lowering.
+ * `scopes`.
  */
 export function lowerToolset(toolset: Toolset, rest?: PermissionsDecl | undefined, source?: string | undefined): LoweredToolset {
-  const narrowed = applyLegacyProfile(toolset, rest?.profile);
-  const permissions = permissionsOfToolset(narrowed, rest?.scopes, source);
-  return { tools: offeredTools(narrowed), ...(Object.keys(permissions).length > 0 ? { permissions } : {}) };
+  const permissions = permissionsOfToolset(toolset, rest?.scopes, source);
+  return { tools: offeredTools(toolset), ...(Object.keys(permissions).length > 0 ? { permissions } : {}) };
 }
 
 /** An issue against one state file, with the path where it was written. */
@@ -667,9 +533,9 @@ export interface StateToolsetIssue extends ToolsetIssue {
 }
 
 /**
- * Is this `tools` value a TOOLSET, as against the three other things the position can hold?
+ * Is this `tools` value a TOOLSET, as against the other things the position can hold?
  *
- *  - an ARRAY is the legacy list, and is left exactly as written;
+ *  - an ARRAY is the list form, which is gone — {@link lowerStateToolsets} refuses it;
  *  - an object carrying a `$`-instruction other than `$ref` (`$expr`, `$any`, `$binding`, …) is a
  *    binding or a scoped name, and is the engine's;
  *  - a string, or a `$ref`, that is NOT written as a path (`review`, as against `$/toolsets/…`,
@@ -680,6 +546,7 @@ export interface StateToolsetIssue extends ToolsetIssue {
 function isToolsetNode(value: unknown): boolean {
   const pathLike = (s: string): boolean => s.startsWith("$") || s.includes("/") || s.startsWith(".");
   if (typeof value === "string") return pathLike(value);
+  if (Array.isArray(value)) return false;
   if (!isPlainObject(value)) return false;
   for (const key of Object.keys(value)) if (key.startsWith("$") && key !== TOOLSET_REF_KEY) return false;
   const reference = value[TOOLSET_REF_KEY];
@@ -694,8 +561,12 @@ function isToolsetNode(value: unknown): boolean {
  * (`"environment": "$/lib/env"`) is not opened — write the toolset on the state, or reference the
  * toolset rather than the block around it.
  *
- * A file with no toolset in it comes back as the SAME object, untouched — an unmigrated state is not
- * rewritten, which is what makes "runs exactly as before" true by construction.
+ * A file with no toolset in it comes back as the SAME object, untouched.
+ *
+ * The old forms are ERRORS: `tools` as a LIST (written, or in a file a reference names), and a
+ * `permissions` block that says `tools`, `default`, `other` or `profile` — each was a mode, and a mode
+ * is an entry of the map now (`default` is its `other`; a profile is the `deny` entries it meant). A
+ * list lowers to an empty map and the old keys are dropped, so a tolerant caller can go on.
  *
  * On an error the node lowers to what could be read (nothing, for a broken reference), so a tolerant
  * caller — the lint surface — can go on to load the rest; a strict one throws on the issues.
@@ -709,50 +580,57 @@ export function lowerStateToolsets(
   if (!isPlainObject(def)) return { def, issues };
 
   const lowerBlock = (block: unknown, at: string): unknown => {
-    if (!isPlainObject(block) || !isToolsetNode(block["tools"])) return block;
+    if (!isPlainObject(block)) return block;
     const node = block["tools"];
+    const own = block["permissions"];
+    const oldKeys = isPlainObject(own) ? OLD_PERMISSION_KEYS.filter((key) => own[key] !== undefined) : [];
+    const list = Array.isArray(node);
+    if (!list && !isToolsetNode(node)) {
+      // No toolset here. A `permissions` block that still says modes is the old statement on its own.
+      if (oldKeys.length === 0) return block;
+      issues.push({ stateId, path: `${at}.permissions`, message: oldPermissionsMessage(oldKeys), severity: "error" });
+      const { permissions: _permissions, ...others } = block;
+      const kept = withoutOldKeys(own as Record<string, unknown>);
+      return { ...others, ...(Object.keys(kept).length > 0 ? { permissions: kept } : {}) };
+    }
     const found: ToolsetIssue[] = [];
-    // A reference that names a LIST fragment (`["bash"]` in a file) is the legacy form by reference.
-    const reference = typeof node === "string" ? node : (node as Record<string, unknown>)[TOOLSET_REF_KEY];
-    if (typeof reference === "string") {
-      try {
-        if (Array.isArray(read(reference, stateId).value)) return block;
-      } catch {
-        // Reported below, by the resolution that fails the same way.
+    let toolset: Toolset = { entries: {} };
+    if (list) {
+      found.push({ path: "", message: LIST_FORM_MESSAGE, severity: "error" });
+    } else {
+      // A reference that names a LIST fragment (`["bash"]` in a file) is the list form by reference.
+      const reference = typeof node === "string" ? node : (node as Record<string, unknown>)[TOOLSET_REF_KEY];
+      let listed = false;
+      if (typeof reference === "string") {
+        try {
+          listed = Array.isArray(read(reference, stateId).value);
+        } catch {
+          // Reported below, by the resolution that fails the same way.
+        }
+      }
+      if (listed) {
+        found.push({ path: "", message: `'${String(reference)}' names a list — ${LIST_FORM_MESSAGE}`, severity: "error" });
+      } else {
+        const resolved = resolveToolsetDecl(node, read, stateId, found);
+        const parsed = parseToolset(resolved ?? {});
+        if (resolved !== undefined) found.push(...parsed.issues);
+        toolset = parsed.toolset;
       }
     }
-    const resolved = resolveToolsetDecl(node, read, stateId, found);
-    const parsed = parseToolset(resolved ?? {});
-    if (resolved !== undefined) found.push(...parsed.issues);
 
-    const own = block["permissions"];
     let rest: PermissionsDecl | undefined;
     if (own !== undefined && !isPlainObject(own)) {
       found.push({ path: "", message: "a toolset cannot sit beside a bound or referenced `permissions` — write its modes as entries", severity: "error" });
     } else if (own !== undefined) {
       rest = own as PermissionsDecl;
-      if (rest.profile !== undefined) {
-        found.push({
-          path: "",
-          message: `permissions.profile beside a toolset map is read as the entries it used to mean — ${LEGACY_NON_READ_ONLY_TOOLS.join(", ")} and 'other' as 'deny' under '${LEGACY_NARROWING_PROFILES.join("' or '")}', nothing otherwise — and is no longer handed to the engine; write those entries`,
-          severity: "warning",
-        });
-      }
-      const folded = (["tools", "default", "other"] as const).filter((key) => rest?.[key] !== undefined);
-      if (folded.length > 0) {
-        found.push({
-          path: "",
-          message: `permissions.${folded.join(", permissions.")} beside a toolset map ${folded.length === 1 ? "is" : "are"} ignored — a mode is an entry of the map, and 'default' is its 'other'`,
-          severity: "warning",
-        });
-      }
+      if (oldKeys.length > 0) found.push({ path: "", message: oldPermissionsMessage(oldKeys), severity: "error" });
     }
     for (const issue of found) {
       issues.push({ ...issue, stateId, path: issue.path === "" ? `${at}.tools` : `${at}.tools.${issue.path}` });
     }
     // Where the shell's subjects came from, written beside them — see `PermissionsDecl.source`. A
     // bare reference names a FILE; a map, and a `$ref` that says more, are written on the state.
-    const lowered = lowerToolset(parsed.toolset, rest, typeof node === "string" ? node : INLINE_TOOLSET);
+    const lowered = lowerToolset(toolset, rest, typeof node === "string" ? node : INLINE_TOOLSET);
     const permissions = lowered.permissions;
     const { permissions: _permissions, ...others } = block;
     return { ...others, tools: lowered.tools, ...(permissions !== undefined ? { permissions } : {}) };
@@ -775,6 +653,22 @@ export function lowerStateToolsets(
     set("children", mounts);
   }
   return { def: out, issues };
+}
+
+/** The keys of a `permissions` block that said a MODE, before a toolset held them all. `scopes` is not one. */
+const OLD_PERMISSION_KEYS = ["tools", "default", "other", "profile"] as const;
+
+const LIST_FORM_MESSAGE =
+  "`tools` is a toolset map — a map from a tool, a command, `script` or `other` to a mode, or a reference to one; the list form was removed (decision 0007)";
+
+function oldPermissionsMessage(keys: readonly string[]): string {
+  return `permissions.${keys.join(", permissions.")} ${keys.length === 1 ? "is" : "are"} no longer read — a mode is an entry of the toolset in \`tools\`, \`default\` is its \`other\`, and a profile is the \`deny\` entries it meant (decision 0007)`;
+}
+
+function withoutOldKeys(permissions: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...permissions };
+  for (const key of OLD_PERMISSION_KEYS) delete out[key];
+  return out;
 }
 
 // --- the composer's settings -------------------------------------------------
@@ -800,9 +694,6 @@ export function declaresTools(settings: ToolSettings): boolean {
  * A `toolset` that does not parse keeps what could be read; the issues are the caller's to show.
  */
 export function toolsetOfSettings(settings: ToolSettings): { toolset: Toolset; issues: ToolsetIssue[] } {
-  if (settings.toolset !== undefined) {
-    const parsed = parseToolset(settings.toolset);
-    return { ...parsed, toolset: applyLegacyProfile(parsed.toolset, settings.permissions?.profile) };
-  }
+  if (settings.toolset !== undefined) return parseToolset(settings.toolset);
   return { toolset: toolsetOfEnvironment(settings.tools, settings.permissions, settings.implementations), issues: [] };
 }

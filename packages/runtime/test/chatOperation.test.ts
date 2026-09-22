@@ -55,9 +55,9 @@ describe("where the settings come from", () => {
   });
 
   it("takes tools and permissions off the merged execution environment", () => {
-    const plan = chatPlanFor([speaking({ environment: { tools: ["bash"], permissions: { profile: "read-only" } } })]);
+    const plan = chatPlanFor([speaking({ environment: { tools: ["bash"], permissions: { tools: { bash: "smart" }, other: "deny" } } })]);
     expect(plan.settings.tools).toEqual(["bash"]);
-    expect(plan.settings.permissions).toEqual({ profile: "read-only" });
+    expect(plan.settings.permissions).toEqual({ tools: { bash: "smart" }, other: "deny" });
   });
 
   it("passes through every knob hw does not own, so a later one still reaches the model", () => {

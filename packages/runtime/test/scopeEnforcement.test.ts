@@ -32,7 +32,7 @@ const gated = (names: string[]) => {
     names,
     sessionId: "s1",
     approve: allowAll,
-    authored: { profile: "full", tools: { read_file: "allow", write_file: "allow", glob: "allow" }, scopes: [...scopes] as never },
+    authored: { tools: { read_file: "allow", write_file: "allow", glob: "allow" }, scopes: [...scopes] as never },
     workspaceRoot: ROOT,
   });
 };
@@ -104,7 +104,7 @@ describe("both routes a call can travel", () => {
       names: ["read_file"],
       sessionId: "s2",
       approve: allowAll,
-      authored: { profile: "full", tools: { read_file: "allow" } },
+      authored: { tools: { read_file: "allow" } },
       workspaceRoot: ROOT,
     });
     expect(await gate.check({ name: "read_file" }, { path: "/anywhere/at/all" })).toMatchObject({ allow: true });
@@ -127,7 +127,7 @@ describe("the ledger cannot be talked past a scope", () => {
       names: ["read_file"],
       sessionId: "s3",
       approve,
-      authored: { profile: "full", tools: { read_file: "ask" }, scopes: [...scopes] as never },
+      authored: { tools: { read_file: "ask" }, scopes: [...scopes] as never },
       workspaceRoot: ROOT,
     });
     expect(await gate.check({ name: "read_file" }, { path: "/work/a.ts" })).toMatchObject({ allow: true });

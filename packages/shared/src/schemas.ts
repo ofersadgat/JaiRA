@@ -341,22 +341,9 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
     permissions: leaf({
       type: "object",
       properties: {
-        profile: {
-          type: "string",
-          description: "LEGACY, still read: `read-only` means every tool that could change anything is `deny` and `other` is `deny`; write those entries in a toolset instead (decision 0007)",
-        },
-        default: {
-          type: "string",
-          enum: [...PERMISSION_MODES],
-          description: "the older form — the mode for tools the map below does not name; in a toolset this is `other`",
-        },
-        tools: {
-          type: "object",
-          description: "the older form — per-tool modes, keyed by tool name; in a toolset these are its entries",
-          additionalProperties: { type: "string", enum: [...PERMISSION_MODES] },
-        },
+        scopes: { type: "array", items: { type: "object" }, description: "where each tool may act — a path or URL pattern and the modes under it" },
       },
-      description: "where tools may act (`scopes`), and the older home of the modes a toolset in `tools` now holds (§5.1)",
+      description: "where tools may act (`scopes`, §5.1); a tool's mode is an entry of the toolset in `tools`",
     }),
     reasoning: leaf({
       type: "object",
@@ -371,7 +358,7 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
 }
 
 /**
- * `tools` — a toolset, or the list it replaces (decision 0007 §1; WORKFLOWS.md §5.1).
+ * `tools` — a toolset (decision 0007 §1; WORKFLOWS.md §5.1).
  *
  * A toolset is a map from a SUBJECT to a mode: a standard tool (`read_file`), a command
  * (`git commit`, `git`), `script`, or `other`. The subject is not constrained here — a command is
@@ -397,9 +384,8 @@ export function toolsSchema(): SchemaDoc {
   };
   return {
     description:
-      "what the agent may do (§5.1) — a toolset: a map from a tool, a command, `script` or `other` to a mode, or a reference to one (\"$/toolsets/chat/read-only\"). A list of tool names is the older form, and an empty list drops the inherited ones",
+      "what the agent may do (§5.1) — a toolset: a map from a tool, a command, `script` or `other` to a mode, or a reference to one (\"$/toolsets/chat/read-only\"). `{}` drops the inherited ones",
     anyOf: [
-      { type: "array", items: { type: "string" }, description: "the list form: tool names, with modes in `permissions`" },
       { type: "string", description: "a reference to a toolset file — $/toolsets/<bucket>/<name>" },
       {
         type: "object",

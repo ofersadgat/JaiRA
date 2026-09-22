@@ -34,7 +34,7 @@ import {
  */
 export type Parked = Readonly<Record<string, { mode?: PermissionMode; implementation?: ToolImplementation }>>;
 
-/** The map with its legacy mark dropped: whatever the composer writes is a MAP. */
+/** A toolset of these entries — whatever the composer writes is a map. */
 function edited(toolset: Toolset, entries: Record<string, ToolsetEntry>, other = toolset.other): Toolset {
   return { entries, ...(other !== undefined ? { other } : {}) };
 }

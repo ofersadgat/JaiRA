@@ -1,33 +1,26 @@
 /**
- * What a delegated claude agent is ACTUALLY handed under one effective `environment` — measured, not
- * modelled (decision 0007 step 7).
+ * What a delegated claude or codex agent is ACTUALLY handed under one effective `environment` —
+ * measured, not modelled (decision 0007).
  *
- * The migration from the list form to a toolset map must preserve what a state DOES, not what it
- * SAYS, and the two differ: a list is a grant and a map is a fence (`agentTools.ts`). So "is this map
- * the same as that list" cannot be answered by comparing the two documents. It is answered here, by
- * running each one through the chain a real run goes through and looking at what comes out:
+ * What a toolset does to an agent is the product of the engine, JaiRA's wrapper and the upstream
+ * executor, and a test that restated any of their rules would stay green while the chain drifted.
+ * So a lowered block is run through the chain a real run goes through, and what comes out is read:
  *
- *   a one-state workflow → the ENGINE (which resolves the tools and builds the gate, seeding an old
- *   `profile`) → `withAgentToolset` (JaiRA's wrapper, by claude's own declaration) → the upstream
- *   agent executor → the options a real `claude` would be spawned with.
+ *   a one-state workflow → the ENGINE (which resolves the tools and builds the gate) →
+ *   `withAgentToolset` (JaiRA's wrapper, by claude's own declaration) → the upstream agent executor
+ *   → the options a real `claude` would be spawned with.
  *
  * A fake QUERY stands in for the binary alone — the rig `agentToolset.test.ts` pins. What is read off
  * the spawn: the tools of ours that are served, the built-ins on the deny list, the pre-approvals,
  * and — by asking the spawn's own permission callback — what decides a call by every name the agent
  * could still address. Nothing here restates a rule of the gate, the plan or the executor, so the
- * answer stays true when any of them changes.
- *
- * {@link handedDifferences} compares two of these. The comparison is of REACH and DECISION per
- * standard tool — "can the agent read a file, and who is asked" — not of which implementation serves
- * it: claude's own `Glob` under the gate and JaiRA's `glob` under the same mode are the same grant.
+ * answer stays true when any of them changes. Reach is judged, not mechanism: a way in that is
+ * refused is not a way in, and a shell every line of which is refused is not a shell.
  */
 import { mcpToolName, type AgentQuery, type AgentQueryOptions } from "@declarative-ai/agents-api";
 import type { Tool } from "@declarative-ai/exec";
 import { loadBundle } from "@declarative-ai/hw";
 import {
-  isLoweredToolset,
-  LEGACY_NARROWING_PROFILES,
-  LEGACY_NON_READ_ONLY_TOOLS,
   nativesOfStandard,
   SHELL_TOOL,
   TOOL_SPECS,
@@ -68,8 +61,6 @@ export const SHELL_PROBES: Readonly<Record<string, string>> = {
 };
 
 export interface AgentHanded {
-  /** Which reading the run made of the block: the marks a lowered map leaves, or none. */
-  form: "legacy" | "map";
   /** Our tools, served over the bridge. */
   served: string[];
   /** The built-ins on the agent's deny list. */
@@ -150,14 +141,8 @@ const PROBE_INPUT = {
 function stubRegistry(): ReturnType<typeof newRegistry> {
   const registry = newRegistry();
   for (const name of JAIRA_TOOL_NAMES) {
-    // `readOnly` is what the engine's `profile` handling reads, and the frozen list is what it said
-    // the day the flag was removed — `tools.test.ts` holds the real tools to it.
-    const tool: Tool = {
-      description: name,
-      inputSchema: { type: "object" },
-      readOnly: !LEGACY_NON_READ_ONLY_TOOLS.includes(name),
-      run: async () => "ok",
-    };
+    // `readOnly` matters only under a session profile, and a probe runs under none.
+    const tool: Tool = { description: name, inputSchema: { type: "object" }, readOnly: false, run: async () => "ok" };
     registry.tools.set(name, tool);
   }
   return registry;
@@ -167,8 +152,7 @@ function stubRegistry(): ReturnType<typeof newRegistry> {
  * Run one effective environment to the spawn, and read off what the agent is handed.
  *
  * `scopes` are left OUT of the probe: a scope table answers per place, by the standard tool a call
- * is (natives translated), and it passes through a migration untouched — the caller compares the
- * table itself. Throws when the engine would refuse the block (a tool nothing registers).
+ * is (natives translated), which is its own test's business. Throws when the engine would refuse the block (a tool nothing registers).
  */
 export async function handedToClaude(environment: HandedEnvironment, options: HandedOptions = {}): Promise<AgentHanded> {
   const seen: AgentQueryOptions[] = [];
@@ -261,7 +245,6 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
   for (const native of unmappedNatives(CLAUDE_TOOLS)) natives[native] = removed.has(native) ? "removed" : await decide(native, {});
 
   return {
-    form: isLoweredToolset(environment.permissions) ? "map" : "legacy",
     served: [...served].sort(),
     removed: [...removed].sort(),
     preApproved: [...preApproved].sort(),
@@ -325,105 +308,4 @@ export async function handedToCodex(environment: HandedEnvironment, options: Cod
     throw new Error(`the engine never reached codex under this block: ${reason}`);
   }
   return { permissionMode: opts.permissionMode, served: Object.keys(opts.mcpTools ?? {}).sort() };
-}
-
-// --- the comparison ------------------------------------------------------------
-
-/** Why a difference is one a migration may carry: there is NO map that says what the list said. */
-export type ToleratedDifference =
-  /**
-   * Under an old narrowing `profile` a name nobody declared was put to a person, while `Task`,
-   * `Agent` and `SlashCommand` were removed. A map has one `other`: `deny` removes the three and
-   * refuses the unknown name; `ask` would hand the three back. The migration writes `deny` — what
-   * `applyLegacyProfile` has always read the profile as — and the unknown name is TIGHTENED.
-   */
-  | "profile-unknown-name"
-  /**
-   * OPT-IN, never assumed. A list that never named `bash` still left claude its own `Bash`, every
-   * call put to a person, and no map says that: a map that does not hold the shell REMOVES it.
-   * Accepting this takes the shell away — tightened, and what the list said it wanted.
-   */
-  | "unlisted-shell"
-  /**
-   * OPT-IN, never assumed, and it may LOOSEN as well as tighten. A list answered a shell LINE as a
-   * whole — before every line where it pinned the shell to a mode of its own, by the project's
-   * command policy where it did not. A map's line is taken apart and each part answers to the map
-   * (decision 0007 §4), in a run as in a conversation turn (a run's policy is handed the block's
-   * `subjects`): a file utility to the file tool's own entry, running a file to
-   * `script`, any other command to its own entry or the shell's. So a list whose `read_file` allowed
-   * while its shell asked about `cat`, or whose policy ran an `rm` the map does not hold, has no map.
-   *
-   * That judgement is what decision 0007 §4 is FOR, so this is the intended destination and not a
-   * defect; it is opt-in because it is a change in what happens, and migrating is where a state's
-   * author chooses.
-   */
-  | "shell-judged";
-
-/** What {@link handedDifferences} needs to know about where `before` came from. */
-export interface HandedContext extends HandedEnvironment {
-  /**
-   * The opt-in kinds the caller accepts. `profile-unknown-name` needs no opting into — there is no
-   * other map — and everything else is accepted by name or not at all.
-   */
-  accept?: readonly ToleratedDifference[];
-}
-
-export interface HandedDifference {
-  /** What differs: `read_file`, `native:Task`, `other`, `shell:write`. */
-  subject: string;
-  before: string;
-  after: string;
-  /** Set when the difference is one no map could avoid; absent is a FAILURE of the proof. */
-  tolerated?: ToleratedDifference;
-}
-
-const describeTool = (tool: HandedTool | undefined): string =>
-  tool === undefined || !tool.reachable ? "not reachable" : `reachable, ${tool.decision ?? "judged by line"}`;
-
-/**
- * Every way `after` hands the agent something `before` did not, or the reverse.
- *
- * A difference with no `tolerated` is a FAILURE of the proof, and the two shell kinds are tolerated
- * only where the caller named them — see {@link ToleratedDifference}.
- */
-export function handedDifferences(before: AgentHanded, after: AgentHanded, context: HandedContext = {}): HandedDifference[] {
-  const out: HandedDifference[] = [];
-  const accepts = (kind: ToleratedDifference): boolean => context.accept?.includes(kind) === true;
-  // The shell a list never named, kept by the agent with every call put to a person — and gone.
-  const shellDropped =
-    accepts("unlisted-shell") &&
-    !(context.tools ?? []).includes(SHELL_TOOL) &&
-    before.tools[SHELL_TOOL]?.reachable === true &&
-    after.tools[SHELL_TOOL]?.reachable !== true;
-  // The shell both sides hold, whose LINES are no longer answered the same way.
-  const shellJudged = accepts("shell-judged") && before.tools[SHELL_TOOL]?.reachable === true && after.tools[SHELL_TOOL]?.reachable === true;
-  for (const name of new Set([...Object.keys(before.tools), ...Object.keys(after.tools)])) {
-    const a = describeTool(before.tools[name]);
-    const b = describeTool(after.tools[name]);
-    if (a !== b) out.push({ subject: name, before: a, after: b, ...(name === SHELL_TOOL && shellDropped ? { tolerated: "unlisted-shell" as const } : {}) });
-  }
-  for (const name of new Set([...Object.keys(before.natives), ...Object.keys(after.natives)])) {
-    // Refused up front and refused at the callback are one answer: the call cannot happen. The
-    // legacy reading leaves `Task` in place for `other: "deny"` to refuse; a map takes it off the
-    // agent. Comparing the mechanism rather than the outcome would call that a lost tool.
-    const answer = (held: HandedDecision | "removed" | undefined): string => (held === undefined || held === "removed" || held === "deny" ? "refused" : held);
-    const a = answer(before.natives[name]);
-    const b = answer(after.natives[name]);
-    if (a !== b) out.push({ subject: `native:${name}`, before: a, after: b });
-  }
-  if (before.other !== after.other) {
-    const profile = context.permissions?.profile;
-    const narrowing = profile !== undefined && LEGACY_NARROWING_PROFILES.includes(profile);
-    const tightened = before.other === "ask" && after.other === "deny";
-    out.push({ subject: "other", before: before.other, after: after.other, ...(narrowing && tightened ? { tolerated: "profile-unknown-name" as const } : {}) });
-  }
-  for (const kind of new Set([...Object.keys(before.shell), ...Object.keys(after.shell)])) {
-    const a = before.shell[kind];
-    const b = after.shell[kind];
-    if (a === b) continue;
-    // With the shell itself gone there is no line left to judge; that is one difference, named above.
-    if (shellDropped && b === undefined) continue;
-    out.push({ subject: `shell:${kind}`, before: a ?? "no shell", after: b ?? "no shell", ...(shellJudged ? { tolerated: "shell-judged" as const } : {}) });
-  }
-  return out;
 }

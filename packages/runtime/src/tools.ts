@@ -274,18 +274,17 @@ export function gateTools(options: {
   policy?: ExecPolicy | undefined;
   approve?: Approver | undefined;
   /**
-   * The operation's own `permissions` block, in the LEGACY shape: a default mode, per-tool modes,
-   * scopes, and perhaps an old `profile`, which is read as the entries it used to mean and never
-   * seeded as one. Folded into a toolset with `names` as the grant — see {@link toolset}.
-   * Its `scopes` are read either way: where a tool may act is not part of a toolset.
+   * The operation's own `permissions` block, in the LOWERED shape a loaded state holds. Read back
+   * into a toolset with `names` as the list when no {@link toolset} is handed over — see there. Its
+   * `scopes` are read either way: where a tool may act is not part of a toolset.
    */
   authored?: PermissionsDecl | undefined;
   /**
    * The toolset this turn runs under — the ONE map the modes are read from (decision 0007).
    *
-   * When absent it is folded from `names` and `authored`, which is the legacy reader: a listed tool
-   * takes `authored.tools[name] ?? authored.default`, and `default` answers as `other` for a name
-   * nothing here registered. Only TOOL entries are read HERE. A toolset's command subjects and
+   * When absent it is read back from `names` and `authored` (`toolsetOfEnvironment`): a listed tool
+   * takes `authored.tools[name]`, and a turn that declared no toolset lists only the always-granted
+   * tools with no mode, which resolve through the baseline. Only TOOL entries are read HERE. A toolset's command subjects and
    * `script` ride on the block handed to the gate and to each wrapped tool, where the policy's
    * narrowing reads them to judge a shell line part by part (decision 0007 §4) — which is also why
    * the shell's own mode reaches both as `smart`: see `gateToolModes`.
@@ -303,8 +302,7 @@ export function gateTools(options: {
 }): { tools: Record<string, Tool>; gate: ToolGate } {
   const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
   const toolset = options.toolset ?? toolsetOfEnvironment(options.names, options.authored);
-  // The block the upstream gate takes, written FROM the map — so a legacy block and a toolset reach
-  // the gate as the same thing. Absent when nothing was authored at all, as before.
+  // The block the upstream gate takes, written FROM the map. Absent when nothing was authored at all.
   const authored =
     options.toolset === undefined && options.authored === undefined ? undefined : permissionsOfToolset(toolset, options.authored?.scopes);
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.

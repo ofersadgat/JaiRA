@@ -571,6 +571,53 @@ project's policy alone; a `bash: "deny"` with nothing allowed is still
 offered there (it was lowered as `smart`), and refuses every part the map does
 not allow.
 
+### Amended 2026-09-22 (last): the list form and the migration tool are removed
+
+The migration (step 7) has been run on every workflow there is: all 32 blocks
+under `~/.jaira` are maps, the project's own `.jaira` holds none in the old
+form, and the one shipped state still written as a list, `chat/agent`, was
+rewritten to the inline map the migration measured for it. So the code that
+existed only to keep the old form working is gone:
+
+- **The list form of `tools` and the old `permissions` block are refused.**
+  A list (written, or in a file a reference names), and a `permissions` block
+  that says `tools`, `default`, `other` or `profile`, are lint **errors**, and
+  a run will not start under either; `permissions` holds `scopes` and nothing
+  else. `toolsetOfLegacy`, `applyLegacyProfile`, the frozen
+  `LEGACY_NON_READ_ONLY_TOOLS` / `LEGACY_NARROWING_PROFILES`, `Toolset.legacy`
+  and the rule that a list-form toolset keeps the agent natives it never
+  mentions are deleted. The state editor's old Permissions control (profile,
+  default, per-tool rows) is gone; a `tools` value the Tools field cannot draw
+  shows read-only.
+- **The readers kept for snapshots lowered the old way are deleted**: the
+  `jaira:shell:{…}` key, the `jaira:bash-deny±` pair (`SHELL_DENIED_MARKERS`),
+  the strictest-of judgement across carried keys, and `viewOfServices`'
+  fallback for an engine without `ExecServices.authored`.
+- **`jaira workflow migrate-toolsets` is removed**, with `toolsetMigration.ts`,
+  `toolsetMigrateEdit.ts` and `handedDifferences`. `handedToClaude` and
+  `handedToCodex` stay, as the measurement tests of the map hold the chain to.
+  [0007-assets/migration-dry-run.txt](0007-assets/migration-dry-run.txt) is
+  kept as the record of what the migration measured, and nothing reads it.
+- **`TOOLSET_MARKERS` stay, for a different reason.** A map no longer needs
+  telling from a list, but it still needs telling from a state that declares
+  no toolset at all — which is not the statement "nothing": an empty map
+  removes every built-in, and saying nothing leaves the agent as its executor
+  built it, under the gate. Both lower to a block with no tools in it. The
+  marks stay a pair, where one would do, because every block lowered since the
+  migration carries the pair and a pinned snapshot's map must not start
+  reading as no declaration.
+
+A task pinned to a snapshot lowered before the migration now reads as the new
+form. In a RUN its block has no marks, so its agent is handed on untouched, as a
+state that declares no toolset — which is what the list form got too — and the
+engine still seeds a `profile` such a block carries. In a CONVERSATION TURN
+continuing it, the inherited list and block are read back as a map: the agent
+loses the built-ins the list does not name, and a `profile` or `default` in the
+block is no longer read, so a listed tool with no mode of its own (a `bash` an
+old `read-only` profile used to refuse) falls to the project baseline. A carried
+`jaira:shell:` key or `jaira:bash-deny±` pair is read as an un-offered tool
+entry of that name and judges nothing. Starting the task again pins the map.
+
 ## Open
 
 - `smart` on a command subject: what the approver is shown for one part of
