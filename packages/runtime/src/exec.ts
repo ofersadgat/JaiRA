@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
 import { isWslEnv, toWslPath, type ExecEnv } from "./paths";
-import { killTree } from "./killTree";
+import { killTree, type KillTreeOptions } from "./killTree";
 
 export interface ExecOptions {
   cwd?: string;
@@ -142,6 +142,8 @@ export class NodeExec implements Exec {
       env?: Record<string, string>;
       /** Records every child this Exec starts (DESIGN §4.2a). */
       observer?: ExecObserver;
+      /** The Windows kill helpers, replaceable for a test of the one that never exits (see `killTree`). */
+      killTree?: KillTreeOptions;
     } = {},
   ) {}
 
@@ -219,7 +221,7 @@ export class NodeExec implements Exec {
       // The children here are not spawned detached (short-lived commands should still die with the
       // shell that started them), so on POSIX this is the single-process kill it always was.
       const kill = (): void => {
-        if (!child.killed) killTree(child);
+        if (!child.killed) killTree(child, "SIGTERM", this.defaults.killTree);
       };
       const timer =
         merged.timeoutMs !== undefined && merged.timeoutMs > 0

@@ -107,6 +107,32 @@ describe("NodeExec (native)", () => {
     expect(result.aborted).toBe(true);
   });
 
+  // `taskkill` reads the process list through WMI, and with that service wedged it neither exits nor
+  // errors — which used to mean nothing was killed and neither promise below ever settled. The stuck
+  // helper is stood in by a process that waits forever; the real tree walk then does the killing.
+  describe.runIf(process.platform === "win32")("when taskkill never exits", () => {
+    const stuck = new NodeExec({
+      killTree: {
+        taskkill: () => ({ command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"] }),
+        taskkillDeadlineMs: 300,
+      },
+    });
+
+    it("still times out and reports it", async () => {
+      const result = await stuck.run(process.execPath, ["-e", "setTimeout(()=>{},60000)"], { timeoutMs: 300 });
+      expect(result.timedOut).toBe(true);
+      expect(result.code === null || result.code !== 0).toBe(true);
+    }, 30_000);
+
+    it("is still abortable", async () => {
+      const abort = new AbortController();
+      const pending = stuck.run(process.execPath, ["-e", "setTimeout(()=>{},60000)"], { abortSignal: abort.signal });
+      abort.abort();
+      const result = await pending;
+      expect(result.aborted).toBe(true);
+    }, 30_000);
+  });
+
   it("rejects when the command cannot start at all", async () => {
     await expect(exec.run("jaira-no-such-binary", [])).rejects.toThrow(/failed to run/);
   });
