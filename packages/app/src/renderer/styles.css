@@ -11319,6 +11319,10 @@ fieldset.reading {
 .cx-opts button {
   display: flex;
   align-items: center;
+  /* Against the base `button` rule, which centres its content. Only the row in force carries a
+     trailing tick (`margin-left: auto`), so it alone filled its width and read as left-aligned while
+     every other row floated in the middle — the same fault `.face-menu-row` documents. */
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   min-width: 0;
@@ -11403,11 +11407,25 @@ fieldset.reading {
 .cx-tool.on {
   background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
-/* Both halves are `.cx-opts button` already; these only divide the width between them. The grant
-   takes what is left so a long tool name truncates rather than pushing the mode off the row. */
+/* The grant takes what is left so a long tool name truncates rather than pushing the mode off the
+   row. It carries the option-row metrics ITSELF: the tools menu is `.cx-cats`, not `.cx-opts`, so
+   nothing else was taking the base `button` rule's box and centring off it. */
 .cx-tool .cx-tool-grant {
   flex: 1 1 auto;
   min-width: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--dim);
+  text-align: left;
+}
+.cx-tool .cx-tool-grant:hover,
+.cx-tool.on .cx-tool-grant {
+  background: none;
+  color: var(--text);
 }
 .cx-tool .cx-tool-mode {
   flex: none;
@@ -11455,6 +11473,7 @@ fieldset.reading {
 .cx-submenu button {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   min-width: 0;
@@ -11573,6 +11592,7 @@ fieldset.reading {
 .cx-col button {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   min-width: 0;
@@ -12666,6 +12686,8 @@ fieldset.reading {
   gap: 6px;
   flex: 1;
   min-width: 0;
+  /* Against the base `button` rule, which centres its content. */
+  justify-content: flex-start;
   padding: 5px 4px;
   border: 0;
   border-radius: 5px;
@@ -12677,7 +12699,14 @@ fieldset.reading {
 .cx-cat-fold:hover {
   background: var(--panel-2);
 }
+/* `.cx-more` pushes itself to the far edge, which is right for a row that points at the column it
+   opens and wrong here: the chevron LEADS this row, so its auto margin took the label with it. A
+   fixed width so the rows without one can indent by the same amount. */
 .cx-cat-chev {
+  flex: none;
+  width: 10px;
+  margin-left: 0;
+  text-align: center;
   transition: transform 0.12s ease;
 }
 .cx-cat.open .cx-cat-chev {
@@ -12701,9 +12730,15 @@ fieldset.reading {
   padding-left: 7px;
   border-left: 1px solid var(--line);
 }
+/* A head with no fold button: the text takes the width the button would have, so the mode beside it
+   lands in the same column as every other row's. */
+.cx-cat-head > .cx-opt-text {
+  flex: 1;
+}
+/* No chevron, so the label is indented by one: the fold's padding, its chevron, its gap. */
 .cx-cat-empty .cx-cat-head,
 .cx-cat-other .cx-cat-head {
-  padding: 5px 4px;
+  padding: 5px 0 5px 20px;
 }
 .cx-cat-empty .cx-opt-name {
   color: var(--tok-hint);
