@@ -31,6 +31,7 @@ import {
   InMemoryPersistence,
   loadBundle,
   moduleHash as moduleHashOf,
+  sourceStateId,
   stateIdFromPath,
   type CallResult,
   type DirectedTransition,
@@ -49,8 +50,10 @@ import {
   beginTaskRun,
   buildTaskLoad,
   adoptedInto,
+  askingMessage,
   connectTask as connectTaskIn,
   CONNECT_CONVERSATION,
+  currentPin,
   ensureControlConversation,
   descentFollower,
   missingInputs,
@@ -246,6 +249,7 @@ import {
   stateWithChatSettings,
   holdsConversation,
   isChatInstance,
+  CHAT_INSTANCE_PREFIX,
   runChatTurn,
   withSessionLayers,
   chatInstanceIdOf,
@@ -434,6 +438,7 @@ import type {
   TaskAdoptResult,
   TaskConnectRequest,
   TaskConnectResult,
+  ConnectMissingInput,
   TaskConnectUndoRequest,
   TaskConnectUndoResult,
   InputProvenance,
@@ -4688,8 +4693,12 @@ export class AppService {
     const open = this.session(projectKey);
     const project = open.project;
     const task = project.runtime.get(taskId);
-    if (task?.snapshotHash === undefined) throw new NoConversationHere(`task '${taskId}' has never run`);
-    const bundle = bundleFor(project, task.snapshotHash, task.snapshotHash);
+    // The version the task CONTINUES under (`currentPin`): a task a move diverged into a document has
+    // the conversation grafted onto its root there, before its next load journals the version — and
+    // a document's task a drop made has only the document, having never loaded at all.
+    const pinned = task !== undefined ? currentPin(project, task)?.snapshotHash : undefined;
+    if (pinned === undefined) throw new NoConversationHere(`task '${taskId}' has never run`);
+    const bundle = bundleFor(project, pinned, pinned);
     if (bundle === undefined) throw this.refusal("run", `the snapshot for task ${taskId} is missing`);
 
     const { events, atMs } = eventsOf(project.events.list(taskId));
@@ -4773,11 +4782,30 @@ export class AppService {
       .reverse()
       .find((h) => h.instanceId === chatInstanceIdOf(hostInstanceId) || h.instanceId === hostInstanceId);
     if (mine === undefined) {
+      // A conversation that STARTS IDLE (decision 0005 §3, `load.ts`): the root of a task standing in
+      // a document, whose prompt operation never ran. Its first turn begins a conversation, under a
+      // name derived from the host — the store mints the session on first use, and every later turn
+      // finds the record this one leaves.
+      if (this.startsIdle(taskId, hostInstanceId, projectKey)) return `${chatInstanceIdOf(hostInstanceId)}@0`;
       throw new NoConversationHere(
         `instance ${hostInstanceId} ran no model call, so there is no conversation to continue`,
       );
     }
     return `${mine.sessionId}@${mine.seq + 1}`;
+  }
+
+  /** The idle conversation {@link chatPositionOf} may begin: a document task's root, its operation never started. */
+  private startsIdle(taskId: string, hostInstanceId: string, projectKey?: string): boolean {
+    const project = this.session(projectKey).project;
+    if (project.runtime.get(taskId)?.documentId === undefined) return false;
+    let root = false;
+    for (const row of project.events.list(taskId)) {
+      const event = row.event as { type: string; instanceId?: string; parentInstanceId?: string };
+      if (event.instanceId !== hostInstanceId) continue;
+      if (event.type === "instance.entered" && event.parentInstanceId === undefined) root = true;
+      if (event.type === "operation.started") return false;
+    }
+    return root;
   }
 
   /**
@@ -5052,7 +5080,11 @@ export class AppService {
   private chatHostOf(taskId: string, projectKey?: string): string | null {
     const history = this.sessionHistory({ taskId, project: projectKey });
     const host = history.find((h) => !isChatInstance(h.instanceId));
-    return host?.instanceId ?? null;
+    if (host !== undefined) return host.instanceId;
+    // A conversation that started idle has turns and no record of its host's own: the host is the
+    // instance its chat child is derived from.
+    const turn = history.find((h) => isChatInstance(h.instanceId));
+    return turn !== undefined ? turn.instanceId.slice(CHAT_INSTANCE_PREFIX.length) : null;
   }
 
   /** Cancel a task: abort a live run here, or record a terminal status. */
@@ -5337,8 +5369,48 @@ export class AppService {
       });
       this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
       this.publishFor(open, { type: "store:invalidate", scope: "board" });
+      if (result.ok && result.asking !== undefined && result.asking.length > 0 && result.taskId !== undefined) {
+        this.askAfterDrop(open, request, result.taskId, result.asking);
+      }
     }
     return result;
+  }
+
+  /**
+   * The OPENING TURN of a conversation an `askAfter` drop made or reused (decision 0005 §4 "Inputs",
+   * 3: asked). The drop is the commit, so nothing waits on this: it is a turn of the conversation,
+   * run the way a typed one is, whose message says what happened and what the target still needs
+   * (`askingMessage`) and whose reply is the question. The conversation's own `start_task` mounts the
+   * target once the person has answered.
+   *
+   * The turn is the conversation's first, so it is also what makes an idle conversation one there is
+   * a thread to read — see `chatPositionOf`.
+   */
+  private askAfterDrop(open: ProjectSession, request: TaskConnectRequest, conversationTaskId: string, asking: readonly ConnectMissingInput[]): void {
+    const project = open.project;
+    // The instance that speaks: the one with a record, else the machine's root — an idle conversation
+    // has said nothing yet, and its root is where the conversation is.
+    const host =
+      this.chatHostOf(conversationTaskId, open.dir) ??
+      project.events
+        .list(conversationTaskId)
+        .flatMap((row) => (row.event.type === "instance.entered" && row.event.parentInstanceId === undefined ? [row.event.instanceId] : []))[0];
+    const at = { project: open.key, taskId: conversationTaskId };
+    if (host === undefined) {
+      this.log({ level: "warn", source: "run", message: `the conversation ${conversationTaskId} has no instance to ask from`, ...at });
+      return;
+    }
+    const title = project.tasks.tryRead(request.taskId)?.title ?? request.taskId;
+    const message = askingMessage(title, sourceStateId(request.target), asking);
+    void this.sendChatMessage({
+      taskId: conversationTaskId,
+      instanceId: host,
+      message,
+      project: open.dir,
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+    }).catch((e: unknown) => {
+      this.log({ level: "error", source: "run", message: `the conversation's opening question failed: ${e instanceof Error ? e.message : String(e)}`, ...at });
+    });
   }
 
   // --- fast-forward (decision 0005 §4, step 7) ----------------------------------
@@ -5808,11 +5880,20 @@ export class AppService {
       this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
       this.publishFor(open, { type: "store:invalidate", scope: "board" });
     };
+    // A conversation the drop made, or gave a turn to, may be taking its opening turn: stopped, and
+    // waited out, before its rows are cut — a turn that landed after the cut would write into a journal
+    // that was taken back. Only for a connect that made one: any other task's turn is the person's.
+    const quiet = async (taskId: string): Promise<void> => {
+      this.cancelChatTurn({ taskId, project: open.dir });
+      const turn = open.chatDone.get(taskId);
+      if (turn !== undefined) await AppService.within(turn, CHAT_WAIT_MS);
+    };
     if (undo.kind === "adopt") {
       const { parentTaskId, adoptedTaskId } = undo;
       const parent = project.tasks.tryRead(parentTaskId);
       if (parent === undefined || project.runtime.get(parentTaskId) === undefined) throw this.refusal("run", `unknown task '${parentTaskId}'`);
       if (running(parentTaskId)) throw this.refusal("run", `'${parent.title}' is running — stop it before taking the move back`);
+      if (undo.made) await quiet(parentTaskId);
       const mirror = project.events.list(parentTaskId).find((row) => row.event.type === "instance.entered" && row.event.instanceId === adoptedTaskId);
       if (mirror === undefined) throw this.refusal("run", `'${parent.title}' no longer holds the task it adopted — there is nothing to take back`);
       for (const [requestId, owner] of open.requestTask) {
@@ -5822,9 +5903,11 @@ export class AppService {
       // What the parent has done of its OWN since: anything it entered that is not a mirror row.
       // Everything it ran comes AFTER the mirror, so the cut takes it too — which is what rewinding
       // past the mirror means — but a task that has done work is kept, to be looked at or resumed.
+      // A turn of its conversation is not work of its own: talking is what a conversation a drop made
+      // does first (`askAfterDrop`), and taking the drop back takes the conversation with it.
       const own = project.events
         .list(parentTaskId)
-        .some((row) => row.seq > mirror.seq && row.event.type === "instance.entered" && (row.event as { adopted?: boolean }).adopted !== true);
+        .some((row) => row.seq > mirror.seq && row.event.type === "instance.entered" && (row.event as { adopted?: boolean }).adopted !== true && !isChatInstance(row.event.instanceId));
       cutTaskJournal(project, parentTaskId, mirror.seq);
       releaseUnmirroredAdoptions(project, parentTaskId);
       let removed: string | undefined;
@@ -5842,8 +5925,16 @@ export class AppService {
     const row = project.runtime.get(taskId);
     if (row === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
     if (running(taskId)) throw this.refusal("run", `task '${taskId}' is running — stop it before taking the move back`);
+    if (undo.asking === true) await quiet(taskId);
     const moved = project.events.list(taskId).some((stored) => stored.seq > undo.after);
-    if (moved) {
+    if (moved && undo.asking === true) {
+      // Nothing moved: what was written is the conversation's opening turn. Cut, and NOT resumed —
+      // a rewind resumes a machine with something left to do, and this one was standing still.
+      // The cut re-reads the status off the journal; the task goes back to standing exactly as it did.
+      cutTaskJournal(project, taskId, undo.after + 1);
+      if (row.outcome !== undefined) project.runtime.endTask(taskId, row.outcome, Date.now());
+      project.runtime.setStatus(taskId, row.status, Date.now());
+    } else if (moved) {
       await this.rewindTask({ taskId, at: undo.after + 1, project: open.dir });
       // A task that had FINISHED goes back to having finished: the cut took away everything since.
       if (undo.wasCompleted === true && !open.live.has(taskId)) {

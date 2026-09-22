@@ -15,9 +15,10 @@
  *     task already in a document has it `augmented`, a task inside a real workflow has its copy
  *     `cloned`.
  *
- * Every resolution ends by settling the target's inputs from the workflow's own bindings. Until the
- * conversations exist (step 6) a connect whose required inputs do not all bind is REFUSED, naming
- * each missing input with its declared schema.
+ * Every resolution ends by settling the target's inputs from the workflow's own bindings. What they
+ * leave open a conversation supplies (`supplied`); a connect whose required inputs still do not bind
+ * is REFUSED, naming each missing input with its declared schema — except a drop that says
+ * `askAfter`, which makes the conversation and has it ask.
  *
  * The platform never names a workflow's input (§0): everything here is derived from declared
  * schemas, bindings and descriptions.
@@ -69,8 +70,11 @@ export interface TaskConnectRequest {
   /**
    * What a DROP says (step 6): where a modified workflow leaves required inputs open, do not refuse —
    * make the conversation that controls the work anyway, with the target not yet mounted, and answer
-   * `asking`. The host then has that conversation ask, in words, and the conversation's own `start`
-   * mounts the target with what it was told. Ignored by a dry run, which still says what is missing.
+   * `asking`. The host then gives that conversation its opening turn, which asks for them in words,
+   * and the conversation's own `start_task` mounts the target with what it was told. A dry run with
+   * it answers the same `asking` and writes nothing, which is what the board's hover says. Only a
+   * modified workflow (rule 3) is asked after; a move within a workflow or an adoption that leaves a
+   * required input open is still refused with what is missing.
    */
   askAfter?: boolean;
   /** Scripted gate answers and prompt rules for a run this starts (tests/demos). */
@@ -211,7 +215,19 @@ export interface ConnectPlan {
  */
 export type ConnectUndo =
   | { kind: "adopt"; parentTaskId: string; adoptedTaskId: string; made: boolean }
-  | { kind: "move"; taskId: string; after: number; pin?: { snapshotHash: string; documentId?: string }; /** The task had finished: it goes back to having finished. */ wasCompleted?: boolean };
+  | {
+      kind: "move";
+      taskId: string;
+      after: number;
+      pin?: { snapshotHash: string; documentId?: string };
+      /** The task had finished: it goes back to having finished. */
+      wasCompleted?: boolean;
+      /**
+       * An `askAfter` drop that made or reused a conversation and moved nothing: what was written since
+       * `after` — the conversation's opening turn — is cut and the pin put back, and nothing is resumed.
+       */
+      asking?: true;
+    };
 
 export type TaskConnectResult =
   | {

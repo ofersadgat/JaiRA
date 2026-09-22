@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
-import { writeWorkflowFiles } from "@jaira/runtime";
+import { createWorkflowTools, writeWorkflowFiles } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
 import type { TaskConnectResult } from "@jaira/shared";
@@ -481,5 +481,113 @@ describe("rule 3 — the workflow is modified", () => {
     }
     expect({ tasks: taskIds(), documents: documents() }).toEqual(before);
     expect(no(await service.connectTask({ taskId: product, target: "lib/nowhere" })).refusal).toMatchObject({ code: "unknown-target", message: "no state 'lib/nowhere' was found on the workflow path" });
+  });
+});
+
+describe("askAfter — a drop whose target needs what nothing binds (decision 0005 §4 'Inputs')", () => {
+  /** The model double: the opening turn is answered with the question, a reply with an acknowledgement. */
+  const QUESTION = "What should the thing be called?";
+  const fake = [
+    { promptIncludes: "Ask the person", output: QUESTION },
+    { output: "Thanks — starting it." },
+  ] as unknown as JsonValue;
+  const TEXT = { state: "lib/needs", name: "text", schema: { type: "string", minLength: 3 }, description: "What to call it.", reason: "nothing the task produced fits it" };
+  /** The conversation's turns, as the Chat view reads them. */
+  const thread = (taskId: string) => service.chatThread({ taskId })?.session.turns ?? [];
+  const chatTurnsSettled = (taskId: string): number => journal(taskId).filter((e) => e.type === "operation.completed" && e.instanceId.startsWith("chat:")).length;
+
+  it("says so in the dry run — no refusal, the inputs it will ask for — and writes nothing", async () => {
+    const product = await ran("feat/product", 1);
+    const before = { tasks: taskIds(), documents: documents() };
+    const dry = ok(await service.connectTask({ taskId: product, target: "lib/needs", dryRun: true, askAfter: true }));
+    expect(dry.asking).toEqual([TEXT]);
+    expect(dry.plan).toMatchObject({ resolution: "modify", modification: "new" });
+    expect(dry.plan.move).toBeUndefined();
+    expect(dry.taskId).toBeUndefined();
+    expect({ tasks: taskIds(), documents: documents() }).toEqual(before);
+  });
+
+  it("makes the document and its conversation instead of refusing, and the conversation's FIRST turn asks for exactly those inputs", async () => {
+    const product = await ran("feat/product", 1);
+    const done = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake }));
+    const parent = done.taskId!;
+    expect(parent).not.toBe(product);
+    expect(done.asking).toEqual([TEXT]);
+    expect(done.moved).toBeUndefined();
+    expect(documents()).toHaveLength(1);
+    expect(metaOf(product)?.origin).toMatchObject({ kind: "adopt", taskId: parent });
+    // The conversation started idle: nothing of the machine ran, and the target is not mounted.
+    expect(statusOf(parent)).toBe("queued");
+    expect(journal(parent).some((e) => e.type === "operation.started" && !e.instanceId.startsWith("chat:"))).toBe(false);
+
+    // Its opening turn is the question — a turn of the conversation, not of the machine.
+    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
+    const [opening, question] = thread(parent);
+    expect(question).toMatchObject({ role: "assistant", text: QUESTION });
+    // What the model was handed: what happened, and each input by its declared description and
+    // schema — the target's own name passed through, nothing the platform named.
+    expect(opening?.text).toContain(`"Ran feat/product" was moved to lib/needs.`);
+    expect(opening?.text).toContain("`text`: What to call it. — schema {\"type\":\"string\",\"minLength\":3}");
+    expect(opening?.text).toContain("call `start_task` with state `lib/needs`");
+    expect(service.pendingInteractions()).toEqual([]);
+  });
+
+  it("takes the person's answer: the conversation's start_task mounts the target with the value recorded ASKED", async () => {
+    const product = await ran("feat/product", 1);
+    const parent = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake })).taskId!;
+    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
+
+    // The person answers in the conversation — the composer's turn, continuing the thread…
+    const host = journal(parent).flatMap((e) => (e.type === "instance.entered" && e.parentInstanceId === undefined ? [e.instanceId] : []))[0]!;
+    await service.sendChatMessage({ taskId: parent, instanceId: host, message: "Call it Widget.", fake });
+    expect(thread(parent).map((t) => t.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    // …and the model, having read it, calls its own start_task naming what the person answered.
+    const started = (await createWorkflowTools(service.workflowHostFor(dir, parent))["start_task"]!.run({ state: "lib/needs", inputs: { text: "Widget" }, asked: ["text"] } as never, {} as never)) as Record<string, JsonValue>;
+    expect(started, JSON.stringify(started)).toMatchObject({ ok: true, state: "lib/needs", inputs: [{ name: "text", via: "asked" }] });
+    expect(await parked()).toMatchObject({ state: "needs", inputs: { text: "Widget" } });
+    const supplied = journal(parent).find((e) => (e as { type: string }).type === "jaira.supplied") as unknown as { provenance: Record<string, { via: string }> };
+    expect(supplied.provenance).toEqual({ text: { via: "asked" } });
+  });
+
+  it("is undone like any adoption — the task the drop made goes, conversation and all", async () => {
+    const product = await ran("feat/product", 1);
+    const done = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake }));
+    const parent = done.taskId!;
+    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
+    // A turn of its conversation is not work of its own: the task is removed, not kept.
+    expect(await service.undoConnect({ undo: done.undo! })).toEqual({ taskId: product, removed: parent });
+    expect(metaOf(parent)).toBeUndefined();
+    expect(metaOf(product)?.origin).toBeUndefined();
+    expect(statusOf(product)).toBe("completed");
+  });
+
+  it("CLONED: the copy gains the conversation, which asks; UNDO cuts the turn and puts the pin back without resuming", async () => {
+    const taskId = await standingIn("flow", 1);
+    await service.cancelTask(taskId);
+    await until(() => statusOf(taskId) === "canceled", "the task to stop");
+    const pinned = read((p) => p.runtime.get(taskId)!);
+    const done = ok(await service.connectTask({ taskId, target: "lib/needs", askAfter: true, fake }));
+    expect(done.taskId).toBe(taskId);
+    expect(done.asking).toEqual([TEXT]);
+    expect(read((p) => p.runtime.get(taskId)!.documentId)).toBeDefined();
+    await until(() => chatTurnsSettled(taskId) === 1, "the opening question");
+    expect(thread(taskId).at(-1)).toMatchObject({ role: "assistant", text: QUESTION });
+
+    expect(done.undo).toMatchObject({ kind: "move", taskId, asking: true, pin: { snapshotHash: pinned.snapshotHash } });
+    await service.undoConnect({ undo: done.undo! });
+    const back = read((p) => p.runtime.get(taskId)!);
+    expect(back.documentId).toBeUndefined();
+    expect(back.status).toBe("canceled");
+    expect(chatTurnsSettled(taskId)).toBe(0);
+    expect(service.pendingInteractions()).toEqual([]);
+  });
+
+  it("leaves every OTHER refusal as it was: an unknown target, a running task, a move within a workflow", async () => {
+    const product = await ran("feat/product", 1);
+    expect(no(await service.connectTask({ taskId: product, target: "lib/nowhere", askAfter: true })).refusal.code).toBe("unknown-target");
+    // Rule 2's missing input is still refused: only a modified workflow asks after.
+    expect(no(await service.connectTask({ taskId: product, target: "feat/ship", skip: true, askAfter: true })).refusal.code).toBe("inputs-missing");
+    const running = await standingIn("flow", 1);
+    expect(no(await service.connectTask({ taskId: running, target: "lib/needs", askAfter: true })).refusal.code).toBe("running");
   });
 });

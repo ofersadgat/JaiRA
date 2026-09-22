@@ -4,7 +4,7 @@
  *
  * `npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/connect-mockups.mts`
  *
- * Writes `docs/ui/assets/task-board/{connecting,refused,after-drop}.html` and
+ * Writes `docs/ui/assets/task-board/{connecting,asking,refused,after-drop}.html` and
  * `docs/ui/assets/task-card/{adopted,undo}.html`, each with the catalog head (`reflects: shipped`)
  * and the app's own stylesheet. As in `connect-static.mts`, the one thing done by hand is the
  * `drop-over` class: a static page has no pointer.
@@ -44,18 +44,33 @@ const adopt: TaskConnectResult = {
     adopt: { workflow: "feature", title: "Pause and stop", adopted: [], cursor: "product", next: "ux", inputs: {}, provenance: { issue: { via: "bound", from: { taskId: "t-pause", input: "issue" } } }, asks: [], waitsFor: [] },
   }),
 };
+// A target whose inputs nothing binds is ASKED after (`askAfter`), not refused: the dry run answers
+// what the conversation the drop makes will ask for.
+const question = { state: "explore", schema: { type: "string" }, reason: "nothing the task produced fits it" };
+const asking: TaskConnectResult = {
+  ok: true,
+  dryRun: true,
+  plan: plan({ resolution: "modify", modification: "new", workflow: "dynamic/…", standsAt: { path: [], stateId: "explore" } }),
+  asking: [
+    { ...question, name: "question", description: "What to find out, in a sentence." },
+    { ...question, name: "sources", schema: { type: "array", items: { type: "string" } }, description: "Where to look first." },
+  ],
+};
+// What is still refused: a task that is running cannot take a new transition until it is paused.
 const refused: TaskConnectResult = {
   ok: false,
   dryRun: true,
-  refusal: { code: "inputs-missing", message: "…", missing: [{ state: "explore", name: "question", schema: { type: "string" }, reason: "nothing the task produced fits it" }] },
-  plan: plan({ resolution: "modify", modification: "new", adoptedAs: "product", standsAt: { path: ["explore"], stateId: "explore" } }),
+  refusal: {
+    code: "running",
+    message: "'Usage readings' is running, and no workflow relates 'feature/product' to 'explore': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it",
+  },
 };
 
 const col = (key: string): Pick<BoardColumn, "key" | "stateId" | "label"> => ({ key, stateId: key, label: key });
 const tile = (c: BoardCard, extra: Record<string, unknown> = {}): ReactElement => h(Card, { key: c.taskId, card: c, selected: false, onSelect: noop, ...extra });
-const pop = (result: TaskConnectResult, key: string): ReactElement => h(ConnectPop, { preview: previewOf({ status: "answered", result }, pause, col(key)) });
+const pop = (result: TaskConnectResult, key: string, from: BoardCard = pause): ReactElement => h(ConnectPop, { preview: previewOf({ status: "answered", result }, from, col(key)) });
 
-function write(component: "task-board" | "task-card", state: string, width: number, body: ReactElement, hover?: number): void {
+function write(component: "task-board" | "task-card", state: string, width: number, body: ReactElement, hover?: number, on = captured): void {
   let seen = 0;
   const html = renderToStaticMarkup(body)
     .replace(/class="column drop-target"/g, (match) => (++seen === hover ? 'class="column drop-target drop-over"' : match))
@@ -67,7 +82,7 @@ function write(component: "task-board" | "task-card", state: string, width: numb
 <meta charset="utf-8">
 <meta name="doc" content="ui/components/${component}">
 <meta name="state" content="${state}">
-<meta name="captured" content="${captured}">
+<meta name="captured" content="${on}">
 <meta name="reflects" content="shipped">
 <title>${component} · ${state}</title>
 <link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
@@ -108,6 +123,29 @@ write(
   1,
 );
 
+// The pointer is over a column whose target needs what nothing binds: it LIGHTS, because the drop
+// does something — it makes the conversation, which asks — and the box names what will be asked.
+write(
+  "task-board",
+  "asking",
+  960,
+  stage(
+    h(
+      "div",
+      { className: "board-body" },
+      h(
+        "div",
+        { className: "columns wrap" },
+        h(Column, { name: "product", count: 2, empty: "—" }, tile(pause, { onDragStart: noop }), tile(usage)),
+        h(Column, { name: "feature", count: 1, empty: "—", drop: { accepts: true, onDrop: noop } }, tile(rewind)),
+        h(Column, { name: "explore", count: 1, empty: "—", drop: { accepts: true, onDrop: noop } }, tile(forge), pop(asking, "explore")),
+      ),
+    ),
+  ),
+  2,
+  "2026-09-22",
+);
+
 // The pointer is over a column that would REFUSE: it is not lit, the browser will not take the drop,
 // and the same box says why — without the accent line, because letting go does nothing.
 write(
@@ -121,12 +159,14 @@ write(
       h(
         "div",
         { className: "columns wrap" },
-        h(Column, { name: "product", count: 2, empty: "—" }, tile(pause, { onDragStart: noop }), tile(usage)),
+        h(Column, { name: "product", count: 2, empty: "—" }, tile(pause), tile(usage, { onDragStart: noop })),
         h(Column, { name: "feature", count: 1, empty: "—", drop: { accepts: true, onDrop: noop } }, tile(rewind)),
-        h(Column, { name: "explore", count: 1, empty: "—", drop: { accepts: false, onDrop: noop } }, tile(forge), pop(refused, "explore")),
+        h(Column, { name: "explore", count: 1, empty: "—", drop: { accepts: false, onDrop: noop } }, tile(forge), pop(refused, "explore", usage)),
       ),
     ),
   ),
+  undefined,
+  "2026-09-22",
 );
 
 write(

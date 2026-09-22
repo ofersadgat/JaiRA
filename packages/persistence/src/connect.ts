@@ -455,6 +455,37 @@ function moveSentence(title: string, target: string): string {
   return `"${title}" was moved to ${target}.`;
 }
 
+/** A declared schema in a few words, for a model reading what it is about to ask for. */
+function schemaWords(schema: JsonValue | undefined): string | undefined {
+  if (schema === undefined || (typeof schema === "object" && schema !== null && !Array.isArray(schema) && Object.keys(schema).length === 0)) return undefined;
+  return JSON.stringify(schema);
+}
+
+/**
+ * The OPENING TURN of a conversation an `askAfter` drop made (decision 0005 §4 "Inputs", 3: asked) —
+ * what the host hands that conversation, which the model answers with the question itself.
+ *
+ * It says what the person did (the same sentence the conversation is opened with), then each input
+ * the target still needs by its declared description and schema, and what to do with the answer.
+ * The names are the target's OWN declared names, passed through as `start_task` needs them: nothing
+ * here knows what any of them means (§0), which is why the model is told to ask in plain words from
+ * the descriptions rather than to read the names back to the person.
+ */
+export function askingMessage(title: string, target: string, asking: readonly ConnectMissingInput[]): string {
+  const one = asking.length === 1;
+  const lines = asking.map((m) => {
+    const what = [m.description, schemaWords(m.schema) !== undefined ? `schema ${schemaWords(m.schema)}` : undefined].filter((part) => part !== undefined).join(" — ");
+    return `- \`${m.name}\`${sourceStateId(m.state) !== sourceStateId(target) ? ` (of \`${m.state}\`)` : ""}${what !== "" ? `: ${what}` : ""}`;
+  });
+  return [
+    `${moveSentence(title, target)} ${target} needs ${one ? "an input" : `${asking.length} inputs`} that nothing the task produced gives, so the move has not been taken yet:`,
+    ...lines,
+    "",
+    `Ask the person for ${one ? "it" : "them"} now, in words: one short message, in plain language drawn from ${one ? "the description" : "the descriptions"}, and nothing else yet. ` +
+      `When they answer, call \`start_task\` with state \`${target}\` and ${one ? "the value" : "the values"}, naming ${one ? "it" : "each"} in \`asked\`.`,
+  ].join("\n");
+}
+
 /**
  * The inputs of a new document's ROOT — the conversation state's own.
  *
@@ -634,7 +665,7 @@ export async function connectTask(project: Project, request: TaskConnectRequest,
   }
 
   // ---- rule 3: the workflow is modified -----------------------------------------------------------
-  if (row.snapshotHash === undefined) {
+  if (row.snapshotHash === undefined && row.documentId === undefined) {
     return refused(dryRun, { code: "never-run", message: `'${meta.title}' has never run, so it stands nowhere to be moved from — start it instead` });
   }
   if (loadsNothing(project, target)) return refused(dryRun, { code: "unknown-target", message: `no state '${target}' was found on the workflow path` });
@@ -681,7 +712,7 @@ export async function connectTask(project: Project, request: TaskConnectRequest,
   const wouldStandIn = modification === "new" ? `${DYNAMIC_ROOT_PREFIX}…` : meta.workflow;
   if (!generated.ok) {
     const missing = generated.unsettled.filter((u) => u.required).map((u) => unsettledAsMissing(target, u));
-    if (request.askAfter === true && !dryRun) return askAfter(project, request, host, { title: meta.title, own, target, conversation, modification, missing, plan: planOf(wouldStandIn), generate });
+    if (request.askAfter === true) return askAfter(project, request, host, { title: meta.title, own, target, conversation, modification, missing, plan: planOf(wouldStandIn), generate, undo: moveUndo });
     return refused(dryRun, { code: "inputs-missing", message: `a move of '${meta.title}' to '${target}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, planOf(wouldStandIn));
   }
   const opening = modification === "new" ? conversationInputs(project, conversation, moveSentence(meta.title, target), host.check) : undefined;
@@ -742,12 +773,16 @@ export async function connectTask(project: Project, request: TaskConnectRequest,
  * A drop that has to ASK (step 6): the workflow is being modified anyway, its target's required
  * inputs are open, and the person is not in a conversation that could be handed the refusal. So the
  * conversation is made — without the target — and the answer says what it is about to ask for. The
- * task does not move; the conversation's own `start` mounts the target with what it is told.
+ * task does not move; the conversation's own `start_task` mounts the target with what it is told.
+ * The host then gives that conversation its opening turn ({@link askingMessage}).
  *
  *  - `new`       — the document holds the conversation and what already ran; its task is made and
  *                  the source adopted into it, idle (`load.ts`, "A conversation starts idle").
  *  - `cloned`    — the task's frozen copy diverges with the conversation grafted on.
  *  - `augmented` — the task already stands in a document, which has a conversation: nothing is written.
+ *
+ * A DRY RUN answers the same `asking` and writes nothing, so a hover says the drop makes a
+ * conversation that asks rather than that it would be refused.
  */
 async function askAfter(
   project: Project,
@@ -762,15 +797,22 @@ async function askAfter(
     missing: ConnectMissingInput[];
     plan: ConnectPlan;
     generate: (dry: boolean, withoutTarget?: boolean) => Promise<GenerateVersionResult>;
+    /** The move-kind undo, taken BEFORE anything is written. */
+    undo: () => ConnectUndo;
   },
 ): Promise<TaskConnectResult> {
   const { taskId } = request;
+  const dryRun = request.dryRun === true;
   const { move: _move, ...standing } = at.plan;
-  if (at.modification === "augmented") return { ok: true, dryRun: false, plan: standing, taskId, asking: at.missing };
+  // Nothing but the conversation is written — the opening turn, and for a clone the pin — so the
+  // undo cuts the journal back and puts the pin back, and resumes nothing.
+  const undo: ConnectUndo = { ...(at.undo() as Extract<ConnectUndo, { kind: "move" }>), asking: true };
+  if (at.modification === "augmented") return { ok: true, dryRun, plan: standing, taskId, asking: at.missing, ...(dryRun ? {} : { undo }) };
   const opening = at.modification === "new" ? conversationInputs(project, at.conversation, moveSentence(at.title, at.target), host.check) : undefined;
   if (opening !== undefined && opening.missing.length > 0) {
-    return refused(false, { code: "inputs-missing", message: `the conversation '${at.conversation}' cannot be opened by a move: ${missingSentence(opening.missing)}`, missing: opening.missing }, at.plan);
+    return refused(dryRun, { code: "inputs-missing", message: `the conversation '${at.conversation}' cannot be opened by a move: ${missingSentence(opening.missing)}`, missing: opening.missing }, at.plan);
   }
+  if (dryRun) return { ok: true, dryRun, plan: standing, ...(at.modification !== "new" ? { taskId } : {}), asking: at.missing };
   let made: GenerateVersionResult;
   try {
     made = await at.generate(false, true);
@@ -779,12 +821,12 @@ async function askAfter(
   }
   if (made.generated.deferred !== true || made.document === undefined) {
     // A root that already speaks needed no version: the conversation is the task's own.
-    if (made.resolution === "unsettled") return { ok: true, dryRun: false, plan: standing, taskId, asking: at.missing };
+    if (made.resolution === "unsettled") return { ok: true, dryRun: false, plan: standing, taskId, asking: at.missing, undo };
     return refused(false, { code: "generate", message: `the conversation for '${at.target}' could not be made` });
   }
   if (at.modification === "cloned") {
     log.info(`${taskId} was given a conversation (${made.document.id}) to ask for what '${at.target}' needs`);
-    return { ok: true, dryRun: false, plan: { ...standing, workflow: made.document.rootId }, taskId, asking: at.missing };
+    return { ok: true, dryRun: false, plan: { ...standing, workflow: made.document.rootId }, taskId, asking: at.missing, undo };
   }
   const document = made.document;
   const sourceKey = Object.entries(made.generated.additions.children).find(([, mount]) => sourceStateId(String(mount["state"])) === at.own)?.[0];

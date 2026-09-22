@@ -3232,10 +3232,12 @@ export function useApp() {
       /**
        * What a drop of this card on that column WOULD do (decision 0005 §1) — `task:connect`'s dry
        * run. Changes nothing, and touches no state here: the board keeps the answer for the length of
-       * one drag, asks once per column, and draws it as the column's light and its preview.
+       * one drag, asks once per column, and draws it as the column's light and its preview. Asked with
+       * `askAfter`, as the drop is, so a target with inputs nothing binds says the conversation that
+       * will ask for them rather than a refusal.
        */
       connectPreview: (project: string | undefined, taskId: string, target: string): Promise<TaskConnectResult> =>
-        invoke("task:connect", { taskId, target, dryRun: true, ...(project !== undefined ? { project } : {}) }),
+        invoke("task:connect", { taskId, target, dryRun: true, askAfter: true, ...(project !== undefined ? { project } : {}) }),
       /**
        * THE DROP (decision 0005): `task_move`, published to a column no rule had offered. The same
        * channel a conversation's `move` tool will use. Nothing is confirmed first; what it did
@@ -3243,10 +3245,14 @@ export function useApp() {
        *
        * `start: false`: a task the drop MAKES is left standing where it was put, for the person to
        * start — a move an engine has to take starts one regardless.
+       *
+       * `askAfter`: a drop whose only obstacle is inputs nothing binds is not refused. The conversation
+       * that controls the work is made, and its first turn asks for them in words; its `start_task`
+       * takes the move once they are answered.
        */
       connectTask: async (project: string | undefined, taskId: string, target: string) => {
         try {
-          const result = await invoke("task:connect", { taskId, target, start: false, ...(project !== undefined ? { project } : {}) });
+          const result = await invoke("task:connect", { taskId, target, start: false, askAfter: true, ...(project !== undefined ? { project } : {}) });
           if (!result.ok) {
             patch({ error: result.refusal.message });
             return;

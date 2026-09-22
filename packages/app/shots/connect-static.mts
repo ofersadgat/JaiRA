@@ -53,11 +53,17 @@ const within: TaskConnectResult = {
 const back = dry(plan({ standsAt: { path: ["product"], stateId: "feature/product" }, move: { direction: "backward", to: "product", path: [], passes: [] }, inputs: [{ name: "issue", via: "wire", from: "inputs.issue" }] }));
 const fresh = dry(plan({ resolution: "modify", modification: "new", adoptedAs: "product", mount: "plain", workflow: "jaira:dynamic:…", standsAt: { path: ["explore"], stateId: "explore" }, inputs: [{ name: "brief", via: "wire", from: "product.brief" }] }));
 const split = dry(plan({ resolution: "modify", modification: "new", adoptedAs: "product", mount: "split", workflow: "jaira:dynamic:…", standsAt: { path: ["item"], stateId: "feature/ux/item" }, inputs: [{ name: "item", via: "wire", from: "product.items", each: "split" }] }));
-const unbound: TaskConnectResult = {
+// `askAfter`: inputs nothing binds are asked in the conversation the drop makes, not refused.
+const asked: TaskConnectResult = {
+  ok: true,
+  dryRun: true,
+  plan: plan({ resolution: "modify", modification: "cloned", standsAt: { path: [], stateId: "explore" }, inputs: [{ name: "brief", via: "wire", from: "product.brief" }] }),
+  asking: [{ state: "explore", name: "question", schema: { type: "string" }, description: "What to find out, in a sentence.", reason: "nothing the task produced fits it" }],
+};
+const running: TaskConnectResult = {
   ok: false,
   dryRun: true,
-  refusal: { code: "inputs-missing", message: "…", missing: [{ state: "explore", name: "question", schema: { type: "string" }, reason: "nothing the task produced fits it" }] },
-  plan: plan({ resolution: "modify", modification: "cloned", standsAt: { path: ["explore"], stateId: "explore" }, inputs: [{ name: "brief", via: "wire", from: "product.brief" }] }),
+  refusal: { code: "running", message: "'Rewind a run' is running, and no workflow relates 'feature' to 'explore': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it" },
 };
 
 const col = (key: string, label: string): Pick<BoardColumn, "key" | "stateId" | "label"> => ({ key, stateId: key, label });
@@ -113,7 +119,7 @@ const page = h(
     h(
       "div",
       { style: { display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" } },
-      ...[pop(adopt, col("feature", "feature")), pop(back, col("product", "product"), rewind), pop(fresh, col("explore", "explore")), pop(split, col("item", "item"))].map((el, i) => h("div", { key: i, style: { width: 300 } }, el)),
+      ...[pop(adopt, col("feature", "feature")), pop(back, col("product", "product"), rewind), pop(fresh, col("explore", "explore")), pop(split, col("item", "item")), pop(asked, col("explore", "explore"), rewind)].map((el, i) => h("div", { key: i, style: { width: 300 } }, el)),
     ),
     true,
   ),
@@ -122,7 +128,7 @@ const page = h(
     h(
       "div",
       { style: { display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" } },
-      ...[pop(within, col("implementation", "implementation"), rewind), pop(unbound, col("explore", "explore"), rewind), h(ConnectPop, { preview: "asking" })].map((el, i) => h("div", { key: i, style: { width: 300 } }, el)),
+      ...[pop(within, col("implementation", "implementation"), rewind), pop(running, col("explore", "explore"), rewind), h(ConnectPop, { preview: "asking" })].map((el, i) => h("div", { key: i, style: { width: 300 } }, el)),
     ),
     true,
   ),

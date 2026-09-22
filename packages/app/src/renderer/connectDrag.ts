@@ -161,6 +161,20 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
     if (move?.stepsPast !== undefined) facts.push(["steps past ", { b: move.stepsPast }, ", where it stopped"]);
     if (move?.answersRule === true) facts.push(["the workflow is waiting for exactly this move"]);
     drop = move?.direction === "backward" ? "Drop to go back" : fastForward ? "Drop to fast-forward" : passes.length > 0 ? "Drop to skip ahead" : "Drop to move";
+  } else if (result.ok && (result.asking ?? []).length > 0) {
+    // `askAfter` (decision 0005 §4 "Inputs"): the target needs what nothing binds, so the drop makes
+    // the conversation — or uses the one there is — and the move waits for what it asks.
+    const own = last(card.workflow);
+    const target = last(plan.standsAt.stateId);
+    say =
+      plan.modification === "augmented"
+        ? ["This task's conversation asks for what ", { b: target }, " needs, then takes the move."]
+        : plan.modification === "cloned"
+          ? ["No workflow holds both ", { b: own }, " and ", { b: target }, ". This task's copy of the workflow gains a conversation to control it from, which asks before the move is taken."]
+          : ["No workflow holds both ", { b: own }, " and ", { b: target }, ". A new one is made around this task, with a conversation to control it from, which asks before the move is taken."];
+    if (plan.modification === "cloned") facts.push(["the copy stops following ", { b: own }]);
+    if (plan.modification === "new") facts.push(plan.adoptedAs !== undefined ? ["this task becomes its first child, ", { code: plan.adoptedAs }] : ["this task becomes its first child"]);
+    drop = plan.modification === "augmented" ? "Drop to ask in the conversation" : "Drop to open the conversation";
   } else {
     const own = last(card.workflow);
     say =
@@ -185,6 +199,8 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
   for (const input of plan.inputs) {
     if (input.via === "wire" && input.from !== undefined) facts.push([{ b: input.name }, input.each === "split" ? " takes one element of " : " comes from ", { b: input.from }]);
   }
+  // What the conversation will ask for, after what the workflow binds — the settled first.
+  if (result.ok) for (const input of result.asking ?? []) facts.push([{ b: input.name }, " will be asked there", ...(input.description !== undefined ? [` — ${input.description}`] : [])]);
   if (plan.asks.length > 0) facts.push([{ b: count(plan.asks.length, "input") }, " can be given afterwards"]);
   if (plan.branch !== undefined) facts.push(["works on branch ", { b: plan.branch }]);
 

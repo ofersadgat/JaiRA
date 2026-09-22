@@ -2,7 +2,7 @@
 id: engineering/contracts/task-channels
 type: engineering-contract
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 visibility: internal
 kind: api
 owned_by: [engineering/units/task-lifecycle, engineering/units/rewind-and-fork]
@@ -122,7 +122,9 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `by` | `"person"` or `"control"` | no | who asked, journaled on the move |
 | `dryRun` | boolean | no | answer what would happen and change nothing: no task, no document, no pin, no journal row |
 | `start` | boolean | no | `false` leaves a task the connect makes queued where no move has to be taken; a move an engine has to take starts one regardless |
-| `interactions`, `fake` | as `task:start` | no | script a run the connect starts |
+| `supplied` | `{[input]: {value, via: "inferred" or "asked", confidence?}}` | no | values a conversation hands the target by its own declared names; journaled `jaira.supplied` |
+| `askAfter` | boolean | no | what the board's drop and its hover send: where a MODIFIED workflow (`plan.resolution: "modify"`) leaves required inputs of the target open, do not refuse — make the conversation without the target and answer `asking`. The app then gives that conversation its opening turn, which asks for them in words; its `start_task` mounts the target. A dry run answers the same `asking` and writes nothing. A `move` or `adopt` that leaves a required input open is still refused |
+| `interactions`, `fake` | as `task:start` | no | script a run the connect starts; `fake` also answers the opening turn `askAfter` gives |
 | `project` | `ProjectRef` | no | as above |
 
 Resolution, in order, stopping at the first that applies:
@@ -133,7 +135,9 @@ Resolution, in order, stopping at the first that applies:
 | `adopt` | one composite mounts the task's root state as a child and either is the target or mounts it as a child too; tried only for a task in no document that nothing made | `task:adopt` into a new task of that composite, then `task:move` of the new task unless the target is what comes next anyway |
 | `modify` | neither | `generateDocumentVersion`: `new` for a task that finished well, whose task is made and which adopts the source as its first child; `augmented` for a task already in a document; `cloned` for one standing inside a real workflow. Then `task:move` |
 
-`TaskConnectResult` is `{ok: true, dryRun, plan, taskId?, moved?, controlTaskId?, undo?}` or `{ok: false, dryRun, refusal, plan?}`. `taskId` is the task that stands at the target: the moved task, or the parent a connect made, absent from a dry run that would make one. `moved` is `task:move`'s status, or `fast-forwarding` for a forward move that runs the states between, when `controlTaskId` names the conversation answering on the way. A refusal carries `plan` wherever the resolution got far enough to have one, so a preview can say what was refused.
+`TaskConnectResult` is `{ok: true, dryRun, plan, taskId?, moved?, controlTaskId?, undo?, asking?}` or `{ok: false, dryRun, refusal, plan?}`. `taskId` is the task that stands at the target: the moved task, or the parent a connect made, absent from a dry run that would make one. `moved` is `task:move`'s status, or `fast-forwarding` for a forward move that runs the states between, when `controlTaskId` names the conversation answering on the way. `asking` answers `askAfter`: the required inputs the conversation `taskId` is about to ask for, as `ConnectMissingInput`s; nothing moved, so `moved` is absent. A refusal carries `plan` wherever the resolution got far enough to have one, so a preview can say what was refused.
+
+An `askAfter` connect that answers `asking` makes, for `new`, the document, its task and the adoption, the task queued and its conversation idle; for `cloned`, the diverged copy with the conversation grafted on; for `augmented`, nothing. The app then runs one turn of that conversation, as a typed turn runs, whose message is `askingMessage` from `persistence/connect.ts`: what the person did, each open input by its declared name, description and schema, and to ask for them in plain words and call `start_task` with the answers named in `asked`. The model's reply is the question. An idle conversation's first turn begins a new session named `chat:<root instance>`, so the conversation has a thread from then on.
 
 | `ConnectPlan` field | Type | Meaning |
 | --- | --- | --- |
@@ -172,7 +176,7 @@ Resolution, in order, stopping at the first that applies:
 | `adopt` | the adoption refused | `adopt`, the `AdoptRefusal` |
 | `generate` | the generator or its lint refused | |
 
-`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made}` or `{kind: "move", taskId, after, pin?, wasCompleted?}`. `after` is the task's last journal seq before the move.
+`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made}` or `{kind: "move", taskId, after, pin?, wasCompleted?, asking?}`. `after` is the task's last journal seq before the move. `asking: true` marks an `askAfter` connect of a `cloned` or `augmented` task, which moved nothing.
 
 ### `task:connectUndo` takes a connect back with the token it handed out
 
@@ -180,8 +184,10 @@ Resolution, in order, stopping at the first that applies:
 
 | `undo.kind` | Does |
 | --- | --- |
-| `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made that had entered nothing of its own is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. A parent that ran something is kept |
-| `move` | `task:rewind` to `after + 1` when the journal holds anything later, which puts a cloned task back under its previous pin; a task that had completed is marked completed again; then the pin is put back if it still differs |
+| `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made that had entered nothing of its own is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. A parent that ran something is kept; a turn of its conversation is not something it ran |
+| `move` | `task:rewind` to `after + 1` when the journal holds anything later, which puts a cloned task back under its previous pin; a task that had completed is marked completed again; then the pin is put back if it still differs. With `asking`, the journal is cut at `after + 1` WITHOUT a resume and the task's status and outcome are put back as they were |
+
+Either kind first stops a turn the task's conversation is taking and waits for it to land, up to the chat wait, so the opening turn an `askAfter` drop started cannot write after the cut.
 
 ### `task:adopt` takes a task up as a child, and answers the plan or the refusal
 

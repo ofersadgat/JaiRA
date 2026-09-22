@@ -2,7 +2,7 @@
 id: engineering/decisions/0005-connect
 type: decision
 status: built
-updated: 2026-09-21
+updated: 2026-09-22
 decides_for: [engineering/units/adoption, engineering/units/fan-out-host, engineering/units/workflow-snapshots, engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/interaction-hub, engineering/units/workflow-browser]
 ---
 
@@ -845,6 +845,35 @@ open:
   Memoization and Workflow lookup, and left out of the file `initProject`
   writes, so a project does not silently override the shared root's answer.
 
+## What the ask-after drop settled
+
+Built 2026-09-22, closing the Open entry "the board does not send `askAfter`
+yet". The statement of record is [task-channels](../contracts/task-channels.md)
+(`askAfter`, `asking`, `ConnectUndo.asking`) and
+[task-board](../../ui/components/task-board.md) (the `asking` state).
+
+- **The board sends it on the hover and the drop alike.** The dry run with
+  `askAfter` answers `ok` with `asking` and writes nothing, so the column lights
+  and the preview says the drop opens a conversation that will ask for each input
+  by name, with its description. Every other refusal is what it was.
+- **The opening turn is a turn, not an operation.** The conversation still
+  starts idle (step 6). The host then runs one turn of it, as a typed turn runs,
+  whose message (`askingMessage`) says what the person did and lists each open
+  input by its declared name, description and schema, and tells the model to ask
+  in plain words and to call `start_task` with the answers named in `asked`. The
+  reply is the question. Nothing in it is a name the platform chose (§0); the
+  names are the target's own, passed through because `start_task` takes them.
+- **An idle conversation can now be typed into.** It had no record, so there was
+  no position to continue; its first turn begins a session named after the root
+  (`chat:<root>`), and the thread reads from there. A document's task a drop made
+  has only the document, never a pinned snapshot of its own, so the chat context,
+  the generator and `connect`'s rule 3 read the document's latest version.
+- **Undo takes the conversation with it.** A turn of a made task's conversation
+  is not work of its own, so the task is still removed; a turn in flight is
+  stopped and waited out first. A clone or an existing document the drop only
+  gave a turn to is cut back without the resume a rewind would do
+  (`ConnectUndo.asking`), its pin and status put back.
+
 ## Open
 
 - A finished task publishes no runtime wait, so a "→ ui" chip offering a
@@ -862,11 +891,14 @@ open:
   finished does not get back the outputs its reopening cleared.
 - A connect that refuses part-way — the adoption into a new document's task,
   a move after an adoption — leaves what it had written, and says so.
-- `connect`'s `askAfter` is built — a drop whose target's inputs do not all bind
-  makes the conversation WITHOUT the target and answers what it is about to ask
-  for — and the board does not send it yet, so a drop of that shape is still
-  refused with what is missing. The conversation's own `start_task` is what mounts
-  the target afterwards.
+- A drop that asks after (above) does so only where the workflow is MODIFIED. A
+  move within the task's workflow, or an adoption, that leaves a required input
+  unbound is still refused with what is missing: there the target is already
+  mounted, and asking would mean grafting a conversation onto a workflow that was
+  not being changed.
+- The opening turn of a conversation a drop made is drawn as the person's
+  message, as a `chat/control` opening line always would have been; nothing
+  marks it as the host's.
 - A fast-forward of a task that is RUNNING with no conversation is refused
   until it is paused, for the reason a new transition is.
 - A fast-forward lives in the process that started it: a restart ends it, and

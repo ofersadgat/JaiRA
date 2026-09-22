@@ -236,14 +236,16 @@ export async function generateDocumentVersion(project: Project, request: Generat
   const { taskId } = request;
   const row = project.runtime.get(taskId);
   if (row === undefined) throw refusal(log, `unknown task '${taskId}'`, { taskId });
-  if (row.snapshotHash === undefined) throw refusal(log, `task '${taskId}' has never run, so it stands nowhere to be moved from`, { taskId });
+  // A task a drop made in a document (`askAfter`) has the document and no run yet: it stands in the
+  // document's latest version, which is what `previous` reads.
+  if (row.snapshotHash === undefined && row.documentId === undefined) throw refusal(log, `task '${taskId}' has never run, so it stands nowhere to be moved from`, { taskId });
   const meta = project.tasks.read(taskId);
   const snapshotsDir = project.paths.snapshotsDir;
 
   const live = loadLive(project, request.target);
   const target = stateShapeOf(live.states[live.rootId]!);
   const existing = row.documentId !== undefined ? readDocument(snapshotsDir, row.documentId) : undefined;
-  const previous = loadSnapshot(snapshotsDir, existing !== undefined ? latestVersion(existing).snapshotHash : row.snapshotHash);
+  const previous = loadSnapshot(snapshotsDir, existing !== undefined ? latestVersion(existing).snapshotHash : row.snapshotHash!);
   const previousRoot = previous.states[previous.rootId]!;
   const cause = { taskId, target: target.id };
   const createdAt = new Date(nowMs).toISOString();
@@ -354,12 +356,12 @@ export async function generateDocumentVersion(project: Project, request: Generat
   const id = `d-${uuidv7(nowMs)}`;
   const document = createDocument(
     snapshotsDir,
-    { id, kind: "diverged", rootId: previous.rootId, conversation: request.conversation, divergedFrom: { workflow: meta.workflow, snapshotHash: row.snapshotHash }, createdAt },
+    { id, kind: "diverged", rootId: previous.rootId, conversation: request.conversation, divergedFrom: { workflow: meta.workflow, snapshotHash: row.snapshotHash! }, createdAt },
     next,
   );
   // The task stops following the workflow it came from: it names the document, and its next load
   // picks version 1 up. The snapshot it last ran under is left as it is — that is still true.
-  project.runtime.setPin(taskId, row.snapshotHash, id, nowMs);
+  project.runtime.setPin(taskId, row.snapshotHash!, id, nowMs);
   log.info(`task ${taskId} diverged from '${meta.workflow}' into ${id}`);
   return { resolution: "cloned", generated: said, document, version: latestVersion(document) };
 }
