@@ -42,7 +42,7 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
-import { dragOffersOf } from "./taskDrag";
+import { dragOffersOf, undoableOn } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, ModuleApprovalDialog, type ApprovalAnswerExtras } from "./components";
@@ -2148,8 +2148,9 @@ export default function App(): JSX.Element {
                           connect={{
                             ask: (card, column) => actions.connectPreview(p.project, card.taskId, column.stateId),
                             onDrop: (card, column) => void actions.connectTask(p.project, card.taskId, column.stateId),
-                            undoable: new Set(Object.keys(state.connectUndo)),
-                            onUndo: (taskId) => void actions.undoConnect(taskId),
+                            // This window's tokens, and the ones a task keeps — which survive a restart.
+                            undoable: undoableOn(state.boards[p.project]!, state.connectUndo),
+                            onUndo: (taskId) => void actions.undoConnect(taskId, p.project),
                           }}
                         />
                       ) : (

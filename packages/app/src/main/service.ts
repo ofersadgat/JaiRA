@@ -103,6 +103,9 @@ import {
   removeWorktree,
   finishTaskRun,
   hasJournalHistory,
+  openFastForward,
+  reopenedAfter,
+  restoreReopened,
   holdingOf,
   type TaskRuntimeRow,
   historySize,
@@ -377,9 +380,20 @@ let installed: LogSink | undefined;
  */
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
-import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
+import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITING } from "./session";
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
 import { arrivedAt, fastForwardView, labelOfTarget, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
+import {
+  clearConnectUndo,
+  keepConnectUndo,
+  keptConnectUndo,
+  noteFastForwardEnd,
+  noteFastForwardStart,
+  noteHeldMove,
+  noteReopened,
+  restoreHostModes,
+  settleHostRowsAtRunEnd,
+} from "./hostModes";
 import { identicalTo, SUPERSEDED } from "./shippedStates";
 import type {
   Scope,
@@ -3792,11 +3806,13 @@ export class AppService {
         });
         // A run unwound by the app closing while its task was waiting on a person is SUSPENDED, and
         // its row says so in the spelling the next open resumes on — see `SUSPENDED_WAITING`.
-        const suspended = status === "canceled" && open.suspendedAtClose.has(taskId);
+        // The same for a run the close caught being FAST-FORWARDED — see `SUSPENDED_FORWARDING`.
+        const suspended =
+          status !== "canceled" ? undefined : open.suspendedAtClose.has(taskId) ? SUSPENDED_WAITING : open.forwardingAtClose.has(taskId) ? SUSPENDED_FORWARDING : undefined;
         finishTaskRun(project, taskId, status, {
           outputs: result.value,
-          ...(suspended
-            ? { failure: { classification: "canceled", reason: SUSPENDED_WAITING } }
+          ...(suspended !== undefined
+            ? { failure: { classification: "canceled", reason: suspended } }
             : "error" in result && result.error !== undefined
               ? { failure: result.error }
               : {}),
@@ -3842,6 +3858,13 @@ export class AppService {
         // answered from go (decision 0005 §4).
         const forward = open.fastForwards.get(taskId);
         if (forward !== undefined) this.endFastForward(open, taskId, open.project.runtime.get(taskId)?.status === "canceled" ? "stopped" : "failed", "the run ended before it reached the target");
+        // What the journal still holds open for this task — a fast-forward nobody held in memory, a
+        // move nobody took — is closed here, unless the session is closing (`hostModes.ts`).
+        try {
+          settleHostRowsAtRunEnd(open, taskId, open.project.runtime.get(taskId)?.status);
+        } catch (e) {
+          this.log({ level: "error", source: "run", message: `could not close what ${taskId}'s journal held open when its run ended: ${(e as Error).message}`, project: open.key, taskId, ...stackDetail(e) });
+        }
         open.fakeRules.delete(taskId);
         open.live.delete(taskId);
         open.liveTurns.drop(taskId);
@@ -4977,10 +5000,16 @@ export class AppService {
       if (owner === taskId) session.hub.reject(requestId, "the task was rewound to before this question");
     }
     session.questions.dismissFor(taskId);
+    // A reopening of the FINISHED task that the cut takes away: what it cleared is what the task goes
+    // back to (`hostRows.ts`). Read before the cut, which deletes the row that says so.
+    const reopened = reopenedAfter(session.project, taskId, request.at);
     const cut = cutTaskJournal(session.project, taskId, request.at);
     // Rewinding past a mirror row UN-ADOPTS (decision 0005 §2): the task that stood for that child
     // goes back to being its own, and the parent runs the child itself from here.
     releaseUnmirroredAdoptions(session.project, taskId);
+    // A rewind is a person taking the work back. A fast-forward whose END the cut deleted — or that a
+    // process left open — is ended here, or the resume below would take it up again.
+    if (openFastForward(session.project, taskId) !== undefined) noteFastForwardEnd(session.project, taskId, "stopped", "the task was rewound");
     this.log({
       level: "info",
       source: "run",
@@ -4994,6 +5023,12 @@ export class AppService {
     // would be a run that does nothing; the task goes back to standing as it did.
     const plan = this.resumable(taskId, request.project);
     if (plan.frontier.length === 0) {
+      if (reopened !== undefined) {
+        // Back to before a reopening: finished, with the outputs the reopening had cleared.
+        restoreReopened(session.project, taskId, reopened);
+        this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+        return { taskId };
+      }
       if (before.outcome !== undefined) session.project.runtime.endTask(taskId, before.outcome, Date.now());
       session.project.runtime.setStatus(taskId, before.status, Date.now());
       this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
@@ -5112,7 +5147,7 @@ export class AppService {
     const project = session.project;
     const candidates = project.runtime
       .list()
-      .filter((row) => row.status === "canceled" && reasonOf(row.failureJson) === SUSPENDED_WAITING);
+      .filter((row) => row.status === "canceled" && (reasonOf(row.failureJson) === SUSPENDED_WAITING || reasonOf(row.failureJson) === SUSPENDED_FORWARDING));
     for (const row of candidates) {
       // A session already on its way out — `closeSession` deletes it before awaiting this — must
       // not have a run started under it.
@@ -5218,14 +5253,39 @@ export class AppService {
       project: open.key,
       taskId,
     });
-    return this.startRun(open, taskId, {
-      config: open.project.config,
-      secrets: this.secretResolver(open),
-      loaded: load.loaded,
-      answers: load.answers,
-      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
-      ...(request.fake !== undefined ? { fake: request.fake } : {}),
-    });
+    // What a person asked of the task that the stopped process was still carrying out: a
+    // fast-forward, and moves held for a running state (`hostModes.ts`).
+    const modes = restoreHostModes(open, taskId);
+    if (modes.forward !== undefined || modes.held > 0 || modes.arrived === true) {
+      this.log({
+        level: "info",
+        source: "run",
+        message: `resuming ${taskId} with ${[
+          ...(modes.forward !== undefined ? [`its fast-forward to '${modes.forward.target}'`] : []),
+          ...(modes.arrived === true ? ["its fast-forward ended: it had arrived"] : []),
+          ...(modes.held > 0 ? [`${modes.held} held move(s)`] : []),
+        ].join(" and ")}`,
+        project: open.key,
+        taskId,
+      });
+      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    }
+    try {
+      return await this.startRun(open, taskId, {
+        config: open.project.config,
+        secrets: this.secretResolver(open),
+        loaded: load.loaded,
+        answers: load.answers,
+        ...(modes.directed !== undefined ? { directed: modes.directed } : {}),
+        ...(modes.descents !== undefined ? { descents: modes.descents } : {}),
+        ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+        ...(request.fake !== undefined ? { fake: request.fake } : {}),
+      });
+    } catch (e) {
+      // Not started: the mode goes back to being only a row, for the next resume to take up.
+      if (modes.forward !== undefined && open.fastForwards.get(taskId) === modes.forward) open.fastForwards.delete(taskId);
+      throw e;
+    }
   }
 
   // --- adopt, and inputs taken from a task (decision 0005 §2) -------------------------------------
@@ -5358,6 +5418,8 @@ export class AppService {
     });
     if (request.dryRun !== true) {
       this.connectBrowsers.delete(open.key);
+      // The card's Undo, kept on the task so it survives a restart (`hostModes.ts`).
+      if (result.ok && result.undo !== undefined) keepConnectUndo(project, result.taskId ?? request.taskId, result.undo);
       this.log({
         level: result.ok ? "info" : "warn",
         source: "run",
@@ -5467,6 +5529,8 @@ export class AppService {
     };
     open.fastForwards.get(taskId)?.seen.forEach((id) => run.seen.add(id));
     open.fastForwards.set(taskId, run);
+    // Journaled, so a restart takes the mode up again rather than ending it (`hostModes.ts`).
+    noteFastForwardStart(project, run);
     this.log({ level: "info", source: "run", message: `fast-forwarding ${taskId} to '${request.target}' through ${through.length === 0 ? "nothing" : through.join(", ")}, answered by ${controlTaskId}`, ...at });
     this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
     try {
@@ -5554,6 +5618,10 @@ export class AppService {
     if (run === undefined || run.end !== undefined) return;
     run.end = why;
     open.fastForwards.delete(taskId);
+    // A session CLOSING is not a reason a fast-forward ends: its start row stays open, and the next
+    // open's resume takes it up again (`hostModes.ts`). Anything else is an end, and is written.
+    if (open.closing) return;
+    noteFastForwardEnd(open.project, taskId, why, detail);
     this.log({
       level: why === "failed" ? "warn" : "info",
       source: "run",
@@ -5874,7 +5942,12 @@ export class AppService {
   async undoConnect(request: TaskConnectUndoRequest): Promise<TaskConnectUndoResult> {
     const open = this.session(request.project);
     const project = open.project;
-    const undo = request.undo;
+    // The token the card's task KEEPS wins over one handed in: it is the one that survived a restart,
+    // and a move's place in the journal is re-read from it rather than trusted as a seq.
+    const kept = request.taskId !== undefined ? keptConnectUndo(project, request.taskId) : undefined;
+    const undo = kept ?? request.undo;
+    if (undo === undefined) throw this.refusal("run", `task '${request.taskId ?? "?"}' has no connect to take back`);
+    const keeper = request.taskId ?? (undo.kind === "adopt" ? undo.parentTaskId : undo.taskId);
     const running = (taskId: string): boolean => open.live.has(taskId) || project.jobs.liveRunJob(taskId, Date.now()) !== undefined;
     const invalidate = (): void => {
       this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
@@ -5918,6 +5991,7 @@ export class AppService {
         removed = parentTaskId;
       }
       this.log({ level: "info", source: "run", message: `took back the adoption of ${adoptedTaskId} into ${parentTaskId}${removed !== undefined ? ", and removed the task it had made" : ""}`, project: open.key, taskId: adoptedTaskId });
+      clearConnectUndo(project, keeper);
       invalidate();
       return { taskId: adoptedTaskId, ...(removed !== undefined ? { removed } : {}) };
     }
@@ -5937,7 +6011,9 @@ export class AppService {
     } else if (moved) {
       await this.rewindTask({ taskId, at: undo.after + 1, project: open.dir });
       // A task that had FINISHED goes back to having finished: the cut took away everything since.
-      if (undo.wasCompleted === true && !open.live.has(taskId)) {
+      // The rewind already did that, outputs and all, when the reopening journaled what it cleared;
+      // this is for a move made before reopenings were journaled.
+      if (undo.wasCompleted === true && !open.live.has(taskId) && project.runtime.get(taskId)?.status !== "completed") {
         project.runtime.endTask(taskId, "success", Date.now());
         project.runtime.setStatus(taskId, "completed", Date.now());
       }
@@ -5947,6 +6023,7 @@ export class AppService {
       project.runtime.setPin(taskId, undo.pin.snapshotHash, undo.pin.documentId ?? null, Date.now());
     }
     this.log({ level: "info", source: "run", message: `took back the move of ${taskId}`, project: open.key, taskId });
+    clearConnectUndo(project, keeper);
     invalidate();
     return { taskId };
   }
@@ -6477,6 +6554,9 @@ export class AppService {
       // `queued` is a run whose engine has not attached yet, or has just let go: the port keeps the
       // move, a starting engine claims it, and the run-end handler reopens for one left behind.
       const status = outcome.status === "taking" ? "taking" : "held";
+      // A HELD move is journaled, so a process that dies holding it hands it to the resume that
+      // follows, which re-queues it and takes it when the state ends (`hostModes.ts`).
+      if (status === "held") noteHeldMove(open.project, request, move);
       this.log({ level: "info", source: "run", message: `moved ${taskId} to '${move.to}' (${move.by}${move.skip === true ? ", skip" : ""}): ${status}`, ...at });
       return { taskId, status };
     }
@@ -6518,6 +6598,9 @@ export class AppService {
     const port = new DirectedTransitions();
     port.direct(row.status === "completed" ? move : { ...move, skip: true });
     this.log({ level: "info", source: "run", message: `reopening ${taskId} (${row.status}) to move it to '${move.to}' (${move.by})`, ...at });
+    // A FINISHED task's reopening clears its outputs off the row; the journal keeps them, so a rewind
+    // to before this — an Undo of the move — puts the task back as it was.
+    noteReopened(open.project, row);
     await this.startRun(open, taskId, {
       config: open.project.config,
       secrets: this.secretResolver(open),

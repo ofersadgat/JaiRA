@@ -97,7 +97,7 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | --- | --- |
 | `answered` | a transition of the task was waiting on `on_user_event('task_move' or 'task_drag', {to_state})` for this state, and now has its answer. Not tried with `skip` or `instanceId` |
 | `taking` | the task runs in this process, has the move, and nothing stands in its way |
-| `held` | the task runs in this process and takes the move when its running state ends |
+| `held` | the task runs in this process and takes the move when its running state ends; journaled `jaira.moveHeld`, so a resume after a crash or a close re-queues it, and a stop drops it ([journal-events](journal-events.md)) |
 | `reopened` | the task was not running and was started again by load with the move waiting; a `completed` task is reopened under its own id, and any other status steps past the state it stopped in |
 
 ### `task:fastForward` runs a task to a state ahead of it, `task:skip` goes there directly, and `task:answerYourself` takes an answer back
@@ -180,12 +180,12 @@ An `askAfter` connect that answers `asking` makes, for `new`, the document, its 
 
 ### `task:connectUndo` takes a connect back with the token it handed out
 
-`task:connectUndo` takes `{undo: ConnectUndo, project?}` and answers `{taskId, removed?}`.
+`task:connectUndo` takes `{undo?: ConnectUndo, taskId?, project?}` and answers `{taskId, removed?}`. A real connect also KEEPS its token on the card's task file (`TaskMeta.connectUndo`, [task-file](task-file.md)), so it survives a restart: given a `taskId` whose task keeps one, the kept token is used — a move's `after` re-read from its place in the journal, counted in rows — whatever `undo` says. Neither kept nor given refuses with `task '<id>' has no connect to take back`. A use clears the kept token, and `TaskSummary.undoable` and `BoardCard.undoable` say which tasks still keep one.
 
 | `undo.kind` | Does |
 | --- | --- |
 | `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made that had entered nothing of its own is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. A parent that ran something is kept; a turn of its conversation is not something it ran |
-| `move` | `task:rewind` to `after + 1` when the journal holds anything later, which puts a cloned task back under its previous pin; a task that had completed is marked completed again; then the pin is put back if it still differs. With `asking`, the journal is cut at `after + 1` WITHOUT a resume and the task's status and outcome are put back as they were |
+| `move` | `task:rewind` to `after + 1` when the journal holds anything later, which puts a cloned task back under its previous pin; a task that had completed is put back completed with the outputs its reopening cleared, read from the `jaira.reopened` row ([journal-events](journal-events.md)); then the pin is put back if it still differs. With `asking`, the journal is cut at `after + 1` WITHOUT a resume and the task's status and outcome are put back as they were. A kept token carries `asking` too, so an Undo after a restart still takes the conversation back |
 
 Either kind first stops a turn the task's conversation is taking and waits for it to land, up to the chat wait, so the opening turn an `askAfter` drop started cannot write after the cut.
 

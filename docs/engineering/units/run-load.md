@@ -2,13 +2,13 @@
 id: engineering/units/run-load
 type: engineering-unit
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 implements: [product/pick-up-where-it-left-off, ux/patterns/button-says-what-will-happen]
 layer: service
 owns_contracts: []
 requires: [engineering/units/event-journal, engineering/units/operation-record-store]
-implemented_by: [packages/persistence/src/load.ts]
-verified_by: [packages/persistence/test/load.test.ts, packages/persistence/test/titleResume.test.ts, packages/app/test/load.test.ts]
+implemented_by: [packages/persistence/src/load.ts, packages/persistence/src/hostRows.ts]
+verified_by: [packages/persistence/test/load.test.ts, packages/persistence/test/titleResume.test.ts, packages/app/test/load.test.ts, packages/persistence/test/hostRows.test.ts]
 siblings: [engineering/units/task-lifecycle, engineering/units/rewind-and-fork, engineering/units/event-journal, engineering/units/board-projection]
 ---
 
@@ -30,7 +30,7 @@ Two releases run before a resume continues. `releaseUnconsumedFailures` deletes 
 It deliberately does not own:
 
 - Continuing the machine. hw's `WorkflowExecutor.load` does, reached through `executeWorkflow` in [engine-wiring](engine-wiring.md).
-- Choosing to resume, the refusals worded from `blocked` and `unreadable`, and `ResumePlan`: [task-lifecycle](task-lifecycle.md).
+- Choosing to resume, the refusals worded from `blocked` and `unreadable`, `ResumePlan`, and taking up an open fast-forward and the held moves beside the load: [task-lifecycle](task-lifecycle.md).
 - Storing and ordering the journal: [event-journal](event-journal.md), with the event shapes in [journal-events](../contracts/journal-events.md).
 - Record rows, seats, handles and blobs: [operation-record-store](operation-record-store.md).
 - Truncating a journal before a resume: [rewind-and-fork](rewind-and-fork.md).
@@ -43,7 +43,7 @@ It deliberately does not own:
 - Boundary: workflow and run. `shape` is the pinned snapshot's states, because the journal records which child entered and only the definition knows its index in a `sequence`.
 - Callers: `AppService.resumeTask` and `resumable`, `jaira task start`, and the pending-gate listing in `service.ts` for `rehydrateArtifactInputs`.
 
-## The fold follows seven rules, and each decides what a resume pays for again
+## The fold follows nine rules, and each decides what a resume pays for again
 
 1. **By instance id.** A second `instance.entered` for a known id clears its termination and does not advance its parent. A `chat:` instance is skipped with all its events. An id without `-` predates durable ids and sets `blocked`.
 2. **One root.** `task_runtime.root_instance_id` wins where stamped; otherwise the newest parentless entry is the machine.
@@ -53,6 +53,7 @@ It deliberately does not own:
 6. **Fields.** The last `value.settled` per field loads, a fallback's value included; a settle with no value removes the field.
 7. **A person's move.** A `transition.taken` carrying `by` was directed ([decision 0005](../decisions/0005-connect.md), [journal-events](../contracts/journal-events.md)). An instance that ended `skipped` is never revived, although its row lands after the transition that decided it. A directed transition on an instance that had terminated clears its termination and every ancestor's, so a reopened task that died loads live. A directed transition with no later entry of its `to` under that instance loads as `LoadedInstance.directed`, the entry the run still owes.
 8. **An adopted child.** An `instance.entered` carrying `adopted` is an adoption's mirror ([adoption](adoption.md)): a task that ran alone, standing for this child. It is emitted as history under the stand-in state id `jaira:adopted:<stateId>`, with the `outputs` on its `instance.terminated` row as its operation's value, and is never live and never revived; a success after the parent's last advancement still reads `unanswered`. A mirror with no end yet sets `blocked`, naming the task that has not completed. `withAdoptedStandIns` adds the stand-in state to the bundle a loaded run is handed.
+9. **The host's own rows are not the machine.** `jaira.fastForward`, `jaira.fastForwardEnded`, `jaira.moveHeld`, `jaira.moveDropped` and `jaira.reopened` ([journal-events](../contracts/journal-events.md)) carry no instance and are skipped by the fold. What a person asked of the task that the stopped process was still carrying out — an open fast-forward, an outstanding held move — is read beside the load, by `restoreHostModes` in `app/main/hostModes.ts` over `hostRows.ts`, and handed to the same start: the mode to the session, the holds to the run's `DirectedTransitions` port, which the loaded engine drains when it attaches and each loaded instance claims as it is built.
 
 A frontier entry is `mid-operation` when its operation started and never settled, or settled as an `interrupted` failure. Its cause is `failed` when the instance ended in `error` or `timeout`.
 

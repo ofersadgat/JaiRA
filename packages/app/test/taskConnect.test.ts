@@ -50,6 +50,13 @@ function files(): Record<string, JsonValue> {
     "flow/b": gate("b"),
     "flow/c": gate("c"),
     "flow/d": gate("d"),
+    // A spine whose root DECLARES outputs — what a finished task has on its row, and a reopening clears.
+    done: {
+      label: "Done",
+      outputs: { a_ok: { schema: BOOLEAN, binding: ".children.a.output.confirmed" }, b_ok: { schema: BOOLEAN, binding: ".children.b.output.confirmed" } },
+      children: { a: { state: "flow/a" }, b: { state: "flow/b" } },
+      sequence: ["a", "b"],
+    },
     deep: { label: "Deep", children: { one: { state: "deep/one" }, two: { state: "deep/two" } }, sequence: ["one", "two"] },
     "deep/one": gate("one"),
     "deep/two": { label: "Two", children: { x: { state: "deep/two/x" }, y: { state: "deep/two/y" }, z: { state: "deep/two/z" } }, sequence: ["x", "y", "z"] },
@@ -589,5 +596,83 @@ describe("askAfter — a drop whose target needs what nothing binds (decision 00
     expect(no(await service.connectTask({ taskId: product, target: "feat/ship", skip: true, askAfter: true })).refusal.code).toBe("inputs-missing");
     const running = await standingIn("flow", 1);
     expect(no(await service.connectTask({ taskId: running, target: "lib/needs", askAfter: true })).refusal.code).toBe("running");
+  });
+});
+
+describe("UNDO outlives the process that handed it out", () => {
+  const outputsOf = (taskId: string): string | undefined => read((p) => p.runtime.get(taskId)?.outputsJson);
+
+  it("is kept on the task and survives a restart; undoing a move of a FINISHED task gives back the outputs its reopening cleared", async () => {
+    const taskId = await ran("done", 2);
+    const finished = outputsOf(taskId);
+    expect(JSON.parse(finished!)).toEqual({ a_ok: true, b_ok: true });
+
+    // Backward, into a task that had finished: it is reopened to take the move, and its row is cleared.
+    const done = ok(await service.connectTask({ taskId, target: "flow/a" }));
+    expect(done.moved).toBe("reopened");
+    expect(metaOf(taskId)?.connectUndo?.undo).toEqual(done.undo);
+    expect(service.listTasks().find((t) => t.taskId === taskId)?.undoable).toBe(true);
+    expect((await parked()).state).toBe("a");
+    service.cancelTask(taskId);
+    await until(() => statusOf(taskId) === "canceled", "the reopened task to stop");
+    expect(outputsOf(taskId)).toBeUndefined();
+
+    // A restart: nothing in this process was handed the token, and the card still offers it.
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    await service.open(dir);
+    const card = service
+      .boardRoots()
+      .columns.flatMap((column) => column.cards)
+      .find((c) => c.taskId === taskId);
+    expect(card).toMatchObject({ taskId, undoable: true });
+
+    expect(await service.undoConnect({ taskId })).toEqual({ taskId });
+    // Finished again, with the outputs it had — not a finished task with none.
+    expect(statusOf(taskId)).toBe("completed");
+    expect(outputsOf(taskId)).toBe(finished);
+    expect(journal(taskId).some((e) => e.type === "transition.taken")).toBe(false);
+    expect(ended(taskId).filter(([key]) => key === "(root)")).toEqual([["(root)", "success"]]);
+    // Used, so no longer offered — and asking again has nothing to take back.
+    expect(metaOf(taskId)?.connectUndo).toBeUndefined();
+    expect(service.listTasks().find((t) => t.taskId === taskId)?.undoable).toBeUndefined();
+    await expect(service.undoConnect({ taskId })).rejects.toThrow(/has no connect to take back/);
+  });
+
+  it("an adoption's Undo survives a restart too", async () => {
+    const product = await ran("feat/product", 1);
+    const done = ok(await service.connectTask({ taskId: product, target: "feat", start: false }));
+    const parent = done.taskId!;
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    await service.open(dir);
+    expect(await service.undoConnect({ taskId: parent })).toEqual({ taskId: product, removed: parent });
+    expect(metaOf(product)?.origin).toBeUndefined();
+  });
+
+  it("keeps askAfter's `asking` on the kept token: after a restart, Undo still takes the drop's conversation back without resuming", async () => {
+    const fake = [{ promptIncludes: "Ask the person", output: "What should the thing be called?" }, { output: "Thanks." }] as unknown as JsonValue;
+    const chatTurnsSettled = (id: string): number => journal(id).filter((e) => e.type === "operation.completed" && e.instanceId.startsWith("chat:")).length;
+    const taskId = await standingIn("flow", 1);
+    service.cancelTask(taskId);
+    await until(() => statusOf(taskId) === "canceled", "the task to stop");
+    const pinned = read((p) => p.runtime.get(taskId)!);
+    const done = ok(await service.connectTask({ taskId, target: "lib/needs", askAfter: true, fake }));
+    expect(done.undo).toMatchObject({ kind: "move", asking: true });
+    await until(() => chatTurnsSettled(taskId) === 1, "the opening question");
+    expect(metaOf(taskId)?.connectUndo?.undo).toMatchObject({ kind: "move", taskId, asking: true });
+
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    await service.open(dir);
+    // Nothing handed in but the card: the kept token, `asking` and all.
+    expect(await service.undoConnect({ taskId })).toEqual({ taskId });
+    const back = read((p) => p.runtime.get(taskId)!);
+    expect(back.documentId).toBeUndefined();
+    expect(back.snapshotHash).toBe(pinned.snapshotHash);
+    // Cut WITHOUT the resume a plain rewind would do: the conversation's turn is gone and the task stands stopped.
+    expect(back.status).toBe("canceled");
+    expect(chatTurnsSettled(taskId)).toBe(0);
+    expect(metaOf(taskId)?.connectUndo).toBeUndefined();
   });
 });

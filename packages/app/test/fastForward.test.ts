@@ -19,6 +19,9 @@
  *  - a failure on the way ends it too;
  *  - Skip mid-state: the jump is journaled BEFORE the interrupt, and the run does not walk on;
  *  - `settled_by` survives a restart, and the resumed run does not ask the answered gate again;
+ *  - the MODE survives a restart (journaled `jaira.fastForward` / `jaira.fastForwardEnded`): a crash's
+ *    Resume and a close's next open both take it up, the approval is still never offered, and a Stop
+ *    ends it for good;
  *  - "Answer it yourself" rewinds to the answer, ends the mode, and the person is asked;
  *  - the stale inbox: a skip withdraws what an interrupted agent asked (`SkipWithdrawals`).
  */
@@ -30,7 +33,7 @@ import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
-import { ANSWERED_EVENT, type InstanceNode, type PendingInteraction, type TaskConnectResult } from "@jaira/shared";
+import { ANSWERED_EVENT, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, type InstanceNode, type PendingInteraction, type TaskConnectResult } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { SkipWithdrawals } from "../src/main/fastForward";
@@ -98,6 +101,8 @@ const answers = (b: { confidence: number } = { confidence: 0.86 }): JsonValue =>
 
 let dir: string;
 let service: AppService;
+/** Services left for dead by a simulated crash — closed at the end, never before. */
+let abandoned: AppService[] = [];
 const seen = new Set<string>();
 
 async function openService(): Promise<void> {
@@ -113,6 +118,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  for (const dead of abandoned) await dead.close().catch(() => undefined);
+  abandoned = [];
   await service.close().catch(() => undefined);
   rmSync(dir, { recursive: true, force: true });
 });
@@ -189,6 +196,11 @@ function nodeByKey(taskId: string, key: string): InstanceNode | undefined {
 }
 
 const answeredRows = (taskId: string) => rows(taskId).filter((row) => (row.event as unknown as { type: string }).type === ANSWERED_EVENT);
+
+/** The fast-forward rows of a task's journal, by type, in order. */
+const ffRows = (taskId: string): string[] => rows(taskId).map((row) => (row.event as unknown as { type: string }).type).filter((type) => type === FAST_FORWARD_EVENT || type === FAST_FORWARD_ENDED_EVENT);
+/** The last fast-forward end row. */
+const endRow = (taskId: string): unknown => rows(taskId).map((row) => row.event as unknown as { type: string }).filter((e) => e.type === FAST_FORWARD_ENDED_EVENT).at(-1);
 
 function setAskBelow(value: number): void {
   const file = join(dir, ".jaira", "settings.json");
@@ -366,9 +378,101 @@ describe("the answers survive, and can be taken back", () => {
     expect(pendingFor(taskId).map(promptOf)).toEqual(["Publish c?"]);
     expect(nodeByKey(taskId, "a")!.settledBy).toEqual(before.a);
     expect(nodeByKey(taskId, "b")!.settledBy).toEqual(before.b);
-    // The mode belonged to the process that is gone: nothing answers for the person any more.
+    // The mode survived the close: its start row is open in the journal, and nothing wrote an end.
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", answered: 2, left: 0, step: 2, at: "c" });
+    expect(ffRows(taskId)).toEqual([FAST_FORWARD_EVENT]);
+  });
+});
+
+describe("a restart RESUMES the fast-forward — and it still ends only for the reasons it ends", () => {
+  /** Abandon the service the way a dying process does, stale its claim, and open again. */
+  async function crashAndReopen(taskId: string): Promise<void> {
+    const dead = service;
+    const project = openProject(dir, { baseDir: testHome() });
+    try {
+      project.db.prepare(`UPDATE jobs SET heartbeat_at = 0 WHERE task_id = ? AND ended_at IS NULL`).run(taskId);
+    } finally {
+      project.close();
+    }
+    await openService();
+    seen.clear();
+    abandoned.push(dead);
+  }
+
+  it("after a CRASH, Resume takes the mode up: the conversation answers what comes next, the approval is still never offered, and arrival ends it", async () => {
+    const taskId = await stoppedAtFirst();
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    await nextGate(taskId); // parked at `c`, the approval, with `a` and `b` answered for you
+    await crashAndReopen(taskId);
+    expect(statusOf(taskId)).toBe("interrupted");
+    // Not running, so no mode is live yet: a crash is resumed by a person, never unasked.
+    expect(service.taskDetail(taskId).fastForward).toBeUndefined();
+
+    await service.resumeTask({ taskId, fake: answers() });
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", targetLabel: "e", through: ["b", "c", "d"], answered: 2, step: 2, at: "c" });
+    // The approval is asked again — of the PERSON. The script would answer it at 0.99 if it were
+    // ever offered; it is not, after a resume as before one.
+    const approval = await nextGate(taskId);
+    expect(promptOf(approval)).toBe("Publish c?");
+    await settle();
+    expect(pendingFor(taskId).map(promptOf)).toEqual(["Publish c?"]);
+    expect(answeredRows(taskId)).toHaveLength(2);
+    expect(nodeByKey(taskId, "c")!.settledBy).toBeUndefined();
+
+    // Answered by the person; `d` is answered FOR them by the resumed mode; arrival ends it.
+    service.submitInteraction(approval.requestId, { confirmed: true });
+    const target = await nextGate(taskId);
+    expect(promptOf(target)).toBe("Pick for e");
+    await settle();
+    expect(pendingFor(taskId).map(promptOf)).toEqual(["Pick for e"]);
+    expect(nodeByKey(taskId, "d")!.settledBy).toMatchObject({ via: "control", confidence: 0.9 });
+    expect(service.taskDetail(taskId).fastForward).toBeUndefined();
+    expect(ffRows(taskId)).toEqual([FAST_FORWARD_EVENT, FAST_FORWARD_ENDED_EVENT]);
+    expect(endRow(taskId)).toMatchObject({ end: "arrived" });
+  });
+
+  it("after a CLOSE, the next open resumes the run and the mode unasked — the strip shows, and Skip works", async () => {
+    const taskId = await stoppedAtFirst();
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    await nextGate(taskId); // at `c`
+    await service.close();
+    seen.clear();
+    await openService();
+    // The open resumes it unasked, in the background — the recovered gate is on the list before then.
+    await (service as unknown as { session(): { resuming: Promise<void> } }).session().resuming;
+    await until(() => pendingFor(taskId).length > 0, "the resumed run to ask again");
+    expect(statusOf(taskId)).toBe("running");
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", controlTaskId: taskId });
+
+    const skipped = await service.skipFastForward({ taskId });
+    expect(skipped.status).toBe("taking");
+    expect(promptOf(await nextGate(taskId))).toBe("Pick for e");
+    expect(ended(taskId).slice(-2)).toEqual([
+      ["c", "skipped"],
+      ["d", "skipped"],
+    ]);
+    expect(service.taskDetail(taskId).fastForward).toBeUndefined();
+    expect(endRow(taskId)).toMatchObject({ end: "skipped" });
+  });
+
+  it("a STOP ends it for good: the end is written, and a later resume is an ordinary one", async () => {
+    const taskId = await stoppedAtFirst();
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    await nextGate(taskId); // at `c`
+    service.cancelTask(taskId);
+    await until(() => statusOf(taskId) === "canceled", "the stop");
+    expect(endRow(taskId)).toMatchObject({ end: "stopped" });
+
+    await service.close();
+    seen.clear();
+    await openService();
+    await service.resumeTask({ taskId, fake: answers() });
+    await nextGate(taskId); // `c` again
     expect(service.taskDetail(taskId).fastForward).toBeUndefined();
   });
+});
+
+describe("the answers can be taken back", () => {
 
   it("'Answer it yourself' rewinds to the answer: the mode is over, and the person is asked", async () => {
     const taskId = await stoppedAtFirst();

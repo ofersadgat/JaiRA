@@ -255,7 +255,26 @@ export type TaskConnectResult =
 
 export interface TaskConnectUndoRequest {
   project?: ProjectRef;
+  /** The token the connect handed out. Absent ⇒ the one the task named by {@link taskId} keeps. */
+  undo?: ConnectUndo;
+  /**
+   * The card whose Undo was pressed. When that task keeps a token (`TaskMeta.connectUndo`), the kept
+   * one is used — it is the one that survives a restart, and its place in the journal is re-read.
+   */
+  taskId?: string;
+}
+
+/**
+ * A connect's Undo as the task file KEEPS it, so it survives a restart (decision 0005 step 5, made
+ * durable 2026-09-22).
+ *
+ * `rows` is where a move's `after` stood, counted as the number of the task's journal rows at or
+ * before it. A seq does not outlive the table that minted it — a file-backed journal re-mints every
+ * seq at each open that replays — while the rows before a point stay the rows before it.
+ */
+export interface StoredConnectUndo {
   undo: ConnectUndo;
+  rows?: number;
 }
 
 export interface TaskConnectUndoResult {

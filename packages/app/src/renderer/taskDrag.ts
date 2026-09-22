@@ -73,3 +73,14 @@ export function canDrag(offers: DragOffers, taskId: string): boolean {
 export function requestFor(offers: DragOffers, taskId: string, columnKey: string): string | undefined {
   return offers.get(taskId)?.get(columnKey);
 }
+
+/**
+ * The cards on this board that carry **Undo** (decision 0005 step 5): the ones a connect in this
+ * window made or moved (`window`, keyed by task id), and the ones whose task KEEPS a connect's token
+ * (`BoardCard.undoable`) — which is what survives a restart.
+ */
+export function undoableOn(board: BoardView, window: Readonly<Record<string, unknown>>): ReadonlySet<string> {
+  const out = new Set(Object.keys(window));
+  for (const card of [...board.columns.flatMap((column) => column.cards), ...board.atLevel]) if (card.undoable === true) out.add(card.taskId);
+  return out;
+}

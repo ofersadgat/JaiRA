@@ -665,6 +665,7 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
       ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
       ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
       ...(summary.inReview !== undefined ? { inReview: summary.inReview } : {}),
+      ...(summary.undoable === true ? { undoable: true as const } : {}),
       updatedAt: summary.updatedAt,
       run: taskRun(project, summary.taskId, shape),
     }));
@@ -877,6 +878,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       ...(adoptedBy !== undefined ? { under: adoptedBy } : {}),
       ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
       ...(summary.inReview !== undefined ? { inReview: summary.inReview } : {}),
+      ...(summary.undoable === true ? { undoable: true as const } : {}),
       updatedAt: summary.updatedAt,
     };
     // Always found: the loop above made a column for every flow the summaries resolve to, whether

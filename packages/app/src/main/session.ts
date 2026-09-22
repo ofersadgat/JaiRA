@@ -123,6 +123,14 @@ export interface ProjectSessionOptions {
  */
 export const SUSPENDED_WAITING = "suspended while waiting on you: the app closed";
 
+/**
+ * The same, for a run the app closed on while it was being FAST-FORWARDED (decision 0005 §4). The
+ * person asked for the machine to be run to a state; closing the app is not them taking that back,
+ * so the next open resumes the run and the fast-forward with it — the mode's start row is still open
+ * in the journal (`hostRows.ts`), because a close writes no end.
+ */
+export const SUSPENDED_FORWARDING = "suspended while running forward: the app closed";
+
 export class ProjectSession {
   readonly key: string;
   readonly kind: SessionKind;
@@ -139,6 +147,14 @@ export class ProjectSession {
    * user-event waits do not, and both are the fact this set records.
    */
   readonly suspendedAtClose = new Set<string>();
+  /** The tasks being FAST-FORWARDED when this session began closing — see {@link SUSPENDED_FORWARDING}. */
+  readonly forwardingAtClose = new Set<string>();
+  /**
+   * Set at the top of {@link close}. What a run does while it is being unwound by a close is not a
+   * person's decision, so nothing that ends then writes that it ended: a fast-forward keeps its open
+   * start row and a held move its hold, and the next open takes both up again.
+   */
+  closing = false;
   /**
    * The resumes the open of this session started — see `Service.resumeSuspended`. Awaited by the
    * close, so a resume in flight is either running (and aborted with the rest) or never started.
@@ -205,9 +221,9 @@ export class ProjectSession {
   /**
    * The tasks being FAST-FORWARDED right now, by task id (decision 0005 §4, step 7).
    *
-   * In memory because nothing in the journal is a fast-forward: it is a mode a run is in, and a
-   * process that did not start it has no business answering questions on its behalf. A task whose
-   * app went away comes back standing wherever the machine got to, with its questions its own again.
+   * The live half of the mode: the journal holds its start and its end (`hostRows.ts`), and a
+   * resume of a task whose fast-forward was still open when its process went away puts it back here
+   * (`AppService.restoreFastForward`) — the conversation answers again, the strip shows, Skip works.
    */
   readonly fastForwards = new Map<string, FastForwardRun>();
   /**
@@ -306,6 +322,8 @@ export class ProjectSession {
    * row left `running`.
    */
   async close(reason = "the project was closed"): Promise<void> {
+    this.closing = true;
+    for (const taskId of this.fastForwards.keys()) if (this.live.has(taskId)) this.forwardingAtClose.add(taskId);
     clearTimeout(this.watchTimer);
     this.watchTimer = undefined;
     for (const watcher of this.watchers) watcher.close();

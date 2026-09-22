@@ -273,6 +273,8 @@ export interface BoardCard {
    * ordinary card otherwise.
    */
   under?: string;
+  /** A connect made or moved this task and can still be taken back — the card carries **Undo**. */
+  undoable?: true;
   updatedAt: number;
   /**
    * When the run ENDED, from the journal — the last instance of it to terminate.
@@ -1144,6 +1146,8 @@ export interface TaskSummary {
   controls?: number;
   /** A merge request this task is waiting on (decision 0004) — see {@link InReview}. */
   inReview?: InReview;
+  /** The task keeps a connect's Undo (`TaskMeta.connectUndo`) — see {@link BoardCard.undoable}. */
+  undoable?: true;
   createdAt: string;
   updatedAt: number;
 }

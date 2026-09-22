@@ -527,6 +527,8 @@ export interface TaskProjection {
   waitingFor?: Holding[];
   /** A merge request the task is waiting on (decision 0004). */
   inReview?: InReview;
+  /** A connect can still be taken back (`TaskSummary.undoable`). */
+  undoable?: true;
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);
@@ -565,6 +567,7 @@ function cardOf(
     ...(task.origin?.kind === "adopt" ? { under: task.origin.taskId } : {}),
     ...(task.waitingFor !== undefined && task.waitingFor.length > 0 ? { waitingFor: task.waitingFor } : {}),
     ...(task.inReview !== undefined ? { inReview: task.inReview } : {}),
+    ...(task.undoable === true ? { undoable: true as const } : {}),
     updatedAt: task.updatedAt,
   };
 }

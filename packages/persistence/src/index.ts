@@ -48,3 +48,4 @@ export * from "./dynamicWorkflow";
 export * from "./dynamicDocuments";
 // `connect(task, target)`: the three resolutions and their composition (decision 0005 §1).
 export * from "./connect";
+export * from "./hostRows";

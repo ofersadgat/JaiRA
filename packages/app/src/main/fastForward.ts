@@ -4,10 +4,12 @@
  * `AppService` drives it; this is the bookkeeping, kept out of the service so the three rules that
  * matter are readable in one place:
  *
- *  1. **It is not a transition.** Nothing in the journal is a fast-forward. A forward move starts
- *     the machine and the machine walks its own spine; the mode is what decides who answers the
- *     questions on the way, what the strip says, and what Skip is aimed at. So it lives in the
- *     memory of the process driving the run, and it is gone when that process is.
+ *  1. **It is not a transition.** A forward move starts the machine and the machine walks its own
+ *     spine; the mode is what decides who answers the questions on the way, what the strip says,
+ *     and what Skip is aimed at. The process driving the run holds it, and the journal holds its
+ *     start and its end (`jaira.fastForward` / `jaira.fastForwardEnded`, `hostRows.ts`): a process
+ *     that goes away writes no end, and the resume that follows takes the mode up again
+ *     ({@link restoredFastForward}). Approvals stay out of it however it was begun.
  *  2. **It ends on arrival, and on anything going wrong.** {@link arrivedAt} is the whole test, and
  *     `end` is written exactly once — a mode that ended twice would answer a question after the
  *     person was supposed to have it back.
@@ -17,7 +19,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent } from "@declarative-ai/hw";
-import type { FastForwardEnd, FastForwardView } from "@jaira/shared";
+import { ANSWERED_EVENT, type FastForwardEnd, type FastForwardEvent, type FastForwardView } from "@jaira/shared";
 
 export interface FastForwardRun {
   /** The task being walked forward. */
@@ -158,4 +160,60 @@ export function noteEntry(run: FastForwardRun, event: EngineEvent, path: string 
   if (path !== undefined && path.length > 0) run.at = path.split("/").join(" → ");
   const at = run.through.indexOf(path ?? event.childKey);
   if (at >= 0 && at + 1 > run.step) run.step = at + 1;
+}
+
+/**
+ * The mode a journal says is still OPEN, rebuilt for a resumed run — see `hostRows.ts`.
+ *
+ * Everything the strip showed is re-read from the rows after the start: how many questions the
+ * conversation answered (its `jaira.answered` rows), how far the run had got (the entries of
+ * `through`), and — should the target's entry already be there, the process having died between it
+ * and the end row — that it has in fact ARRIVED, in which case there is nothing to take up. `left`
+ * starts again from nothing: a question left to the person is not a row, and the resumed run asks it
+ * again under a request id this process has never offered.
+ */
+export function restoredFastForward(
+  taskId: string,
+  start: FastForwardEvent,
+  history: readonly EngineEvent[],
+  since: readonly EngineEvent[],
+): { run: FastForwardRun; arrived: boolean } {
+  const run: FastForwardRun = {
+    taskId,
+    controlTaskId: start.controlTaskId,
+    target: start.target,
+    targetLabel: start.targetLabel,
+    to: start.to,
+    path: [...start.path],
+    ...(start.under !== undefined ? { instanceId: start.under } : {}),
+    through: [...start.through],
+    ...(start.inputs !== undefined ? { inputs: start.inputs } : {}),
+    step: 0,
+    answered: 0,
+    left: 0,
+    startedAt: start.startedAt,
+    seen: new Set(),
+  };
+  const entry = new Map<string, { parent?: string; key?: string }>();
+  for (const event of history) {
+    if (event.type === "instance.entered") entry.set(event.instanceId, { ...(event.parentInstanceId !== undefined ? { parent: event.parentInstanceId } : {}), ...(event.childKey !== undefined ? { key: event.childKey } : {}) });
+  }
+  const pathOf = (id: string): string => {
+    const keys: string[] = [];
+    const visited = new Set<string>();
+    for (let at: string | undefined = id; at !== undefined && !visited.has(at); at = entry.get(at)?.parent) {
+      visited.add(at);
+      const key = entry.get(at)?.key;
+      if (key !== undefined) keys.unshift(key);
+    }
+    return keys.join("/");
+  };
+  let arrived = false;
+  for (const event of since) {
+    const row = event as unknown as { type: string; byTaskId?: string };
+    if (row.type === ANSWERED_EVENT && row.byTaskId === start.controlTaskId) run.answered += 1;
+    if (arrivedAt(run, event)) arrived = true;
+    if (event.type === "instance.entered") noteEntry(run, event, pathOf(event.instanceId));
+  }
+  return { run, arrived };
 }

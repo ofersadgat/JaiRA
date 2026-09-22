@@ -42,6 +42,7 @@ export * from "./adopt";
 export * from "./connect";
 export * from "./workflowTools";
 export * from "./fastForward";
+export * from "./hostRows";
 export * from "./toolVocabulary";
 export * from "./agentTools";
 export * from "./toolsets";

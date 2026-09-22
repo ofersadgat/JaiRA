@@ -25,7 +25,7 @@ import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
-import type { PushMessage } from "@jaira/shared";
+import { MOVE_DROPPED_EVENT, MOVE_HELD_EVENT, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
@@ -317,5 +317,75 @@ describe("a restart mid-skip", () => {
     // The owed entry was made, and the transition was not journaled a second time.
     expect(taken(taskId)).toHaveLength(1);
     expect(ended(taskId)).toEqual([["a", "success"], ["b", "skipped"], ["c", "skipped"], ["d", "success"], ["(root)", "success"]]);
+  });
+});
+
+describe("a HELD move survives the process that held it", () => {
+  const hostRows = (taskId: string): string[] =>
+    journal(taskId)
+      .map((e) => (e as unknown as { type: string }).type)
+      .filter((type) => type === MOVE_HELD_EVENT || type === MOVE_DROPPED_EVENT);
+
+  it("is journaled when held, re-queued by the resume after a CRASH, and taken when the state it waited for ends", async () => {
+    const taskId = await start();
+    await parked(); // a
+    expect(await service.moveTask({ taskId, toState: "c" })).toEqual({ taskId, status: "held" });
+    expect(hostRows(taskId)).toEqual([MOVE_HELD_EVENT]);
+
+    abandoned.push(service);
+    const project = openProject(dir, { baseDir: testHome() });
+    try {
+      project.db.prepare(`UPDATE jobs SET heartbeat_at = 0 WHERE task_id = ? AND ended_at IS NULL`).run(taskId);
+    } finally {
+      project.close();
+    }
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
+    expect((await service.open(dir)).recovered).toEqual([taskId]);
+    seen.clear();
+
+    await service.resumeTask({ taskId });
+    // Still held: `a` is asked again, and nothing has moved while it is.
+    expect(await answer()).toBe("a");
+    expect(await answer()).toBe("c");
+    expect(await answer()).toBe("d");
+    await until(() => statusOf(taskId) === "completed", "the task to complete");
+    expect(offered).toEqual(["a", "a", "c", "d"]);
+    expect(taken(taskId)).toMatchObject([{ to: "c", by: "person" }]);
+    expect(outputsOf(taskId)).toMatchObject({ a_outcome: "success", b_outcome: "skipped", c_outcome: "success" });
+    // Taken, so nothing was left to drop.
+    expect(hostRows(taskId)).toEqual([MOVE_HELD_EVENT]);
+  });
+
+  it("survives a CLOSE: the next open resumes the task, and the move is taken when the state ends", async () => {
+    const taskId = await start();
+    await parked(); // a
+    expect(await service.moveTask({ taskId, toState: "c" })).toEqual({ taskId, status: "held" });
+    await service.close();
+    seen.clear();
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
+    await service.open(dir);
+    await (service as unknown as { session(): { resuming: Promise<void> } }).session().resuming;
+
+    expect(await answer()).toBe("a");
+    expect(await answer()).toBe("c");
+    expect(await answer()).toBe("d");
+    await until(() => statusOf(taskId) === "completed", "the task to complete");
+    expect(taken(taskId)).toMatchObject([{ to: "c", by: "person" }]);
+    expect(outputsOf(taskId)).toMatchObject({ a_outcome: "success", b_outcome: "skipped", c_outcome: "success" });
+  });
+
+  it("is DROPPED by a stop, as the in-memory hold is: a resume after it walks on as written", async () => {
+    const taskId = await start();
+    await parked(); // a
+    await service.moveTask({ taskId, toState: "c" });
+    service.cancelTask(taskId);
+    await until(() => statusOf(taskId) === "canceled", "the stop");
+    expect(hostRows(taskId)).toEqual([MOVE_HELD_EVENT, MOVE_DROPPED_EVENT]);
+    seen.clear();
+
+    await service.resumeTask({ taskId });
+    expect(await answer()).toBe("a");
+    expect(await answer()).toBe("b");
+    expect(taken(taskId)).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@
  * owns only the durable bookkeeping around a run.
  */
 import { createLogger } from "@declarative-ai/log";
-import { ApprovalRequired, approvalRefusalMessage, refusal } from "@jaira/shared";
+import { ApprovalRequired, approvalRefusalMessage, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./toolsets";
@@ -160,10 +160,12 @@ export interface BeginRunOptions {
 export function hasJournalHistory(project: Project, taskId: string): boolean {
   // A version pick-up (`documents.ts`) is the host's note about what the machine is ABOUT to run
   // under, written before the engine says anything — so it is not the machine having said something.
+  // Nor is a fast-forward's start (`hostRows.ts`): the host writes it before it starts a task that
+  // has never run, and the start must still be a first start.
   return (
     project.db
-      .prepare(`SELECT 1 FROM state_machine_events WHERE task_id = ? AND type != ? LIMIT 1`)
-      .get(taskId, WORKFLOW_VERSION_EVENT) !== undefined
+      .prepare(`SELECT 1 FROM state_machine_events WHERE task_id = ? AND type NOT IN (?, ?, ?) LIMIT 1`)
+      .get(taskId, WORKFLOW_VERSION_EVENT, FAST_FORWARD_EVENT, FAST_FORWARD_ENDED_EVENT) !== undefined
   );
 }
 

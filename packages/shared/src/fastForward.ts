@@ -4,9 +4,10 @@
  * A forward move inside a workflow RUNS THE MACHINE to the target. That is not a transition: the
  * states between where the work stands and where it was sent run normally, one after another, and
  * the only thing that is different about them is who answers their questions — the control
- * conversation, through `answer_question`, marked as such and rewindable. So there is nothing in the journal
- * that IS a fast-forward. It is a mode a task is in, held by the process driving it, and this is
- * what that mode looks like from outside.
+ * conversation, through `answer_question`, marked as such and rewindable. So no transition IS a
+ * fast-forward. It is a mode a task is in, held by the process driving it — with its start and its
+ * end journaled (`hostRows.ts`), so a restart resumes it — and this is what that mode looks like
+ * from outside.
  *
  * ⚠️ It ends on ARRIVAL. The target state runs normally and its questions come to the person: the
  * whole point of sending work ahead is to be there when it gets there.
@@ -20,7 +21,7 @@ export type FastForwardEnd =
   | "failed"
   /** A person pressed Skip: what was running was interrupted and the target entered directly. */
   | "skipped"
-  /** A person stopped the run, or the project closed. */
+  /** A person stopped the run, took an answer back, or rewound the task. A project closing is NOT an end: the next open resumes it. */
   | "stopped";
 
 /**

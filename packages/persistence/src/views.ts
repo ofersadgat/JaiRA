@@ -79,6 +79,7 @@ export function taskSummaries(project: Project): TaskSummary[] {
       ...(waitingFor.length > 0 ? { waitingFor } : {}),
       ...((under.get(row.taskId) ?? 0) > 0 ? { controls: under.get(row.taskId)! } : {}),
       ...(awaited !== undefined ? { inReview: { provider: awaited.provider, number: awaited.number!, url: awaited.url! } } : {}),
+      ...(meta?.connectUndo !== undefined ? { undoable: true as const } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
     };
@@ -720,6 +721,7 @@ export function boardView(project: Project, level?: string, options?: ViewOption
     ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
     ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
     ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
+    ...(summary.undoable === true ? { undoable: true as const } : {}),
     updatedAt: summary.updatedAt,
     run: taskRun(project, summary.taskId, shape),
   }));

@@ -5,6 +5,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { InputProvenance } from "./adopt";
+import type { StoredConnectUndo } from "./connect";
 
 export type TaskStatus =
   | "queued"
@@ -68,6 +69,11 @@ export interface TaskMeta {
    * a fact derived wherever the row is read, so a dependency finishing releases it without a write.
    */
   dependsOn?: string[];
+  /**
+   * How to take back the connect that last made or moved this task — the card's **Undo**, kept here
+   * so it survives a restart. Cleared when it is used.
+   */
+  connectUndo?: StoredConnectUndo;
   createdAt: string; // ISO 8601
 }
 

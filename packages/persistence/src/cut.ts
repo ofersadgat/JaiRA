@@ -54,7 +54,7 @@ import { createHash } from "node:crypto";
 import { hashOperation, scopedOperationId } from "@declarative-ai/exec";
 import { uuidv7, type EngineEvent } from "@declarative-ai/hw";
 import { createLogger } from "@declarative-ai/log";
-import { refusal, remoteBranchName, type SplitEntry, type TaskProvenance, type TaskStatus } from "@jaira/shared";
+import { PROCESS_NOTE_EVENTS, refusal, remoteBranchName, type SplitEntry, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { Project } from "./project";
 import { sessionStoreFor } from "./project";
@@ -631,7 +631,8 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
 
     // The journal, re-addressed. Through the recorder, so the file gets its lines too.
     const recorder = project.events.recorder(copy.id);
-    for (const row of part.kept) recorder.record(rewriteEvent(row.event, mapInstance, mapRef, recordIds), row.createdAt);
+    // What a process was doing WITH the parent — a fast-forward, a held move — is not the copy's.
+    for (const row of part.kept) if (!PROCESS_NOTE_EVENTS.has(row.type)) recorder.record(rewriteEvent(row.event, mapInstance, mapRef, recordIds), row.createdAt);
     const last = project.db.prepare(`SELECT MAX(seq) AS seq FROM state_machine_events WHERE task_id = ?`).get(copy.id) as { seq: number | null };
     boundarySeq = last.seq ?? 0;
 

@@ -2,11 +2,11 @@
 id: engineering/contracts/journal-events
 type: engineering-contract
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 visibility: public
 kind: event
 owned_by: [engineering/units/event-journal]
-consumers: ["@jaira/persistence views.ts, conversation.ts, load.ts, cut.ts, prune.ts, lifecycle.ts", "@jaira/app main service.ts and fanOut.ts", "@jaira/runtime chatTurn.ts", "@jaira/cli task status", "the renderer, through engine:event pushes", "people and tools reading committed journal files"]
+consumers: ["@jaira/persistence views.ts, conversation.ts, load.ts, cut.ts, prune.ts, lifecycle.ts, hostRows.ts", "@jaira/app main service.ts, hostModes.ts and fanOut.ts", "@jaira/runtime chatTurn.ts", "@jaira/cli task status", "the renderer, through engine:event pushes", "people and tools reading committed journal files"]
 since: 2026-07-17
 siblings: [engineering/contracts/sqlite-schema, engineering/contracts/storage-files, engineering/contracts/push-messages, engineering/contracts/fan-out-host-answers]
 ---
@@ -122,6 +122,25 @@ Three reading rules follow, and `load.ts`, `projection.ts` and every other folde
 - A directed `transition.taken` on an instance that had already written `instance.terminated` reopens it, and every ancestor with it, exactly as a chat turn's transition reopens its instance. The reopened instances write `instance.terminated` again when they end, so one instance can hold two ends with a directed transition between them.
 - A directed `transition.taken` with no later `instance.entered` under that instance for `to` is an entry still owed: the process died between the rows. `buildTaskLoad` hands it to the engine as `LoadedInstance.directed`, and the loaded run makes the entry without writing the transition again.
 
+### What a person asked of a task that outlives the process is JaiRA's own row, opened and closed in order
+
+A fast-forward, a move held for a running state, and a finished task's reopening used to live only in the memory of the process that was asked ([decision 0005](../decisions/0005-connect.md), made durable 2026-09-22). Each is now a row in the task's journal, table and file, written through the task's recorder by `recordHostRow` in `@jaira/persistence` `hostRows.ts`; the vocabulary is `@jaira/shared` `hostRows.ts`. None carries a top-level `instanceId`, so the `instance_id` column stays null and no reader of an instance's rows sees them; where a row names an instance it says `under`.
+
+| `type` | Fields | Written by | Meaning |
+| --- | --- | --- | --- |
+| `jaira.fastForward` | `controlTaskId, target, targetLabel, to, path, under?, through, inputs?, startedAt` | `AppService.fastForwardTask`, before it starts or resumes the task | a fast-forward began; the newest one with no `jaira.fastForwardEnded` after it is OPEN |
+| `jaira.fastForwardEnded` | `end` (`arrived`, `failed`, `skipped`, `stopped`), `detail?` | `endFastForward`; the run-end handler for one nobody held in memory; `rewindTask`; a resume that finds the target already entered (`arrived`) | the fast-forward ended for one of the reasons one ends. Never written while the session is closing, and a dying process writes nothing |
+| `jaira.moveHeld` | `under?, to, by, inputs?, path?` | `moveTask`, when the live engine holds the move (or queues it for the engine about to attach) | a directed move is held; a later hold for the same instance replaces it |
+| `jaira.moveDropped` | `under?, reason` | the run-end handler, for a hold the run ended without taking, unless the session is closing | the hold is over: a stop, or a run that finished without reaching it |
+| `jaira.reopened` | `status: "completed"`, `outcome: "success"`, `endedAt?`, `outputsJson?` | `moveTask`, just before it reopens a `completed` task | what the reopening is about to clear off the task's row |
+
+The reading rules, which `openFastForward`, `heldMoves` and `reopenedAfter` implement and every consumer shares:
+
+- A fast-forward is open when its start row has no end row after it. `resumeTask` puts an open one back on the session (`restoreHostModes` in `app/main/hostModes.ts`), with `answered` recounted from the `jaira.answered` rows after it and `step` and `at` from the entries after it. `hasJournalHistory` counts neither fast-forward row, because the start is written before a task that has never run starts.
+- A hold is outstanding until a directed `transition.taken` (one carrying `by`) on the instance it names, a `jaira.moveDropped` for that instance, or a later hold for it. A hold naming no instance is the root's, and a directed transition on a parentless instance takes it. `resumeTask` re-queues every outstanding hold on the resumed run's port.
+- A cut drops these rows like any row with no instance at or past the point. A cut that takes away a fast-forward's end leaves its start open, so `rewindTask` writes a fresh end after every cut that leaves one open. A cut at or before a `jaira.reopened` row puts the task back as the row says, outputs and all, when the machine has nothing left to run.
+- A fork or a split copy (`forkTask`) does not copy `jaira.fastForward`, `jaira.fastForwardEnded`, `jaira.moveHeld` or `jaira.moveDropped`: the copy is another task, and no process was doing anything with it. `projectRun`, `buildTaskLoad` and the conversation view ignore all five.
+
 ### A chat turn journals a synthetic child whose id is derived from its host
 
 `runChatTurn` in `@jaira/runtime` `chatTurn.ts` writes a typed message into the host task's journal as a child of the instance the conversation belongs to.
@@ -149,7 +168,8 @@ The first message writes `instance.entered` with `inputs: {}`, and each later on
 
 ## A change to any event or to the envelope breaks every stored journal, and no deprecation path exists
 
-- Dropping `by` from a directed `transition.taken`, or writing it on a rule-taken one, breaks reopening and the owed entry in `load.ts` and the reopened status in `projection.ts`.
+- Dropping `by` from a directed `transition.taken`, or writing it on a rule-taken one, breaks reopening and the owed entry in `load.ts`, the reopened status in `projection.ts`, and the end of a held move in `hostRows.ts`.
+- Renaming a `jaira.fastForward*`, `jaira.move*` or `jaira.reopened` row, or giving one a top-level `instanceId`, loses every open fast-forward and held move in stored journals, or files the row under an instance every reader then sees.
 - Renaming or reshaping an upstream event breaks projections, load, cut and fork together. Stored payloads are never migrated, so a reader keeps accepting an old shape for as long as any journal holds it.
 - Changing the line envelope, its field names or the ordinal rule of `jaira.rewound` breaks replay of every committed journal file.
 - Changing the `chat:` prefix or the `ask` key breaks resume filtering in `load.ts`, the id mapping in `cut.ts` and the conversation readers for existing journals.

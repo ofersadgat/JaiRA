@@ -411,7 +411,8 @@ Four things the text above left open were decided in the building:
   transition records what it steps over as `skipped`; changing what every
   existing `{ "to": … }` leaves behind was not this step's to do.
 
-A held move lives in the engine's memory and is lost with the process.
+A held move lives in the engine's memory and is lost with the process. *(Amended
+2026-09-22: it is journaled `jaira.moveHeld` and survives — see "Made durable" below.)*
 
 ## What steps 2–3 settled
 
@@ -633,7 +634,8 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
 - **The token is the renderer's, for the session.** `Undo` is on the card
   until it is used or the app closes; after that the task's own rewind takes
   the same thing back. It is not on the task file because it is not a fact
-  about the task.
+  about the task. *(Amended 2026-09-22: it is kept on the task file after all,
+  so it survives a restart — see "Made durable" below.)*
 - **An adopted task stays in sight.** Steps 2–3 left it off the roots board.
   It was a task of its own first, with a card somebody knows, so it files in
   its parent's column with `under` naming the parent, and the board draws it
@@ -770,7 +772,9 @@ open:
   start one never answers for anybody: after a restart the task is where the
   machine got to and its questions are the person's. A host that drives no run
   (the CLI) has no `fastForward`, and there a forward move is still refused
-  with `fast-forward`: nobody there could answer on the way.
+  with `fast-forward`: nobody there could answer on the way. *(Amended
+  2026-09-22: the journal now holds the mode's start and end, and a restart
+  resumes it — see "Made durable" below.)*
 - **"Adopted into one first" is a graft, not a wrapper.** Wrapping the task in
   a new parent would make the PARENT the thing that moves, and a fast-forward
   is a move of the task's own machine through its own workflow. So a task with
@@ -874,6 +878,46 @@ yet". The statement of record is [task-channels](../contracts/task-channels.md)
   gave a turn to is cut back without the resume a rewind would do
   (`ConnectUndo.asking`), its pin and status put back.
 
+## Made durable (2026-09-22)
+
+Three things a person asks for lived only in the memory of the process that
+was asked, and a restart lost them. They were on the Open list below and in
+steps 1, 5 and 7 above; each is now written where the next process finds it,
+host-side, the way a parked gate was made durable, with no upstream change. The
+rows are [journal-events](../contracts/journal-events.md)' "What a person asked
+of a task that outlives the process"; the code is `@jaira/persistence`
+`hostRows.ts` and the app's `main/hostModes.ts`.
+
+- **A fast-forward** journals `jaira.fastForward` when it starts and
+  `jaira.fastForwardEnded` when it ends — arrival, a failure on the way, Stop,
+  Skip, or a rewind, which is a person taking the work back. A session that is
+  closing writes no end (`ProjectSession.closing`), and the close records the
+  run `SUSPENDED_FORWARDING`, so the next open resumes it unasked; a crash's
+  `interrupted` task waits for Resume, as every crash does. Either resume puts
+  the mode back on the session before the run starts: the conversation answers
+  what comes up, the strip shows (`answered` recounted from the `jaira.answered`
+  rows, `step` and `at` from the entries), and Skip works. It is still reached
+  only from the gate and question hubs, so an approval never gets there after a
+  resume either. `left` starts again from nothing, and a question the
+  conversation left to the person before the restart is offered to it once more
+  under the request id the resumed run parks it with.
+- **A held move** journals `jaira.moveHeld`; a directed `transition.taken` on its
+  instance is its taking, and the run-end handler writes `jaira.moveDropped` for
+  one a run ended without taking, unless the session is closing. The resume
+  re-queues every outstanding hold on the run's port, and the loaded engine
+  takes it when the state it waited for ends. A Stop drops it, as it did in
+  memory: a stop is the later word.
+- **Undo** is kept on the card's task file (`TaskMeta.connectUndo`), a move's
+  place in the journal counted in rows, because a seq does not outlive a
+  replay; `task:connectUndo` with a `taskId` uses the kept token and clears it.
+  A reopening of a finished task journals `jaira.reopened` with the row's
+  outputs, and a rewind back past it — an Undo — puts the task back finished,
+  outputs and all.
+
+What stays in memory: the descent follower of a move to a nested target, so a
+process that dies after such a move was taken and before the way down was
+directed leaves the composite walking its own spine.
+
 ## Open
 
 - A finished task publishes no runtime wait, so a "→ ui" chip offering a
@@ -887,8 +931,6 @@ yet". The statement of record is [task-channels](../contracts/task-channels.md)
 - A new transition for a task that is running: refused until it is paused.
   Stopping it and reopening it with the move is `skip` by another name, and
   was not taken without being asked for.
-- `Undo` does not survive a restart, and an undone move of a task that had
-  finished does not get back the outputs its reopening cleared.
 - A connect that refuses part-way — the adoption into a new document's task,
   a move after an adoption — leaves what it had written, and says so.
 - A drop that asks after (above) does so only where the workflow is MODIFIED. A
@@ -901,9 +943,6 @@ yet". The statement of record is [task-channels](../contracts/task-channels.md)
   marks it as the host's.
 - A fast-forward of a task that is RUNNING with no conversation is refused
   until it is paused, for the reason a new transition is.
-- A fast-forward lives in the process that started it: a restart ends it, and
-  the task resumes with its questions the person's. Moving it forward again
-  starts a new one.
 - A skip that lands while an agent OUTSIDE the skipped subtree is still running
   (an `async` sibling) withdraws nothing — whose ask is whose cannot be told —
   and those asks stay on the inbox until answered or the task is stopped. An

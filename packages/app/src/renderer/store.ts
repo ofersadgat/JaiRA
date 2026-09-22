@@ -3267,11 +3267,13 @@ export function useApp() {
         }
       },
       /** **Undo** on the card a drop made or moved: un-adopt, or rewind to before the move. */
-      undoConnect: async (taskId: string) => {
+      undoConnect: async (taskId: string, project?: string) => {
+        // The card's task keeps its own token in main, which survives a restart; the one held here
+        // is this window's copy, and main prefers the kept one when both exist.
         const kept = ref.current.connectUndo[taskId];
-        if (kept === undefined) return;
+        const at = kept?.project ?? project;
         try {
-          await invoke("task:connectUndo", { undo: kept.undo, ...(kept.project !== undefined ? { project: kept.project } : {}) });
+          await invoke("task:connectUndo", { taskId, ...(kept !== undefined ? { undo: kept.undo } : {}), ...(at !== undefined ? { project: at } : {}) });
           const { [taskId]: _used, ...rest } = ref.current.connectUndo;
           patch({ connectUndo: rest });
         } catch (e) {

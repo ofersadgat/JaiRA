@@ -2,7 +2,7 @@
 id: engineering/contracts/task-file
 type: engineering-contract
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 visibility: public
 kind: format
 owned_by: [engineering/units/task-lifecycle]
@@ -42,6 +42,7 @@ The file is `.jaira/system/tasks/<taskId>.json` in a project and `system/tasks/<
 | `origin` | object | no | how a fan-out made the task, or which task adopted it |
 | `split` | array of `{expr: string, index: number}` | no | one entry per `each: "split"` list the task is split on: the wire's expression verbatim and this task's element index; omitted when empty |
 | `dependsOn` | string array | no | ids of tasks that must complete before this one starts; omitted when empty |
+| `connectUndo` | `{undo: ConnectUndo, rows?: number}` | no | the Undo of the connect that last made or moved this task, kept so it survives a restart; `rows` is a move's `after` as the number of the task's journal rows at or before it, because a seq does not outlive a replay. Written by `connectTask`, removed when `task:connectUndo` uses it ([task-channels](task-channels.md)) |
 
 ### `origin` records the mount and element a fan-out made the task from
 
