@@ -204,6 +204,7 @@ export class PollingSource implements RemoteEventSource {
         })(),
       };
       const probe = await target.provider(group.host).probe(handles, cursor);
+      if (!this.live(target)) return this.forget(connectionKey, state);
       moved = probe.moved;
       for (const row of rows) {
         const id = handleOfRow(row)?.id;
@@ -220,6 +221,7 @@ export class PollingSource implements RemoteEventSource {
       state.floorSeconds = probe.pollAfterSeconds;
       state.quiet = moved.length > 0 ? 0 : state.quiet + 1;
     } catch (error) {
+      if (!this.live(target)) return this.forget(connectionKey, state);
       state.failures += 1;
       if (error instanceof ForgeError && error.retryAfterSeconds !== undefined) state.floorSeconds = error.retryAfterSeconds;
       this.options.onError?.(connectionKey, error as Error);
@@ -238,6 +240,23 @@ export class PollingSource implements RemoteEventSource {
     const attention = rows.some((row) => row.settleAt !== undefined || this.options.onScreen?.(target.key, row.taskId) === true);
     const delay = nextProbeDelay({ attention, quiet: state.quiet, failures: state.failures, ...(state.floorSeconds !== undefined ? { floorSeconds: state.floorSeconds } : {}) });
     if (this.hint !== undefined) state.timer = this.clock.setTimeout(() => void this.probe(connectionKey), delay);
+  }
+
+  /**
+   * Whether a probe that was awaiting the forge may still touch what it started from. Not when the
+   * source was disposed, and not when the target's store has gone — its project closed while the
+   * probe was out, and a closed store throws on any read (§ "Watching": the poller is owned by the
+   * connection, so it must not outlive it).
+   */
+  private live(target: WatchTarget): boolean {
+    return this.hint !== undefined && this.options.targets().some((t) => t.handles === target.handles);
+  }
+
+  /** Drop a connection whose probe came back to nothing: no write, no hint, no next tick. */
+  private forget(connectionKey: string, state: ConnectionState): void {
+    state.probing = false;
+    if (state.timer !== undefined) this.clock.clearTimeout(state.timer);
+    if (this.connections.get(connectionKey) === state) this.connections.delete(connectionKey);
   }
 }
 
@@ -285,6 +304,7 @@ export class RemoteWatcher {
   private readonly windows = new Map<string, unknown>();
   /** Reads in flight, by handle key — so a second asker waits for the first read instead of starting another. */
   private readonly reading = new Map<string, Promise<SettleStep | undefined>>();
+  private disposed = false;
 
   constructor(private readonly options: WatcherOptions) {
     this.clock = options.clock ?? realClock;
@@ -300,12 +320,14 @@ export class RemoteWatcher {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const subscription of this.subscriptions.splice(0)) subscription.dispose();
     for (const timer of this.windows.values()) this.clock.clearTimeout(timer);
     this.windows.clear();
   }
 
   private async onHint(connectionKey: string, handleKey?: string): Promise<void> {
+    if (this.disposed) return;
     const [targetKey, host] = JSON.parse(connectionKey) as [string, string];
     const target = this.options.targets().find((t) => t.key === targetKey);
     if (target === undefined) return;
@@ -331,6 +353,7 @@ export class RemoteWatcher {
 
   private async read(target: WatchTarget, stale: RemoteHandleRow, id: string): Promise<SettleStep | undefined> {
     {
+      if (!this.live(target)) return undefined;
       // Re-read the row: a hint can outlive the wait it was for.
       const row = target.handles.get(stale.taskId, stale.key);
       const handle = row === undefined ? undefined : handleOfRow(row);
@@ -340,6 +363,7 @@ export class RemoteWatcher {
       try {
         state = await target.provider(row.host).read(handle);
       } catch (error) {
+        if (!this.live(target)) return undefined;
         const message = (error as Error).message;
         const failed = target.handles.update(row.taskId, row.key, { checkedAt: this.clock.now(), lastError: message }) ?? row;
         this.options.onProgress?.({ target: target.key, row: failed, error: message });
@@ -348,7 +372,9 @@ export class RemoteWatcher {
 
       // The read took time, and the OTHER door may have been used during it: a person answered the
       // gate, or the run was stopped. Whichever settles first answers — so a read that comes back to a
-      // row nobody awaits any more is dropped, not acted on.
+      // row nobody awaits any more is dropped, not acted on. So is one that comes back to a store that
+      // is no longer there: the watcher was stopped, or the project closed, while the forge answered.
+      if (!this.live(target)) return undefined;
       const still = target.handles.get(row.taskId, row.key);
       if (still === undefined || !still.awaiting || still.requestId !== row.requestId) return undefined;
 
@@ -377,6 +403,15 @@ export class RemoteWatcher {
       this.options.onProgress?.({ target: target.key, row: waiting, state, step });
       return step;
     }
+  }
+
+  /**
+   * Whether a read may touch this target's store. A read awaits the forge, and the process can shut
+   * down — or the project close — in that time; its store is closed then, and the row is someone
+   * else's to read on the next open.
+   */
+  private live(target: WatchTarget): boolean {
+    return !this.disposed && this.options.targets().some((t) => t.handles === target.handles);
   }
 
   private disarm(id: string): void {

@@ -364,3 +364,124 @@ describe("the watcher", () => {
     expect(settled).toHaveLength(1);
   });
 });
+
+describe("shutting down while the forge is answering", () => {
+  /** The store as the app has it: closed with its project, after which every call throws. */
+  class ClosableHandles extends MemoryHandles {
+    closed = false;
+    after: string[] = [];
+    private guard(call: string): void {
+      if (this.closed) {
+        this.after.push(call);
+        throw new TypeError("The database connection is not open");
+      }
+    }
+    override get(taskId: string, key: string) {
+      this.guard("get");
+      return super.get(taskId, key);
+    }
+    override forTask(taskId: string) {
+      this.guard("forTask");
+      return super.forTask(taskId);
+    }
+    override awaiting() {
+      this.guard("awaiting");
+      return super.awaiting();
+    }
+    override update(...args: Parameters<MemoryHandles["update"]>) {
+      this.guard("update");
+      return super.update(...args);
+    }
+  }
+
+  let store: ClosableHandles;
+  let open_: boolean;
+  const project = (): WatchTarget => ({ ...target(), handles: store });
+  /** The open projects: none once the project is closed, as `AppService.watchTargets` has it. */
+  const targets = (): WatchTarget[] => (open_ ? [project()] : []);
+  /** The forge's answer, held until the test lets it through. */
+  function hold<T>(): { wait: Promise<void>; release: () => void } {
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => (release = resolve));
+    return { wait, release };
+  }
+
+  beforeEach(() => {
+    store = new ClosableHandles();
+    handles = store;
+    open_ = true;
+  });
+
+  for (const how of ["the watcher is disposed, then the store closes", "the project closes and the watcher stays up"] as const) {
+    it(`a read in flight when ${how} touches nothing afterwards and throws nothing`, async () => {
+      const id = awaited("t-1", 41);
+      let hint: RemoteHint | undefined;
+      const relay: RemoteEventSource = { start: (onHint) => ((hint = onHint), { dispose: () => (hint = undefined) }) };
+      const watcher = new RemoteWatcher({ targets, sources: [relay], clock, onSettled: (event) => void settled.push(event) });
+      const running = watcher.start();
+      const forge = new ScriptedForge("gitlab.com");
+      forges.set("gitlab.com", forge);
+      forge.states.set(id, open({ state: "merged", mergeCommit: "f00d", closedBy: "mara" }));
+      const gate = hold();
+      const read = forge.read.bind(forge);
+      const asked: string[] = [];
+      forge.read = async (handle) => (asked.push(handle.id), await gate.wait, read(handle));
+
+      // One read started by a hint and one by "Check now", both out on the forge.
+      hint!(connectionKeyOf("project", "gitlab.com"), handleKeyOf("project", { taskId: "t-1", key: "review" }));
+      const checked = watcher.check(project(), store.get("t-1", "review")!);
+      await settle();
+      expect(asked).toEqual([id]); // one read: "Check now" joined the hint's
+
+      if (how === "the watcher is disposed, then the store closes") running.dispose();
+      open_ = false;
+      store.closed = true;
+      gate.release();
+
+      await expect(checked).resolves.toBeUndefined();
+      await settle();
+      expect(store.after).toEqual([]);
+      expect(settled).toEqual([]);
+      running.dispose();
+    });
+  }
+
+  it("a hint that arrives after the watcher is disposed reads nothing", async () => {
+    awaited("t-1", 41);
+    let hint: RemoteHint | undefined;
+    const relay: RemoteEventSource = { start: (onHint) => ((hint = onHint), { dispose: () => undefined }) };
+    const watcher = new RemoteWatcher({ targets, sources: [relay], clock, onSettled: (event) => void settled.push(event) });
+    watcher.start().dispose();
+    store.closed = true;
+    hint!(connectionKeyOf("project", "gitlab.com"));
+    await settle();
+    expect(store.after).toEqual([]);
+    expect(forges.get("gitlab.com")?.reads ?? []).toEqual([]);
+  });
+
+  it("a probe in flight when the store closes writes no cursor, hints nothing and schedules nothing", async () => {
+    awaited("t-1", 41);
+    const forge = new ScriptedForge("gitlab.com");
+    forges.set("gitlab.com", forge);
+    const gate = hold();
+    const probe = forge.probe.bind(forge);
+    let asked = 0;
+    forge.probe = async (h, c) => (asked++, await gate.wait, probe(h, c));
+    const hints: string[] = [];
+    const errors: Error[] = [];
+    const source = new PollingSource({ targets, clock, onError: (_, error) => void errors.push(error) });
+    const running = source.start((connection) => void hints.push(connection));
+    await settle();
+    expect(asked).toBe(1);
+
+    running.dispose();
+    open_ = false;
+    store.closed = true;
+    gate.release();
+    await settle();
+    expect(store.after).toEqual([]);
+    expect(hints).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(clock.timers.size).toBe(0);
+  });
+});
