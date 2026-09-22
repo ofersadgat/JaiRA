@@ -717,9 +717,9 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const compiledFor = options.toolset !== undefined ? shellToolsetOf(options.toolset) : undefined;
   /**
    * Every map the line is judged against. The state's own block says where its subjects came from
-   * — on `subjects` and `source` in a conversation, in the carried keys in a run, where upstream
-   * dropped the two fields; a toolset this policy was compiled for is a message's, which has no
-   * file behind it.
+   * — on `subjects` and `source`, in a conversation and (since declarative-ai 3f5e5cc) in a run; in
+   * the carried keys of a snapshot an older engine handed over without them. A toolset this policy
+   * was compiled for is a message's, which has no file behind it.
    */
   const toolsetsFor = (authored: PermissionsDecl | undefined): Array<{ toolset: ShellToolset; source: string }> => {
     const own = shellToolsetsOfBlock(authored);
@@ -740,8 +740,9 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
       });
-    // More than one map only where a child inherited its parent's carried subjects beside its own:
-    // the nearer one cannot be told apart, so the line answers to the STRICTEST, never the loosest.
+    // More than one map only for an old block with no `subjects`, where a child inherited its
+    // parent's carried key beside its own: the nearer one cannot be told apart, so the line answers
+    // to the STRICTEST, never the loosest.
     const judging = toolsetsFor(authored);
     const decision =
       judging.length === 0

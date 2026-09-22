@@ -928,13 +928,17 @@ the same rule.
   cannot model (an unterminated quote, `$CMD …`, `git $(…) …`, a `case`, an
   encoded PowerShell command) asks whatever the toolset allows.
 
-  ⚠️ **Two things a toolset says that are not enforced yet.**
-  `"implementation": "native"` is honoured
-  by a **conversation turn** and not by a **run**, which injects JaiRA's
-  implementation — the governed choice: the engine hands an executor a state's
-  resolved tools and its gate, and neither says whose code an entry chose. And a
-  run's `"other": "ask"` does not *force* `Task` and its kind to the callback (a
-  conversation turn's does); write `"other": "deny"` to remove them.
+  **A run reads the toolset as a conversation turn does.** The engine hands the
+  agent executor the state's resolved block, so `"implementation": "native"` keeps
+  the agent's built-in in a run too (ours is not injected beside it), and a written
+  `"other": "ask"` (or `"smart"`) forces `Task`, `Agent` and `SlashCommand` to the
+  callback — an `other` you did not write does not. An agent reached as a
+  **function** is held too: `"function": "codex-cli"` runs read-only where the
+  toolset holds no open writer, whatever `permissionMode` the call passes, and a
+  generic CLI function refuses a toolset that denies anything. The one exception:
+  a claude agent reached as a function (`"function": "claude-code"`) has nowhere
+  to put the ask rule a kept built-in needs, so `"native"` there gets JaiRA's
+  implementation — reach the agent through a model prefix to keep its own.
 
   ⚠️ **The old form's `bash` mode is still a mode for the tool.** A state written
   as a list with `permissions.tools.bash: "ask"` asks before every line, as it
@@ -947,7 +951,12 @@ the same rule.
   reaches the engine as a list and a `permissions` block, and the block merges per
   key (§5.2) — so a child that writes its own toolset without an `other` still
   inherits its parent's, and a mode the parent gave a tool the child no longer
-  offers rides along, inert. Say `other` in a toolset that means to stand alone.
+  offers rides along, inert. So does an implementation choice: a child that holds
+  a tool its parent marked `"native"` keeps the built-in, unless the child chooses
+  an implementation for some tool itself (`{ "mode": "ask", "implementation":
+  "app" }`), which replaces the parent's choices whole. Say `other` in a toolset that means to stand alone. The shell is the
+  exception that needs no care: a child's own shell entries replace its parent's
+  whole, so its lines are judged by its own map.
 
   **The older form still loads, unchanged**: a list of tool names
   (`"tools": ["read_file"]`) with the modes in `permissions`. A state written that

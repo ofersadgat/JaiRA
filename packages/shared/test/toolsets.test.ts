@@ -111,19 +111,32 @@ describe("parsing the map", () => {
     expect(declOfToolset(back)).toEqual({ read_file: "allow", bash: "deny", other: "deny" });
   });
 
-  it("CARRIES an offered shell's subjects in a `permissions.tools` key, because a run is handed nothing else", () => {
+  it("no longer CARRIES an offered shell's subjects in `permissions.tools` — a run is handed `subjects` itself", () => {
     const lowered = lowerToolset(parseToolset({ bash: "deny", "git status": "allow", other: "deny" }).toolset, undefined, "$/toolsets/x/y");
     const tools = lowered.permissions!.tools!;
     expect(tools["bash"]).toBe("smart");
-    // The pair that says the shell's own entry is `deny`, for a switch a run derives from it.
-    expect(tools).toMatchObject(SHELL_DENIED_MARKERS);
-    expect(carriedShellSubjects(tools)).toEqual([{ subjects: { bash: "deny", "git status": "allow" }, source: "$/toolsets/x/y" }]);
-    // …which no reader takes for a tool, and which reads back as the toolset it was.
+    // Neither the carried key nor the pair: upstream hands a run's policy and executor the block
+    // whole since declarative-ai 3f5e5cc, and `subjects` merges per key down the chain, so a child's
+    // own replaces an inherited one where a carried key sat beside it.
+    expect(carriedShellSubjects(tools)).toEqual([]);
+    expect(Object.keys(tools)).not.toContain(Object.keys(SHELL_DENIED_MARKERS)[0]);
+    expect(lowered.permissions).toMatchObject({ subjects: { bash: "deny", "git status": "allow" }, source: "$/toolsets/x/y" });
     expect(Object.keys(toolsetOfEnvironment(lowered.tools, lowered.permissions).entries)).toEqual(["bash", "git status"]);
-    // A shell whose entry is not `deny` carries its subjects and no pair.
-    const asking = lowerToolset(parseToolset({ bash: "ask" }).toolset).permissions!.tools!;
-    expect(carriedShellSubjects(asking)).toEqual([{ subjects: { bash: "ask" } }]);
-    expect(Object.keys(asking)).not.toContain("jaira:bash-deny+");
+  });
+
+  it("still READS a block lowered the old way — the carried key and the pair a pinned snapshot holds", () => {
+    const subjects = { bash: "deny" as const, "git status": "allow" as const };
+    const old = {
+      tools: { bash: "smart" as const, ...TOOLSET_MARKERS, ...SHELL_DENIED_MARKERS, [shellCarriedKey({ subjects, source: "inline" })]: "allow" as const },
+      subjects,
+      source: "inline",
+    };
+    expect(carriedShellSubjects(old.tools)).toEqual([{ subjects, source: "inline" }]);
+    // No reader takes a mark for a tool: the block reads back as the toolset it was.
+    const back = toolsetOfEnvironment(["bash"], old);
+    expect(Object.keys(back.entries)).toEqual(["bash", "git status"]);
+    expect(back.entries["bash"]!.mode).toBe("deny");
+    expect(back.legacy).toBeUndefined();
   });
 
   it("reads an object entry, with the implementation chosen too", () => {
@@ -335,10 +348,10 @@ describe("legacy equivalence", () => {
     // `bash: "ask"` is the answer for any command nothing else names, not a mode for the tool: the
     // gate is handed `smart` so the line is taken apart first, and the authored mode rides beside it.
     const lowered = { tools: legacy.tools, permissions: { tools: { ...legacy.permissions.tools, bash: "smart" }, other: "deny", subjects: { bash: "ask" } } };
-    // …and, since the shell is offered, its subjects carried where a RUN can read them.
+    // …and the marks. A run reads `subjects` off the block itself, so nothing is carried a second time.
     const marked = {
       ...lowered,
-      permissions: { ...lowered.permissions, tools: { ...lowered.permissions.tools, ...TOOLSET_MARKERS, [shellCarriedKey({ subjects: { bash: "ask" } })]: "allow" } },
+      permissions: { ...lowered.permissions, tools: { ...lowered.permissions.tools, ...TOOLSET_MARKERS } },
     };
     expect(lowerToolset(parseToolset(map).toolset)).toEqual(marked);
     // The legacy reading lowers with NO marks, so a run reads it as legacy.
@@ -370,7 +383,7 @@ describe("legacy equivalence", () => {
     const authored = parseToolset({ read_file: { mode: "allow", implementation: "native" }, bash: "smart", "git commit": "ask", script: "deny", other: "ask" }).toolset;
     const lowered = lowerToolset(authored);
     expect(lowered.permissions).toEqual({
-      tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS, [shellCarriedKey({ subjects: { bash: "smart", "git commit": "ask", script: "deny" } })]: "allow" },
+      tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS },
       other: "ask",
       subjects: { bash: "smart", "git commit": "ask", script: "deny" },
       implementations: { read_file: "native" },
@@ -423,13 +436,12 @@ describe("lowering a state file", () => {
     expect(def).toEqual({
       environment: { model: "m", tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "allow", ...TOOLSET_MARKERS }, other: "deny" } },
       // `source` is written beside `subjects`, and only there: where a shell line's subjects came from.
-      // …and, for a run, in the key lowering carries an offered shell's subjects in.
       operation: {
         kind: "prompt",
         prompt: "go",
         tools: ["bash"],
         permissions: {
-          tools: { bash: "smart", ...TOOLSET_MARKERS, [shellCarriedKey({ subjects: { bash: "smart", "git status": "allow" }, source: "inline" })]: "allow" },
+          tools: { bash: "smart", ...TOOLSET_MARKERS },
           subjects: { bash: "smart", "git status": "allow" },
           source: "inline",
         },

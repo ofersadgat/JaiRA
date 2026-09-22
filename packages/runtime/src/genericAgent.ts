@@ -30,6 +30,7 @@ import type { WorkflowMetrics } from "@declarative-ai/hw";
 import type { JairaGenericCliAgent } from "@jaira/shared";
 import { NodeExec, type Exec } from "./exec";
 import { pathFor, type ExecEnv } from "./paths";
+import { GENERIC_CLI_TOOLS, holdAgentFunction } from "./agentTools";
 
 /** The default registry name a single configured generic CLI is registered under. */
 export const AGENT_GENERIC_CLI = "generic-cli";
@@ -214,7 +215,9 @@ export function registerGenericAgents(
     });
     registry.functions.set(
       spec.name ?? AGENT_GENERIC_CLI,
-      runtimeFunction(fn.run as never, fn.capabilities) as never,
+      // It declares no tools and no channel, so a toolset that refuses anything is refused — as the
+      // prompt route of the same binary refuses it (decision 0007 §3).
+      runtimeFunction(holdAgentFunction(GENERIC_CLI_TOOLS, fn.run as never, spec.name ?? AGENT_GENERIC_CLI) as never, fn.capabilities) as never,
     );
   }
   return registry;

@@ -34,6 +34,7 @@ import {
   unmappedNatives,
   type PermissionsDecl,
 } from "@jaira/shared";
+import { AGENT_CODEX, registerAgentRuntimes } from "./agents";
 import { CLAUDE_TOOLS } from "./agentTools";
 import { agentPromptRoutes } from "./modelRoutes";
 import { compilePolicy, type JairaPolicy } from "./policy";
@@ -75,6 +76,12 @@ export interface AgentHanded {
   removed: string[];
   /** What is never put to the permission callback. */
   preApproved: string[];
+  /**
+   * The built-ins the agent's OWN settings force to the permission callback (`permissions.ask`).
+   * Without such a rule Claude Code decides a read-only built-in, and a sub-agent tool, itself, and the
+   * callback — which is where every decision below is read — is never consulted for it.
+   */
+  askRules: string[];
   /** Per standard tool, the shell included (its `decision` is left to {@link shell}). */
   tools: Record<string, HandedTool>;
   /** claude's built-ins with no standard tool: removed, or what decides a call. */
@@ -88,6 +95,44 @@ export interface AgentHanded {
 export interface HandedOptions {
   /** The project's policy; the default policy when absent. */
   policy?: JairaPolicy;
+  /**
+   * An ENCLOSING state's `environment`, in the shape the engine takes: the probe then runs as that
+   * state's child and inherits it down the chain exactly as a mounted state does — `permissions`
+   * merged per key, `tools` one level deeper, the list replaced.
+   */
+  parent?: HandedEnvironment;
+}
+
+/** The probe workflow: one prompt state, alone or as the only child of a state holding `parent`. */
+function probeStates(
+  environment: HandedEnvironment,
+  operation: Record<string, unknown>,
+  outputs: Record<string, unknown>,
+  options: HandedOptions,
+): { states: Record<string, unknown>; root: string } {
+  const { scopes: _scopes, ...permissions } = environment.permissions ?? {};
+  const def = {
+    label: "probe",
+    outputs,
+    operation,
+    environment: {
+      ...(environment.tools !== undefined ? { tools: [...environment.tools] } : {}),
+      ...(Object.keys(permissions).length > 0 ? { permissions } : {}),
+    },
+  };
+  if (options.parent === undefined) return { states: { probe: def }, root: "probe" };
+  const { scopes: _parentScopes, ...parentPermissions } = options.parent.permissions ?? {};
+  const parent = {
+    label: "enclosing",
+    outputs: {},
+    environment: {
+      ...(options.parent.tools !== undefined ? { tools: [...options.parent.tools] } : {}),
+      ...(Object.keys(parentPermissions).length > 0 ? { permissions: parentPermissions } : {}),
+    },
+    children: { probe: { state: "enclosing/probe", inputs: {} } },
+    sequence: ["probe"],
+  };
+  return { states: { enclosing: parent, "enclosing/probe": def }, root: "enclosing" };
 }
 
 const PROBE_INPUT = {
@@ -131,22 +176,17 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
     seen.push(opts);
     yield { type: "result", result: { text: "Done.", structured: { report: "probe" } } };
   };
-  const { scopes: _scopes, ...permissions } = environment.permissions ?? {};
-  const def = {
-    label: "probe",
-    outputs: { report: { kind: "text", schema: { type: "string" } } },
-    operation: { kind: "prompt", prompt: "probe", model: "claude-cli/default" },
-    environment: {
-      ...(environment.tools !== undefined ? { tools: [...environment.tools] } : {}),
-      ...(Object.keys(permissions).length > 0 ? { permissions } : {}),
-    },
-  };
-  const states: Record<string, unknown> = { probe: def };
+  const { states, root } = probeStates(
+    environment,
+    { kind: "prompt", prompt: "probe", model: "claude-cli/default" },
+    { report: { kind: "text", schema: { type: "string" } } },
+    options,
+  );
   grantAlwaysGrantedTools(states);
 
   let asked = 0;
   const result = await executeWorkflow({
-    bundle: loadBundle(states, "probe"),
+    bundle: loadBundle(states, root),
     inputs: {},
     registry: stubRegistry(),
     prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: "claude-cli" } }),
@@ -164,6 +204,8 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
 
   const removed = new Set(opts.disallowedTools ?? []);
   const preApproved = new Set(opts.allowedTools ?? []);
+  const settings = (opts.providerOptions as { settings?: { permissions?: { ask?: unknown } } } | undefined)?.settings;
+  const askRules = Array.isArray(settings?.permissions?.ask) ? (settings.permissions.ask as unknown[]).filter((rule): rule is string => typeof rule === "string") : [];
   const served = Object.keys(opts.mcpTools ?? {});
   const decide = async (toolName: string, input: Record<string, unknown>): Promise<HandedDecision> => {
     if (opts.canUseTool === undefined) return "allow";
@@ -223,11 +265,66 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
     served: [...served].sort(),
     removed: [...removed].sort(),
     preApproved: [...preApproved].sort(),
+    askRules: [...askRules].sort(),
     tools,
     natives,
     other: await decide("mcp__somebody__a_tool_nobody_declared", {}),
     shell,
   };
+}
+
+/** What a delegated codex is handed: its one channel, the sandbox. */
+export interface CodexHanded {
+  /** `plan` is `--sandbox read-only` on this transport; absent keeps the configured sandbox. */
+  permissionMode: string | undefined;
+  /** Our tools, served over the bridge — which codex refuses to be handed at all. */
+  served: string[];
+}
+
+export interface CodexHandedOptions extends HandedOptions {
+  /**
+   * How the state reaches codex: by a model prefix (`model: "codex-cli/default"`, the prompt route),
+   * or as a FUNCTION (`operation.function: "codex-cli"`), which is registered separately.
+   */
+  via?: "route" | "function";
+}
+
+/**
+ * {@link handedToClaude}'s codex half: one effective environment run to the spawn a real `codex exec`
+ * would get, through the engine and whichever wrapper holds that path to its toolset.
+ */
+export async function handedToCodex(environment: HandedEnvironment, options: CodexHandedOptions = {}): Promise<CodexHanded> {
+  const seen: AgentQueryOptions[] = [];
+  const query: AgentQuery = async function* (opts) {
+    seen.push(opts);
+    yield { type: "result", result: { text: "Done.", structured: { report: "probe" } } };
+  };
+  const viaFunction = options.via === "function";
+  const { states, root } = probeStates(
+    environment,
+    viaFunction
+      ? { kind: "function", function: AGENT_CODEX, args: { prompt: "probe" } }
+      : { kind: "prompt", prompt: "probe", model: `${AGENT_CODEX}/default` },
+    viaFunction ? {} : { report: { kind: "text", schema: { type: "string" } } },
+    options,
+  );
+  grantAlwaysGrantedTools(states);
+  const registry = stubRegistry();
+  if (viaFunction) registerAgentRuntimes(registry, { query, adapters: ["codex"] });
+  const result = await executeWorkflow({
+    bundle: loadBundle(states, root),
+    inputs: {},
+    registry,
+    prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: AGENT_CODEX } }),
+    policy: compilePolicy(options.policy ?? {}),
+    approve: () => ({ decision: "deny", scope: "once" }),
+  });
+  const opts = seen[0];
+  if (opts === undefined) {
+    const reason = (result as { failure?: { reason?: string } }).failure?.reason ?? JSON.stringify(result).slice(0, 400);
+    throw new Error(`the engine never reached codex under this block: ${reason}`);
+  }
+  return { permissionMode: opts.permissionMode, served: Object.keys(opts.mcpTools ?? {}).sort() };
 }
 
 // --- the comparison ------------------------------------------------------------
@@ -251,8 +348,8 @@ export type ToleratedDifference =
    * OPT-IN, never assumed, and it may LOOSEN as well as tighten. A list answered a shell LINE as a
    * whole — before every line where it pinned the shell to a mode of its own, by the project's
    * command policy where it did not. A map's line is taken apart and each part answers to the map
-   * (decision 0007 §4), in a run as in a conversation turn (the subjects reach a run's policy in the
-   * key lowering carries them in): a file utility to the file tool's own entry, running a file to
+   * (decision 0007 §4), in a run as in a conversation turn (a run's policy is handed the block's
+   * `subjects`): a file utility to the file tool's own entry, running a file to
    * `script`, any other command to its own entry or the shell's. So a list whose `read_file` allowed
    * while its shell asked about `cat`, or whose policy ran an `rm` the map does not hold, has no map.
    *

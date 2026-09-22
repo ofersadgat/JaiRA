@@ -9,8 +9,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { lowerToolset, parseToolset, type PermissionsDecl } from "@jaira/shared";
-import { handedDifferences, handedToClaude, type HandedContext, type HandedEnvironment } from "../src/agentHanded";
+import { lowerToolset, parseToolset, SHELL_DENIED_MARKERS, shellCarriedKey, TOOLSET_MARKERS, type PermissionsDecl } from "@jaira/shared";
+import { handedDifferences, handedToClaude, handedToCodex, type HandedContext, type HandedEnvironment } from "../src/agentHanded";
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -173,5 +173,77 @@ describe("a shell the toolset denies, MEASURED in a run", () => {
     expect(handed.shell).toEqual({ command: "allow", read: "allow", write: "deny", script: "deny" });
     // The project's policy alone — what a run used to judge this line by — runs every one of them.
     expect((await handedToClaude({ tools: ["read_file", "bash"] })).shell).toEqual({ command: "allow", read: "allow", write: "allow", script: "allow" });
+  });
+});
+
+/**
+ * A RUN reads the state's resolved block, as a conversation turn does — upstream hands it over whole
+ * since declarative-ai 3f5e5cc (`literalPermissions` keeps a host's keys; `ExecServices.authored`).
+ * Each of these was a failure row in tool-policy.md, and each is measured through the real chain.
+ */
+describe("what a RUN reads off the state's block, MEASURED", () => {
+  const lowered = (decl: Record<string, unknown>): HandedEnvironment => lowerToolset(parseToolset(decl).toolset);
+
+  it("a written `other: \"ask\"` forces `Task`, `Agent` and `SlashCommand` to the callback — the gate's own default does not", async () => {
+    const asking = await handedToClaude(map({ read_file: "allow", other: "ask" }));
+    expect(asking.askRules).toEqual(["Agent", "SlashCommand", "Task"]);
+    expect(asking.natives).toEqual({ Task: "ask", Agent: "ask", SlashCommand: "ask" });
+    // A map that says nothing about `other` is not forced: the gate's `ask` is a last resort, not a choice.
+    expect((await handedToClaude(map({ read_file: "allow" }))).askRules).toEqual([]);
+    // …and the LEGACY reading is handed on untouched, whatever its block says.
+    expect((await handedToClaude({ tools: ["read_file"], permissions: { tools: { read_file: "allow" }, other: "ask" } })).askRules).toEqual([]);
+  });
+
+  it("`implementation: \"native\"` keeps the built-in in a run: ours is not served, the native is forced to the callback, and the ENTRY decides", async () => {
+    const handed = await handedToClaude(lowered({ read_file: "allow", grep: { mode: "ask", implementation: "native" }, other: "deny" }));
+    expect(handed.served).toEqual(["read_file", "show_artifact"]);
+    expect(handed.removed).not.toContain("Grep");
+    expect(handed.askRules).toEqual(["Grep"]);
+    expect(handed.tools["grep"]).toEqual({ reachable: true, via: ["Grep"], decision: "ask" });
+    // Ours still serves what the entry did not hand to the agent.
+    expect(handed.tools["read_file"]).toEqual({ reachable: true, via: ["app"], decision: "allow" });
+    // A `deny` beside `native` is a removal, not a question.
+    const shut = await handedToClaude(lowered({ read_file: "allow", grep: { mode: "deny", implementation: "native" }, other: "deny" }));
+    expect(shut.removed).toContain("Grep");
+    expect(shut.tools["grep"]!.reachable).toBe(false);
+  });
+
+  it("a child's OWN shell entries win over a parent's that offered a shell — even a parent pinned from a snapshot lowered the old way", async () => {
+    // The parent: "no shell but `npm test`", lowered as it was between 2026-09-22 and 3f5e5cc — its
+    // subjects carried a second time in a key of `tools`, beside the pair that says its shell is `deny`.
+    const parentSubjects = { bash: "deny" as const, "npm test": "allow" as const };
+    const parentOld: HandedEnvironment = {
+      tools: ["bash"],
+      permissions: {
+        tools: { bash: "smart", ...TOOLSET_MARKERS, ...SHELL_DENIED_MARKERS, [shellCarriedKey({ subjects: parentSubjects })]: "allow" },
+        subjects: parentSubjects,
+      },
+    };
+    const child = map({ read_file: "allow", bash: "ask", git: "allow", other: "deny" });
+    const alone = await handedToClaude(child);
+    expect(alone.shell["command"]).toBe("allow");
+    // The child's map runs `git status`; the parent's `bash: "deny"` would have refused it.
+    const under = await handedToClaude(child, { parent: parentOld });
+    expect(under.shell).toEqual(alone.shell);
+    // Lowered today, a parent carries nothing a child could inherit beside its own.
+    expect((await handedToClaude(child, { parent: map({ bash: "deny", "npm test": "allow" }) })).shell).toEqual(alone.shell);
+    // And codex's writing sandbox follows the CHILD's shell, not the pair it inherited.
+    for (const via of ["route", "function"] as const) {
+      expect((await handedToCodex(map({ bash: "ask" }), { parent: parentOld, via })).permissionMode).toBeUndefined();
+    }
+  });
+});
+
+describe("handedToCodex — codex is held by its sandbox, by a model prefix and as a FUNCTION alike", () => {
+  it.each(["route", "function"] as const)("%s: a toolset with no open writer runs read-only; one with one, or an unmigrated state, keeps the configured sandbox", async (via) => {
+    expect((await handedToCodex(map({ other: "deny" }), { via })).permissionMode).toBe("plan");
+    expect((await handedToCodex(map({ bash: "deny", other: "deny" }), { via })).permissionMode).toBe("plan");
+    expect((await handedToCodex(map({ bash: "deny", "git status": "allow" }), { via })).permissionMode).toBe("plan");
+    expect((await handedToCodex(map({ bash: "ask" }), { via })).permissionMode).toBeUndefined();
+    // Unmigrated: exactly as before — the configured sandbox, and on the route an old read-only
+    // profile still `plan`. (The function rig stands a fake query in for codex's adapter, which is
+    // where the profile's mapping lives, so it is measured on the route alone.)
+    expect((await handedToCodex({}, { via })).permissionMode).toBeUndefined();
+    if (via === "route") expect((await handedToCodex({ permissions: { profile: "read-only" } }, { via })).permissionMode).toBe("plan");
   });
 });

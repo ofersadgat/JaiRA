@@ -37,20 +37,24 @@
  * runs `git status`; every reader that wants the authored mode back goes through
  * {@link toolsetOfEnvironment}.
  *
- * Two exceptions keep that from being a door a run cannot see through:
+ * A shell the map denies OUTRIGHT — `"bash": "deny"` and no command subject or `script` that allows,
+ * asks or defers — is WITHHELD ({@link shellWithheld}): held as written, left off the lowered list,
+ * `deny` at the gate, so an agent loses its own shell and codex's writing sandbox stays off.
  *
- *  - A shell the map denies OUTRIGHT — `"bash": "deny"` and no command subject or `script` that
- *    allows, asks or defers — is WITHHELD ({@link shellWithheld}): held as written, left off the
- *    lowered list, `deny` at the gate, so an agent loses its own shell and codex's writing sandbox
- *    stays off.
- *  - An OFFERED shell's subjects are carried a second time, in a key of `permissions.tools`
- *    ({@link SHELL_SUBJECTS_KEY_PREFIX}), because a run's policy is handed `tools` and never
- *    `subjects`; and where its own entry is `deny`, {@link SHELL_DENIED_MARKERS} say so to a run's gate.
+ * ## What a run reads
  *
- * `implementation: "native"` on a state the ENGINE runs is still carried and not enforced — the chat
- * path honours it through `planAgentTools`; a run injects ours, which is the governed choice, because
- * the engine hands an executor a state's tool LIST and a gate, and neither can say whose code was
- * chosen.
+ * The engine hands a run's policy and its executor the state's RESOLVED block, host keys included
+ * (upstream `literalPermissions` and `ExecServices.authored`, since declarative-ai 3f5e5cc) — so
+ * `subjects`, `source`, `implementations` and a written `other` reach a run exactly as they reach a
+ * conversation turn, and `implementation: "native"` is honoured in a run too (`withAgentToolset`).
+ *
+ * Before that, a run was handed only `tools`, `default`, `other`, `profile` and `scopes`, and lowering
+ * carried an offered shell's subjects a second time in a key of `permissions.tools`
+ * ({@link SHELL_SUBJECTS_KEY_PREFIX}) with {@link SHELL_DENIED_MARKERS} beside a `deny` entry. Nothing
+ * WRITES those any more — `permissions` merges per key down the `environment` chain and `tools` one
+ * level deeper, so a child's own `subjects` replaces its parent's where a carried key was inherited
+ * beside the child's own. Every reader still READS them, for a task pinned to a snapshot lowered the
+ * old way.
  *
  * ## The LEGACY reading, and how a run tells it from a map
  *
@@ -61,12 +65,14 @@
  * `$/toolsets/…` reference, a `$ref` with overrides. Which one a state means is chosen when it is
  * migrated (0007 step 7), never inferred. {@link Toolset.legacy} carries the difference.
  *
- * A run does not see a `Toolset`: the engine hands an executor the tools it resolved and a GATE over
- * the state's `permissions` block, and nothing else. So a lowered map says it WAS a map in the one
- * place a gate can be asked about: {@link TOOLSET_MARKERS}, two entries in the lowered
- * `permissions.tools` that no tool is named by. They are a PAIR with different modes because a gate
- * answers `other` for a name it has no entry for — one marker could not be told from an `other` that
- * happened to agree with it; two that DISAGREE can only be entries. A legacy block never has them.
+ * A lowered map says it WAS a map with {@link TOOLSET_MARKERS}, two entries in the lowered
+ * `permissions.tools` that no tool is named by, and a legacy block never has them. A run reads them
+ * off the block it is handed (`ExecServices.authored`); where only a GATE is in hand they can still be
+ * asked about, which is why they are a PAIR with different modes: a gate answers `other` for a name it
+ * has no entry for, so one marker could not be told from an `other` that happened to agree with it,
+ * and two that DISAGREE can only be entries. They stay the discriminator — a key of their own would
+ * inherit down the chain exactly as they do, and every migrated state's lowered block would change
+ * for nothing.
  *
  * ## There is no profile
  *
@@ -95,25 +101,27 @@ export const TOOLSET_REF_KEY = "$ref";
 export const TOOLSET_MARKERS: Readonly<Record<string, PermissionMode>> = { "jaira:toolset+": "allow", "jaira:toolset-": "deny" };
 
 /**
- * WRITTEN BY LOWERING, never authored: the pair that says "this map's shell is OFFERED and its own
- * entry is `deny`" — `"bash": "deny", "git status": "allow"`, no shell but the named commands. The
- * gate is told `smart` for the shell, so the line is read; a run that must know the AUTHORED mode (the
- * codex sandbox, which has no per-line channel) asks the gate about this pair, which disagrees only
- * where it was written — the same argument as {@link TOOLSET_MARKERS}.
+ * WRITTEN BY LOWERING UNTIL declarative-ai 3f5e5cc, and READ ONLY since: the pair that says "this
+ * map's shell is OFFERED and its own entry is `deny`" — `"bash": "deny", "git status": "allow"`, no
+ * shell but the named commands. The gate is told `smart` for the shell, so the line is read; a run
+ * that had to know the AUTHORED mode (the codex sandbox, which has no per-line channel) asked the gate
+ * about this pair. A run now reads the authored mode off `subjects` on the block it is handed; a
+ * snapshot lowered before still carries the pair, and is read by it where it has no `subjects`.
  */
 export const SHELL_DENIED_MARKERS: Readonly<Record<string, PermissionMode>> = { "jaira:bash-deny+": "allow", "jaira:bash-deny-": "deny" };
 
 /**
- * WRITTEN BY LOWERING, never authored: the prefix of the one `permissions.tools` key that carries an
- * offered shell's command subjects (and where they came from) into a RUN.
+ * WRITTEN BY LOWERING UNTIL declarative-ai 3f5e5cc, and READ ONLY since: the prefix of the one
+ * `permissions.tools` key that carried an offered shell's command subjects (and where they came from)
+ * into a RUN.
  *
- * The engine hands the policy a state's block through upstream `literalPermissions`, which keeps
- * `tools`, `default`, `other`, `profile` and `scopes` and drops the rest — `subjects` and `source`
- * among them — so a run's narrowing would judge the line by the project's policy alone. `tools`
- * arrives whole, so the subjects ride in a KEY of it: `jaira:shell:` + the JSON of
- * {@link ShellCarried}, with the mode `allow`, which means nothing. Upstream merges `permissions.tools`
- * per key down the `environment` chain, so a child can inherit a parent's key beside its own; the
- * policy then judges the line under each and keeps the strictest answer.
+ * Upstream `literalPermissions` used to keep `tools`, `default`, `other`, `profile` and `scopes` and
+ * drop the rest — `subjects` and `source` among them — so the subjects rode in a KEY of `tools`:
+ * `jaira:shell:` + the JSON of {@link ShellCarried}, with the mode `allow`, which means nothing. It
+ * passes a host's keys through now, so `subjects` reaches a run itself, and nothing writes the key.
+ * A snapshot lowered before still carries it: a block with `subjects` is judged by `subjects` alone,
+ * and one without is judged under every carried key, strictest kept — a child could inherit a
+ * parent's key beside its own, since `permissions.tools` merges per key down the chain.
  */
 export const SHELL_SUBJECTS_KEY_PREFIX = "jaira:shell:";
 
@@ -578,18 +586,12 @@ export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> 
 export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[] | undefined, source?: string | undefined): PermissionsDecl {
   const subjects = shellSubjects(toolset);
   const hasSubjects = Object.keys(subjects).length > 0;
-  // What a RUN needs to judge an OFFERED shell's lines as this map says, in the one field it is
-  // handed: see {@link SHELL_SUBJECTS_KEY_PREFIX} and {@link SHELL_DENIED_MARKERS}.
-  const map = toolset.legacy !== true;
-  const offeredShell = map && hasSubjects && holdsTool(toolset, SHELL_TOOL) && !shellWithheld(toolset);
-  const carried: Record<string, PermissionMode> = offeredShell ? { [shellCarriedKey({ subjects, ...(source !== undefined ? { source } : {}) })]: "allow" } : {};
-  // A MAP leaves its marks, so a run — which sees this block only through a gate — can tell it from
-  // the legacy reading. See the module header and {@link TOOLSET_MARKERS}.
+  // A MAP leaves its marks, so a run can tell it from the legacy reading. See the module header and
+  // {@link TOOLSET_MARKERS}. The shell's subjects are NOT carried a second time in `tools` any more:
+  // a run is handed `subjects` itself (see "What a run reads").
   const tools = {
     ...gateToolModes(toolset),
-    ...(map ? TOOLSET_MARKERS : {}),
-    ...(offeredShell && subjects[SHELL_TOOL] === "deny" ? SHELL_DENIED_MARKERS : {}),
-    ...carried,
+    ...(toolset.legacy !== true ? TOOLSET_MARKERS : {}),
   };
   const implementations = toolImplementations(toolset);
   return {

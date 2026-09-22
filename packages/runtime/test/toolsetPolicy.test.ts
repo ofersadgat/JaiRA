@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { Approver } from "@declarative-ai/permissions";
 import type { LoadedState } from "@declarative-ai/hw";
-import { lowerToolset, parseToolset, TOOLSET_MARKERS, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
+import { lowerToolset, parseToolset, shellCarriedKey, TOOLSET_MARKERS, toolsetOfLegacy, type ChatSettings } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, stateWithChatSettings } from "../src/chatOperation";
 import { commandDecisionOf, compilePolicy } from "../src/policy";
 import { planAgentTools } from "../src/agentTools";
@@ -82,32 +82,45 @@ describe("compilePolicy", () => {
     expect(policy.scopeOf!({ name: "Bash" }, { command: "git commit -m x" } as never, block as never)).toBe("deny");
   });
 
-  it("reads them in a RUN too, where upstream hands the narrowing the block without `subjects` or `source`", () => {
+  it("reads them in a RUN too: upstream hands the narrowing the block whole, `subjects` and `source` included", () => {
     const policy = compilePolicy({});
     const lowered = lowerToolset(parseToolset({ bash: "deny", "git status": "allow", read_file: "allow", other: "deny" }).toolset, undefined, "$/toolsets/x/y");
-    // What `literalPermissions` keeps: `tools`, `default`, `other`, `profile`, `scopes`.
-    const { subjects: _subjects, source: _source, ...literal } = lowered.permissions!;
-    const narrowed = (command: string) => {
+    const narrowed = (command: string, block: unknown) => {
       const input = { command };
-      const mode = policy.scopeOf!({ name: "bash" }, input as never, literal as never);
+      const mode = policy.scopeOf!({ name: "bash" }, input as never, block as never);
       return { mode, toolset: commandDecisionOf(input)?.parts.toolset, parts: commandDecisionOf(input)?.parts.parts.map((p) => `${p.subject}:${p.verdict}`) };
     };
-    expect(narrowed("git status")).toEqual({ mode: undefined, toolset: "$/toolsets/x/y", parts: ["git status:allowed"] });
+    // What `literalPermissions` hands a run since declarative-ai 3f5e5cc: the block, host keys and all.
+    expect(narrowed("git status", lowered.permissions)).toEqual({ mode: undefined, toolset: "$/toolsets/x/y", parts: ["git status:allowed"] });
     // The project's policy alone would run both; the toolset refuses them.
-    expect(narrowed("rm notes.txt")).toMatchObject({ mode: "deny", parts: ["write_file:denied"] });
-    expect(narrowed("npm install")).toMatchObject({ mode: "deny" });
+    expect(narrowed("rm notes.txt", lowered.permissions)).toMatchObject({ mode: "deny", parts: ["write_file:denied"] });
+    expect(narrowed("npm install", lowered.permissions)).toMatchObject({ mode: "deny" });
+
+    // A snapshot lowered between 2026-09-22 and 3f5e5cc, as an OLDER engine handed it: the subjects
+    // only in the carried key. Still judged by the map.
+    const subjects = { bash: "deny" as const, "git status": "allow" as const, read_file: "allow" as const };
+    const oldCarried = { tools: { ...lowered.permissions!.tools, [shellCarriedKey({ subjects, source: "$/toolsets/x/y" })]: "allow" }, other: "deny" };
+    expect(narrowed("git status", oldCarried)).toMatchObject({ mode: undefined, toolset: "$/toolsets/x/y" });
+    expect(narrowed("rm notes.txt", oldCarried)).toMatchObject({ mode: "deny" });
   });
 
-  it("answers to the STRICTEST of the subjects a child inherited beside its own", () => {
-    // Upstream merges `permissions.tools` per key, so a child can hold its parent's carried key too.
+  it("lets a child's OWN subjects win over a carried key it inherited — not the strictest of both", () => {
+    // A parent pinned from a snapshot lowered the old way still carries its subjects in a key of
+    // `tools`, which upstream merges per key into the child's block. `subjects` merges per key of
+    // `permissions`, so the child's own replaces the parent's — and it is what judges the line.
     const policy = compilePolicy({});
-    const parent = lowerToolset(parseToolset({ bash: "allow", git: "allow" }).toolset).permissions!.tools!;
-    const child = lowerToolset(parseToolset({ bash: "deny", "git status": "allow" }).toolset).permissions!.tools!;
-    const merged = { tools: { ...parent, ...child } };
+    const parentSubjects = { bash: "deny" as const, "git status": "allow" as const };
+    const parentOld = {
+      tools: { bash: "smart", ...TOOLSET_MARKERS, [shellCarriedKey({ subjects: parentSubjects })]: "allow" },
+      subjects: parentSubjects,
+    };
+    const child = lowerToolset(parseToolset({ bash: "allow", git: "allow" }).toolset).permissions!;
+    const merged = { ...parentOld, ...child, tools: { ...parentOld.tools, ...child.tools } };
+    expect(merged.subjects).toEqual({ bash: "allow", git: "allow" });
     const mode = (command: string) => policy.scopeOf!({ name: "bash" }, { command } as never, merged as never);
+    // The parent's `bash: "deny"` would refuse it; the child's own map runs it.
+    expect(mode("git log")).toBeUndefined();
     expect(mode("git status")).toBeUndefined();
-    // The parent's `git` would run it; the child's own map falls to its `bash: "deny"`.
-    expect(mode("git log")).toBe("deny");
   });
 });
 

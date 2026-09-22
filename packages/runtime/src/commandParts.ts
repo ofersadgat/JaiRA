@@ -277,12 +277,16 @@ export interface JudgingToolset {
 /**
  * EVERY map a lowered block judges a line against.
  *
- * A block that still has its `subjects` — a conversation turn's, or a state read straight off its
- * file — is one map. A RUN's block has lost them to upstream `literalPermissions`, and finds them
- * again in the keys lowering carried them in (`SHELL_SUBJECTS_KEY_PREFIX` in `@jaira/shared`). Upstream
- * merges `permissions.tools` per key down the `environment` chain, so a child can hold its parent's
- * key beside its own: each is a map, and the caller keeps the strictest answer. Empty for a block no
- * lowering wrote, which is the unmigrated state's "the command policy decides".
+ * A block with `subjects` is one map, and only that one: a conversation turn's, a state read straight
+ * off its file, and a RUN's since upstream `literalPermissions` passes a host's keys through
+ * (declarative-ai 3f5e5cc). `subjects` merges per key of `permissions`, so a child's own replaces its
+ * parent's, and a carried key it inherited beside them is not read.
+ *
+ * A block WITHOUT `subjects` is a snapshot lowered between 2026-09-22 and 3f5e5cc, handed over by an
+ * older engine: its subjects are found in the keys lowering carried them in
+ * (`SHELL_SUBJECTS_KEY_PREFIX` in `@jaira/shared`), and a child could hold its parent's key beside its
+ * own — each is a map, and the caller keeps the strictest answer. Empty for a block no lowering wrote,
+ * which is the unmigrated state's "the command policy decides".
  */
 export function shellToolsetsOfBlock(block: PermissionsDecl | undefined): JudgingToolset[] {
   if (block === undefined) return [];

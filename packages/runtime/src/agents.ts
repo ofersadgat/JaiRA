@@ -33,7 +33,7 @@ import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
 import type { ExecEnv } from "./paths";
 import { primaryNativeOf, type AgentToolDeclaration } from "@jaira/shared";
-import { agentServices, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS } from "./agentTools";
+import { CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction } from "./agentTools";
 import { claudeReplacements } from "./tools";
 
 /** The registry names JaiRA registers its agents under. */
@@ -283,9 +283,10 @@ export function registerAgentRuntimes(
   };
   // And the other half of decision 0007 §3: a tool the state's toolset does NOT hold loses its
   // built-in too. Applied to the services each call is handed, from the claude executor's own
-  // declaration — see `agentServices`.
-  const held = <F extends (inputs: never, ctx: never) => unknown>(run: F): F =>
-    ((inputs: never, ctx: never) => run(inputs, agentServices(CLAUDE_TOOLS, ctx) as never)) as F;
+  // declaration — see `agentServices`. Codex is held by its one channel, the sandbox, and a generic
+  // CLI (`registerGenericAgents`) by refusing what it cannot hold — see `holdAgentFunction`.
+  const held = <F extends (inputs: never, ctx: never) => unknown>(run: F, declaration: AgentToolDeclaration = CLAUDE_TOOLS, label: string = AGENT_SDK): F =>
+    holdAgentFunction(declaration, run as never, label) as unknown as F;
 
   if (adapters.includes("sdk")) {
     const sdk = createClaudeCodeFunction({
@@ -345,7 +346,9 @@ export function registerAgentRuntimes(
           });
     registry.functions.set(
       AGENT_CODEX,
-      runtimeFunction(codex.run as never, codex.capabilities) as never,
+      // Held by its one channel: where the toolset leaves the writing switch off, the call's
+      // `permissionMode` is `plan`, which this adapter runs as `--sandbox read-only`.
+      runtimeFunction(held(codex.run as never, CODEX_TOOLS, AGENT_CODEX), codex.capabilities) as never,
     );
   }
 

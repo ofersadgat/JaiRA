@@ -30,6 +30,8 @@ import { lowerStateToolsets, parseToolset } from "@jaira/shared";
 import { CODEX_TOOLS, planAgentTools, withToolsetService } from "../src/agentTools";
 import { AgentCliExecutor, AgentCodexExecutor } from "@declarative-ai/agents-cli";
 import { agentPromptRoutes, normaliseAgentModel } from "../src/modelRoutes";
+import { registerAgentRuntimes } from "../src/agents";
+import { registerGenericAgents } from "../src/genericAgent";
 import { gateTools } from "../src/tools";
 import { buildPromptExecutor, executeWorkflow, newRegistry } from "../src/wiring";
 
@@ -348,6 +350,97 @@ describe("a transport that enforces nothing", () => {
   it("runs a state that restricts nothing", async () => {
     const { opts } = await run({}, { agent: "aider", agents });
     expect(opts).toBeDefined();
+  });
+});
+
+describe("the implementation choice — a RUN, which reads it off the state's block", () => {
+  it("keeps a `native` built-in and does not inject ours beside it — as a conversation turn does", async () => {
+    const { opts, asked } = await run({ tools: { read_file: "allow", grep: { mode: "ask", implementation: "native" }, other: "deny" } });
+    expect(Object.keys(opts!.mcpTools ?? {})).toEqual(["read_file"]);
+    expect(opts!.disallowedTools).toContain("Read");
+    expect(opts!.disallowedTools).not.toContain("Grep");
+    expect(opts!.providerOptions).toMatchObject({ settings: { permissions: { ask: ["Grep"] } } });
+    // Asked by its STANDARD name, of the entry's mode.
+    expect(await ask(opts!, "Grep", { pattern: "x" })).toMatchObject({ allow: false });
+    expect(asked).toEqual(["grep"]);
+  });
+
+  it("holds a run with NO approver to its map too — the block is published without a gate", async () => {
+    // Before, no approver meant no gate, and with no gate nothing of the block was visible: a map was
+    // read as legacy and the agent kept every built-in. (`jaira run` passes no approver.)
+    const { seen, query } = capturingQuery();
+    const lowered = lowerStateToolsets(
+      "digest",
+      {
+        label: "Read and report",
+        outputs: { report: { kind: "text", schema: { type: "string" } } },
+        operation: { kind: "prompt", prompt: "Summarize.", model: "claude-cli/default" },
+        environment: { tools: { read_file: "allow", other: "deny" } },
+      },
+      () => {
+        throw new Error("no reference expected");
+      },
+    );
+    await executeWorkflow({
+      bundle: loadBundle({ digest: lowered.def }, "digest"),
+      inputs: {},
+      registry: registry(),
+      prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: "claude-cli" } }),
+    });
+    expect(seen[0]!.disallowedTools).toEqual(expect.arrayContaining(["Edit", "Write", "Bash", "Glob", "Task"]));
+    expect(Object.keys(seen[0]!.mcpTools ?? {})).toEqual(["read_file"]);
+  });
+
+  it("forces the unmapped natives to the callback for a WRITTEN `other: \"ask\"`, and only for a written one", async () => {
+    const written = (await run({ tools: { read_file: "allow", other: "ask" } })).opts!;
+    expect(written.providerOptions).toMatchObject({ settings: { permissions: { ask: ["Task", "Agent", "SlashCommand"] } } });
+    const unwritten = (await run({ tools: { read_file: "allow" } })).opts!;
+    expect(unwritten.providerOptions).toBeUndefined();
+  });
+});
+
+describe("an agent reached as a FUNCTION is held to its toolset — every channel, not only claude's", () => {
+  async function runFunction(
+    environment: Record<string, unknown>,
+    fn: string,
+    args: Record<string, unknown>,
+    register: (registry: ReturnType<typeof newRegistry>, query: AgentQuery) => void,
+  ) {
+    const { seen, query } = capturingQuery();
+    const def = { label: "Delegate", outputs: {}, operation: { kind: "function", function: fn, args }, environment };
+    const lowered = lowerStateToolsets("delegate", def, () => {
+      throw new Error("no reference expected");
+    });
+    const reg = registry();
+    register(reg, query);
+    const result = await executeWorkflow({
+      bundle: loadBundle({ delegate: lowered.def }, "delegate"),
+      inputs: {},
+      registry: reg,
+      prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: "claude-cli" } }),
+      approve: () => ({ decision: "deny", scope: "once" }),
+    });
+    return { opts: seen[0], result };
+  }
+  const codex = (reg: ReturnType<typeof newRegistry>, query: AgentQuery) => registerAgentRuntimes(reg, { query, adapters: ["codex"] });
+
+  it("codex-cli: a toolset that leaves the writing switch off runs read-only, over whatever the call itself asked for", async () => {
+    const shut = await runFunction({ tools: { other: "deny" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
+    expect(shut.opts!.permissionMode).toBe("plan");
+    // A switch the toolset leaves on keeps the call's own mode…
+    const open = await runFunction({ tools: { bash: "ask" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
+    expect(open.opts!.permissionMode).toBe("acceptEdits");
+    // …and an unmigrated state is handed on exactly as before.
+    const legacy = await runFunction({ tools: [] }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
+    expect(legacy.opts!.permissionMode).toBe("acceptEdits");
+  });
+
+  it("a generic CLI refuses a toolset that refuses anything, by name — as its prompt route does", async () => {
+    const { opts, result } = await runFunction(READ_ONLY_MAP, "aider", { prompt: "go" }, (reg) =>
+      registerGenericAgents(reg, { agents: [{ name: "aider", command: "aider" }] }),
+    );
+    expect(opts).toBeUndefined();
+    expect(JSON.stringify(result)).toMatch(/aider: this state's toolset refuses .*'edit', 'write_file'.*'other', and this transport enforces nothing/);
   });
 });
 

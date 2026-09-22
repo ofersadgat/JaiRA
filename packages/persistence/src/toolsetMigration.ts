@@ -436,8 +436,8 @@ function linesOver(choice: ToolsetChoice, map: Record<string, PermissionMode>, f
     if (entry.kind !== "tool") return undefined;
     // A toolset of tools nothing serves yet (`chat_control`) is not what a workflow state meant.
     if (TOOL_SPEC_BY_NAME.get(subject)?.unserved === true) return undefined;
-    // A run injects ours whatever the entry chose, so a `native` choice would be measured as equal
-    // and read as a decision nobody made.
+    // A `native` choice is a decision no list ever made — and a run honours it now, so a base that
+    // made one would hand the agent its built-in where the list had ours.
     if (entry.implementation === "native") return undefined;
     const want = full[subject];
     if (want === undefined) {

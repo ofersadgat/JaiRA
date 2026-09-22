@@ -525,6 +525,52 @@ shell. What changed:
 - A task started before this keeps its pinned snapshot, lowered the old way,
   and runs as it did.
 
+### Amended 2026-09-22 (later): a run is handed the state's block
+
+The upstream change the amendment above named is made (declarative-ai
+`3f5e5cc`, additive): `literalPermissions` passes every key of a `permissions`
+block it does not read through verbatim, so the gate's and the narrowing's
+`authored` carry `subjects`, `source` and `implementations`; and the engine
+publishes the state's resolved block on `ExecServices.authored` beside the
+gate, with or without an approver, cleared for a call whose environment
+carries none. JaiRA reads it in a run exactly as a conversation turn reads its
+toolset (`viewOfServices` through `toolsetOfEnvironment`). Four failure rows
+in [tool-policy](../units/tool-policy.md) closed, each measured with
+`handedToClaude` (and a new `handedToCodex`) through the real chain:
+
+- **A written `other: "ask"` forces `Task`, `Agent` and `SlashCommand` to the
+  callback in a run.** The block says whether `other` was written; the gate's
+  last-resort `ask` still forces nothing.
+- **`implementation: "native"` holds in a run.** The built-in is kept under an
+  ask rule and the tool is taken out of the copy of `ctx.tools` the executor is
+  handed, so ours is not injected beside it. A claude agent reached as a
+  FUNCTION still gets ours: a function call has nowhere to write the ask rule a
+  kept built-in needs.
+- **A child's own shell entries win over its parent's.** Nothing writes the
+  `jaira:shell:` key or the `jaira:bash-deny±` pair any more: `subjects` merges
+  per key of `permissions`, so a child's replaces its parent's, where a carried
+  key inherited per key of `tools` sat beside the child's own and the line was
+  judged under both. The readers stay — a block with `subjects` is judged by
+  them alone, and one without (a snapshot pinned between the amendment above
+  and this, handed over by an older engine) by its carried keys, strictest
+  kept — so a task pinned in that window keeps running as it did.
+- **An agent reached as a function is held to its toolset.**
+  `holdAgentFunction` wraps the claude, codex and generic CLI functions: codex
+  gets `permissionMode: "plan"` (`--sandbox read-only`) over the call's own
+  where the toolset leaves the writing switch off, and a generic CLI refuses a
+  toolset that denies anything, as their prompt routes do.
+
+`TOOLSET_MARKERS` stay: they are the map/legacy discriminator, now read off the
+block, and a key of their own would inherit down the chain just as they do
+while changing every migrated state's lowered block. Two consequences worth
+naming. A run with NO approver (`jaira run`) is now held to its map — the
+block is published without a gate — where it used to be read as legacy. And a
+task pinned before the first amendment, whose snapshot has `subjects` and no
+carried key, now has its shell lines judged by its map rather than by the
+project's policy alone; a `bash: "deny"` with nothing allowed is still
+offered there (it was lowered as `smart`), and refuses every part the map does
+not allow.
+
 ## Open
 
 - `smart` on a command subject: what the approver is shown for one part of
