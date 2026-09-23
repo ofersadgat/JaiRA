@@ -2,7 +2,7 @@
 id: engineering/units/adoption
 type: engineering-unit
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 implements: [product/large-work-splits-into-independent-pieces, product/pick-up-where-it-left-off, ux/patterns/nested-under-what-caused-it, ux/patterns/refuse-with-the-reason-and-the-fix]
 layer: service
 owns_contracts: []
@@ -29,6 +29,7 @@ siblings: [engineering/units/fan-out-host, engineering/units/run-load, engineeri
 - **A task still running** is mirrored at once with no end, and the parent is made holding through `dependsOn`. `settleAdoptions` writes the end when the task has completed: at its run end, and before every resume of the parent.
 - **Into a new task, or into one that exists.** `AdoptionInput.parentTaskId` names a task something else made, which is what `connect()` composes with a dynamic workflow's task. The record is the constraint: the parent must be startable and not running, a child it has entered is not adopted over, a parent standing past the child is refused, its recorded inputs must agree with what the child ran with, and one that has run keeps the tree it stands in. The mirror rows go under the root it already entered, or a root entry is written first. A parent already pinned, to a snapshot or a versioned document, adopts under what it runs.
 - **A rewind past the mirror row un-adopts.** `releaseUnmirroredAdoptions` runs after every `task:rewind` and `task:delete` of a parent.
+- **A named session stays the named session** (the person's ruling, 2026-09-22). A name's key is `name#<address of the instance scoping it>`, and the adopted task ran the child as its root, so every address it wrote is one level short of the parent's. `adoptSessionNames` aliases each of the adopted task's `session_names` into the parent under the key the parent gives the SAME declaration: scoped to the child or inside it, `rest` becomes `<childKey>/rest` (the root, `/`, becomes `<childKey>`); scoped `global`, `/` stays `/`. Which of the two a root-scoped name was is read from the parent's own normalized declarations (`{$ref, $in}` under `session` or `scopeSession` in the child's subtree); a name nothing declares is taken as the child's. The alias points at the adopted task's own session, so the parent CONTINUES that conversation on its next seat, resuming its remote — nothing is copied. An alias the parent already has is left alone, since its own conversation came first; engine-minted `#i…` keys are never shared. Written by `writeAdoption` and again by `settleAdoptions` for a task adopted while running; taken back by `releaseUnmirroredAdoptions` (with a name tombstone in a file-backed conversations log). A fork of the parent branches such a conversation at the copy's first seat rather than copying its rows, since the adopted task's records are not the parent's to copy.
 
 It deliberately does not own:
 
@@ -72,6 +73,7 @@ It deliberately does not own:
 | 14 | An adoption into an existing task makes no new task, keeps that task's own inputs and their provenance, and refuses one whose input disagrees with what the child ran with | `taskAdopt.test.ts` "takes a task up into a parent that has not run, under the child key named, and makes no new task", "refuses a parent whose own input disagrees with what the child ran with" |
 | 15 | An existing parent that is running, or has entered the child, is refused; one stopped before a later child takes it up under the root it already entered, and is not asked that child's question | `taskAdopt.test.ts` "refuses a parent that is running or has entered the child, and takes a later child into one that stopped before it" |
 | 16 | An adopted child that fans out inline or `each: "task"` is refused | unasserted |
+| 17 | A named session of the adopted task is the same conversation in the parent — `global` under `/`, one scoped to the child under the child's key — the parent continues it on its next seat, a fork of the parent keeps its whole prefix, and un-adopting takes the aliases back | `taskAdopt.test.ts` "stays the named session: global stays global, …", "stops being the parent's when the adoption is taken back …" |
 
 ## Every refusal is an answer, and what is half written is a queued task somebody can delete
 

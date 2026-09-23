@@ -34,6 +34,12 @@
  *  - **A fast-forward the drop started** — everything while it runs is the drop's; when it ARRIVES
  *    the landing is the target, judged as a move's. A Skip or Stop that ends it is a decision; a
  *    failure on the way is not work of the task's own, and leaves the Undo offered.
+ *
+ * Every place in a journal this reads is a ROW, found by the token's `mark`: the connect's own
+ * `jaira.connect` rows (`connect.ts`). Its `intent` row is where a move's Undo cuts and where judging
+ * starts (for an adoption, the adopted task's place at the drop); its `done` row closes the drop's own
+ * writes on the watched journal. Not a count of rows — a retry that deleted a row from before the drop
+ * made that land too late — and not a seq, which a file-backed journal's replay re-mints.
  */
 import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import {
@@ -50,7 +56,6 @@ import {
   type TaskMeta,
 } from "@jaira/shared";
 import type { StoredEvent } from "./eventLog";
-
 import { connectRowAt } from "./hostRows";
 import type { Project } from "./project";
 
@@ -90,7 +95,7 @@ export function keepConnectUndo(project: Project, taskId: string, undo: ConnectU
 
 /**
  * The token a task keeps, judged now: usable — with the seq a move's Undo cuts at, read off where its
- * `drop` row sits NOW — or stale and why.
+ * `intent` row sits NOW — or stale and why.
  */
 export type KeptConnectUndo = { undo: ConnectUndo; cutAt?: number } | { stale: string };
 
@@ -143,7 +148,7 @@ export function staleReason(project: Project, kept: StoredConnectUndo): string |
   const dropped = project.events.list(droppedTask(undo));
   const drop = connectRowAt(dropped, undo.mark, "intent");
   if (undo.kind === "adopt") {
-    // The adopted task's `drop` row is its place at the drop; a rewind that took it took the drop too.
+    // The adopted task's `intent` row is its place at the drop; a rewind that took it took the drop too.
     if (drop < 0) return "the adopted task was rewound to before it was adopted";
     const own = dropped.slice(drop + 1);
     if (own.some((row) => typeOf(row) === "instance.entered" || typeOf(row) === "instance.terminated")) return "the adopted task has done work of its own since it was adopted";

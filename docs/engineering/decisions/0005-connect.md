@@ -904,9 +904,11 @@ of a task that outlives the process"; the code is `@jaira/persistence`
   what comes up, the strip shows (`answered` recounted from the `jaira.answered`
   rows, `step` and `at` from the entries), and Skip works. It is still reached
   only from the gate and question hubs, so an approval never gets there after a
-  resume either. `left` starts again from nothing, and a question the
-  conversation left to the person before the restart is offered to it once more
-  under the request id the resumed run parks it with.
+  resume either. *(Amended 2026-09-22, the same day: a question the conversation
+  left to the person is journaled `jaira.left` by its identity — the instance
+  asking and the question itself — and the resume seeds it back, so it stays the
+  person's under the new request id the resumed run parks it with, and `left` is
+  recounted from those rows. See "Closed 2026-09-22, second" below.)*
 - **A held move** journals `jaira.moveHeld`; a directed `transition.taken` on its
   instance is its taking, and the run-end handler writes `jaira.moveDropped` for
   one a run ended without taking, unless the session is closing. The resume
@@ -916,6 +918,10 @@ of a task that outlives the process"; the code is `@jaira/persistence`
 - **Undo** is kept on the card's task file (`TaskMeta.connectUndo`), a move's
   place in the journal counted in rows, because a seq does not outlive a
   replay; `task:connectUndo` with a `taskId` uses the kept token and clears it.
+  *(Amended 2026-09-22, the same day: the count drifted when a retry deleted a
+  row from before the drop, and the file-backed journal that re-mints seqs still
+  exists, so neither is the position. The place is now a ROW: the connect's own
+  `jaira.connect` intent and done rows, found by the token's `mark`.)*
   A reopening of a finished task journals `jaira.reopened` with the row's
   outputs, and a rewind back past it — an Undo — puts the task back finished,
   outputs and all.
@@ -970,7 +976,8 @@ about the task or at the task's own progress past where the drop landed.
   so an Undo the landing's failure ended stays ended.
 - **Cut at the task's own first row after the drop**, not at `after + 1`: seqs
   are the table's, and the drop's own resume deletes the unwound rows it stood
-  behind.
+  behind. *(Amended the same day: that first row is the drop's own `jaira.connect`
+  intent row, found by `mark` wherever it now sits.)*
 
 What stayed in memory was the descent follower of a move to a nested target, so a
 process that died part-way down left the composite walking its own spine. *(Closed
@@ -982,23 +989,16 @@ the same day — the way down is journaled upstream; see "Signals and paths" bel
   known move cannot come from the engine's waits, and reading the document
   for it in the renderer was rejected when `on_user_event` was built. It
   ships without the chip.
-- A named session continued across an adoption boundary (a refine loop
-  whose earlier passes ran in the adopted task).
 - An adopted child that fans out (`each: "inline"` or `"task"`) is refused:
   one task cannot stand for a batch. Adopting a whole batch is not designed.
 - A new transition for a task that is running: refused until it is paused.
   Stopping it and reopening it with the move is `skip` by another name, and
   was not taken without being asked for.
-- A connect that refuses part-way — the adoption into a new document's task,
-  a move after an adoption — leaves what it had written, and says so.
 - A drop that asks after (above) does so only where the workflow is MODIFIED. A
   move within the task's workflow, or an adoption, that leaves a required input
   unbound is still refused with what is missing: there the target is already
   mounted, and asking would mean grafting a conversation onto a workflow that was
   not being changed.
-- The opening turn of a conversation a drop made is drawn as the person's
-  message, as a `chat/control` opening line always would have been; nothing
-  marks it as the host's.
 - A fast-forward of a task that is RUNNING with no conversation is refused
   until it is paused, for the reason a new transition is.
 - A question stays on screen while the conversation considers it; a person who
@@ -1072,6 +1072,64 @@ Closed 2026-09-22 — **signals and paths** (upstream `@declarative-ai` on branc
   instance the request named, and `markAnsweredQuestions` marks the block with
   that `callId`. The question-text join, and the pairing of an untexted row, are
   deleted; rows written before this are not drawn.
+
+Closed 2026-09-22, second (five gaps, no upstream change; the statement of record is
+[task-channels](../contracts/task-channels.md), [task-file](../contracts/task-file.md),
+[journal-events](../contracts/journal-events.md), [adoption](../units/adoption.md) and
+[message](../../ui/components/message.md)):
+
+- **A named session stays the named session across an adoption** — the person's
+  ruling: whatever its scope, it keeps meaning the same conversation. A key is
+  `name#<address>`, and the adopted task ran the child as its root, so the
+  adopted task's `session_names` are aliased into the parent under the key the
+  parent gives the same declaration: scoped to the child, `loop#/` becomes
+  `loop#product`; scoped `global`, `notes#/` stays `notes#/` — read off the
+  parent's own normalized declarations. The alias points at the adopted task's
+  session, so the parent continues that conversation on its next seat. Un-adopting
+  takes the aliases back; a fork of the parent branches the conversation rather
+  than copying rows it does not own.
+- **A connect that stops part-way is finished as it was meant** — the person's
+  ruling ("i thought we had a written source which would allow us to properly
+  replay this"): before a real connect writes anything, ONE durable record of its
+  intent — the request, the resolution chosen, the supplied inputs, the steps — is
+  journaled on the dragged task (`jaira.connect`, `at: "intent"`), each step marks
+  itself done there with what it made, and a `done` row closes it. A retry of the
+  same drop, and the app's next open after a crash, run only the steps not yet
+  done and never re-resolve. **Chosen: a journal row on the task, not the task
+  file** — the journal is the task's written, replayable account of what was done
+  to it (a file-backed journal carries it like any line), a rewind to before the
+  drop takes the unfinished intent with it, and it is the same row the Undo is
+  measured from; the task file holds a projection of facts, and would need every
+  decision that drops a token to learn to drop an intent too. Each step is ALSO
+  idempotent — it recognises its own unmarked write (the document whose cause is
+  this drop, the task standing in it since the intent, the adoption on the task's
+  `origin`, the `jaira.supplied` carrying the drop's `mark`, the held move or the
+  fast-forward row since the intent) — for the one gap rows cannot close: a step
+  that ran and died before its row landed. A step that refuses journals `stopped`
+  and keeps refusing the same way while nothing changes; a different drop of the
+  task is refused `connecting` until the same drop finishes it.
+- **What the app wrote is not drawn as what the person typed.** The record marks
+  it on the ENTRY (`by: host` for the opening turn of a conversation a drop made,
+  `by: workflow` for a run's state prompt and every system prompt), at every
+  write of the one conversation array. The conversation still shows what was
+  said to the model on the right; such a message wears a badge naming its source
+  and a quieter bubble, and the person's own messages wear none.
+- **A question left to the person survives a restart.** The decision is
+  journaled `jaira.left`, keyed by the question's identity — the instance asking
+  and the question itself — and the resume seeds it back onto the mode, as
+  `InteractionHub.seed` gives a recovered gate its answer; the strip's `left` is
+  recounted from the rows.
+- **Undo's saved position cannot drift.** The file-backed journal that re-mints
+  seqs still exists, so a seq is not the answer, and a count of rows drifted when
+  a retry deleted a row from before the drop. The position is the connect's own
+  rows, found by `mark`: a move's Undo cuts at its intent row, an adoption's is
+  judged from the adopted task's intent row, and the done row closes the drop's own
+  writes. `StoredConnectUndo.rows`/`kept` and `ConnectUndo.after` are gone.
+
+Left open by this: a drop that stops on a refusal the retry cannot change (a hole,
+a schema misfit) blocks other drops of the task until it is taken back by a rewind
+to before its intent, and what its finished steps made (a document, a queued task)
+stays, as a document an Undo leaves does.
 
 ## Revisit when
 

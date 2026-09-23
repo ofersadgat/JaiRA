@@ -39,6 +39,18 @@
  * value and calls again. A DROP has nobody to hand it to, so it says `askAfter`: where the workflow
  * is being modified anyway, the conversation is made without the target and asks.
  *
+ * ## Written down before it is done, and finished as it was meant
+ *
+ * A real connect decides everything first — the resolution, the plan, the steps — and then journals
+ * that INTENT on the dragged task before it writes anything (`jaira.connect`, {@link begin}). Each
+ * step marks itself done with what it made; a `done` row closes it. A connect that stops part-way —
+ * a refusal, a throw, a process that died — leaves its intent open, and the same drop again (or the
+ * app's next open, for one that was cut off) carries out only the steps not yet done
+ * ({@link finishConnect}), from the intent's own request and plan: never a second resolution against
+ * what the first attempt left behind, and so never a second document version, a second adoption or a
+ * different refusal. Every step also recognises its own unmarked write, for the one gap rows cannot
+ * close. The intent rows are also what the connect's Undo is measured from (`connectUndo.ts`).
+ *
  * ## §0
  *
  * Nothing here reads or writes a workflow's input by name. The conversation state that roots a new

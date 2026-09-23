@@ -175,8 +175,24 @@ An `askAfter` connect that answers `asking` makes, for `new`, the document, its 
 | `running` | the move is a new transition and an engine is running the task, which picks a new version up only at its next load | |
 | `adopt` | the adoption refused | `adopt`, the `AdoptRefusal` |
 | `generate` | the generator or its lint refused | |
+| `connecting` | an earlier connect of this task stopped part-way, and this request is a DIFFERENT drop (another target or workflow); nothing is written | |
 
-`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made}` or `{kind: "move", taskId, after, pin?, wasCompleted?, asking?}`. `after` is the task's last journal seq before the move. `asking: true` marks an `askAfter` connect of a `cloned` or `augmented` task, which moved nothing.
+`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made, mark}` or `{kind: "move", taskId, mark, pin?, wasCompleted?, asking?}`. `mark` names the connect's own `jaira.connect` rows ([journal-events](journal-events.md)): a move's Undo cuts at its `intent` row, wherever that row now sits, and an adoption's is judged from the adopted task's `intent` row. `pin` and `wasCompleted` are how the task stood before the drop, as the intent recorded them. `asking: true` marks an `askAfter` connect of a `cloned` or `augmented` task, which moved nothing.
+
+#### A real connect writes its intent first, and a retry finishes it
+
+Before a real connect writes anything, it journals its INTENT on the dragged task — a `jaira.connect` row with `at: "intent"` carrying the request as asked (target, workflow, supplied inputs, skip, askAfter, scripts), the plan as resolved, how the task stood, and the steps it will take:
+
+| Step | Does | Recognised as already done when |
+| --- | --- | --- |
+| `document` | generates and writes the document version (`new`, `augmented`, `cloned`, or the conversation alone for `askAfter`) | a document whose latest version's cause is this task moved to this target was written since the intent |
+| `parent` | makes the document's task | a task standing in that document was made since the intent |
+| `adopt` | `task:adopt` into that task, or into a new task of the candidate workflow | the dragged task's `origin` is that adoption |
+| `supplied` | journals `jaira.supplied`, carrying the connect's `mark` | a `jaira.supplied` with this `mark` is on the task |
+| `move` | `task:move` | a held move, a directed `transition.taken` to that child, a reopening, or that child's entry since the intent |
+| `fastForward` | `task:fastForward` | a `jaira.fastForward` since the intent |
+
+Each step done journals a `step` row with what it made (the document, its keys, the task, the adoption), and the last a `done` row — on the parent's journal too for an adoption. A step that refuses, or throws, journals `stopped` with the reason and the connect answers that refusal, or rejects; the intent stays open. The SAME drop again (same task, target and workflow) — a retry, or the app's next open for an intent that was cut off with no `stopped` row — carries out only the steps not yet done, with the intent's own request and plan; nothing is resolved again. While an intent is open, any other connect of the task is refused `connecting`, and a dry run of the same drop answers the intent's plan. Nothing is ever written twice: one document version, one task, one adoption, one move per drop.
 
 ### `task:connectUndo` takes back the drop a card's task keeps, while that drop is still the last thing it did
 
@@ -199,7 +215,7 @@ A stale token is refused with `'<title>' has moved on since the drop (<why>), so
 | `undo.kind` | Does |
 | --- | --- |
 | `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. Everything it did since the drop was the drop's own, or the token would not stand |
-| `move` | `task:rewind` to the task's first journal row after `after`, which puts a cloned task back under its previous pin; a task that had completed is put back completed with the outputs its reopening cleared, read from the `jaira.reopened` row ([journal-events](journal-events.md)); then the pin is put back if it still differs. With `asking`, the journal is cut there WITHOUT a resume and the task's status and outcome are put back as they were. A kept token carries `asking` too, so an Undo after a restart still takes the conversation back |
+| `move` | `task:rewind` to the drop's `intent` row — the task's first row of the drop, found by `mark` wherever it now sits — which puts a cloned task back under its previous pin; a task that had completed is put back completed with the outputs its reopening cleared, read from the `jaira.reopened` row ([journal-events](journal-events.md)); then the pin is put back if it still differs. With `asking`, the journal is cut there WITHOUT a resume and the task's status and outcome are put back as they were. A kept token carries `asking` too, so an Undo after a restart still takes the conversation back |
 
 A run the drop started — the landing parked on a gate, a fast-forward on its way — is the drop's effect, so either kind first stops it in this process and waits for it to end; a run another process drives is refused. Either kind then stops a turn the task's conversation is taking and waits for it to land, up to the chat wait, so the opening turn an `askAfter` drop started cannot write after the cut.
 
@@ -341,7 +357,7 @@ A completed task's output is offered when its value validates against the slot's
 - `task:cancel` of a finished task answers `{taskId}` and changes nothing, where `jaira task cancel` refuses.
 - `functions:pending` ignores `project`: the list is keyed by task id alone, set when a `task:start` or `task:rerun` start refuses with `ApprovalRequired`, and cleared when a later start of that task succeeds.
 - `task:resumable` and `task:detail` throw for a startable task with history whose snapshot is missing or corrupt, because the plan loads the snapshot without a fallback.
-- `task:connect` answers a refusal as data, as `task:adopt` does. A real connect writes in order — the document, its task, the adoption, the move — and a refusal or rejection part-way leaves what was written: the `adopt` refusal of a `new` names the document and the task already made, and a `task:move` that rejects after an adoption leaves the adoption.
+- `task:connect` answers a refusal as data, as `task:adopt` does. A refusal or rejection part-way leaves what was written, and the connect's intent open: dropping the task on the same target again carries out only what is not done, and nothing else may be done with the task by a connect until then (`connecting`). A drop that stops on a refusal the retry cannot change — a hole, a schema misfit — keeps refusing the same way; rewinding the dragged task to before its intent takes the drop back, and what the finished steps made (a document, a task) stays.
 - `task:connect` decides whether inputs will bind statically, from the lowered wires and the loaded machine: a wire counts as bound when every child it reads has ended well, and a computed expression that reads nothing is taken to resolve. The engine's own entry is still the judge.
 - `task:connectUndo` of a card whose drop is still running stops that run first: the run is the drop's, and a Stop from the card would have ended the Undo.
 - A kept Undo that has gone stale stays on the task file until something acts on it (`task:connectUndo`, or the next decision); only the read says it is stale, so `undoable` is absent at once.
