@@ -12,7 +12,7 @@
  * turn the board's shape into something you cannot read left to right.
  */
 import { Fragment, useEffect, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import type { BoardCard, BoardColumn, BoardView, InstanceStatus, TaskStatus } from "@jaira/shared/browser";
+import type { BoardCard, BoardColumn, BoardView, InstanceStatus, MoveConfirm as MoveConfirmKind, NextMove, TaskStatus } from "@jaira/shared/browser";
 import { canConnect, ConnectDrag, nestUnder, ownColumnOf, previewOf, type ConnectAsk, type ConnectPreview, type Words } from "./connectDrag";
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
@@ -270,6 +270,7 @@ export function Column({
   onMenu,
   selected = false,
   drop,
+  confirm,
   children,
 }: {
   name: ReactNode;
@@ -312,6 +313,8 @@ export function Column({
    * column stays inert rather than accepting a gesture it would have to discard.
    */
   drop?: { accepts: boolean; onDrop: () => void; preview?: (() => ConnectPreview | "asking" | undefined) | undefined } | undefined;
+  /** A move's question, put in front of its commit — drawn under the cards, where a preview goes. */
+  confirm?: ReactNode;
   children?: ReactNode;
 }): JSX.Element {
   // Whether the pointer is over THIS column, which is a different fact from whether the column would
@@ -381,6 +384,7 @@ export function Column({
         {children}
         {count === 0 ? <div className="empty">{empty}</div> : null}
         {over && drop?.preview !== undefined ? <ConnectPop preview={drop.preview()} /> : null}
+        {confirm}
       </div>
     </section>
   );
@@ -429,6 +433,76 @@ export function ConnectPop({ preview }: { preview: ConnectPreview | "asking" | u
       ) : null}
       {preview.drop !== undefined ? <span className="connect-drop">{preview.drop}</span> : null}
       {preview.refused !== undefined ? <span className="connect-drop connect-no">{preview.refused}</span> : null}
+    </div>
+  );
+}
+
+/** The yes of each ASK cell, as its button says it. */
+const CONFIRM_YES: Record<MoveConfirmKind, string> = { "stop-and-rewind": "Stop and go back", "pause-and-move": "Pause and move" };
+
+/**
+ * The move table's QUESTION (decision 0005, the rulings of 2026-09-22): a drop — or a chip — whose
+ * move stops or pauses a working task asks first. A render function with no opinion about its place;
+ * the board puts it in the column the task would land in, under the cards, where the preview was.
+ */
+export function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: string; onYes: () => void; onNo: () => void }): JSX.Element {
+  return (
+    <div className="connect-pop connect-pop-inline connect-confirm" role="alertdialog" aria-label="Confirm the move" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      <span className="connect-kind">Confirm the move</span>
+      <p className="connect-say">{sentence}</p>
+      <div className="options">
+        <button type="button" className="primary" onClick={onYes}>
+          {yes}
+        </button>
+        <button type="button" className="ghost" onClick={onNo}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What pressing a chip does, in the words its tooltip says it. */
+function chipTip(move: NextMove, name: string): string {
+  if (move.blocked !== undefined) return move.blocked;
+  switch (move.way) {
+    case "event":
+      return `Move to ${name} — the workflow is waiting for exactly this move`;
+    case "fast-forward":
+      return `Fast-forward to ${name} — the states between run, the conversation answering on the way`;
+    case "back":
+      return `Go back to ${name} — entered again as its next pass`;
+    default:
+      return `Move to ${name} — taken when the state it stands in ends`;
+  }
+}
+
+/**
+ * A card's NEXT TRANSITIONS (decision 0005, the rulings of 2026-09-22): one chip per move the task's
+ * workflow defines out of where it stands, computed in main and judged by the move table — so every
+ * chip is a legal move. Pressing one takes it, as a drop on that column would.
+ */
+export function NextChips({ moves, onMove }: { moves: readonly NextMove[]; onMove: (move: NextMove) => void }): JSX.Element {
+  return (
+    <div className="card-next" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      {moves.map((move) => {
+        const name = move.label ?? move.path.at(-1) ?? move.target;
+        return (
+          <button
+            key={move.path.join("/")}
+            type="button"
+            className={`move-chip${move.event === true ? " is-event" : ""}${move.way === "back" ? " is-back" : ""}`}
+            disabled={move.blocked !== undefined}
+            title={chipTip(move, name)}
+            onClick={() => onMove(move)}
+          >
+            <span className="move-chip-arrow" aria-hidden="true">
+              {move.way === "back" ? "↩" : "→"}
+            </span>
+            <span className="move-chip-name">{name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -570,8 +644,14 @@ export function Card({
   onDragEnd,
   child = false,
   onUndo,
+  onMove,
 }: {
   card: BoardCard;
+  /**
+   * A NEXT-TRANSITION chip was pressed (decision 0005, the rulings of 2026-09-22): take that move.
+   * Absent where the board moves nothing — the chips are not drawn at all there.
+   */
+  onMove?: ((move: NextMove) => void) | undefined;
   /** Drawn beneath the task that adopted it — see {@link Tile}. */
   child?: boolean;
   /**
@@ -654,6 +734,7 @@ export function Card({
       onDrill={onDrill}
       onMenu={onMenu}
       child={child}
+      {...(onMove !== undefined && (card.next ?? []).length > 0 ? { children: <NextChips moves={card.next!} onMove={onMove} /> } : {})}
       {...(onDragStart !== undefined
         ? {
             onDragStart: (e: ReactDragEvent) => {
@@ -760,7 +841,10 @@ export function Board({
   connect?:
     | {
         ask: ConnectAsk;
-        onDrop: (card: BoardCard, column: BoardColumn) => void;
+        /** The commit. `confirmed` once the person said yes to the move table's question, where it asks one. */
+        onDrop: (card: BoardCard, column: BoardColumn, confirmed?: boolean) => void;
+        /** A card's next-transition chip, pressed — and confirmed, where the move asks first. */
+        onMove?: (card: BoardCard, move: NextMove, confirmed?: boolean) => void;
         undoable?: ReadonlySet<string>;
         onUndo?: (taskId: string) => void;
       }
@@ -780,6 +864,23 @@ export function Board({
    */
   const connecting = useRef<ConnectDrag | null>(null);
   const [, answered] = useReducer((n: number) => n + 1, 0);
+  /**
+   * A move the table ASKS about before it commits (a working task sent back, or into another
+   * workflow): the question, drawn in the column it will land in until the person answers it.
+   */
+  const [confirming, setConfirming] = useState<{ column: string; sentence: string; yes: string; go: () => void } | null>(null);
+  /** A chip's move: taken at once, or — where the table asks — once the person said yes. */
+  const moveFrom = (card: BoardCard) =>
+    connect?.onMove === undefined
+      ? undefined
+      : (move: NextMove): void => {
+          if (move.confirm !== undefined) {
+            const column = ownColumnOf(board.columns, card) ?? board.columns[0]?.key ?? "";
+            setConfirming({ column, sentence: move.sentence ?? "Take this move?", yes: CONFIRM_YES[move.confirm], go: () => connect.onMove!(card, move, true) });
+            return;
+          }
+          connect.onMove!(card, move);
+        };
   useEffect(() => () => connecting.current?.end(), []);
   const pickUp = (card: BoardCard): void => {
     setDragging(card);
@@ -836,11 +937,22 @@ export function Board({
     }
     return {
       accepts: drag.accepts(columnKey),
-      // THE DROP IS THE COMMIT: no dialog, no second step. What it did is on the board a moment later.
+      // THE DROP IS THE COMMIT: no dialog, no second step — except where the move table ASKS first,
+      // and then the question is put in the column the task would land in, and yes is the commit.
       onDrop: () => {
         const accepted = drag.accepts(columnKey);
+        const preview = previewOf(drag.answer(columnKey), card, column);
         putDown();
-        if (accepted) connect.onDrop(card, column);
+        if (!accepted) return;
+        const judgement = (() => {
+          const answer = drag.answer(columnKey);
+          return answer?.status === "answered" ? answer.result.plan?.judgement : undefined;
+        })();
+        if (judgement?.confirm !== undefined) {
+          setConfirming({ column: columnKey, sentence: preview?.confirm ?? "Take this move?", yes: CONFIRM_YES[judgement.confirm], go: () => connect.onDrop(card, column, true) });
+          return;
+        }
+        connect.onDrop(card, column);
       },
       preview: () => (drag.answer(columnKey)?.status === "asking" ? "asking" : previewOf(drag.answer(columnKey), card, column)),
     };
@@ -865,6 +977,22 @@ export function Board({
             {...(onColumnMenu !== undefined ? { onMenu: (at: MenuPoint) => onColumnMenu(column.stateId, at) } : {})}
             selected={column.stateId === selectedColumn}
             {...(dropFor(column) !== undefined ? { drop: dropFor(column)! } : {})}
+            {...(confirming?.column === column.key
+              ? {
+                  confirm: (
+                    <MoveConfirm
+                      sentence={confirming.sentence}
+                      yes={confirming.yes}
+                      onYes={() => {
+                        const go = confirming.go;
+                        setConfirming(null);
+                        go();
+                      }}
+                      onNo={() => setConfirming(null)}
+                    />
+                  ),
+                }
+              : {})}
           >
             <Lanes
               cards={column.cards}
@@ -880,6 +1008,7 @@ export function Board({
                     {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
                     child={card.under !== undefined && column.cards.some((other) => other.taskId === card.under)}
                     {...(connect?.onUndo !== undefined && connect.undoable?.has(card.taskId) === true ? { onUndo: () => connect.onUndo!(card.taskId) } : {})}
+                    {...(moveFrom(card) !== undefined ? { onMove: moveFrom(card)! } : {})}
                     {...(onTaskDrop !== undefined && (canDrag(dragOffers, card.taskId) || (connect !== undefined && canConnect(card)))
                       ? { onDragStart: () => pickUp(card), onDragEnd: putDown }
                       : {})}

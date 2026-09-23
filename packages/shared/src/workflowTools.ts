@@ -10,12 +10,15 @@
  * ## Inputs are the target's own (§0, §4)
  *
  * `start_task` and `move_task` take `inputs`: an object keyed by the TARGET STATE'S declared input names. The
- * platform names none of them. A call whose `inputs` leave a required input open DOES NOTHING and
- * answers `ok: false` with `missing` — each open input with its declared schema, description and why
- * nothing binds it — and `schema`, the target's whole input schema with what the host could bind
- * left out of `required`. The conversation then supplies the value from what was said, or asks the
- * person in words, and calls again. `asked` names the inputs whose value the person gave in answer
- * to such a question; every other supplied value is recorded `inferred`.
+ * platform names none of them. A `start_task` whose `inputs` leave a required input open DOES NOTHING
+ * and answers `ok: false` with `missing` — each open input with its declared schema, description and
+ * why nothing binds it — and `schema`, the target's whole input schema with what the host could bind
+ * left out of `required`; the conversation supplies the value from what was said and calls again.
+ * `asked` names the inputs whose value the person gave; every other supplied value is `inferred`.
+ *
+ * A `move_task` whose target still lacks a required input is not handed back: the host asks the PERSON
+ * in the moved task's own conversation (decision 0005, the rulings of 2026-09-22) and answers `asked`
+ * with the question's request id — the move is taken when they answer, recorded `asked`.
  *
  * A refusal is an ANSWER (`ok: false`), never a thrown error: the model reads it and says so.
  */
@@ -126,6 +129,8 @@ export interface MoveInput extends SuppliedInputs {
   workflow?: string;
   /** Go directly: interrupt what is running and record what is stepped over as skipped. */
   skip?: boolean;
+  /** The person agreed to the question a `confirm` answer carried (the move table's ASK cells). */
+  confirm?: boolean;
 }
 
 export type MoveResult =
@@ -148,6 +153,15 @@ export type MoveResult =
       answeredBy?: string;
       /** The states a fast-forward runs on the way, as child-key paths — what its note names. */
       through?: string[];
+    }
+  | {
+      ok: true;
+      task: string;
+      /**
+       * The move is waiting on a QUESTION parked in the task's own conversation: these required
+       * inputs, asked of the person. It is taken when they answer; nothing has moved yet.
+       */
+      asked: { request: string; inputs: ConnectMissingInput[] };
     }
   | InputsMissing
   | { ok: false; code: string; reason: string; candidates?: ConnectCandidate[] };
@@ -268,7 +282,8 @@ export function workflowOutcomeOf(result: unknown): WorkflowOutcome | undefined 
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
   const r = parsed as Record<string, unknown>;
-  if (r["ok"] !== true) return undefined;
+  // A move still waiting on its input question did nothing yet.
+  if (r["ok"] !== true || r["asked"] !== undefined) return undefined;
   const text = (key: string): string | undefined => (typeof r[key] === "string" ? (r[key] as string) : undefined);
   const standsAt = text("standsAt") ?? text("key");
   if (standsAt === undefined) return undefined;

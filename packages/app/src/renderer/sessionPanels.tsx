@@ -44,7 +44,7 @@ import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { clockOf, durationOf, OutcomeNote } from "./transcriptView";
 import { signatureOf } from "./transcript";
-import { addressSegment, segmentKey, type InstanceNode, type MadeBatch, type MadeTask, type TaskOrigin } from "@jaira/shared/browser";
+import { addressSegment, segmentKey, type InstanceNode, type MadeBatch, type MadeTask, type MoveQuestionView, type TaskOrigin } from "@jaira/shared/browser";
 import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
 import {
   forksOf,
@@ -909,12 +909,18 @@ export function NoteRow({
   root,
   onCut,
   onSelectTask,
+  adopted,
+  moveQuestion,
 }: {
   note: BandNote;
   root: string;
   onCut?: CutOffer | undefined;
   /** Where a made task's title goes when clicked — the task itself. */
   onSelectTask?: ((taskId: string) => void) | undefined;
+  /** An ADOPTED task's own history, drawn expanded under the line that adopted it — see {@link MadeRow}. */
+  adopted?: ((taskId: string) => ReactNode) | undefined;
+  /** A move's input question, drawn where the move asked it — see {@link MoveQuestionRow}. */
+  moveQuestion?: ((asked: MoveQuestionView) => ReactNode) | undefined;
 }): JSX.Element {
   // Moving is not going wrong: a forking-path glyph and the ordinary text colour, against the alert
   // and `--bad` a failure gets. Same shape and same column either way, because they are the same KIND
@@ -930,7 +936,8 @@ export function NoteRow({
     note.keys !== undefined && note.keys.length > 1
       ? [pathFrom(note.path.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "", root), note.keys.join(", ")].filter((part) => part !== "").join(" → ")
       : pathFrom(note.path, root);
-  if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} />;
+  if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} adopted={adopted} />;
+  if (note.kind === "asked" && note.asked !== undefined) return <MoveQuestionRow asked={note.asked} body={moveQuestion} />;
   // What the conversation's workflow tool did — the tool note's own words, as a row on the rail.
   if (note.kind === "moved" && note.moved !== undefined) return <OutcomeNote outcome={note.moved} />;
   return (
@@ -1007,16 +1014,41 @@ function MadeRow({
   made,
   where,
   onSelectTask,
+  adopted,
 }: {
   note: BandNote;
   made: MadeBatch;
   where: string;
   onSelectTask?: ((taskId: string) => void) | undefined;
+  /**
+   * The adopted task's own history (decision 0005, the rulings of 2026-09-22: "when a task gets
+   * adopted, the conversation simply expands"). OPEN by default — it is this conversation's history
+   * now — and foldable like any section. Only an adoption: a batch's runs are tasks of their own.
+   */
+  adopted?: ((taskId: string) => ReactNode) | undefined;
 }): JSX.Element {
   const others = made.runs.filter((run) => !run.self);
+  const expands = made.kind === "adopt" && adopted !== undefined && others.length === 1;
+  const [open, setOpen] = useState(true);
   return (
-    <div className="sb-note step sb-made" role="note" data-made={others.map((run) => run.taskId).join(" ")}>
-      <Icon name="choice" className="sb-note-icon" />
+    <div className={`sb-note step sb-made${expands && open ? " sb-made-open" : ""}`} role="note" data-made={others.map((run) => run.taskId).join(" ")}>
+      {expands ? (
+        <button
+          type="button"
+          className={`lh-chev sb-made-chev${open ? " open" : ""}`}
+          aria-expanded={open}
+          aria-label={open ? `fold ${others[0]!.title}` : `unfold ${others[0]!.title}`}
+          title={open ? "fold what this task did before it was adopted" : "show what this task did before it was adopted"}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((v) => !v);
+          }}
+        >
+          <Icon name="chevron" />
+        </button>
+      ) : (
+        <Icon name="choice" className="sb-note-icon" />
+      )}
       <span className="sb-note-verb">{MADE_VERB[made.kind]}</span>
       <span className="sb-made-runs">
         {others.map((run, i) => (
@@ -1043,6 +1075,28 @@ function MadeRow({
           {where}
         </span>
       )}
+      {expands && open ? <div className="sb-made-nest">{adopted!(others[0]!.taskId)}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * A move's INPUT QUESTION, where the move asked it (decision 0005, the rulings of 2026-09-22): a row
+ * that says what the move is, and under it the question itself — the gate, live while it is open and
+ * as it was answered once it is not. The body is the host's (`body`): only it holds the pending gate
+ * and the channel that answers it.
+ */
+function MoveQuestionRow({ asked, body }: { asked: MoveQuestionView; body?: ((asked: MoveQuestionView) => ReactNode) | undefined }): JSX.Element {
+  const target = asked.targetLabel ?? asked.target;
+  const verb = asked.outcome === undefined ? "asked" : asked.outcome === "moved" ? "answered" : asked.outcome === "refused" ? "answered" : "withdrawn";
+  return (
+    <div className="sb-note step sb-asked" role="note" data-asked={asked.requestId}>
+      <Icon name="choice" className="sb-note-icon" />
+      <span className="sb-note-verb">{verb}</span>
+      <span className="sb-note-text">
+        for the move to <b>{target}</b> · {asked.missing.map((m) => m.name).join(", ")}
+      </span>
+      {body !== undefined ? <div className="sb-move-question">{body(asked)}</div> : null}
     </div>
   );
 }
@@ -1077,6 +1131,7 @@ const VERB: Record<BandNote["kind"], string> = {
   made: "made",
   skipped: "skipped",
   moved: "",
+  asked: "asked",
 };
 
 /**
@@ -1130,11 +1185,17 @@ export function SessionBandsView({
   armed,
   origin,
   onSelectTask,
+  adopted,
+  moveQuestion,
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
   /** Where a made task's title goes when clicked — see {@link MadeRow}. */
   onSelectTask?: ((taskId: string) => void) | undefined;
+  /** An adopted task's history, expanded under its line — see {@link MadeRow}. */
+  adopted?: ((taskId: string) => ReactNode) | undefined;
+  /** A move's input question, where the move asked it — see {@link MoveQuestionRow}. */
+  moveQuestion?: ((asked: MoveQuestionView) => ReactNode) | undefined;
   /** The two verbs of a cut, offered on every entered row and knot — see {@link CutOffer}. */
   onCut?: CutOffer | undefined;
   /**
@@ -1304,6 +1365,8 @@ export function SessionBandsView({
           root={root}
           {...(onCut !== undefined ? { onCut } : {})}
           {...(onSelectTask !== undefined ? { onSelectTask } : {})}
+          {...(adopted !== undefined ? { adopted } : {})}
+          {...(moveQuestion !== undefined ? { moveQuestion } : {})}
         />,
         note.at,
       );

@@ -724,7 +724,8 @@ export default function App(): JSX.Element {
    */
   const inlineGate =
     view === "tasks" && detail !== null
-      ? (pending.find((p) => p.about === detail.taskId || p.taskId === detail.taskId) ?? null)
+      ? // A move's question is not a state asking: it is drawn where the move asked it (`moveQuestions`).
+        (pending.find((p) => (p.about === detail.taskId || p.taskId === detail.taskId) && p.moves !== true) ?? null)
       : null;
   /**
    * The agent question this conversation is holding, hosted the same way. An agent addressing you
@@ -1407,6 +1408,10 @@ export default function App(): JSX.Element {
     onRunFocus: setRunFocus,
     ...(runHere !== undefined ? { runHere } : {}),
     onRunHere: setRunHere,
+    // The questions MOVES parked in task conversations (decision 0005, the rulings of 2026-09-22):
+    // each is drawn where its move asked it, and answering it takes the move.
+    moveQuestions: pending.filter((p) => p.moves === true),
+    onMoveQuestion: (requestId: string, value: unknown) => actions.answer(requestId, value),
     // The same gate, channel and services the task panel hosts — see `FileSurfaceContext.runGate`.
     ...(inlineGate !== null
       ? {
@@ -2132,7 +2137,10 @@ export default function App(): JSX.Element {
                           // step after it; Undo is on the card it made or moved.
                           connect={{
                             ask: (card, column) => actions.connectPreview(p.project, card.taskId, column.stateId),
-                            onDrop: (card, column) => void actions.connectTask(p.project, card.taskId, column.stateId),
+                            onDrop: (card, column, confirmed) => void actions.connectTask(p.project, card.taskId, column.stateId, confirmed ? { confirmed: true } : {}),
+                            // A NEXT-TRANSITION chip: the same move, at the exact mount it names.
+                            onMove: (card, move, confirmed) =>
+                              void actions.connectTask(p.project, card.taskId, move.target, { path: move.path, ...(confirmed ? { confirmed: true } : {}) }),
                             // Where the board says so: the task keeps the token, and main judges it.
                             undoable: undoableOn(state.boards[p.project]!),
                             onUndo: (taskId) => void actions.undoConnect(taskId, p.project),

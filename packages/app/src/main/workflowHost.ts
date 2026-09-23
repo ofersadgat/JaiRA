@@ -340,10 +340,17 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
           by: "control",
           ...(input.workflow !== undefined ? { workflow: input.workflow } : {}),
           ...(input.skip === true ? { skip: true } : {}),
+          ...(input.confirm === true ? { confirmed: true } : {}),
           ...(supplied !== undefined ? { supplied } : {}),
         });
       } catch (e) {
         return { ok: false, code: "move", reason: (e as Error).message };
+      }
+      // What is still required is asked of the PERSON, in the moved task's own conversation — not by
+      // this conversation in words (decision 0005, the rulings of 2026-09-22). The move waits on it.
+      if (result.ok && result.asked !== undefined) {
+        deps.invalidate();
+        return { ok: true, task: result.asked.taskId, asked: { request: result.asked.requestId, inputs: result.asked.missing } };
       }
       if (!result.ok) {
         const { refusal } = result;

@@ -10,6 +10,8 @@ import type { InputProvenance } from "./adopt";
 import type { FastForwardView, SettledByView } from "./fastForward";
 import type { WorkflowOutcome } from "./workflowTools";
 import type { ModuleApproval } from "./refusal";
+import type { NextMove } from "./move";
+import type { ConnectMissingInput } from "./connect";
 
 /**
  * Per-instance status, derived from the event journal (SPEC §10.1). `blocked` is
@@ -278,6 +280,13 @@ export interface BoardCard {
    * from the journal on every read: absent once the task has done anything past where the drop landed.
    */
   undoable?: true;
+  /**
+   * The task's NEXT TRANSITIONS, as chips (decision 0005, the rulings of 2026-09-22): computed in the
+   * main process from the transitions its pinned workflow defines out of the state it stands in, and
+   * from the rules waiting on a user event — each one legal by the move table. Absent for a finished
+   * task, a task that has never run, and one that stands where nothing further is defined.
+   */
+  next?: NextMove[];
   updatedAt: number;
   /**
    * When the run ENDED, from the journal — the last instance of it to terminate.
@@ -933,7 +942,13 @@ export type TurnKind =
    * A conversation's `start_task` / `move_task` took effect (decision 0005 §3) — the host's
    * `jaira.moved` row. At the conversation's root; `moved` is what the note says.
    */
-  | "moved";
+  | "moved"
+  /**
+   * A move asked, in this task's conversation, for inputs it lacked (decision 0005, the rulings of
+   * 2026-09-22) — the host's `jaira.moveAsked` row, with how it ended folded in. At the root; `asked`
+   * is the question, drawn where it was asked.
+   */
+  | "asked";
 
 export interface ConversationTurn {
   seq: number;
@@ -980,6 +995,26 @@ export interface ConversationTurn {
   moved?: WorkflowOutcome;
   /** For a `moved` turn: the tool call that did it, when the row names it — see `MovedEvent.toolCallId`. */
   toolCallId?: string;
+  /** For an `asked` turn: the move's input question, and how it ended. */
+  asked?: MoveQuestionView;
+}
+
+/**
+ * A move's input question as the conversation draws it (decision 0005, the rulings of 2026-09-22):
+ * what it asks for, where the move goes, and — once it has ended — what was answered and what became
+ * of the move. While it is open the gate itself (`PendingInteraction.moves`) is drawn here, live.
+ */
+export interface MoveQuestionView {
+  requestId: string;
+  /** The move's target state id. */
+  target: string;
+  targetLabel?: string;
+  missing: ConnectMissingInput[];
+  optional?: ConnectMissingInput[];
+  /** How it ended, when it has: the move taken, the move refused when it came to be taken, or withdrawn. */
+  outcome?: "moved" | "refused" | "dismissed";
+  answered?: Record<string, JsonValue>;
+  message?: string;
 }
 
 /**

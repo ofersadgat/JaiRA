@@ -50,3 +50,6 @@ export * from "./connect";
 export * from "./hostRows";
 // A connect's Undo: kept on the task file, dropped by the next decision, judged against the journal.
 export * from "./connectUndo";
+export * from "./moveLegality";
+export * from "./moveQuestion";
+export * from "./nextMoves";

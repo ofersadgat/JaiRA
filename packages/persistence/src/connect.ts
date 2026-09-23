@@ -10,13 +10,14 @@
  * ## Three resolutions, in order
  *
  *  1. **The target is in the task's workflow** (`resolveWithin`). The pinned definition is searched
- *     for a mount of the target; the shared ancestor is the deepest instance the task stands in that
- *     the path to the target passes through. Behind where it stands is a backward move. Ahead of it
- *     is a forward one, which is a FAST-FORWARD by default (step 7): no transition at all — the host
- *     is asked for the mode (`ConnectHost.fastForward`) and the machine runs the states between, its
- *     conversation answering on the way. A host that drives no run has no such operation, and there a
- *     forward move is refused unless it says `skip`. A rule of the workflow already waiting on
- *     exactly this move is answered instead, and steps over nothing.
+ *     for a mount of the target, and the MOVE TABLE judges it (`@jaira/shared` `move.ts`, the rulings
+ *     of 2026-09-22; `moveLegality.ts` reads where it is): entered already is BEHIND — a backward move,
+ *     taken now if an engine holds the task, which a working task asks first; reachable through the
+ *     transitions the workflow defines is AHEAD — a FAST-FORWARD (step 7): no transition at all, the
+ *     host is asked for the mode (`ConnectHost.fastForward`) and the machine runs the states between,
+ *     its conversation answering on the way; a rule already waiting on exactly this move is answered
+ *     instead. Neither is ILLEGAL and refused with why — unless nothing at all is defined ahead of
+ *     where the task stands (a finished task), which makes the move a new transition: rule 3.
  *  2. **A real workflow holds both** (`candidatesFor`): a composite that mounts the task's root state
  *     and the target as children — or IS the target, and mounts the task's state. One such workflow
  *     adopts the task into a new task of it, and rule 1 takes that task to the target. More than one
@@ -31,13 +32,18 @@
  * Every resolution ends by settling the target's inputs. The workflow's own bindings come first: a
  * wire whose producers have run, a literal, a slot's own default. `unboundInputs` decides that
  * statically from the lowered definition and the loaded machine, for the target and for every
- * ancestor entered on the way down to it. What they leave open a CONVERSATION may supply
- * (`request.supplied`, step 6) — inferred from what was said, or asked of the person in words — and
- * each supplied value is journaled with which of the two it was (`jaira.supplied`). A required input
- * still open refuses the connect with the input, its declared schema and description, and why: that
- * refusal is what the conversation's `move` and `start` tools hand the model, which supplies the
- * value and calls again. A DROP has nobody to hand it to, so it says `askAfter`: where the workflow
- * is being modified anyway, the conversation is made without the target and asks.
+ * ancestor entered on the way down to it. What they leave open a conversation may supply
+ * (`request.supplied`, step 6), and each supplied value is journaled with how it was settled
+ * (`jaira.supplied`). A required input still open is ASKED in the task's own conversation: the host
+ * parks a question there (`ConnectHost.ask`) and the move is taken when it is answered, the values
+ * recorded `asked` (the rulings of 2026-09-22, 2). A host that cannot ask (the CLI) refuses with the
+ * input, its declared schema and description, and why.
+ *
+ * ## Another workflow, or a new transition
+ *
+ * Rules 2 and 3 are the table's last row: a working task is asked first ("pause and move?"), and a
+ * task an engine holds is paused before anything is written (`ConnectHost.pause`) — an adopted one
+ * resumed again as the child it now is.
  *
  * ## Written down before it is done, and finished as it was meant
  *
@@ -93,6 +99,12 @@ import {
   type ConnectSupplied,
   type FastForwardEvent,
   type SuppliedEvent,
+  isLive,
+  judgeMove,
+  type HeldMoveRequest,
+  type MoveJudgement,
+  type MoveWhere,
+  type TaskActivity,
 } from "@jaira/shared";
 import { randomUUID } from "node:crypto";
 import { childrenReadBy, missingInputs, plainInputOf, planAdoption, writeAdoption, type ValueCheck } from "./adopt";
@@ -102,6 +114,7 @@ import { createTask, pinWorkflow } from "./lifecycle";
 import { buildTaskLoad } from "./load";
 import { dropConnectUndo } from "./connectUndo";
 import { openConnectIntent, recordConnectRow, type OpenConnectIntent } from "./hostRows";
+import { activityFromRow, enteredPaths, reachAhead, unreachableSentence, whereIs } from "./moveLegality";
 import type { Project } from "./project";
 import { bundleFor } from "./views";
 import { browseWorkflows } from "./workflows";
@@ -129,6 +142,24 @@ export interface ConnectHost {
   offered?: (taskId: string) => readonly string[];
   /** Whether an engine is running this task — here, or in another process. */
   running?: (taskId: string) => boolean;
+  /**
+   * What the task is DOING — the move table's columns. Only a host with the hubs can tell waiting for
+   * the person from working; absent ⇒ what the row and the parked gates say (`activityFromRow`).
+   */
+  activity?: (taskId: string) => TaskActivity;
+  /**
+   * PAUSE the task and wait its run out — what a move into another workflow, or along a new
+   * transition, does first to a task an engine holds. Absent ⇒ such a task is refused, saying to pause it.
+   */
+  pause?(taskId: string): Promise<void>;
+  /** Resume a task a move paused and adopted, so it goes on as the child it now is. */
+  resume?(taskId: string): Promise<void>;
+  /**
+   * ASK for the inputs a legal move still lacks, in the task's own conversation: park the question
+   * and answer its request id. The move is taken when it is answered. Absent ⇒ such a move is refused
+   * with what is missing.
+   */
+  ask?(question: MoveQuestion): Promise<{ requestId: string }>;
   /** The workflow roots and their closures — `browseWorkflows`, which a host may have cached. */
   browser?: () => WorkflowBrowser;
   /** ADOPT — the host's `task:adopt`. */
@@ -157,7 +188,71 @@ export interface ConnectHost {
   onStep?(step: ConnectStep, index: number): void | Promise<void>;
 }
 
+/** The input question a move parks in the task's conversation — see {@link ConnectHost.ask}. */
+export interface MoveQuestion {
+  taskId: string;
+  /** The moved task's title, for the question's heading. */
+  title: string;
+  /** The move, as it is asked again once answered. */
+  move: HeldMoveRequest;
+  /** The required inputs nothing binds. */
+  missing: ConnectMissingInput[];
+  /** Inputs of the target nothing binds that may be left out — asked in the same form, not required. */
+  optional: ConnectMissingInput[];
+  /** Where the task will stand, in words. */
+  targetLabel: string;
+}
+
 const refused = (dryRun: boolean, refusal: ConnectRefusal, plan?: ConnectPlan): TaskConnectResult => ({ ok: false, dryRun, refusal, ...(plan !== undefined ? { plan } : {}) });
+
+/** The table's cell for a move, with its sentence where it has one — see `@jaira/shared` `move.ts`. */
+function judged(where: MoveWhere, activity: TaskActivity, title: string, target: string, at: { eventLeadsThere?: boolean; next?: boolean; illegal?: string } = {}): MoveJudgement {
+  const cell = judgeMove(where, activity, at);
+  const sentence =
+    cell.way === "illegal"
+      ? at.illegal
+      : cell.confirm === "stop-and-rewind"
+        ? `'${title}' is working. Stop it and go back to '${target}'? It is entered again as its next pass; what the task did since stays in its history.`
+        : cell.confirm === "pause-and-move"
+          ? `'${title}' is working. Pause it and move it to '${target}'?`
+          : undefined;
+  return { where, activity, ...cell, ...(sentence !== undefined ? { sentence } : {}) };
+}
+
+/**
+ * An ASK cell the caller has not confirmed. A dry run carries the question on its plan — which is what
+ * the board puts in front of the drop — and the real thing refuses with it, having done nothing.
+ */
+function unconfirmed(request: TaskConnectRequest, judgement: MoveJudgement, plan: ConnectPlan): TaskConnectResult | undefined {
+  if (judgement.confirm === undefined || request.confirmed === true || request.dryRun === true) return undefined;
+  return refused(false, { code: "confirm", message: judgement.sentence ?? "confirm the move first" }, plan);
+}
+
+/**
+ * Park the question a legal move needs answered (the rulings of 2026-09-22, 2), and answer that the
+ * move is waiting on it. Nothing else is written: the move is taken when it is answered.
+ */
+async function askFor(
+  request: TaskConnectRequest,
+  host: ConnectHost,
+  at: { title: string; plan: ConnectPlan; missing: ConnectMissingInput[]; optional: ConnectMissingInput[]; path?: readonly string[] },
+): Promise<TaskConnectResult> {
+  const move: HeldMoveRequest = {
+    target: request.target,
+    by: request.by ?? "person",
+    ...(request.workflow !== undefined ? { workflow: request.workflow } : {}),
+    ...(at.path !== undefined ? { path: [...at.path] } : request.path !== undefined ? { path: [...request.path] } : {}),
+    ...(skipOf(request) ? { skip: true } : {}),
+    ...(request.confirmed === true ? { confirmed: true as const } : {}),
+  };
+  const targetLabel = at.plan.standsAt.label ?? (at.plan.standsAt.path.join("/") || sourceStateId(request.target));
+  const { requestId } = await host.ask!({ taskId: request.taskId, title: at.title, move, missing: at.missing, optional: at.optional, targetLabel });
+  log.info(`${request.taskId}: the move to '${request.target}' asks for ${at.missing.map((m) => `'${m.name}'`).join(", ")} in the task's conversation (${requestId})`);
+  return { ok: true, dryRun: false, plan: at.plan, taskId: request.taskId, asked: { requestId, taskId: request.taskId, missing: at.missing } };
+}
+
+/** Of what is open, what the question can answer: the target's own inputs (an ancestor's are not handed over). */
+const answerable = (open: readonly ConnectMissingInput[], target: string): boolean => open.every((m) => sourceStateId(m.state) === sourceStateId(target));
 
 // ---------------------------------------------------------------------------------------------------
 // the definition, searched
@@ -497,37 +592,6 @@ function moveSentence(title: string, target: string): string {
   return `"${title}" was moved to ${target}.`;
 }
 
-/** A declared schema in a few words, for a model reading what it is about to ask for. */
-function schemaWords(schema: JsonValue | undefined): string | undefined {
-  if (schema === undefined || (typeof schema === "object" && schema !== null && !Array.isArray(schema) && Object.keys(schema).length === 0)) return undefined;
-  return JSON.stringify(schema);
-}
-
-/**
- * The OPENING TURN of a conversation an `askAfter` drop made (decision 0005 §4 "Inputs", 3: asked) —
- * what the host hands that conversation, which the model answers with the question itself.
- *
- * It says what the person did (the same sentence the conversation is opened with), then each input
- * the target still needs by its declared description and schema, and what to do with the answer.
- * The names are the target's OWN declared names, passed through as `start_task` needs them: nothing
- * here knows what any of them means (§0), which is why the model is told to ask in plain words from
- * the descriptions rather than to read the names back to the person.
- */
-export function askingMessage(title: string, target: string, asking: readonly ConnectMissingInput[]): string {
-  const one = asking.length === 1;
-  const lines = asking.map((m) => {
-    const what = [m.description, schemaWords(m.schema) !== undefined ? `schema ${schemaWords(m.schema)}` : undefined].filter((part) => part !== undefined).join(" — ");
-    return `- \`${m.name}\`${sourceStateId(m.state) !== sourceStateId(target) ? ` (of \`${m.state}\`)` : ""}${what !== "" ? `: ${what}` : ""}`;
-  });
-  return [
-    `${moveSentence(title, target)} ${target} needs ${one ? "an input" : `${asking.length} inputs`} that nothing the task produced gives, so the move has not been taken yet:`,
-    ...lines,
-    "",
-    `Ask the person for ${one ? "it" : "them"} now, in words: one short message, in plain language drawn from ${one ? "the description" : "the descriptions"}, and nothing else yet. ` +
-      `When they answer, call \`start_task\` with state \`${target}\` and ${one ? "the value" : "the values"}, naming ${one ? "it" : "each"} in \`asked\`.`,
-  ].join("\n");
-}
-
 /**
  * The inputs of a new document's ROOT — the conversation state's own.
  *
@@ -575,9 +639,12 @@ function fastForwardRefusal(move: ConnectMove): ConnectRefusal {
   return {
     code: "fast-forward",
     message:
-      `'${[move.to, ...move.path].join("/")}' is ahead of where the task stands, past ${move.passes.map((p) => `'${p}'`).join(", ")}. ` +
-      `Running the states between (fast-forward) needs a conversation to answer what comes up on the way, and there is none here — ` +
-      `say skip to go there directly, which records ${move.passes.length === 1 ? "it" : "them"} as skipped`,
+      move.passes.length > 0
+        ? `'${[move.to, ...move.path].join("/")}' is ahead of where the task stands, past ${move.passes.map((p) => `'${p}'`).join(", ")}. ` +
+          `Running the states between (fast-forward) needs a conversation to answer what comes up on the way, and there is none here — ` +
+          `say skip to go there directly, which records ${move.passes.length === 1 ? "it" : "them"} as skipped`
+        : `'${[move.to, ...move.path].join("/")}' is ahead of where the task stands, through what the workflow decides on the way. ` +
+          `Running there (fast-forward) needs a conversation to answer what comes up, and there is none here — say skip to go there directly`,
   };
 }
 
@@ -626,10 +693,97 @@ export async function connectTask(project: Project, request: TaskConnectRequest,
   const open = project.runtime.get(request.taskId) !== undefined ? openConnectIntent(project, request.taskId) : undefined;
   if (open !== undefined) {
     if (!sameDrop(open.intent.request, request)) return refused(dryRun, connectingRefusal(project, request.taskId, open), open.intent.plan);
-    if (dryRun) return { ok: true, dryRun, plan: open.intent.plan, ...(open.intent.asking !== undefined ? { asking: open.intent.asking } : {}) };
+    if (dryRun) return { ok: true, dryRun, plan: open.intent.plan };
     return finishConnect(project, request.taskId, open, host, request.project);
   }
   return connectOnce(project, request, host);
+}
+
+/**
+ * Rule 1, judged: the target is in the task's workflow and the table has said where (`where` is never
+ * `elsewhere` here — that one is rule 3's). See the module header for what each row does.
+ */
+async function moveWithin(
+  project: Project,
+  request: TaskConnectRequest,
+  host: ConnectHost,
+  at: {
+    title: string;
+    own: string;
+    target: string;
+    bundle: WorkflowBundle;
+    loaded: LoadedInstance;
+    keys: string[];
+    where: Exclude<MoveWhere, "elsewhere">;
+    activity: TaskActivity;
+    running: boolean;
+    reach: ReturnType<typeof reachAhead>;
+    entered: ReadonlySet<string>;
+    /** How the task stood before the move — what a move's Undo puts back, written into the intent. */
+    before: ConnectIntent["before"];
+  },
+): Promise<TaskConnectResult> {
+  const dryRun = request.dryRun === true;
+  const { taskId } = request;
+  const { bundle, keys, where, activity, target } = at;
+  const states = statesAlong(bundle, keys);
+  // BEHIND, with an engine holding the task: taken NOW — the state it stands in is stopped (a
+  // working task asks first) — rather than held until that state ends, which a waiting one never would.
+  const backNow = where === "behind" && isLive(activity);
+  const within = resolveWithin({ bundle, loaded: at.loaded, keys, skip: skipOf(request) || backNow, running: at.running, offered: host.offered?.(taskId) ?? [] });
+  const event = within.move.answersRule === true;
+  const judgement = judged(where, activity, at.title, keys.join("/"), {
+    eventLeadsThere: event,
+    next: within.move.direction === "next",
+    ...(where === "unreachable" ? { illegal: unreachableSentence(bundle, at.reach, at.entered, keys, at.title) } : {}),
+  });
+  // AHEAD and not simply next: the machine RUNS there (§4) — through the states between, and through
+  // the decisions on the way, which a directed jump would take out of the workflow's hands. That is a
+  // target past states nobody has run, and one off the spine that only a rule of the workflow enters.
+  const runs = judgement.way === "fast-forward" && (within.move.direction === "forward" || within.move.direction === "aside");
+  const plan: ConnectPlan = {
+    resolution: "move",
+    workflow: at.own,
+    ...(states[0]?.label !== undefined ? { workflowLabel: states[0].label } : {}),
+    standsAt: { path: [...keys], stateId: target, ...(states.at(-1)?.label !== undefined ? { label: states.at(-1)!.label! } : {}) },
+    move: within.move,
+    ...(runs ? { forward: skipOf(request) ? ("skip" as const) : ("fast-forward" as const) } : {}),
+    inputs: within.inputs,
+    asks: within.asks,
+    judgement,
+  };
+  if (judgement.way === "illegal") return refused(dryRun, { code: "illegal", message: judgement.sentence! }, plan);
+  const confirm = unconfirmed(request, judgement, plan);
+  if (confirm !== undefined) return confirm;
+  // FORWARD: the machine runs there (§4). Not a transition at all — the host is asked for the MODE,
+  // and the workflow walks itself into the target.
+  const forward = runs && !skipOf(request);
+  if (forward && host.fastForward === undefined) return refused(dryRun, fastForwardRefusal(within.move), plan);
+  const blocked = forward ? host.fastForwardBlocked?.(taskId) : undefined;
+  if (blocked !== undefined) return refused(dryRun, { code: "fast-forward", message: blocked }, plan);
+  const open = stillMissing(within.missing, request.supplied, target);
+  if (open.length > 0 && within.move.answersRule !== true) {
+    // Asked in the task's own conversation, where the host can ask and what is open is the target's.
+    if (host.ask !== undefined && answerable(open, target)) {
+      const asking: ConnectPlan = { ...plan, question: open };
+      if (dryRun) return { ok: true, dryRun, plan: asking, taskId };
+      return askFor(request, host, { title: at.title, plan: asking, missing: open, optional: within.asks.filter((m) => sourceStateId(m.state) === target), path: keys });
+    }
+    return refused(dryRun, { code: "inputs-missing", message: `moving '${at.title}' to '${keys.join("/")}' leaves required inputs unbound: ${missingSentence(open)}`, missing: open }, plan);
+  }
+  if (dryRun) return { ok: true, dryRun, plan, taskId };
+  const handed = suppliedFor(request.supplied, states.at(-1));
+  const inputs = Object.keys(handed).length > 0 ? { inputs: handed } : {};
+  // Written down first (`begin`), with the exact mount, and — for a move back taken now — `skip`, so a
+  // retry takes the same move the same way.
+  return begin(project, { ...request, path: keys, ...(backNow ? { skip: true } : {}) }, host, {
+    plan,
+    before: at.before,
+    steps: [
+      ...suppliedStep("task", { ...(within.move.instanceId !== undefined ? { instanceId: within.move.instanceId } : {}), to: keys.at(-1)!, nested: within.move.path.length > 0 }, Object.keys(handed)),
+      forward ? { kind: "fastForward", on: "task", move: within.move, ...inputs } : { kind: "move", on: "task", move: within.move, ...inputs },
+    ],
+  });
 }
 
 async function connectOnce(project: Project, request: TaskConnectRequest, host: ConnectHost): Promise<TaskConnectResult> {
@@ -639,7 +793,8 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   const row = project.runtime.get(taskId);
   if (meta === undefined || row === undefined) return refused(dryRun, { code: "unknown-task", message: `unknown task '${taskId}'` });
   const target = sourceStateId(request.target);
-  const running = host.running?.(taskId) ?? (row.status === "running" || row.status === "stopping");
+  let running = host.running?.(taskId) ?? (row.status === "running" || row.status === "stopping");
+  const activity: TaskActivity = host.activity?.(taskId) ?? activityFromRow(project, taskId, running);
   // How the task stood before the drop — what a move's Undo puts back, written into the intent.
   const pinNow = row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash, ...(row.documentId !== undefined ? { documentId: row.documentId } : {}) } : undefined;
   const before: ConnectIntent["before"] = { ...(pinNow !== undefined ? { pin: pinNow } : {}), ...(row.status === "completed" ? { wasCompleted: true as const } : {}) };
@@ -664,7 +819,9 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
       if (load.loaded === undefined) {
         return refused(dryRun, { code: load.blocked !== undefined ? "unloadable" : "never-run", message: load.blocked !== undefined ? `'${meta.title}' cannot be moved: ${load.blocked}` : `'${meta.title}' has never run, so it stands nowhere to be moved from — start it instead` });
       }
-      // The path that shares most with where the task stands; then the shortest.
+      // WHERE the target is, from where the task stands (the move table's rows, `moveLegality.ts`).
+      const entered = enteredPaths(load.loaded);
+      const reach = reachAhead(bundle, load.loaded);
       const standing: string[] = [];
       for (let node: LoadedInstance | undefined = lastChildOf(load.loaded); node?.childKey !== undefined; node = lastChildOf(node)) standing.push(node.childKey);
       const shared = (keys: readonly string[]): number => {
@@ -672,42 +829,39 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
         while (n < keys.length && n < standing.length && keys[n] === standing[n]) n += 1;
         return n;
       };
-      const keys = [...paths].sort((a, b) => shared(b) - shared(a) || a.length - b.length)[0]!;
-      const within = resolveWithin({ bundle, loaded: load.loaded, keys, skip: skipOf(request), running, offered: host.offered?.(taskId) ?? [] });
-      const states = statesAlong(bundle, keys);
-      const plan: ConnectPlan = {
-        resolution: "move",
-        workflow: own,
-        ...(states[0]?.label !== undefined ? { workflowLabel: states[0].label } : {}),
-        standsAt: { path: [...keys], stateId: target, ...(states.at(-1)?.label !== undefined ? { label: states.at(-1)!.label! } : {}) },
-        move: within.move,
-        ...(within.move.direction === "forward" ? { forward: skipOf(request) ? ("skip" as const) : ("fast-forward" as const) } : {}),
-        inputs: within.inputs,
-        asks: within.asks,
-      };
-      // FORWARD, past states nobody has run: the machine runs them (§4). Not a transition at all —
-      // the host is asked for the MODE, and the spine walks itself into the target.
-      const forward = within.move.direction === "forward" && !skipOf(request);
-      if (forward && host.fastForward === undefined) return refused(dryRun, fastForwardRefusal(within.move), plan);
-      const blocked = forward ? host.fastForwardBlocked?.(taskId) : undefined;
-      if (blocked !== undefined) return refused(dryRun, { code: "fast-forward", message: blocked }, plan);
-      const open = stillMissing(within.missing, request.supplied, target);
-      if (open.length > 0 && within.move.answersRule !== true) {
-        return refused(dryRun, { code: "inputs-missing", message: `moving '${meta.title}' to '${keys.join("/")}' leaves required inputs unbound: ${missingSentence(open)}`, missing: open }, plan);
+      const RANK: Record<MoveWhere, number> = { ahead: 0, behind: 1, elsewhere: 2, unreachable: 3 };
+      let keys: string[];
+      if (request.path !== undefined) {
+        const named = paths.find((p) => p.join("/") === request.path!.join("/"));
+        if (named === undefined) return refused(dryRun, { code: "unknown-target", message: `'${request.path.join("/")}' is not where '${target}' is mounted in the workflow '${meta.title}' runs` });
+        keys = named;
+      } else {
+        // A state mounted twice: the mount the table can take — ahead, then behind — then the one that
+        // shares most with where the task stands, then the shortest.
+        keys = [...paths].sort((a, b) => RANK[whereIs(reach, entered, a)] - RANK[whereIs(reach, entered, b)] || shared(b) - shared(a) || a.length - b.length)[0]!;
       }
-      if (dryRun) return { ok: true, dryRun, plan, taskId };
-      const handed = suppliedFor(request.supplied, states.at(-1));
-      const inputs = Object.keys(handed).length > 0 ? { inputs: handed } : {};
-      return begin(project, request, host, {
-        plan,
-        before,
-        steps: [
-          ...suppliedStep("task", { ...(within.move.instanceId !== undefined ? { instanceId: within.move.instanceId } : {}), to: keys.at(-1)!, nested: within.move.path.length > 0 }, Object.keys(handed)),
-          forward ? { kind: "fastForward", on: "task", move: within.move, ...inputs } : { kind: "move", on: "task", move: within.move, ...inputs },
-        ],
-      });
+      const where = whereIs(reach, entered, keys);
+      // Nothing is defined ahead of where the task stands (it finished): a move anywhere it has not
+      // been is a NEW transition — rule 3, below.
+      if (where !== "elsewhere") return moveWithin(project, request, host, { title: meta.title, own, target, bundle, loaded: load.loaded, keys, where, activity, running, reach, entered, before });
     }
   }
+
+  // ---- rules 2–3: the table's last row ------------------------------------------------------------
+  const elsewhere = judged("elsewhere", activity, meta.title, target);
+  /**
+   * What a move into another workflow does first to a task an engine holds: PAUSE it and wait the run
+   * out (the person confirmed it, or it was only waiting). Asked only once everything has been checked.
+   */
+  const pauseFirst = async (): Promise<ConnectRefusal | undefined> => {
+    if (!running) return undefined;
+    if (host.pause === undefined) {
+      return { code: "running", message: `'${meta.title}' is running, and no workflow relates '${own}' to '${target}': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it` };
+    }
+    await host.pause(taskId);
+    running = false;
+    return undefined;
+  };
 
   // ---- rule 2: a real workflow holds both ---------------------------------------------------------
   const inDocument = row.documentId !== undefined;
@@ -722,7 +876,7 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
       });
     }
     const candidate = candidates[0];
-    if (candidate !== undefined) return adoptInto(project, request, host, { title: meta.title, own, target, candidate });
+    if (candidate !== undefined) return adoptInto(project, request, host, { title: meta.title, own, target, candidate, judgement: elsewhere, paused: running, pauseFirst });
   }
 
   // ---- rule 3: the workflow is modified -----------------------------------------------------------
@@ -732,7 +886,7 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   if (loadsNothing(project, target)) return refused(dryRun, { code: "unknown-target", message: `no state '${target}' was found on the workflow path` });
   const finishedWell = row.status === "completed" && (row.outcome === undefined || row.outcome === "success");
   const modification: NonNullable<ConnectPlan["modification"]> = inDocument ? "augmented" : finishedWell ? "new" : "cloned";
-  if (running) {
+  if (running && host.pause === undefined) {
     return refused(dryRun, {
       code: "running",
       message: `'${meta.title}' is running, and no workflow relates '${own}' to '${target}': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it`,
@@ -740,7 +894,7 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   }
   const conversation = host.conversation ?? CONNECT_CONVERSATION;
   const suppliedLiterals = generatorSupplied(request.supplied);
-  const generate = (dry: boolean, withoutTarget = false): Promise<GenerateVersionResult> =>
+  const generate = (dry: boolean): Promise<GenerateVersionResult> =>
     generateDocumentVersion(project, {
       taskId,
       target,
@@ -748,7 +902,6 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
       ...(suppliedLiterals !== undefined ? { supplied: suppliedLiterals } : {}),
       ...(host.functions !== undefined ? { functions: host.functions } : {}),
       ...(dry ? { dryRun: true } : {}),
-      ...(withoutTarget ? { withoutTarget: true } : {}),
     });
   let preview: GenerateVersionResult;
   try {
@@ -769,11 +922,20 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
       ...generated.literals.map((literal): ConnectInput => ({ name: literal.input, via: "literal" })),
     ],
     asks: generated.unsettled.filter((u) => !u.required).map((u): ConnectMissingInput => unsettledAsMissing(target, u)),
+    judgement: elsewhere,
   });
   const wouldStandIn = modification === "new" ? `${DYNAMIC_ROOT_PREFIX}…` : meta.workflow;
+  const confirm = unconfirmed(request, elsewhere, planOf(wouldStandIn));
+  if (confirm !== undefined) return confirm;
   if (!generated.ok) {
     const missing = generated.unsettled.filter((u) => u.required).map((u) => unsettledAsMissing(target, u));
-    if (request.askAfter === true) return askAfter(project, request, host, { title: meta.title, target, conversation, modification, missing, plan: planOf(wouldStandIn), before });
+    // Asked in the task's own conversation, where the host can ask; the move is taken when answered.
+    if (host.ask !== undefined) {
+      const plan: ConnectPlan = { ...planOf(wouldStandIn), question: missing };
+      if (dryRun) return { ok: true, dryRun, plan, ...(modification !== "new" ? { taskId } : {}) };
+      const optional = generated.unsettled.filter((u) => !u.required).map((u) => unsettledAsMissing(target, u));
+      return askFor(request, host, { title: meta.title, plan, missing, optional });
+    }
     return refused(dryRun, { code: "inputs-missing", message: `a move of '${meta.title}' to '${target}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, planOf(wouldStandIn));
   }
   const opening = modification === "new" ? conversationInputs(project, conversation, moveSentence(meta.title, target), host.check) : undefined;
@@ -782,6 +944,11 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   }
   const sourceKey = Object.entries(generated.additions.children).find(([, mount]) => sourceStateId(String(mount["state"])) === own)?.[0];
   if (dryRun) return { ok: true, dryRun, plan: { ...planOf(wouldStandIn), ...(modification === "new" ? { adoptedAs: sourceKey ?? Object.keys(generated.additions.children)[0] ?? generated.targetKey } : {}) }, ...(modification !== "new" ? { taskId } : {}) };
+
+  // A task an engine holds is paused first: its engine runs the version it loaded, and the new
+  // transition is one it could not see.
+  const paused = await pauseFirst();
+  if (paused !== undefined) return refused(dryRun, paused, planOf(wouldStandIn));
 
   // The real thing, written down first (`begin`): the document, then — for a NEW one — its task and
   // the adoption into it, then what the conversation supplied, then the move. The target's key is the
@@ -808,64 +975,6 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   });
 }
 
-/**
- * A drop that has to ASK (step 6): the workflow is being modified anyway, its target's required
- * inputs are open, and the person is not in a conversation that could be handed the refusal. So the
- * conversation is made — without the target — and the answer says what it is about to ask for. The
- * task does not move; the conversation's own `start_task` mounts the target with what it is told.
- * The host then gives that conversation its opening turn ({@link askingMessage}).
- *
- *  - `new`       — the document holds the conversation and what already ran; its task is made and
- *                  the source adopted into it, idle (`load.ts`, "A conversation starts idle").
- *  - `cloned`    — the task's frozen copy diverges with the conversation grafted on.
- *  - `augmented` — the task already stands in a document, which has a conversation: nothing is written.
- *
- * A DRY RUN answers the same `asking` and writes nothing, so a hover says the drop makes a
- * conversation that asks rather than that it would be refused.
- */
-async function askAfter(
-  project: Project,
-  request: TaskConnectRequest,
-  host: ConnectHost,
-  at: {
-    title: string;
-    target: string;
-    conversation: string;
-    modification: NonNullable<ConnectPlan["modification"]>;
-    missing: ConnectMissingInput[];
-    plan: ConnectPlan;
-    before: ConnectIntent["before"];
-  },
-): Promise<TaskConnectResult> {
-  const { taskId } = request;
-  const dryRun = request.dryRun === true;
-  const { move: _move, ...standing } = at.plan;
-  const opening = at.modification === "new" ? conversationInputs(project, at.conversation, moveSentence(at.title, at.target), host.check) : undefined;
-  if (opening !== undefined && opening.missing.length > 0) {
-    return refused(dryRun, { code: "inputs-missing", message: `the conversation '${at.conversation}' cannot be opened by a move: ${missingSentence(opening.missing)}`, missing: opening.missing }, at.plan);
-  }
-  if (dryRun) return { ok: true, dryRun, plan: standing, ...(at.modification !== "new" ? { taskId } : {}), asking: at.missing };
-  // Nothing but the conversation is written — the opening turn, and for a clone the pin — so a move
-  // kind's undo cuts the journal back and puts the pin back, and resumes nothing. An `augmented`
-  // document already has its conversation: the intent has no steps at all.
-  const conversationOnly: ConnectStep = { kind: "document", conversation: at.conversation, withoutTarget: true };
-  return begin(project, request, host, {
-    plan: standing,
-    before: at.before,
-    asking: at.missing,
-    steps:
-      at.modification === "augmented"
-        ? []
-        : at.modification === "cloned"
-          ? [conversationOnly]
-          : [
-              conversationOnly,
-              { kind: "parent", title: at.title, ...(Object.keys(opening!.inputs).length > 0 ? { inputs: opening!.inputs, provenance: opening!.provenance } : {}) },
-              { kind: "adopt", intoParent: true, start: false },
-            ],
-  });
-}
-
 export function unsettledAsMissing(target: string, u: { input: string; schema: JsonValue; description?: string; reason: string; candidates?: Array<{ child: string; output: string }> }): ConnectMissingInput {
   const reason =
     u.reason === "ambiguous"
@@ -887,7 +996,17 @@ async function adoptInto(
   project: Project,
   request: TaskConnectRequest,
   host: ConnectHost,
-  at: { title: string; own: string; target: string; candidate: ConnectCandidate },
+  at: {
+    title: string;
+    own: string;
+    target: string;
+    candidate: ConnectCandidate;
+    /** The table's last row, for this task. */
+    judgement: MoveJudgement;
+    /** An engine held the task when the move was asked: it is paused first, and resumed as the child. */
+    paused: boolean;
+    pauseFirst: () => Promise<ConnectRefusal | undefined>;
+  },
 ): Promise<TaskConnectResult> {
   const dryRun = request.dryRun === true;
   const { candidate, target } = at;
@@ -938,17 +1057,29 @@ async function adoptInto(
     inputs: within?.inputs ?? nextUp?.inputs ?? [],
     asks: [...adoptPlan.asks.filter((ask) => !ask.required).map((ask) => asMissing(candidate.workflow, ask)), ...(within?.asks ?? nextUp?.asks ?? [])],
     ...(adoptPlan.branch !== undefined ? { branch: adoptPlan.branch } : {}),
+    judgement: at.judgement,
   };
+  const confirm = unconfirmed(request, at.judgement, plan);
+  if (confirm !== undefined) return confirm;
   const forward = needsMove && within!.move.direction === "forward" && !skipOf(request);
   if (forward && host.fastForward === undefined) return refused(dryRun, fastForwardRefusal(within!.move), plan);
   if (missing.length > 0) {
+    // Asked in the task's own conversation — the one the adoption extends — and adopted when answered.
+    if (host.ask !== undefined && (within === undefined || answerable(stillMissing(within.missing, request.supplied, target), target))) {
+      const asking: ConnectPlan = { ...plan, question: missing };
+      if (dryRun) return { ok: true, dryRun, plan: asking };
+      const optional = [...adoptPlan.asks.filter((ask) => !ask.required).map((ask) => asMissing(candidate.workflow, ask)), ...(within?.asks ?? []).filter((m) => sourceStateId(m.state) === sourceStateId(target))];
+      return askFor(request, host, { title: at.title, plan: asking, missing, optional });
+    }
     return refused(dryRun, { code: "inputs-missing", message: `adopting '${at.title}' into '${candidate.workflow}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, plan);
   }
   if (dryRun) return { ok: true, dryRun, plan };
+  const paused = await at.pauseFirst();
+  if (paused !== undefined) return refused(dryRun, paused, plan);
 
   const handed = needsMove ? suppliedFor(request.supplied, bundle.states[root.children?.[candidate.targetKey ?? ""]?.state ?? ""]) : {};
   const inputs = Object.keys(handed).length > 0 ? { inputs: handed } : {};
-  return begin(project, request, host, {
+  const done = await begin(project, request, host, {
     plan,
     before: {},
     steps: [
@@ -970,6 +1101,10 @@ async function adoptInto(
         : []),
     ],
   });
+  // Paused for the move, it goes on as the child it now is; the parent holds for it as for any task
+  // adopted before it finished, and is released when it does.
+  if (done.ok && at.paused) await host.resume?.(request.taskId);
+  return done;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -1068,7 +1203,7 @@ export async function finishConnect(project: Project, taskId: string, open: Open
   const targetKey = document?.targetKey;
   const plan: ConnectPlan = {
     ...intent.plan,
-    ...(document?.rootId !== undefined && (parentTaskId !== undefined && adopts && intent.plan.resolution === "modify" || intent.asking !== undefined) ? { workflow: document.rootId } : {}),
+    ...(document?.rootId !== undefined && (parentTaskId !== undefined && adopts && intent.plan.resolution === "modify") ? { workflow: document.rootId } : {}),
     ...(targetKey !== undefined && intent.plan.resolution === "modify" ? { standsAt: { ...intent.plan.standsAt, path: [targetKey] } } : {}),
     ...(intent.plan.move !== undefined && targetKey !== undefined && intent.plan.resolution === "modify" ? { move: { ...intent.plan.move, to: targetKey } } : {}),
     ...(adopted !== undefined ? { adopt: adopted } : {}),
@@ -1078,7 +1213,7 @@ export async function finishConnect(project: Project, taskId: string, open: Open
   const undo: ConnectUndo =
     adopts && parentTaskId !== undefined
       ? { kind: "adopt", parentTaskId, adoptedTaskId: taskId, made: true, mark }
-      : { kind: "move", taskId, mark, ...(intent.before.pin !== undefined ? { pin: intent.before.pin } : {}), ...(intent.before.wasCompleted === true ? { wasCompleted: true } : {}), ...(intent.asking !== undefined ? { asking: true as const } : {}) };
+      : { kind: "move", taskId, mark, ...(intent.before.pin !== undefined ? { pin: intent.before.pin } : {}), ...(intent.before.wasCompleted === true ? { wasCompleted: true } : {}) };
   log.info(`connected ${taskId} to '${sourceStateId(intent.request.target)}' (${intent.plan.resolution}${intent.plan.modification !== undefined ? `, ${intent.plan.modification}` : ""})${parentTaskId !== undefined ? ` through ${parentTaskId}` : ""}${document?.documentId !== undefined ? `, ${document.documentId}` : ""}`);
   return {
     ok: true,
@@ -1088,7 +1223,6 @@ export async function finishConnect(project: Project, taskId: string, open: Open
     ...(moved?.moved !== undefined ? { moved: moved.moved } : {}),
     ...(moved?.controlTaskId !== undefined ? { controlTaskId: moved.controlTaskId } : {}),
     undo,
-    ...(intent.asking !== undefined ? { asking: intent.asking } : {}),
   };
 }
 
@@ -1129,16 +1263,9 @@ async function runStep(
           conversation: step.conversation,
           ...(suppliedLiterals !== undefined ? { supplied: suppliedLiterals } : {}),
           ...(host.functions !== undefined ? { functions: host.functions } : {}),
-          ...(step.withoutTarget === true ? { withoutTarget: true } : {}),
         });
       } catch (e) {
         return { refusal: { code: "generate", message: (e as Error).message } };
-      }
-      if (step.withoutTarget === true) {
-        if (made.generated.deferred === true && made.document !== undefined) return { result: documentResult(made.document, target, own) };
-        // A root that already speaks needed no version: the conversation is the task's own.
-        if (made.resolution === "unsettled") return { result: {} };
-        return { refusal: { code: "generate", message: `the conversation for '${target}' could not be made` } };
       }
       if (made.resolution === "unsettled") return { refusal: { code: "generate", message: `the workflow for '${target}' could not be generated` } };
       return {

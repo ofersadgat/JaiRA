@@ -529,6 +529,8 @@ const EVENT_TONE: Record<TurnKind, EventEntry["tone"] | undefined> = {
   // What a conversation's workflow tool did is the rail's row too (`jaira.moved`), and the call's own
   // row is already in this transcript.
   moved: undefined,
+  // A move's input question is drawn by the grey where it was asked (`MoveQuestionRow`), as a gate.
+  asked: undefined,
 };
 
 function eventOf(turn: ConversationTurn): EventEntry | undefined {

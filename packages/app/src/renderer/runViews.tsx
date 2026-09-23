@@ -30,6 +30,8 @@ import type {
   StateChild,
   StateView,
   TaskDetail,
+  ConversationView,
+  MoveQuestionView,
 } from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
 import { ApprovalSurface, GateSurface, QuestionSurface, type EditorServices } from "./components";
@@ -43,7 +45,8 @@ import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { AnsweredForYou, Paper, Pulse, Transcript, clockOf, durationOf, useElapsed, type CallSurface } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
-import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, type ReadCall } from "@jaira/shared/browser";
+import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionPrompt, moveQuestionSchema, type ReadCall } from "@jaira/shared/browser";
+import type { JsonValue as SharedJson } from "@declarative-ai/json";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
 import { SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
@@ -51,7 +54,8 @@ import { AskDialog, type AskSpec } from "./menu";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
-import { invoke } from "./store";
+import { invoke, subscribe } from "./store";
+import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
 
 // Moved to `trail.ts`, which is where the tree queries live now — it also seeds a walk, and that
 // has to work for a composite, which has no session row to look one up by. Re-exported because this
@@ -683,7 +687,14 @@ export function RunConversation({
   approval,
   onApproval,
   onHere,
+  nested = false,
 }: {
+  /**
+   * Drawn INSIDE another conversation — an adopted task's history under the line that adopted it.
+   * Only the history: no scroller of its own, no composer, and no cut (a cut here would name the
+   * other task's journal from inside this one).
+   */
+  nested?: boolean;
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
   detail: TaskDetail | null;
@@ -1065,6 +1076,75 @@ export function RunConversation({
     return transcript;
   };
 
+  /**
+   * A move's INPUT QUESTION, where the move asked it (decision 0005, the rulings of 2026-09-22): the
+   * gate itself while it is open — answering it takes the move — and, once it is not, the same form
+   * as it was answered with what became of the move.
+   */
+  const moveQuestion = (asked: MoveQuestionView): ReactNode => {
+    const live = context.moveQuestions?.find((pending) => pending.requestId === asked.requestId);
+    if (live !== undefined && context.onMoveQuestion !== undefined) {
+      return (
+        <div className="inline-gate">
+          <GateSurface key={live.requestId} pending={live} onSubmit={(value) => context.onMoveQuestion!(live.requestId, value)} />
+        </div>
+      );
+    }
+    const target = asked.targetLabel ?? asked.target;
+    const settled: PendingInteraction = {
+      requestId: asked.requestId,
+      taskId: detail?.taskId ?? "",
+      project: "",
+      component: "fill_form",
+      inputs: {},
+      config: { component: "fill_form", prompt: moveQuestionPrompt(detail?.title ?? "this task", target, asked.missing), fields: [], schema: moveQuestionSchema(asked.missing, asked.optional ?? []) as Record<string, SharedJson> },
+    };
+    const outcome =
+      asked.outcome === "moved"
+        ? asked.message !== undefined
+          ? `Answered — ${asked.message}.`
+          : `Answered — the move to ${target} was taken.`
+        : asked.outcome === "refused"
+          ? `Answered, and the move could not be taken: ${asked.message ?? "refused"}`
+          : asked.outcome === "dismissed"
+            ? "Withdrawn — the move was not taken."
+            : "No longer open — the move was not taken.";
+    return (
+      <>
+        {asked.answered !== undefined ? (
+          <div className="inline-gate">
+            <GateSurface pending={settled} onSubmit={() => undefined} settled={{ value: asked.answered }} />
+          </div>
+        ) : null}
+        <p className={`sb-move-outcome${asked.outcome === "refused" ? " is-refused" : ""}`}>{outcome}</p>
+      </>
+    );
+  };
+  /** An ADOPTED task's history, expanded where the adoption happened: the conversation simply grows. */
+  const adopted = (taskId: string): ReactNode => <AdoptedHistory taskId={taskId} context={context} />;
+
+  if (nested) {
+    return (
+      <div className="run-convo-nested">
+        <SessionBandsView
+          bands={bands}
+          render={render}
+          notes={notes}
+          {...(rootPath !== undefined ? { root: rootPath } : {})}
+          shut={shutStates}
+          onToggle={onToggleShutState}
+          onSetShut={onSetShutStates}
+          scope={detail.taskId}
+          palette={palette}
+          empty="This task had not entered a child yet."
+          onSelectTask={context.onSelectTask}
+          adopted={adopted}
+          moveQuestion={moveQuestion}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="run-convo-wrap">
       <div
@@ -1097,6 +1177,8 @@ export function RunConversation({
             ? { origin: { ...detail.origin, onGo: () => context.onSelectTask(detail.origin!.taskId) } }
             : {})}
           onSelectTask={context.onSelectTask}
+          adopted={adopted}
+          moveQuestion={moveQuestion}
         />
         {/* AFTER the bands, always. A wait is the present tense of a run — it is where the thing
             stopped — so it belongs at the bottom of what has happened rather than sorted into it by
@@ -1187,6 +1269,116 @@ export function CutStrip({ armed, onConfirm, onCancel }: { armed: ArmedRewind; o
  * Doorways INSIDE the chain walk deeper: a nested spawn keys its own chain in the same flat map,
  * under the same host, so `onOpen` pushes another sidechain step with the same instance on it.
  */
+/**
+ * An ADOPTED task's own history, drawn inside the conversation of the task that adopted it (decision
+ * 0005, the rulings of 2026-09-22: "when a task gets adopted, the conversation simply expands … the
+ * conversation is essentially the history of the task").
+ *
+ * The adopted task keeps its journal and its records (§2 — nothing is copied), so its history is read
+ * from it: its tree, its turns, its sessions, its records and its live tail, fetched by ITS id, and the
+ * transcripts through `session:view` with ITS id. Drawn by the same conversation component, nested —
+ * no scroller of its own and no composer — under the line that adopted it.
+ */
+export function AdoptedHistory({ taskId, context }: { taskId: string; context: FileSurfaceProps["context"] }): JSX.Element {
+  const [detail, setDetail] = useState<TaskDetail | null>(null);
+  const [conversation, setConversation] = useState<ConversationView | null>(null);
+  const [history, setHistory] = useState<SessionRef[]>([]);
+  const [records, setRecords] = useState<Record<string, OperationRecordView>>({});
+  const [sessions, setSessions] = useState<FileSurfaceProps["context"]["sessions"]>({});
+  const [failed, setFailed] = useState<string | null>(null);
+  const [liveTurn, setLiveTurn] = useState<FileSurfaceProps["context"]["liveTurn"]>(null);
+  const project = context.project;
+
+  useEffect(() => {
+    let mounted = true;
+    const at = project !== undefined ? { project } : {};
+    const load = async (): Promise<void> => {
+      try {
+        const [d, c, h, snap] = await Promise.all([
+          invoke("task:detail", { taskId, ...at }),
+          invoke("task:conversation", { taskId, ...at }),
+          invoke("session:history", { taskId, ...at }),
+          invoke("session:live", { taskId, ...at }).catch(() => null),
+        ]);
+        const rows = await invoke("run:records", { taskId, ...at }).catch(() => [] as OperationRecordView[]);
+        if (!mounted) return;
+        setDetail(d);
+        setConversation(c);
+        setHistory(h);
+        setRecords(Object.fromEntries(rows.map((row) => [row.recordId, row])));
+        setLiveTurn((current) => (tailIsAhead(current, snap) ? current : liveTurnOfSnapshot(snap)));
+        setFailed(null);
+      } catch (e) {
+        if (mounted) setFailed((e as Error).message);
+      }
+    };
+    void load();
+    const off = subscribe((message) => {
+      if (!("taskId" in message) || message.taskId !== taskId) return;
+      if (message.type === "session:turn") {
+        setLiveTurn((current) => (alreadyFolded(current, message) ? current : foldLiveTurn(current, message)));
+        return;
+      }
+      if (message.type === "engine:event") {
+        const type = (message.event as { type?: string } | undefined)?.type;
+        if (type === "operation.completed" || type === "operation.failed") setLiveTurn(null);
+        void load();
+        return;
+      }
+      if (message.type === "run:finished") void load();
+    });
+    return () => {
+      mounted = false;
+      off();
+    };
+  }, [taskId, project]);
+
+  const loadSessions = useCallback(
+    (wanted: ReadonlyArray<{ instanceId: string }>) => {
+      void (async () => {
+        const missing = wanted.filter((one) => sessions[sessionKey(one)] === undefined);
+        if (missing.length === 0) return;
+        const loaded = await Promise.all(
+          missing.map(async (one) => {
+            try {
+              return [sessionKey(one), await invoke("session:view", { taskId, instanceId: one.instanceId, ...(project !== undefined ? { project } : {}) })] as const;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        setSessions((prev) => {
+          const next = { ...prev };
+          for (const entry of loaded) if (entry !== null) next[entry[0]] = entry[1];
+          return next;
+        });
+      })();
+    },
+    [taskId, project, sessions],
+  );
+
+  const nested: FileSurfaceProps["context"] = useMemo(
+    () => ({
+      ...context,
+      detail,
+      conversation,
+      sessions,
+      onLoadSessions: loadSessions,
+      onLoadSession: (instanceId: string) => loadSessions([{ instanceId }]),
+      sessionHistory: history,
+      records,
+      session: null,
+      sessionInstance: null,
+      liveTurn,
+    }),
+    [context, detail, conversation, sessions, loadSessions, history, records, liveTurn],
+  );
+
+  if (failed !== null) return <p className="empty">Could not read what this task did: {failed}</p>;
+  if (detail === null) return <p className="empty">Loading…</p>;
+  return <RunConversation parent={detail.instances[0]} detail={detail} context={nested} nested />;
+}
+
 export function SidechainConversation({
   step,
   context,

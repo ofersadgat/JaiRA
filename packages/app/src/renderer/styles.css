@@ -13807,6 +13807,113 @@ fieldset.reading {
   border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
+/* ---- moving a task: the table's question, the next-transition chips, the input question -----------
+   (decision 0005, the rulings of 2026-09-22) */
+
+/* The move table's QUESTION, put in front of a drop's commit: the preview's own box, which unlike the
+   preview takes the pointer — it has two buttons. */
+.connect-pop.connect-confirm {
+  pointer-events: auto;
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+}
+.connect-confirm .options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* A card's NEXT TRANSITIONS: small, quiet chips between the title and the card's second line. They
+   are verbs, so they are buttons — but the card's own weight stays on its title. */
+.card-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 5px 0 1px;
+}
+.move-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: 500 calc(var(--size-app) * 10.5 / 12.5) / 1.5 var(--font-app);
+  cursor: pointer;
+}
+.move-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.move-chip:disabled {
+  color: var(--dim);
+  border-style: dashed;
+  cursor: default;
+}
+.move-chip-arrow {
+  color: var(--accent);
+  font-family: var(--font-data);
+}
+.move-chip:disabled .move-chip-arrow {
+  color: var(--dim);
+}
+.move-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The move a rule of the workflow is waiting for: the one a person is being asked to make. */
+.move-chip.is-event {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: var(--tint-accent);
+}
+/* A loop back the workflow defines. */
+.move-chip.is-back .move-chip-arrow {
+  color: var(--dim);
+}
+
+/* A move's INPUT QUESTION, in the task's conversation where the move asked it: the gate's own
+   surface under a row that says what the move is. Answered, the same form drawn as it was answered. */
+.sb-note.sb-asked {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.sb-asked .sb-note-text b {
+  color: var(--text);
+  font-weight: 600;
+}
+.sb-move-question {
+  flex-basis: 100%;
+  min-width: 0;
+  margin: 4px 0 8px 18px;
+  color: var(--text);
+  font-size: var(--size-app);
+}
+.sb-move-question .inline-gate {
+  margin: 4px 0 0;
+}
+.sb-move-outcome {
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  margin: 4px 0 0;
+}
+.sb-move-outcome.is-refused {
+  color: var(--bad);
+}
+
+/* An ADOPTED task's history, expanded where the adoption happened: the conversation simply grows. */
+.sb-made-nest {
+  flex-basis: 100%;
+  min-width: 0;
+  margin: 4px 0 8px 18px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
 /* ============================================================================
    Toolsets in the composer's two cards (decision 0007 §5; composer.tsx)
 

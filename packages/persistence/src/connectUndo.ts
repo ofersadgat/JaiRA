@@ -28,9 +28,6 @@
  *  - **An adoption** — the same rule on the PARENT's journal from the mirror row on (its landing is
  *    where the plan said it stands), plus the adopted task itself: any state it enters or settles
  *    after the drop is work of its own.
- *  - **An `asking` drop** — the conversation's turns are the drop's; the moment its `start_task`
- *    mounts the target (a `jaira.supplied` or `jaira.moved` row, or any non-conversation entry), the
- *    Undo is over, and taking the drop back is a rewind.
  *  - **A fast-forward the drop started** — everything while it runs is the drop's; when it ARRIVES
  *    the landing is the target, judged as a move's. A Skip or Stop that ends it is a decision; a
  *    failure on the way is not work of the task's own, and leaves the Undo offered.
@@ -63,8 +60,6 @@ import type { Project } from "./project";
 export interface ConnectLanding {
   /** `ConnectPlan.standsAt.path`. */
   landing: readonly string[];
-  /** The drop opened a conversation that asks, and moved nothing. */
-  asking?: boolean;
 }
 
 /** The journal a token is judged against: the moved task's, or the parent's for an adoption. */
@@ -88,7 +83,6 @@ export function keepConnectUndo(project: Project, taskId: string, undo: ConnectU
   const stored: StoredConnectUndo = {
     undo,
     landing: [...at.landing],
-    ...(at.asking === true || (undo.kind === "move" && undo.asking === true) ? { asking: true as const } : {}),
   };
   project.tasks.write({ ...meta, connectUndo: stored });
 }
@@ -194,7 +188,6 @@ function pastLanding(events: readonly StoredEvent[], from: number, keptAt: numbe
   const prefix = (a: readonly string[], b: readonly string[]): boolean => a.length < b.length && a.every((key, i) => key === b[i]);
 
   const landing = kept.landing;
-  const asking = kept.asking === true;
   // A drop that lands on the root itself (an adoption with nothing after its child) stands in it.
   let landed: string | undefined = landing.length === 0 ? root : undefined;
   let forwarding = false;
@@ -218,15 +211,11 @@ function pastLanding(events: readonly StoredEvent[], from: number, keptAt: numbe
     }
     // What a conversation's `start_task` writes on its own task: what it supplied, then what it did.
     const started = (type === SUPPLIED_EVENT && later) || (type === MOVED_EVENT && (row.event as unknown as MovedEvent).tool === "start_task");
-    if (started && asking) return "the conversation started the target";
     if (started || ((type === MOVE_HELD_EVENT || type === REOPENED_EVENT) && later)) return "the task was moved again";
     if (type.startsWith("jaira.")) continue;
 
-    // Engine rows. A conversation's turns are the drop's only when the drop opened it to ask.
-    if (isChat(e.instanceId)) {
-      if (asking) continue;
-      return "a turn of the task's conversation was taken since";
-    }
+    // Engine rows. A turn of the task's conversation is work of its own.
+    if (isChat(e.instanceId)) return "a turn of the task's conversation was taken since";
     // While a fast-forward the drop started is on its way, the states between are its effect.
     if (forwarding) {
       if (type === "instance.entered" && landed === undefined && e.instanceId !== undefined && same(pathOf(e.instanceId), landing)) landed = e.instanceId;
@@ -235,7 +224,6 @@ function pastLanding(events: readonly StoredEvent[], from: number, keptAt: numbe
     if (type === "instance.entered" && e.instanceId !== undefined) {
       const id = e.instanceId;
       if (entries.get(id)?.mirror === true) continue;
-      if (asking) return "the conversation started the target";
       const path = pathOf(id);
       if (landed === undefined && same(path, landing)) {
         landed = id;

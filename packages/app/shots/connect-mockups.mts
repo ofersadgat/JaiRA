@@ -4,8 +4,8 @@
  *
  * `npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/connect-mockups.mts`
  *
- * Writes `docs/ui/assets/task-board/{connecting,asking,refused,after-drop}.html` and
- * `docs/ui/assets/task-card/{adopted,undo}.html`, each with the catalog head (`reflects: shipped`)
+ * Writes `docs/ui/assets/task-board/{connecting,asking,refused,confirming,after-drop}.html` and
+ * `docs/ui/assets/task-card/{adopted,undo,next}.html`, each with the catalog head (`reflects: shipped`)
  * and the app's own stylesheet. As in `connect-static.mts`, the one thing done by hand is the
  * `drop-over` class: a static page has no pointer.
  */
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { BoardCard, BoardColumn, ConnectPlan, TaskConnectResult } from "@jaira/shared/browser";
-import { Board, Card, Column, ConnectPop } from "../src/renderer/board";
+import { Board, Card, Column, ConnectPop, MoveConfirm } from "../src/renderer/board";
 import { previewOf } from "../src/renderer/connectDrag";
 
 const docs = join(import.meta.dirname, "..", "..", "..", "docs", "ui", "assets");
@@ -44,26 +44,32 @@ const adopt: TaskConnectResult = {
     adopt: { workflow: "feature", title: "Pause and stop", adopted: [], cursor: "product", next: "ux", inputs: {}, provenance: { issue: { via: "bound", from: { taskId: "t-pause", input: "issue" } } }, asks: [], waitsFor: [] },
   }),
 };
-// A target whose inputs nothing binds is ASKED after (`askAfter`), not refused: the dry run answers
-// what the conversation the drop makes will ask for.
+// A target whose inputs nothing binds is not refused: the dry run names what the move will ASK for
+// in the task's own conversation (decision 0005, the rulings of 2026-09-22).
 const question = { state: "explore", schema: { type: "string" }, reason: "nothing the task produced fits it" };
 const asking: TaskConnectResult = {
   ok: true,
   dryRun: true,
-  plan: plan({ resolution: "modify", modification: "new", workflow: "dynamic/…", standsAt: { path: [], stateId: "explore" } }),
-  asking: [
-    { ...question, name: "question", description: "What to find out, in a sentence." },
-    { ...question, name: "sources", schema: { type: "array", items: { type: "string" } }, description: "Where to look first." },
-  ],
+  plan: plan({
+    resolution: "modify",
+    modification: "new",
+    adoptedAs: "product",
+    workflow: "dynamic/…",
+    standsAt: { path: ["explore"], stateId: "explore" },
+    question: [
+      { ...question, name: "question", description: "What to find out, in a sentence." },
+      { ...question, name: "sources", schema: { type: "array", items: { type: "string" } }, description: "Where to look first." },
+    ],
+    judgement: { where: "elsewhere", activity: "finished", way: "move" },
+  }),
 };
-// What is still refused: a task that is running cannot take a new transition until it is paused.
+// What the move table refuses: a state the task cannot reach from where it stands.
+const decided = "'revise' is reached only by the decision at 'review', which 'Usage readings' has already made — a move cannot take the other branch. Move it back to that state to decide again.";
 const refused: TaskConnectResult = {
   ok: false,
   dryRun: true,
-  refusal: {
-    code: "running",
-    message: "'Usage readings' is running, and no workflow relates 'feature/product' to 'explore': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it",
-  },
+  refusal: { code: "illegal", message: decided },
+  plan: plan({ standsAt: { path: ["revise"], stateId: "feature/revise" }, judgement: { where: "unreachable", activity: "waiting-input", way: "illegal", sentence: decided } }),
 };
 
 const col = (key: string): Pick<BoardColumn, "key" | "stateId" | "label"> => ({ key, stateId: key, label: key });
@@ -124,7 +130,7 @@ write(
 );
 
 // The pointer is over a column whose target needs what nothing binds: it LIGHTS, because the drop
-// does something — it makes the conversation, which asks — and the box names what will be asked.
+// does something — the move is decided, and asks for them in the task's own conversation.
 write(
   "task-board",
   "asking",
@@ -146,8 +152,8 @@ write(
   "2026-09-22",
 );
 
-// The pointer is over a column that would REFUSE: it is not lit, the browser will not take the drop,
-// and the same box says why — without the accent line, because letting go does nothing.
+// The pointer is over a column the move table REFUSES: it is not lit, the browser will not take the
+// drop, and the same box says why — without the accent line, because letting go does nothing.
 write(
   "task-board",
   "refused",
@@ -162,6 +168,42 @@ write(
         h(Column, { name: "product", count: 2, empty: "—" }, tile(pause), tile(usage, { onDragStart: noop })),
         h(Column, { name: "feature", count: 1, empty: "—", drop: { accepts: true, onDrop: noop } }, tile(rewind)),
         h(Column, { name: "explore", count: 1, empty: "—", drop: { accepts: false, onDrop: noop } }, tile(forge), pop(refused, "explore", usage)),
+      ),
+    ),
+  ),
+  undefined,
+  "2026-09-22",
+);
+
+// An ASK cell, dropped on: a working task sent back asks before the drop commits, in the column it lands in.
+write(
+  "task-board",
+  "confirming",
+  960,
+  stage(
+    h(
+      "div",
+      { className: "board-body" },
+      h(
+        "div",
+        { className: "columns wrap" },
+        h(
+          Column,
+          {
+            name: "product",
+            count: 1,
+            empty: "—",
+            confirm: h(MoveConfirm, {
+              sentence: "'Rewind a run' is working. Stop it and go back to 'product'? It is entered again as its next pass; what the task did since stays in its history.",
+              yes: "Stop and go back",
+              onYes: noop,
+              onNo: noop,
+            }),
+          },
+          tile(pause),
+        ),
+        h(Column, { name: "feature", count: 1, empty: "—" }, tile(rewind)),
+        h(Column, { name: "explore", count: 1, empty: "—" }, tile(forge)),
       ),
     ),
   ),
@@ -199,3 +241,20 @@ write(
 const column = (body: ReactElement): ReactElement => stage(h("div", { className: "board-body" }, h("div", { className: "columns" }, h(Column, { name: "feature", count: 2, empty: "—" }, body))));
 write("task-card", "adopted", 320, column(h("div", null, tile(parent), tile(adopted, { child: true }))));
 write("task-card", "undo", 320, column(tile(parent, { onUndo: noop })));
+
+// A card's NEXT TRANSITIONS: the next state, a decision's branch that cannot be run to right now, and
+// the move a rule of the workflow is waiting for.
+const chips = card({
+  taskId: "t-next",
+  title: "Usage readings",
+  status: "running",
+  activeStatus: "waiting_for_user",
+  activeStateId: "feature/review",
+  workflow: "feature",
+  next: [
+    { target: "feature/ship", path: ["ship"], label: "ship", way: "event", event: true },
+    { target: "feature/archive", path: ["archive"], label: "archive", way: "next" },
+    { target: "feature/revise", path: ["revise"], label: "revise", way: "fast-forward", blocked: "'Usage readings' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly" },
+  ],
+});
+write("task-card", "next", 320, column(h("div", null, tile(chips, { onMove: noop }))), undefined, "2026-09-22");

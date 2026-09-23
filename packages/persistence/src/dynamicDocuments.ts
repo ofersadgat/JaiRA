@@ -159,13 +159,6 @@ export interface GenerateVersionRequest {
    * copy. Absent ⇒ by where the task stands — finished well ⇒ `new`, anywhere inside its workflow ⇒ `clone`.
    */
   mode?: "new" | "clone";
-  /**
-   * Make the conversation even though the target's required inputs are open, WITHOUT the target
-   * (step 6, a drop that has to ask first): a new document holds the conversation and what already
-   * ran; a clone is the frozen copy with the conversation grafted on. `resolution` still says
-   * `unsettled`-or-not through `generated.unsettled`; `generated.deferred` says the target is not in.
-   */
-  withoutTarget?: boolean;
   /** Override the producers derived from the task (nearest first). */
   producers?: readonly Producer[];
   /** The registry's `functions` facet, so validation resolves every function ref — as `beginTaskRun` takes it. */
@@ -236,8 +229,8 @@ export async function generateDocumentVersion(project: Project, request: Generat
   const { taskId } = request;
   const row = project.runtime.get(taskId);
   if (row === undefined) throw refusal(log, `unknown task '${taskId}'`, { taskId });
-  // A task a drop made in a document (`askAfter`) has the document and no run yet: it stands in the
-  // document's latest version, which is what `previous` reads.
+  // A task made in a document has the document and maybe no run yet: it stands in the document's
+  // latest version, which is what `previous` reads.
   if (row.snapshotHash === undefined && row.documentId === undefined) throw refusal(log, `task '${taskId}' has never run, so it stands nowhere to be moved from`, { taskId });
   const meta = project.tasks.read(taskId);
   const snapshotsDir = project.paths.snapshotsDir;
@@ -276,7 +269,6 @@ export async function generateDocumentVersion(project: Project, request: Generat
       target,
       ...(request.targetKey !== undefined ? { targetKey: request.targetKey } : {}),
       ...(request.supplied !== undefined ? { supplied: request.supplied } : {}),
-      ...(request.withoutTarget === true && request.dryRun !== true ? { deferTarget: true } : {}),
     });
     if (!generated.ok) return { resolution: "unsettled", generated };
     if (request.dryRun === true) return { resolution: "new", generated };
@@ -338,20 +330,16 @@ export async function generateDocumentVersion(project: Project, request: Generat
     ...(request.targetKey !== undefined ? { targetKey: request.targetKey } : {}),
     ...(request.supplied !== undefined ? { supplied: request.supplied } : {}),
   });
-  // A drop that has to ask first: the copy diverges now, with the conversation and without the
-  // target. Only where that changes something — a root that already speaks needs no version for it.
-  const conversationOnly = !generated.ok && request.withoutTarget === true && request.dryRun !== true && previousRoot.operation === undefined;
-  if (!generated.ok && !conversationOnly) return { resolution: "unsettled", generated, ...(existing !== undefined ? { document: existing } : {}) };
+  if (!generated.ok) return { resolution: "unsettled", generated, ...(existing !== undefined ? { document: existing } : {}) };
   if (request.dryRun === true) return { resolution: existing !== undefined ? "augmented" : "cloned", generated, ...(existing !== undefined ? { document: existing } : {}) };
 
-  const said: GenerateResult = conversationOnly ? { ...generated, deferred: true } : generated;
-  const bundle = graft(project, previous, said, existing?.conversation ?? request.conversation);
+  const bundle = graft(project, previous, generated, existing?.conversation ?? request.conversation);
   lintOrRefuse(bundle, `the diverged copy of '${sourceStateId(previous.rootId)}'`, request.functions);
   const snap = await snapshotWithModules(project, bundle);
   const next = { snapshotHash: snap.hash, createdAt, additions: generated.additions, cause };
   if (existing !== undefined) {
     const appended = appendVersion(snapshotsDir, existing.id, latestVersion(existing).version, next);
-    return { resolution: appended.appended ? "augmented" : "existing", generated: said, document: appended.document, version: appended.version };
+    return { resolution: appended.appended ? "augmented" : "existing", generated, document: appended.document, version: appended.version };
   }
   const id = `d-${uuidv7(nowMs)}`;
   const document = createDocument(
@@ -363,7 +351,7 @@ export async function generateDocumentVersion(project: Project, request: Generat
   // picks version 1 up. The snapshot it last ran under is left as it is — that is still true.
   project.runtime.setPin(taskId, row.snapshotHash!, id, nowMs);
   log.info(`task ${taskId} diverged from '${meta.workflow}' into ${id}`);
-  return { resolution: "cloned", generated: said, document, version: latestVersion(document) };
+  return { resolution: "cloned", generated, document, version: latestVersion(document) };
 }
 
 /**

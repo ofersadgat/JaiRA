@@ -19,7 +19,7 @@
  * agent was doing when it asked.
  */
 import { createLogger } from "@declarative-ai/log";
-import { MOVED_EVENT, refusal, type MovedEvent } from "@jaira/shared";
+import { MOVE_ANSWERED_EVENT, MOVE_ASKED_EVENT, MOVED_EVENT, refusal, type MoveAnsweredEvent, type MoveAskedEvent, type MovedEvent, type MoveQuestionView } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent } from "@declarative-ai/hw";
 import { isTaskId, type ConversationTurn, type ConversationView, type MadeBatch } from "@jaira/shared";
@@ -160,6 +160,28 @@ export function conversationView(project: Project, taskId: string, options: Conv
     if ((event as { type: string }).type === MOVED_EVENT) {
       const row = event as unknown as MovedEvent;
       turns.push({ seq, at, kind: "moved", path: "", text: row.tool, moved: row.outcome, ...(row.toolCallId !== undefined ? { toolCallId: row.toolCallId } : {}) });
+      continue;
+    }
+    // A move's input question (decision 0005, the rulings of 2026-09-22): drawn where it was asked,
+    // at the root — the task's conversation is where the move is — with how it ended folded onto it.
+    if ((event as { type: string }).type === MOVE_ASKED_EVENT) {
+      const row = event as unknown as MoveAskedEvent;
+      const asked: MoveQuestionView = {
+        requestId: row.requestId,
+        target: row.move.target,
+        ...(row.targetLabel !== undefined ? { targetLabel: row.targetLabel } : {}),
+        missing: row.missing,
+        ...(row.optional !== undefined ? { optional: row.optional } : {}),
+      };
+      turns.push({ seq, at, kind: "asked", path: "", text: row.requestId, asked });
+      continue;
+    }
+    if ((event as { type: string }).type === MOVE_ANSWERED_EVENT) {
+      const row = event as unknown as MoveAnsweredEvent;
+      const turn = turns.find((t) => t.kind === "asked" && t.asked?.requestId === row.requestId);
+      if (turn?.asked !== undefined) {
+        turn.asked = { ...turn.asked, outcome: row.outcome, ...(row.answered !== undefined ? { answered: row.answered } : {}), ...(row.message !== undefined ? { message: row.message } : {}) };
+      }
       continue;
     }
     switch (event.type) {

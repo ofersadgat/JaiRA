@@ -15,10 +15,14 @@
  *     task already in a document has it `augmented`, a task inside a real workflow has its copy
  *     `cloned`.
  *
+ * Which of them a move MAY be is the legality table (`move.ts`): where the target is from where the
+ * task stands — ahead through the transitions the workflow defines, behind, unreachable, or elsewhere —
+ * and what the task is doing. A dry run carries the table's answer (`ConnectPlan.judgement`).
+ *
  * Every resolution ends by settling the target's inputs from the workflow's own bindings. What they
- * leave open a conversation supplies (`supplied`); a connect whose required inputs still do not bind
- * is REFUSED, naming each missing input with its declared schema — except a drop that says
- * `askAfter`, which makes the conversation and has it ask.
+ * leave open a conversation supplies (`supplied`); what is still required is ASKED in the task's own
+ * conversation — a question the host parks there (`asked`) — where the host can ask, and refused,
+ * naming each missing input with its declared schema, where it cannot (the CLI).
  *
  * The platform never names a workflow's input (§0): everything here is derived from declared
  * schemas, bindings and descriptions.
@@ -26,6 +30,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { AdoptPlan, AdoptRefusal, InputProvenance } from "./adopt";
 import type { ProjectRef } from "./ipc";
+import type { MoveJudgement } from "./move";
 import type { TaskMoveResult } from "./userEvents";
 
 /**
@@ -46,6 +51,17 @@ export interface TaskConnectRequest {
   target: string;
   /** The workflow the target is meant in — the root state id of the composite that holds it. Narrows rule 2. */
   workflow?: string;
+  /**
+   * The exact mount, as child keys from the task's root — what a next-transition chip hands back, so a
+   * state mounted twice is not guessed between. Absent ⇒ the mount the table prefers: ahead, then behind.
+   */
+  path?: string[];
+  /**
+   * The person confirmed the move's ASK cell (`MoveJudgement.confirm`): stop a working task and go
+   * back, or pause it and move it. Without it such a move is refused with the question, and a dry run
+   * says the question — which is what the board puts in front of the drop.
+   */
+  confirmed?: boolean;
   /** How a forward move crosses what lies between. Absent ⇒ `fast-forward`. */
   forward?: ConnectForward;
   /** `skip: true` is `forward: "skip"` — the spelling the conversation's `move` tool and the CLI use. */
@@ -67,16 +83,6 @@ export interface TaskConnectRequest {
    * modified workflow they are literals on the generated mount, provenance beside the value.
    */
   supplied?: Record<string, ConnectSupplied>;
-  /**
-   * What a DROP says (step 6): where a modified workflow leaves required inputs open, do not refuse —
-   * make the conversation that controls the work anyway, with the target not yet mounted, and answer
-   * `asking`. The host then gives that conversation its opening turn, which asks for them in words,
-   * and the conversation's own `start_task` mounts the target with what it was told. A dry run with
-   * it answers the same `asking` and writes nothing, which is what the board's hover says. Only a
-   * modified workflow (rule 3) is asked after; a move within a workflow or an adoption that leaves a
-   * required input open is still refused with what is missing.
-   */
-  askAfter?: boolean;
   /** Scripted gate answers and prompt rules for a run this starts (tests/demos). */
   interactions?: Record<string, JsonValue[]>;
   fake?: JsonValue;
@@ -127,7 +133,11 @@ export interface ConnectRefusal {
     | "adopt"
     | "generate"
     /** An earlier connect of this task stopped part-way, and only the same drop may finish it. */
-    | "connecting";
+    | "connecting"
+    /** The target cannot be reached from where the task stands by anything the workflow defines. */
+    | "illegal"
+    /** An ASK cell the caller has not confirmed: `message` is the question. */
+    | "confirm";
   message: string;
   /** `inputs-missing`: exactly which, with their schemas. */
   missing?: ConnectMissingInput[];
@@ -201,8 +211,15 @@ export interface ConnectPlan {
   mount?: "plain" | "split";
   /** How the target's inputs settle. */
   inputs: ConnectInput[];
-  /** What will be asked afterwards: inputs nothing determines that are NOT required (a required one refuses). */
+  /** What can be given afterwards: inputs nothing determines that are NOT required. */
   asks: ConnectMissingInput[];
+  /**
+   * The REQUIRED inputs nothing binds, which the move asks for in the task's own conversation before it
+   * is taken (the rulings of 2026-09-22, 2). Absent when everything binds.
+   */
+  question?: ConnectMissingInput[];
+  /** The legality table's answer for this move (`move.ts`). */
+  judgement?: MoveJudgement;
   /** The branch the new parent takes up, when the adopted task had one. */
   branch?: string;
 }
@@ -235,11 +252,6 @@ export type ConnectUndo =
       pin?: { snapshotHash: string; documentId?: string };
       /** The task had finished: it goes back to having finished. */
       wasCompleted?: boolean;
-      /**
-       * An `askAfter` drop that made or reused a conversation and moved nothing: what was written from
-       * the `intent` row on — the conversation's opening turn — is cut and the pin put back, and nothing is resumed.
-       */
-      asking?: true;
     };
 
 export type TaskConnectResult =
@@ -259,10 +271,10 @@ export type TaskConnectResult =
       controlTaskId?: string;
       undo?: ConnectUndo;
       /**
-       * `askAfter`: the conversation exists and the task has NOT moved — these required inputs are
-       * what its conversation is about to ask for. `taskId` is the task that conversation is.
+       * The move is waiting on a QUESTION parked in the task's own conversation: these required inputs,
+       * asked by the gate `requestId`. Nothing has moved; answering it takes the move.
        */
-      asking?: ConnectMissingInput[];
+      asked?: { requestId: string; taskId: string; missing: ConnectMissingInput[] };
     }
   | { ok: false; dryRun: boolean; refusal: ConnectRefusal; /** How far the resolution got, for a preview that explains the refusal. */ plan?: ConnectPlan };
 
@@ -274,15 +286,13 @@ export type TaskConnectResult =
  * marking itself done with what it made.
  */
 export interface ConnectIntent {
-  /** What was asked, as it was asked: the target, the supplied inputs, skip, askAfter, the scripts. */
+  /** What was asked, as it was asked: the target, the exact mount, the supplied inputs, skip, the person's yes, the scripts. */
   request: Omit<TaskConnectRequest, "dryRun" | "project">;
   /** The plan as resolved, before anything was written — what the done connect answers with, completed by the steps' results. */
   plan: ConnectPlan;
   steps: ConnectStep[];
   /** How the dragged task stood before the drop — what a move's Undo puts back. */
   before: { pin?: { snapshotHash: string; documentId?: string }; wasCompleted?: true };
-  /** `askAfter`: what the conversation it makes will ask for. */
-  asking?: ConnectMissingInput[];
 }
 
 /**
@@ -291,7 +301,7 @@ export interface ConnectIntent {
  */
 export type ConnectStep =
   /** Generate and write the document version the move needs — `new`, `augmented` or `cloned`. */
-  | { kind: "document"; conversation: string; withoutTarget?: true }
+  | { kind: "document"; conversation: string }
   /** Make the document's task: the conversation, with the source adopted into it next. */
   | { kind: "parent"; title: string; inputs?: Record<string, JsonValue>; provenance?: Record<string, InputProvenance> }
   /** Adopt the dragged task — into the `parent` step's task, or into a new task of `workflow`. */
@@ -347,11 +357,6 @@ export interface StoredConnectUndo {
   undo: ConnectUndo;
   /** Where the drop landed: `ConnectPlan.standsAt.path`, child keys from the watched task's root. */
   landing: string[];
-  /**
-   * The drop opened a conversation that asks for the target's inputs (`askAfter`) and moved nothing:
-   * its turns are the drop's, and the conversation's `start_task` mounting the target ends the Undo.
-   */
-  asking?: true;
 }
 
 export interface TaskConnectUndoResult {

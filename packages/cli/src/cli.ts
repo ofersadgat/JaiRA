@@ -227,7 +227,7 @@ const USAGE = `usage:
   jaira task list [--project <dir>]
   jaira task status <taskId> [--events <n>] [--project <dir>]
   jaira task cancel <taskId> [--project <dir>]
-  jaira task move <taskId> --to <stateId> [--workflow <rootStateId>] [--skip] [--dry-run]
+  jaira task move <taskId> --to <stateId> [--workflow <rootStateId>] [--skip] [--yes] [--dry-run]
             [--interactions <json|@file>] [--fake <json|@file>] [--project <dir>]
             [--non-interactive] [--approve-functions] [--approve ask|deny]
   jaira board [--level <stateId>] [--json] [--project <dir>]
@@ -983,6 +983,8 @@ async function cmdTaskMove(argv: string[], io: CliIo): Promise<number> {
       to: { type: "string" },
       workflow: { type: "string" },
       skip: { type: "boolean" },
+      // The move table's ASK cells (a working task sent back, or into another workflow): the answer.
+      yes: { type: "boolean" },
       "dry-run": { type: "boolean" },
       interactions: { type: "string" },
       fake: { type: "string" },
@@ -1002,7 +1004,7 @@ async function cmdTaskMove(argv: string[], io: CliIo): Promise<number> {
     let pending: TaskMoveRequest | undefined;
     const result = await connectTask(
       project,
-      { taskId, target: values.to, ...(values.workflow !== undefined ? { workflow: values.workflow } : {}), ...(values.skip === true ? { skip: true } : {}), ...(values["dry-run"] === true ? { dryRun: true } : {}) },
+      { taskId, target: values.to, ...(values.workflow !== undefined ? { workflow: values.workflow } : {}), ...(values.skip === true ? { skip: true } : {}), ...(values.yes === true ? { confirmed: true } : {}), ...(values["dry-run"] === true ? { dryRun: true } : {}) },
       {
         running: (id) => project.jobs.liveRunJob(id, Date.now()) !== undefined,
         adopt: (request) => adoptTaskIn(project, request),

@@ -3207,30 +3207,39 @@ export function useApp() {
       /**
        * What a drop of this card on that column WOULD do (decision 0005 §1) — `task:connect`'s dry
        * run. Changes nothing, and touches no state here: the board keeps the answer for the length of
-       * one drag, asks once per column, and draws it as the column's light and its preview. Asked with
-       * `askAfter`, as the drop is, so a target with inputs nothing binds says the conversation that
-       * will ask for them rather than a refusal.
+       * one drag, asks once per column, and draws it as the column's light and its preview — the move
+       * table's answer included: an illegal column says why, an ASK column says what the drop will ask,
+       * and a target lacking inputs says they will be asked in the task's conversation.
        */
       connectPreview: (project: string | undefined, taskId: string, target: string): Promise<TaskConnectResult> =>
-        invoke("task:connect", { taskId, target, dryRun: true, askAfter: true, ...(project !== undefined ? { project } : {}) }),
+        invoke("task:connect", { taskId, target, dryRun: true, ...(project !== undefined ? { project } : {}) }),
       /**
-       * THE DROP (decision 0005): `task_move`, published to a column no rule had offered. The same
-       * channel a conversation's `move` tool will use. Nothing is confirmed first; what it did
-       * arrives on the ordinary refresh, and the token that takes it back is kept for the card.
+       * THE MOVE (decision 0005): a drop on a column no rule had offered, or a next-transition chip
+       * (`path` — the exact mount). The drop is the commit, except where the move table ASKS first,
+       * and then only once the board's confirmation said yes (`confirmed`). What it did arrives on the
+       * ordinary refresh, and the token that takes it back is kept for the card.
        *
-       * `start: false`: a task the drop MAKES is left standing where it was put, for the person to
+       * `start: false`: a task the move MAKES is left standing where it was put, for the person to
        * start — a move an engine has to take starts one regardless.
        *
-       * `askAfter`: a drop whose only obstacle is inputs nothing binds is not refused. The conversation
-       * that controls the work is made, and its first turn asks for them in words; its `start_task`
-       * takes the move once they are answered.
+       * A move whose target lacks inputs is not refused and does not open another conversation: the
+       * host parks a question in the task's OWN conversation, and the task is selected so the person
+       * is looking at it. Answering it takes the move.
        */
-      connectTask: async (project: string | undefined, taskId: string, target: string) => {
+      connectTask: async (project: string | undefined, taskId: string, target: string, extra: { path?: string[]; confirmed?: boolean } = {}) => {
         try {
-          const result = await invoke("task:connect", { taskId, target, start: false, askAfter: true, ...(project !== undefined ? { project } : {}) });
+          const result = await invoke("task:connect", {
+            taskId,
+            target,
+            start: false,
+            ...(extra.path !== undefined ? { path: extra.path } : {}),
+            ...(extra.confirmed === true ? { confirmed: true } : {}),
+            ...(project !== undefined ? { project } : {}),
+          });
           // The token that takes it back is kept on the card's task in main; the board's refresh says
           // whether the card carries Undo, for as long as the drop is still the last thing it did.
           if (!result.ok) patch({ error: result.refusal.message });
+          else if (result.asked !== undefined) actionsRef.current.select(result.asked.taskId, project);
         } catch (e) {
           fail(e);
         }

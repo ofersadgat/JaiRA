@@ -362,6 +362,13 @@ export interface FileSurfaceContext {
    */
   runGate?: PendingInteraction | undefined;
   onRunGate?: ((value: unknown) => void) | undefined;
+  /**
+   * The questions MOVES parked in task conversations (decision 0005, the rulings of 2026-09-22) —
+   * every one this window knows of; a conversation draws its own where its `asked` row sits, and
+   * answering one takes the move it holds.
+   */
+  moveQuestions?: readonly PendingInteraction[] | undefined;
+  onMoveQuestion?: ((requestId: string, value: unknown) => void) | undefined;
   runGateServices?: Partial<ComponentServices> | undefined;
   runGateEditor?: EditorServices | undefined;
   /**

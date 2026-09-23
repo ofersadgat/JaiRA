@@ -358,7 +358,15 @@ export interface EditArtifactConfig {
 export interface FillFormConfig {
   component: "fill_form";
   prompt: string;
+  /** The form's fields. EMPTY when `schema` carries the form instead — the two spellings are exclusive. */
   fields: FormField[];
+  /**
+   * The form as a whole JSON Schema object — for values the field subset cannot say (an object, a
+   * list, a number with bounds). Drawn by the same schema form; its `required` are required. A host
+   * that parks one checks the answer against the schema itself (the move question does, with the
+   * run's validator), since the shape check here reads only `required`.
+   */
+  schema?: Record<string, JsonValue>;
 }
 
 export interface ConfirmActionConfig {
@@ -673,8 +681,17 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
       if (config["source"] !== undefined) parsed.source = str(config["source"], "edit_artifact.source");
       return parsed;
     }
-    case "fill_form":
+    case "fill_form": {
+      const schema = config["schema"];
+      if (schema !== undefined) {
+        if (config["fields"] !== undefined) throw new ConfigError("fill_form.schema and fill_form.fields are exclusive — one form");
+        if (schema === null || typeof schema !== "object" || Array.isArray(schema) || (schema as { type?: unknown }).type !== "object") {
+          throw new ConfigError('fill_form.schema must be a JSON Schema object with type "object"');
+        }
+        return { component, prompt, fields: [], schema: schema as Record<string, JsonValue> };
+      }
       return { component, prompt, fields: fields(config["fields"], "fill_form.fields") };
+    }
     case "confirm_action":
       return {
         component,
@@ -920,6 +937,16 @@ export function validateComponentResult(
     }
     case "fill_form": {
       const problems: string[] = [];
+      if (config.schema !== undefined) {
+        // The shape the form promises and nothing more: every required name answered. The values
+        // themselves are the schema's to judge, which the host that parked the form does.
+        const required = Array.isArray(config.schema["required"]) ? (config.schema["required"] as unknown[]).filter((n): n is string => typeof n === "string") : [];
+        for (const name of required) {
+          const raw = result[name];
+          if (raw === undefined || raw === null || raw === "") problems.push(`result.${name} is required`);
+        }
+        return problems.length === 0 ? { ok: true } : bad(problems.join("; "));
+      }
       for (const field of config.fields) {
         const present = Object.prototype.hasOwnProperty.call(result, field.name);
         const raw = result[field.name];

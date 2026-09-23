@@ -14,6 +14,14 @@
  * a card is picked up, asks about every column at once (which is what lets them light before the
  * pointer reaches them), and is thrown away when the card is put down.
  *
+ * ## The move table
+ *
+ * Every answer carries the table's verdict (`ConnectPlan.judgement`, decision 0005's rulings of
+ * 2026-09-22): a column the task cannot reach from where it stands does not light and says why; a
+ * column whose move ASKS first (a working task sent back, or into another workflow) lights and says
+ * the drop will ask — the board puts that question in front of the commit; and a target lacking
+ * inputs says they will be asked in the task's own conversation.
+ *
  * No React and no DOM, so both halves — the memo and the words — are tested as plain functions.
  */
 import type { BoardCard, BoardColumn, ConnectPlan, TaskConnectResult } from "@jaira/shared/browser";
@@ -103,6 +111,8 @@ export interface ConnectPreview {
   drop?: string;
   /** Why a drop here does nothing, in the host's words. */
   refused?: string;
+  /** The move table ASKS before this drop commits: the question the board puts to the person. */
+  confirm?: string;
 }
 
 const KIND: Record<ConnectPlan["resolution"], string> = { adopt: "Adopt into", move: "Move within", modify: "New transition" };
@@ -115,6 +125,10 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
   if (answer.status === "failed") return { kind: "Cannot move here", say: [answer.message], facts: [], refused: answer.message };
   const { result } = answer;
   const plan = result.plan;
+  // Unreachable from where the task stands (the move table's ILLEGAL row): said plainly, and nothing lights.
+  if (!result.ok && result.refusal.code === "illegal") {
+    return { kind: "Cannot move here", say: [result.refusal.message], facts: [], refused: "The workflow does not go there from where this task stands." };
+  }
   if (plan === undefined) {
     const refusal = result.ok ? "" : result.refusal.message;
     const candidates = result.ok ? [] : (result.refusal.candidates ?? []);
@@ -161,20 +175,6 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
     if (move?.stepsPast !== undefined) facts.push(["steps past ", { b: move.stepsPast }, ", where it stopped"]);
     if (move?.answersRule === true) facts.push(["the workflow is waiting for exactly this move"]);
     drop = move?.direction === "backward" ? "Drop to go back" : fastForward ? "Drop to fast-forward" : passes.length > 0 ? "Drop to skip ahead" : "Drop to move";
-  } else if (result.ok && (result.asking ?? []).length > 0) {
-    // `askAfter` (decision 0005 §4 "Inputs"): the target needs what nothing binds, so the drop makes
-    // the conversation — or uses the one there is — and the move waits for what it asks.
-    const own = last(card.workflow);
-    const target = last(plan.standsAt.stateId);
-    say =
-      plan.modification === "augmented"
-        ? ["This task's conversation asks for what ", { b: target }, " needs, then takes the move."]
-        : plan.modification === "cloned"
-          ? ["No workflow holds both ", { b: own }, " and ", { b: target }, ". This task's copy of the workflow gains a conversation to control it from, which asks before the move is taken."]
-          : ["No workflow holds both ", { b: own }, " and ", { b: target }, ". A new one is made around this task, with a conversation to control it from, which asks before the move is taken."];
-    if (plan.modification === "cloned") facts.push(["the copy stops following ", { b: own }]);
-    if (plan.modification === "new") facts.push(plan.adoptedAs !== undefined ? ["this task becomes its first child, ", { code: plan.adoptedAs }] : ["this task becomes its first child"]);
-    drop = plan.modification === "augmented" ? "Drop to ask in the conversation" : "Drop to open the conversation";
   } else {
     const own = last(card.workflow);
     say =
@@ -199,8 +199,8 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
   for (const input of plan.inputs) {
     if (input.via === "wire" && input.from !== undefined) facts.push([{ b: input.name }, input.each === "split" ? " takes one element of " : " comes from ", { b: input.from }]);
   }
-  // What the conversation will ask for, after what the workflow binds — the settled first.
-  if (result.ok) for (const input of result.asking ?? []) facts.push([{ b: input.name }, " will be asked there", ...(input.description !== undefined ? [` — ${input.description}`] : [])]);
+  // What the move will ASK for in this task's own conversation, after what the workflow binds.
+  if (result.ok) for (const input of plan.question ?? []) facts.push([{ b: input.name }, " will be asked in this task's conversation", ...(input.description !== undefined ? [` — ${input.description}`] : [])]);
   if (plan.asks.length > 0) facts.push([{ b: count(plan.asks.length, "input") }, " can be given afterwards"]);
   if (plan.branch !== undefined) facts.push(["works on branch ", { b: plan.branch }]);
 
@@ -212,6 +212,18 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
     const refused = missing.length > 0 ? `${count(missing.length, "required input")} would not be bound.` : result.refusal.message;
     return { kind: KIND[plan.resolution], say, facts, refused };
   }
+  // The move table's ASK cells: the drop still commits, once the person has said yes to this.
+  const judgement = plan.judgement;
+  if (judgement?.confirm !== undefined) {
+    return {
+      kind: KIND[plan.resolution],
+      say,
+      facts,
+      drop: judgement.confirm === "stop-and-rewind" ? "Drop, then confirm: stop it and go back" : "Drop, then confirm: pause it and move it",
+      ...(judgement.sentence !== undefined ? { confirm: judgement.sentence } : {}),
+    };
+  }
+  if ((plan.question ?? []).length > 0) drop = `${drop}, then answer in its conversation`;
   return { kind: KIND[plan.resolution], say, facts, drop };
 }
 

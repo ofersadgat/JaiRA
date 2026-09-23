@@ -9,7 +9,7 @@ surfaces: [ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/run-view]
 reuses: [ui/components/task-name, ui/components/status-pill]
 implemented_by: [packages/app/src/renderer/board.tsx, packages/app/src/renderer/pill.tsx, packages/app/src/renderer/runViews.tsx]
 verified_by: [packages/app/test/board.test.ts, packages/app/test/connectDrag.test.ts, packages/app/test/pill.test.ts]
-mockups: [ui/assets/task-card/loading.html, ui/assets/task-card/queued.html, ui/assets/task-card/holding.html, ui/assets/task-card/running.html, ui/assets/task-card/waiting.html, ui/assets/task-card/stopped.html, ui/assets/task-card/error.html, ui/assets/task-card/success.html, ui/assets/task-card/selected.html, ui/assets/task-card/adopted.html, ui/assets/task-card/undo.html, ui/assets/task-card/execution.html]
+mockups: [ui/assets/task-card/loading.html, ui/assets/task-card/queued.html, ui/assets/task-card/holding.html, ui/assets/task-card/running.html, ui/assets/task-card/waiting.html, ui/assets/task-card/stopped.html, ui/assets/task-card/error.html, ui/assets/task-card/success.html, ui/assets/task-card/selected.html, ui/assets/task-card/adopted.html, ui/assets/task-card/undo.html, ui/assets/task-card/next.html, ui/assets/task-card/execution.html]
 siblings: [ui/components/task-board, ui/components/instance-index, ui/components/conversation-row]
 ---
 
@@ -47,6 +47,7 @@ A borderless rounded tile in a board column: the task's name in mono with a stat
 | selected | Ground `--tint-accent` and the name at weight 600. On the Tasks view several cards can be selected at once, each tinted. | [selected.html](../assets/task-card/selected.html) |
 | adopted | A task another task took up as one of its children: drawn under that task's card, 14px in, with a 2px left edge of `--accent` mixed into `--line`. Its second line reads `adopted · {the state it ran}`; pill and far end as usual. It cannot be picked up: it moves with the task above it. | [adopted.html](../assets/task-card/adopted.html) |
 | undo | A task a drop has just made or moved: the far end of its second line is the link `Undo`, in place of the word or the age, while the drop is still the last thing the task did — through a restart, and while the run the drop started is going, but not once the task does anything past where the drop put it or anything else is decided about it. | [undo.html](../assets/task-card/undo.html) |
+| next | On the Tasks view a card that stands somewhere offers its NEXT TRANSITIONS between its name and its second line: one small pill per move its process defines out of where it stands — the next state, a decision's branches, the move a rule is waiting for (tinted `--tint-accent`), a loop back (`↩` in `--dim`) — each `→ {label}`. Pressing one takes that move, as a drop on its column would; a loop back of a working task asks first, in the card's column. A move that cannot be served right now (a branch the machine would have to be run to, with nobody to answer on the way) is a dashed, dimmed pill whose tooltip says why. A finished task has none. | [next.html](../assets/task-card/next.html) |
 | execution | One pass of a state on a run's board: the pass chip, the inputs, the duration and the raw status. Passes stack oldest first. | [execution.html](../assets/task-card/execution.html) |
 
 ## A single click describes the card and a double click enters it

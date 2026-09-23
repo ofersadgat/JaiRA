@@ -157,7 +157,7 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
     },
     move_task: {
       description:
-        "Move a task to another state — forward, backward, or across workflows. The host finds or makes the workflow that relates the two. `task` absent means the task this conversation is. `skip: true` goes there directly instead of running what lies between. `inputs` works as in `start_task`: a call that leaves a required input open does nothing and answers `missing`.",
+        "Move a task to another state — forward, backward, or across workflows. The host finds or makes the workflow that relates the two. `task` absent means the task this conversation is. A move is judged from where the task stands: a state ahead that the workflow's own transitions reach, a state it already entered, or another workflow. A sideways jump, or a branch whose decision was already made, is refused with why (`illegal`). A move of a WORKING task backward or into another workflow first needs the person's yes: the answer is `confirm` with the question, and you call again with `confirm: true` only once they agreed. `skip: true` goes there directly instead of running what lies between. Give what you can infer in `inputs`; what is still required is asked of the person in the task's own conversation, and the answer is `asked` — the move is taken when they answer.",
       inputSchema: {
         type: "object",
         properties: {
@@ -165,6 +165,7 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
           to: { type: "string", description: "The target state id, e.g. `feature/ux`." },
           workflow: { type: "string", description: "The workflow the target is meant in, when the answer said more than one holds it." },
           skip: { type: "boolean", description: "Go directly; what is stepped over is recorded as skipped." },
+          confirm: { type: "boolean", description: "The person agreed to what a `confirm` answer asked: stop the working task and go back, or pause it and move it." },
           ...SUPPLIED_PROPERTIES,
         },
         required: ["to"],
@@ -181,6 +182,7 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
             ...(typeof args["task"] === "string" && args["task"].length > 0 ? { task: args["task"] } : {}),
             ...(typeof args["workflow"] === "string" && args["workflow"].length > 0 ? { workflow: args["workflow"] } : {}),
             ...(args["skip"] === true ? { skip: true } : {}),
+            ...(args["confirm"] === true ? { confirm: true } : {}),
             ...supplied,
           },
           callOf(ctx),

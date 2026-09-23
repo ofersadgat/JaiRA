@@ -203,17 +203,25 @@ const no = (result: TaskConnectResult): Extract<TaskConnectResult, { ok: false }
 };
 
 describe("rule 1 — the target is in the task's workflow", () => {
-  it("moves BACKWARD as the workflow's own machinery does, and needs no skip", async () => {
-    const taskId = await standingIn("flow", 2); // parked at c
+  it("goes BACK as the workflow's own machinery does — at once, from a task waiting on the person, with no question asked", async () => {
+    const taskId = await standingIn("flow", 2); // parked at c: waiting for the person's input
     const dry = ok(await service.connectTask({ taskId, target: "flow/a", dryRun: true }));
-    expect(dry.plan).toMatchObject({ resolution: "move", workflow: "flow", standsAt: { path: ["a"], stateId: "flow/a" }, move: { direction: "backward", to: "a", passes: [] } });
+    expect(dry.plan).toMatchObject({
+      resolution: "move",
+      workflow: "flow",
+      standsAt: { path: ["a"], stateId: "flow/a" },
+      move: { direction: "backward", to: "a", passes: [] },
+      judgement: { where: "behind", activity: "waiting-input", way: "back" },
+    });
+    expect(dry.plan.judgement?.confirm).toBeUndefined();
 
     const done = ok(await service.connectTask({ taskId, target: "flow/a" }));
-    expect(done.moved).toBe("held");
-    // Held until the state it stands in ends; then `a` again, as the next occurrence.
-    service.submitInteraction(service.pendingInteractions()[0]!.requestId, { confirmed: true });
+    // Taken NOW — the gate it waited on is not the person's to answer first — and `a` is entered
+    // again as the next occurrence, what the task did since kept in its history.
+    expect(done.moved).toBe("taking");
     expect((await parked()).state).toBe("a");
     expect(journal(taskId).filter((e) => e.type === "transition.taken")).toMatchObject([{ to: "a", by: "person" }]);
+    expect(ended(taskId)).toContainEqual(["c", "skipped"]);
   });
 
   it("goes to the very NEXT state without skip, FAST-FORWARDS over states by default, and steps over them with skip", async () => {
@@ -330,21 +338,18 @@ describe("rule 2 — a real workflow holds both", () => {
     expect(ux).toMatchObject({ state: "ux", inputs: { flag: true } });
   });
 
-  it("reaches a target past the next state only by skip, and refuses one whose binding reads what was skipped", async () => {
+  it("reaches a target past the next state only by skip, and ASKS for an input whose binding reads what was skipped", async () => {
     const product = await ran("feat/product", 1);
     // Without skip it is a fast-forward — the plan says so, and runs `ux` on the way.
     const over = ok(await service.connectTask({ taskId: product, target: "feat/build", dryRun: true }));
     expect(over.plan).toMatchObject({ resolution: "adopt", forward: "fast-forward", move: { direction: "forward", to: "build", passes: ["ux"] } });
 
-    // `ship` reads `ux`, which a skip steps over: the input would not bind, and the refusal says which, with its schema.
-    const unbound = no(await service.connectTask({ taskId: product, target: "feat/ship", skip: true }));
-    expect(unbound.refusal.code).toBe("inputs-missing");
-    expect(unbound.refusal.missing).toEqual([
+    // `ship` reads `ux`, which a skip steps over: the input would not bind, so the move ASKS for it in
+    // the task's own conversation — the dry run says which, with its schema — rather than refusing.
+    const unbound = ok(await service.connectTask({ taskId: product, target: "feat/ship", skip: true, dryRun: true }));
+    expect(unbound.plan.question).toEqual([
       { state: "feat/ship", name: "flag", schema: BOOLEAN, description: "Whether the step before was confirmed.", reason: "its binding reads 'ux', which has not run" },
     ]);
-    expect(unbound.refusal.message).toBe(
-      `adopting 'Ran feat/product' into 'feat' leaves required inputs unbound: 'flag' of 'feat/ship' ({"type":"boolean"}) — its binding reads 'ux', which has not run`,
-    );
     expect(metaOf(product)?.origin).toBeUndefined();
 
     const done = ok(await service.connectTask({ taskId: product, target: "feat/build", skip: true }));
@@ -499,22 +504,24 @@ describe("rule 3 — the workflow is modified", () => {
   });
 
   it("CLONED: a task standing inside a real workflow has its copy diverge — and UNDO puts it back under its pin", async () => {
-    const taskId = await standingIn("flow", 1); // a confirmed, parked at b
-    // Running: a new transition is picked up at the next load, so it is refused until it is paused.
-    const running = no(await service.connectTask({ taskId, target: "lib/second" }));
-    expect(running.refusal).toMatchObject({
-      code: "running",
-      message: "'In flow' is running, and no workflow relates 'flow' to 'lib/second': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it",
-    });
-    await service.cancelTask(taskId);
-    await until(() => statusOf(taskId) === "canceled", "the task to stop");
+    const taskId = await standingIn("flow", 1); // a confirmed, parked at b: waiting for the person
     const pinned = read((p) => p.runtime.get(taskId)!);
     expect(pinned.documentId).toBeUndefined();
 
+    // A new transition (the move table's last row): a task only WAITING is moved without a question.
     const dry = ok(await service.connectTask({ taskId, target: "lib/second", dryRun: true }));
-    expect(dry.plan).toMatchObject({ resolution: "modify", modification: "cloned", workflow: "flow", inputs: [{ name: "flag", via: "wire", from: "a.confirmed" }] });
+    expect(dry.plan).toMatchObject({
+      resolution: "modify",
+      modification: "cloned",
+      workflow: "flow",
+      inputs: [{ name: "flag", via: "wire", from: "a.confirmed" }],
+      judgement: { where: "elsewhere", activity: "waiting-input", way: "move" },
+    });
+    expect(dry.plan.judgement?.confirm).toBeUndefined();
     expect(documents()).toEqual([]);
 
+    // Its engine runs the version it loaded, so the move PAUSES it first — the stop a person used to
+    // be told to make — and then takes the new transition.
     const done = ok(await service.connectTask({ taskId, target: "lib/second" }));
     expect(done.taskId).toBe(taskId);
     expect(done.undo).toMatchObject({ kind: "move", taskId, pin: { snapshotHash: pinned.snapshotHash } });
@@ -529,153 +536,21 @@ describe("rule 3 — the workflow is modified", () => {
     expect(journal(taskId).some((e) => e.type === "transition.taken")).toBe(false);
   });
 
-  it("refuses a target whose required input nothing fits — saying which, with its schema — and writes nothing", async () => {
+  it("ASKS for a target's required input nothing fits — in the task's own conversation, with its schema — and moves nothing yet", async () => {
     const product = await ran("feat/product", 1);
     const before = { tasks: taskIds(), documents: documents() };
-    for (const dryRun of [true, false]) {
-      const refusal = no(await service.connectTask({ taskId: product, target: "lib/needs", dryRun }));
-      expect(refusal.refusal.code).toBe("inputs-missing");
-      expect(refusal.refusal.missing).toEqual([
-        { state: "lib/needs", name: "text", schema: { type: "string", minLength: 3 }, description: "What to call it.", reason: "nothing the task produced fits it" },
-      ]);
-      expect(refusal.refusal.message).toBe(
-        `a move of 'Ran feat/product' to 'lib/needs' leaves required inputs unbound: 'text' of 'lib/needs' ({"type":"string","minLength":3}) — nothing the task produced fits it`,
-      );
-      expect(refusal.plan).toMatchObject({ resolution: "modify", modification: "new" });
-    }
+    const TEXT = { state: "lib/needs", name: "text", schema: { type: "string", minLength: 3 }, description: "What to call it.", reason: "nothing the task produced fits it" };
+    const dry = ok(await service.connectTask({ taskId: product, target: "lib/needs", dryRun: true }));
+    expect(dry.plan).toMatchObject({ resolution: "modify", modification: "new", question: [TEXT] });
+    const asked = ok(await service.connectTask({ taskId: product, target: "lib/needs" }));
+    expect(asked.asked).toMatchObject({ taskId: product, missing: [TEXT] });
+    expect(asked.moved).toBeUndefined();
+    expect(asked.undo).toBeUndefined();
+    // Nothing moved: no document, no task, the source its own — only the question, in ITS conversation.
     expect({ tasks: taskIds(), documents: documents() }).toEqual(before);
-    expect(no(await service.connectTask({ taskId: product, target: "lib/nowhere" })).refusal).toMatchObject({ code: "unknown-target", message: "no state 'lib/nowhere' was found on the workflow path" });
-  });
-});
-
-describe("askAfter — a drop whose target needs what nothing binds (decision 0005 §4 'Inputs')", () => {
-  /** The model double: the opening turn is answered with the question, a reply with an acknowledgement. */
-  const QUESTION = "What should the thing be called?";
-  const fake = [
-    { promptIncludes: "Ask the person", output: QUESTION },
-    { output: "Thanks — starting it." },
-  ] as unknown as JsonValue;
-  const TEXT = { state: "lib/needs", name: "text", schema: { type: "string", minLength: 3 }, description: "What to call it.", reason: "nothing the task produced fits it" };
-  /** The conversation's turns, as the Chat view reads them. */
-  const thread = (taskId: string) => service.chatThread({ taskId })?.session.turns ?? [];
-  const chatTurnsSettled = (taskId: string): number => journal(taskId).filter((e) => e.type === "operation.completed" && e.instanceId.startsWith("chat:")).length;
-
-  it("says so in the dry run — no refusal, the inputs it will ask for — and writes nothing", async () => {
-    const product = await ran("feat/product", 1);
-    const before = { tasks: taskIds(), documents: documents() };
-    const dry = ok(await service.connectTask({ taskId: product, target: "lib/needs", dryRun: true, askAfter: true }));
-    expect(dry.asking).toEqual([TEXT]);
-    expect(dry.plan).toMatchObject({ resolution: "modify", modification: "new" });
-    expect(dry.plan.move).toBeUndefined();
-    expect(dry.taskId).toBeUndefined();
-    expect({ tasks: taskIds(), documents: documents() }).toEqual(before);
-  });
-
-  it("makes the document and its conversation instead of refusing, and the conversation's FIRST turn asks for exactly those inputs", async () => {
-    const product = await ran("feat/product", 1);
-    const done = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake }));
-    const parent = done.taskId!;
-    expect(parent).not.toBe(product);
-    expect(done.asking).toEqual([TEXT]);
-    expect(done.moved).toBeUndefined();
-    expect(documents()).toHaveLength(1);
-    expect(metaOf(product)?.origin).toMatchObject({ kind: "adopt", taskId: parent });
-    // The conversation started idle: nothing of the machine ran, and the target is not mounted.
-    expect(statusOf(parent)).toBe("queued");
-    expect(journal(parent).some((e) => e.type === "operation.started" && !e.instanceId.startsWith("chat:"))).toBe(false);
-
-    // Its opening turn is the question — a turn of the conversation, not of the machine.
-    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
-    const [opening, question] = thread(parent);
-    expect(question).toMatchObject({ role: "assistant", text: QUESTION });
-    // What the model was handed: what happened, and each input by its declared description and
-    // schema — the target's own name passed through, nothing the platform named.
-    expect(opening?.text).toContain(`"Ran feat/product" was moved to lib/needs.`);
-    expect(opening?.text).toContain("`text`: What to call it. — schema {\"type\":\"string\",\"minLength\":3}");
-    expect(opening?.text).toContain("call `start_task` with state `lib/needs`");
-    // The APP wrote it, on the person's behalf — and the record says so on the message (`MessageAuthor`).
-    expect(opening?.by).toBe("host");
-    expect(question?.by).toBeUndefined();
-    expect(service.pendingInteractions()).toEqual([]);
-  });
-
-  it("takes the person's answer: the conversation's start_task mounts the target with the value recorded ASKED", async () => {
-    const product = await ran("feat/product", 1);
-    const parent = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake })).taskId!;
-    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
-
-    // The person answers in the conversation — the composer's turn, continuing the thread…
-    const host = journal(parent).flatMap((e) => (e.type === "instance.entered" && e.parentInstanceId === undefined ? [e.instanceId] : []))[0]!;
-    await service.sendChatMessage({ taskId: parent, instanceId: host, message: "Call it Widget.", fake });
-    expect(thread(parent).map((t) => t.role)).toEqual(["user", "assistant", "user", "assistant"]);
-    // What the person typed is theirs: only the opening turn is marked as the app's.
-    expect(thread(parent).map((t) => t.by)).toEqual(["host", undefined, undefined, undefined]);
-    // …and the model, having read it, calls its own start_task naming what the person answered.
-    const started = (await createWorkflowTools(service.workflowHostFor(dir, parent))["start_task"]!.run({ state: "lib/needs", inputs: { text: "Widget" }, asked: ["text"] } as never, {} as never)) as Record<string, JsonValue>;
-    expect(started, JSON.stringify(started)).toMatchObject({ ok: true, state: "lib/needs", inputs: [{ name: "text", via: "asked" }] });
-    expect(await parked()).toMatchObject({ state: "needs", inputs: { text: "Widget" } });
-    const supplied = journal(parent).find((e) => (e as { type: string }).type === "jaira.supplied") as unknown as { provenance: Record<string, { via: string }> };
-    expect(supplied.provenance).toEqual({ text: { via: "asked" } });
-  });
-
-  it("is undone like any adoption — the task the drop made goes, conversation and all", async () => {
-    const product = await ran("feat/product", 1);
-    const done = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake }));
-    const parent = done.taskId!;
-    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
-    // A turn of its conversation is not work of its own: the task is removed, not kept.
-    expect(await service.undoConnect({ taskId: parent })).toEqual({ taskId: product, removed: parent });
-    expect(metaOf(parent)).toBeUndefined();
     expect(metaOf(product)?.origin).toBeUndefined();
-    expect(statusOf(product)).toBe("completed");
-  });
-
-  it("CLONED: the copy gains the conversation, which asks; UNDO cuts the turn and puts the pin back without resuming", async () => {
-    const taskId = await standingIn("flow", 1);
-    await service.cancelTask(taskId);
-    await until(() => statusOf(taskId) === "canceled", "the task to stop");
-    const pinned = read((p) => p.runtime.get(taskId)!);
-    const done = ok(await service.connectTask({ taskId, target: "lib/needs", askAfter: true, fake }));
-    expect(done.taskId).toBe(taskId);
-    expect(done.asking).toEqual([TEXT]);
-    expect(read((p) => p.runtime.get(taskId)!.documentId)).toBeDefined();
-    await until(() => chatTurnsSettled(taskId) === 1, "the opening question");
-    expect(thread(taskId).at(-1)).toMatchObject({ role: "assistant", text: QUESTION });
-
-    expect(done.undo).toMatchObject({ kind: "move", taskId, asking: true, pin: { snapshotHash: pinned.snapshotHash } });
-    await service.undoConnect({ taskId });
-    const back = read((p) => p.runtime.get(taskId)!);
-    expect(back.documentId).toBeUndefined();
-    expect(back.status).toBe("canceled");
-    expect(chatTurnsSettled(taskId)).toBe(0);
-    expect(service.pendingInteractions()).toEqual([]);
-  });
-
-  it("leaves every OTHER refusal as it was: an unknown target, a running task, a move within a workflow", async () => {
-    const product = await ran("feat/product", 1);
-    expect(no(await service.connectTask({ taskId: product, target: "lib/nowhere", askAfter: true })).refusal.code).toBe("unknown-target");
-    // Rule 2's missing input is still refused: only a modified workflow asks after.
-    expect(no(await service.connectTask({ taskId: product, target: "feat/ship", skip: true, askAfter: true })).refusal.code).toBe("inputs-missing");
-    const running = await standingIn("flow", 1);
-    expect(no(await service.connectTask({ taskId: running, target: "lib/needs", askAfter: true })).refusal.code).toBe("running");
-  });
-
-  it("offers Undo while the conversation asks and is answered, and ends it when its start_task mounts the target", async () => {
-    const product = await ran("feat/product", 1);
-    const parent = ok(await service.connectTask({ taskId: product, target: "lib/needs", askAfter: true, start: false, fake })).taskId!;
-    await until(() => chatTurnsSettled(parent) === 1, "the opening question");
-    const undoable = (): boolean | undefined => service.listTasks().find((t) => t.taskId === parent)?.undoable;
-    expect(undoable()).toBe(true);
-    // The person answering in words is still the conversation the drop opened…
-    const host = journal(parent).flatMap((e) => (e.type === "instance.entered" && e.parentInstanceId === undefined ? [e.instanceId] : []))[0]!;
-    await service.sendChatMessage({ taskId: parent, instanceId: host, message: "Call it Widget.", fake });
-    expect(undoable()).toBe(true);
-    // …its start_task mounting the target is not: from here, taking the drop back is a rewind.
-    await createWorkflowTools(service.workflowHostFor(dir, parent))["start_task"]!.run({ state: "lib/needs", inputs: { text: "Widget" }, asked: ["text"] } as never, {} as never);
-    expect(await parked()).toMatchObject({ state: "needs" });
-    expect(undoable()).toBeUndefined();
-    await expect(service.undoConnect({ taskId: parent })).rejects.toThrow(/has moved on since the drop \(the conversation started the target\)/);
-    expect(metaOf(product)?.origin).toMatchObject({ kind: "adopt", taskId: parent });
+    expect(service.pendingInteractions()).toMatchObject([{ requestId: asked.asked!.requestId, taskId: product, component: "fill_form", moves: true }]);
+    expect(no(await service.connectTask({ taskId: product, target: "lib/nowhere" })).refusal).toMatchObject({ code: "unknown-target", message: "no state 'lib/nowhere' was found on the workflow path" });
   });
 });
 
@@ -782,31 +657,6 @@ describe("UNDO outlives the process that handed it out", () => {
     expect(metaOf(product)?.origin).toBeUndefined();
   });
 
-  it("keeps askAfter's `asking` on the kept token: after a restart, Undo still takes the drop's conversation back without resuming", async () => {
-    const fake = [{ promptIncludes: "Ask the person", output: "What should the thing be called?" }, { output: "Thanks." }] as unknown as JsonValue;
-    const chatTurnsSettled = (id: string): number => journal(id).filter((e) => e.type === "operation.completed" && e.instanceId.startsWith("chat:")).length;
-    const taskId = await standingIn("flow", 1);
-    service.cancelTask(taskId);
-    await until(() => statusOf(taskId) === "canceled", "the task to stop");
-    const pinned = read((p) => p.runtime.get(taskId)!);
-    const done = ok(await service.connectTask({ taskId, target: "lib/needs", askAfter: true, fake }));
-    expect(done.undo).toMatchObject({ kind: "move", asking: true });
-    await until(() => chatTurnsSettled(taskId) === 1, "the opening question");
-    expect(metaOf(taskId)?.connectUndo?.undo).toMatchObject({ kind: "move", taskId, asking: true });
-
-    await service.close();
-    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
-    await service.open(dir);
-    // Nothing handed in but the card: the kept token, `asking` and all.
-    expect(await service.undoConnect({ taskId })).toEqual({ taskId });
-    const back = read((p) => p.runtime.get(taskId)!);
-    expect(back.documentId).toBeUndefined();
-    expect(back.snapshotHash).toBe(pinned.snapshotHash);
-    // Cut WITHOUT the resume a plain rewind would do: the conversation's turn is gone and the task stands stopped.
-    expect(back.status).toBe("canceled");
-    expect(chatTurnsSettled(taskId)).toBe(0);
-    expect(metaOf(taskId)?.connectUndo).toBeUndefined();
-  });
 });
 
 describe("UNDO means only 'take back what I just did'", () => {
@@ -815,11 +665,12 @@ describe("UNDO means only 'take back what I just did'", () => {
 
   it("a held move is the drop's until the state it waits for FINISHES — that is the task's own work, and Undo is over", async () => {
     const taskId = await standingIn("flow", 2); // parked at c
-    const done = ok(await service.connectTask({ taskId, target: "flow/a" }));
+    // The state that comes next anyway is taken when the one the task stands in ends: held.
+    const done = ok(await service.connectTask({ taskId, target: "flow/d" }));
     expect(done.moved).toBe("held");
     expect(undoable(taskId)).toBe(true);
     service.submitInteraction(service.pendingInteractions()[0]!.requestId, { confirmed: true }); // c finishes
-    expect((await parked()).state).toBe("a");
+    expect((await parked()).state).toBe("d");
     expect(undoable(taskId)).toBeUndefined();
     await expect(service.undoConnect({ taskId })).rejects.toThrow(/has moved on since the drop \('c' finished after the drop\)/);
     expect(metaOf(taskId)?.connectUndo).toBeUndefined();
@@ -827,7 +678,7 @@ describe("UNDO means only 'take back what I just did'", () => {
 
   it("taken back while held: the run is stopped, the move goes, and the task stands where it stood", async () => {
     const taskId = await standingIn("flow", 2); // parked at c
-    ok(await service.connectTask({ taskId, target: "flow/a" }));
+    ok(await service.connectTask({ taskId, target: "flow/d" }));
     expect(hostRows(taskId, "jaira.moveHeld")).toBe(1);
     expect(await service.undoConnect({ taskId })).toEqual({ taskId });
     seen.clear();
@@ -863,7 +714,7 @@ describe("UNDO means only 'take back what I just did'", () => {
     const taskId = await ran("flow", 4);
     ok(await service.connectTask({ taskId, target: "flow/b" }));
     expect((await parked()).state).toBe("b");
-    const second = ok(await service.connectTask({ taskId, target: "flow/a" }));
+    const second = ok(await service.connectTask({ taskId, target: "flow/c" }));
     expect(second.moved).toBe("held");
     expect(metaOf(taskId)?.connectUndo?.undo).toEqual(second.undo);
     expect(undoable(taskId)).toBe(true);

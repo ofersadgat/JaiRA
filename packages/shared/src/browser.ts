@@ -40,6 +40,7 @@ export * from "./grammars";
 export * from "./userEvents";
 export * from "./adopt";
 export * from "./connect";
+export * from "./move";
 export * from "./workflowTools";
 export * from "./fastForward";
 export * from "./hostRows";

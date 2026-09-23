@@ -53,12 +53,17 @@ const within: TaskConnectResult = {
 const back = dry(plan({ standsAt: { path: ["product"], stateId: "feature/product" }, move: { direction: "backward", to: "product", path: [], passes: [] }, inputs: [{ name: "issue", via: "wire", from: "inputs.issue" }] }));
 const fresh = dry(plan({ resolution: "modify", modification: "new", adoptedAs: "product", mount: "plain", workflow: "jaira:dynamic:…", standsAt: { path: ["explore"], stateId: "explore" }, inputs: [{ name: "brief", via: "wire", from: "product.brief" }] }));
 const split = dry(plan({ resolution: "modify", modification: "new", adoptedAs: "product", mount: "split", workflow: "jaira:dynamic:…", standsAt: { path: ["item"], stateId: "feature/ux/item" }, inputs: [{ name: "item", via: "wire", from: "product.items", each: "split" }] }));
-// `askAfter`: inputs nothing binds are asked in the conversation the drop makes, not refused.
+// Inputs nothing binds are asked in the task's OWN conversation (decision 0005, the rulings of 2026-09-22).
 const asked: TaskConnectResult = {
   ok: true,
   dryRun: true,
-  plan: plan({ resolution: "modify", modification: "cloned", standsAt: { path: [], stateId: "explore" }, inputs: [{ name: "brief", via: "wire", from: "product.brief" }] }),
-  asking: [{ state: "explore", name: "question", schema: { type: "string" }, description: "What to find out, in a sentence.", reason: "nothing the task produced fits it" }],
+  plan: plan({
+    resolution: "modify",
+    modification: "cloned",
+    standsAt: { path: ["explore"], stateId: "explore" },
+    inputs: [{ name: "brief", via: "wire", from: "product.brief" }],
+    question: [{ state: "explore", name: "question", schema: { type: "string" }, description: "What to find out, in a sentence.", reason: "nothing the task produced fits it" }],
+  }),
 };
 const running: TaskConnectResult = {
   ok: false,

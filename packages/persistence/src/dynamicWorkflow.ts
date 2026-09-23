@@ -124,13 +124,6 @@ export interface GenerateInput {
   targetKey?: string;
   /** Values the caller settled, by the target's own declared input. They win over a wire. */
   supplied?: Readonly<Record<string, SuppliedValue>>;
-  /**
-   * A NEW document whose target still has required inputs open is generated anyway, WITHOUT the
-   * target: the conversation and what already ran, and nothing else. It is what a drop makes when
-   * the conversation has to ask first (step 6) — the conversation's own `start` mounts the target
-   * afterwards, as an ordinary augmentation, with what it was told. `unsettled` still says what.
-   */
-  deferTarget?: boolean;
 }
 
 export interface GeneratedWire {
@@ -185,7 +178,7 @@ export interface GenerateResult {
   targetKey: string;
   /** True when the document already mounted the target: nothing to add, and no new version to write. */
   existing: boolean;
-  /** {@link GenerateInput.deferTarget} applied: the document was generated and the target is NOT in it. */
+  /** The document holds no target: a conversation grafted on and nothing else (`ensureControlConversation`). */
   deferred?: boolean;
   mount: "plain" | "split";
   wires: GeneratedWire[];
@@ -415,10 +408,6 @@ export function generateDynamicWorkflow(input: GenerateInput): GenerateResult {
 
   const mount: GenerateResult["mount"] = splitOn !== undefined ? "split" : "plain";
   if (unsettled.some((entry) => entry.required)) {
-    if (input.deferTarget === true && base.kind === "new" && Object.keys(additions.children).length > 0) {
-      const document = withAdditions(rootFrom(base.conversation), additions);
-      return { ok: true, document, additions, targetKey, existing: false, deferred: true, mount, wires, literals, unsettled };
-    }
     return { ok: false, additions: { children: {}, transitions: [] }, targetKey, existing: false, mount, wires, literals, unsettled };
   }
 

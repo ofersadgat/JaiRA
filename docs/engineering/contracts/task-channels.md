@@ -117,14 +117,15 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 | `taskId` | string | yes | the task to send |
 | `target` | string | yes | a state id; a workflow's own root id means "into this workflow" |
 | `workflow` | string | no | the composite that holds the target; narrows the second resolution to it and skips the first when it is not the task's own |
+| `path` | string[] | no | the exact mount, as child keys from the task's root — what a next-transition chip hands back; a path that does not mount the target is refused `unknown-target`. Absent: the mount the move table can take, ahead before behind |
+| `confirmed` | boolean | no | the person said yes to the move's ASK cell (`plan.judgement.confirm`); without it such a move is refused `confirm`. A dry run never needs it |
 | `forward` | `"fast-forward"` or `"skip"` | no | how a forward move crosses the states between; absent reads `fast-forward`: the states between RUN, with the task's controlling conversation answering on the way (`task:fastForward`) |
 | `skip` | boolean | no | `true` is `forward: "skip"` |
 | `by` | `"person"` or `"control"` | no | who asked, journaled on the move |
 | `dryRun` | boolean | no | answer what would happen and change nothing: no task, no document, no pin, no journal row |
 | `start` | boolean | no | `false` leaves a task the connect makes queued where no move has to be taken; a move an engine has to take starts one regardless |
 | `supplied` | `{[input]: {value, via: "inferred" or "asked", confidence?}}` | no | values a conversation hands the target by its own declared names; journaled `jaira.supplied` |
-| `askAfter` | boolean | no | what the board's drop and its hover send: where a MODIFIED workflow (`plan.resolution: "modify"`) leaves required inputs of the target open, do not refuse — make the conversation without the target and answer `asking`. The app then gives that conversation its opening turn, which asks for them in words; its `start_task` mounts the target. A dry run answers the same `asking` and writes nothing. A `move` or `adopt` that leaves a required input open is still refused |
-| `interactions`, `fake` | as `task:start` | no | script a run the connect starts; `fake` also answers the opening turn `askAfter` gives |
+| `interactions`, `fake` | as `task:start` | no | script a run the connect starts |
 | `project` | `ProjectRef` | no | as above |
 
 Resolution, in order, stopping at the first that applies:
@@ -135,9 +136,18 @@ Resolution, in order, stopping at the first that applies:
 | `adopt` | one composite mounts the task's root state as a child and either is the target or mounts it as a child too; tried only for a task in no document that nothing made | `task:adopt` into a new task of that composite, then `task:move` of the new task unless the target is what comes next anyway |
 | `modify` | neither | `generateDocumentVersion`: `new` for a task that finished well, whose task is made and which adopts the source as its first child; `augmented` for a task already in a document; `cloned` for one standing inside a real workflow. Then `task:move` |
 
-`TaskConnectResult` is `{ok: true, dryRun, plan, taskId?, moved?, controlTaskId?, undo?, asking?}` or `{ok: false, dryRun, refusal, plan?}`. `taskId` is the task that stands at the target: the moved task, or the parent a connect made, absent from a dry run that would make one. `moved` is `task:move`'s status, or `fast-forwarding` for a forward move that runs the states between, when `controlTaskId` names the conversation answering on the way. `asking` answers `askAfter`: the required inputs the conversation `taskId` is about to ask for, as `ConnectMissingInput`s; nothing moved, so `moved` is absent. A refusal carries `plan` wherever the resolution got far enough to have one, so a preview can say what was refused.
+`TaskConnectResult` is `{ok: true, dryRun, plan, taskId?, moved?, controlTaskId?, undo?, asked?}` or `{ok: false, dryRun, refusal, plan?}`. `taskId` is the task that stands at the target: the moved task, or the parent a connect made, absent from a dry run that would make one. `moved` is `task:move`'s status, or `fast-forwarding` for a move the machine runs to, when `controlTaskId` names the conversation answering on the way. `asked` is `{requestId, taskId, missing}`: the move is waiting on the INPUT QUESTION parked in the moved task's own conversation, and nothing has moved, so `moved` and `undo` are absent. A refusal carries `plan` wherever the resolution got far enough to have one, so a preview can say what was refused.
 
-An `askAfter` connect that answers `asking` makes, for `new`, the document, its task and the adoption, the task queued and its conversation idle; for `cloned`, the diverged copy with the conversation grafted on; for `augmented`, nothing. The app then runs one turn of that conversation, as a typed turn runs, whose message is `askingMessage` from `persistence/connect.ts`: what the person did, each open input by its declared name, description and schema, and to ask for them in plain words and call `start_task` with the answers named in `asked`. The model's reply is the question. An idle conversation's first turn begins a new session named `chat:<root instance>`, so the conversation has a thread from then on.
+**The move table** ([decision 0005](../decisions/0005-connect.md), "The rulings of 2026-09-22"; `@jaira/shared` `move.ts`) decides what each move may be, before any resolution writes anything. Its rows are where the target is from where the task stands (`persistence/moveLegality.ts`): `behind` — the task entered it, or a move stepped over it, an ancestor of where it stands included; `ahead` — reachable through the transitions the workflow DEFINES (the sequence's walk, a rule written on a child or on the state, a composite ending and its parent walking on, a composite entered at its first child or a child its own rules enter), whatever the guards say; `unreachable` — neither; `elsewhere` — another workflow, or any target of a task with nothing defined ahead of it (a finished task, a task in its last state). Its columns are what the task is doing, which the app reads from what it holds (`AppService.activityOf`): `waiting-input` while a gate, an agent's question or an approval of the task is open (a move's own question does not count), else `waiting-event` while a rule of the task waits on a user event, else `working` while an engine holds it; `stopped` and `finished` otherwise. A host without the hubs (the CLI) reads the row and the parked gates (`activityFromRow`).
+
+| Where | working | waiting for input, or for an event | stopped, finished |
+| --- | --- | --- | --- |
+| `ahead` | the next state is taken when the current one ends (`way: "next"`); anything further, or off the spine, is RUN to (`fast-forward`) | the same; a rule waiting on exactly this move is answered (`event`) | the same |
+| `behind` | ASK `stop-and-rewind`; confirmed, the directed transition is taken NOW (`skip`), the state stood in recorded `skipped`, the target entered as its next occurrence | the same, without asking | reopened to take it |
+| `unreachable` | refused `illegal` | refused `illegal` | refused `illegal` |
+| `elsewhere` | ASK `pause-and-move`; confirmed, the task is paused (stopped and waited out) and then adopted or given the new transition — an adopted one resumed as the child it now is | the same, without asking | adopted or given the new transition |
+
+**Inputs.** A legal move whose target still lacks a required input that the target itself declares is not refused where the host can ask: the app parks the INPUT QUESTION in the moved task's conversation (`ConnectHost.ask`, `persistence/moveQuestion.ts`) — a `fill_form` gate whose `schema` is the inputs' own declared schemas and descriptions ([gate-components](gate-components.md)), with request id `move:…` — journals `jaira.moveAsked` ([journal-events](journal-events.md)) and answers `asked`. The question is durable as any parked gate is (`pending_interactions`) and is listed by `interaction:pending` with `moves: true`, whether or not the task is running. `interaction:submit` on it checks the answer against the form's schema with the run's validator, closes it (`jaira.moveAnswered`), and makes the same connect again with every given value `supplied` as `asked` and the stored `path`, `skip` and `confirmed`; a refusal then is journaled on the answer and rejected. The dry run says what would be asked in `plan.question`. A host that cannot ask (the CLI), and a required input of an ancestor entered on the way down, are refused `inputs-missing`.
 
 | `ConnectPlan` field | Type | Meaning |
 | --- | --- | --- |
@@ -146,12 +156,14 @@ An `askAfter` connect that answers `asking` makes, for `new`, the document, its 
 | `workflow`, `workflowLabel` | string | the workflow the task will stand in; `jaira:dynamic:…` from a `new` dry run, whose document does not exist yet |
 | `standsAt` | `{path: string[], stateId, label?}` | child keys from that workflow's root to where the task will stand |
 | `move` | `ConnectMove`, optional | the directed transition it ends in; absent where the adoption alone reaches the target |
-| `forward` | `"fast-forward"` or `"skip"`, optional | how a `forward` move crosses what it passes; absent for any other direction |
+| `forward` | `"fast-forward"` or `"skip"`, optional | how a move the machine runs to — a `forward` one, or an `aside` target ahead that only a rule enters — gets there; absent otherwise |
 | `adopt` | `AdoptPlan`, optional | the adoption that is part of it; absent from a `new` dry run |
 | `adoptedAs` | string, optional | the child key the task becomes |
 | `mount` | `"plain"` or `"split"`, optional | the mount a modification adds; `split` makes one held task per element |
 | `inputs` | `{name, via: "wire", "literal" or "default", from?, each?}` array | how each input of the target settles |
 | `asks` | `ConnectMissingInput` array | inputs nothing determines that are not required |
+| `question` | `ConnectMissingInput` array, optional | the required inputs nothing binds, which the move asks for in the task's own conversation before it is taken |
+| `judgement` | `{where, activity, way, confirm?, sentence?}`, optional | the move table's cell: `way` is `next`, `fast-forward`, `event`, `back`, `move` or `illegal`; `confirm` is `stop-and-rewind` or `pause-and-move` on an ASK cell, with the question in `sentence`; an `illegal` one's reason is `sentence` |
 | `branch` | string, optional | the branch a made parent takes up |
 
 | `ConnectMove` field | Type | Meaning |
@@ -172,20 +184,22 @@ An `askAfter` connect that answers `asking` makes, for `new`, the document, its 
 | `fast-forward` | a forward move would step over states, did not say `skip`, and cannot be run: from a host that drives no run (the CLI), or in the app for a task running with no conversation, running in another process, or with nothing left to run — the message says which | `plan` with `move.passes` |
 | `ambiguous-workflow` | more than one composite holds both | `candidates: [{workflow, label?, childKey, targetKey?}]`; call again with `workflow` |
 | `inputs-missing` | a required input of the target, of an ancestor entered on the way down, of the adopting workflow or of a new document's conversation would not be bound | `missing: [{state, name, schema?, description?, reason}]` |
-| `running` | the move is a new transition and an engine is running the task, which picks a new version up only at its next load | |
+| `running` | the move is a new transition, an engine is running the task, and the host cannot pause it (the CLI) | |
+| `illegal` | the target cannot be reached from where the task stands by anything the workflow defines — a sideways jump, or a branch whose decision was already made. The message says which, naming the decision | `plan` with `judgement` |
+| `confirm` | an ASK cell the request did not confirm; `message` is the question. Nothing was written | `plan` with `judgement` |
 | `adopt` | the adoption refused | `adopt`, the `AdoptRefusal` |
 | `generate` | the generator or its lint refused | |
 | `connecting` | an earlier connect of this task stopped part-way, and this request is a DIFFERENT drop (another target or workflow); nothing is written | |
 
-`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made, mark}` or `{kind: "move", taskId, mark, pin?, wasCompleted?, asking?}`. `mark` names the connect's own `jaira.connect` rows ([journal-events](journal-events.md)): a move's Undo cuts at its `intent` row, wherever that row now sits, and an adoption's is judged from the adopted task's `intent` row. `pin` and `wasCompleted` are how the task stood before the drop, as the intent recorded them. `asking: true` marks an `askAfter` connect of a `cloned` or `augmented` task, which moved nothing.
+`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made, mark}` or `{kind: "move", taskId, mark, pin?, wasCompleted?}`. `mark` names the connect's own `jaira.connect` rows ([journal-events](journal-events.md)): a move's Undo cuts at its `intent` row, wherever that row now sits, and an adoption's is judged from the adopted task's `intent` row. `pin` and `wasCompleted` are how the task stood before the drop, as the intent recorded them.
 
 #### A real connect writes its intent first, and a retry finishes it
 
-Before a real connect writes anything, it journals its INTENT on the dragged task — a `jaira.connect` row with `at: "intent"` carrying the request as asked (target, workflow, supplied inputs, skip, askAfter, scripts), the plan as resolved, how the task stood, and the steps it will take:
+Before a real connect writes anything, it journals its INTENT on the dragged task — a `jaira.connect` row with `at: "intent"` carrying the request as asked (target, workflow, the exact mount, supplied inputs, skip, the person's yes, scripts), the plan as resolved, how the task stood, and the steps it will take:
 
 | Step | Does | Recognised as already done when |
 | --- | --- | --- |
-| `document` | generates and writes the document version (`new`, `augmented`, `cloned`, or the conversation alone for `askAfter`) | a document whose latest version's cause is this task moved to this target was written since the intent |
+| `document` | generates and writes the document version (`new`, `augmented` or `cloned`) | a document whose latest version's cause is this task moved to this target was written since the intent |
 | `parent` | makes the document's task | a task standing in that document was made since the intent |
 | `adopt` | `task:adopt` into that task, or into a new task of the candidate workflow | the dragged task's `origin` is that adoption |
 | `supplied` | journals `jaira.supplied`, carrying the connect's `mark` | a `jaira.supplied` with this `mark` is on the task |
@@ -207,7 +221,6 @@ The token means only "take back what I just did" ([decision 0005](../decisions/0
 | --- | --- |
 | move | the state it landed in (`ConnectPlan.standsAt.path`) settles with any outcome but `canceled`; anything outside it is entered; a state of the task's own finishes `success` after the drop (the state a held move waited for); a turn of the task's conversation |
 | adoption | the same, on the parent's journal after the mirror row; or the adopted task enters or settles anything after the drop |
-| `asking` drop | the conversation's `start_task` mounts the target (`jaira.supplied`, `jaira.moved` with `start_task`, or any entry outside the conversation); its turns before that are the drop's |
 | fast-forward | nothing while it runs; when it ARRIVES the target is the landing, judged as a move's. A `skipped` or `stopped` end is a decision; a `failed` one leaves the Undo |
 
 A stale token is refused with `'<title>' has moved on since the drop (<why>), so it can no longer be undone — rewind it to take the drop back`, and dropped. A retry that deletes the landing's failure judges the token first (`settleConnectUndo`), so an Undo the failure ended does not come back.
@@ -215,9 +228,9 @@ A stale token is refused with `'<title>' has moved on since the drop (<why>), so
 | `undo.kind` | Does |
 | --- | --- |
 | `adopt` | cuts the parent's journal at the mirror row and releases the adoption, resuming nothing; a parent the connect made is deleted, row and file, after its `worktree_path` is cleared because the tree is the adopted task's. `removed` names it. Everything it did since the drop was the drop's own, or the token would not stand |
-| `move` | `task:rewind` to the drop's `intent` row — the task's first row of the drop, found by `mark` wherever it now sits — which puts a cloned task back under its previous pin; a task that had completed is put back completed with the outputs its reopening cleared, read from the `jaira.reopened` row ([journal-events](journal-events.md)); then the pin is put back if it still differs. With `asking`, the journal is cut there WITHOUT a resume and the task's status and outcome are put back as they were. A kept token carries `asking` too, so an Undo after a restart still takes the conversation back |
+| `move` | `task:rewind` to the drop's `intent` row — the task's first row of the drop, found by `mark` wherever it now sits — which puts a cloned task back under its previous pin; a task that had completed is put back completed with the outputs its reopening cleared, read from the `jaira.reopened` row ([journal-events](journal-events.md)); then the pin is put back if it still differs. |
 
-A run the drop started — the landing parked on a gate, a fast-forward on its way — is the drop's effect, so either kind first stops it in this process and waits for it to end; a run another process drives is refused. Either kind then stops a turn the task's conversation is taking and waits for it to land, up to the chat wait, so the opening turn an `askAfter` drop started cannot write after the cut.
+A run the drop started — the landing parked on a gate, a fast-forward on its way — is the drop's effect, so either kind first stops it in this process and waits for it to end; a run another process drives is refused.
 
 ### `task:adopt` takes a task up as a child, and answers the plan or the refusal
 

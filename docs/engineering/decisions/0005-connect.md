@@ -278,7 +278,9 @@ transition, on any entry whose bindings do not all resolve:
 1. the workflow's binding resolves → **bound**, by the host, with no model;
 2. else the control conversation supplies it from what has been said →
    **inferred**;
-3. else it asks, in the conversation, in words → **asked**.
+3. else it asks, in the conversation, in words → **asked**. *(Amended
+   2026-09-22: the host asks, with a question parked in the moved task's OWN
+   conversation, and no model asks in words — see "The rulings of 2026-09-22".)*
 
 Every value keeps which of the three it was, and the task's inputs view
 shows it. When everything binds no model runs. A skipped child reads as
@@ -288,7 +290,9 @@ state does with that is its author's business.
 ### 5. Backward
 
 A backward move uses the workflow's own machinery: the target is re-entered
-as the next occurrence and the usual backward reset applies. Its inputs are
+as the next occurrence and the usual backward reset applies. *(Amended
+2026-09-22: a backward move of a task an engine holds is taken at once, and a
+working task asks first — see "The rulings of 2026-09-22".)* Its inputs are
 settled like any other entry's, and what the person said to cause the move
 is in the conversation that settles them. An input whose description says
 it carries what came back gets filled because of what it says, not because
@@ -857,6 +861,10 @@ open:
 
 ## What the ask-after drop settled
 
+*Superseded the same day by "The rulings of 2026-09-22" below: the drop no
+longer opens a conversation whose model asks in words; the move asks in the
+task's own conversation. Kept as the record of what was built and removed.*
+
 Built 2026-09-22, closing the Open entry "the board does not send `askAfter`
 yet". The statement of record is [task-channels](../contracts/task-channels.md)
 (`askAfter`, `asking`, `ConnectUndo.asking`) and
@@ -983,22 +991,123 @@ What stayed in memory was the descent follower of a move to a nested target, so 
 process that died part-way down left the composite walking its own spine. *(Closed
 the same day — the way down is journaled upstream; see "Signals and paths" below.)*
 
+## The rulings of 2026-09-22 — the move table, the question, the chips
+
+The person's rulings, taken the same day and built together. "Move" is the
+person's word for all of it — a board drop, a chip, `move_task`, `jaira task
+move`; `connect` stays only the host operation's name. The statement of record
+is [task-channels](../contracts/task-channels.md) (`task:connect`: the move
+table, "Inputs"), [journal-events](../contracts/journal-events.md)
+(`jaira.moveAsked` / `jaira.moveAnswered`), [gate-components](../contracts/gate-components.md)
+(`fill_form` `schema`), [host-tool-vocabulary](../contracts/host-tool-vocabulary.md)
+(`move_task`), [task-board](../../ui/components/task-board.md),
+[task-card](../../ui/components/task-card.md) and
+[run-step-note](../../ui/components/run-step-note.md).
+
+**1. Legality by where the target is.** The approved table:
+
+| target, from where the task stands | working | waiting for the person's input | waiting for a user event |
+| --- | --- | --- | --- |
+| ahead, reachable through the DEFINED transitions | fast-forward from where it is | fast-forward (the conversation answers on the way) | if that pending event leads there the move IS the event; else fast-forward |
+| behind (already entered) | ASK: stop and rewind? | rewind | rewind |
+| not reachable through the defined transitions | ILLEGAL | ILLEGAL | ILLEGAL |
+| in another workflow (adopt / modify) | ASK: pause and move? | move | move |
+
+A state that defines no transitions (a finished task) takes a move as a new
+transition — the last row.
+
+- **Where a target is** is read from the pinned definition and the loaded
+  machine (`@jaira/persistence` `moveLegality.ts`): *behind* is every path the
+  task entered, or a move stepped over, its live ancestors included; *ahead*
+  is what the defined transitions reach from the instances the task stands in
+  — the sequence's walk, rules written on a child or on the state, a composite
+  ending and its parent walking on, a composite entered at its first child or
+  a child its own rules enter — with guards NOT evaluated, since a guard is a
+  decision the machine makes on the way; *unreachable* is neither; and when
+  nothing at all is ahead, every target not behind is *elsewhere*. Behind wins
+  where a loop makes a state both. `pathsTo`'s "any state in the tree" is gone
+  as a licence; it only finds the mounts, and of two mounts the one ahead is
+  preferred, then the one behind. A chip names its mount exactly (`path`).
+- **What a task is doing** is only the app's to know
+  (`AppService.activityOf`): *waiting for input* while a gate, an agent's
+  question or an approval of the task is open (a move's own question does not
+  count), else *waiting for a user event* while a rule of the task waits on one,
+  else *working* while an engine holds it here or elsewhere; otherwise
+  *stopped* or *finished*, whose cells are the waiting ones without the ASK.
+  The CLI reads the row and the parked gates (`activityFromRow`).
+- **"Rewind" is the workflow's backward move, taken now.** The earlier ruling
+  (§5, "Backward = the workflow's backward transition, not rewind") and "the
+  conversation is the history of the task" both keep history, so the target is
+  re-entered as its next occurrence with what the task did since kept; what
+  changed is WHEN: a task an engine holds takes it at once — the directed
+  transition with `skip`, the state it stood in recorded `skipped` — where it
+  used to be held until that state ended, which a task parked on a gate never
+  does. A journal-cutting rewind remains the task's own Rewind.
+- **Ahead and not simply next is run to.** A target past states nobody ran,
+  and one off the spine that only a rule enters, is a fast-forward: a directed
+  jump there would take the decision out of the workflow's hands. The very
+  next state is still taken when the current one ends.
+- **The ASK cells are a confirmation, not a refusal.** A dry run carries the
+  question (`plan.judgement.confirm`, `sentence`); the board puts it in the
+  column the task would land in after the drop, and yes is the commit
+  (`confirmed`). Without it the move is refused `confirm`, and `move_task`
+  answers the same, taking `confirm: true` once the person agreed; the CLI's
+  answer is `--yes`. "Pause and move" pauses — stops the run and waits it out,
+  the step a person used to be told to take — then adopts or grafts; an adopted
+  task is resumed as the child it now is.
+- **Illegal is said plainly**, naming the decision where one was taken:
+  "'right' is reached only by the decision at 'decide', which 'X' has already
+  made — a move cannot take the other branch. Move it back to that state to
+  decide again." The hover says it before the drop, and the column does not
+  light.
+
+**2. Missing inputs are asked in the task's own conversation.** "It shouldn't
+replace the conversation … the conversation is essentially the history of the
+task." A legal move whose target lacks a required input it declares parks a
+QUESTION there (`ConnectHost.ask`, `persistence/moveQuestion.ts`): a
+`fill_form` gate over the inputs' own schemas and descriptions (`fill_form`
+gained a whole-schema form for this, drawn by the one schema form), written to
+`pending_interactions` like any gate — so it survives a restart — beside a
+`jaira.moveAsked` row that says what move it holds and where in the history it
+was asked. The conversation draws it at that row, live; answering it checks the
+values against the schema with the run's validator, records them `asked`, takes
+the move (judged again, since the task may have gone on), and journals
+`jaira.moveAnswered`, after which the row draws the form as answered and what
+became of the move. Nothing is written before the answer but the question. The
+askAfter design is removed: `askAfter`, `asking`, `askingMessage`,
+`ConnectUndo.asking`, the generator's `withoutTarget` / `deferTarget`, and the
+opening turn. An input of an ancestor entered on the way down cannot be handed
+over and is still refused, as is everything from the CLI.
+
+**Adoption expands the conversation.** It did not: the parent drew the adopted
+task as a one-line link. The adopted task's history is now drawn under that
+line, open, read from the adopted task itself (its tree, turns, sessions,
+records and live tail — nothing is copied, §2), with no composer and no cut of
+its own (`AdoptedHistory`).
+
+**3. Next-transition chips.** Computed in main for every card the board
+returns (`nextMovesOf`, decorated in `AppService.board` / `boardRoots`): the
+paths one defined transition away from where the task stands, plus the rules
+waiting on a user event, each judged by the table — so a chip is ahead, the
+event, or a defined loop back, and a finished task gets none. Pressing one is
+`task:connect` with its `path`; a loop back of a working task asks first; a
+chip that would have to be run to when nothing can answer on the way is drawn
+disabled with why. The "→ ui" chip of the Open list sat on the task's card
+there, and that is where it is. No approved mockup existed; the proposal was
+published as a mockup artifact with today's rendering first
+(<https://claude.ai/artifact/DTZzB4EKGaRbCDkEu5Kuk9>), and the catalog
+mockups are rendered from the components (`packages/app/shots/move-static.mts`).
+
 ## Open
 
-- A finished task publishes no runtime wait, so a "→ ui" chip offering a
-  known move cannot come from the engine's waits, and reading the document
-  for it in the renderer was rejected when `on_user_event` was built. It
-  ships without the chip.
 - An adopted child that fans out (`each: "inline"` or `"task"`) is refused:
   one task cannot stand for a batch. Adopting a whole batch is not designed.
-- A new transition for a task that is running: refused until it is paused.
-  Stopping it and reopening it with the move is `skip` by another name, and
-  was not taken without being asked for.
-- A drop that asks after (above) does so only where the workflow is MODIFIED. A
-  move within the task's workflow, or an adoption, that leaves a required input
-  unbound is still refused with what is missing: there the target is already
-  mounted, and asking would mean grafting a conversation onto a workflow that was
-  not being changed.
+- A move whose missing input belongs to an ANCESTOR entered on the way down
+  to a nested target is still refused: a directed transition hands inputs to
+  the target only.
+- A pending event "leads there" only when its `to_state` is the target; a
+  target beyond it is fast-forwarded, and a fast-forward cannot answer a user
+  event on the way.
 - A fast-forward of a task that is RUNNING with no conversation is refused
   until it is paused, for the reason a new transition is.
 - A question stays on screen while the conversation considers it; a person who

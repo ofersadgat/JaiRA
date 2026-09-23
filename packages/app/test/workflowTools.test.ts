@@ -122,7 +122,8 @@ const documentOf = (taskId: string): string | undefined => read((p) => p.runtime
 const rootInstanceOf = (taskId: string): string =>
   journal(taskId).flatMap((e) => (e.type === "instance.entered" && e.parentInstanceId === undefined ? [e.instanceId] : []))[0]!;
 
-const fresh = () => service.pendingInteractions().find((p) => !seen.has(p.requestId));
+// A move's own input question is not a state's gate (decision 0005, the rulings of 2026-09-22).
+const fresh = () => service.pendingInteractions().find((p) => !seen.has(p.requestId) && p.moves !== true);
 async function parked(): Promise<{ state: string; inputs: Record<string, unknown>; taskId: string; requestId: string }> {
   await until(() => fresh() !== undefined, "the next gate");
   const gate = fresh()!;
@@ -309,10 +310,14 @@ describe("move_task", () => {
     expect(journal(parent).filter((e) => e.type === "transition.taken").length + 1).toBeGreaterThan(0);
   });
 
-  it("journals what it did on the CONVERSATION's task — the row its rail draws — and nothing for a refusal", async () => {
+  it("journals what it did on the CONVERSATION's task — the row its rail draws — and nothing for a refusal or a move still asking", async () => {
     const session = await conversation("chat/session");
     const done = await ran("lib/done", 1, "Pause and stop");
-    const refused = await call(session, "move_task", { task: done, to: "lib/needs" });
+    // Waiting on the person's answer, nothing has moved yet: no row.
+    const asking = await call(session, "move_task", { task: done, to: "lib/needs" });
+    expect(asking).toMatchObject({ ok: true, asked: { inputs: [{ name: "text" }] } });
+    expect(movedRows(session)).toEqual([]);
+    const refused = await call(session, "move_task", { task: done, to: "lib/nowhere" });
     expect(refused).toMatchObject({ ok: false });
     expect(movedRows(session)).toEqual([]);
     const moved = (await call(session, "move_task", { task: done, to: "lib/next" })) as unknown as MoveResult;
@@ -324,11 +329,13 @@ describe("move_task", () => {
     expect(movedRows(done)).toEqual([]);
   });
 
-  it("hands back the refusal whole, so the conversation can say what is missing rather than guess", async () => {
+  it("does not hand what is missing back to the model to ask in words: the PERSON is asked, in the moved task's own conversation", async () => {
     const session = await conversation("chat/session");
     const done = await ran("lib/done", 1);
-    const refused = (await call(session, "move_task", { task: done, to: "lib/needs" })) as unknown as MoveResult;
-    expect(refused).toMatchObject({ ok: false, code: "inputs-missing", missing: [{ name: "text", description: "What to call it." }] });
+    const asked = (await call(session, "move_task", { task: done, to: "lib/needs" })) as unknown as MoveResult;
+    expect(asked).toMatchObject({ ok: true, task: done, asked: { inputs: [{ name: "text", description: "What to call it." }] } });
+    const request = (asked as { asked: { request: string } }).asked.request;
+    expect(service.pendingInteractions().find((p) => p.requestId === request)).toMatchObject({ taskId: done, component: "fill_form", moves: true });
   });
 
   it("refuses a task it does not know, and says so rather than throwing", async () => {

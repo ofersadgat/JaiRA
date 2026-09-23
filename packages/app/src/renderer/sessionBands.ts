@@ -43,6 +43,7 @@ import {
   type InstanceAddress,
   type InstanceNode,
   type MadeBatch,
+  type MoveQuestionView,
   type SequentialBatchLayout,
   type SessionRef,
   type WorkflowOutcome,
@@ -484,7 +485,7 @@ export interface BandNote {
    * "could not enter X" — rather than as a bare reason, because that is what it is. `failure` is
    * everything else that went wrong: a call that failed, a state that gave up.
    */
-  kind: "failure" | "blocked" | "entered" | "transition" | "made" | "skipped" | "moved";
+  kind: "failure" | "blocked" | "entered" | "transition" | "made" | "skipped" | "moved" | "asked";
   /** The state DEFINITION the note is about, when the journal named one — what the title shows. */
   stateId?: string;
   /** For a `made` note: the runs the batch's elements became — see `MadeBatch`. */
@@ -496,6 +497,11 @@ export interface BandNote {
   moved?: WorkflowOutcome;
   /** For a `moved` note: the tool call that did it, when the row names it — where {@link splitAtNotes} cuts. */
   toolCallId?: string;
+  /**
+   * For an `asked` note: a move's INPUT QUESTION (decision 0005, the rulings of 2026-09-22), drawn
+   * where the move asked it — live while it is open, as it was answered once it is not.
+   */
+  asked?: MoveQuestionView;
   /**
    * For a `skipped` note that stands for SEVERAL states never entered: their child keys, in the order
    * they were stepped over, the first being the note's own. One Skip steps over a run of siblings, and
@@ -721,6 +727,12 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
       if (turn.moved !== undefined) {
         out.push({ seq: turn.seq, at: turn.at, kind: "moved", path: "", text: "", moved: turn.moved, ...(turn.toolCallId !== undefined ? { toolCallId: turn.toolCallId } : {}) });
       }
+      continue;
+    }
+    // A move's input question: at the ROOT — the task's conversation is where the move is — and never
+    // a lane: nothing was entered by asking.
+    if (turn.kind === "asked") {
+      if (turn.asked !== undefined) out.push({ seq: turn.seq, at: turn.at, kind: "asked", path: "", text: "", asked: turn.asked });
       continue;
     }
     if (turn.kind === "transition") {

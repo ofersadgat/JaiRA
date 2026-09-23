@@ -176,28 +176,63 @@ describe("previewOf", () => {
     expect(unbound.drop).toBeUndefined();
   });
 
-  it("ASKS AFTER: a target whose inputs nothing binds is not refused — the drop makes the conversation that asks for them, by name", () => {
+  it("THE MOVE TABLE: an unreachable column says why and does not light; an ASK column lights and says the drop will ask", () => {
+    const sentence = "'right' is reached only by the decision at 'decide', which 'In fork' has already made — a move cannot take the other branch. Move it back to that state to decide again.";
+    const illegal = previewOf(
+      answered({
+        ok: false,
+        dryRun: true,
+        refusal: { code: "illegal", message: sentence },
+        plan: plan({ standsAt: { path: ["right"], stateId: "fork/right" }, judgement: { where: "unreachable", activity: "waiting-input", way: "illegal", sentence } }),
+      }),
+      mine,
+      column("right"),
+    )!;
+    expect(illegal).toEqual({ kind: "Cannot move here", say: [sentence], facts: [], refused: "The workflow does not go there from where this task stands." });
+
+    const ask = "'In flow' is working. Stop it and go back to 'a'? It is entered again as its next pass; what the task did since stays in its history.";
+    const back = previewOf(
+      answered({
+        ok: true,
+        dryRun: true,
+        plan: plan({ standsAt: { path: ["a"], stateId: "flow/a" }, move: { direction: "backward", to: "a", path: [], passes: [] }, judgement: { where: "behind", activity: "working", way: "back", confirm: "stop-and-rewind", sentence: ask } }),
+      }),
+      mine,
+      column("a"),
+    )!;
+    expect(back.drop).toBe("Drop, then confirm: stop it and go back");
+    expect(back.confirm).toBe(ask);
+    expect(back.refused).toBeUndefined();
+
+    const pause = previewOf(
+      answered({ ok: true, dryRun: true, plan: plan({ resolution: "modify", modification: "cloned", standsAt: { path: ["explore"], stateId: "explore" }, judgement: { where: "elsewhere", activity: "working", way: "move", confirm: "pause-and-move", sentence: "'In flow' is working. Pause it and move it to 'explore'?" } }) }),
+      card({ taskId: "t2", workflow: "feature" }),
+      column("explore"),
+    )!;
+    expect(pause.drop).toBe("Drop, then confirm: pause it and move it");
+    expect(pause.confirm).toBe("'In flow' is working. Pause it and move it to 'explore'?");
+
+    // …and the column the table refuses does not light, while the one that asks does.
+    const refusing = new ConnectDrag(card({ taskId: "t1" }), async () => ({ ok: false, dryRun: true, refusal: { code: "illegal", message: sentence } }), () => undefined);
+    refusing.resolve(column("right"));
+    const asking = new ConnectDrag(card({ taskId: "t1" }), async () => ({ ok: true, dryRun: true, plan: plan({ judgement: { where: "behind", activity: "working", way: "back", confirm: "stop-and-rewind" } }) }), () => undefined);
+    asking.resolve(column("a"));
+    return flush().then(() => {
+      expect(refusing.accepts("right")).toBe(false);
+      expect(asking.accepts("a")).toBe(true);
+    });
+  });
+
+  it("INPUTS nothing binds are asked in the task's OWN conversation: the column lights and says so, by name", () => {
     const question = { state: "explore", name: "question", schema: { type: "string" }, description: "What to explore.", reason: "nothing the task produced fits it" };
-    const asking = (modification: "new" | "cloned" | "augmented", who = mine) =>
-      previewOf(answered({ ok: true, dryRun: true, plan: plan({ resolution: "modify", modification, workflow: "dynamic/…", standsAt: { path: [], stateId: "explore" } }), asking: [question, { ...question, name: "depth", description: undefined }] as never }), who, column("explore"))!;
-    const made = asking("new");
-    expect(made.kind).toBe("New transition");
+    const made = previewOf(
+      answered({ ok: true, dryRun: true, plan: plan({ resolution: "modify", modification: "new", adoptedAs: "product", standsAt: { path: ["explore"], stateId: "explore" }, question: [question, { ...question, name: "depth", description: undefined } as never] }) }),
+      mine,
+      column("explore"),
+    )!;
     expect(made.refused).toBeUndefined();
-    expect(text(made.say)).toBe("No workflow holds both product and explore. A new one is made around this task, with a conversation to control it from, which asks before the move is taken.");
-    expect(made.facts.map(text)).toEqual(["this task becomes its first child", "question will be asked there — What to explore.", "depth will be asked there"]);
-    expect(made.drop).toBe("Drop to open the conversation");
-
-    const cloned = asking("cloned", card({ taskId: "t2", workflow: "feature" }));
-    expect(text(cloned.say)).toBe("No workflow holds both feature and explore. This task's copy of the workflow gains a conversation to control it from, which asks before the move is taken.");
-    expect(cloned.facts.map(text)).toEqual(["the copy stops following feature", "question will be asked there — What to explore.", "depth will be asked there"]);
-
-    const augmented = asking("augmented");
-    expect(text(augmented.say)).toBe("This task's conversation asks for what explore needs, then takes the move.");
-    expect(augmented.drop).toBe("Drop to ask in the conversation");
-    // …and the column LIGHTS: an answer that asks is an answer that accepts the drop.
-    const drag = new ConnectDrag(card({ taskId: "t1" }), async () => ({ ok: true, dryRun: true, plan: plan({}), asking: [question] }), () => undefined);
-    drag.resolve(column("explore"));
-    return flush().then(() => expect(drag.accepts("explore")).toBe(true));
+    expect(made.facts.map(text)).toEqual(["this task becomes its first child, product", "question will be asked in this task's conversation — What to explore.", "depth will be asked in this task's conversation"]);
+    expect(made.drop).toBe("Drop to add the move and take it, then answer in its conversation");
   });
 
   it("names the workflows to choose between when more than one holds both", () => {

@@ -56,7 +56,7 @@ Four ideas, composed rather than parallel. `review_artifact` is a viewer plus a
 | `review_artifact` | `{ decision, comments?, notes? }` |
 | `review_artifacts` | `{ decision?, comments?, decisions: [{ id, decision, comment?, notes?, content? }] }` |
 | `edit_artifact` | `{ content }` |
-| `fill_form` | a flat object of its fields |
+| `fill_form` | a flat object of its fields, or of its `schema`'s properties |
 | `confirm_action` | `{ confirmed }` |
 
 `fill_form` reads a JSON-Schema **subset**: `string` · `number` · `boolean` ·
@@ -67,6 +67,13 @@ converted to a JSON Schema (`fillFormSchema`) and drawn by the app's one schema
 form — the renderer the Run panel and Settings use — so an optional field has a
 switch that leaves it out of the answer, and a `default` is the answer the form
 starts on.
+
+`fill_form` may instead carry `schema` — a whole JSON Schema object (`type: "object"`), exclusive with
+`fields` — for values the subset cannot say: a bounded number, a list, an object. The same form draws it;
+the contract check here reads only its `required`, and the host that parked it checks the values against
+the schema itself. The host's own MOVE QUESTION is one ([task-channels](task-channels.md), "Inputs"): its
+properties are the target's declared inputs with their own schemas and descriptions, and it is listed with
+`moves: true`, since answering it takes a move rather than continuing a run.
 
 ### `choose_option` — one component, two callers
 

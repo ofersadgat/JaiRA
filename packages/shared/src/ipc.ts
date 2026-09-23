@@ -374,6 +374,11 @@ export interface PendingInteraction {
    * answer — both go through `interaction:submit` with a value.
    */
   resumes?: boolean;
+  /**
+   * A MOVE's question (decision 0005, the rulings of 2026-09-22): the host parked it in the task's
+   * conversation because the move lacks inputs, and answering it takes the move. No run is blocked on it.
+   */
+  moves?: true;
 }
 
 /**

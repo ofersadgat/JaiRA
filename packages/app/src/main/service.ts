@@ -49,8 +49,13 @@ import {
   beginTaskRun,
   buildTaskLoad,
   adoptedInto,
-  askingMessage,
+  closeMoveQuestion,
   connectTask as connectTaskIn,
+  moveQuestionId,
+  nextMovesOf,
+  openMoveQuestion,
+  parkMoveQuestion,
+  type MoveQuestion,
   CONNECT_CONVERSATION,
   dropConnectUndo,
   keepConnectUndo,
@@ -351,6 +356,9 @@ import {
   type ModuleApproval,
   LEFT_EVENT,
   questionKeyOf,
+  isMoveQuestion,
+  type TaskActivity,
+  type NextMove,
 } from "@jaira/shared";
 import { Diagnostics, stackDetail } from "./diagnostics";
 import { WorkerTypeCheck } from "./tsCheck";
@@ -2366,7 +2374,7 @@ export class AppService {
       project: this.refOf(key),
       component: row.component,
       inputs,
-      resumes: true,
+      ...(isMoveQuestion(row.requestId) ? { moves: true as const } : { resumes: true }),
       ...(row.about !== undefined ? { about: row.about } : {}),
       ...(row.subjectProject !== undefined ? { subjectProject: row.subjectProject } : {}),
     });
@@ -2452,9 +2460,9 @@ export class AppService {
     const open = this.session(project);
     if (level !== undefined && level.length > 0) {
       const board = boardForState(open.project, level, this.browseWorkflowsIn(open), this.stateViewOptions());
-      if (board) return board;
+      if (board) return this.withNextMoves(open, board);
     }
-    return boardView(open.project, level, this.viewOptions());
+    return this.withNextMoves(open, boardView(open.project, level, this.viewOptions()));
   }
 
   /**
@@ -2468,7 +2476,7 @@ export class AppService {
   boardRoots(request?: { project?: string }): BoardView {
     const open = this.sessionOf(request?.project);
     if (open === undefined) return { level: "", label: "All workflows", breadcrumb: [], columns: [], atLevel: [], finished: [] };
-    return rootsBoard(open.project, this.browseWorkflowsIn(open), this.stateViewOptions());
+    return this.withNextMoves(open, rootsBoard(open.project, this.browseWorkflowsIn(open), this.stateViewOptions()));
   }
 
   /**
@@ -5400,6 +5408,12 @@ export class AppService {
           .filter((wait) => wait.taskId === taskId && MOVE_EVENTS.includes(wait.event) && typeof wait.options.to_state === "string")
           .map((wait) => wait.options.to_state as string),
       running: (taskId) => open.live.has(taskId) || project.jobs.liveRunJob(taskId, Date.now()) !== undefined,
+      activity: (taskId) => this.activityOf(open, taskId),
+      pause: (taskId) => this.pauseForMove(open, taskId),
+      resume: async (taskId) => {
+        await this.resumeTask({ taskId, project: open.dir });
+      },
+      ask: (question) => this.askMoveQuestion(open, question),
       browser: () => {
         const kept = this.connectBrowsers.get(open.key);
         if (kept !== undefined && Date.now() - kept.at < 3000) return kept.browser;
@@ -5418,68 +5432,162 @@ export class AppService {
       // left there (`connectTaskIn` already dropped the moved task's). Kept with where the drop landed,
       // which is what judges it from here on (`connectUndo.ts`).
       if (result.ok && result.undo !== undefined) {
-        keepConnectUndo(project, result.taskId ?? request.taskId, result.undo, {
-          landing: result.plan.standsAt.path,
-          asking: result.asking !== undefined && result.asking.length > 0,
-        });
+        keepConnectUndo(project, result.taskId ?? request.taskId, result.undo, { landing: result.plan.standsAt.path });
       }
       this.log({
         level: result.ok ? "info" : "warn",
         source: "run",
         message: result.ok
-          ? `connected ${request.taskId} to '${request.target}': ${result.plan.resolution}${result.plan.modification !== undefined ? ` (${result.plan.modification})` : ""}, standing at '${result.plan.standsAt.path.join("/") || result.plan.workflow}'${result.taskId !== undefined && result.taskId !== request.taskId ? ` as ${result.taskId}` : ""}`
+          ? result.asked !== undefined
+            ? `the move of ${request.taskId} to '${request.target}' asks for ${result.asked.missing.map((m) => `'${m.name}'`).join(", ")} in its conversation first`
+            : `connected ${request.taskId} to '${request.target}': ${result.plan.resolution}${result.plan.modification !== undefined ? ` (${result.plan.modification})` : ""}, standing at '${result.plan.standsAt.path.join("/") || result.plan.workflow}'${result.taskId !== undefined && result.taskId !== request.taskId ? ` as ${result.taskId}` : ""}`
           : `did not connect ${request.taskId} to '${request.target}': ${result.refusal.message}`,
         project: open.key,
         taskId: request.taskId,
       });
       this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
       this.publishFor(open, { type: "store:invalidate", scope: "board" });
-      if (result.ok && result.asking !== undefined && result.asking.length > 0 && result.taskId !== undefined) {
-        this.askAfterDrop(open, request, result.taskId, result.asking);
-      }
     }
     return result;
   }
 
   /**
-   * The OPENING TURN of a conversation an `askAfter` drop made or reused (decision 0005 §4 "Inputs",
-   * 3: asked). The drop is the commit, so nothing waits on this: it is a turn of the conversation,
-   * run the way a typed one is, whose message says what happened and what the target still needs
-   * (`askingMessage`) and whose reply is the question. The conversation's own `start_task` mounts the
-   * target once the person has answered.
+   * What a task is DOING, as the move table reads it (`@jaira/shared` `move.ts`) — the four things
+   * only this process knows: whether an engine holds it, and whether what holds it is waiting on the
+   * person (a gate, an agent's question, an approval) or on a user event (`on_user_event`).
    *
-   * The turn is the conversation's first, so it is also what makes an idle conversation one there is
-   * a thread to read — see `chatPositionOf`.
+   * Asked first, because an engine parked on a gate is not WORKING: a drop on it goes back or moves
+   * without asking. A move question the host parked itself is not the task waiting — it is the move.
    */
-  private askAfterDrop(open: ProjectSession, request: TaskConnectRequest, conversationTaskId: string, asking: readonly ConnectMissingInput[]): void {
-    const project = open.project;
-    // The instance that speaks: the one with a record, else the machine's root — an idle conversation
-    // has said nothing yet, and its root is where the conversation is.
-    const host =
-      this.chatHostOf(conversationTaskId, open.dir) ??
-      project.events
-        .list(conversationTaskId)
-        .flatMap((row) => (row.event.type === "instance.entered" && row.event.parentInstanceId === undefined ? [row.event.instanceId] : []))[0];
-    const at = { project: open.key, taskId: conversationTaskId };
-    if (host === undefined) {
-      this.log({ level: "warn", source: "run", message: `the conversation ${conversationTaskId} has no instance to ask from`, ...at });
+  private activityOf(open: ProjectSession, taskId: string): TaskActivity {
+    const row = open.project.runtime.get(taskId);
+    if (row?.status === "completed") return "finished";
+    const held = open.live.has(taskId) || open.project.jobs.liveRunJob(taskId, Date.now()) !== undefined || row?.status === "running" || row?.status === "stopping";
+    if (!held) return "stopped";
+    const asking =
+      open.hub.list().some((request) => (request.taskId ?? open.requestTask.get(request.requestId)) === taskId) ||
+      open.questions.list().some((question) => question.taskId === taskId) ||
+      open.approvals.list().some((approval) => approval.taskId === taskId) ||
+      open.project.interactions.forTask(taskId).some((stored) => !isMoveQuestion(stored.requestId));
+    if (asking) return "waiting-input";
+    if (open.userEvents.list().some((wait) => wait.taskId === taskId)) return "waiting-event";
+    return "working";
+  }
+
+  /**
+   * PAUSE a task for a move into another workflow or along a new transition (the move table's last
+   * row): stop its run and wait it out — the stop a person would have had to make first. A run
+   * another process drives is not ours to stop.
+   */
+  private async pauseForMove(open: ProjectSession, taskId: string): Promise<void> {
+    const live = open.live.get(taskId);
+    if (live !== undefined) {
+      this.cancelTaskIn(open, taskId);
+      await live.done;
       return;
     }
-    const title = project.tasks.tryRead(request.taskId)?.title ?? request.taskId;
-    const message = askingMessage(title, sourceStateId(request.target), asking);
-    // The app wrote this for the person: the conversation says so on the message (`MessageAuthor`).
-    void this.sendChatMessage(
-      {
-        taskId: conversationTaskId,
-        instanceId: host,
-        message,
-        project: open.dir,
-        ...(request.fake !== undefined ? { fake: request.fake } : {}),
-      },
-      { by: "host" },
-    ).catch((e: unknown) => {
-      this.log({ level: "error", source: "run", message: `the conversation's opening question failed: ${e instanceof Error ? e.message : String(e)}`, ...at });
+    if (open.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      throw this.refusal("run", `'${open.project.tasks.tryRead(taskId)?.title ?? taskId}' is running in another process — move it there`, { project: open.key, taskId });
+    }
+  }
+
+  /**
+   * Park the INPUT QUESTION a legal move needs answered, in the task's own conversation (decision
+   * 0005, the rulings of 2026-09-22, 2): a `fill_form` gate over the inputs' own schemas, durable as
+   * every gate is, with the move it holds journaled beside it (`moveQuestion.ts`). The renderer draws
+   * it where the journal row sits; answering it is {@link answerMoveQuestion}.
+   */
+  private async askMoveQuestion(open: ProjectSession, question: MoveQuestion): Promise<{ requestId: string }> {
+    const requestId = moveQuestionId();
+    parkMoveQuestion(open.project, question, requestId);
+    this.publish({ type: "interaction:requested", pending: this.pendingOfStored(open.key, open.project.interactions.get(requestId)!) });
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: question.taskId });
+    return { requestId };
+  }
+
+  /**
+   * A move question was answered: the move it holds is taken with what the person gave, every value
+   * recorded `asked`, and the question closed with how it ended. The move is judged AGAIN — the task
+   * may have gone on while the question waited — and a refusal is said, and journaled, rather than
+   * leaving the question open for an answer that can no longer be used.
+   */
+  private async answerMoveQuestion(requestId: string, value: JsonValue): Promise<{ requestId: string }> {
+    const session = [...this.sessions.values()].find((candidate) => openMoveQuestion(candidate.project, requestId) !== undefined);
+    const found = session !== undefined ? openMoveQuestion(session.project, requestId) : undefined;
+    if (session === undefined || found === undefined) throw this.refusal("run", `no open move question '${requestId}'`);
+    const { taskId, asked } = found;
+    const answers = (value !== null && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, JsonValue>;
+    // The form's own schema, checked with the run's validator — the shape check in the component
+    // contract reads only what is required.
+    const schema = session.project.interactions.get(requestId)?.inputs["schema"];
+    const problem = schema !== undefined ? this.valueCheck()(schema, answers as JsonValue) : undefined;
+    if (problem !== undefined) throw this.refusal("run", `invalid answer: ${problem}`, { project: session.key, taskId });
+    const given = Object.fromEntries(Object.entries(answers).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+    const supplied = Object.fromEntries(Object.entries(given).map(([name, v]) => [name, { value: v, via: "asked" as const }]));
+    const result = await this.connectTask({
+      project: session.dir,
+      taskId,
+      target: asked.move.target,
+      by: asked.move.by,
+      ...(asked.move.workflow !== undefined ? { workflow: asked.move.workflow } : {}),
+      ...(asked.move.path !== undefined ? { path: asked.move.path } : {}),
+      ...(asked.move.skip === true ? { skip: true } : {}),
+      ...(asked.move.confirmed === true ? { confirmed: true } : {}),
+      supplied,
     });
+    if (result.ok && result.asked !== undefined) {
+      // Asked AGAIN — what was answered left something else open. The new question stands; this one is done.
+      closeMoveQuestion(session.project, taskId, requestId, "moved", { answered: given, message: "asked again for what is still open" });
+    } else if (result.ok) {
+      closeMoveQuestion(session.project, taskId, requestId, "moved", { answered: given });
+    } else {
+      closeMoveQuestion(session.project, taskId, requestId, "refused", { answered: given, message: result.refusal.message });
+    }
+    this.publish({ type: "interaction:resolved", requestId });
+    this.publishFor(session, { type: "store:invalidate", scope: "task", taskId });
+    this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    if (!result.ok) throw this.refusal("run", `the move could not be taken: ${result.refusal.message}`, { project: session.key, taskId });
+    return { requestId };
+  }
+
+  /**
+   * The board, each card carrying its NEXT TRANSITIONS (decision 0005, the rulings of 2026-09-22, 5):
+   * computed here from the pinned workflow's defined transitions and the waits this process holds, and
+   * judged by the move table like any move. A finished card gets none.
+   */
+  private withNextMoves(open: ProjectSession, view: BoardView): BoardView {
+    const cache = new Map<string, NextMove[]>();
+    const nextOf = (taskId: string): NextMove[] => {
+      const known = cache.get(taskId);
+      if (known !== undefined) return known;
+      const activity = this.activityOf(open, taskId);
+      let found: NextMove[] = [];
+      try {
+        found = nextMovesOf(open.project, taskId, {
+          activity,
+          offered: open.userEvents
+            .list()
+            .filter((wait) => wait.taskId === taskId && MOVE_EVENTS.includes(wait.event) && typeof wait.options.to_state === "string")
+            .map((wait) => wait.options.to_state as string),
+          running: activity === "working" || activity === "waiting-input" || activity === "waiting-event",
+          fastForwardBlocked: () => this.fastForwardBlocked(open, taskId),
+        });
+      } catch (e) {
+        this.log({ level: "warn", source: "run", message: `could not work out ${taskId}'s next transitions: ${(e as Error).message}`, project: open.key, taskId });
+      }
+      cache.set(taskId, found);
+      return found;
+    };
+    const decorate = <T extends { taskId: string; status: string; under?: string }>(card: T): T => {
+      if (card.status === "completed" || card.under !== undefined) return card;
+      const next = nextOf(card.taskId);
+      return next.length > 0 ? { ...card, next } : card;
+    };
+    return {
+      ...view,
+      columns: view.columns.map((column) => ({ ...column, cards: column.cards.map(decorate) })),
+      atLevel: view.atLevel.map(decorate),
+    };
   }
 
   // --- fast-forward (decision 0005 §4, step 7) ----------------------------------
@@ -6016,20 +6124,11 @@ export class AppService {
       }
       if (project.jobs.liveRunJob(taskId, Date.now()) !== undefined) throw this.refusal("run", `'${title}' is running in another process — take the drop back there`);
     };
-    // A conversation the drop made, or gave a turn to, may be taking its opening turn: stopped, and
-    // waited out, before its rows are cut — a turn that landed after the cut would write into a journal
-    // that was taken back. Only for a connect that made one: any other task's turn is the person's.
-    const quiet = async (taskId: string): Promise<void> => {
-      this.cancelChatTurn({ taskId, project: open.dir });
-      const turn = open.chatDone.get(taskId);
-      if (turn !== undefined) await AppService.within(turn, CHAT_WAIT_MS);
-    };
     if (undo.kind === "adopt") {
       const { parentTaskId, adoptedTaskId } = undo;
       const parent = project.tasks.tryRead(parentTaskId);
       if (parent === undefined || project.runtime.get(parentTaskId) === undefined) throw this.refusal("run", `unknown task '${parentTaskId}'`);
       await stopDropRun(parentTaskId, parent.title);
-      if (undo.made) await quiet(parentTaskId);
       const mirror = project.events.list(parentTaskId).find((row) => row.event.type === "instance.entered" && row.event.instanceId === adoptedTaskId);
       if (mirror === undefined) throw this.refusal("run", `'${parent.title}' no longer holds the task it adopted — there is nothing to take back`);
       for (const [requestId, owner] of open.requestTask) {
@@ -6038,7 +6137,7 @@ export class AppService {
       open.questions.dismissFor(parentTaskId);
       // Everything the parent ran comes AFTER the mirror, so the cut takes it too — which is what
       // rewinding past the mirror means. The token standing says all of it was the drop's own: the
-      // landing's run, or the opening turn of a conversation the drop made to ask.
+      // landing's run.
       cutTaskJournal(project, parentTaskId, mirror.seq);
       releaseUnmirroredAdoptions(project, parentTaskId);
       let removed: string | undefined;
@@ -6056,19 +6155,10 @@ export class AppService {
     const { taskId } = undo;
     if (project.runtime.get(taskId) === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
     await stopDropRun(taskId, project.tasks.tryRead(taskId)?.title ?? taskId);
-    if (undo.asking === true) await quiet(taskId);
-    const row = project.runtime.get(taskId)!;
     // The cut is at the drop's own first row — its `jaira.connect` intent, found where it sits NOW
     // (`keptConnectUndo`), since nothing else about the drop's place in the journal holds still.
     const moved = kept.cutAt !== undefined ? project.events.list(taskId).find((stored) => stored.seq === kept.cutAt) : undefined;
-    if (moved !== undefined && undo.asking === true) {
-      // Nothing moved: what was written is the conversation's opening turn. Cut, and NOT resumed —
-      // a rewind resumes a machine with something left to do, and this one was standing still.
-      // The cut re-reads the status off the journal; the task goes back to standing exactly as it did.
-      cutTaskJournal(project, taskId, moved.seq);
-      if (row.outcome !== undefined) project.runtime.endTask(taskId, row.outcome, Date.now());
-      project.runtime.setStatus(taskId, row.status, Date.now());
-    } else if (moved !== undefined) {
+    if (moved !== undefined) {
       await this.rewindTask({ taskId, at: moved.seq, project: open.dir });
       // A task that had FINISHED goes back to having finished: the cut took away everything since.
       // The rewind already did that, outputs and all, when the reopening journaled what it cleared;
@@ -6715,9 +6805,11 @@ export class AppService {
    * front of the person.
    */
   private storedInteractionsOf(key: string, session: ProjectSession): PendingInteraction[] {
+    // A move's question is the host's own and no run holds it, so it is offered whether or not the
+    // task is running.
     return session.project.interactions
       .list()
-      .filter((row) => !session.live.has(row.taskId))
+      .filter((row) => !session.live.has(row.taskId) || isMoveQuestion(row.requestId))
       .map((row) => this.pendingOfStored(key, row));
   }
 
@@ -6736,12 +6828,15 @@ export class AppService {
    * did, re-reaches the state it stopped in, and takes the seeded answer without asking again. From
    * the renderer both are `interaction:submit` with a value, which is the point.
    */
-  submitInteraction(requestId: string, value: JsonValue): { requestId: string } {
+  submitInteraction(requestId: string, value: JsonValue): { requestId: string } | Promise<{ requestId: string }> {
     const contract = this.configOf(requestId);
     if (contract) {
       const check = validateComponentResult(contract.config, value, contract.inputs);
       if (!check.ok) throw this.refusal("run", `invalid ${contract.config.component} response: ${check.errors}`);
     }
+    // A MOVE's question (decision 0005, the rulings of 2026-09-22): no run is waiting on it — the
+    // answer takes the move it holds.
+    if (isMoveQuestion(requestId)) return this.answerMoveQuestion(requestId, value);
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     // A multi-part chooser's answer is EVERY round's answers, and the loop's own bookkeeping stays
     // out of what the engine gets — see `followUp.ts`. Whether a round follows is the STATE's

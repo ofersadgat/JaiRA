@@ -641,7 +641,7 @@ function formStartsWith(fields: readonly FormField[], schema: Schema): Record<st
 
 function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>): JSX.Element {
   const readOnly = settled !== undefined;
-  const schema = useMemo(() => fillFormSchema(config.fields) as Schema, [config.fields]);
+  const schema = useMemo(() => (config.schema ?? fillFormSchema(config.fields)) as Schema, [config.schema, config.fields]);
   // Settled: what was submitted, and nothing else — a field the record does not name is drawn NOT SET,
   // because a default the person never saw sent is not their answer.
   const [value, setValue] = useState<Record<string, unknown>>(() =>
