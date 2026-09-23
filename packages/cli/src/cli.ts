@@ -1220,7 +1220,8 @@ async function runTaskNow(
     // The DURABLE conversation store, scoped to this task — the same wiring the app's runs get. A
     // task run that wrote its records into a `MapSessionStore` dropped every conversation at exit,
     // and left the journal's operation ids pointing at records a resume could never read back.
-    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }) });
+    // A run's calls are made with the WORKFLOW's words — a state's prompt, rendered — never with what somebody typed.
+    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }, "workflow") });
     try {
       assertCapabilities(registry, started.bundle, project.config, approvals);
     } catch (e) {

@@ -575,7 +575,8 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
     const bump = project.db.prepare(`UPDATE blobs SET refs = refs + 1 WHERE hash = ?`);
     for (const row of records) {
       const request = parsedObject(row.request_json) as Record<string, unknown> | undefined;
-      const { scope, session, ...op } = request ?? {};
+      // `openingBy` rides the ask, not the operation — see `withAuthors` — so it is not part of the identity either.
+      const { scope, session, openingBy, ...op } = request ?? {};
       const oldScope = scope as { instanceId?: unknown; sequence?: unknown } | undefined;
       const scoped = typeof oldScope?.instanceId === "string" && typeof oldScope.sequence === "number";
       const newScope = scoped ? { instanceId: mapInstance(oldScope!.instanceId as string), sequence: oldScope!.sequence as number } : undefined;
@@ -596,6 +597,7 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
               ...op,
               ...(newScope !== undefined ? { scope: newScope } : scope !== undefined ? { scope } : {}),
               ...(newSession !== undefined ? { session: newSession } : session !== undefined ? { session } : {}),
+              ...(openingBy !== undefined ? { openingBy } : {}),
             });
       const metrics = parsedObject(row.metrics_json) as { sessionRef?: unknown } | undefined;
       const newMetrics =

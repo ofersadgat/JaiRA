@@ -3624,7 +3624,8 @@ export class AppService {
     // messages, thinking, tool calls, the provider's own handle — and dropped the whole thing when the
     // process exited. Scoped to this run, so a stored transcript can be found from the task that made
     // it (`stateSessions` is the other half of that join).
-    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }) });
+    // A run's calls are made with the WORKFLOW's words — a state's prompt, rendered — never with what somebody typed.
+    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }, "workflow") });
     // A delegated agent's record is its stream, and its stream is not its whole story: the agent's
     // own session file holds the context injections, `toolUseResult` records and line threading that
     // never ride the wire — and the file is the agent's, prunable on its schedule. Captured into the
@@ -4185,6 +4186,8 @@ export class AppService {
    */
   async sendChatMessage(
     request: typeof AppService.chatSend,
+    /** Who wrote the message, when the person did not: the app, sending it on their behalf. Never an IPC field. */
+    origin: { by?: "host" } = {},
   ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     const open = this.session(request.project);
@@ -4196,7 +4199,7 @@ export class AppService {
     });
     open.chatDone.set(request.taskId, done);
     try {
-      return await this.runChatMessage(open, request, settledAhead);
+      return await this.runChatMessage(open, request, settledAhead, origin);
     } finally {
       if (open.chatDone.get(request.taskId) === done) open.chatDone.delete(request.taskId);
       finished();
@@ -4216,6 +4219,7 @@ export class AppService {
     request: typeof AppService.chatSend,
     /** The typed turn ahead of this one, if there is one — resolves when it has landed. */
     settledAhead?: Promise<void>,
+    origin: { by?: "host" } = {},
   ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean }> {
     const project = open.project;
     let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
@@ -4298,7 +4302,8 @@ export class AppService {
     const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
     const workspaceRoot =
       recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
-    const liveStore = sessionStoreFor(project, { taskId: request.taskId });
+    // A message the app wrote for the person is marked so on the record's entry — see `MessageAuthor`.
+    const liveStore = sessionStoreFor(project, { taskId: request.taskId }, origin.by);
     const stores = sessionServicesFor({ inner: liveStore });
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
@@ -5462,13 +5467,17 @@ export class AppService {
     }
     const title = project.tasks.tryRead(request.taskId)?.title ?? request.taskId;
     const message = askingMessage(title, sourceStateId(request.target), asking);
-    void this.sendChatMessage({
-      taskId: conversationTaskId,
-      instanceId: host,
-      message,
-      project: open.dir,
-      ...(request.fake !== undefined ? { fake: request.fake } : {}),
-    }).catch((e: unknown) => {
+    // The app wrote this for the person: the conversation says so on the message (`MessageAuthor`).
+    void this.sendChatMessage(
+      {
+        taskId: conversationTaskId,
+        instanceId: host,
+        message,
+        project: open.dir,
+        ...(request.fake !== undefined ? { fake: request.fake } : {}),
+      },
+      { by: "host" },
+    ).catch((e: unknown) => {
       this.log({ level: "error", source: "run", message: `the conversation's opening question failed: ${e instanceof Error ? e.message : String(e)}`, ...at });
     });
   }
@@ -9582,7 +9591,7 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
   if (!Array.isArray(entries)) return [];
   const turns: SessionTurn[] = [];
   for (const raw of entries) {
-    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: unknown; timing?: unknown } | null;
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: unknown; timing?: unknown; by?: unknown } | null;
     if (entry === null || typeof entry !== "object") continue;
     // Events are not turns, and a subagent's turns belong to the call that spawned it.
     if (entry.kind !== "message" || entry.sidechain !== undefined) continue;
@@ -9590,6 +9599,8 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
     const timing = (entry.timing ?? {}) as { at?: unknown; startedAt?: unknown; thoughtMs?: unknown };
     turns.push({
       ...turn,
+      // Who wrote it, when the person did not — the mark the record carries on the entry.
+      ...(entry.by === "host" || entry.by === "workflow" ? { by: entry.by } : {}),
       ...(typeof timing.at === "number" ? { at: timing.at } : {}),
       ...(typeof timing.startedAt === "number" ? { startedAt: timing.startedAt } : {}),
       ...(typeof timing.thoughtMs === "number" ? { thoughtMs: timing.thoughtMs } : {}),

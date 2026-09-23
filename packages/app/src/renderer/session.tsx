@@ -53,7 +53,11 @@ function Parts({ parts }: { parts: JsonValue }): JSX.Element | null {
 function Turn({ turn }: { turn: SessionTurn }): JSX.Element {
   return (
     <div className={`sturn sturn-${turn.role}`}>
-      <span className="sturn-role">{ROLE_LABEL[turn.role] ?? turn.role}</span>
+      <span className="sturn-role">
+        {ROLE_LABEL[turn.role] ?? turn.role}
+        {/* Not typed by the person — the record's own mark (`MessageAuthor`). */}
+        {turn.by !== undefined ? ` · ${turn.by === "host" ? "by JaiRA" : "the workflow's"}` : null}
+      </span>
       <div className="sturn-body">
         {turn.text !== undefined ? <pre className="sturn-text">{turn.text}</pre> : null}
         {turn.parts !== undefined ? <Parts parts={turn.parts} /> : null}

@@ -1041,3 +1041,33 @@ describe("a workflow tool's note, where the host puts it", () => {
     expect(html).not.toContain("adopted into");
   });
 });
+
+describe("what was said to the model and not typed by the person", () => {
+  const view = session([
+    { role: "system", text: "Be brief.", by: "workflow" },
+    { role: "user", text: "\"Pause and stop\" was moved to lib/costed…", by: "host" },
+    { role: "assistant", text: "What is the most it may cost?" },
+    { role: "user", text: "Keep it under 400." },
+  ]);
+
+  it("carries who wrote it from the record's entry onto the message", () => {
+    const said = entriesOf(view).filter((entry): entry is Extract<TranscriptEntry, { kind: "message" }> => entry.kind === "message");
+    expect(said.map((message) => [message.role, message.by])).toEqual([
+      ["system", "workflow"],
+      ["user", "host"],
+      ["assistant", undefined],
+      ["user", undefined],
+    ]);
+  });
+
+  it("stays on the right, where everything said to the model is, and wears a badge naming its source — what the person typed wears none", () => {
+    const html = renderToStaticMarkup(createElement(Transcript, { entries: entriesOf(view) }));
+    // Two bubbles on the right: the app's, marked and badged; the person's, bare.
+    expect(html.match(/ts-msg ts-msg-user/g)).toHaveLength(2);
+    expect(html.match(/ts-msg-sent/g)).toHaveLength(1);
+    expect(html).toContain("Written by JaiRA");
+    // The system prompt keeps its aside, and says whose it is.
+    expect(html).toMatch(/ts-tag">system<span class="ts-source ts-source-workflow"/);
+    expect(html.match(/ts-source /g)).toHaveLength(2);
+  });
+});

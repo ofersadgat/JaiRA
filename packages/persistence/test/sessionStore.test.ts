@@ -1107,6 +1107,60 @@ describe("streamed partials on open records", () => {
   });
 
   /**
+   * WHO WROTE what a call was made with, when the person did not (`MessageAuthor`) — marked ON the
+   * entry, in the one conversation array, at every write: the record's birth, a flush, the settle.
+   * A store opened for a run marks a state's prompt `workflow`; one the app sends a message through
+   * on the person's behalf marks it `host`; a message somebody typed is never marked. A system
+   * message is the workflow's, whoever opened the store.
+   */
+  describe("who wrote the message a call was made with", () => {
+    const asked = { kind: "prompt", user: "what is in this repository?" } as never;
+    const authored = (by?: "host" | "workflow") => new SqliteSessionStore(db, {}, undefined, by) as unknown as Store & SqliteSessionStore;
+    const entriesOf = (s: SqliteSessionStore, ref: string) => (s.transcript(ref)[0]!.value as { value: { entries: Array<Record<string, unknown>> } }).value.entries;
+
+    it("marks the opening entry from birth, keeps it through a flush, and on the settle's own copy of it", async () => {
+      const s = authored("host");
+      const at = await s.resolve({ ref: "ask" });
+      const r1 = await s.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      expect(entriesOf(s, "ask")).toEqual([{ ...said("what is in this repository?", "user"), by: "host" }]);
+      s.update(r1, { value: partial(["it has two tables"]) });
+      expect(entriesOf(s, "ask")[0]).toMatchObject({ role: "user", by: "host" });
+      // The provider's authoritative delta opens with the same question — ITS copy carries the mark,
+      // and a system prompt in it is the workflow's.
+      await s.finish(r1, {
+        result: { value: { entries: [said("be brief", "system"), { kind: "message", role: "user", content: [{ type: "text", text: "what is in this repository?" }] }, said("two tables")] } } as never,
+      });
+      expect(entriesOf(s, "ask").map((entry) => [entry["role"], entry["by"]])).toEqual([
+        ["system", "workflow"],
+        ["user", "host"],
+        ["assistant", undefined],
+      ]);
+      // The mark rides the record, not the wire: what goes back to the provider is unchanged.
+      expect(await s.messages("ask")).toEqual([{ role: "system", content: "be brief" }, { role: "user", content: [{ type: "text", text: "what is in this repository?" }] }, turn("two tables")]);
+    });
+
+    it("marks a run's prompt as the workflow's, and leaves what the person typed unmarked", async () => {
+      const run = authored("workflow");
+      const at = await run.resolve({ ref: "state" });
+      await run.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      expect(entriesOf(run, "state")[0]).toMatchObject({ role: "user", by: "workflow" });
+
+      const typed = authored();
+      const here = await typed.resolve({ ref: "chat" });
+      await typed.append({ id: "r2", source: { kind: "prompt", user: "and the third?" } as never, session: here.at, startMs: 1 });
+      expect(entriesOf(typed, "chat")[0]!["by"]).toBeUndefined();
+    });
+
+    it("marks only the message the call was made with — a later user turn with other words is not the app's", async () => {
+      const s = authored("host");
+      const at = await s.resolve({ ref: "ask" });
+      const r1 = await s.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      await s.finish(r1, { result: { value: { entries: [said("what is in this repository?", "user"), said("two tables"), said("thanks — and the third?", "user")] } } as never });
+      expect(entriesOf(s, "ask").map((entry) => entry["by"])).toEqual(["host", undefined, undefined]);
+    });
+  });
+
+  /**
    * The clocks survive a SUCCESSFUL settle — the one field the settle cannot reproduce.
    *
    * A provider result carries no wall clock per message, so the per-turn times exist exactly once:

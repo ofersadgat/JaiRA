@@ -9429,6 +9429,44 @@ fieldset.reading {
   padding: 1px 0 1px 12px;
   border-left: 2px solid var(--rule);
 }
+/* Said to the model, and not typed by the person: the same side as everything said to the model,
+   with a quieter bubble and a badge above it that names where the words came from. */
+.ts-msg-sent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.ts-msg-sent .ts-bubble {
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.ts-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding: 1px 7px 1px 5px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+.ts-source svg {
+  width: 11px;
+  height: 11px;
+  color: var(--accent);
+}
+/* Beside the aside's own label (`system`), on its line. */
+.ts-tag .ts-source {
+  margin: 0 0 0 8px;
+  vertical-align: 1px;
+}
 .ts-tag {
   display: block;
   margin-bottom: 3px;

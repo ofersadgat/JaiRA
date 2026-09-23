@@ -54,7 +54,7 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, workflowOutcomeOf, workflowToolOf, type AgentQuestion, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
+import { choicesOfQuestions, workflowOutcomeOf, workflowToolOf, type AgentQuestion, type MessageAuthor, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfAnsweredText, answersOfValue, ChoiceList, ChoiceSteps, type Answer } from "./choices";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
@@ -1375,9 +1375,13 @@ function Message({
   const stamped = day !== undefined ? { "data-day": day } : {};
 
   const fade = doomed ? " ts-doomed" : "";
+  // Said to the model and NOT typed by the person: still on the right, where everything said to the
+  // model is, and named by where it came from.
+  const source = entry.by !== undefined ? <MessageSource by={entry.by} /> : null;
   if (entry.role === "user") {
     return (
-      <div className={`ts-msg ts-msg-user${fade}`} {...stamped}>
+      <div className={`ts-msg ts-msg-user${entry.by !== undefined ? " ts-msg-sent" : ""}${fade}`} {...stamped}>
+        {source}
         <div className="ts-bubble">{said ? body : <span className="sub">(empty)</span>}</div>
         {rail}
       </div>
@@ -1393,7 +1397,10 @@ function Message({
   }
   return (
     <div className={`ts-msg ts-msg-aside${fade}`} {...stamped}>
-      <span className="ts-tag">{entry.role}</span>
+      <span className="ts-tag">
+        {entry.role}
+        {source}
+      </span>
       {/* Shown as written, which is what `text/plain` now MEANS rather than merely what happened to
           happen: this is the input, and reformatting an input is how you stop being able to see what
           was actually sent. The chip is still there for the day one of them is a pasted diff. */}
@@ -1402,6 +1409,25 @@ function Message({
     </div>
   );
 }
+
+/**
+ * The badge on a message the person did not type — WHO wrote it, in a word, with the rest on the
+ * tooltip. Exported for the snapshot specimens, which draw it over the real stylesheet.
+ */
+export function MessageSource({ by }: { by: MessageAuthor }): JSX.Element {
+  const said = MESSAGE_SOURCE[by];
+  return (
+    <span className={`ts-source ts-source-${by}`} title={said.title}>
+      <Icon name={said.icon} />
+      {said.label}
+    </span>
+  );
+}
+
+const MESSAGE_SOURCE: Record<MessageAuthor, { label: string; title: string; icon: "send" | "workflow" }> = {
+  host: { label: "Written by JaiRA", title: "JaiRA wrote and sent this for you — you did not type it", icon: "send" },
+  workflow: { label: "From the workflow", title: "The workflow's words for this call — written by its author, not typed here", icon: "workflow" },
+};
 
 /** What each reading is called in the rail, and what its tooltip says it does. */
 const READING: Record<ViewId, { label: string; hint: string }> = {

@@ -69,6 +69,10 @@ import { uuidv7 } from "@declarative-ai/hw";
 import type { JairaDb } from "./db";
 import { dehydrate, hydrate, release } from "./blobStore";
 import { messagesOfRecord } from "./recordMessages";
+import type { MessageAuthor } from "@jaira/shared";
+
+/** Who wrote the message a record is made with, when the person did not — see `withAuthors`. */
+export type OpeningAuthor = MessageAuthor;
 export { messagesOfRecord } from "./recordMessages";
 import type { ConversationLog, RecordRow, SessionRow } from "./conversationFile";
 
@@ -216,6 +220,12 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     private readonly db: JairaDb,
     private readonly scope: SessionScope = {},
     private readonly log?: ConversationLog,
+    /**
+     * Who wrote the message every record this store opens is MADE with, when it was not the person
+     * typing it (`OpeningAuthor`). Pinned on the request, so every later write of the record — a
+     * flush, the settle — marks the same entry whichever store instance makes it.
+     */
+    private readonly openingBy?: OpeningAuthor,
   ) {}
 
   // --- the file half ------------------------------------------------------------
@@ -395,10 +405,12 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // times exist exactly once, in the stream that measured them, and dropping them at the settle is
     // why a finished run's thinking rows had no "thought for 12 s" while a live one did. Times only:
     // the messages themselves still come from the authoritative result.
-    const folded =
+    const folded = withAuthors(
       error !== undefined
         ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json, row.request_json)
-        : carryTurnTiming(settled.result as JsonValue, row.result_json);
+        : carryTurnTiming(settled.result as JsonValue, row.result_json),
+      row.request_json,
+    );
     // The outcome's one earned case — a payload that is NOT a conversation — normalises into the
     // result at the WRITE now (Identity and Resume §03 deleted `session_outcome_json`): the turns
     // land as a SIBLING of the value (`$.messages`), never over it, because `$.value` is the op's
@@ -951,6 +963,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const at = stub.session;
     const ask: Record<string, unknown> = { ...((stub.source ?? {}) as object) };
     if (stub.scope !== undefined) ask["scope"] = stub.scope;
+    // Who wrote the message it is made with, beside it — see `withAuthors`. Only on a request that has one.
+    if (this.openingBy !== undefined && typeof ask["user"] === "string") ask[OPENING_BY] = this.openingBy;
     if (at !== undefined) {
       ask["session"] = {
         id: at.id,
@@ -1330,8 +1344,11 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     return [...seat.values()]
       .sort((a, b) => a.seq - b.seq)
       .map((row) => {
-        const value = projectValue(
-          row.result_json === null ? undefined : (hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as JsonValue),
+        // A conversation that rides as reported `messages` becomes entries HERE, and is marked as it
+        // does — the same `withAuthors` a stored conversation got at its write.
+        const value = withAuthors(
+          projectValue(row.result_json === null ? undefined : (hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as JsonValue)),
+          row.request_json,
         );
         return {
           seq: row.seq,
@@ -1480,15 +1497,73 @@ function withOpening(value: JsonValue, requestJson: string | null): JsonValue {
   const held = value as { value?: { entries?: JsonValue[] } } | null;
   const entries = Array.isArray(held?.value?.entries) ? held.value.entries : [];
   const opening = openingMessage(requestJson, messagesOfRecord(value));
-  if (opening.length === 0) return value;
+  if (opening.length === 0) return withAuthors(value, requestJson) as JsonValue;
   const asked = opening[0] as { role: string; content: JsonValue };
   // `provider: "unknown"` because nobody produced it: this turn is the host stating what it asked,
   // which is exactly what a settled record's own spliced opening says about itself.
   const entry = { kind: "message", role: asked.role, content: asked.content, provider: "unknown" } as JsonValue;
-  return {
-    ...((value ?? {}) as object),
-    value: { ...((held?.value ?? {}) as object), entries: [entry, ...entries] },
-  } as JsonValue;
+  return withAuthors(
+    {
+      ...((value ?? {}) as object),
+      value: { ...((held?.value ?? {}) as object), entries: [entry, ...entries] },
+    } as JsonValue,
+    requestJson,
+  ) as JsonValue;
+}
+
+/** Where a record's request says who wrote the message it was made with — see {@link withAuthors}. */
+const OPENING_BY = "openingBy";
+
+/** The text of a message's content, however the provider shaped it. */
+function textOfContent(content: unknown): string | undefined {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .filter((part): part is { type: string; text: string } => (part as { type?: unknown })?.type === "text" && typeof (part as { text?: unknown }).text === "string")
+    .map((part) => part.text)
+    .join("");
+  return text.length > 0 ? text : undefined;
+}
+
+/**
+ * Mark, ON THE ENTRY, the messages the person did not type — `by` (`MessageAuthor`), so the
+ * conversation can say whose words they are. What was said to the model is still drawn where it
+ * always is; the mark only names its source.
+ *
+ *  - The message a call was MADE with, when its request says who wrote it (`openingBy`): a state's
+ *    prompt rendered from the workflow, or a message the app sent on the person's behalf. Found by
+ *    content — the first user message that IS the request's `user` — because a provider's own copy of
+ *    it (a native session's first line) is the same message and must carry the same mark.
+ *  - Every `system` message: nobody types one; it is the workflow's frame for the call.
+ *
+ * One conversation array, marked where it is written: at the record's birth, every flush, and the
+ * settle, so the record carries the mark at every instant of its life.
+ */
+function withAuthors<T extends JsonValue | undefined>(value: T, requestJson: string | null): T {
+  const held = value as { value?: { entries?: JsonValue[] } } | null | undefined;
+  const entries = held?.value?.entries;
+  if (!Array.isArray(entries)) return value;
+  const request = parsed<{ user?: unknown; [OPENING_BY]?: unknown }>(requestJson);
+  const by = request?.[OPENING_BY] === "host" || request?.[OPENING_BY] === "workflow" ? (request[OPENING_BY] as OpeningAuthor) : undefined;
+  const asked = typeof request?.user === "string" ? request.user : undefined;
+  let opening = by === undefined || asked === undefined;
+  let changed = false;
+  const marked = entries.map((raw) => {
+    const entry = raw as { kind?: unknown; role?: unknown; content?: unknown; by?: unknown } | null;
+    if (entry === null || typeof entry !== "object" || entry.kind !== "message" || entry.by !== undefined) return raw;
+    if (entry.role === "system") {
+      changed = true;
+      return { ...entry, by: "workflow" } as JsonValue;
+    }
+    if (!opening && entry.role === "user" && textOfContent(entry.content) === asked) {
+      opening = true;
+      changed = true;
+      return { ...entry, by } as JsonValue;
+    }
+    return raw;
+  });
+  if (!changed) return value;
+  return { ...(value as object), value: { ...(held!.value as object), entries: marked } } as unknown as T;
 }
 
 /**

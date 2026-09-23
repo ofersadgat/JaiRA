@@ -29,7 +29,7 @@ import { applyStorage, isFileBacked, type ShadowReport } from "./shadow";
 import { journalFiles, replayJournal } from "./journalFile";
 import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
 import { ARTIFACT_ROWS, fingerprintOf, replayRows, RowLog, rowFiles, TASK_ROWS } from "./rowFile";
-import { SqliteSessionStore, type SessionScope } from "./sessionStore";
+import { SqliteSessionStore, type OpeningAuthor, type SessionScope } from "./sessionStore";
 import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
 import { JobStore, type JobRow } from "./jobs";
@@ -279,13 +279,13 @@ export function openSharedProject(opts?: { now?: () => number; staleMs?: number;
  * database is thrown away and the conversations are not there. An unscoped store — no task — gets no
  * log because it has nothing to name a file by; it is a read already narrowed.
  */
-export function sessionStoreFor(project: Project, scope: SessionScope = {}): SqliteSessionStore {
+export function sessionStoreFor(project: Project, scope: SessionScope = {}, openingBy?: OpeningAuthor): SqliteSessionStore {
   const filed = isFileBacked(project.config.storage.conversations);
   const log =
     filed && scope.taskId !== undefined
       ? new ConversationLog(project.paths.conversationsDir, project.config.storage.format, scope.taskId)
       : undefined;
-  return new SqliteSessionStore(project.db, scope, log);
+  return new SqliteSessionStore(project.db, scope, log, openingBy);
 }
 
 export function loadLayeredConfig(paths: JairaPaths): JairaConfig {

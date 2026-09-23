@@ -30,6 +30,7 @@ import {
   writingPath,
   type ConversationTurn,
   type InstanceNode,
+  type MessageAuthor,
   type SessionOutput,
   type SessionTurn,
   type SessionView,
@@ -45,6 +46,12 @@ export interface MessageEntry {
   kind: "message";
   /** `system` · `user` · `assistant`, or whatever else the provider labelled it. */
   role: string;
+  /**
+   * Who wrote it, when the person did not — the record's own mark on the entry (`MessageAuthor`):
+   * the app on the person's behalf, or the workflow (a state's prompt, a system prompt). It is still
+   * drawn where what was said to the model is drawn; the mark names its source.
+   */
+  by?: MessageAuthor;
   at?: number;
   text?: string;
   /** Tool calls and results carried on the turn, kept structured — see {@link toolPartsOf}. */
@@ -575,6 +582,7 @@ function messageOf(
     entries.push({
       kind: "message",
       role: turn.role,
+      ...(turn.by !== undefined ? { by: turn.by } : {}),
       ...(at !== undefined ? { at } : {}),
       ...(turn.text !== undefined ? { text: turn.text } : {}),
       ...(index !== undefined ? { turn: index } : {}),

@@ -2,7 +2,7 @@
 id: ui/components/transcript
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-22
 realizes: [ux/patterns/stream-then-settle, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/arm-the-cut-then-confirm, ux/patterns/absence-is-stated, ux/patterns/say-what-it-is-doing-and-for-how-long]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/chat-with-agents, product/rewind-to-where-it-went-wrong]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
@@ -27,7 +27,7 @@ A white sheet with rounded corners on the grey page, carrying one conversation f
 
 - **Page and sheet.** Where the transcript is the whole view, a `--bg` page with 14px above, 16px at the sides and 22px below holds a `--panel` sheet with a 1px `--line` border, 12px corners and a faint shadow, at most 900px wide and centred. On a session sheet the transcript takes that sheet's body instead.
 - **Column.** 12px above, 16px at the sides and 22px below, then the blocks top to bottom.
-- **Messages.** Each [message](message.md): a sent bubble at the right, an answer across the full width, or a system prompt behind a rule.
+- **Messages.** Each [message](message.md): a sent bubble at the right, an answer across the full width, or a system prompt behind a rule. What was said to the model is on the right whoever wrote it; what the person did not type — a message the app sent for them, a state's prompt, a system prompt — wears a badge naming its source, read from the record's own mark on the entry.
 - **Work.** Each stretch of work between two messages is a column of [work-row](work-row.md)s, pulled 6px outward so the glyphs line up with the prose edge, with 6px above and 10px below.
 - **Fold.** A stretch of more than six rows shows only its last five under a centred line with a chevron and `{n} earlier steps`, in the app face at 12/12.5 of the app size and weight 600 in `--dim`. A row that produced a page or delivered the state's output is never folded.
 - **Answer arriving.** Plain text in the app face at 13/12.5 in `--dim`, and under it three 4px breathing dots and `writing…`.

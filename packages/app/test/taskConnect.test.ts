@@ -593,6 +593,9 @@ describe("askAfter — a drop whose target needs what nothing binds (decision 00
     expect(opening?.text).toContain(`"Ran feat/product" was moved to lib/needs.`);
     expect(opening?.text).toContain("`text`: What to call it. — schema {\"type\":\"string\",\"minLength\":3}");
     expect(opening?.text).toContain("call `start_task` with state `lib/needs`");
+    // The APP wrote it, on the person's behalf — and the record says so on the message (`MessageAuthor`).
+    expect(opening?.by).toBe("host");
+    expect(question?.by).toBeUndefined();
     expect(service.pendingInteractions()).toEqual([]);
   });
 
@@ -605,6 +608,8 @@ describe("askAfter — a drop whose target needs what nothing binds (decision 00
     const host = journal(parent).flatMap((e) => (e.type === "instance.entered" && e.parentInstanceId === undefined ? [e.instanceId] : []))[0]!;
     await service.sendChatMessage({ taskId: parent, instanceId: host, message: "Call it Widget.", fake });
     expect(thread(parent).map((t) => t.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    // What the person typed is theirs: only the opening turn is marked as the app's.
+    expect(thread(parent).map((t) => t.by)).toEqual(["host", undefined, undefined, undefined]);
     // …and the model, having read it, calls its own start_task naming what the person answered.
     const started = (await createWorkflowTools(service.workflowHostFor(dir, parent))["start_task"]!.run({ state: "lib/needs", inputs: { text: "Widget" }, asked: ["text"] } as never, {} as never)) as Record<string, JsonValue>;
     expect(started, JSON.stringify(started)).toMatchObject({ ok: true, state: "lib/needs", inputs: [{ name: "text", via: "asked" }] });

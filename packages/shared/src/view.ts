@@ -1257,8 +1257,21 @@ export interface RunMetrics {
  * hands back every message, tool call and result on the same wire, and the record stores that
  * verbatim. Flattening it here would throw away exactly what a session view is for.
  */
+/**
+ * Who wrote a message the PERSON did not type — carried on the record's entry (`by`), so the
+ * conversation names the source of what was said to the model instead of drawing it as typed:
+ *
+ *  - `host` — the app wrote it on the person's behalf (the opening turn of a conversation a drop made);
+ *  - `workflow` — the workflow's words: a state's prompt, rendered for its call, and a system prompt.
+ *
+ * Absent ⇒ the person typed it, or the model said it.
+ */
+export type MessageAuthor = "host" | "workflow";
+
 export interface SessionTurn {
   role: string;
+  /** Who wrote it, when the person did not — see {@link MessageAuthor}. */
+  by?: MessageAuthor;
   /** The turn's text, when it has any — a tool-call turn does not. */
   text?: string;
   /** Tool calls and their results, kept structured so a viewer can pair and collapse them. */
