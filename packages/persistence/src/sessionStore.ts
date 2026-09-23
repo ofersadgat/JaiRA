@@ -246,7 +246,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   /** A record or a session that is GONE — the append-only file's way of saying so (see `cut.ts`). */
-  private logTombstone(row: { record_id?: string; session_id?: string; task_id?: string | null }): void {
+  private logTombstone(row: { record_id?: string; session_id?: string; name?: string; task_id?: string | null }): void {
     this.log?.append({ kind: "tombstone", row: { ...(this.scope.taskId !== undefined ? { task_id: this.scope.taskId } : {}), ...row } });
   }
 
@@ -1223,6 +1223,31 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     this.logSession(id);
     this.log?.append({ kind: "name", row: { task_id: this.scope.taskId ?? "", name: ref, session_id: id } });
     return id;
+  }
+
+  /**
+   * Make `name`, in THIS store's task, an alias to a session that already exists — what an ADOPTION
+   * does for a named session of the task it takes up (`adopt.ts`): the parent's key for the same
+   * declaration resolves to the conversation the adopted task had under it. A name the task already
+   * has is left as it is. Returns whether the alias was added.
+   */
+  aliasName(name: string, sessionId: string): boolean {
+    const added = this.db
+      .prepare(`INSERT OR IGNORE INTO session_names (task_id, name, session_id) VALUES (?, ?, ?)`)
+      .run(this.scope.taskId ?? "", name, sessionId).changes > 0;
+    if (added) this.log?.append({ kind: "name", row: { task_id: this.scope.taskId ?? "", name, session_id: sessionId } });
+    return added;
+  }
+
+  /** Take back this task's aliases to these sessions — an un-adoption; the other half of {@link aliasName}. */
+  unaliasSessions(sessionIds: readonly string[]): string[] {
+    if (sessionIds.length === 0) return [];
+    const marks = sessionIds.map(() => "?").join(", ");
+    const task = this.scope.taskId ?? "";
+    const names = (this.db.prepare(`SELECT name FROM session_names WHERE task_id = ? AND session_id IN (${marks})`).all(task, ...sessionIds) as Array<{ name: string }>).map((row) => row.name);
+    this.db.prepare(`DELETE FROM session_names WHERE task_id = ? AND session_id IN (${marks})`).run(task, ...sessionIds);
+    for (const name of names) this.logTombstone({ name });
+    return names;
   }
 
   /**

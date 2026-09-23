@@ -109,6 +109,8 @@ export interface NameRow {
 export interface TombstoneRow {
   record_id?: string;
   session_id?: string;
+  /** A `session_names` alias taken back — with `task_id`, the task it belonged to (an un-adoption, `adopt.ts`). */
+  name?: string;
   task_id?: string | null;
 }
 
@@ -368,6 +370,9 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
         // Last wins, so a tombstone after the row it names takes the row out of the fold.
         if (entry.row.record_id !== undefined) records.delete(`${entry.row.task_id ?? ""} ${entry.row.record_id}`);
         if (entry.row.session_id !== undefined) sessions.delete(entry.row.session_id);
+        if (entry.row.name !== undefined) {
+          for (const [key, row] of names) if (row.task_id === (entry.row.task_id ?? "") && row.name === entry.row.name) names.delete(key);
+        }
       } else {
         sessions.set(entry.row.id, entry.row);
       }

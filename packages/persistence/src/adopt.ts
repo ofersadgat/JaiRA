@@ -59,7 +59,7 @@ import type { AdoptAsk, AdoptPlan, AdoptRefusal, AdoptedChild, AdoptionTarget, I
 import { createTask } from "./lifecycle";
 import { loadPinnedBundle } from "./documents";
 import { loadSnapshot } from "./snapshots";
-import type { Project } from "./project";
+import { sessionStoreFor, type Project } from "./project";
 
 const log = createLogger("jaira.persistence.adopt");
 
@@ -670,6 +670,9 @@ export function writeAdoption(project: Project, pin: { bundle: WorkflowBundle; h
     if (child.outputs !== undefined) recorder.record(mirrorTerminated(child.taskId, child.stateId, child.outputs), now());
   }
 
+  // Its named sessions stay the named sessions (a still-running task's are taken up again when it ends).
+  for (const child of children) adoptSessionNames(project, parent.id, child, pin.bundle);
+
   for (const child of children) {
     // Adopted is connected again: an Undo the task kept from an earlier drop is over (`connectUndo.ts`).
     const { connectUndo: _over, ...meta } = project.tasks.read(child.taskId);
@@ -740,7 +743,8 @@ export function settleAdoptions(project: Project, parentTaskId: string, deps: Ad
   if (open.length === 0) return { settled, misfits };
   const parentRow = project.runtime.get(parentTaskId);
   // What the parent runs under NOW — a document's latest version, for a task in one.
-  const states = parentRow !== undefined && (parentRow.snapshotHash !== undefined || parentRow.documentId !== undefined) ? loadPinnedBundle(project, parentRow).states : {};
+  const bundle = parentRow !== undefined && (parentRow.snapshotHash !== undefined || parentRow.documentId !== undefined) ? loadPinnedBundle(project, parentRow) : undefined;
+  const states = bundle?.states ?? {};
   const recorder = project.events.recorder(parentTaskId);
   for (const mirror of open) {
     const row = project.runtime.get(mirror.taskId);
@@ -753,6 +757,9 @@ export function settleAdoptions(project: Project, parentTaskId: string, deps: Ad
       continue;
     }
     recorder.record(mirrorTerminated(mirror.taskId, mirror.stateId, outputs), (deps.now ?? Date.now)());
+    // What it named while it ran after the adoption is the parent's to continue too.
+    const key = project.events.list(parentTaskId).find((row) => row.event.type === "instance.entered" && row.event.instanceId === mirror.taskId)?.event as { childKey?: string } | undefined;
+    if (bundle !== undefined && key?.childKey !== undefined) adoptSessionNames(project, parentTaskId, { taskId: mirror.taskId, childKey: key.childKey, stateId: mirror.stateId }, bundle);
     settled.push(mirror.taskId);
   }
   return { settled, misfits };
@@ -772,6 +779,8 @@ export function releaseUnmirroredAdoptions(project: Project, parentTaskId: strin
     const { origin, parentTaskId: _parent, ...rest } = meta;
     project.tasks.write({ ...rest, ...(origin.formerParentTaskId !== undefined ? { parentTaskId: origin.formerParentTaskId } : {}) });
     if (project.runtime.get(meta.id) !== undefined) project.runtime.setParent(meta.id, origin.formerParentTaskId, nowMs);
+    // Its named sessions stop being the parent's: a parent that runs the child itself now starts it fresh.
+    if (project.runtime.get(parentTaskId) !== undefined) releaseSessionNames(project, parentTaskId, meta.id);
     released.push(meta.id);
   }
   if (released.length > 0) {
@@ -784,6 +793,93 @@ export function releaseUnmirroredAdoptions(project: Project, parentTaskId: strin
     log.info(`un-adopted ${released.join(", ")} from ${parentTaskId}`);
   }
   return released;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// named sessions
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Where a session declaration inside the adopted child is SCOPED, in the parent's definition: at the
+ * child or below it (`within` — the key moves under the child's address), or above it (`above` — the
+ * parent's root, which is what `$in: "global"` resolves to there). By the declared name.
+ *
+ * Read off the loader's normalized declarations — `{ $ref, $in }` under a `session` or
+ * `scopeSession` key anywhere in a state of the child's subtree — because `$in` has been resolved to
+ * the state that scopes the name by then, and the same declaration resolves differently in the task
+ * that ran alone (where `global` is the child itself) and in the parent (where it is the parent's root).
+ */
+function sessionScopesUnder(bundle: WorkflowBundle, childStateId: string): Map<string, Set<"within" | "above">> {
+  const subtree = new Set<string>();
+  const queue = [childStateId];
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    if (subtree.has(id) || bundle.states[id] === undefined) continue;
+    subtree.add(id);
+    for (const child of Object.values(bundle.states[id]!.children ?? {})) queue.push(child.state);
+  }
+  const out = new Map<string, Set<"within" | "above">>();
+  const note = (declared: unknown): void => {
+    if (!isRecord(declared) || typeof declared["$ref"] !== "string" || typeof declared["$in"] !== "string") return;
+    const where = subtree.has(declared["$in"]) ? "within" : "above";
+    out.set(declared["$ref"], (out.get(declared["$ref"]) ?? new Set()).add(where));
+  };
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (isRecord(value)) {
+      for (const [key, inner] of Object.entries(value)) {
+        if (key === "session" || key === "scopeSession") note(inner);
+        walk(inner);
+      }
+    }
+  };
+  for (const id of subtree) walk(bundle.states[id]);
+  return out;
+}
+
+/**
+ * A named session of the adopted task stays THAT session in the parent (decision 0005 §2; the
+ * person's ruling, 2026-09-22): whatever its scope, the key the parent gives the same declaration
+ * resolves to the conversation the adopted task had under it. Nothing is copied — the parent's name
+ * is an alias to the adopted task's own session, as a resumed run's name is to its earlier one.
+ *
+ * A name's key is `name#<address of the instance scoping it>` (upstream `scope.ts`). The adopted task
+ * ran the child as its ROOT, so every address it wrote is one level short of the parent's:
+ *
+ *  - scoped to the child or inside it: `rest` there is `<childKey>/rest` here (the root, `/`, is `<childKey>`);
+ *  - scoped `global`: the root there was the child, the root here is the parent — `/` stays `/`.
+ *
+ * Which of the two a root-scoped `name#/` was is read from the parent's own declarations; a name no
+ * declaration spells (a computed one) is taken as the child's. An alias the parent already has for
+ * the key is left alone: the parent's own conversation came first. Engine-minted keys (`#i…`, one
+ * per instance) are never shared, and are skipped.
+ */
+export function adoptSessionNames(project: Project, parentTaskId: string, child: { taskId: string; childKey: string; stateId: string }, bundle: WorkflowBundle): number {
+  const rows = project.db.prepare(`SELECT name, session_id FROM session_names WHERE task_id = ?`).all(child.taskId) as Array<{ name: string; session_id: string }>;
+  if (rows.length === 0) return 0;
+  const scopes = sessionScopesUnder(bundle, child.stateId);
+  const store = sessionStoreFor(project, { taskId: parentTaskId });
+  let added = 0;
+  for (const row of rows) {
+    const at = row.name.lastIndexOf("#");
+    if (row.name.startsWith("#") || at <= 0) continue;
+    const name = row.name.slice(0, at);
+    const address = row.name.slice(at + 1);
+    if (address === "") continue;
+    const scoped = scopes.get(name);
+    const keys: string[] = [];
+    if (address === "/" && scoped?.has("above") === true) keys.push(`${name}#/`);
+    if (address !== "/" || scoped === undefined || scoped.has("within")) keys.push(`${name}#${child.childKey}${address === "/" ? "" : `/${address}`}`);
+    for (const key of keys) if (store.aliasName(key, row.session_id)) added += 1;
+  }
+  if (added > 0) log.info(`${parentTaskId} took up ${added} named session(s) of ${child.taskId}`);
+  return added;
+}
+
+/** Un-adopting takes the aliases back — see {@link adoptSessionNames}. */
+function releaseSessionNames(project: Project, parentTaskId: string, childTaskId: string): void {
+  const sessions = (project.db.prepare(`SELECT DISTINCT session_id FROM session_names WHERE task_id = ?`).all(childTaskId) as Array<{ session_id: string }>).map((row) => row.session_id);
+  sessionStoreFor(project, { taskId: parentTaskId }).unaliasSessions(sessions);
 }
 
 /** The parent a task was adopted into, when it was. */

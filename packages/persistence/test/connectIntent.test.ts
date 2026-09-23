@@ -204,7 +204,7 @@ describe("a retry finishes the drop it stopped — never a second document, adop
     await finishedProduct();
     const first = await whole();
     // Back to just after the intent: every later connect row gone, and what the steps made still there.
-    const intentSeq = project.events.list("t-product").find((row) => row.type === CONNECT_EVENT)!.seq;
+    const intentSeq = project.events.list("t-product").find((row) => (row.type as string) === CONNECT_EVENT)!.seq;
     project.db.prepare(`DELETE FROM state_machine_events WHERE task_id = 't-product' AND type = ? AND seq > ?`).run(CONNECT_EVENT, intentSeq);
     project.db.prepare(`DELETE FROM state_machine_events WHERE task_id = ? AND type = ?`).run(first.taskId, CONNECT_EVENT);
     const moves: TaskMoveRequest[] = [];

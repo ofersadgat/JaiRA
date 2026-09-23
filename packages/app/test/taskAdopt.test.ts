@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildTaskLoad, initProject, loadSnapshot, openProject, SqliteEventLog, ADOPTED_STATE_PREFIX } from "@jaira/persistence";
+import { buildTaskLoad, forkTask, initProject, loadSnapshot, openProject, sessionStoreFor, SqliteEventLog, ADOPTED_STATE_PREFIX } from "@jaira/persistence";
 import { writeWorkflowFiles, type FakeRule } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
@@ -110,6 +110,24 @@ function files(productBrief: JsonValue = { type: "string" }): Record<string, Jso
       outputs: { confirmed: { schema: { type: "boolean" } } },
       operation: { kind: "function", function: "confirm_action", args: { prompt: "b?" } },
     },
+    // NAMED SESSIONS across an adoption. Product keeps a `notes` conversation scoped GLOBAL (the run's
+    // root, whichever that is) and a `loop` one scoped to itself; ux, run by the parent, joins `notes`.
+    sess: {
+      label: "Sessions",
+      environment: { kind: "prompt", model: "nobody" },
+      children: { product: { state: "sess/product" }, ux: { state: "sess/ux", inputs: { brief: ".children.product.output.brief" } } },
+      sequence: ["product", "ux"],
+      outputs: { plan: { schema: { type: "string" }, binding: ".children.ux.output.plan", optional: true } },
+    },
+    "sess/product": {
+      label: "Product",
+      outputs: { brief: { schema: { type: "string" }, binding: ".children.draft.output.brief" } },
+      children: { note: { state: "sess/product/note" }, draft: { state: "sess/product/draft" } },
+      sequence: ["note", "draft"],
+    },
+    "sess/product/note": { ...(leaf("Note", "noter", {}, "note") as Record<string, JsonValue>), environment: { session: { $ref: "notes", $in: "global" } } },
+    "sess/product/draft": { ...(leaf("Draft", "drafter", {}, "brief") as Record<string, JsonValue>), environment: { session: { $ref: "loop", $in: "sess/product" } } },
+    "sess/ux": { ...(leaf("UX", "uxer", { brief: str() }, "plan") as Record<string, JsonValue>), environment: { session: { $ref: "notes", $in: "global" } } },
   };
 }
 
@@ -120,6 +138,9 @@ const RULES: FakeRule[] = [
   { model: "worker", output: { doc: "worked" } },
   { model: "finisher", output: { final: "done" } },
   { model: "after", output: { done: "after the gate" } },
+  { model: "noter", output: { note: "noted" } },
+  { model: "drafter", output: { brief: "drafted" } },
+  { model: "uxer", output: { plan: "planned" } },
 ];
 
 let dir: string;
@@ -479,6 +500,66 @@ describe("adopting INTO a task that exists", () => {
     expect(entered(parent)).toEqual(["a", "b"]);
     // Nobody was asked b's question a second time.
     expect(service.pendingInteractions()).toEqual([]);
+  });
+});
+
+describe("a named session across an adoption", () => {
+  /** A task's names and the session each is an alias to. */
+  const names = (taskId: string): Record<string, string> =>
+    Object.fromEntries(read((p) => p.db.prepare(`SELECT name, session_id FROM session_names WHERE task_id = ? AND name NOT LIKE '#%'`).all(taskId) as Array<{ name: string; session_id: string }>).map((row) => [row.name, row.session_id]));
+  /** Where a task's records sit: `[session, seat]` in the order they started. */
+  const seats = (taskId: string): Array<[string, number]> =>
+    read((p) => p.db.prepare(`SELECT COALESCE(landed_session_id, session_id) AS sid, COALESCE(landed_seq, session_seq) AS seat FROM operation_records WHERE task_id = ? ORDER BY started_at, rowid`).all(taskId) as Array<{ sid: string; seat: number }>).map((row) => [row.sid, row.seat]);
+
+  it("stays the named session: global stays global, one scoped to the child moves under it — and the parent CONTINUES the conversation the adopted task began", async () => {
+    const product = await ran("sess/product", {}, "Product");
+    // Run alone, product is the root: `global` and `sess/product` both anchor at `/`.
+    const own = names(product);
+    expect(Object.keys(own).sort()).toEqual(["loop#/", "notes#/"]);
+
+    const result = await service.adoptTask({ taskId: product, workflow: "sess", start: false });
+    const parent = (result as { taskId: string }).taskId;
+    // In the parent the same declarations resolve under its root: `notes` is still the root's, `loop` is the child's.
+    expect(names(parent)).toEqual({ "notes#/": own["notes#/"], "loop#product": own["loop#/"] });
+
+    await service.resumeTask({ taskId: parent, fake: RULES as unknown as JsonValue });
+    await until(() => statusOf(parent) === "completed", "the parent to complete");
+    expect(outputsOf(parent)).toEqual({ plan: "planned" });
+    // ux ran in the parent, in the adopted task's `notes` conversation, on the seat after its note.
+    const noteSeat = seats(product).find(([sid]) => sid === own["notes#/"])!;
+    expect(seats(parent)).toEqual([[own["notes#/"], noteSeat[1] + 1]]);
+    // …and a model reading that conversation reads the note first, then what ux said.
+    const said = read((p) => sessionStoreFor(p, { taskId: parent }).messages("notes#/")) as Array<{ role: string }>;
+    const product_said = read((p) => sessionStoreFor(p, { taskId: product }).messages(`${own["notes#/"]}@${noteSeat[1] + 1}`));
+    expect(said.length).toBeGreaterThan(product_said.length);
+    expect(said.slice(0, product_said.length)).toEqual(product_said);
+
+    // A FORK of the parent keeps the whole conversation: a branch of the adopted task's, not a copy
+    // that would begin at ux with the note missing.
+    const end = read((p) => {
+      const rows = p.events.list(parent);
+      const root = rows.find((row) => row.event.type === "instance.entered" && row.event.parentInstanceId === undefined)!.instanceId;
+      return rows.find((row) => row.type === "instance.terminated" && row.instanceId === root)!.seq;
+    });
+    const copy = read((p) => forkTask(p, parent, end, { standing: "asIs" }).taskId);
+    const copied = read((p) => sessionStoreFor(p, { taskId: copy }).messages("notes#/"));
+    expect(copied).toEqual(said);
+    expect(names(copy)["notes#/"]).not.toBe(own["notes#/"]);
+  });
+
+  it("stops being the parent's when the adoption is taken back — a parent that runs the child itself starts it fresh", async () => {
+    const product = await ran("sess/product", {}, "Product");
+    const own = names(product);
+    const result = await service.adoptTask({ taskId: product, workflow: "sess", start: false });
+    const parent = (result as { taskId: string }).taskId;
+    const mirror = journal(parent).find((row) => row.type === "instance.entered" && row.instanceId === product)!;
+    await service.rewindTask({ taskId: parent, at: mirror.seq, fake: RULES as unknown as JsonValue });
+    await until(() => statusOf(parent) === "completed", "the parent to run product itself");
+    const now = names(parent);
+    expect(Object.values(now)).not.toContain(own["notes#/"]);
+    expect(Object.values(now)).not.toContain(own["loop#/"]);
+    // Its own product used its own conversations, under the keys the parent gives them.
+    expect(Object.keys(now).sort()).toEqual(["loop#product", "notes#/"]);
   });
 });
 

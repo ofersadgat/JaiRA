@@ -453,12 +453,26 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
   // inherits by lineage inside one task, so the lineage comes whole.
   const sessionRow = project.db.prepare(`SELECT id, parent, cursor, provider, provider_session_id, created_at FROM sessions WHERE id = ?`);
   const sessions = new Map<string, ParentSessionRow>();
+  // A session holding ANOTHER task's records is not this task's to copy: it is a conversation a task
+  // this one adopted began, and this one continued under an alias (`adopt.ts`). Its copy is a BRANCH
+  // of it at the copy's first seat, so the prefix is read where it is — copying the rows without the
+  // other task's records would hand the copy a conversation with its beginning missing.
+  const othersIn = project.db.prepare(
+    `SELECT MAX(COALESCE(landed_seq, session_seq)) AS m, COUNT(*) AS n FROM operation_records
+      WHERE COALESCE(landed_session_id, session_id) = ? AND (task_id IS NULL OR task_id != ?)`,
+  );
+  const foreign = new Map<string, number>();
   const claim = (id: string | null | undefined): void => {
     let at = id ?? undefined;
     while (at !== undefined && !sessions.has(at)) {
       const row = sessionRow.get(at) as ParentSessionRow | undefined;
       if (row === undefined) return;
       sessions.set(at, row);
+      const others = othersIn.get(at, taskId) as { m: number | null; n: number };
+      if (others.n > 0) {
+        foreign.set(at, others.m === null ? row.cursor : others.m + 1);
+        return;
+      }
       at = row.parent ?? undefined;
     }
   };
@@ -520,21 +534,19 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
         .map((record) => record.result_json);
       const cut = row.provider_session_id === null ? undefined : lastMessageIdOf(own);
       const handle = cut === undefined ? null : row.provider_session_id;
-      insertSession.run(
-        mapSession(old),
-        row.parent === null ? null : sessions.has(row.parent) ? mapSession(row.parent) : null,
-        row.cursor,
-        row.provider,
-        handle,
-        cut ?? null,
-        row.created_at,
-      );
+      // Another task's conversation: a branch of the ORIGINAL, at the first seat of this task's own
+      // (or where the other task's end, when this one only named it) — see `foreign` above.
+      const seats = records.map((record) => seatOf(record)).filter((seat) => seat?.id === old).map((seat) => seat!.seq);
+      const branch = foreign.has(old) ? { parent: old, cursor: seats.length > 0 ? Math.min(...seats) : foreign.get(old)! } : undefined;
+      const parent = branch !== undefined ? branch.parent : row.parent === null ? null : sessions.has(row.parent) ? mapSession(row.parent) : null;
+      const cursor = branch?.cursor ?? row.cursor;
+      insertSession.run(mapSession(old), parent, cursor, row.provider, handle, cut ?? null, row.created_at);
       convo?.append({
         kind: "session",
         row: {
           id: mapSession(old),
-          parent: row.parent === null ? null : sessions.has(row.parent) ? mapSession(row.parent) : null,
-          cursor: row.cursor,
+          parent,
+          cursor,
           provider: row.provider,
           provider_session_id: handle,
           cut_at: cut ?? null,
