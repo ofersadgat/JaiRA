@@ -11,7 +11,7 @@
  *    decision 0005's Open list, closed 2026-09-22). Each reader is a fold over the rows IN ORDER — an
  *    opening row is open until a closing row follows it.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -19,6 +19,7 @@ import { testHome } from "@jaira/testing";
 import type { EngineEvent } from "@declarative-ai/hw";
 import {
   ANSWERED_EVENT,
+  CONNECT_EVENT,
   FAST_FORWARD_ENDED_EVENT,
   FAST_FORWARD_EVENT,
   MOVE_DROPPED_EVENT,
@@ -26,14 +27,17 @@ import {
   MOVED_EVENT,
   REOPENED_EVENT,
   type AnsweredEvent,
+  type ConnectIntent,
   type FastForwardEvent,
   type MovedEvent,
+  type StoredConnectUndo,
 } from "@jaira/shared";
 import { initProject, openProject, type Project } from "../src/project";
 import { conversationView } from "../src/conversation";
 import { createTask, hasJournalHistory } from "../src/lifecycle";
 import { forkTask, rewindTask as cutTaskJournal } from "../src/cut";
-import { heldMoves, journalRowsThrough, openFastForward, recordHostRow, reopenedAfter, seqAtJournalRow } from "../src/hostRows";
+import { heldMoves, openFastForward, recordConnectRow, recordHostRow, reopenedAfter } from "../src/hostRows";
+import { keptConnectUndo, staleReason } from "../src/connectUndo";
 import { taskRun } from "../src/views";
 
 let dir: string;
@@ -184,17 +188,59 @@ describe("heldMoves", () => {
   });
 });
 
-describe("a place in the journal that outlives the seq", () => {
-  it("counts rows up to a seq and reads the count back", () => {
+/** A move's intent as a drop writes it — enough of one for the Undo to be measured from. */
+const intent = (target: string): ConnectIntent => ({
+  request: { taskId: "x", target },
+  plan: { resolution: "move", workflow: "w", standsAt: { path: ["b"], stateId: target }, inputs: [], asks: [] },
+  steps: [],
+  before: {},
+});
+
+/** The drop's rows around what it did, and the token its card keeps. */
+function dropped(p: Project, id: string, mark: string): void {
+  recordConnectRow(p, id, { mark, at: "intent", intent: intent("w/b") });
+  recordConnectRow(p, id, { mark, at: "done" });
+  const stored: StoredConnectUndo = { undo: { kind: "move", taskId: id, mark }, landing: ["b"] };
+  p.tasks.write({ ...p.tasks.read(id), connectUndo: stored });
+}
+
+describe("where an Undo is measured from — a row, which nothing can make drift", () => {
+  it("stays the drop's own row when a retry deletes rows from BEFORE the drop, where a count of rows landed too late", () => {
     const { id } = createTask(project, { title: "T", workflow: "w" });
-    const other = createTask(project, { title: "U", workflow: "w" });
     engine(id, { type: "instance.entered", instanceId: "r", stateId: "w", inputs: {} });
+    engine(id, { type: "instance.entered", instanceId: "a", parentInstanceId: "r", childKey: "a", stateId: "w/a", inputs: {} });
+    engine(id, { type: "instance.terminated", instanceId: "a", stateId: "w/a", outcome: "error" });
+    dropped(project, id, "m-1");
+    const at = (): number => project.events.list(id).find((row) => (row.event as unknown as { at?: string }).at === "intent")!.seq;
+    const before = keptConnectUndo(project, id);
+    expect(before).toEqual({ undo: { kind: "move", taskId: id, mark: "m-1" }, cutAt: at() });
+    // A retry takes the failure it revives OUT of the journal — two rows from before the drop.
+    project.db.prepare(`DELETE FROM state_machine_events WHERE task_id = ? AND instance_id = 'a'`).run(id);
+    // The cut is still the drop's own first row: nothing the drop did not do is taken back, and none of what it did is left.
+    expect(keptConnectUndo(project, id)).toEqual({ undo: { kind: "move", taskId: id, mark: "m-1" }, cutAt: at() });
+    expect(project.events.list(id).map((row) => row.type as string)).toEqual(["instance.entered", CONNECT_EVENT, CONNECT_EVENT]);
+    // A rewind to before the drop takes its row, and the Undo with it.
+    cutTaskJournal(project, id, at());
+    expect(staleReason(project, { undo: { kind: "move", taskId: id, mark: "m-1" }, landing: ["b"] })).toBe("the task was rewound to before the move");
+  });
+
+  it("is found again after a file-backed journal's replay re-mints every seq", () => {
+    project.close();
+    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ storage: { journal: "file" } }), "utf8");
+    project = openProject(dir, { baseDir: testHome() });
+    const { id } = createTask(project, { id: "t-2", title: "T", workflow: "w" });
+    engine(id, { type: "instance.entered", instanceId: "r", stateId: "w", inputs: {} });
+    dropped(project, id, "m-2");
+    // A task whose file sorts FIRST, written after: the replay inserts it ahead, so t-2's seqs move.
+    const other = createTask(project, { id: "t-1", title: "U", workflow: "w" });
     engine(other.id, { type: "instance.entered", instanceId: "q", stateId: "w", inputs: {} });
-    engine(id, { type: "instance.terminated", instanceId: "r", stateId: "w", outcome: "success" });
-    const last = project.events.list(id).at(-1)!.seq;
-    expect(journalRowsThrough(project, id, last)).toBe(2);
-    expect(seqAtJournalRow(project, id, 2)).toBe(last);
-    expect(seqAtJournalRow(project, id, 0)).toBe(0);
+    const was = (keptConnectUndo(project, id) as { cutAt: number }).cutAt;
+    project.close();
+    project = openProject(dir, { baseDir: testHome() });
+    const now = keptConnectUndo(project, id) as { cutAt: number };
+    expect(now.cutAt).not.toBe(was);
+    const row = project.events.list(id).find((stored) => stored.seq === now.cutAt)!;
+    expect(row.event).toMatchObject({ type: CONNECT_EVENT, mark: "m-2", at: "intent" });
   });
 
   it("finds the reopening a cut at a seq takes away", () => {

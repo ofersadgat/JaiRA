@@ -24,7 +24,7 @@
  * schemas, bindings and descriptions.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import type { AdoptPlan, AdoptRefusal } from "./adopt";
+import type { AdoptPlan, AdoptRefusal, InputProvenance } from "./adopt";
 import type { ProjectRef } from "./ipc";
 import type { TaskMoveResult } from "./userEvents";
 
@@ -125,7 +125,9 @@ export interface ConnectRefusal {
     | "fast-forward"
     | "inputs-missing"
     | "adopt"
-    | "generate";
+    | "generate"
+    /** An earlier connect of this task stopped part-way, and only the same drop may finish it. */
+    | "connecting";
   message: string;
   /** `inputs-missing`: exactly which, with their schemas. */
   missing?: ConnectMissingInput[];
@@ -214,17 +216,28 @@ export interface ConnectPlan {
  *    document puts it back under its previous pin, which is how a clone is undone.
  */
 export type ConnectUndo =
-  | { kind: "adopt"; parentTaskId: string; adoptedTaskId: string; made: boolean }
+  | {
+      kind: "adopt";
+      parentTaskId: string;
+      adoptedTaskId: string;
+      made: boolean;
+      /** The drop's `jaira.connect` rows (`CONNECT_EVENT`): its `intent` is the adopted task's place at the drop. */
+      mark: string;
+    }
   | {
       kind: "move";
       taskId: string;
-      after: number;
+      /**
+       * The drop's `jaira.connect` rows (`CONNECT_EVENT`): its `intent` row is the task's first row of
+       * the drop, and the cut is made there.
+       */
+      mark: string;
       pin?: { snapshotHash: string; documentId?: string };
       /** The task had finished: it goes back to having finished. */
       wasCompleted?: boolean;
       /**
-       * An `askAfter` drop that made or reused a conversation and moved nothing: what was written since
-       * `after` — the conversation's opening turn — is cut and the pin put back, and nothing is resumed.
+       * An `askAfter` drop that made or reused a conversation and moved nothing: what was written from
+       * the `intent` row on — the conversation's opening turn — is cut and the pin put back, and nothing is resumed.
        */
       asking?: true;
     };
@@ -253,6 +266,59 @@ export type TaskConnectResult =
     }
   | { ok: false; dryRun: boolean; refusal: ConnectRefusal; /** How far the resolution got, for a preview that explains the refusal. */ plan?: ConnectPlan };
 
+/**
+ * A connect's INTENT — written on the dragged task's journal before the connect writes anything
+ * (`CONNECT_EVENT`, `at: "intent"`), so a retry and the next open after a crash finish the drop as it
+ * was first meant (decision 0005, "A connect that stops part-way", 2026-09-22). Nothing in it is
+ * re-resolved: the resolution was decided once, here, and the steps are carried out in order, each
+ * marking itself done with what it made.
+ */
+export interface ConnectIntent {
+  /** What was asked, as it was asked: the target, the supplied inputs, skip, askAfter, the scripts. */
+  request: Omit<TaskConnectRequest, "dryRun" | "project">;
+  /** The plan as resolved, before anything was written — what the done connect answers with, completed by the steps' results. */
+  plan: ConnectPlan;
+  steps: ConnectStep[];
+  /** How the dragged task stood before the drop — what a move's Undo puts back. */
+  before: { pin?: { snapshotHash: string; documentId?: string }; wasCompleted?: true };
+  /** `askAfter`: what the conversation it makes will ask for. */
+  asking?: ConnectMissingInput[];
+}
+
+/**
+ * One step of a connect. `on: "parent"` is the task an earlier `parent` or `adopt` step made; a
+ * `move` after a `document` step enters the key the document gave the target.
+ */
+export type ConnectStep =
+  /** Generate and write the document version the move needs — `new`, `augmented` or `cloned`. */
+  | { kind: "document"; conversation: string; withoutTarget?: true }
+  /** Make the document's task: the conversation, with the source adopted into it next. */
+  | { kind: "parent"; title: string; inputs?: Record<string, JsonValue>; provenance?: Record<string, InputProvenance> }
+  /** Adopt the dragged task — into the `parent` step's task, or into a new task of `workflow`. */
+  | { kind: "adopt"; intoParent?: true; workflow?: string; childKey?: string; start: boolean; inputs?: Record<string, JsonValue>; suppliedVia?: "inferred" | "asked" }
+  /** Journal how the values a conversation handed the entry were settled (`jaira.supplied`). */
+  | { kind: "supplied"; on: "task" | "parent"; to: string; instanceId?: string; nested?: true; names: string[] }
+  /** `task_move`, published. */
+  | { kind: "move"; on: "task" | "parent"; move: ConnectMove; inputs?: Record<string, JsonValue> }
+  /** Run the machine to the target (§4). */
+  | { kind: "fastForward"; on: "task" | "parent"; move: ConnectMove; inputs?: Record<string, JsonValue> };
+
+/** What a step made — carried on its `step` row, so a later step (and a retry) can use it. */
+export interface ConnectStepResult {
+  documentId?: string;
+  /** The document's root state id. */
+  rootId?: string;
+  /** The child key the document mounts the target under. */
+  targetKey?: string;
+  /** The child key the document mounts the dragged task's state under (`new`). */
+  sourceKey?: string;
+  /** The task a `parent` or `adopt` step made. */
+  parentTaskId?: string;
+  adopt?: AdoptPlan;
+  moved?: TaskMoveResult["status"] | "fast-forwarding";
+  controlTaskId?: string;
+}
+
 export interface TaskConnectUndoRequest {
   project?: ProjectRef;
   /**
@@ -267,23 +333,18 @@ export interface TaskConnectUndoRequest {
  * durable 2026-09-22) — and what it takes to judge whether it still means "take back what I just
  * did" (2026-09-22, the same day: a card no longer offers Undo forever).
  *
- * The WATCHED journal is the moved task's for a move, and the parent's for an adoption. Every count
- * is a number of journal rows rather than a seq: a seq does not outlive the table that minted it,
- * while the rows before a point stay the rows before it.
+ * The WATCHED journal is the moved task's for a move, and the parent's for an adoption. Every place
+ * in a journal is a ROW, found by the token's `mark` (the drop's `jaira.connect` rows): not a count
+ * of rows, which drifts when a retry deletes a row from before the drop, and not a seq, which a
+ * file-backed journal's replay re-mints.
+ *
+ *  - A move: its `intent` row is where the Undo cuts back to, and where judging starts.
+ *  - An adoption: its `intent` row is on the ADOPTED task, which must do nothing past it.
+ *  - Either: its `done` row, on the watched journal, closes the drop's own writes — a held move, a
+ *    fast-forward, a reopening or a supplied start after it is a later move, not this drop.
  */
 export interface StoredConnectUndo {
   undo: ConnectUndo;
-  /**
-   * A move: the moved task's journal rows at or before the move's `after` — where the Undo cuts back
-   * to, and where judging starts. An adoption: the ADOPTED task's journal rows at the drop — it must
-   * do nothing past them.
-   */
-  rows: number;
-  /**
-   * The watched journal's rows when the token was kept, the drop's own writes included. A held move,
-   * a fast-forward, a reopening or a supplied start written after this is a later move, not this drop.
-   */
-  kept: number;
   /** Where the drop landed: `ConnectPlan.standsAt.path`, child keys from the watched task's root. */
   landing: string[];
   /**

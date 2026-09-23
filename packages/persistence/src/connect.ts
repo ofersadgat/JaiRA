@@ -69,13 +69,27 @@ import type {
   TaskMoveResult,
   WorkflowBrowser,
 } from "@jaira/shared";
-import { ApprovalRequired, SUPPLIED_EVENT, type ConnectSupplied, type SuppliedEvent } from "@jaira/shared";
+import {
+  ApprovalRequired,
+  FAST_FORWARD_EVENT,
+  MOVE_HELD_EVENT,
+  REOPENED_EVENT,
+  SUPPLIED_EVENT,
+  type ConnectIntent,
+  type ConnectStep,
+  type ConnectStepResult,
+  type ConnectSupplied,
+  type FastForwardEvent,
+  type SuppliedEvent,
+} from "@jaira/shared";
+import { randomUUID } from "node:crypto";
 import { childrenReadBy, missingInputs, plainInputOf, planAdoption, writeAdoption, type ValueCheck } from "./adopt";
-import { DYNAMIC_ROOT_PREFIX, loadPinnedBundle } from "./documents";
+import { DYNAMIC_ROOT_PREFIX, listDocuments, loadPinnedBundle, tryReadDocument, type FrozenDocument } from "./documents";
 import { generateDocumentVersion, type GenerateVersionResult } from "./dynamicDocuments";
 import { createTask, pinWorkflow } from "./lifecycle";
 import { buildTaskLoad } from "./load";
 import { dropConnectUndo } from "./connectUndo";
+import { openConnectIntent, recordConnectRow, type OpenConnectIntent } from "./hostRows";
 import type { Project } from "./project";
 import { bundleFor } from "./views";
 import { browseWorkflows } from "./workflows";
@@ -123,6 +137,12 @@ export interface ConnectHost {
    * conversation (its engine cannot pick one up), a task with nothing left to run.
    */
   fastForwardBlocked?(taskId: string): string | undefined;
+  /**
+   * Told of each step of a connect's intent just before it runs (`finishConnect`) — a host's
+   * progress line, and the seam a test stops a connect part-way at: a throw here is a step that
+   * failed, journaled `stopped` like any other.
+   */
+  onStep?(step: ConnectStep, index: number): void | Promise<void>;
 }
 
 const refused = (dryRun: boolean, refusal: ConnectRefusal, plan?: ConnectPlan): TaskConnectResult => ({ ok: false, dryRun, refusal, ...(plan !== undefined ? { plan } : {}) });
@@ -290,6 +310,8 @@ export function recordSupplied(
   at: { instanceId?: string; to: string; nested?: boolean },
   supplied: Readonly<Record<string, ConnectSupplied>> | undefined,
   names: readonly string[],
+  /** The connect writing it — how a retry knows it already did. */
+  mark?: string,
 ): void {
   const provenance: SuppliedEvent["provenance"] = {};
   for (const name of names) {
@@ -297,7 +319,14 @@ export function recordSupplied(
     if (entry !== undefined) provenance[name] = { via: entry.via, ...(entry.confidence !== undefined ? { confidence: entry.confidence } : {}) };
   }
   if (Object.keys(provenance).length === 0) return;
-  const event: SuppliedEvent = { type: SUPPLIED_EVENT, ...(at.instanceId !== undefined ? { instanceId: at.instanceId } : {}), to: at.to, ...(at.nested === true ? { nested: true } : {}), provenance };
+  const event: SuppliedEvent = {
+    type: SUPPLIED_EVENT,
+    ...(at.instanceId !== undefined ? { instanceId: at.instanceId } : {}),
+    to: at.to,
+    ...(at.nested === true ? { nested: true } : {}),
+    provenance,
+    ...(mark !== undefined ? { mark } : {}),
+  };
   project.events.recorder(taskId).record(event as unknown as EngineEvent, Date.now());
 }
 
@@ -521,7 +550,10 @@ function conversationInputs(
   return { inputs, provenance, missing };
 }
 
-const skipOf = (request: TaskConnectRequest): boolean => request.skip === true || request.forward === "skip";
+/** A connect's request as its intent keeps it — what the steps are carried out with. */
+type Asked = ConnectIntent["request"];
+
+const skipOf = (request: Asked): boolean => request.skip === true || request.forward === "skip";
 
 /**
  * A forward move nobody here can run (§4): no host to drive one, so there is nobody to answer on
@@ -538,7 +570,7 @@ function fastForwardRefusal(move: ConnectMove): ConnectRefusal {
 }
 
 /** The mode a forward move asks the host for — see {@link ConnectHost.fastForward}. */
-function fastForwardRequest(request: TaskConnectRequest, taskId: string, target: string, move: ConnectMove, inputs: Record<string, JsonValue>): TaskFastForwardRequest {
+function fastForwardRequest(request: Asked, taskId: string, target: string, move: ConnectMove, inputs: Record<string, JsonValue>): TaskFastForwardRequest {
   return {
     taskId,
     target,
@@ -548,19 +580,17 @@ function fastForwardRequest(request: TaskConnectRequest, taskId: string, target:
     ...(move.passes.length > 0 ? { through: [...move.passes] } : {}),
     by: request.by ?? "person",
     ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
-    ...(request.project !== undefined ? { project: request.project } : {}),
     ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
     ...(request.fake !== undefined ? { fake: request.fake } : {}),
   };
 }
 
-function moveRequest(request: TaskConnectRequest, taskId: string, move: ConnectMove, inputs: Record<string, JsonValue> = {}): TaskMoveRequest {
+function moveRequest(request: Asked, taskId: string, move: ConnectMove, inputs: Record<string, JsonValue> = {}): TaskMoveRequest {
   return {
     taskId,
     toState: move.to,
     by: request.by ?? "person",
     ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
-    ...(request.project !== undefined ? { project: request.project } : {}),
     ...(move.instanceId !== undefined ? { instanceId: move.instanceId } : {}),
     ...(move.path.length > 0 ? { path: move.path } : {}),
     ...(skipOf(request) && move.answersRule !== true ? { skip: true } : {}),
@@ -578,9 +608,16 @@ function moveRequest(request: TaskConnectRequest, taskId: string, move: ConnectM
  * one after this returns. A dry run and a refusal decide nothing.
  */
 export async function connectTask(project: Project, request: TaskConnectRequest, host: ConnectHost): Promise<TaskConnectResult> {
-  const result = await connectOnce(project, request, host);
-  if (result.ok && !result.dryRun) dropConnectUndo(project, request.taskId);
-  return result;
+  const dryRun = request.dryRun === true;
+  // A drop of this task that stopped part-way is finished as it was MEANT — its written intent, never
+  // a second resolution against what it left behind — and nothing else is done with the task first.
+  const open = project.runtime.get(request.taskId) !== undefined ? openConnectIntent(project, request.taskId) : undefined;
+  if (open !== undefined) {
+    if (!sameDrop(open.intent.request, request)) return refused(dryRun, connectingRefusal(project, request.taskId, open), open.intent.plan);
+    if (dryRun) return { ok: true, dryRun, plan: open.intent.plan, ...(open.intent.asking !== undefined ? { asking: open.intent.asking } : {}) };
+    return finishConnect(project, request.taskId, open, host, request.project);
+  }
+  return connectOnce(project, request, host);
 }
 
 async function connectOnce(project: Project, request: TaskConnectRequest, host: ConnectHost): Promise<TaskConnectResult> {
@@ -591,9 +628,9 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   if (meta === undefined || row === undefined) return refused(dryRun, { code: "unknown-task", message: `unknown task '${taskId}'` });
   const target = sourceStateId(request.target);
   const running = host.running?.(taskId) ?? (row.status === "running" || row.status === "stopping");
-  const lastSeq = (): number => project.events.list(taskId).at(-1)?.seq ?? 0;
+  // How the task stood before the drop — what a move's Undo puts back, written into the intent.
   const pinNow = row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash, ...(row.documentId !== undefined ? { documentId: row.documentId } : {}) } : undefined;
-  const moveUndo = (): ConnectUndo => ({ kind: "move", taskId, after: lastSeq(), ...(pinNow !== undefined ? { pin: pinNow } : {}), ...(row.status === "completed" ? { wasCompleted: true } : {}) });
+  const before: ConnectIntent["before"] = { ...(pinNow !== undefined ? { pin: pinNow } : {}), ...(row.status === "completed" ? { wasCompleted: true as const } : {}) };
 
   // ---- rule 1: the target is in the task's workflow ----------------------------------------------
   const own = sourceStateId(meta.workflow);
@@ -647,15 +684,16 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
         return refused(dryRun, { code: "inputs-missing", message: `moving '${meta.title}' to '${keys.join("/")}' leaves required inputs unbound: ${missingSentence(open)}`, missing: open }, plan);
       }
       if (dryRun) return { ok: true, dryRun, plan, taskId };
-      const undo = moveUndo();
       const handed = suppliedFor(request.supplied, states.at(-1));
-      recordSupplied(project, taskId, { ...(within.move.instanceId !== undefined ? { instanceId: within.move.instanceId } : {}), to: keys.at(-1)!, nested: within.move.path.length > 0 }, request.supplied, Object.keys(handed));
-      if (forward) {
-        const running = await host.fastForward!(fastForwardRequest(request, taskId, target, within.move, handed));
-        return { ok: true, dryRun, plan, taskId, moved: "fast-forwarding", controlTaskId: running.controlTaskId, undo };
-      }
-      const moved = await host.move(moveRequest(request, taskId, within.move, handed));
-      return { ok: true, dryRun, plan, taskId, moved: moved.status, undo };
+      const inputs = Object.keys(handed).length > 0 ? { inputs: handed } : {};
+      return begin(project, request, host, {
+        plan,
+        before,
+        steps: [
+          ...suppliedStep("task", { ...(within.move.instanceId !== undefined ? { instanceId: within.move.instanceId } : {}), to: keys.at(-1)!, nested: within.move.path.length > 0 }, Object.keys(handed)),
+          forward ? { kind: "fastForward", on: "task", move: within.move, ...inputs } : { kind: "move", on: "task", move: within.move, ...inputs },
+        ],
+      });
     }
   }
 
@@ -723,61 +761,39 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   const wouldStandIn = modification === "new" ? `${DYNAMIC_ROOT_PREFIX}…` : meta.workflow;
   if (!generated.ok) {
     const missing = generated.unsettled.filter((u) => u.required).map((u) => unsettledAsMissing(target, u));
-    if (request.askAfter === true) return askAfter(project, request, host, { title: meta.title, own, target, conversation, modification, missing, plan: planOf(wouldStandIn), generate, undo: moveUndo });
+    if (request.askAfter === true) return askAfter(project, request, host, { title: meta.title, target, conversation, modification, missing, plan: planOf(wouldStandIn), before });
     return refused(dryRun, { code: "inputs-missing", message: `a move of '${meta.title}' to '${target}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, planOf(wouldStandIn));
   }
   const opening = modification === "new" ? conversationInputs(project, conversation, moveSentence(meta.title, target), host.check) : undefined;
   if (opening !== undefined && opening.missing.length > 0) {
     return refused(dryRun, { code: "inputs-missing", message: `the conversation '${conversation}' cannot be opened by a move: ${missingSentence(opening.missing)}`, missing: opening.missing }, planOf(wouldStandIn));
   }
-  if (dryRun) return { ok: true, dryRun, plan: { ...planOf(wouldStandIn), ...(modification === "new" ? { adoptedAs: Object.keys(generated.additions.children)[0] ?? generated.targetKey } : {}) }, ...(modification !== "new" ? { taskId } : {}) };
+  const sourceKey = Object.entries(generated.additions.children).find(([, mount]) => sourceStateId(String(mount["state"])) === own)?.[0];
+  if (dryRun) return { ok: true, dryRun, plan: { ...planOf(wouldStandIn), ...(modification === "new" ? { adoptedAs: sourceKey ?? Object.keys(generated.additions.children)[0] ?? generated.targetKey } : {}) }, ...(modification !== "new" ? { taskId } : {}) };
 
-  // The real thing. Anything past this point has written: the document first, then its task, then
-  // the adoption — each usable on its own if the next refuses, and each said in the refusal.
-  let made: GenerateVersionResult;
-  try {
-    made = await generate(false);
-  } catch (e) {
-    return refused(dryRun, { code: "generate", message: (e as Error).message });
-  }
-  if (made.resolution === "unsettled") return refused(dryRun, { code: "generate", message: `the workflow for '${target}' could not be generated` });
-  const targetKey = made.generated.targetKey;
-
-  const literalNames = made.generated.literals.map((literal) => literal.input);
+  // The real thing, written down first (`begin`): the document, then — for a NEW one — its task and
+  // the adoption into it, then what the conversation supplied, then the move. The target's key is the
+  // one the document gives it; the preview names the same one, and the step's result is what is used.
+  const literalNames = generated.literals.map((literal) => literal.input);
+  const move: ConnectMove = { direction: "aside", to: TARGET_KEY, path: [], passes: [] };
   if (modification !== "new") {
-    const plan = planOf(meta.workflow);
-    const undo = moveUndo();
-    recordSupplied(project, taskId, { to: targetKey }, request.supplied, literalNames);
-    const moved = await host.move(moveRequest(request, taskId, plan.move!));
-    log.info(`connected ${taskId} to '${target}' by ${made.resolution === "cloned" ? "cloning its workflow" : "augmenting its document"} (${made.document?.id ?? "?"})`);
-    return { ok: true, dryRun, plan, taskId, moved: moved.status, undo };
+    return begin(project, request, host, {
+      plan: planOf(meta.workflow),
+      before,
+      steps: [{ kind: "document", conversation }, ...suppliedStep("task", { to: TARGET_KEY }, literalNames), { kind: "move", on: "task", move }],
+    });
   }
-
-  // NEW: the document's task, with the source adopted into it as the first child.
-  const document = made.document!;
-  const sourceKey = Object.entries(made.generated.additions.children).find(([, mount]) => sourceStateId(String(mount["state"])) === own)?.[0];
-  const parent = createTask(project, {
-    title: meta.title,
-    workflow: document.rootId,
-    documentId: document.id,
-    ...(Object.keys(opening!.inputs).length > 0 ? { inputs: opening!.inputs, inputProvenance: opening!.provenance } : {}),
+  return begin(project, request, host, {
+    plan: planOf(`${DYNAMIC_ROOT_PREFIX}…`),
+    before,
+    steps: [
+      { kind: "document", conversation },
+      { kind: "parent", title: meta.title, ...(Object.keys(opening!.inputs).length > 0 ? { inputs: opening!.inputs, provenance: opening!.provenance } : {}) },
+      { kind: "adopt", intoParent: true, ...(sourceKey !== undefined ? { childKey: sourceKey } : {}), start: false },
+      ...suppliedStep("parent", { to: TARGET_KEY }, literalNames),
+      { kind: "move", on: "parent", move },
+    ],
   });
-  const adopted = await host.adopt({
-    taskId,
-    parentTaskId: parent.id,
-    ...(sourceKey !== undefined ? { childKey: sourceKey } : {}),
-    ...(request.project !== undefined ? { project: request.project } : {}),
-    start: false,
-  });
-  if (!adopted.ok) {
-    return refused(dryRun, { code: "adopt", message: `the workflow was made (${document.id}) and '${parent.title}' (${parent.id}) stands in it, but '${meta.title}' could not be adopted into it: ${adopted.refusal.message}`, adopt: adopted.refusal });
-  }
-  const plan: ConnectPlan = { ...planOf(document.rootId), standsAt: { path: [targetKey], stateId: target }, adopt: adopted.plan, ...(sourceKey !== undefined ? { adoptedAs: sourceKey } : {}), ...(adopted.plan.branch !== undefined ? { branch: adopted.plan.branch } : {}) };
-  const undo: ConnectUndo = { kind: "adopt", parentTaskId: parent.id, adoptedTaskId: taskId, made: true };
-  recordSupplied(project, parent.id, { to: targetKey }, request.supplied, literalNames);
-  const moved = await host.move(moveRequest(request, parent.id, plan.move!));
-  log.info(`connected ${taskId} to '${target}' through a new workflow ${document.id}: adopted into ${parent.id} as '${sourceKey ?? "?"}'`);
-  return { ok: true, dryRun, plan, taskId: parent.id, moved: moved.status, undo };
 }
 
 /**
@@ -801,65 +817,41 @@ async function askAfter(
   host: ConnectHost,
   at: {
     title: string;
-    own: string;
     target: string;
     conversation: string;
     modification: NonNullable<ConnectPlan["modification"]>;
     missing: ConnectMissingInput[];
     plan: ConnectPlan;
-    generate: (dry: boolean, withoutTarget?: boolean) => Promise<GenerateVersionResult>;
-    /** The move-kind undo, taken BEFORE anything is written. */
-    undo: () => ConnectUndo;
+    before: ConnectIntent["before"];
   },
 ): Promise<TaskConnectResult> {
   const { taskId } = request;
   const dryRun = request.dryRun === true;
   const { move: _move, ...standing } = at.plan;
-  // Nothing but the conversation is written — the opening turn, and for a clone the pin — so the
-  // undo cuts the journal back and puts the pin back, and resumes nothing.
-  const undo: ConnectUndo = { ...(at.undo() as Extract<ConnectUndo, { kind: "move" }>), asking: true };
-  if (at.modification === "augmented") return { ok: true, dryRun, plan: standing, taskId, asking: at.missing, ...(dryRun ? {} : { undo }) };
   const opening = at.modification === "new" ? conversationInputs(project, at.conversation, moveSentence(at.title, at.target), host.check) : undefined;
   if (opening !== undefined && opening.missing.length > 0) {
     return refused(dryRun, { code: "inputs-missing", message: `the conversation '${at.conversation}' cannot be opened by a move: ${missingSentence(opening.missing)}`, missing: opening.missing }, at.plan);
   }
   if (dryRun) return { ok: true, dryRun, plan: standing, ...(at.modification !== "new" ? { taskId } : {}), asking: at.missing };
-  let made: GenerateVersionResult;
-  try {
-    made = await at.generate(false, true);
-  } catch (e) {
-    return refused(false, { code: "generate", message: (e as Error).message });
-  }
-  if (made.generated.deferred !== true || made.document === undefined) {
-    // A root that already speaks needed no version: the conversation is the task's own.
-    if (made.resolution === "unsettled") return { ok: true, dryRun: false, plan: standing, taskId, asking: at.missing, undo };
-    return refused(false, { code: "generate", message: `the conversation for '${at.target}' could not be made` });
-  }
-  if (at.modification === "cloned") {
-    log.info(`${taskId} was given a conversation (${made.document.id}) to ask for what '${at.target}' needs`);
-    return { ok: true, dryRun: false, plan: { ...standing, workflow: made.document.rootId }, taskId, asking: at.missing, undo };
-  }
-  const document = made.document;
-  const sourceKey = Object.entries(made.generated.additions.children).find(([, mount]) => sourceStateId(String(mount["state"])) === at.own)?.[0];
-  const parent = createTask(project, {
-    title: at.title,
-    workflow: document.rootId,
-    documentId: document.id,
-    ...(Object.keys(opening!.inputs).length > 0 ? { inputs: opening!.inputs, inputProvenance: opening!.provenance } : {}),
-  });
-  const adopted = await host.adopt({ taskId, parentTaskId: parent.id, ...(sourceKey !== undefined ? { childKey: sourceKey } : {}), ...(request.project !== undefined ? { project: request.project } : {}), start: false });
-  if (!adopted.ok) {
-    return refused(false, { code: "adopt", message: `the workflow was made (${document.id}) and '${parent.title}' (${parent.id}) stands in it, but '${at.title}' could not be adopted into it: ${adopted.refusal.message}`, adopt: adopted.refusal });
-  }
-  log.info(`${taskId} was adopted into a new workflow ${document.id} (${parent.id}) whose conversation asks for what '${at.target}' needs`);
-  return {
-    ok: true,
-    dryRun: false,
-    plan: { ...standing, workflow: document.rootId, adopt: adopted.plan, ...(sourceKey !== undefined ? { adoptedAs: sourceKey } : {}) },
-    taskId: parent.id,
-    undo: { kind: "adopt", parentTaskId: parent.id, adoptedTaskId: taskId, made: true },
+  // Nothing but the conversation is written — the opening turn, and for a clone the pin — so a move
+  // kind's undo cuts the journal back and puts the pin back, and resumes nothing. An `augmented`
+  // document already has its conversation: the intent has no steps at all.
+  const conversationOnly: ConnectStep = { kind: "document", conversation: at.conversation, withoutTarget: true };
+  return begin(project, request, host, {
+    plan: standing,
+    before: at.before,
     asking: at.missing,
-  };
+    steps:
+      at.modification === "augmented"
+        ? []
+        : at.modification === "cloned"
+          ? [conversationOnly]
+          : [
+              conversationOnly,
+              { kind: "parent", title: at.title, ...(Object.keys(opening!.inputs).length > 0 ? { inputs: opening!.inputs, provenance: opening!.provenance } : {}) },
+              { kind: "adopt", intoParent: true, start: false },
+            ],
+  });
 }
 
 export function unsettledAsMissing(target: string, u: { input: string; schema: JsonValue; description?: string; reason: string; candidates?: Array<{ child: string; output: string }> }): ConnectMissingInput {
@@ -942,31 +934,328 @@ async function adoptInto(
   }
   if (dryRun) return { ok: true, dryRun, plan };
 
-  const scripted = { ...(request.interactions !== undefined ? { interactions: request.interactions } : {}), ...(request.fake !== undefined ? { fake: request.fake } : {}) };
-  const adopted = await host.adopt({
-    taskId: request.taskId,
-    workflow: candidate.workflow,
-    childKey: candidate.childKey,
-    // A move is taken by an engine that loads with it waiting, so the parent is not started twice.
-    start: needsMove ? false : request.start !== false,
-    ...(Object.keys(parentSupplied).length > 0
-      ? { inputs: parentSupplied, suppliedVia: Object.keys(parentSupplied).every((name) => request.supplied![name]!.via === "asked") ? ("asked" as const) : ("inferred" as const) }
-      : {}),
-    ...scripted,
-    ...pass,
+  const handed = needsMove ? suppliedFor(request.supplied, bundle.states[root.children?.[candidate.targetKey ?? ""]?.state ?? ""]) : {};
+  const inputs = Object.keys(handed).length > 0 ? { inputs: handed } : {};
+  return begin(project, request, host, {
+    plan,
+    before: {},
+    steps: [
+      {
+        kind: "adopt",
+        workflow: candidate.workflow,
+        childKey: candidate.childKey,
+        // A move is taken by an engine that loads with it waiting, so the parent is not started twice.
+        start: needsMove ? false : request.start !== false,
+        ...(Object.keys(parentSupplied).length > 0
+          ? { inputs: parentSupplied, suppliedVia: Object.keys(parentSupplied).every((name) => request.supplied![name]!.via === "asked") ? ("asked" as const) : ("inferred" as const) }
+          : {}),
+      },
+      ...(needsMove
+        ? [
+            ...suppliedStep("parent", { to: within!.move.to }, Object.keys(handed)),
+            forward ? ({ kind: "fastForward", on: "parent", move: within!.move, ...inputs } as const) : ({ kind: "move", on: "parent", move: within!.move, ...inputs } as const),
+          ]
+        : []),
+    ],
   });
-  if (!adopted.ok) return refused(dryRun, { code: "adopt", message: adopted.refusal.message, adopt: adopted.refusal }, plan);
-  const parentId = adopted.taskId!;
-  const undo: ConnectUndo = { kind: "adopt", parentTaskId: parentId, adoptedTaskId: request.taskId, made: true };
-  if (!needsMove) return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, undo };
-  const handed = suppliedFor(request.supplied, bundle.states[root.children?.[candidate.targetKey ?? ""]?.state ?? ""]);
-  recordSupplied(project, parentId, { to: within!.move.to }, request.supplied, Object.keys(handed));
-  if (forward) {
-    const running = await host.fastForward!(fastForwardRequest(request, parentId, target, within!.move, handed));
-    return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, moved: "fast-forwarding", controlTaskId: running.controlTaskId, undo };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// the intent, and carrying it out
+// ---------------------------------------------------------------------------------------------------
+
+/** Where a document's key for the target goes in a step — replaced by the key the `document` step's result names. */
+const TARGET_KEY = "@target";
+
+/** The `supplied` step, when anything was supplied for the names the entry takes. */
+function suppliedStep(on: "task" | "parent", at: { instanceId?: string; to: string; nested?: boolean }, names: readonly string[]): ConnectStep[] {
+  if (names.length === 0) return [];
+  return [{ kind: "supplied", on, to: at.to, ...(at.instanceId !== undefined ? { instanceId: at.instanceId } : {}), ...(at.nested === true ? { nested: true as const } : {}), names: [...names] }];
+}
+
+/** Two requests are the SAME drop when they send the same task to the same target, in the same workflow. */
+function sameDrop(asked: ConnectIntent["request"], request: TaskConnectRequest): boolean {
+  const workflow = (w: string | undefined): string | undefined => (w === undefined ? undefined : sourceStateId(w));
+  return sourceStateId(asked.target) === sourceStateId(request.target) && workflow(asked.workflow) === workflow(request.workflow);
+}
+
+const STEP_WORDS: Record<ConnectStep["kind"], string> = {
+  document: "writing the workflow",
+  parent: "making its task",
+  adopt: "the adoption",
+  supplied: "recording what was supplied",
+  move: "the move",
+  fastForward: "starting the fast-forward",
+};
+
+/**
+ * WRITE the intent, then carry it out. Called by each resolution once it has decided everything and
+ * before it writes anything: from here on the journal says what this drop is, so a retry — or the
+ * next open after a crash — finishes it as it was meant ({@link finishConnect}) instead of resolving it
+ * again against what the first attempt left behind.
+ */
+async function begin(
+  project: Project,
+  request: TaskConnectRequest,
+  host: ConnectHost,
+  intent: Omit<ConnectIntent, "request">,
+): Promise<TaskConnectResult> {
+  const { dryRun: _dry, project: _project, ...asked } = request;
+  const whole: ConnectIntent = { request: asked, ...intent };
+  const mark = `c-${randomUUID()}`;
+  const atMs = Date.now();
+  recordConnectRow(project, request.taskId, { mark, at: "intent", intent: whole }, atMs);
+  return finishConnect(project, request.taskId, { mark, intent: whole, atMs, results: whole.steps.map(() => undefined) }, host, request.project);
+}
+
+/** What one step answered: what it made, or why it will not. */
+type StepOutcome = { result: ConnectStepResult } | { refusal: ConnectRefusal };
+
+/**
+ * Carry an intent out: every step not yet done, in order, each journaling itself done with what it
+ * made. A step that REFUSES, or throws, is journaled `stopped` and the intent stays open; the same
+ * drop again carries on from it, and gets the same answer where nothing has changed. When every step
+ * is done the intent is closed, and the answer is assembled from what the steps made.
+ *
+ * Each step is also IDEMPOTENT on its own, for the one gap the rows cannot close: a step that ran and
+ * whose `step` row never landed (the process died between the two). What it would have made is looked
+ * for first — written by this drop's own task, after its intent — and taken if it is there.
+ */
+export async function finishConnect(project: Project, taskId: string, open: OpenConnectIntent, host: ConnectHost, projectRef?: string): Promise<TaskConnectResult> {
+  const { intent, mark } = open;
+  const results = [...open.results];
+  for (let i = 0; i < intent.steps.length; i += 1) {
+    if (results[i] !== undefined) continue;
+    let outcome: StepOutcome;
+    try {
+      await host.onStep?.(intent.steps[i]!, i);
+      outcome = await runStep(project, taskId, open, results, i, host, projectRef);
+    } catch (e) {
+      recordConnectRow(project, taskId, { mark, at: "stopped", step: i, reason: (e as Error).message });
+      throw e;
+    }
+    if ("refusal" in outcome) {
+      recordConnectRow(project, taskId, { mark, at: "stopped", step: i, reason: outcome.refusal.message });
+      return refused(false, outcome.refusal, intent.plan);
+    }
+    recordConnectRow(project, taskId, { mark, at: "step", step: i, result: outcome.result });
+    results[i] = outcome.result;
   }
-  const moved = await host.move(moveRequest(request, parentId, within!.move, handed));
-  return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, moved: moved.status, undo };
+  const made = (key: keyof ConnectStepResult): ConnectStepResult | undefined => results.find((result) => result?.[key] !== undefined);
+  const parentTaskId = made("parentTaskId")?.parentTaskId;
+  const adopts = intent.steps.some((step) => step.kind === "adopt");
+  // The intent is closed where the drop's own writes end — on the watched journal too, for an adoption.
+  recordConnectRow(project, taskId, { mark, at: "done" });
+  if (adopts && parentTaskId !== undefined && parentTaskId !== taskId) recordConnectRow(project, parentTaskId, { mark, at: "done" });
+  // A connect that was MADE is the next decision about the task (`connectUndo.ts`).
+  dropConnectUndo(project, taskId);
+
+  const document = made("documentId");
+  const adopted = made("adopt")?.adopt;
+  const moved = made("moved");
+  const targetKey = document?.targetKey;
+  const plan: ConnectPlan = {
+    ...intent.plan,
+    ...(document?.rootId !== undefined && (parentTaskId !== undefined && adopts && intent.plan.resolution === "modify" || intent.asking !== undefined) ? { workflow: document.rootId } : {}),
+    ...(targetKey !== undefined && intent.plan.resolution === "modify" ? { standsAt: { ...intent.plan.standsAt, path: [targetKey] } } : {}),
+    ...(intent.plan.move !== undefined && targetKey !== undefined && intent.plan.resolution === "modify" ? { move: { ...intent.plan.move, to: targetKey } } : {}),
+    ...(adopted !== undefined ? { adopt: adopted } : {}),
+    ...(document?.sourceKey !== undefined && adopts ? { adoptedAs: document.sourceKey } : {}),
+    ...(adopted?.branch !== undefined && intent.plan.resolution === "modify" ? { branch: adopted.branch } : {}),
+  };
+  const undo: ConnectUndo =
+    adopts && parentTaskId !== undefined
+      ? { kind: "adopt", parentTaskId, adoptedTaskId: taskId, made: true, mark }
+      : { kind: "move", taskId, mark, ...(intent.before.pin !== undefined ? { pin: intent.before.pin } : {}), ...(intent.before.wasCompleted === true ? { wasCompleted: true } : {}), ...(intent.asking !== undefined ? { asking: true as const } : {}) };
+  log.info(`connected ${taskId} to '${sourceStateId(intent.request.target)}' (${intent.plan.resolution}${intent.plan.modification !== undefined ? `, ${intent.plan.modification}` : ""})${parentTaskId !== undefined ? ` through ${parentTaskId}` : ""}${document?.documentId !== undefined ? `, ${document.documentId}` : ""}`);
+  return {
+    ok: true,
+    dryRun: false,
+    plan,
+    taskId: adopts && parentTaskId !== undefined ? parentTaskId : taskId,
+    ...(moved?.moved !== undefined ? { moved: moved.moved } : {}),
+    ...(moved?.controlTaskId !== undefined ? { controlTaskId: moved.controlTaskId } : {}),
+    undo,
+    ...(intent.asking !== undefined ? { asking: intent.asking } : {}),
+  };
+}
+
+/** One step — see {@link finishConnect}. */
+async function runStep(
+  project: Project,
+  taskId: string,
+  open: OpenConnectIntent,
+  results: ReadonlyArray<ConnectStepResult | undefined>,
+  index: number,
+  host: ConnectHost,
+  projectRef: string | undefined,
+): Promise<StepOutcome> {
+  const { intent, atMs, mark } = open;
+  const step = intent.steps[index]!;
+  const asked = intent.request;
+  const target = sourceStateId(asked.target);
+  const title = project.tasks.tryRead(taskId)?.title ?? taskId;
+  const earlier = (key: keyof ConnectStepResult): ConnectStepResult | undefined => results.slice(0, index).find((result) => result?.[key] !== undefined);
+  const document = earlier("documentId") ?? earlier("targetKey");
+  const parentTaskId = earlier("parentTaskId")?.parentTaskId;
+  const on = (which: "task" | "parent"): string | undefined => (which === "parent" ? parentTaskId : taskId);
+  const keyOf = (key: string): string => (key === TARGET_KEY ? (document?.targetKey ?? key) : key);
+  const pass = projectRef !== undefined ? { project: projectRef } : {};
+  const scripted = { ...(asked.interactions !== undefined ? { interactions: asked.interactions } : {}), ...(asked.fake !== undefined ? { fake: asked.fake } : {}) };
+
+  switch (step.kind) {
+    case "document": {
+      const own = sourceStateId(project.tasks.tryRead(taskId)?.workflow ?? "");
+      const found = documentMadeBy(project, taskId, target, atMs);
+      if (found !== undefined) return { result: documentResult(found, target, own) };
+      const suppliedLiterals = generatorSupplied(asked.supplied);
+      let made: GenerateVersionResult;
+      try {
+        made = await generateDocumentVersion(project, {
+          taskId,
+          target,
+          conversation: step.conversation,
+          ...(suppliedLiterals !== undefined ? { supplied: suppliedLiterals } : {}),
+          ...(host.functions !== undefined ? { functions: host.functions } : {}),
+          ...(step.withoutTarget === true ? { withoutTarget: true } : {}),
+        });
+      } catch (e) {
+        return { refusal: { code: "generate", message: (e as Error).message } };
+      }
+      if (step.withoutTarget === true) {
+        if (made.generated.deferred === true && made.document !== undefined) return { result: documentResult(made.document, target, own) };
+        // A root that already speaks needed no version: the conversation is the task's own.
+        if (made.resolution === "unsettled") return { result: {} };
+        return { refusal: { code: "generate", message: `the conversation for '${target}' could not be made` } };
+      }
+      if (made.resolution === "unsettled") return { refusal: { code: "generate", message: `the workflow for '${target}' could not be generated` } };
+      return {
+        result: {
+          ...(made.document !== undefined ? documentResult(made.document, target, own) : {}),
+          targetKey: made.generated.targetKey,
+        },
+      };
+    }
+    case "parent": {
+      const doc = document?.documentId !== undefined ? tryReadDocument(project.paths.snapshotsDir, document.documentId) : undefined;
+      if (doc === undefined) return { refusal: { code: "generate", message: `the workflow '${title}' was to be moved into is gone` } };
+      // Made already, by this drop, and not marked — the task standing in the document since the intent.
+      const made = project.tasks
+        .list()
+        .find((meta) => meta.id !== taskId && project.runtime.get(meta.id)?.documentId === doc.id && Date.parse(meta.createdAt) >= atMs - 1);
+      if (made !== undefined) return { result: { parentTaskId: made.id } };
+      const parent = createTask(project, {
+        title: step.title,
+        workflow: doc.rootId,
+        documentId: doc.id,
+        ...(step.inputs !== undefined ? { inputs: step.inputs, ...(step.provenance !== undefined ? { inputProvenance: step.provenance } : {}) } : {}),
+      });
+      return { result: { parentTaskId: parent.id } };
+    }
+    case "adopt": {
+      const meta = project.tasks.tryRead(taskId);
+      const into = step.intoParent === true ? parentTaskId : undefined;
+      if (step.intoParent === true && into === undefined) return { refusal: { code: "adopt", message: `there is no task for '${title}' to be adopted into` } };
+      // Adopted already, by this drop — the one thing an adoption leaves on the adopted task.
+      if (meta?.origin?.kind === "adopt" && (into === undefined || meta.origin.taskId === into)) return { result: { parentTaskId: meta.origin.taskId } };
+      const childKey = document?.sourceKey ?? step.childKey;
+      const adopted = await host.adopt({
+        taskId,
+        ...(into !== undefined ? { parentTaskId: into } : { workflow: step.workflow! }),
+        ...(childKey !== undefined ? { childKey } : {}),
+        start: step.start,
+        ...(step.inputs !== undefined ? { inputs: step.inputs } : {}),
+        ...(step.suppliedVia !== undefined ? { suppliedVia: step.suppliedVia } : {}),
+        ...(into === undefined ? scripted : {}),
+        ...pass,
+      });
+      if (!adopted.ok) {
+        const message =
+          into !== undefined && document?.documentId !== undefined
+            ? `the workflow was made (${document.documentId}) and '${project.tasks.tryRead(into)?.title ?? into}' (${into}) stands in it, but '${title}' could not be adopted into it: ${adopted.refusal.message}`
+            : adopted.refusal.message;
+        return { refusal: { code: "adopt", message, adopt: adopted.refusal } };
+      }
+      return { result: { parentTaskId: adopted.taskId ?? into!, adopt: adopted.plan } };
+    }
+    case "supplied": {
+      const where = on(step.on);
+      if (where === undefined) return { refusal: { code: "adopt", message: `there is no task for what was supplied to '${title}' to be journaled on` } };
+      // Journaled already, by this drop, and not marked.
+      const journaled = project.events.list(where).some((stored) => (stored.event as unknown as Partial<SuppliedEvent>).type === SUPPLIED_EVENT && (stored.event as unknown as Partial<SuppliedEvent>).mark === mark);
+      if (!journaled) {
+        recordSupplied(project, where, { ...(step.instanceId !== undefined ? { instanceId: step.instanceId } : {}), to: keyOf(step.to), ...(step.nested === true ? { nested: true } : {}) }, asked.supplied, step.names, mark);
+      }
+      return { result: {} };
+    }
+    case "move": {
+      const where = on(step.on);
+      if (where === undefined) return { refusal: { code: "adopt", message: `there is no task for '${title}' to move` } };
+      const move = { ...step.move, to: keyOf(step.move.to) };
+      if (moveTakenSince(project, where, move.to, atMs)) return { result: { moved: "taking" } };
+      const moved = await host.move({ ...moveRequest(asked, where, move, step.inputs), ...pass });
+      return { result: { moved: moved.status } };
+    }
+    case "fastForward": {
+      const where = on(step.on);
+      if (where === undefined) return { refusal: { code: "adopt", message: `there is no task for '${title}' to run forward` } };
+      if (host.fastForward === undefined) return { refusal: fastForwardRefusal(step.move) };
+      const started = fastForwardSince(project, where, atMs);
+      if (started !== undefined) return { result: { moved: "fast-forwarding", controlTaskId: started } };
+      const running = await host.fastForward({ ...fastForwardRequest(asked, where, target, step.move, step.inputs ?? {}), ...pass });
+      return { result: { moved: "fast-forwarding", controlTaskId: running.controlTaskId } };
+    }
+  }
+}
+
+/** What a document step made, read off the document — its key for the target, and for the task it wraps. */
+function documentResult(document: FrozenDocument, target: string, own: string): ConnectStepResult {
+  const mounts = Object.entries(document.versions.flatMap((version) => Object.entries(version.additions?.children ?? {})).reduce<Record<string, unknown>>((all, [key, mount]) => ({ ...all, [key]: mount }), {}));
+  const keyOf = (state: string): string | undefined => mounts.find(([, mount]) => sourceStateId(String((mount as { state?: unknown }).state ?? "")) === state)?.[0];
+  const targetKey = keyOf(target);
+  const sourceKey = own !== "" ? keyOf(own) : undefined;
+  return { documentId: document.id, rootId: document.rootId, ...(targetKey !== undefined ? { targetKey } : {}), ...(sourceKey !== undefined ? { sourceKey } : {}) };
+}
+
+/**
+ * A document version this drop wrote and never marked: the newest version of a document whose cause
+ * is this task moved to this target, written at or after the intent. The task's own document first —
+ * a clone or an augmentation — then any dynamic document, which is where a `new` one is.
+ */
+function documentMadeBy(project: Project, taskId: string, target: string, sinceMs: number): FrozenDocument | undefined {
+  const byThisDrop = (document: FrozenDocument | undefined): boolean => {
+    const latest = document?.versions.at(-1);
+    return latest !== undefined && latest.cause?.taskId === taskId && latest.cause.target === target && Date.parse(latest.createdAt) >= sinceMs - 1;
+  };
+  const own = project.runtime.get(taskId)?.documentId;
+  const mine = own !== undefined ? tryReadDocument(project.paths.snapshotsDir, own) : undefined;
+  if (byThisDrop(mine)) return mine;
+  return listDocuments(project.paths.snapshotsDir).find((document) => document.kind === "dynamic" && document.versions.length === 1 && byThisDrop(document));
+}
+
+/** The move to `to` has been handed over since `sinceMs` — held, taken, reopened for, or entered. */
+function moveTakenSince(project: Project, taskId: string, to: string, sinceMs: number): boolean {
+  return project.events.list(taskId).some((stored) => {
+    if (stored.createdAt < sinceMs) return false;
+    const e = stored.event as unknown as { type: string; to?: string; by?: string; childKey?: string };
+    return (e.type === MOVE_HELD_EVENT && e.to === to) || e.type === REOPENED_EVENT || (e.type === "transition.taken" && e.by !== undefined && e.to === to) || (e.type === "instance.entered" && e.childKey === to);
+  });
+}
+
+/** The fast-forward started since `sinceMs`, by the conversation answering it — absent when none did. */
+function fastForwardSince(project: Project, taskId: string, sinceMs: number): string | undefined {
+  const row = project.events.list(taskId).find((stored) => stored.createdAt >= sinceMs && (stored.event as unknown as { type: string }).type === FAST_FORWARD_EVENT);
+  return row === undefined ? undefined : (row.event as unknown as FastForwardEvent).controlTaskId;
+}
+
+/** Why a different drop of a task is refused while an earlier one is not finished. */
+function connectingRefusal(project: Project, taskId: string, open: OpenConnectIntent): ConnectRefusal {
+  const title = project.tasks.tryRead(taskId)?.title ?? taskId;
+  const at = open.stopped !== undefined ? ` — it stopped at ${STEP_WORDS[open.intent.steps[open.stopped.step]?.kind ?? "move"]}: ${open.stopped.reason}` : "";
+  return {
+    code: "connecting",
+    message: `'${title}' is still being moved to '${sourceStateId(open.intent.request.target)}'${at}. Drop it there again to finish that move first`,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------

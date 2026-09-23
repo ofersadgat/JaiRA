@@ -55,6 +55,8 @@ import {
   dropConnectUndo,
   keepConnectUndo,
   keptConnectUndo,
+  openConnectIntent,
+  tasksWithConnects,
   currentPin,
   ensureControlConversation,
   missingInputs,
@@ -1549,7 +1551,7 @@ export class AppService {
     // should not wait on that. Each one logs its own failure. The promise is kept on the session so
     // a close that arrives while this is still going waits for it — a resume that started after
     // the close began would be a run with no session and a database on its way out.
-    session.resuming = this.resumeSuspended(session);
+    session.resuming = this.resumeSuspended(session).then(() => this.finishOpenConnects(session));
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
     if (this.options.probeOnStart === true) this.kickAvailability();
@@ -5110,6 +5112,26 @@ export class AppService {
    * than re-run. A resume that cannot be made (unreadable records, a legacy journal) is logged and
    * left for the strip the same way.
    */
+  /**
+   * A drop the last process was CUT OFF in the middle of — its intent written, not every step done,
+   * and no step having refused — is finished now, as it was meant (`persistence/connect.ts`). One
+   * that stopped on a refusal or a throw is left for the person: dropping it again is what retries it.
+   */
+  private async finishOpenConnects(session: ProjectSession): Promise<void> {
+    const project = session.project;
+    for (const taskId of tasksWithConnects(project)) {
+      if (this.closed || this.sessions.get(session.key) !== session) return;
+      const open = project.runtime.get(taskId) !== undefined ? openConnectIntent(project, taskId) : undefined;
+      if (open === undefined || open.stopped !== undefined) continue;
+      try {
+        await this.connectTask({ ...open.intent.request, taskId, project: project.paths.projectDir });
+        this.log({ level: "info", source: "run", message: `finished the move of ${taskId} to '${open.intent.request.target}' that was cut off when the app last closed`, project: session.key, taskId });
+      } catch (e) {
+        this.log({ level: "warn", source: "run", message: `could not finish the move of ${taskId} to '${open.intent.request.target}': ${(e as Error).message}`, project: session.key, taskId, ...stackDetail(e) });
+      }
+    }
+  }
+
   private async resumeSuspended(session: ProjectSession): Promise<void> {
     const project = session.project;
     const candidates = project.runtime
@@ -5980,9 +6002,9 @@ export class AppService {
     await stopDropRun(taskId, project.tasks.tryRead(taskId)?.title ?? taskId);
     if (undo.asking === true) await quiet(taskId);
     const row = project.runtime.get(taskId)!;
-    // The cut is at the task's FIRST row after the drop — a seq of its own. `after + 1` need not be
-    // one: seqs are the table's, and a resume may have deleted rows the drop stood behind.
-    const moved = project.events.list(taskId).find((stored) => stored.seq > undo.after);
+    // The cut is at the drop's own first row — its `jaira.connect` intent, found where it sits NOW
+    // (`keptConnectUndo`), since nothing else about the drop's place in the journal holds still.
+    const moved = kept.cutAt !== undefined ? project.events.list(taskId).find((stored) => stored.seq === kept.cutAt) : undefined;
     if (moved !== undefined && undo.asking === true) {
       // Nothing moved: what was written is the conversation's opening turn. Cut, and NOT resumed —
       // a rewind resumes a machine with something left to do, and this one was standing still.

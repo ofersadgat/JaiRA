@@ -323,7 +323,7 @@ describe("rule 2 — a real workflow holds both", () => {
     const parent = done.taskId!;
     expect(statusOf(parent)).toBe("queued");
     expect(metaOf(product)?.origin).toMatchObject({ kind: "adopt", taskId: parent, key: "product" });
-    expect(done.undo).toEqual({ kind: "adopt", parentTaskId: parent, adoptedTaskId: product, made: true });
+    expect(done.undo).toEqual({ kind: "adopt", parentTaskId: parent, adoptedTaskId: product, made: true, mark: expect.any(String) });
     // Started, it runs only what is left, with the wire reading the adopted task's output.
     await service.resumeTask({ taskId: parent });
     const ux = await parked();
@@ -674,6 +674,56 @@ describe("askAfter — a drop whose target needs what nothing binds (decision 00
   });
 });
 
+describe("a drop that stopped part-way is finished as it was meant (its written intent)", () => {
+  it("is finished by the NEXT OPEN when the process was cut off in the middle of it — one document, one task, one move", { timeout: 20_000 }, async () => {
+    const product = await ran("feat/product", 1);
+    // The move step dies with the process: nothing writes that it stopped.
+    const real = service.moveTask.bind(service);
+    (service as unknown as { moveTask: unknown }).moveTask = () => Promise.reject(new Error("the process went away"));
+    await expect(service.connectTask({ taskId: product, target: "lib/second" })).rejects.toThrow("the process went away");
+    (service as unknown as { moveTask: unknown }).moveTask = real;
+    read((p) => p.db.prepare(`DELETE FROM state_machine_events WHERE task_id = ? AND type = 'jaira.connect' AND payload_json LIKE '%"stopped"%'`).run(product));
+    const made = taskIds().filter((id) => id !== product);
+    expect(made).toHaveLength(1);
+    expect(documents()).toHaveLength(1);
+
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    await service.open(dir);
+    await (service as unknown as { session(): { resuming: Promise<void> } }).session().resuming;
+    // A new process numbers its requests from the start again.
+    seen.clear();
+    // The parent the first attempt made stands at the target, asking its question — and nothing was made twice.
+    expect((await parked()).state).toBe("second");
+    expect(taskIds().filter((id) => id !== product)).toEqual(made);
+    expect(documents()).toHaveLength(1);
+    const rows = journal(product).filter((e) => (e as unknown as { type: string }).type === "jaira.connect").map((e) => (e as unknown as { at: string }).at);
+    expect(rows[0]).toBe("intent");
+    expect(rows.at(-1)).toBe("done");
+    expect(metaOf(made[0]!)?.connectUndo?.undo).toMatchObject({ kind: "adopt", parentTaskId: made[0], adoptedTaskId: product });
+  });
+
+  it("is NOT finished unasked when it stopped on a refusal — dropping it again is the retry", { timeout: 20_000 }, async () => {
+    const product = await ran("feat/product", 1);
+    const real = service.moveTask.bind(service);
+    (service as unknown as { moveTask: unknown }).moveTask = () => Promise.reject(new Error("refused: busy"));
+    await expect(service.connectTask({ taskId: product, target: "lib/second" })).rejects.toThrow("refused: busy");
+    (service as unknown as { moveTask: unknown }).moveTask = real;
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    await service.open(dir);
+    await (service as unknown as { session(): { resuming: Promise<void> } }).session().resuming;
+    // A new process numbers its requests from the start again.
+    seen.clear();
+    expect(service.pendingInteractions()).toEqual([]);
+    // The person drops it again: the same document and task, now moved.
+    const again = ok(await service.connectTask({ taskId: product, target: "lib/second" }));
+    expect((await parked()).state).toBe("second");
+    expect(taskIds().filter((id) => id !== product)).toEqual([again.taskId]);
+    expect(documents()).toHaveLength(1);
+  });
+});
+
 describe("UNDO outlives the process that handed it out", () => {
   const outputsOf = (taskId: string): string | undefined => read((p) => p.runtime.get(taskId)?.outputsJson);
 
@@ -836,7 +886,8 @@ describe("UNDO means only 'take back what I just did'", () => {
     const rewound = await ran("feat/product", 1);
     const p1 = ok(await service.connectTask({ taskId: rewound, target: "feat", start: false })).taskId!;
     expect(undoable(p1)).toBe(true);
-    const last1 = read((p) => new SqliteEventLog(p.db).list(p1).at(-1)!.seq);
+    // The last row the MACHINE wrote — the drop's own `jaira.connect` rows come after it.
+    const last1 = read((p) => new SqliteEventLog(p.db).list(p1).filter((row) => !(row.type as string).startsWith("jaira.")).at(-1)!.seq);
     await service.rewindTask({ taskId: p1, at: last1 });
     expect(metaOf(p1)?.connectUndo).toBeUndefined();
     expect(undoable(p1)).toBeUndefined();

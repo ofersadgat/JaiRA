@@ -318,6 +318,8 @@ export interface SuppliedEvent {
   /** The entry is further down than a child of `instanceId`: matched by key, under whatever composite enters it. */
   nested?: boolean;
   provenance: Record<string, { via: "inferred" | "asked"; confidence?: number }>;
+  /** The connect that wrote it, when one did (`jaira.connect`'s `mark`) — how a retry of it knows it already did. */
+  mark?: string;
 }
 
 const shortly = (value: unknown, max = 40): string => {

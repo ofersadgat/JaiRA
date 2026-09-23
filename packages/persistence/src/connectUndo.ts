@@ -50,7 +50,8 @@ import {
   type TaskMeta,
 } from "@jaira/shared";
 import type { StoredEvent } from "./eventLog";
-import { journalRowsThrough, seqAtJournalRow } from "./hostRows";
+
+import { connectRowAt } from "./hostRows";
 import type { Project } from "./project";
 
 /** Where the drop landed, as the host knows it from the connect's plan. */
@@ -66,26 +67,32 @@ function watchedTask(undo: ConnectUndo): string {
   return undo.kind === "adopt" ? undo.parentTaskId : undo.taskId;
 }
 
+/** The journal a token's `intent` row is on — the DRAGGED task's: the moved task, or the adopted one. */
+function droppedTask(undo: ConnectUndo): string {
+  return undo.kind === "adopt" ? undo.adoptedTaskId : undo.taskId;
+}
+
 /**
  * Keep a connect's Undo on the card it made or moved (replacing whatever that card kept), so it
- * survives a restart. Called once the connect has returned, so the drop's own writes are behind `kept`.
+ * survives a restart. Called once the connect has returned: its `done` row, on the watched journal,
+ * already closes the drop's own writes (`connect.ts`).
  */
 export function keepConnectUndo(project: Project, taskId: string, undo: ConnectUndo, at: ConnectLanding): void {
   const meta = project.tasks.tryRead(taskId);
   if (meta === undefined) return;
-  const rows = undo.kind === "move" ? journalRowsThrough(project, undo.taskId, undo.after) : project.events.list(undo.adoptedTaskId).length;
   const stored: StoredConnectUndo = {
     undo,
-    rows,
-    kept: project.events.list(watchedTask(undo)).length,
     landing: [...at.landing],
     ...(at.asking === true || (undo.kind === "move" && undo.asking === true) ? { asking: true as const } : {}),
   };
   project.tasks.write({ ...meta, connectUndo: stored });
 }
 
-/** The token a task keeps, judged now: usable (a move's `after` re-read from its place in the journal), or stale and why. */
-export type KeptConnectUndo = { undo: ConnectUndo } | { stale: string };
+/**
+ * The token a task keeps, judged now: usable — with the seq a move's Undo cuts at, read off where its
+ * `drop` row sits NOW — or stale and why.
+ */
+export type KeptConnectUndo = { undo: ConnectUndo; cutAt?: number } | { stale: string };
 
 export function keptConnectUndo(project: Project, taskId: string): KeptConnectUndo | undefined {
   const kept = project.tasks.tryRead(taskId)?.connectUndo;
@@ -93,7 +100,10 @@ export function keptConnectUndo(project: Project, taskId: string): KeptConnectUn
   const stale = staleReason(project, kept);
   if (stale !== undefined) return { stale };
   const undo = kept.undo;
-  return { undo: undo.kind === "move" ? { ...undo, after: seqAtJournalRow(project, undo.taskId, kept.rows) } : undo };
+  if (undo.kind !== "move") return { undo };
+  const events = project.events.list(undo.taskId);
+  const drop = events[connectRowAt(events, undo.mark, "intent")];
+  return { undo, ...(drop !== undefined ? { cutAt: drop.seq } : {}) };
 }
 
 /** Whether the card carries **Undo** — the board's and the task list's reading of {@link keptConnectUndo}. */
@@ -130,17 +140,20 @@ const isChat = (instanceId: string | undefined): boolean => instanceId?.startsWi
  */
 export function staleReason(project: Project, kept: StoredConnectUndo): string | undefined {
   const { undo } = kept;
+  const dropped = project.events.list(droppedTask(undo));
+  const drop = connectRowAt(dropped, undo.mark, "intent");
   if (undo.kind === "adopt") {
-    const own = project.events.list(undo.adoptedTaskId).slice(kept.rows);
+    // The adopted task's `drop` row is its place at the drop; a rewind that took it took the drop too.
+    if (drop < 0) return "the adopted task was rewound to before it was adopted";
+    const own = dropped.slice(drop + 1);
     if (own.some((row) => typeOf(row) === "instance.entered" || typeOf(row) === "instance.terminated")) return "the adopted task has done work of its own since it was adopted";
     const events = project.events.list(undo.parentTaskId);
     const mirror = events.findIndex((row) => row.event.type === "instance.entered" && row.event.instanceId === undo.adoptedTaskId);
     if (mirror < 0) return "the task no longer holds the task it adopted";
-    return pastLanding(events, mirror + 1, kept);
+    return pastLanding(events, mirror + 1, connectRowAt(events, undo.mark, "done"), kept);
   }
-  const events = project.events.list(undo.taskId);
-  if (events.length < kept.rows) return "the task was rewound to before the move";
-  return pastLanding(events, kept.rows, kept);
+  if (drop < 0) return "the task was rewound to before the move";
+  return pastLanding(dropped, drop + 1, connectRowAt(dropped, undo.mark, "done"), kept);
 }
 
 interface Entry {
@@ -149,8 +162,12 @@ interface Entry {
   mirror: boolean;
 }
 
-/** Read the watched journal from `from` on: is everything there the drop's own? */
-function pastLanding(events: readonly StoredEvent[], from: number, kept: StoredConnectUndo): string | undefined {
+/**
+ * Read the watched journal from `from` on: is everything there the drop's own? `keptAt` is where the
+ * token's `kept` mark sits — the drop's own host rows are before it. -1 (no such row) reads every
+ * host row as a later move's, which withdraws the Undo rather than offering a stale one.
+ */
+function pastLanding(events: readonly StoredEvent[], from: number, keptAt: number, kept: StoredConnectUndo): string | undefined {
   const entries = new Map<string, Entry>();
   let root: string | undefined;
   for (const row of events) {
@@ -180,7 +197,7 @@ function pastLanding(events: readonly StoredEvent[], from: number, kept: StoredC
     const row = events[i]!;
     const type = typeOf(row);
     const e = row.event as { type: string; instanceId?: string; outcome?: string };
-    const later = i >= kept.kept;
+    const later = i > keptAt;
 
     // Host rows: the drop's own were written before it was kept; the same kinds after are a later move.
     if (type === FAST_FORWARD_EVENT) {
