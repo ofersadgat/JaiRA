@@ -33,7 +33,7 @@ import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
-import { ANSWERED_EVENT, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, type InstanceNode, type PendingInteraction, type TaskConnectResult } from "@jaira/shared";
+import { ANSWERED_EVENT, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, LEFT_EVENT, type InstanceNode, type PendingInteraction, type TaskConnectResult } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { SkipWithdrawals } from "../src/main/fastForward";
@@ -453,6 +453,42 @@ describe("a restart RESUMES the fast-forward — and it still ends only for the 
     ]);
     expect(service.taskDetail(taskId).fastForward).toBeUndefined();
     expect(endRow(taskId)).toMatchObject({ end: "skipped" });
+  });
+
+  it("a question LEFT to the person stays theirs across a restart — not offered again, and the count goes on from the journal", async () => {
+    setAskBelow(0.5);
+    await service.close();
+    await openService();
+    const taskId = await stoppedAtFirst();
+    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers({ confidence: 0.3 }) }));
+    // `a` is answered; `b` at 0.3 is left to the person — and that decision is a journal row.
+    const b = await nextGate(taskId);
+    expect(promptOf(b)).toBe("Pick for b");
+    await until(() => service.taskDetail(taskId).fastForward?.left === 1, "b to be left to the person");
+    const leftRows = (): Array<Record<string, unknown>> => rows(taskId).map((row) => row.event as unknown as Record<string, unknown>).filter((e) => e["type"] === LEFT_EVENT);
+    const bNode = nodeByKey(taskId, "b")!;
+    expect(leftRows()).toEqual([
+      expect.objectContaining({ kind: "interaction", under: bNode.instanceId, byTaskId: taskId, key: expect.stringContaining("Pick for b"), requestId: b.requestId }),
+    ]);
+
+    // The process dies with `b` parked. Resume parks `b` again under a NEW request id — and this time
+    // the conversation would be sure of it (0.99). It is not asked: the question is the person's, as
+    // it was before the restart.
+    await crashAndReopen(taskId);
+    await service.resumeTask({ taskId, fake: answers({ confidence: 0.99 }) });
+    const again = await nextGate(taskId);
+    expect(promptOf(again)).toBe("Pick for b");
+    await settle(300);
+    expect(pendingFor(taskId).map(promptOf)).toEqual(["Pick for b"]);
+    expect(nodeByKey(taskId, "b")!.settledBy).toBeUndefined();
+    expect(answeredRows(taskId)).toHaveLength(1);
+    // The strip's count is rebuilt from the rows, and nothing was left twice.
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", answered: 1, left: 1 });
+    expect(leftRows()).toHaveLength(1);
+
+    // The person answers it; the mode goes on answering what comes after (`c` is an approval, theirs anyway).
+    service.submitInteraction(again.requestId, { decision: "go" });
+    expect(promptOf(await nextGate(taskId))).toBe("Publish c?");
   });
 
   it("a STOP ends it for good: the end is written, and a later resume is an ordinary one", async () => {

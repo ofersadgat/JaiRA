@@ -19,7 +19,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent } from "@declarative-ai/hw";
-import { ANSWERED_EVENT, type FastForwardEnd, type FastForwardEvent, type FastForwardView } from "@jaira/shared";
+import { ANSWERED_EVENT, LEFT_EVENT, type FastForwardEnd, type FastForwardEvent, type FastForwardView, type LeftEvent } from "@jaira/shared";
 
 export interface FastForwardRun {
   /** The task being walked forward. */
@@ -49,6 +49,13 @@ export interface FastForwardRun {
   startedAt: number;
   /** Request ids already offered to the conversation — see rule 3. */
   seen: Set<string>;
+  /**
+   * The questions the conversation LEFT to the person, by their stable identity ({@link leftKeyOf}) —
+   * journaled `jaira.left`, and seeded back from those rows when a restart resumes the mode, the way
+   * `InteractionHub.seed` gives a recovered gate its answer. A request id is not enough: the resumed
+   * run parks the same question under a new one, and the conversation would be offered it again.
+   */
+  leftKeys: Set<string>;
   /** Why it stopped being a fast-forward. Set once; a set `end` means the mode is over. */
   end?: FastForwardEnd;
 }
@@ -154,14 +161,23 @@ export function noteEntry(run: FastForwardRun, event: EngineEvent, path: string 
 }
 
 /**
+ * A question's identity for the "left to the person" decision: the instance asking (when exactly one
+ * could be) and the question itself — see `questionKeyOf`. Both survive a restart, where the request
+ * id does not.
+ */
+export function leftKeyOf(under: string | undefined, key: string): string {
+  return `${under ?? ""}\u0000${key}`;
+}
+
+/**
  * The mode a journal says is still OPEN, rebuilt for a resumed run — see `hostRows.ts`.
  *
  * Everything the strip showed is re-read from the rows after the start: how many questions the
- * conversation answered (its `jaira.answered` rows), how far the run had got (the entries of
- * `through`), and — should the target's entry already be there, the process having died between it
- * and the end row — that it has in fact ARRIVED, in which case there is nothing to take up. `left`
- * starts again from nothing: a question left to the person is not a row, and the resumed run asks it
- * again under a request id this process has never offered.
+ * conversation answered (its `jaira.answered` rows) and LEFT to the person (its `jaira.left` rows,
+ * whose questions are seeded back so the conversation is not offered them again), how far the run had
+ * got (the entries of `through`), and — should the target's entry already be there, the process
+ * having died between it and the end row — that it has in fact ARRIVED, in which case there is
+ * nothing to take up.
  */
 export function restoredFastForward(
   taskId: string,
@@ -184,6 +200,7 @@ export function restoredFastForward(
     left: 0,
     startedAt: start.startedAt,
     seen: new Set(),
+    leftKeys: new Set(),
   };
   const entry = new Map<string, { parent?: string; key?: string }>();
   for (const event of history) {
@@ -203,6 +220,11 @@ export function restoredFastForward(
   for (const event of since) {
     const row = event as unknown as { type: string; byTaskId?: string };
     if (row.type === ANSWERED_EVENT && row.byTaskId === start.controlTaskId) run.answered += 1;
+    if (row.type === LEFT_EVENT) {
+      const left = event as unknown as LeftEvent;
+      run.left += 1;
+      run.leftKeys.add(leftKeyOf(left.under, left.key));
+    }
     if (arrivedAt(run, event)) arrived = true;
     if (event.type === "instance.entered") noteEntry(run, event, pathOf(event.instanceId));
   }

@@ -159,6 +159,7 @@ import {
   toolsetUsers,
   writeToolset,
   policyAuditRow,
+  recordHostRow,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -348,6 +349,8 @@ import {
   ApprovalRequired,
   Refusal,
   type ModuleApproval,
+  LEFT_EVENT,
+  questionKeyOf,
 } from "@jaira/shared";
 import { Diagnostics, stackDetail } from "./diagnostics";
 import { WorkerTypeCheck } from "./tsCheck";
@@ -386,7 +389,7 @@ let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITING } from "./session";
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
-import { arrivedAt, fastForwardView, labelOfTarget, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
+import { arrivedAt, fastForwardView, labelOfTarget, leftKeyOf, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
 import {
   noteFastForwardEnd,
   noteFastForwardStart,
@@ -5521,6 +5524,7 @@ export class AppService {
       left: 0,
       startedAt: Date.now(),
       seen: new Set(),
+      leftKeys: new Set(),
     };
     open.fastForwards.get(taskId)?.seen.forEach((id) => run.seen.add(id));
     open.fastForwards.set(taskId, run);
@@ -5740,11 +5744,57 @@ export class AppService {
     if (run.seen.has(requestId)) return;
     run.seen.add(requestId);
     if (what.kind === "interaction" && !ANSWERABLE_COMPONENTS.has(what.pending.component)) return;
-    void this.autopilotAnswer(open, run, what).catch((e: unknown) => {
-      run.left += 1;
-      this.log({ level: "warn", source: "run", message: `the conversation could not answer ${requestId} for ${taskId}; it is yours: ${(e as Error).message}`, project: open.key, taskId, ...stackDetail(e) });
-      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    // Its identity is taken NOW, while it is parked: the instance asking is the one running there.
+    const identity = this.questionIdentity(open, taskId, what);
+    // Left to the person already — before a restart, under a request id this process never saw.
+    if (run.leftKeys.has(leftKeyOf(identity.under, identity.key))) return;
+    void this.autopilotAnswer(open, run, what, identity).catch((e: unknown) => {
+      this.leaveToPerson(open, run, what, identity, `the conversation could not answer it: ${(e as Error).message}`, "warn", stackDetail(e));
     });
+  }
+
+  /** A parked question's stable identity — the instance asking, and the question itself (`jaira.left`). */
+  private questionIdentity(
+    open: ProjectSession,
+    taskId: string,
+    what: { kind: "interaction"; pending: PendingInteraction } | { kind: "question"; request: QuestionRequest },
+  ): { under?: string; key: string } {
+    const under = this.askingInstance(open, taskId, what.kind);
+    const key =
+      what.kind === "interaction"
+        ? questionKeyOf({ kind: "interaction", component: what.pending.component, inputs: what.pending.inputs })
+        : questionKeyOf({ kind: "question", questions: what.request.questions.map((q) => q.question) });
+    return { ...(under !== undefined ? { under } : {}), key };
+  }
+
+  /**
+   * The conversation leaves a question to the person: counted, and JOURNALED by the question's
+   * identity (`jaira.left`), so a restart seeds it back — the resumed run's re-park of it is the
+   * person's, not offered to the conversation again, and the strip's count goes on from the rows.
+   */
+  private leaveToPerson(
+    open: ProjectSession,
+    run: FastForwardRun,
+    what: { kind: "interaction"; pending: PendingInteraction } | { kind: "question"; request: QuestionRequest },
+    identity: { under?: string; key: string },
+    why: string,
+    level: "info" | "warn" = "info",
+    detail: Record<string, unknown> = {},
+  ): void {
+    const requestId = what.kind === "interaction" ? what.pending.requestId : what.request.requestId;
+    run.left += 1;
+    run.leftKeys.add(leftKeyOf(identity.under, identity.key));
+    recordHostRow(open.project, run.taskId, {
+      type: LEFT_EVENT,
+      requestId,
+      kind: what.kind,
+      ...(identity.under !== undefined ? { under: identity.under } : {}),
+      key: identity.key,
+      byTaskId: run.controlTaskId,
+      reason: why,
+    });
+    this.log({ level, source: "run", message: `left ${requestId} to you (${run.taskId}): ${why}`, project: open.key, taskId: run.taskId, ...detail });
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: run.taskId });
   }
 
   /**
@@ -5759,6 +5809,7 @@ export class AppService {
     open: ProjectSession,
     run: FastForwardRun,
     what: { kind: "interaction"; pending: PendingInteraction } | { kind: "question"; request: QuestionRequest },
+    identity: { under?: string; key: string },
   ): Promise<void> {
     const project = open.project;
     const taskId = run.taskId;
@@ -5785,11 +5836,7 @@ export class AppService {
     if ("error" in result) throw new Error(result.error.reason);
     const reply = autopilotAnswerOf(result.value as JsonValue | undefined);
     const threshold = project.config.autopilot.askBelow;
-    const leave = (why: string): void => {
-      run.left += 1;
-      this.log({ level: "info", source: "run", message: `left ${requestId} to you (${taskId}): ${why}`, project: open.key, taskId });
-      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
-    };
+    const leave = (why: string): void => this.leaveToPerson(open, run, what, identity, why);
     if (reply === undefined) return leave("the conversation gave no usable answer");
     if (reply.confidence < threshold) return leave(`the conversation is ${reply.confidence} sure, under autopilot.askBelow ${threshold}`);
     // Arrived, skipped or stopped while the model was thinking: the question is the person's now.
