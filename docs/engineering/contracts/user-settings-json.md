@@ -29,7 +29,7 @@ The file is `<base>/user-settings.json`, UTF-8 JSON written with two-space inden
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `theme` | `"light"` or `"dark"` | no, default `"light"` | the window palette; any other value reads as `"light"` |
+| `theme` | `"light"`, `"dark"` or `"system"` | no, default `"light"` | light or dark, or `system` to follow the operating system; any other value reads as `"light"` |
 | `ui` | object | no | layout memory and read marks, see below |
 | `projects` | string array | no, default `[]` | the projects open at quit, oldest first; trimmed, blanks and non-strings dropped, de-duplicated |
 | `logging` | object | no, default `{minLevel: "info", overrides: []}` | what the app log keeps, see below |
@@ -95,7 +95,7 @@ A key is `"<mime>:<kind>"` for one type or `"family:<family>:<kind>"` for a fami
 
 A choice whose four statements are all at their defaults is dropped.
 
-### Appearance holds two voices, the editor size and the editor palette
+### Appearance holds the window's theme, two voices, the editor size and the editor palette
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -107,6 +107,12 @@ A choice whose four statements are all at their defaults is dropped.
 | `appearance.advanced` | boolean | no, default false | separates the editor size from the data voice; only `true` counts |
 | `appearance.smoothing` | boolean | no, default false | grayscale antialiasing; only `true` counts |
 | `appearance.editorTheme` | non-empty string | no, default `"monokai-light"` | a palette id or `app`; an unknown id is kept and the renderer falls back |
+| `appearance.palette` | `"ink"`, `"classic"`, `"hairline"`, `"contrast"`, `"blueprint"`, `"pastel"`, `"pastel-rail"` or `"zinc"` | no, default `"ink"` | the window's theme, in both light and dark; an unknown id reads as the default |
+| `appearance.laneColors` | boolean or null | no, default null | each board column its own colour; null is the palette's own (on for `pastel`) |
+| `appearance.buckets` | `"box"`, `"line"` or null | no, default null | a board column drawn as a box or as a rule under its heading; null is the palette's own (`line` for `ink`) |
+| `appearance.statusWash` | boolean or null | no, default null | a card washed in its status's colour; null is the palette's own (off everywhere) |
+
+Choosing a palette in the pane writes the three options back to null, so a palette arrives the way it was designed.
 
 ## Nothing is refused on read, and a write fails only when the disk does
 

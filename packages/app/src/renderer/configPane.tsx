@@ -8,6 +8,11 @@
  * template over a closed variable set — none of which the box told you, and all of which it would
  * accept and then refuse on save.
  *
+ * Drawn as a settings page (`settingsLayout.tsx`, the person's pick of 2026-09-23): each block a
+ * section of rows, and each row with a SWITCH that says whether this layer states it — "use a switch to
+ * enable/disable a row". Off, the row shows what it inherits and cannot be edited; on, it pins the
+ * value it shows and edits it.
+ *
  * Two things get bespoke controls rather than the generic renderer, because their shape carries
  * meaning a property walk cannot:
  *
@@ -20,7 +25,7 @@
  * `Record<string, JsonValue>` at the config layer and a project may legitimately carry a field newer
  * than this form, so the escape hatch is what keeps the screen from being lossy.
  */
-import { useState, type JSX } from "react";
+import { type JSX } from "react";
 import {
   ARTIFACT_DESTINATIONS,
   ARTIFACT_VARIABLES,
@@ -32,6 +37,7 @@ import { Chip, Disclosure, Field, FieldGrid, Level, NumInput, SelectInput, TextI
 import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
+import { SettingsSection } from "./settingsLayout";
 
 export interface ConfigPaneProps {
   config: ConfigView | null;
@@ -94,6 +100,16 @@ export function layerWriter(
   return { set, stated };
 }
 
+/** The value at a dotted path of a document, or undefined. */
+function valueAt(doc: Record<string, unknown>, path: string): unknown {
+  let cursor: unknown = doc;
+  for (const part of path.split(".")) {
+    if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return undefined;
+    cursor = (cursor as Record<string, unknown>)[part];
+  }
+  return cursor;
+}
+
 export function ConfigPane({ config, layer, busy, editable, onSave, children }: ConfigPaneProps): JSX.Element {
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
 
@@ -102,22 +118,35 @@ export function ConfigPane({ config, layer, busy, editable, onSave, children }: 
   const locked = busy || !editable;
 
   const { set, stated } = layerWriter(doc, layer, onSave);
+  /**
+   * A row's switch for one path: on while this layer states it. Switching it on pins the value the
+   * row shows — the one it inherits — so nothing changes until it is edited; switching it off removes
+   * it, and the row inherits again. With nothing to pin, the row is simply enabled (see `Field`).
+   */
+  const toggle = (path: string, seed?: unknown): { on: boolean; onChange: (on: boolean) => void; disabled: boolean } => ({
+    on: stated(path),
+    disabled: locked,
+    onChange: (on) => {
+      if (!on) set(path, undefined);
+      else {
+        const current = seed ?? valueAt(effective, path);
+        if (current !== undefined) set(path, current);
+      }
+    },
+  });
+  const writer: Writer = { effective, locked, stated, set, toggle };
 
   return (
     <div className="cfg-pane">
-      <Artifacts effective={effective} locked={locked} stated={stated} set={set} />
-      <ExecEnvironment effective={effective} locked={locked} stated={stated} set={set} />
-      <DefaultEnvironment effective={effective} locked={locked} stated={stated} set={set} />
-      <Policy effective={effective} locked={locked} stated={stated} set={set} />
+      <Artifacts {...writer} />
+      <ExecEnvironment {...writer} />
+      <DefaultEnvironment {...writer} />
+      <Policy {...writer} />
 
       {/* `autopilot` (decision 0005 §6) through the same declared form: one number, and its description
           is the whole explanation — the threshold a fast-forward's answers are held to. */}
       {CONFIG_SECTIONS.filter((s) => s.key === "autopilot" || s.key === "memo" || s.key === "workflows").map((section) => (
-        <section key={section.key} className="cfg-group">
-          <header className="cfg-group-head">
-            <h4>{section.title}</h4>
-            <p className="cfg-hint">{section.hint}</p>
-          </header>
+        <SettingsSection key={section.key} id={section.key} title={section.title} info={section.hint}>
           <SchemaForm
             schema={section.schema as Schema}
             value={effective[section.key]}
@@ -126,18 +155,18 @@ export function ConfigPane({ config, layer, busy, editable, onSave, children }: 
             // rebuilt section back would pin every inherited sibling into this layer with the one edit.
             ctx={{ path: section.key, disabled: locked, isSet: stated, setAt: set }}
           />
-        </section>
+        </SettingsSection>
       ))}
 
-      <Disclosure summary="The raw document" desc="everything, as it is stored">
-        <div className="cfg-stack">
-          <p className="cfg-hint">
-            The escape hatch, and the reason this screen is not lossy: a project may carry a field
-            newer than this form, and it survives every save made above.
-          </p>
-          {children}
-        </div>
-      </Disclosure>
+      <SettingsSection
+        id="raw"
+        title="The raw document"
+        info="The escape hatch, and the reason this screen is not lossy: a project may carry a field newer than this form, and it survives every save made above."
+      >
+        <Disclosure summary="Edit the document" desc="everything, as it is stored">
+          <div className="cfg-stack">{children}</div>
+        </Disclosure>
+      </SettingsSection>
     </div>
   );
 }
@@ -147,63 +176,59 @@ interface Writer {
   locked: boolean;
   stated: (path: string) => boolean;
   set: (path: string, value: unknown) => void;
+  toggle: (path: string, seed?: unknown) => { on: boolean; onChange: (on: boolean) => void; disabled: boolean };
 }
 
 /** Where a produced file lands — a template, offered as presets plus the variables it may use. */
-function Artifacts({ effective, locked, stated, set }: Writer): JSX.Element {
+function Artifacts({ effective, locked, set, toggle }: Writer): JSX.Element {
   const artifacts = (effective["artifacts"] ?? {}) as Record<string, unknown>;
   const destination = typeof artifacts["destination"] === "string" ? (artifacts["destination"] as string) : "";
 
   return (
-    <section className="cfg-group">
-      <header className="cfg-group-head">
-        <h4>Artifacts</h4>
-        <p className="cfg-hint">
-          Where a file an agent produces actually lands. A path TEMPLATE rather than a mode, because
-          &ldquo;which backend&rdquo; and &ldquo;how the path is derived&rdquo; are independent questions
-          and an enum conflates them.
-        </p>
-      </header>
-
-      <Field
-        label="Destination"
-        param="artifacts.destination"
-        hint="Pick one, or write a template of your own."
-        set={stated("artifacts.destination")}
-      >
-        <div className="cfg-stack">
-          <div className="cfg-chips">
-            {ARTIFACT_DESTINATIONS.map((option) => (
-              <Chip
-                key={option.value}
-                active={destination === option.value}
-                disabled={locked}
-                title={option.what}
-                onClick={() => set("artifacts.destination", option.value)}
-              >
-                {option.label}
-              </Chip>
-            ))}
-          </div>
-          <TextInput
-            value={destination}
-            mono
-            placeholder="$JAIRA/artifacts/$TASK_ID/$RELPATH"
-            disabled={locked}
-            onChange={(v) => set("artifacts.destination", v === "" ? undefined : v)}
-          />
-          <p className="cfg-hint">
-            Variables: {ARTIFACT_VARIABLES.map((v) => <code key={v}>{v} </code>)}
-          </p>
-        </div>
-      </Field>
-
+    <SettingsSection
+      id="artifacts"
+      title="Artifacts"
+      info="Where a file an agent produces actually lands. A path template rather than a mode, because which backend and how the path is derived are independent questions and an enum conflates them."
+    >
       <FieldGrid>
+        <Field
+          label="Destination"
+          param="artifacts.destination"
+          hint="Pick one, or write a template of your own."
+          wide
+          toggle={toggle("artifacts.destination", destination === "" ? ARTIFACT_DESTINATIONS[0]!.value : destination)}
+        >
+          <div className="cfg-stack">
+            <div className="cfg-chips">
+              {ARTIFACT_DESTINATIONS.map((option) => (
+                <Chip
+                  key={option.value}
+                  active={destination === option.value}
+                  disabled={locked}
+                  title={option.what}
+                  onClick={() => set("artifacts.destination", option.value)}
+                >
+                  {option.label}
+                </Chip>
+              ))}
+            </div>
+            <TextInput
+              value={destination}
+              mono
+              placeholder="$JAIRA/artifacts/$TASK_ID/$RELPATH"
+              disabled={locked}
+              onChange={(v) => set("artifacts.destination", v === "" ? undefined : v)}
+            />
+            <p className="cfg-hint">
+              Variables: {ARTIFACT_VARIABLES.map((v) => <code key={v}>{v} </code>)}
+            </p>
+          </div>
+        </Field>
         <Field
           label="Artifact directory"
           param="artifacts.dir"
           hint="What $ARTIFACT_DIR expands to, inside the root's system/ directory."
-          set={stated("artifacts.dir")}
+          toggle={toggle("artifacts.dir")}
         >
           <TextInput
             value={typeof artifacts["dir"] === "string" ? (artifacts["dir"] as string) : ""}
@@ -217,7 +242,7 @@ function Artifacts({ effective, locked, stated, set }: Writer): JSX.Element {
           label="Keep inline below"
           param="artifacts.inlineMaxBytes"
           hint="Content smaller than this rides along in bindings and prompts rather than being read back. Larger is fewer reads and bigger prompts."
-          set={stated("artifacts.inlineMaxBytes")}
+          toggle={toggle("artifacts.inlineMaxBytes")}
         >
           <NumInput
             value={typeof artifacts["inlineMaxBytes"] === "number" ? (artifacts["inlineMaxBytes"] as number) : undefined}
@@ -226,7 +251,7 @@ function Artifacts({ effective, locked, stated, set }: Writer): JSX.Element {
           />
         </Field>
       </FieldGrid>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -251,7 +276,7 @@ const DEFAULT_ENVIRONMENT = "executors.default.prompt.defaults";
  * `args`, and a project-wide default for any of those is not a default — it is a state's whole
  * operation, applied to every state that never asked for one.
  */
-function DefaultEnvironment({ effective, locked, stated, set }: Writer): JSX.Element {
+function DefaultEnvironment({ effective, locked, set, toggle }: Writer): JSX.Element {
   const executors = (effective["executors"] ?? {}) as Record<string, unknown>;
   const prompt = ((executors["default"] as Record<string, unknown> | undefined)?.["prompt"] ?? {}) as Record<string, unknown>;
   const defaults = (prompt["defaults"] ?? {}) as Record<string, unknown>;
@@ -259,44 +284,41 @@ function DefaultEnvironment({ effective, locked, stated, set }: Writer): JSX.Ele
   const { model: _model, ...knobs } = defaults;
 
   return (
-    <section className="cfg-group">
-      <header className="cfg-group-head">
-        <h4>Default environment</h4>
-        <p className="cfg-hint">
-          What a state that names nothing is filled in with — the same fields a state&rsquo;s own
-          <code> environment </code> block carries, one level out. Applied UNDER whatever a state
-          says, so naming a field there always wins.
-        </p>
-      </header>
-
-      <Field
-        label="Default model"
-        param={`${DEFAULT_ENVIRONMENT}.model`}
-        hint="A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state."
-        set={stated(`${DEFAULT_ENVIRONMENT}.model`)}
-      >
-        <TextInput
-          value={model}
-          mono
-          placeholder="left to the state"
-          disabled={locked}
-          onChange={(v) => set(`${DEFAULT_ENVIRONMENT}.model`, v === "" ? undefined : v)}
-        />
-      </Field>
-
-      <LlmConfigForm
-        value={knobs as LlmConfigDoc}
-        disabled={locked}
-        onChange={(next) => {
-          // The model is written by the field above and merged back here, so editing a knob cannot
-          // drop it — the same shape the executor tree's own defaults editor uses, for the same
-          // reason: `LlmConfigForm` owns every key it renders and would otherwise take the block.
-          const merged = { ...next, ...(model === "" ? {} : { model }) };
-          set(DEFAULT_ENVIRONMENT, Object.keys(merged).length === 0 ? undefined : merged);
-        }}
-      />
-      <p className="cfg-hint">{summariseLlmConfig(knobs as LlmConfigDoc)}</p>
-    </section>
+    <SettingsSection
+      id="default-environment"
+      title="Default environment"
+      info="What a state that names nothing is filled in with — the same fields a state's own environment block carries, one level out. Applied under whatever a state says, so naming a field there always wins."
+    >
+      <FieldGrid>
+        <Field
+          label="Default model"
+          param={`${DEFAULT_ENVIRONMENT}.model`}
+          hint="A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state."
+          toggle={toggle(`${DEFAULT_ENVIRONMENT}.model`)}
+        >
+          <TextInput
+            value={model}
+            mono
+            placeholder="left to the state"
+            disabled={locked}
+            onChange={(v) => set(`${DEFAULT_ENVIRONMENT}.model`, v === "" ? undefined : v)}
+          />
+        </Field>
+        <Field label="Call settings" hint={summariseLlmConfig(knobs as LlmConfigDoc)} wide>
+          <LlmConfigForm
+            value={knobs as LlmConfigDoc}
+            disabled={locked}
+            onChange={(next) => {
+              // The model is written by the field above and merged back here, so editing a knob cannot
+              // drop it — the same shape the executor tree's own defaults editor uses, for the same
+              // reason: `LlmConfigForm` owns every key it renders and would otherwise take the block.
+              const merged = { ...next, ...(model === "" ? {} : { model }) };
+              set(DEFAULT_ENVIRONMENT, Object.keys(merged).length === 0 ? undefined : merged);
+            }}
+          />
+        </Field>
+      </FieldGrid>
+    </SettingsSection>
   );
 }
 
@@ -307,26 +329,18 @@ function DefaultEnvironment({ effective, locked, stated, set }: Writer): JSX.Ele
  * would offer a `wsl` box on a value that is sometimes a bare string, and writing to it would produce
  * a document the parser refuses.
  */
-function ExecEnvironment({ effective, locked, stated, set }: Writer): JSX.Element {
+function ExecEnvironment({ effective, locked, stated, set, toggle }: Writer): JSX.Element {
   const value = effective["execEnvironment"];
   const distro = value !== null && typeof value === "object" ? String((value as { wsl?: string }).wsl ?? "") : "";
 
   return (
-    <section className="cfg-group">
-      <header className="cfg-group-head">
-        <h4>Where commands run</h4>
-        <p className="cfg-hint">
-          Natively, or inside a WSL distro — which is where git and every agent then run too.
-          Deliberately not Windows git against <code>\\wsl$</code>, which is slow and permission-fragile.
-        </p>
-      </header>
+    <SettingsSection
+      id="exec-environment"
+      title="Where commands run"
+      info="Natively, or inside a WSL distro — which is where git and every agent then run too. Deliberately not Windows git against \\wsl$, which is slow and permission-fragile."
+    >
       <FieldGrid>
-        <Field
-          label="Environment"
-          param="execEnvironment"
-          hint="Naming a distro runs everything inside it."
-          set={stated("execEnvironment")}
-        >
+        <Field label="Environment" param="execEnvironment" hint="Naming a distro runs everything inside it." toggle={toggle("execEnvironment", value ?? "windows")}>
           <SelectInput
             value={distro === "" ? "windows" : "wsl"}
             options={[
@@ -338,18 +352,13 @@ function ExecEnvironment({ effective, locked, stated, set }: Writer): JSX.Elemen
           />
         </Field>
         {distro !== "" || (typeof value === "object" && value !== null) ? (
-          <Field label="Distro" param="execEnvironment.wsl" hint="As `wsl -l` lists it." set={stated("execEnvironment")}>
-            <TextInput
-              value={distro}
-              mono
-              placeholder="Ubuntu"
-              disabled={locked}
-              onChange={(v) => set("execEnvironment", { wsl: v })}
-            />
+          // The same key as the row above, so it follows that row's switch rather than having its own.
+          <Field label="Distro" param="execEnvironment.wsl" hint="As `wsl -l` lists it." off={!stated("execEnvironment")}>
+            <TextInput value={distro} mono placeholder="Ubuntu" disabled={locked} onChange={(v) => set("execEnvironment", { wsl: v })} />
           </Field>
         ) : null}
       </FieldGrid>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -374,7 +383,7 @@ interface PolicyRule {
  * subcommand, a flag) and never a regex over the raw string, which is what makes a rule mean the same
  * thing whichever way a command was spelled.
  */
-function Policy({ effective, locked, stated, set }: Writer): JSX.Element {
+function Policy({ effective, locked, set, toggle }: Writer): JSX.Element {
   const policy = (effective["policy"] ?? {}) as Record<string, unknown>;
   const rules = Array.isArray(policy["rules"]) ? (policy["rules"] as PolicyRule[]) : [];
 
@@ -389,164 +398,132 @@ function Policy({ effective, locked, stated, set }: Writer): JSX.Element {
   };
 
   return (
-    <section className="cfg-group">
-      <header className="cfg-group-head">
-        <h4>Safety policy</h4>
-        <p className="cfg-hint">
-          What an agent may run without asking. Rules are checked IN ORDER and the first match wins;
-          anything no rule matches falls through to the built-in rules and then to the default below.
-          A matcher is over parsed intent — a program, a subcommand, a flag — never a regex over the
-          raw string, so a rule means the same thing however the command was spelled.
-        </p>
-      </header>
-
+    <SettingsSection
+      id="policy"
+      title="Safety policy"
+      info="What an agent may run without asking. Rules are checked in order and the first match wins; anything no rule matches falls through to the built-in rules and then to the default. A matcher is over parsed intent — a program, a subcommand, a flag — never a regex over the raw string, so a rule means the same thing however the command was spelled."
+    >
       <FieldGrid>
-        <Field
-          label="Anything else"
-          param="policy.default"
-          hint="The verdict for a command no rule and no built-in matches."
-          set={stated("policy.default")}
-        >
+        <Field label="Anything else" param="policy.default" hint="The verdict for a command no rule and no built-in matches." toggle={toggle("policy.default", policy["default"] ?? "allow")}>
           <SelectInput
-            value={typeof policy["default"] === "string" ? (policy["default"] as string) : ""}
-            options={[["— inherit (allow)", ""], ...POLICY_ACTIONS]}
+            value={typeof policy["default"] === "string" ? (policy["default"] as string) : "allow"}
+            options={POLICY_ACTIONS}
             disabled={locked}
-            onChange={(v) => set("policy.default", v === "" ? undefined : v)}
+            onChange={(v) => set("policy.default", v)}
           />
         </Field>
-        <Field
-          label="Unlisted tools"
-          param="policy.toolDefault"
-          hint="For tools that do not run a command line — writing a file, say."
-          set={stated("policy.toolDefault")}
-        >
+        <Field label="Unlisted tools" param="policy.toolDefault" hint="For tools that do not run a command line — writing a file, say." toggle={toggle("policy.toolDefault", policy["toolDefault"] ?? "ask")}>
           <SelectInput
-            value={typeof policy["toolDefault"] === "string" ? (policy["toolDefault"] as string) : ""}
+            value={typeof policy["toolDefault"] === "string" ? (policy["toolDefault"] as string) : "ask"}
             options={[
-              ["— inherit", ""],
               ["allow", "allow"],
               ["ask first", "ask"],
               ["deny", "deny"],
             ]}
             disabled={locked}
-            onChange={(v) => set("policy.toolDefault", v === "" ? undefined : v)}
+            onChange={(v) => set("policy.toolDefault", v)}
           />
         </Field>
         <Field
           label="Built-in rules"
           param="policy.builtins"
           hint="JaiRA's own refusals — force pushes, credential paths, package publishes. Turning them off is a deliberate opt-out."
-          set={stated("policy.builtins")}
+          toggle={toggle("policy.builtins", policy["builtins"] !== false)}
         >
           <SelectInput
-            value={policy["builtins"] === false ? "off" : ""}
+            value={policy["builtins"] === false ? "off" : "on"}
             options={[
-              ["on — the built-in refusals apply", ""],
+              ["on — the built-in refusals apply", "on"],
               ["off — this project's rules only", "off"],
             ]}
             disabled={locked}
-            onChange={(v) => set("policy.builtins", v === "off" ? false : undefined)}
+            onChange={(v) => set("policy.builtins", v !== "off")}
           />
         </Field>
-      </FieldGrid>
-
-      <Level title={`Rules (${rules.length})`} depth={1} hint="First match wins, so order matters.">
-        <div className="cfg-stack">
-          {rules.length === 0 ? (
-            <p className="cfg-hint">
-              No rules of this project&apos;s own — the built-ins and the default above decide everything.
-            </p>
-          ) : null}
-          {rules.map((rule, index) => (
-            <div key={index} className="cfg-rule-card">
-              <div className="cfg-rule-head">
-                <span className="cfg-step-index" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <SelectInput
-                  value={rule.action ?? "allow"}
-                  options={POLICY_ACTIONS}
-                  disabled={locked}
-                  onChange={(v) => replace(index, { ...rule, action: v })}
-                />
-                <span className="grow" />
-                <button className="ghost" disabled={locked || index === 0} onClick={() => move(index, -1)} title="earlier">
-                  ↑
-                </button>
-                <button
-                  className="ghost"
-                  disabled={locked || index === rules.length - 1}
-                  onClick={() => move(index, 1)}
-                  title="later"
-                >
-                  ↓
-                </button>
-                <button
-                  className="ghost danger"
-                  disabled={locked}
-                  onClick={() => write(rules.filter((_, i) => i !== index))}
-                >
-                  Remove
-                </button>
+        <Field label={`Rules (${rules.length})`} hint="First match wins, so order matters." wide>
+          <div className="cfg-stack">
+            {rules.length === 0 ? (
+              <p className="cfg-hint">No rules of this project&apos;s own — the built-ins and the default above decide everything.</p>
+            ) : null}
+            {rules.map((rule, index) => (
+              <div key={index} className="cfg-rule-card">
+                <div className="cfg-rule-head">
+                  <span className="cfg-step-index" aria-hidden="true">
+                    {index + 1}
+                  </span>
+                  <SelectInput value={rule.action ?? "allow"} options={POLICY_ACTIONS} disabled={locked} onChange={(v) => replace(index, { ...rule, action: v })} />
+                  <span className="grow" />
+                  <button className="ghost" disabled={locked || index === 0} onClick={() => move(index, -1)} title="earlier">
+                    ↑
+                  </button>
+                  <button className="ghost" disabled={locked || index === rules.length - 1} onClick={() => move(index, 1)} title="later">
+                    ↓
+                  </button>
+                  <button className="ghost danger" disabled={locked} onClick={() => write(rules.filter((_, i) => i !== index))}>
+                    Remove
+                  </button>
+                </div>
+                <Level title="Match" depth={1}>
+                  <FieldGrid min={170}>
+                    <Field label="Program" param="match.program" hint="Normalised — git, npm, curl.">
+                      <TextInput
+                        value={rule.match?.program ?? ""}
+                        mono
+                        placeholder="git"
+                        disabled={locked}
+                        onChange={(v) => replace(index, { ...rule, match: { ...rule.match, program: v || undefined } })}
+                      />
+                    </Field>
+                    <Field label="Subcommand" param="match.subcommand" hint="push, publish, install.">
+                      <TextInput
+                        value={rule.match?.subcommand ?? ""}
+                        mono
+                        placeholder="push"
+                        disabled={locked}
+                        onChange={(v) => replace(index, { ...rule, match: { ...rule.match, subcommand: v || undefined } })}
+                      />
+                    </Field>
+                    <Field label="Any of these flags" param="match.anyFlag" hint="Comma-separated; one is enough to match.">
+                      <TextInput
+                        value={(rule.match?.anyFlag ?? []).join(", ")}
+                        mono
+                        placeholder="--force, -f"
+                        disabled={locked}
+                        onChange={(v) => {
+                          const list = v.split(",").map((f) => f.trim()).filter((f) => f.length > 0);
+                          replace(index, { ...rule, match: { ...rule.match, anyFlag: list.length > 0 ? list : undefined } });
+                        }}
+                      />
+                    </Field>
+                    <Field label="An argument contains" param="match.argIncludes" hint="A substring — a path, a URL.">
+                      <TextInput
+                        value={rule.match?.argIncludes ?? ""}
+                        mono
+                        placeholder=".ssh"
+                        disabled={locked}
+                        onChange={(v) => replace(index, { ...rule, match: { ...rule.match, argIncludes: v || undefined } })}
+                      />
+                    </Field>
+                    <Field label="Reason" param="reason" hint="Shown when this rule causes a prompt or a refusal.">
+                      <TextInput
+                        value={rule.reason ?? ""}
+                        placeholder="force-pushing rewrites published history"
+                        disabled={locked}
+                        onChange={(v) => replace(index, { ...rule, reason: v || undefined })}
+                      />
+                    </Field>
+                  </FieldGrid>
+                </Level>
               </div>
-              <FieldGrid min={170}>
-                <Field label="Program" param="match.program" hint="Normalised — git, npm, curl.">
-                  <TextInput
-                    value={rule.match?.program ?? ""}
-                    mono
-                    placeholder="git"
-                    disabled={locked}
-                    onChange={(v) => replace(index, { ...rule, match: { ...rule.match, program: v || undefined } })}
-                  />
-                </Field>
-                <Field label="Subcommand" param="match.subcommand" hint="push, publish, install.">
-                  <TextInput
-                    value={rule.match?.subcommand ?? ""}
-                    mono
-                    placeholder="push"
-                    disabled={locked}
-                    onChange={(v) => replace(index, { ...rule, match: { ...rule.match, subcommand: v || undefined } })}
-                  />
-                </Field>
-                <Field label="Any of these flags" param="match.anyFlag" hint="Comma-separated; one is enough to match.">
-                  <TextInput
-                    value={(rule.match?.anyFlag ?? []).join(", ")}
-                    mono
-                    placeholder="--force, -f"
-                    disabled={locked}
-                    onChange={(v) => {
-                      const list = v.split(",").map((f) => f.trim()).filter((f) => f.length > 0);
-                      replace(index, { ...rule, match: { ...rule.match, anyFlag: list.length > 0 ? list : undefined } });
-                    }}
-                  />
-                </Field>
-                <Field label="An argument contains" param="match.argIncludes" hint="A substring — a path, a URL.">
-                  <TextInput
-                    value={rule.match?.argIncludes ?? ""}
-                    mono
-                    placeholder=".ssh"
-                    disabled={locked}
-                    onChange={(v) => replace(index, { ...rule, match: { ...rule.match, argIncludes: v || undefined } })}
-                  />
-                </Field>
-                <Field label="Reason" param="reason" hint="Shown when this rule causes a prompt or a refusal.">
-                  <TextInput
-                    value={rule.reason ?? ""}
-                    placeholder="force-pushing rewrites published history"
-                    disabled={locked}
-                    onChange={(v) => replace(index, { ...rule, reason: v || undefined })}
-                  />
-                </Field>
-              </FieldGrid>
+            ))}
+            <div className="pane-actions">
+              <button disabled={locked} onClick={() => write([...rules, { action: "require_approval", match: {} }])}>
+                Add a rule
+              </button>
             </div>
-          ))}
-          <div className="pane-actions">
-            <button disabled={locked} onClick={() => write([...rules, { action: "require_approval", match: {} }])}>
-              Add a rule
-            </button>
           </div>
-        </div>
-      </Level>
-    </section>
+        </Field>
+      </FieldGrid>
+    </SettingsSection>
   );
 }

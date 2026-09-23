@@ -4349,75 +4349,12 @@ ol.children li::marker {
   margin: 0;
 }
 
-/* --- the appearance screen (SHELL.md §6) ---
-   Six settings, all about type. They get a layout of their own rather than the label-on-the-left
-   form the other sections use: with one-word names and a preview to check the answer against, a
-   paragraph beside each control would be three times the height of the thing it explains.
-
-   Every size below is a ratio of a voice's base, like everything else in this file — a literal px in
-   the screen that SETS the base is the one place the joke would be on us. */
-.cfg-pane.ap {
-  /* Compounded with `.cfg-pane` deliberately: this screen borrows that column's scrolling and its
-     bottom padding, and overrides the two things a form of forty settings wants and a screen of six
-     does not — a 34px gap between sections, and 780px of width. */
-  gap: 10px;
-  /* Wide enough for the widest thing on it, which is no longer a form. This section used to be
-     typography alone and was capped at 560 for a good reason — a font stack stretched across a wide
-     window puts a chip at each end of a line with nothing between them — and then File types arrived
-     as a tree beside a stage beside a live preview, and inherited a width that was never about it.
-     So the CAP MOVED TO THE CONTROLS: everything that is a label-and-a-control still stops at 560
-     below, and the one thing that is a workspace gets the room. */
-  max-width: 1040px;
-}
-/* The form half of this screen. A label on the left and its control on the right reads worse the
-   wider it gets, whatever else is on the page. */
-.ap-field,
+/* --- the rows File types still draws on its stage (editorKnobs.tsx) ---
+   A switch, its name and what it is worth, read down the right edge; and a row of chips. Capped,
+   because they sit on a stage that takes the page's full width. */
 .ap-toggle,
-.ap-preview,
-.ap-editor-preview,
-.ap-head:not(.wide),
-.ap-divider:not(.wide) {
+.ap-editor-preview {
   max-width: 560px;
-}
-/* Whose settings these are. A non-layered section is drawn without the chrome's `settings-head`
-   (there is no shared-versus-project switch to put in it), so the sentence that header would have
-   carried is stated here instead. */
-.ap-head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding-bottom: 9px;
-  border-bottom: 1px solid var(--line);
-}
-.ap-head > .app-secondary {
-  margin-left: auto;
-}
-.ap-field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-/* The family and its size, on ONE line. They are a single decision about a single voice, and split
-   across two rows a person sets the face and then hunts for the size of what they just set. */
-.ap-line {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  min-width: 0;
-}
-/* The resolved stack, as the stylesheet will receive it — the one line that proves what "prepend"
-   actually did, in the voice it did it to. */
-.ap-note {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ap-divider {
-  height: 1px;
-  background: var(--line);
-  margin: 4px 0;
 }
 .ap-toggle {
   display: flex;
@@ -4451,16 +4388,6 @@ ol.children li::marker {
   gap: 6px;
   flex-wrap: wrap;
   min-width: 0;
-}
-.ap-reset {
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  padding: 1px 8px;
-  background: none;
-  cursor: pointer;
-}
-.ap-reset:hover:not(:disabled) {
-  background: var(--fill-ghost-hover);
 }
 
 /* How each kind of file is drawn — a tree of families on the left, one stage on the right.
@@ -14288,4 +14215,953 @@ fieldset.reading {
   font-family: var(--font-data);
   font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
+}
+
+/* =================================================================================================
+ * THE WINDOW'S PALETTES, and the board's three surface options (Settings → Appearance → Theme).
+ *
+ * Picked by the person on 2026-09-23 from the palette study: classic (everything above this line,
+ * untouched), ink rail (the default), hairline, high contrast, blueprint, pastel, pastel rail and zinc. Each palette is a token block for light
+ * and one for dark on `:root[data-palette]`, written by `applyAppearance`, plus the few rules that
+ * make it more than a recolour. The DARK block names every token its light block names, because both
+ * match in dark mode and the light one, sitting later than the stylesheet's own dark `:root`, would
+ * otherwise leak light values into it.
+ *
+ * What the palettes share is the fix the study was about: a thing is brighter than what holds it.
+ * Classic's cards are a 6% wash over a grey column on a grey ground, so nothing reads as an object;
+ * every other palette draws the column as a TRACK (`--track`) and the card as a TILE (`--tile`) with
+ * an edge and a shadow of its own. Classic does not define those tokens and none of these rules match
+ * it, which is what keeps it byte for byte the app it was.
+ *
+ * The three options come after, and are palette-agnostic: `data-buckets="line"`, `data-lanes`,
+ * `data-wash`. Each is written only when it departs from today's board — see `applySurface`.
+ * ================================================================================================= */
+
+/* ---- ink rail: dark chrome in both themes, a near-white workspace, an iris accent ---- */
+:root[data-palette="ink"] {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1;
+  --line: #e0e3ec; --rule: #c5cadb; --text: #121526; --dim: #5a5f7a;
+  --accent: #4a4fd1; --fill-accent: #4a4fd1; --fill-accent-hover: #3f44bd;
+  --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-ghost-hover: rgba(18, 21, 38, 0.05); --fill-ghost-selected: rgba(18, 21, 38, 0.09);
+  --chrome: #171a2e; --track: #eceef5; --track-edge: transparent;
+  --tile: #ffffff; --tile-edge: #dfe2ec;
+  --tile-shadow: 0 1px 2px rgba(18, 21, 48, 0.07); --tile-shadow-hi: 0 3px 10px rgba(18, 21, 48, 0.12);
+}
+:root[data-palette="ink"][data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #141620; --panel-3: #1e2130;
+  --line: #242838; --rule: #363b52; --text: #e8e9f3; --dim: #8c90ab;
+  --accent: #9ea2ff; --fill-accent: #5a5fe0; --fill-accent-hover: #6a6fea;
+  --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.05); --fill-ghost-selected: rgba(255, 255, 255, 0.09);
+  --chrome: #08091a; --track: #13151e; --track-edge: transparent;
+  --tile: #181b27; --tile-edge: #262a3b;
+  --tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --tile-shadow-hi: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 12px rgba(0, 0, 0, 0.55);
+}
+/* The sidebar gets a dark token set of its own, in BOTH themes, so every row, pill and drawer inside
+   it re-colours itself without a rule per component. */
+:root[data-palette="ink"] .sidebar {
+  --panel: color-mix(in srgb, #ffffff 7%, var(--chrome));
+  --panel-2: var(--chrome);
+  --panel-3: color-mix(in srgb, #ffffff 11%, var(--chrome));
+  --line: color-mix(in srgb, #ffffff 10%, var(--chrome));
+  --rule: color-mix(in srgb, #ffffff 18%, var(--chrome));
+  --text: #eceefa; --dim: #9ca1c4;
+  --accent: #b3b6ff; --ok: #6fd6a0; --warn: #f3c464; --bad: #ff8a80;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.06); --fill-ghost-selected: rgba(255, 255, 255, 0.1);
+  --tint-accent: color-mix(in srgb, #b3b6ff 20%, transparent);
+  --tint-ok: color-mix(in srgb, #6fd6a0 12%, transparent);
+  --tint-warn: color-mix(in srgb, #f3c464 14%, transparent);
+  --tint-bad: color-mix(in srgb, #ff8a80 12%, transparent);
+  color: var(--text);
+  color-scheme: dark;
+}
+
+/* ---- hairline: no fills, every boundary a one-pixel line ---- */
+:root[data-palette="hairline"] {
+  --bg: #ffffff; --panel: #ffffff; --panel-2: #f7f8fa; --panel-3: #f2f4f7;
+  --line: #e3e6eb; --rule: #cdd2da; --text: #111827; --dim: #5b6474;
+  --fill-ghost-hover: rgba(17, 24, 39, 0.04); --fill-ghost-selected: rgba(17, 24, 39, 0.07);
+  --chrome: #ffffff; --track: #ffffff; --track-edge: #e3e6eb;
+  --tile: #ffffff; --tile-edge: #e3e6eb;
+  --tile-shadow: 0 0 #0000; --tile-shadow-hi: 0 0 #0000;
+}
+:root[data-palette="hairline"][data-theme="dark"] {
+  --bg: #0d0f13; --panel: #0d0f13; --panel-2: #15181e; --panel-3: #1a1e25;
+  --line: #232831; --rule: #363d4a; --text: #e7eaf0; --dim: #8d95a6;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.04); --fill-ghost-selected: rgba(255, 255, 255, 0.08);
+  --chrome: #0d0f13; --track: #0d0f13; --track-edge: #232831;
+  --tile: #0d0f13; --tile-edge: #2a303a;
+  --tile-shadow: 0 0 #0000; --tile-shadow-hi: 0 0 #0000;
+}
+/* ---- high contrast: black and white, hard edges, inverted headings ---- */
+:root[data-palette="contrast"] {
+  --bg: #ffffff; --panel: #ffffff; --panel-2: #f0f0f0; --panel-3: #e6e6e6;
+  --line: #8c8c8c; --rule: #141414; --text: #000000; --dim: #3a3a3a;
+  --accent: #0040c8; --fill-accent: #0040c8; --fill-accent-hover: #00329e;
+  --ok: #0a6b2f; --warn: #7a4d00; --bad: #b00d0d;
+  --fill-ghost-hover: rgba(0, 0, 0, 0.06); --fill-ghost-selected: rgba(0, 0, 0, 0.11);
+  --chrome: #ffffff; --track: #ffffff; --track-edge: #141414;
+  --tile: #ffffff; --tile-edge: #141414;
+  --tile-shadow: 2px 2px 0 #141414; --tile-shadow-hi: 3px 3px 0 #141414;
+}
+:root[data-palette="contrast"][data-theme="dark"] {
+  --bg: #000000; --panel: #000000; --panel-2: #141414; --panel-3: #1f1f1f;
+  --line: #6e6e6e; --rule: #ededed; --text: #ffffff; --dim: #c4c4c4;
+  --accent: #7fb2ff; --fill-accent: #2f6fe0; --fill-accent-hover: #4a84ea;
+  --ok: #5fe08f; --warn: #ffd166; --bad: #ff7070;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.08); --fill-ghost-selected: rgba(255, 255, 255, 0.14);
+  --chrome: #000000; --track: #000000; --track-edge: #ededed;
+  --tile: #000000; --tile-edge: #ededed;
+  --tile-shadow: 2px 2px 0 #ededed; --tile-shadow-hi: 3px 3px 0 #ededed;
+}
+/* ---- blueprint: a white-print with blue ink by day, a cobalt drafting sheet at night ---- */
+:root[data-palette="blueprint"] {
+  --bg: #f7faff; --panel: #ffffff; --panel-2: #eef4fd; --panel-3: #e2ecfa;
+  --line: #b9cdea; --rule: #6f93c7; --text: #0f2f5e; --dim: #4e6d98;
+  --accent: #d9480f; --fill-accent: #d9480f; --fill-accent-hover: #bb3c0a; --on-accent: #ffffff;
+  --ok: #1b7a4a; --warn: #9a6400; --bad: #c0271d;
+  --fill-ghost-hover: rgba(15, 47, 94, 0.05); --fill-ghost-selected: rgba(15, 47, 94, 0.09);
+  --chrome: #0f3b7a; --track: transparent; --track-edge: #6f93c7;
+  --tile: #ffffff; --tile-edge: #6f93c7;
+  --tile-shadow: 0 0 #0000; --tile-shadow-hi: 0 0 #0000;
+  --grid: rgba(15, 59, 122, 0.07);
+}
+:root[data-palette="blueprint"][data-theme="dark"] {
+  --bg: #0f3b7a; --panel: #134487; --panel-2: #0d3570; --panel-3: #1a4f97;
+  --line: #3e68a6; --rule: #9bb7de; --text: #f2f7ff; --dim: #b3cae9;
+  --accent: #ffe066; --fill-accent: #f2c500; --fill-accent-hover: #ffd21f; --on-accent: #10213d;
+  --ok: #7cf0b0; --warn: #ffb86b; --bad: #ff9a9a;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.07); --fill-ghost-selected: rgba(255, 255, 255, 0.13);
+  --chrome: #0b2f63; --track: transparent; --track-edge: #9bb7de;
+  --tile: #174a8f; --tile-edge: #9bb7de;
+  --tile-shadow: 0 0 #0000; --tile-shadow-hi: 0 0 #0000;
+  --grid: rgba(255, 255, 255, 0.08);
+}
+/* Deep blue chrome in both themes, the same way ink rail does it: a token set of the sidebar's own. */
+:root[data-palette="blueprint"] .sidebar {
+  --panel: color-mix(in srgb, #ffffff 8%, var(--chrome));
+  --panel-2: var(--chrome);
+  --panel-3: color-mix(in srgb, #ffffff 12%, var(--chrome));
+  --line: color-mix(in srgb, #ffffff 16%, var(--chrome));
+  --rule: color-mix(in srgb, #ffffff 30%, var(--chrome));
+  --text: #f2f7ff; --dim: #b3cae9;
+  --accent: #ffe066; --ok: #7cf0b0; --warn: #ffb86b; --bad: #ff9a9a;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.07); --fill-ghost-selected: rgba(255, 255, 255, 0.12);
+  --tint-accent: color-mix(in srgb, #ffe066 18%, transparent);
+  --tint-ok: color-mix(in srgb, #7cf0b0 12%, transparent);
+  --tint-warn: color-mix(in srgb, #ffb86b 14%, transparent);
+  --tint-bad: color-mix(in srgb, #ff9a9a 12%, transparent);
+  color: var(--text);
+  color-scheme: dark;
+}
+/* ---- pastel: lavender light, a Catppuccin-style soft dark, rounder everything ---- */
+:root:is([data-palette="pastel"], [data-palette="pastel-rail"]) {
+  --bg: #fbfaff; --panel: #ffffff; --panel-2: #f5f2ff; --panel-3: #ece7fb;
+  --line: #ebe7f5; --rule: #d2cce6; --text: #2b2640; --dim: #6e6887;
+  --accent: #6d4aff; --fill-accent: #6d4aff; --fill-accent-hover: #5c3ae8;
+  --ok: #1f8a4c; --warn: #9a6200; --bad: #d02f55;
+  --fill-ghost-hover: rgba(43, 38, 64, 0.04); --fill-ghost-selected: rgba(43, 38, 64, 0.08);
+  --chrome: #f5f2ff; --track: #f5f2ff; --track-edge: transparent;
+  --tile: #ffffff; --tile-edge: transparent;
+  --tile-shadow: 0 1px 3px rgba(60, 40, 120, 0.1); --tile-shadow-hi: 0 4px 12px rgba(60, 40, 120, 0.14);
+}
+:root:is([data-palette="pastel"], [data-palette="pastel-rail"])[data-theme="dark"] {
+  --bg: #1e1e2e; --panel: #24273a; --panel-2: #1b1b29; --panel-3: #2b2c40;
+  --line: #313244; --rule: #45475a; --text: #cdd6f4; --dim: #a6adc8;
+  --accent: #cba6f7; --fill-accent: #8c5fd6; --fill-accent-hover: #9a6de0;
+  --ok: #a6e3a1; --warn: #f9e2af; --bad: #f38ba8;
+  --fill-ghost-hover: rgba(205, 214, 244, 0.05); --fill-ghost-selected: rgba(205, 214, 244, 0.09);
+  --chrome: #181825; --track: #1b1b29; --track-edge: transparent;
+  --tile: #2a2b3d; --tile-edge: #3a3b52;
+  --tile-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); --tile-shadow-hi: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+/* ---- pastel rail: pastel, beside a dark aubergine sidebar in both themes, the way ink rail does it ---- */
+:root[data-palette="pastel-rail"] {
+  --chrome: #2b2640;
+}
+:root[data-palette="pastel-rail"][data-theme="dark"] {
+  --chrome: #11111b;
+}
+:root[data-palette="pastel-rail"] .sidebar {
+  --panel: color-mix(in srgb, #ffffff 7%, var(--chrome));
+  --panel-2: var(--chrome);
+  --panel-3: color-mix(in srgb, #ffffff 11%, var(--chrome));
+  --line: color-mix(in srgb, #ffffff 11%, var(--chrome));
+  --rule: color-mix(in srgb, #ffffff 20%, var(--chrome));
+  --text: #ece8fb; --dim: #b4acd6;
+  --accent: #c9b6ff; --ok: #a6e3a1; --warn: #f9e2af; --bad: #f7a1b8;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.06); --fill-ghost-selected: rgba(255, 255, 255, 0.1);
+  --tint-accent: color-mix(in srgb, #c9b6ff 22%, transparent);
+  --tint-ok: color-mix(in srgb, #a6e3a1 12%, transparent);
+  --tint-warn: color-mix(in srgb, #f9e2af 14%, transparent);
+  --tint-bad: color-mix(in srgb, #f7a1b8 12%, transparent);
+  color: var(--text);
+  color-scheme: dark;
+}
+
+/* ---- zinc: after t3code's own tokens (apps/web/src/index.css) — zinc neutrals, one indigo, borders rather
+   than fills; a near-black canvas and a pure-black sidebar in dark ---- */
+:root[data-palette="zinc"] {
+  --bg: #fcfcfc; --panel: #ffffff; --panel-2: #fafafa; --panel-3: #f4f4f5;
+  --line: #e4e4e7; --rule: #d4d4d8; --text: #27272a; --dim: #71717a;
+  --accent: #2150e0; --fill-accent: #2150e0; --fill-accent-hover: #1a43c4;
+  --ok: #047857; --warn: #b45309; --bad: #b91c1c;
+  --fill-ghost-hover: rgba(24, 24, 27, 0.04); --fill-ghost-selected: rgba(24, 24, 27, 0.07);
+  --chrome: #fafafa; --track: #fdfdfd; --track-edge: #e4e4e7;
+  --tile: #ffffff; --tile-edge: #e4e4e7;
+  --tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); --tile-shadow-hi: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+:root[data-palette="zinc"][data-theme="dark"] {
+  --bg: #0a0a0a; --panel: #121212; --panel-2: #0f0f0f; --panel-3: #171717;
+  --line: #1f1f1f; --rule: #2e2e2e; --text: #f5f5f5; --dim: #8f8f8f;
+  --accent: #7c9cff; --fill-accent: #3d6ef2; --fill-accent-hover: #4f7cf5;
+  --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.04); --fill-ghost-selected: rgba(255, 255, 255, 0.07);
+  --chrome: #000000; --track: #0f0f0f; --track-edge: #1f1f1f;
+  --tile: #141414; --tile-edge: #262626;
+  --tile-shadow: 0 0 #0000; --tile-shadow-hi: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+/* ---- what every palette but classic shares: the track and the tile ---- */
+:root[data-palette] .sidebar {
+  background: var(--chrome);
+}
+:root[data-palette] .column {
+  background: var(--track);
+  border-color: var(--track-edge);
+}
+:root[data-palette] .column:hover {
+  border-color: var(--rule);
+}
+:root[data-palette] .column.sel,
+:root[data-palette] .column.drop-target {
+  border-color: var(--accent);
+}
+:root[data-palette] .column.drop-over {
+  background: var(--fill-ghost-selected);
+}
+/* The heading band goes: on a track, the heading is text at the top of the place, and a second
+   ground under it was one more grey. */
+:root[data-palette] .column h4 {
+  background: var(--track);
+  border-bottom-color: transparent;
+  padding-top: 8px;
+}
+:root[data-palette] .column-body {
+  padding: 4px 7px 8px;
+}
+:root[data-palette] .card {
+  background: var(--tile);
+  box-shadow: 0 0 0 1px var(--tile-edge), var(--tile-shadow);
+  margin-bottom: 6px;
+}
+:root[data-palette] .card:hover {
+  background: var(--tile);
+  box-shadow: 0 0 0 1px var(--rule), var(--tile-shadow-hi);
+}
+:root[data-palette] .card-selected,
+:root[data-palette] .card-selected:hover {
+  background: color-mix(in srgb, var(--accent) 7%, var(--tile));
+  box-shadow: 0 0 0 1.5px var(--accent), var(--tile-shadow);
+}
+
+/* ---- each palette's own rules, after the shared ones they refine ---- */
+:root[data-palette="hairline"] .column h4 {
+  border-bottom-color: var(--line);
+  margin-bottom: 4px;
+}
+
+:root[data-palette="contrast"] .column {
+  border-radius: 0;
+  border-width: 1.5px;
+}
+/* The inverted heading is a BAND, so it is drawn only where there is a box for it to head and no
+   lane colour wanting the same ground — either option would otherwise leave white text on white. */
+:root[data-palette="contrast"]:not([data-buckets="line"], [data-lanes]) .column h4 {
+  background: var(--text);
+  border-radius: 0;
+}
+:root[data-palette="contrast"]:not([data-buckets="line"], [data-lanes]) .column h4 * {
+  color: var(--bg);
+}
+:root[data-palette="contrast"] .card {
+  border-radius: 2px;
+  margin-bottom: 8px;
+}
+:root[data-palette="contrast"] .sidebar {
+  border-right: 1.5px solid var(--rule);
+}
+:root[data-palette="contrast"] .title-bar {
+  border-bottom: 1.5px solid var(--rule);
+}
+/* Where you ARE, as a ruled box rather than an inverted bar: inverted, the row put its own status
+   pills' dark counts on black. */
+:root[data-palette="contrast"] .side-row.on {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--rule);
+}
+:root[data-palette="contrast"] .sb-sheet {
+  border: 1.5px solid var(--rule);
+  box-shadow: 3px 3px 0 var(--rule);
+  border-radius: 4px;
+}
+
+:root:is([data-palette="pastel"], [data-palette="pastel-rail"]) .column {
+  border-radius: 16px;
+}
+:root:is([data-palette="pastel"], [data-palette="pastel-rail"]) .column h4 {
+  border-radius: 16px 16px 0 0;
+}
+:root:is([data-palette="pastel"], [data-palette="pastel-rail"]) .card {
+  border-radius: 11px;
+}
+:root:is([data-palette="pastel"], [data-palette="pastel-rail"]) .sb-sheet {
+  border-radius: 16px;
+}
+:root:is([data-palette="pastel"], [data-palette="pastel-rail"]) .side-row.on {
+  border-radius: 9px;
+}
+
+
+/* Blueprint: the board is drawn on graph paper, columns are dashed outlines with nothing in them,
+   and every corner is square. The grid is on the board only — behind a conversation it would be
+   texture under text. */
+:root[data-palette="blueprint"] .board-body {
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-attachment: local;
+}
+:root[data-palette="blueprint"] .column {
+  border-style: dashed;
+  border-radius: 2px;
+}
+:root[data-palette="blueprint"] .column h4 {
+  /* Opaque, over the grid, because the heading is sticky and the cards scroll under it. */
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+  border-radius: 2px 2px 0 0;
+}
+:root[data-palette="blueprint"] .card {
+  border-radius: 1px;
+}
+:root[data-palette="blueprint"] .title-bar {
+  border-bottom-color: var(--rule);
+}
+/* zinc: where you are is a raised row — t3's `sidebar-row-selected` — not a tint. */
+:root[data-palette="zinc"] .side-row.on {
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--line);
+}
+:root[data-palette="zinc"][data-theme="dark"] .side-row.on {
+  background: #191a1d;
+  box-shadow: none;
+}
+
+/* ---- option: buckets as a LINE — no box, a rule under the heading ---- */
+:root[data-buckets="line"] .column,
+:root[data-buckets="line"] .column:hover,
+:root[data-buckets="line"] .column.sel {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+}
+:root[data-buckets="line"] .column h4 {
+  /* Opaque, because the heading is sticky and the cards scroll under it. */
+  background: var(--bg);
+  border-bottom: 2px solid var(--line);
+  border-radius: 0;
+  padding-inline: 3px;
+  margin-bottom: 6px;
+}
+:root[data-buckets="line"] .column:hover > h4 {
+  border-bottom-color: var(--rule);
+}
+:root[data-buckets="line"] .column.sel > h4 {
+  background: var(--bg);
+  border-bottom-color: var(--accent);
+}
+:root[data-buckets="line"] .column-body {
+  padding: 0 1px 6px;
+}
+/* A drop still needs a target to land in, and a column with no box has no edge to dash. */
+:root[data-buckets="line"] .column.drop-target {
+  border: 1px dashed var(--accent);
+  border-radius: 9px;
+}
+
+/* ---- option: lane colours — every column its own, cycling through six ---- */
+:root {
+  --lane-1: #f06a8a; --lane-2: #3d9df2; --lane-3: #34b36b;
+  --lane-4: #e8a21c; --lane-5: #9b6cf0; --lane-6: #1fa8a0;
+  --lane-pct: 16%;
+  --lane-ink: 62%;
+  --lane-deep: #1a1530;
+}
+:root[data-theme="dark"] {
+  --lane-1: #f5a3b7; --lane-2: #89b4fa; --lane-3: #a6e3a1;
+  --lane-4: #f9e2af; --lane-5: #cba6f7; --lane-6: #94e2d5;
+  --lane-pct: 13%;
+  --lane-ink: 100%;
+}
+:root[data-lanes] .columns > .column {
+  --lane: var(--lane-1);
+  background: color-mix(in srgb, var(--lane) var(--lane-pct), var(--bg));
+}
+:root[data-lanes] .columns > .column:nth-child(6n + 2) { --lane: var(--lane-2); }
+:root[data-lanes] .columns > .column:nth-child(6n + 3) { --lane: var(--lane-3); }
+:root[data-lanes] .columns > .column:nth-child(6n + 4) { --lane: var(--lane-4); }
+:root[data-lanes] .columns > .column:nth-child(6n + 5) { --lane: var(--lane-5); }
+:root[data-lanes] .columns > .column:nth-child(6n + 6) { --lane: var(--lane-6); }
+:root[data-lanes] .columns > .column > h4 {
+  background: color-mix(in srgb, var(--lane) var(--lane-pct), var(--bg));
+  border-bottom-color: color-mix(in srgb, var(--lane) 35%, var(--line));
+}
+:root[data-lanes] .columns > .column > h4 :is(.col-name, .seq) {
+  color: color-mix(in srgb, var(--lane) var(--lane-ink), var(--lane-deep));
+  font-weight: 700;
+}
+/* Lanes with no box: the colour moves into the rule and the name, and the column stays open. */
+:root[data-lanes][data-buckets="line"] .columns > .column {
+  background: transparent;
+}
+:root[data-lanes][data-buckets="line"] .columns > .column > h4 {
+  background: var(--bg);
+  border-bottom-color: var(--lane);
+}
+
+/* ---- option: status wash — a card coloured by what it is doing ---- */
+:root[data-wash] .card[data-pill="running"] {
+  background: color-mix(in srgb, var(--accent) 11%, var(--tile, var(--panel)));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+:root[data-wash] .card[data-pill="waiting"] {
+  background: color-mix(in srgb, var(--warn) 14%, var(--tile, var(--panel)));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 40%, transparent);
+}
+:root[data-wash] .card[data-pill="error"] {
+  background: color-mix(in srgb, var(--bad) 10%, var(--tile, var(--panel)));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bad) 35%, transparent);
+}
+/* Done is the one state that needs nothing from anybody, so it steps back rather than forward. */
+:root[data-wash] .card[data-pill="success"] {
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--line);
+}
+:root[data-wash] .card[data-pill="success"] .card-title {
+  color: var(--dim);
+}
+/* Selected is a RING over the wash, so a card keeps saying what it is doing while it is the one
+   you are on. */
+:root[data-wash] .card-selected[data-pill] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* =================================================================================================
+ * SETTINGS PAGES — the shape the person picked from t3code on 2026-09-23 (`settingsLayout.tsx`).
+ *
+ * A page is a title, a sentence saying whose settings these are, and sections. A section is a quiet
+ * sentence-case heading over ONE bordered card; a row is a setting's name and one sentence on the
+ * left and its control on the right edge, with a hairline between rows. Nothing here is uppercase:
+ * the uppercase `app-label` heading over loose rows is exactly what this replaced.
+ * ================================================================================================= */
+.set-page {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  max-width: 1040px;
+  padding: 6px 4px 36px;
+}
+/* The readable width. A section of rows stops here; only a WIDE one (File types) takes the page. */
+.set-page > .set-head,
+.set-page > .set-section:not(.wide),
+.set-page > :is(.cfg-pane, .pane, .history) > .set-section:not(.wide) {
+  max-width: 740px;
+}
+.set-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.set-title {
+  font: 650 calc(var(--size-app) * 1.5) / 1.2 var(--font-app);
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+.set-lead {
+  margin: 5px 0 0;
+  font-size: calc(var(--size-app) * 1.04);
+  line-height: 1.5;
+  color: var(--dim);
+}
+.set-lead b {
+  font-weight: 600;
+  color: var(--text);
+}
+.set-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Where a click in the accordion lands: the heading, a little below the top of the scroll box. */
+  scroll-margin-top: 12px;
+}
+.set-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+  padding-inline: 16px;
+  font: 450 calc(var(--size-app) * 1.1) / 1.3 var(--font-app);
+  letter-spacing: -0.005em;
+  color: color-mix(in srgb, var(--text) 68%, transparent);
+}
+.set-group {
+  container-type: inline-size;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+.set-group > * + * {
+  border-top: 1px solid var(--line);
+}
+.set-row {
+  padding: 13px 16px;
+}
+.set-row-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 32px;
+}
+.set-row.full > .set-row-line {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* Narrow, the control drops under its sentence — a container query, so it answers to the CARD's
+   width and not the window's, which is what t3code does and why. */
+@container (max-width: 540px) {
+  .set-row-line {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .set-ctl {
+    justify-content: flex-start;
+  }
+}
+.set-row-say {
+  min-width: 0;
+}
+.set-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  font: 550 calc(var(--size-app) * 1.1) / 1.3 var(--font-app);
+  color: var(--text);
+}
+.set-desc {
+  margin: 3px 0 0;
+  max-width: 62ch;
+  font-size: calc(var(--size-app) * 1.03);
+  line-height: 1.45;
+  color: var(--dim);
+}
+.set-desc code {
+  font-family: var(--font-data);
+  font-size: 0.92em;
+  color: var(--text);
+}
+/* The stack a font row resolves to, as the stylesheet receives it — one line, cut at the end. */
+.set-stack {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.set-ctl {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.set-inherit {
+  font-size: calc(var(--size-app) * 0.96);
+  color: var(--dim);
+}
+/* ↺ and ⓘ beside a setting's name: small, quiet, and only there when they have something to say. */
+.set-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  box-shadow: none;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 0.96);
+  line-height: 1;
+}
+.set-reset {
+  cursor: pointer;
+}
+.set-reset:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  border-color: transparent;
+  color: var(--text);
+}
+.set-info {
+  cursor: help;
+}
+/* Two to four choices side by side, the chosen one raised. */
+.set-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+.set-seg button {
+  border: 0;
+  border-radius: 7px;
+  padding: 4px 12px;
+  background: none;
+  box-shadow: none;
+  color: var(--dim);
+  font-weight: 500;
+}
+.set-seg button:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  border-color: transparent;
+  color: var(--text);
+}
+.set-seg button[aria-pressed="true"],
+.set-seg button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+/* A font row's control: the stack and its size, at one width so the rows share a right edge. */
+.set-font {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 340px;
+  max-width: 100%;
+}
+.set-font > .face-box {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A preview under its row: a real surface, framed, and inert — it shows, it does not take clicks. */
+.set-preview {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+  pointer-events: none;
+  user-select: none;
+}
+.task-preview .board-body {
+  padding: 10px;
+  overflow: hidden;
+}
+.task-preview .column {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+}
+.convo-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.set-row > .ap-preview {
+  margin-top: 10px;
+}
+
+/* The mode, as three tiles, each the current palette's board in that mode. */
+.mode-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+.mode-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: none;
+  color: var(--dim);
+  white-space: normal;
+}
+.mode-tile > .theme-mini {
+  height: 70px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.mode-tile-name {
+  text-align: center;
+  font-weight: 500;
+}
+/* The palettes, as cards: a miniature board, a name, a sentence. */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+.theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: none;
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+}
+.theme-card > .theme-mini {
+  height: 96px;
+  border-bottom: 1px solid var(--line);
+}
+.mode-tile:hover:not(:disabled),
+.theme-card:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--rule);
+}
+.mode-tile[aria-pressed="true"],
+.mode-tile[aria-pressed="true"]:hover:not(:disabled),
+.theme-card[aria-pressed="true"],
+.theme-card[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--text);
+}
+.mode-tile[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+.theme-mini {
+  position: relative;
+  display: block;
+  overflow: hidden;
+}
+.theme-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+}
+.theme-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.theme-desc {
+  font-size: calc(var(--size-app) * 0.92);
+  line-height: 1.4;
+  color: var(--dim);
+}
+.theme-tag {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--panel-3);
+  color: var(--dim);
+  font: 700 calc(var(--size-app) * 0.68) / 1 var(--font-app);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.theme-check {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--fill-accent);
+  color: var(--on-accent);
+  font-size: calc(var(--size-app) * 0.84);
+  font-weight: 800;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/* The accordion: the open tab's sections, indented under it in the sidebar — the one being read
+   carries the accent down its edge, and each is a way to scroll there. */
+.sections li.parts,
+.sections li.parts:hover {
+  padding: 0;
+  background: none;
+  cursor: default;
+}
+.section-parts {
+  list-style: none;
+  margin: 2px 0 6px 12px;
+  padding: 0;
+  border-left: 1px solid var(--line);
+}
+.sections .section-parts li {
+  padding: 3px 8px 3px 11px;
+  margin-left: -1px;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--control-radius-sm) var(--control-radius-sm) 0;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 0.94);
+}
+.sections .section-parts li:hover {
+  color: var(--text);
+}
+.sections .section-parts li.on {
+  border-left-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---- the tabs built from `Field` / `Level` / `FieldGrid`, drawn as settings rows ----
+   (the person's go-ahead, 2026-09-23: "do the other tabs, and use a switch to enable/disable a row").
+   A tab's own root steps aside so its sections are the page's; everything below is scoped to a
+   settings page, so the same pieces keep their shape in a run's inputs, the new-task form and a gate. */
+.set-page > .cfg-pane,
+.set-page > .pane,
+.set-page > .history {
+  display: contents;
+}
+.set-head-aside .settings-head {
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.set-section-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.set-section-lead {
+  margin-top: -4px;
+  padding-inline: 16px;
+  max-width: 72ch;
+}
+/* The card's contents take the rows' inset: a list of fields, a list of rows, a level's body, and
+   anything else a tab puts straight into a card (a tree, a tab rail, a disclosure). */
+.set-group > .cfg-level-body,
+.set-group > .cfg-stack,
+.set-group > .cfg-disclosure,
+.set-group > .cfg-hint,
+.set-group > p,
+.set-group > .llm-config {
+  padding: 13px 16px;
+}
+.set-group > .cfg-level-body {
+  gap: 0;
+}
+.set-group > .cfg-fields,
+.set-group > .cfg-level-body > .cfg-fields {
+  margin: 0;
+}
+.set-group > .cfg-level-body > .cfg-fields:first-child {
+  margin-top: -13px;
+}
+.set-group > .cfg-level-body > .cfg-fields:last-child {
+  margin-bottom: -13px;
+}
+.set-group > .cfg-level-body > .cfg-fields > .set-field,
+.set-group > .cfg-level-body > :not(.cfg-fields) + .cfg-fields > .set-field:first-child {
+  padding-inline: 0;
+}
+/* A list of rows (providers, forges) is the card's rows. */
+.set-group > .cfg-rows {
+  margin: 0;
+  padding: 0;
+}
+.set-group > .cfg-rows > li {
+  padding: 13px 16px;
+}
+.set-group > .cfg-rows > li + li {
+  border-top: 1px solid var(--line);
+}
+
+/* A field, as a row: its name and one sentence on the left, the control on the right edge. */
+.set-field {
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 17rem);
+  gap: 10px 32px;
+  padding: 13px 16px;
+}
+.cfg-fields > .set-field + .set-field {
+  border-top: 1px solid var(--line);
+}
+.set-field .cfg-field-say {
+  gap: 3px;
+}
+.set-field .cfg-label {
+  font: 550 calc(var(--size-app) * 1.1) / 1.3 var(--font-app);
+  color: var(--text);
+}
+.set-field .cfg-label.mono {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 1.02);
+}
+.set-field .cfg-field-say > .cfg-hint {
+  max-width: 62ch;
+  font-size: calc(var(--size-app) * 1.03);
+  line-height: 1.45;
+}
+/* A list or a form of its own goes under the name, across the row. */
+.set-field.wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* Switched off: the row says what it inherits, and its control cannot be reached. */
+.set-field.off > .cfg-control {
+  opacity: 0.5;
+}
+.set-field.off > .cfg-field-say .cfg-label {
+  color: var(--dim);
+}
+/* A field INSIDE a field — a nested object — is a row of the list it sits in, not a card row. */
+.cfg-control .set-field {
+  padding: 9px 0;
+}
+.set-group .cfg-level[data-depth="1"],
+.set-group .cfg-level[data-depth="2"],
+.set-group .cfg-level[data-depth="3"] {
+  margin-block: 4px;
+}
+/* A statistic's value, on the right edge. */
+.set-num {
+  font-size: calc(var(--size-data) * 1.02);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* A row's name starts with a capital, whatever the schema's title said — "wait after a comment" is a
+   key's description, and on a settings page it is the name of a setting. Data-voice names (a key, a
+   slot) keep their case: changing it would misstate what they are. */
+.set-field .cfg-label:not(.mono) {
+  display: inline-block;
+}
+.set-field .cfg-label:not(.mono)::first-letter {
+  text-transform: uppercase;
 }

@@ -8,7 +8,7 @@ realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/checked-status-wit
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects, product/agents-act-only-where-allowed, product/read-comfortably, product/keep-history-within-bounds]
 components: [ui/components/settings-header]
 mockups: [ui/assets/settings-view/in-a-project.html, ui/assets/settings-view/no-project.html, ui/assets/settings-view/unlayered.html]
-siblings: [ui/surfaces/sidebar, ui/surfaces/app-window, ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-toolsets, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/settings-appearance, ui/surfaces/settings-conversation, ui/surfaces/settings-history, ui/surfaces/inbox-strip]
+siblings: [ui/surfaces/sidebar, ui/surfaces/app-window, ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-toolsets, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/settings-appearance, ui/surfaces/settings-history, ui/surfaces/inbox-strip]
 ---
 
 # Settings view
@@ -19,14 +19,14 @@ The Settings room: one scrolling column right of the [sidebar](sidebar.md) that 
 
 - **Column.** On `--bg` with 14px of padding above and below and 16px at the sides, scrolling up and down and never sideways.
 - **Header.** The [settings-header](../components/settings-header.md), when the section has one: the layer switch or the no-project sentence at the left, and on Providers and Executors the age of the checks and `Re-check` at the far right, over a 1px `--line` rule.
-- **Section.** Under the header, left-aligned: [Providers](settings-providers.md), [Executors](settings-executors.md), [Toolsets](settings-toolsets.md), [Configuration](settings-configuration.md), [Files](settings-files.md), [Appearance](settings-appearance.md), [Conversation](settings-conversation.md) or [History](settings-history.md). A section of grouped settings is at most 780px wide, and Appearance at most 1040px.
+- **Section.** Under the header, left-aligned: [Providers](settings-providers.md), [Executors](settings-executors.md), [Toolsets](settings-toolsets.md), [Configuration](settings-configuration.md), [Files](settings-files.md), [Appearance](settings-appearance.md) or [History](settings-history.md). Every section is a settings page: its name, one sentence saying whose settings these are (the project, or ~/.jaira shared by every project), the layer switch and any re-check at the head's right edge, then sections — a quiet sentence-case heading over one bordered card of rows, at most 740px wide; a workspace section (File types, Toolsets) takes up to 1040px. A row a layer may or may not state has a switch before its name that enables it; switched off, the row is dimmed and shows what it inherits. While a section is open, the sidebar lists that page's own sections indented under it, lights the one being read as the page scrolls, and scrolls to one when it is clicked.
 - **Inbox strip.** The [inbox strip](inbox-strip.md) stays at the foot of the room while anything waits.
 
 | Section | Header |
 | --- | --- |
 | Providers, Executors | Layer switch or no-project sentence, then the check age and `Re-check` |
 | Configuration, Files | Layer switch or no-project sentence |
-| Appearance, Conversation, History | None |
+| Appearance, History | None |
 
 ## The room changes only its header between states, and each section draws its own content
 
@@ -34,7 +34,7 @@ The Settings room: one scrolling column right of the [sidebar](sidebar.md) that 
 | --- | --- | --- |
 | in a project | A project is open and the section is layered: the layer switch with `This project` or `Shared (all projects)` filled, and the section reading and writing that layer. On Providers and Executors the header also shows `checked {n} min ago` and `Re-check`, which reads `checking…` while the checks run. While a change is being written, the header's buttons and every control in the section are at half strength and inert. | [in-a-project.html](../assets/settings-view/in-a-project.html) |
 | no project | No project is open: the header's sentence stands where the switch was, every layered section edits the shared settings, and History is not offered in the sheet. | [no-project.html](../assets/settings-view/no-project.html) |
-| unlayered | Appearance, Conversation or History: no header, and the section starts at the top of the column. | [unlayered.html](../assets/settings-view/unlayered.html) |
+| unlayered | Appearance or History: no header, and the section starts at the top of the column. | [unlayered.html](../assets/settings-view/unlayered.html) |
 | empty | Cannot occur: a section is always shown, Providers the first time Settings opens. | |
 | loading | Cannot occur as its own look: the settings are read at launch and read again in place on entering. Checks that have not reported show as `not checked yet` in the header and `not checked` on each provider. | |
 | error | Settings that cannot be read: a section that edits them shows `The configuration could not be read.` in `--dim` under its header. A save or check that fails puts the [error notice](error-notice.md) at the foot of the window and leaves the section as it was. | [settings-providers error](../assets/settings-providers/error.html) |

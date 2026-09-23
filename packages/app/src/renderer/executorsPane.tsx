@@ -28,6 +28,7 @@ import {
   type ProbeResult,
 } from "@jaira/shared/browser";
 import { ExecutorTree } from "./executorTreePane";
+import { SettingsSection } from "./settingsLayout";
 import { LAYER_LABELS } from "./layerLabels";
 import { modelsBlock, type ModelPatch } from "./modelsConfig";
 import { Presets, type PresetDocs } from "./presetTabs";
@@ -56,17 +57,11 @@ export function ExecutorsPane(props: ExecutorsPaneProps): JSX.Element {
 
   return (
     <div className="cfg-pane">
-      <section className="cfg-group">
-        <header className="cfg-group-head">
-          <h4>The default executor</h4>
-          <p className="cfg-hint">
-            What every UI-initiated operation uses — starting a task, proposing workflow changes,
-            summarizing a conversation. It is a TREE: an operation executor over a function executor
-            and a router, and the whole of it is below. Nothing here has to be configured: what is
-            shown is DERIVED from what is available, and a change pins only the field you changed, so
-            a provider or agent you set up tomorrow still appears by itself.
-          </p>
-        </header>
+      <SettingsSection
+        id="default-executor"
+        title="The default executor"
+        info="What every UI-initiated operation uses — starting a task, proposing workflow changes, summarizing a conversation. It is a tree: an operation executor over a function executor and a router. Nothing here has to be configured: what is shown is derived from what is available, and a change pins only the field you changed, so a provider or agent you set up tomorrow still appears by itself."
+      >
         {availability.tree === undefined ? (
           <p className="cfg-hint">Not resolved yet — the startup check has not finished.</p>
         ) : (
@@ -78,7 +73,7 @@ export function ExecutorsPane(props: ExecutorsPaneProps): JSX.Element {
             onOverlay={(next) => props.onSaveDefinition(DEFAULT_EXECUTOR, next, layer)}
           />
         )}
-      </section>
+      </SettingsSection>
 
       <PresetsGroup config={config} locked={locked} layer={layer} onSave={props.onSaveModels} />
     </div>
@@ -118,15 +113,11 @@ function PresetsGroup({
 }): JSX.Element {
   const other: ConfigLayer = layer === "base" ? "project" : "base";
   return (
-    <section className="cfg-group">
-      <header className="cfg-group-head">
-        <h4>Presets</h4>
-        <p className="cfg-hint">
-          A named set of call settings a state picks with <code>configRef</code>, merged under its own
-          config. A definition is the heavier tool — it chooses the provider and the stack too; a preset
-          is only the settings.
-        </p>
-      </header>
+    <SettingsSection
+      id="presets"
+      title="Presets"
+      info="A named set of call settings a state picks with configRef, merged under its own config. A definition is the heavier tool — it chooses the provider and the stack too; a preset is only the settings."
+    >
       <Presets
         // A different layer is a different list: start clean rather than show one layer's unsaved
         // edits, or its selection, over another's presets.
@@ -138,7 +129,7 @@ function PresetsGroup({
         originLabel={LAYER_LABELS[other]}
         onWrite={(name, value) => onSave({ [`presets.${name}`]: value }, layer)}
       />
-    </section>
+    </SettingsSection>
   );
 }
 

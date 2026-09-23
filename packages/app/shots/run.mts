@@ -119,7 +119,7 @@ async function pass(world: World, port: number, fresh: boolean, last: boolean): 
      * between is of an empty box.
      */
     await app.clickText("Appearance");
-    await app.until(says("what opens a file"), "the File types section to draw");
+    await app.until(`document.querySelector('[data-part="file-types"]') !== null`, "the File types section to draw");
     // Text the CSS does not transform: `innerText` reflects `text-transform`, so a label styled
     // uppercase is matched by its uppercase form and a wait written against the DOM text silently
     // never fires. This one sits in a plain button.
@@ -132,7 +132,7 @@ async function pass(world: World, port: number, fresh: boolean, last: boolean): 
       })()`,
       "the preview's editor to colour itself",
     );
-    await app.shot(`appearance-${theme}`, ".cfg-pane.ap");
+    await app.shot(`appearance-${theme}`, ".set-page");
     await app.shot(`file-types-${theme}`, ".ft");
     await app.resize(1280, 860);
 

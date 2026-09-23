@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-configuration
 type: ui-surface
 status: shipped
-updated: 2026-09-22
+updated: 2026-09-23
 kind: screen
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/schema-driven-form, ux/patterns/verbs-on-the-thing-itself, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/draft-belongs-to-the-file, ux/patterns/absence-is-stated]
 serves: [product/risky-actions-wait-for-approval, product/share-processes-across-projects, product/bring-your-own-models-and-agents, product/work-inside-wsl, product/read-what-work-produced]
@@ -30,7 +30,7 @@ The Configuration section of the Settings room: one scrolling column, at most 78
 Each rule is a card with a 1px `--line` border, 8px corners, a `--panel` ground and 9px by 11px padding.
 
 - **Head.** An 18px hollow circle holding the rule's number in `--dim`, a 130px select of `allow`, `ask first` or `deny`, then at the far right ghost `↑` and `↓` and a ghost `Remove` in `--bad`. The head wraps when narrow.
-- **Match fields.** Five rows always stacked, each label over a full-width box: `Program`, `Subcommand`, `Any of these flags` and `An argument contains` in mono, `Reason` in the app face. No row carries a `SET HERE` tag.
+- **Match fields.** Five rows always stacked, each label over a full-width box: `Program`, `Subcommand`, `Any of these flags` and `An argument contains` in mono, `Reason` in the app face. No row carries a switch: a rule is part of the list, which the layer states as a whole.
 - `↑` is disabled on the first card and `↓` on the last.
 
 The cards list the rules in effect. A project layer that states no rules shows the shared root's rules and counts them, and any edit to a card writes the whole list into the layer being edited.
@@ -39,7 +39,7 @@ The cards list the rules in effect. A project layer that states no rules shows t
 
 | State | Surface shows | Mockup |
 | --- | --- | --- |
-| success | A project layer: `This project` filled in the header, stated rows tagged `SET HERE`, `inside a WSL distro` chosen so `Distro` shows, and the call settings at their defaults. | [success.html](../assets/settings-configuration/success.html) |
+| success | A project layer: `This project` filled in the header, each row a layer may state led by a switch — on for what the project states, off (dimmed, showing what it inherits) for the rest — `inside a WSL distro` chosen so `Distro` shows, and the call settings at their defaults. | [success.html](../assets/settings-configuration/success.html) |
 | policy | Two rules as cards, the first with `↑` disabled and the last with `↓` disabled, under the three verdict selects. | [policy.html](../assets/settings-configuration/policy.html) |
 | empty | No rules in effect: `No rules of this project's own — the built-ins and the default above decide everything.` stands above `Add a rule`. Memoization and Workflow lookup follow with their values not set, then the closed disclosure. | [empty.html](../assets/settings-configuration/empty.html) |
 | loading | Not a look of its own: until the configuration is first read the pane shows the error sentence. | |
@@ -52,7 +52,8 @@ The cards list the rules in effect. A project layer that states no rules shows t
 | On | Does | Feedback |
 | --- | --- | --- |
 | A preset chip | Writes that destination | The chip fills and the template box shows it |
-| Typing in a box | Writes the layer on each keystroke; an emptied box removes the key so it inherits | Every control disables until the write lands, then `SET HERE` follows the value |
+| Typing in a box | Writes the layer on each keystroke; an emptied box removes the key so it inherits | Every control disables until the write lands |
+| A row's switch | On pins the value the row shows into this layer; off removes the key, so it inherits | The row enables, or dims and shows what it inherits |
 | `Environment` set to `inside a WSL distro` | Writes the distro `Ubuntu` unless one is named | `Distro` appears |
 | `Built-in rules` set to `on — the built-in refusals apply` | Removes the key, so only `off` is ever stated | The tag goes |
 | `↑`, `↓` | Swaps the card with its neighbour | The numbers follow the new order |

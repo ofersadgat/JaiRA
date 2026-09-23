@@ -5,6 +5,7 @@
  * sidebar at the same visual weight as the approvals inbox, which is how a control you use twice a
  * year ends up looking as urgent as one that is blocking a run.
  */
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { useState, type JSX } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type { HistorySize, InputSourcesResponse, WorkflowEntry } from "@jaira/shared/browser";
@@ -246,56 +247,60 @@ export function History({
   const [days, setDays] = useState(30);
   if (!size) return <p className="empty">Open a project to see its history.</p>;
   const planned = report?.dryRun === true ? report : null;
+  // Two sections of rows (`settingsLayout.tsx`): what is stored, and what pruning would free.
   return (
-    <div className="pane history">
-      <div>
-        <div className="pane-title">Stored history</div>
-        <div className="sub">
-          {size.tasks} tasks · {size.events} events · {size.commands} commands
-        </div>
-      </div>
+    <div className="history">
+      <SettingsSection id="stored" title="Stored history">
+        <SettingsRow name="Tasks" description="Every task this project has kept a record of." control={<span className="set-num data-num">{size.tasks}</span>} />
+        <SettingsRow name="Events" description="What its runs recorded, step by step." control={<span className="set-num data-num">{size.events}</span>} />
+        <SettingsRow name="Commands" description="Every command an agent ran, and what it was told." control={<span className="set-num data-num">{size.commands}</span>} />
+      </SettingsSection>
 
-      <div className="prune-controls">
-        <label>
-          older than
-          <input type="number" min={0} value={days} onChange={(e) => setDays(Math.max(0, Number(e.target.value)))} />d
-        </label>
-        <button className="ghost" onClick={() => onPreview(days)} disabled={busy}>
-          Preview
-        </button>
-      </div>
-
-      {report ? (
-        <div className="prune-report">
-          {planned ? (
-            planned.tasks.length > 0 ? (
+      <SettingsSection id="prune" title="Pruning" info="An unfinished task is never pruned: it can still be resumed, so its history is kept whatever its age.">
+        <SettingsRow
+          name="Older than"
+          description="Delete the history of finished tasks older than this. Preview first: nothing is deleted until you confirm."
+          control={
+            <div className="prune-controls">
+              <label>
+                <input type="number" min={0} value={days} onChange={(e) => setDays(Math.max(0, Number(e.target.value)))} aria-label="days" />
+                days
+              </label>
+              <button className="ghost" onClick={() => onPreview(days)} disabled={busy}>
+                Preview
+              </button>
+            </div>
+          }
+        />
+        {report ? (
+          <SettingsRow
+            name={planned ? "Would delete" : "Deleted"}
+            description={
+              planned
+                ? planned.tasks.length > 0
+                  ? `The history of ${planned.tasks.length} task(s): ${planned.events} events, ${planned.commands} commands.`
+                  : "Nothing matches — no task history is old enough."
+                : `The history of ${report.tasks.length} task(s); ${report.remaining.events} events remain.`
+            }
+            {...(report.skippedTasks.length > 0
+              ? // The §13 safety rule, made visible: these are resumable.
+                { info: `Kept ${report.skippedTasks.length} unfinished task(s): ${report.skippedTasks.map((t) => `${t.taskId} (${t.reason})`).join(", ")}` }
+              : {})}
+            control={
               <>
-                <div className="sub">
-                  would delete the history of {planned.tasks.length} task(s): {planned.events} events, {planned.commands} commands
-                </div>
-                <button className="danger" onClick={() => onApply(days)} disabled={busy}>
-                  Delete permanently
+                {planned && planned.tasks.length > 0 ? (
+                  <button className="danger" onClick={() => onApply(days)} disabled={busy}>
+                    Delete permanently
+                  </button>
+                ) : null}
+                <button className="ghost" onClick={onDismiss}>
+                  Dismiss
                 </button>
               </>
-            ) : (
-              <div className="sub">nothing matches — no task history is old enough</div>
-            )
-          ) : (
-            <div className="sub">
-              deleted the history of {report.tasks.length} task(s); {report.remaining.events} events remain
-            </div>
-          )}
-          {report.skippedTasks.length > 0 ? (
-            // The §13 safety rule, made visible: these are resumable.
-            <div className="sub" title={report.skippedTasks.map((s) => `${s.taskId}: ${s.reason}`).join("\n")}>
-              kept {report.skippedTasks.length} unfinished task(s)
-            </div>
-          ) : null}
-          <button className="ghost" onClick={onDismiss}>
-            Dismiss
-          </button>
-        </div>
-      ) : null}
+            }
+          />
+        ) : null}
+      </SettingsSection>
     </div>
   );
 }

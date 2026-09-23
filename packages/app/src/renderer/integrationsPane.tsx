@@ -37,6 +37,7 @@ import { SelectInput, StatusDot, Switch, stateWord, type ProviderState } from ".
 import { BrandIcon, Icon } from "./icons";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
+import { SettingsSection } from "./settingsLayout";
 
 export interface IntegrationsPaneProps {
   config: ConfigView | null;
@@ -169,14 +170,11 @@ export function IntegrationsPane(props: IntegrationsPaneProps): JSX.Element {
 
   return (
     <div className="cfg-pane">
-      <section className="cfg-group">
-        <header className="cfg-group-head">
-          <h4>Forges</h4>
-          <p className="cfg-hint">
-            Where a review can also be opened as a merge request. A project&apos;s git remote picks the
-            connection by host.
-          </p>
-        </header>
+      <SettingsSection
+        id="forges"
+        title="Forges"
+        info="Where a review can also be opened as a merge request. A project's git remote picks the connection by host."
+      >
         <ul className="cfg-rows">
           {Object.entries(forges).map(([name, connection]) => (
             <ForgeRow
@@ -192,12 +190,9 @@ export function IntegrationsPane(props: IntegrationsPaneProps): JSX.Element {
           ))}
           <AddHost forges={forges} locked={locked} set={set} />
         </ul>
-      </section>
+      </SettingsSection>
 
-      <section className="cfg-group">
-        <header className="cfg-group-head">
-          <h4>Remote review</h4>
-        </header>
+      <SettingsSection id="remote-review" title="Remote review">
         <SchemaForm
           schema={REVIEW_SCHEMA}
           value={integrations.review}
@@ -214,7 +209,7 @@ export function IntegrationsPane(props: IntegrationsPaneProps): JSX.Element {
           onChange={(next) => set("policy.remote", next)}
           ctx={{ path: "policy.remote", disabled: locked, isSet: stated, setAt: set }}
         />
-      </section>
+      </SettingsSection>
     </div>
   );
 }

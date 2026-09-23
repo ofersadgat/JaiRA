@@ -210,12 +210,17 @@ export function Tile({
   onDragEnd?: (() => void) | undefined;
 }): JSX.Element {
   const draggable = onDragStart !== undefined;
+  const pill = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
   return (
     <div
       // No `card-${status}` any more: every rule that read it was colouring the left stripe or the
       // status word, and both are the trailing pill's job now. A class nothing styles is a hook the
       // next person has to check before they can change anything.
       className={`card${selected === true ? " card-selected is-active" : ""}${draggable ? " card-draggable" : ""}${child ? " card-child" : ""}`}
+      // The pill's KIND, which is what the status wash colours the whole card by (Appearance → status
+      // wash, `:root[data-wash]` in `styles.css`). The kind rather than the status, so the wash and the
+      // pill can never disagree about which colour a status is.
+      {...(pill !== null ? { "data-pill": pill } : {})}
       // Only where something is waiting for it. `draggable` on every card would offer a gesture that
       // does nothing almost everywhere, and an affordance that usually lies is worse than none.
       {...(draggable ? { draggable: true, onDragStart, ...(onDragEnd !== undefined ? { onDragEnd } : {}) } : {})}

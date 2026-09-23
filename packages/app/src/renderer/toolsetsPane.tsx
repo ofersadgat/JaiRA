@@ -50,6 +50,7 @@ import { Icon } from "./icons";
 import { TabRail, type RailItem } from "./llmConfigForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
+import { SettingsSection } from "./settingsLayout";
 import { ToolsetCard } from "./toolsetCard";
 
 // --- the model ---------------------------------------------------------------------------
@@ -187,11 +188,9 @@ export function ToolsetsView(props: ToolsetsViewProps): JSX.Element {
   const adding = props.choice === "bucket" || (props.choice !== undefined && typeof props.choice === "object" && "newIn" in props.choice);
   return (
     <div className="cfg-pane">
-      <section className="cfg-group">
-        <header className="cfg-group-head">
-          <h4>Toolsets</h4>
-          <p className="cfg-hint">{HEAD_HINT}</p>
-        </header>
+      {/* A workspace — a rail of toolsets beside the one open — so it takes the page's width, and its
+          sentence stays in view because it names the reference a state writes. */}
+      <SettingsSection id="toolsets" title="Toolsets" lead={HEAD_HINT} wide>
         <div className="llm-config set-config">
           <TabRail
             label="Toolsets"
@@ -209,7 +208,7 @@ export function ToolsetsView(props: ToolsetsViewProps): JSX.Element {
             </div>
           )}
         </div>
-      </section>
+      </SettingsSection>
     </div>
   );
 }

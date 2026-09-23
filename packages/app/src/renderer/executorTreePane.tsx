@@ -84,6 +84,22 @@ interface Ctx {
   pinned: (path: string) => boolean;
 }
 
+/**
+ * A row's switch over one overlay path (`Field.toggle`): on while the overlay pins it. On pins what
+ * the row shows — the derived value — so nothing changes until it is edited; off unpins it, and the
+ * tree derives it again.
+ */
+function toggleOf(ctx: Ctx, path: string, current: unknown): { on: boolean; onChange: (on: boolean) => void; disabled: boolean } {
+  return {
+    on: ctx.pinned(path),
+    disabled: ctx.locked,
+    onChange: (on) => {
+      if (!on) ctx.set(path, undefined);
+      else if (current !== undefined) ctx.set(path, current);
+    },
+  };
+}
+
 /** What this level IS, and which upstream class it builds. */
 function NodeBanner({ kind }: { kind: string }): JSX.Element {
   const spec = executorNode(kind)!;
@@ -121,7 +137,8 @@ function FunctionNode({
         label="Rules"
         param="function.rules"
         hint="Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract. Empty means everything the workflow registers."
-        set={ctx.pinned("function.rules")}
+        wide
+        toggle={toggleOf(ctx, "function.rules", rules.length > 0 ? rules : undefined)}
       >
         <RuleList rules={rules} known={known} disabled={ctx.locked} onChange={setRules} />
       </Field>
@@ -291,7 +308,7 @@ function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; 
             label="Default model"
             param={`${path}.defaults.model`}
             hint="A bare id routes to whatever serves that family below; prefix it to insist on one route. Empty leaves the choice to the state. The same block as Settings → Default environment."
-            set={ctx.pinned(`${path}.defaults.model`)}
+            toggle={toggleOf(ctx, `${path}.defaults.model`, node.defaults?.["model"])}
           >
             <TextInput
               value={typeof node.defaults?.["model"] === "string" ? (node.defaults["model"] as string) : ""}
@@ -392,7 +409,7 @@ function LeafNode({ node, path, ctx }: { node: JairaProviderNode | JairaAgentNod
           label="Model"
           param={`${path}.model`}
           hint="As it knows it — bare, because the route's own name is already the prefix. Empty means the runtime's own default."
-          set={ctx.pinned(`${path}.model`)}
+          toggle={toggleOf(ctx, `${path}.model`, node.model)}
         >
           <TextInput
             value={node.model ?? ""}
@@ -406,7 +423,7 @@ function LeafNode({ node, path, ctx }: { node: JairaProviderNode | JairaAgentNod
           label="May only run"
           param={`${path}.allow`}
           hint="One pattern per line. 'opus' restricts a model; 'openrouter/*' restricts a provider. A state asking for anything else is refused before it runs."
-          set={ctx.pinned(`${path}.allow`)}
+          toggle={toggleOf(ctx, `${path}.allow`, node.allow)}
         >
           <TextArea
             value={(node.allow ?? []).join("\n")}

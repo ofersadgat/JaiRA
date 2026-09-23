@@ -30,10 +30,24 @@ export const SETTINGS_FILE_NAME = "settings.json";
 /** The file this module is about — see the note above on why the names are a pair. */
 export const USER_SETTINGS_FILE_NAME = "user-settings.json";
 
-/** Which palette the renderer paints. */
+/** Which palette the renderer paints — light or dark, once `system` has been resolved. */
 export type JairaTheme = "light" | "dark";
 
 export const THEMES: readonly JairaTheme[] = ["light", "dark"];
+
+/**
+ * What a person CHOSE: light, dark, or `system` — follow the operating system, and follow it again
+ * when it changes (the person's pick, 2026-09-23, after t3code's three mode tiles). Resolved to a
+ * {@link JairaTheme} at the two places that paint: the renderer's root and main's window frame.
+ */
+export type ThemeMode = JairaTheme | "system";
+
+export const THEME_MODES: readonly ThemeMode[] = ["light", "dark", "system"];
+
+/** The theme a mode paints, given whether the operating system is dark right now. */
+export function resolveTheme(mode: ThemeMode, systemDark: boolean): JairaTheme {
+  return mode === "system" ? (systemDark ? "dark" : "light") : mode;
+}
 
 /**
  * The window's layout, as this person last left it.
@@ -115,8 +129,9 @@ export interface JairaSettings {
   /**
    * Light by default — an explicit product decision, not an inherited one. The window's own
    * background colour is set from this too, so a cold start does not flash the wrong palette.
+   * `system` follows the operating system — see {@link ThemeMode}.
    */
-  theme: JairaTheme;
+  theme: ThemeMode;
   /**
    * Where the window's panes and folds were left — see {@link JairaUiState}.
    *
@@ -288,7 +303,89 @@ export interface Appearance {
    * rather than as a preference anyway.
    */
   editorTheme: string;
+  /**
+   * Which palette the WINDOW is painted in — see {@link Palette}. Independent of light and dark:
+   * every palette has both, and {@link JairaSettings.theme} still picks between them.
+   */
+  palette: Palette;
+  /**
+   * The three surface options, each `null` for "what the palette says" — see {@link surfaceOf}.
+   *
+   * Null rather than absent so a patch can put one back (`{ buckets: null }`) without an optional
+   * field that `exactOptionalPropertyTypes` would refuse to be handed `undefined`. Choosing a palette
+   * resets all three, which is what makes a palette arrive looking the way it was designed.
+   */
+  laneColors: boolean | null;
+  buckets: BucketStyle | null;
+  statusWash: boolean | null;
 }
+
+/**
+ * The window's palettes (the person's pick, 2026-09-23, from the palette study).
+ *
+ * `ink` is the DEFAULT — the person's call — and `classic` is the one the app shipped with, kept byte
+ * for byte: its tokens are the stylesheet's own `:root`, and choosing it removes the attribute rather
+ * than writing one. The others are a token block and a handful of rules each, keyed on
+ * `:root[data-palette]` in `styles.css`. Listed default first, which is the order the pane offers.
+ */
+export type Palette = "ink" | "classic" | "hairline" | "contrast" | "blueprint" | "pastel" | "pastel-rail" | "zinc";
+export const PALETTES: readonly Palette[] = ["ink", "classic", "hairline", "contrast", "blueprint", "pastel", "pastel-rail", "zinc"];
+export const DEFAULT_PALETTE: Palette = "ink";
+
+/** A board column drawn as a box around its cards, or as a rule under its heading. */
+export type BucketStyle = "box" | "line";
+export const BUCKET_STYLES: readonly BucketStyle[] = ["box", "line"];
+
+/** The three surface options with every one decided. */
+export interface Surface {
+  /** Each board column tinted its own colour, cycling through six. */
+  laneColors: boolean;
+  buckets: BucketStyle;
+  /** A card washed in its status's colour — running, waiting, failed — and a finished one faded. */
+  statusWash: boolean;
+}
+
+/**
+ * What each palette was designed with. Ink rail's columns are rules rather than boxes, and pastel's
+ * lanes are coloured; everything else is today's board.
+ */
+export const PALETTE_SURFACE: Record<Palette, Surface> = {
+  classic: { laneColors: false, buckets: "box", statusWash: false },
+  ink: { laneColors: false, buckets: "line", statusWash: false },
+  hairline: { laneColors: false, buckets: "box", statusWash: false },
+  contrast: { laneColors: false, buckets: "box", statusWash: false },
+  blueprint: { laneColors: false, buckets: "box", statusWash: false },
+  pastel: { laneColors: true, buckets: "box", statusWash: false },
+  "pastel-rail": { laneColors: true, buckets: "box", statusWash: false },
+  zinc: { laneColors: false, buckets: "box", statusWash: false },
+};
+
+/** The options as drawn: the person's choice where there is one, the palette's where there is not. */
+export function surfaceOf(a: Appearance): Surface {
+  const base = PALETTE_SURFACE[a.palette];
+  return {
+    laneColors: a.laneColors ?? base.laneColors,
+    buckets: a.buckets ?? base.buckets,
+    statusWash: a.statusWash ?? base.statusWash,
+  };
+}
+
+/**
+ * The colours Chromium paints the frame in before the document exists, per palette and theme:
+ * `ground` is the palette's `--bg`, and `panel` / `dim` are what the OS draws the window controls on
+ * and in. Here rather than in `main` because they are a copy of `styles.css`, and the copy should sit
+ * beside the list of palettes it has to be kept in step with.
+ */
+export const PALETTE_FRAME: Record<Palette, Record<JairaTheme, { ground: string; panel: string; dim: string }>> = {
+  classic: { light: { ground: "#f5f6f8", panel: "#ffffff", dim: "#5c6779" }, dark: { ground: "#0f1115", panel: "#161922", dim: "#8b93a7" } },
+  ink: { light: { ground: "#f5f6fa", panel: "#ffffff", dim: "#5a5f7a" }, dark: { ground: "#0f1017", panel: "#171923", dim: "#8c90ab" } },
+  hairline: { light: { ground: "#ffffff", panel: "#ffffff", dim: "#5b6474" }, dark: { ground: "#0d0f13", panel: "#0d0f13", dim: "#8d95a6" } },
+  contrast: { light: { ground: "#ffffff", panel: "#ffffff", dim: "#3a3a3a" }, dark: { ground: "#000000", panel: "#000000", dim: "#c4c4c4" } },
+  blueprint: { light: { ground: "#f7faff", panel: "#ffffff", dim: "#4e6d98" }, dark: { ground: "#0f3b7a", panel: "#134487", dim: "#b3cae9" } },
+  pastel: { light: { ground: "#fbfaff", panel: "#ffffff", dim: "#6e6887" }, dark: { ground: "#1e1e2e", panel: "#24273a", dim: "#a6adc8" } },
+  "pastel-rail": { light: { ground: "#fbfaff", panel: "#ffffff", dim: "#6e6887" }, dark: { ground: "#1e1e2e", panel: "#24273a", dim: "#a6adc8" } },
+  zinc: { light: { ground: "#fcfcfc", panel: "#ffffff", dim: "#71717a" }, dark: { ground: "#0a0a0a", panel: "#121212", dim: "#8f8f8f" } },
+};
 
 /**
  * What the editors are painted in when nobody has said — Monokai Light.
@@ -413,6 +510,10 @@ export function defaultAppearance(): Appearance {
     advanced: false,
     smoothing: false,
     editorTheme: DEFAULT_EDITOR_THEME,
+    palette: DEFAULT_PALETTE,
+    laneColors: null,
+    buckets: null,
+    statusWash: null,
   };
 }
 
@@ -645,7 +746,7 @@ export function parseSettings(raw: unknown): JairaSettings {
   const theme = doc["theme"];
   const baseDir = doc["baseDir"];
   return {
-    theme: THEMES.includes(theme as JairaTheme) ? (theme as JairaTheme) : "light",
+    theme: THEME_MODES.includes(theme as ThemeMode) ? (theme as ThemeMode) : "light",
     ui: parseUiState(doc["ui"]),
     appearance: parseAppearance(doc["appearance"]),
     editors: parseEditors(doc["editors"]),
@@ -707,6 +808,15 @@ function parseAppearance(raw: unknown): Appearance {
   // default for anything it does not recognise.
   const editorTheme = doc["editorTheme"];
   if (typeof editorTheme === "string" && editorTheme.length > 0) out.editorTheme = editorTheme;
+  // Unlike the editor theme, the palettes are known here — their frame colours are — so an id this
+  // release does not have falls back to the default rather than being kept.
+  const palette = doc["palette"];
+  if (PALETTES.includes(palette as Palette)) out.palette = palette as Palette;
+  const flag = (value: unknown): boolean | null => (typeof value === "boolean" ? value : null);
+  out.laneColors = flag(doc["laneColors"]);
+  out.statusWash = flag(doc["statusWash"]);
+  const buckets = doc["buckets"];
+  out.buckets = BUCKET_STYLES.includes(buckets as BucketStyle) ? (buckets as BucketStyle) : null;
   return out;
 }
 

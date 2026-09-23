@@ -2,10 +2,10 @@
 id: ui/components/settings-field
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/schema-driven-form, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects, product/agents-act-only-where-allowed, product/read-comfortably]
-surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/settings-conversation, ui/surfaces/new-task-popover, ui/surfaces/gate-modal, ui/surfaces/context-panel]
+surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/new-task-popover, ui/surfaces/gate-modal, ui/surfaces/context-panel]
 reuses: [ui/components/switch, ui/components/preset-chips]
 implemented_by: [packages/app/src/renderer/controls.tsx]
 verified_by: [packages/app/test/schemaForm.test.ts]
@@ -19,9 +19,17 @@ A settings row with its statement on the left, a bold label with an optional blu
 
 ## A settings field states one setting, what it writes, and its value
 
-**Use when.** One setting or one typed value is shown with its control: every row of the Providers, Executors, Configuration, Files and Conversation settings panes, and every member a [schema-form](schema-form.md) draws, so run inputs, New task inputs and gate forms share the same row. A level heading groups the rows one type of thing contributes, and a disclosure holds settings most projects never touch.
+**Use when.** One setting or one typed value is shown with its control: every row of the Providers, Executors, Configuration and Files settings pages, and every member a [schema-form](schema-form.md) draws, so run inputs, New task inputs and gate forms share the same row. A level heading groups the rows one type of thing contributes, and a disclosure holds settings most projects never touch.
 
 **Do not use when.** A whole value is declared by a schema: draw it with [schema-form](schema-form.md), which uses these rows. A thing with a status and its own switch, such as a provider, is a [provider-row](provider-row.md). Text in a conversation, a gate's own heading, or the options of a question are not settings.
+
+## On a settings page a field is a row of a card, with a switch that enables it
+
+Inside the Settings view (the person's pick of t3code's pattern, 2026-09-23) a field is drawn as a settings row: its name at 1.1× the app base in weight 550, capitalised; ONE sentence under it — the first sentence of the hint — and whatever followed, with the config key it writes, behind an `ⓘ` beside the name; its control on the right edge; rows parted by a full `--line` hairline inside one bordered card per section, under a quiet sentence-case heading ([settings-appearance](../surfaces/settings-appearance.md) is built the same way). A top-level level is such a section; nested levels stay bands inside it.
+
+A field a layer may or may not state carries a **switch** before its name, and the switch enables the row: on, this layer states the value and the control edits it; off, the row is disabled — its control dimmed to 50% and unreachable — and shows what it inherits. Switching it on pins the value it shows, so nothing changes until it is edited; switching it off removes the value, and the row inherits again. This replaces the `SET HERE` tag on every settings page. A list or a nested form goes under the name across the row instead of on the right edge.
+
+Everywhere else — run inputs, New task, a gate — a field keeps the shape below.
 
 ## The statement reads first, the value lands on one rail, and levels say what the settings belong to
 
@@ -51,7 +59,8 @@ A settings row with its statement on the left, a bold label with an optional blu
 
 | On | Does | Feedback |
 | --- | --- | --- |
-| Typing in a box | Writes the value to the layer being edited | `SET HERE` appears once the layer states it |
+| Typing in a box | Writes the value to the layer being edited | On a settings page the row's switch is already on; elsewhere `SET HERE` appears once the layer states it |
+| A row's switch, on a settings page | On pins the value the row shows into this layer; off removes it, so the row inherits | The row enables, or dims and shows what it inherits |
 | Emptying a box | Leaves the setting unset, so it inherits; a number box never writes zero for empty | The placeholder returns and the tag goes |
 | Typing a number part way, such as `0.` | Keeps the typed text until the box is left | The box shows exactly what was typed |
 | Pointer over a box | Nothing | Border `--rule` |

@@ -27,8 +27,8 @@
  * The approvals strip spans all three. A blocked tool loop is the one thing that must never scroll
  * away, and it stays visible while you are deep in the Files tree.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
-import { toolsetChoicesAt, toolsetsAt } from "@jaira/shared/browser";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
+import { resolveTheme, toolsetChoicesAt, toolsetsAt } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
@@ -56,7 +56,10 @@ import {
   type MenuPoint,
 } from "./menu";
 import { AppearancePane } from "./appearancePane";
-import { ConversationPane } from "./conversationPane";
+import { useSettingsParts } from "./settingsParts";
+import { SettingsPage } from "./settingsLayout";
+import { SettingsRowsContext } from "./controls";
+import { useSystemDark } from "./appearance";
 import { FilesPane } from "./filesPane";
 import {
   addCounts,
@@ -249,12 +252,8 @@ function SettingsHeader({
           />
         ) : hasProject ? (
           <LayerPicker value={layer} onChange={onLayer} disabled={busy} />
-        ) : (
-          <span className="sub">
-            Editing the shared settings, which apply to every project on this machine. Open a project to
-            override them for it.
-          </span>
-        )
+        ) : // With no project there is one layer to edit, and the page's own sentence says so.
+        null
       ) : null}
       {observed ? (
         <div className="settings-head-right">
@@ -268,6 +267,53 @@ function SettingsHeader({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A settings tab as a PAGE — its name, whose settings these are, and the layer switch — around the
+ * tab's own sections. Appearance draws its own page (it has no layer to switch), so it passes through.
+ */
+function SettingsFrame({
+  section,
+  lead,
+  aside,
+  children,
+}: {
+  section: SettingsSection;
+  lead: ReactNode;
+  aside: ReactNode;
+  children: ReactNode;
+}): JSX.Element {
+  if (section === "appearance") return <>{children}</>;
+  const meta = SECTIONS.find((s) => s.id === section);
+  return (
+    <SettingsPage title={meta?.label ?? "Settings"} lead={lead} aside={aside}>
+      {children}
+    </SettingsPage>
+  );
+}
+
+/**
+ * The page's one sentence: WHOSE settings these are, and what anything left unset falls back to.
+ * What the layer switch at the head's right edge changes, said in words.
+ */
+function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: string | null, builtIn: boolean): ReactNode {
+  const meta = SECTIONS.find((s) => s.id === section);
+  if (section === "history") return project !== null ? <>The runs <b>{projectName(project)}</b> has kept, and what pruning would free.</> : undefined;
+  if (meta === undefined || !meta.layered) return undefined;
+  if (builtIn && meta.builtIn === true) return <>What JaiRA <b>ships</b>, read-only — copy a line into a layer of your own to change it.</>;
+  if (layer === "project" && project !== null) {
+    return (
+      <>
+        Editing <b>{projectName(project)}</b>. Anything left unset comes from <b>~/.jaira</b>.
+      </>
+    );
+  }
+  return (
+    <>
+      Editing <b>~/.jaira</b>, shared by every project on this machine.{project === null ? " Open a project to override it for one." : ""}
+    </>
   );
 }
 
@@ -374,9 +420,9 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; ne
   { id: "files", label: "Files", layered: true },
   // Not layered and not project-scoped: typography belongs to a PERSON, not to a checkout, and a
   // window with nothing open is exactly where somebody sets it up.
+  // How a transcript is laid out lives here too — it was a tab of its own holding one setting, and it
+  // is a way things LOOK (the person's call, 2026-09-23).
   { id: "appearance", label: "Appearance", layered: false },
-  // The same person-not-checkout rule: how you read a transcript is yours.
-  { id: "conversation", label: "Conversation", layered: false },
   { id: "history", label: "History", layered: false, needsProject: true },
 ];
 
@@ -479,6 +525,13 @@ function InboxStrip({
 
 export default function App(): JSX.Element {
   const { state, actions } = useApp();
+  const systemDark = useSystemDark();
+  /**
+   * The Settings page's scroll box, and the sections on it — what the sidebar's accordion lists under
+   * the open tab, lights as it is scrolled, and scrolls to when one is clicked (`settingsParts.ts`).
+   */
+  const [settingsBody, setSettingsBody] = useState<HTMLDivElement | null>(null);
+  const settingsParts = useSettingsParts(settingsBody, state.section);
   /**
    * The remembered layout — every pane size, fold and collapsed branch in the window.
    *
@@ -1735,23 +1788,46 @@ export default function App(): JSX.Element {
     label: "Settings",
     panel: (
       <ul className="sections">
-        {SECTIONS.filter((s) => !s.needsProject || state.at !== null).map(({ id, label }) => (
-          <li
-            key={id}
-            // Only while Settings is what you are LOOKING at. The list stays drawn in Logs and in
-            // Debug — it is the panel's, not the view's — and a row marked selected there claimed
-            // the window was showing Providers while it was showing the log.
-            className={view === "settings" && state.section === id ? "sel" : undefined}
-            onClick={() => {
-              actions.setSection(id);
-              // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
-              // Remembering the section without showing it would be a click that did nothing.
-              actions.setView("settings");
-            }}
-          >
-            {label}
-          </li>
-        ))}
+        {SECTIONS.filter((s) => !s.needsProject || state.at !== null).flatMap(({ id, label }) => {
+          const open = view === "settings" && state.section === id;
+          const row = (
+            <li
+              key={id}
+              // Only while Settings is what you are LOOKING at. The list stays drawn in Logs and in
+              // Debug — it is the panel's, not the view's — and a row marked selected there claimed
+              // the window was showing Providers while it was showing the log.
+              className={open ? "sel" : undefined}
+              onClick={() => {
+                actions.setSection(id);
+                // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
+                // Remembering the section without showing it would be a click that did nothing.
+                actions.setView("settings");
+              }}
+            >
+              {label}
+            </li>
+          );
+          // The open tab's own sections, indented under it: lit as the page is scrolled past them,
+          // and a click scrolls to one. A tab of one section has nothing to list.
+          if (!open || settingsParts.parts.length < 2) return [row];
+          return [
+            row,
+            <li key={`${id}:parts`} className="parts">
+              <ul className="section-parts" aria-label={`${label} sections`}>
+                {settingsParts.parts.map((part) => (
+                  <li
+                    key={part.id}
+                    className={settingsParts.active === part.id ? "on" : undefined}
+                    aria-current={settingsParts.active === part.id ? "location" : undefined}
+                    onClick={() => settingsParts.go(part.id)}
+                  >
+                    {part.label}
+                  </li>
+                ))}
+              </ul>
+            </li>,
+          ];
+        })}
       </ul>
     ),
   };
@@ -1783,7 +1859,9 @@ export default function App(): JSX.Element {
         at={state.at}
         onProject={actions.standOn}
         busy={state.busy}
-        theme={state.settings.theme}
+        // The theme on SCREEN: the sidebar's toggle flips what you see, so on `system` it starts from
+        // whatever the OS resolved to and makes the other one an explicit choice.
+        theme={resolveTheme(state.settings.theme, systemDark)}
         onTheme={actions.setTheme}
         onChooseProject={(mode) => void actions.chooseProject(mode)}
       />
@@ -2335,19 +2413,29 @@ export default function App(): JSX.Element {
                in the window's own address bar rather than restated at the foot of one view. Opening
                another one is the chevron beside it. */
             <div className="view settings-view">
-              <div className="col mid settings-body">
-                <SettingsHeader
+              <div className="col mid settings-body" ref={setSettingsBody}>
+                {/* Every field below is a settings ROW (`controls.tsx`), and every tab but Appearance —
+                    which draws its own — is a settings PAGE: its title, whose settings these are, and
+                    the layer switch at the head's right edge. */}
+                <SettingsRowsContext.Provider value={true}>
+                <SettingsFrame
                   section={state.section}
-                  layer={state.configLayer}
-                  hasProject={state.at !== null}
-                  busy={state.busy}
-                  rechecking={state.rechecking}
-                  checkedAt={state.availability.checkedAt}
-                  onLayer={actions.setConfigLayer}
-                  onRecheck={actions.recheckAvailability}
-                  builtIn={toolsetsBuiltIn}
-                  onBuiltIn={setToolsetsBuiltIn}
-                />
+                  lead={settingsLeadOf(state.section, state.configLayer, state.at, toolsetsBuiltIn)}
+                  aside={
+                    <SettingsHeader
+                      section={state.section}
+                      layer={state.configLayer}
+                      hasProject={state.at !== null}
+                      busy={state.busy}
+                      rechecking={state.rechecking}
+                      checkedAt={state.availability.checkedAt}
+                      onLayer={actions.setConfigLayer}
+                      onRecheck={actions.recheckAvailability}
+                      builtIn={toolsetsBuiltIn}
+                      onBuiltIn={setToolsetsBuiltIn}
+                    />
+                  }
+                >
                 {state.section === "toolsets" ? (
                   <ToolsetsPane
                     // A different project is a different set of files: start clean rather than show
@@ -2439,16 +2527,17 @@ export default function App(): JSX.Element {
                 {state.section === "appearance" ? (
                   <AppearancePane
                     appearance={state.settings.appearance}
+                    theme={state.settings.theme}
+                    conversation={state.settings.conversation}
                     editors={state.settings.editors}
                     renderers={state.settings.renderers}
                     busy={state.busy}
                     onChange={actions.setAppearance}
+                    onTheme={(mode) => void actions.setTheme(mode)}
+                    onConversation={actions.setConversation}
                     onEditor={actions.setEditorLook}
                     onRenderer={actions.setRenderer}
                   />
-                ) : null}
-                {state.section === "conversation" ? (
-                  <ConversationPane look={state.settings.conversation} busy={state.busy} onChange={actions.setConversation} />
                 ) : null}
                 {state.section === "history" && state.at !== null ? (
                   <History
@@ -2460,6 +2549,8 @@ export default function App(): JSX.Element {
                     onDismiss={actions.dismissPrune}
                   />
                 ) : null}
+                </SettingsFrame>
+                </SettingsRowsContext.Provider>
               </div>
             </div>
           ) : null}

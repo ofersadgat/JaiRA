@@ -6,7 +6,8 @@
  * voice with every ratio intact. That is the entire reason §3.3 forbids a literal font-size in a
  * component — a px anywhere is a component this cannot reach.
  */
-import { SIZE_LIMITS, clampSize, type Appearance } from "@jaira/shared/browser";
+import { useEffect, useState } from "react";
+import { SIZE_LIMITS, clampSize, surfaceOf, type Appearance } from "@jaira/shared/browser";
 import { EDITOR_THEMES, editorThemeSpec, editorThemeVars } from "./editorThemes";
 
 /**
@@ -89,6 +90,7 @@ export function applyAppearance(root: HTMLElement, a: Appearance): void {
   // Grayscale antialiasing, off by default — see `Appearance.smoothing`.
   set("-webkit-font-smoothing", a.smoothing ? "antialiased" : null);
   set("-moz-osx-font-smoothing", a.smoothing ? "grayscale" : null);
+  applySurface(root, a);
   /**
    * The editors' own palette: an ATTRIBUTE that switches the rule on, and the colours it reads.
    *
@@ -113,6 +115,48 @@ export function applyAppearance(root: HTMLElement, a: Appearance): void {
   }
   root.dataset["editorTheme"] = theme.id;
   for (const [name, value] of Object.entries(editorThemeVars(theme))) set(name, value);
+}
+
+/**
+ * Whether the operating system is dark RIGHT NOW, and again whenever it changes — what the `system`
+ * theme mode follows (`resolveTheme`). No media query API means no opinion, which reads as light.
+ */
+export function useSystemDark(): boolean {
+  const query = (): MediaQueryList | null =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const [dark, setDark] = useState(() => query()?.matches === true);
+  useEffect(() => {
+    const mq = query();
+    if (mq === null) return undefined;
+    const follow = (): void => setDark(mq.matches);
+    mq.addEventListener("change", follow);
+    return () => mq.removeEventListener("change", follow);
+  }, []);
+  return dark;
+}
+
+/**
+ * The window's palette and the board's three surface options, as ATTRIBUTES on the root.
+ *
+ * Attributes rather than custom properties because each one selects a block of rules, not a value:
+ * a palette is thirty tokens and a handful of rules in `styles.css`, and a bucket style is a
+ * different way of drawing a column. Classic removes `data-palette`, so the stylesheet's own `:root`
+ * is what paints it (`index.html` stamps the default, ink, for the first paint), and each option is
+ * written only when it differs from the classic board — so the rules only ever describe a departure.
+ *
+ * The options are written as DECIDED (`surfaceOf`), not as stored: a palette's own defaults are
+ * resolved here, which keeps the stylesheet free of "ink, unless the person said otherwise" rules.
+ */
+function applySurface(root: HTMLElement, a: Appearance): void {
+  const mark = (name: string, value: string | null): void => {
+    if (value === null) delete root.dataset[name];
+    else root.dataset[name] = value;
+  };
+  const surface = surfaceOf(a);
+  mark("palette", a.palette === "classic" ? null : a.palette);
+  mark("buckets", surface.buckets === "line" ? "line" : null);
+  mark("lanes", surface.laneColors ? "on" : null);
+  mark("wash", surface.statusWash ? "on" : null);
 }
 
 /**

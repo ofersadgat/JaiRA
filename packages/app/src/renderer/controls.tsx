@@ -19,7 +19,24 @@
  * convention and its two themes are variable-driven — an inline `#fff` is a light-mode assumption
  * that dark mode cannot override.
  */
-import { useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+
+/**
+ * Whether a {@link Field} is being drawn on a SETTINGS PAGE — the row shape the person picked from
+ * t3code (2026-09-23, `settingsLayout.tsx`). Provided once around the Settings view; everywhere else
+ * (a run's inputs, the new-task form, a gate) a field keeps the shape it has.
+ *
+ * On a settings page a field's hint is ONE sentence under its name, and whatever followed it — and
+ * the config key it writes — sit behind an ⓘ beside the name.
+ */
+export const SettingsRowsContext = createContext(false);
+
+/** The first sentence of a hint, and the rest — the split a settings row draws. */
+export function splitHint(hint: string): { first: string; rest: string } {
+  const at = hint.search(/[.!?](\s|$)/);
+  if (at < 0 || at >= hint.length - 1) return { first: hint, rest: "" };
+  return { first: hint.slice(0, at + 1), rest: hint.slice(at + 1).trim() };
+}
 
 /**
  * One setting: what it is called, what it writes, what it means, and the control.
@@ -40,6 +57,9 @@ export function Field({
   param,
   hint,
   set = false,
+  toggle,
+  off = false,
+  wide = false,
   lead,
   after,
   mono = false,
@@ -50,6 +70,16 @@ export function Field({
   param?: string | undefined;
   hint?: ReactNode;
   set?: boolean;
+  /**
+   * The row's own on/off SWITCH — the person's rule for settings (2026-09-23): "use a switch to
+   * enable/disable a row". On, this layer states the value and the control edits it; off, the row is
+   * disabled and shows what it inherits. Replaces the `set here` mark, which only said which it was.
+   */
+  toggle?: { on: boolean; onChange: (on: boolean) => void; disabled?: boolean | undefined } | undefined;
+  /** The row is switched off by a switch its caller drew itself (`lead`) — see {@link toggle}. */
+  off?: boolean;
+  /** The control is a list or a form of its own: it goes UNDER the name, across the row. */
+  wide?: boolean;
   /** Before the label — the switch that decides whether an optional member is set at all. */
   lead?: ReactNode;
   /** After the label, on the same line — a required mark, what the value may be, a choice of shape. */
@@ -60,23 +90,54 @@ export function Field({
   error?: string | undefined;
   children: ReactNode;
 }): JSX.Element {
+  const row = useContext(SettingsRowsContext);
+  // Switched on with nothing to write yet — an empty model box, say — the row stays enabled until
+  // something is typed, rather than writing an empty value that would read back as "not set".
+  const [armed, setArmed] = useState(false);
+  const on = toggle !== undefined ? toggle.on || armed : !off;
+  const disabled = !on;
+  const leading =
+    toggle !== undefined ? (
+      <Switch
+        on={on}
+        label={on ? `${label} is set here — switch off to inherit it` : `set ${label} here`}
+        disabled={toggle.disabled}
+        onChange={(next) => {
+          setArmed(next);
+          toggle.onChange(next);
+        }}
+      />
+    ) : (
+      lead
+    );
+  // On a settings page: one sentence under the name, and the rest — with the key it writes — behind
+  // an ⓘ, which is what keeps a page of forty settings readable (t3code's rule: about one line each).
+  const split = row && typeof hint === "string" ? splitHint(hint) : undefined;
+  const more = split !== undefined ? [split.rest, param !== undefined ? `Writes ${param}.` : ""].filter((s) => s.length > 0).join(" ") : "";
   return (
-    <div className={`cfg-field${error !== undefined ? " bad" : ""}`}>
+    <div className={`cfg-field${row ? " set-field" : ""}${wide ? " wide" : ""}${disabled ? " off" : ""}${error !== undefined ? " bad" : ""}`}>
       <div className="cfg-field-say">
         <span className="cfg-field-head">
-          {lead}
+          {leading}
           <span className={`cfg-label${mono ? " mono" : ""}`}>{label}</span>
-          {set ? <span className="cfg-set" title="set in the layer you are editing">set here</span> : null}
+          {set && toggle === undefined ? <span className="cfg-set" title="set in the layer you are editing">set here</span> : null}
           {after}
+          {more.length > 0 ? (
+            <span className="set-icon set-info" title={more} aria-label={more} role="img">
+              ⓘ
+            </span>
+          ) : null}
         </span>
-        {hint !== undefined || param !== undefined ? (
+        {split !== undefined ? (
+          split.first.length > 0 ? <span className="cfg-hint">{split.first}</span> : null
+        ) : hint !== undefined || param !== undefined ? (
           <span className="cfg-hint">
             {hint}
-            {param ? <code className="cfg-param">{param}</code> : null}
+            {param && !row ? <code className="cfg-param">{param}</code> : null}
           </span>
         ) : null}
       </div>
-      <div className="cfg-control">
+      <div className="cfg-control" {...(disabled ? { inert: true } : {})}>
         {children}
         {error !== undefined ? <div className="reason cfg-error">{error}</div> : null}
       </div>
@@ -125,6 +186,30 @@ export function Level({
   depth?: number;
   children: ReactNode;
 }): JSX.Element {
+  if (depth === 0) {
+    // A top-level band is a SECTION of its Settings page (`settingsLayout.tsx`): a quiet heading over
+    // one card, and a place the sidebar's accordion lists and scrolls to (`settingsParts.ts`). Its
+    // sentence goes behind an ⓘ when it is a plain string, the way a row's does.
+    const info = typeof hint === "string" ? hint : undefined;
+    return (
+      <section className="set-section cfg-level" data-depth={0} data-part={partIdOf(title)} data-part-label={title}>
+        <div className="set-section-title" role="heading" aria-level={2}>
+          <span className="set-section-name">
+            {title}
+            {info !== undefined ? (
+              <span className="set-icon set-info" title={info} aria-label={info} role="img">
+                ⓘ
+              </span>
+            ) : null}
+          </span>
+        </div>
+        {hint !== undefined && info === undefined ? <div className="set-section-lead cfg-hint">{hint}</div> : null}
+        <div className="set-group">
+          <div className="cfg-level-body">{children}</div>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="cfg-level" data-depth={depth}>
       <div className="cfg-level-head">
@@ -134,6 +219,11 @@ export function Level({
       <div className="cfg-level-body">{children}</div>
     </section>
   );
+}
+
+/** A section's id for the accordion, from its title — `Model providers` → `model-providers`. */
+export function partIdOf(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 /** A collapsed-by-default well for the settings most projects never touch. */

@@ -9,13 +9,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, powerMonitor, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeTheme, powerMonitor, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import {
   ARTIFACT_SCHEME,
   IPC_CHANNELS,
+  PALETTE_FRAME,
   PUSH_CHANNEL,
+  resolveTheme,
   takeHomeFlag,
+  type JairaSettings,
   type IpcChannel,
   type PushMessage,
   type SaveFileRequest,
@@ -532,10 +535,13 @@ function registerIpc(): void {
  *
  * Read from the saved preference rather than hardcoded: this is painted before any CSS loads, so a
  * fixed value means every cold start flashes the wrong theme at anyone using the other one. The
- * values match the `--bg` of each palette in `styles.css` — the two have to be kept in step, which
- * is why both say so.
+ * values are `PALETTE_FRAME`, a copy of each palette's `--bg` in `styles.css` — the two have to be
+ * kept in step, which is why both say so.
  */
-const WINDOW_BACKGROUND = { light: "#f5f6f8", dark: "#0f1115" } as const;
+function frameOf(settings: JairaSettings): { ground: string; panel: string; dim: string } {
+  // `system` asks the OS, which is what the renderer asks too (`prefers-color-scheme`).
+  return PALETTE_FRAME[settings.appearance.palette][resolveTheme(settings.theme, nativeTheme.shouldUseDarkColors)];
+}
 /**
  * How many DISTINCT renderer console errors are mirrored into the log before the window stops being
  * quoted. Enough to hold the failure and the handful of warnings that led to it; small enough that a
@@ -560,12 +566,9 @@ const TITLE_BAR_HEIGHT = 34;
  * ours to style in CSS — it is this value — and a fixed one would leave a white notch in the corner
  * of the dark theme. `--panel`, because what sits under that corner is a panel in every view.
  */
-function titleBarOverlay(theme: "light" | "dark"): { color: string; symbolColor: string; height: number } {
-  return {
-    color: theme === "dark" ? "#161922" : "#ffffff",
-    symbolColor: theme === "dark" ? "#8b93a7" : "#5c6779",
-    height: TITLE_BAR_HEIGHT,
-  };
+function titleBarOverlay(settings: JairaSettings): { color: string; symbolColor: string; height: number } {
+  const frame = frameOf(settings);
+  return { color: frame.panel, symbolColor: frame.dim, height: TITLE_BAR_HEIGHT };
 }
 
 /**
@@ -581,7 +584,7 @@ function repaintTitleBar(): void {
   if (process.platform === "darwin") return;
   if (window === undefined || window.isDestroyed()) return;
   try {
-    window.setTitleBarOverlay(titleBarOverlay(service.readSettings().theme));
+    window.setTitleBarOverlay(titleBarOverlay(service.readSettings()));
   } catch {
     // Only available on a window created with an overlay. Nothing here is worth failing a settings
     // write over.
@@ -589,11 +592,11 @@ function repaintTitleBar(): void {
 }
 
 async function createWindow(): Promise<BrowserWindow> {
-  const theme = service.readSettings().theme;
+  const settings = service.readSettings();
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
-    backgroundColor: WINDOW_BACKGROUND[theme],
+    backgroundColor: frameOf(settings).ground,
     show: false,
     /*
      * NO TITLE BAR, and no menu bar either (see `app.whenReady`).
@@ -609,7 +612,7 @@ async function createWindow(): Promise<BrowserWindow> {
      * describes, and the layout reserves that band through the `titlebar-area-*` env variables.
      */
     titleBarStyle: "hidden",
-    titleBarOverlay: titleBarOverlay(theme),
+    titleBarOverlay: titleBarOverlay(settings),
     webPreferences: {
       preload: PRELOAD,
       // The renderer gets no Node: its only capability is the typed bridge
@@ -845,6 +848,9 @@ void app.whenReady().then(async () => {
   // it takes a row across the top of the window to say so. Nulling it also disables the Alt key that
   // would otherwise summon it back over the layout.
   Menu.setApplicationMenu(null);
+  // A person on `system` whose OS flips to dark gets a renderer that follows at once; the window
+  // controls are drawn by the OS from a colour we hand it, so they have to be handed the new one.
+  nativeTheme.on("updated", () => repaintTitleBar());
   registerIpc();
   // The projects this window had open when it was last quit, before the one the command line names:
   // restoring first keeps the list's own order (oldest to newest) and leaves an explicitly requested

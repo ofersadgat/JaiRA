@@ -1,51 +1,50 @@
 /**
- * The typography screen (SHELL.md §6): two voices, two families, two sizes.
+ * Settings → Appearance: how JaiRA looks on this machine, for every project (SHELL.md §6).
  *
- * Four decisions carry it, and each one is a correction of what a font picker usually is.
+ * Built from `settingsLayout.tsx` — the row-and-card shape the person picked from t3code on
+ * 2026-09-23 — as six sections, each one a place the sidebar's accordion can jump to:
  *
- *  - **The control is a multi-select, not a text field.** A font stack is an ORDERED LIST — the
- *    second family is what renders a glyph the first lacks — so the chips are numbered and sit in
- *    one box in the order they are tried, and the default stack is the last line of the menu, stated
- *    and un-removable. That is what makes "prepend, never replace" visible rather than a rule you
- *    have to be told.
- *  - **Size sits on the same line as the family it applies to.** They are one decision about one
- *    voice; on separate rows a person sets the app font and then scrolls past two controls to find
- *    the size of the thing they just set.
- *  - **The preview is a real surface**, built from the same components and the same register classes
- *    as the shell — not a lookalike sample string. A sample cannot show you that your data font is
- *    wider than the column, and the preview is also the one place both voices sit adjacent.
- *  - **The proportional check is a NOTE, not a block.** Two voices can be configured into one, and
- *    measuring says so; it is their app, and a proportional code font is an unusual taste rather
- *    than an error.
+ *  - **Mode** — light, dark, or follow the system, as three tiles drawn in the current theme.
+ *  - **Theme** — the palettes as cards, each a miniature task board in its own colours
+ *    (`paletteCards.tsx`), so a person chooses by looking rather than by name.
+ *  - **Board** — lane colours, columns as box or line, status wash; and a PREVIEW of real board
+ *    components under them, in whatever the window is now painted in, which follows each switch.
+ *  - **Conversation** — how a fan-out batch that ran one element after another is laid out, with a
+ *    preview of the choice. It was a tab of its own holding this one setting; it is a way things
+ *    LOOK, so it lives with the rest of them.
+ *  - **Text** — the two voices' faces and sizes, the editor's own size and smoothing, and the preview
+ *    both voices sit side by side in.
+ *  - **File types** — what opens a file and what that thing looks like, the workspace it always was.
  *
- * It does NOT use the `Level` / `Field` chrome the other settings sections are built from, and that
- * is the point rather than an oversight. That chrome is a statement on the left and its control on
- * the right, which is the right shape for a form of forty independent settings whose names are the
- * only thing distinguishing them. This screen has SIX, they are two pairs and two switches, and
- * every one of them is about type — so the labels are one word, the controls are the width of the
- * pane, and what a person needs beside the control is the preview, not a paragraph.
+ * Three decisions from the typography screen this grew out of still stand, and are why the font rows
+ * are what they are:
+ *
+ *  - **The family control is a multi-select, not a text field.** A font stack is an ORDERED LIST —
+ *    the second family is what renders a glyph the first lacks — so the chips are numbered and sit in
+ *    one box in the order they are tried, and the default stack is the last line of the menu.
+ *  - **The preview is a real surface**, built from the same components and register classes as the
+ *    shell. A sample string cannot show that a data font is wider than the column.
+ *  - **The proportional check is a NOTE, not a block.** It is their app.
  */
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
-  EDITOR_KINDS,
-  EDITOR_KNOBS,
-  LINE_HEIGHT,
-  OFFERED_TYPES,
+  PALETTES,
+  PALETTE_SURFACE,
   SIZE_LIMITS,
-  TAB_SIZES,
-  defaultEditorLook,
-  editorKnobApplies,
-  isCodeMime,
-  typeNameOf,
+  surfaceOf,
   type Appearance,
+  type BucketStyle,
+  type ConversationLook,
   type EditorKind,
+  type EditorLook,
+  type JairaTheme,
   type RendererChoices,
   type RendererEdit,
-  type EditorKnob,
-  type EditorLook,
+  type SequentialBatchLayout,
+  type ThemeMode,
 } from "@jaira/shared/browser";
 import { FileTypesPane } from "./fileTypesPane";
-import { SizeStep, ToggleRow } from "./editorKnobs";
+import { SizeStep } from "./editorKnobs";
 import {
   DEFAULT_APP_STACK,
   DEFAULT_DATA_STACK,
@@ -55,9 +54,13 @@ import {
   isMonospace,
   shownFamilies,
   stackOf,
+  useSystemDark,
 } from "./appearance";
-import { Chip, SelectInput, Switch } from "./controls";
+import { Switch } from "./controls";
 import { Pill } from "./pill";
+import { Column, Tile } from "./board";
+import { PALETTE_CARDS, ThemeMini } from "./paletteCards";
+import { Segmented, SettingsPage, SettingsRow, SettingsSection } from "./settingsLayout";
 
 /**
  * Faces worth offering by name.
@@ -258,17 +261,6 @@ function FaceMenu({
   );
 }
 
-/** A one-word heading over one control — this screen's whole label vocabulary. */
-function VoiceField({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }): JSX.Element {
-  return (
-    <div className="ap-field">
-      <span className="app-label">{label}</span>
-      <div className="ap-line">{children}</div>
-      {note !== undefined ? <span className="ap-note data-faint">{note}</span> : null}
-    </div>
-  );
-}
-
 /**
  * The preview: a file surface beside a task row.
  *
@@ -296,29 +288,164 @@ function Preview(): JSX.Element {
   );
 }
 
+const noop = (): void => undefined;
+
+const MODES: ReadonlyArray<readonly [label: string, mode: ThemeMode]> = [
+  ["Light", "light"],
+  ["Dark", "dark"],
+  ["System", "system"],
+];
+
+/** Light, dark or follow the system — each tile the current palette's board in that mode. */
+function ModeTiles({ mode, palette, busy, onTheme }: { mode: ThemeMode; palette: Appearance["palette"]; busy: boolean; onTheme: (mode: ThemeMode) => void }): JSX.Element {
+  return (
+    <div className="mode-tiles" role="group" aria-label="Mode">
+      {MODES.map(([label, option]) => (
+        <button key={option} type="button" className="mode-tile" aria-pressed={mode === option} disabled={busy} onClick={() => onTheme(option)}>
+          <ThemeMini palette={palette} theme={option} />
+          <span className="mode-tile-name">{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The palettes as cards, each a miniature of the task board in its own colours — drawn in the mode
+ * the person chose, so on `system` every card is split light | dark.
+ */
+function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["palette"]; mode: ThemeMode; busy: boolean; onPick: (palette: Appearance["palette"]) => void }): JSX.Element {
+  return (
+    <div className="theme-grid" role="group" aria-label="Theme">
+      {PALETTES.map((option) => {
+        const card = PALETTE_CARDS[option];
+        const on = option === palette;
+        return (
+          <button key={option} type="button" className="theme-card" aria-pressed={on} disabled={busy} onClick={() => onPick(option)}>
+            {on ? (
+              <span className="theme-check" aria-hidden="true">
+                ✓
+              </span>
+            ) : null}
+            <ThemeMini palette={option} theme={mode} />
+            <span className="theme-meta">
+              <span className="theme-name">
+                {card.label}
+                {option === PALETTES[0] ? <span className="theme-tag">default</span> : null}
+              </span>
+              <span className="theme-desc">{card.note}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * What tasks look like — the board's own `Column` and `Tile`, not a picture of them, so the window's
+ * palette and all three board options reach it exactly as they reach the Tasks view.
+ */
+function TaskPreview(): JSX.Element {
+  return (
+    <div className="set-preview task-preview" aria-hidden="true">
+      <div className="board-body">
+        <div className="columns">
+          <Column name="draft" seq={1} count={2} empty="—">
+            <Tile status="running" title="Rewind a run" selected onSelect={noop} meta={<><span className="ellip">feature/ux/draft</span><span className="card-status">2 m</span></>} />
+            <Tile status="completed" title="Ship each kinds" onSelect={noop} meta={<><span className="ellip">feature/ux/draft</span><span className="card-status">1 h ago</span></>} />
+          </Column>
+          <Column name="critique" seq={2} count={2} empty="—">
+            <Tile status="waiting_for_user" title="Fork from any point" onSelect={noop} meta={<><span className="ellip">feature/ux/critique</span><span className="card-status">gate</span></>} />
+            <Tile status="failed" title="Bridge race" onSelect={noop} meta={<><span className="ellip">exit 1</span><span className="card-status">6 m ago</span></>} />
+          </Column>
+          <Column name="verify" seq={3} count={1} empty="—">
+            <Tile status="queued" title="Pause and stop" onSelect={noop} meta={<span className="ellip">queued</span>} />
+          </Column>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Two elements of one fan-out, in the conversation's own sheet markup, laid out as chosen. */
+function ConversationPreview({ layout }: { layout: SequentialBatchLayout }): JSX.Element {
+  const panel = (file: string, text: string): JSX.Element => (
+    <div className="sb-panel" key={file}>
+      <div className="sb-gutter">
+        <span className="sb-session mono ellip">reviewer</span>
+        <span className="sb-span ellip">each · {file}</span>
+      </div>
+      <section className="sb-sheet">
+        <div className="sb-body">
+          <div className="ts-msg ts-msg-assistant">
+            <div className="markdown">
+              <p>{text}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+  const first = panel("auth.ts", "The token is refreshed after it is read, so a request can go out with a stale one.");
+  const second = panel("session.ts", "Nothing to change: the lock is taken before the session is written.");
+  return (
+    <div className="set-preview convo-preview" aria-hidden="true">
+      {layout === "band" ? (
+        <div className="sb-band concurrent columns">
+          <div className="sb-columns">
+            {first}
+            {second}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="sb-band">{first}</div>
+          <div className="sb-band">{second}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const BUCKET_CHOICES: ReadonlyArray<readonly [string, BucketStyle]> = [
+  ["Box", "box"],
+  ["Line", "line"],
+];
+
+const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
+  ["One after another", "stacked"],
+  ["Side by side", "band"],
+];
+
 export function AppearancePane({
   appearance,
+  theme,
+  conversation,
   editors,
   renderers,
   busy,
   onChange,
+  onTheme,
+  onConversation,
   onEditor,
   onRenderer,
 }: {
   appearance: Appearance;
+  /** Light, dark or system — the window's mode, which lives beside the palette it paints. */
+  theme: ThemeMode;
+  /** How a run's conversation is laid out — see {@link ConversationLook}. */
+  conversation: ConversationLook;
   /**
-   * How each editing surface looks, and the two tables below it.
-   *
-   * All three optional TOGETHER with their callbacks, which is how the specimen and the gallery draw
-   * this pane without a store behind it: absent means the sections are not drawn at all, rather than
-   * drawn dead. Typography needs no such guard because it has always been passed one object and one
-   * callback, and a screen that shows a control it cannot honour is the thing this whole pane is
-   * careful about.
+   * How each editing surface looks, and the renderer choices — both optional TOGETHER with their
+   * callbacks, which is how a caller with no store behind it draws this pane without File types.
    */
   editors?: Record<EditorKind, EditorLook> | undefined;
   renderers?: RendererChoices | undefined;
   busy: boolean;
   onChange: (patch: Partial<Appearance>) => void;
+  onTheme: (mode: ThemeMode) => void;
+  onConversation: (patch: Partial<ConversationLook>) => void;
   onEditor?: ((kind: EditorKind, patch: Partial<EditorLook>) => void) | undefined;
   onRenderer?: ((edits: readonly RendererEdit[]) => void) | undefined;
 }): JSX.Element {
@@ -328,133 +455,179 @@ export function AppearancePane({
     const ctx = document.createElement("canvas").getContext("2d");
     return new Set(appearance.dataFamily.filter((f) => !isMonospace(f, ctx)));
   }, [appearance.dataFamily]);
+  const systemDark = useSystemDark();
+  const shown: JairaTheme = theme === "system" ? (systemDark ? "dark" : "light") : theme;
+  const surface = surfaceOf(appearance);
+  const own = PALETTE_SURFACE[appearance.palette];
+  const card = PALETTE_CARDS[appearance.palette];
+  const backTo = (what: string): string => `Back to ${card.label}'s own: ${what}`;
 
   return (
-    <div className="cfg-pane ap">
-      {/* This section's own head. A non-layered section gets no `settings-head` from the chrome —
-          there is no shared-versus-project switch to draw above it — so the one thing that header
-          would have said, WHOSE settings these are, is said here. */}
-      <div className="ap-head">
-        <span className="app-title">Appearance</span>
-        <span className="app-secondary">every project on this machine</span>
-      </div>
-
-      {/* "App text", not "app voice". The voices are what the STYLESHEET calls them and what §3
-          argues about; on the screen where a person picks a font, the thing they are picking is the
-          text of the app and the text of their data. A label naming an internal distinction makes
-          somebody work out which of two abstractions their font is about. */}
-      <VoiceField label="app text" note={<Resolved families={appearance.appFamily} voice="app" fallback={DEFAULT_APP_STACK} />}>
-        <FamilyStack
-          families={appearance.appFamily}
-          ours={SHIPPED_APP_FAMILY}
-          fallback={DEFAULT_APP_STACK}
-          suggested={SUGGESTED_APP}
-          voice="app"
-          disabled={busy}
-          onChange={(appFamily) => onChange({ appFamily })}
-        />
-        <SizeStep
-          value={appearance.sizeApp}
-          limits={SIZE_LIMITS.sizeApp}
-          disabled={busy}
-          onChange={(sizeApp) => onChange({ sizeApp })}
-        />
-      </VoiceField>
-
-      <VoiceField label="data text" note={<Resolved families={appearance.dataFamily} voice="data" fallback={DEFAULT_DATA_STACK} />}>
-        <FamilyStack
-          families={appearance.dataFamily}
-          ours={SHIPPED_DATA_FAMILY}
-          fallback={DEFAULT_DATA_STACK}
-          suggested={SUGGESTED_DATA}
-          voice="data"
-          disabled={busy}
-          // OURS, and a note rather than a block (§6): two voices can be configured into one, and a
-          // column of counts that no longer lines up is worth saying out loud. It is their app.
-          warn={(family) => (proportional.has(family) ? "not monospaced — columns will not line up" : undefined)}
-          onChange={(dataFamily) => onChange({ dataFamily })}
-        />
-        <SizeStep
-          value={appearance.sizeData}
-          limits={SIZE_LIMITS.sizeData}
-          disabled={busy}
-          onChange={(sizeData) => onChange({ sizeData })}
-        />
-      </VoiceField>
-
-      <div className="ap-divider" />
-
-      <ToggleRow
-        on={appearance.advanced}
-        label="Separate editor size"
-        disabled={busy}
-        onChange={(advanced) => onChange({ advanced })}
-        // OFF, the editor follows the data text — so the value on the right is the data size, and
-        // it says so rather than showing a number the switch is not currently spending.
-        value={
-          appearance.advanced ? (
-            <SizeStep
-              value={appearance.sizeEditor}
-              limits={SIZE_LIMITS.sizeEditor}
-              disabled={busy}
-              onChange={(sizeEditor) => onChange({ sizeEditor })}
-            />
-          ) : (
-            <span className="app-secondary">follows the data text</span>
-          )
-        }
-      />
-      <ToggleRow
-        on={appearance.smoothing}
-        label="Smooth text"
-        disabled={busy}
-        onChange={(smoothing) => onChange({ smoothing })}
-        value={<span className="app-secondary">{appearance.smoothing ? "grayscale" : "the platform's own"}</span>}
-      />
-
-      <div className="ap-divider" />
-
-      <span className="app-label">preview</span>
-      <Preview />
-
-      {/* File types BEFORE editors, which is the order the questions are asked in: what opens this
-          file, and then what that thing looks like. It is also the order of consequence — picking
-          the source reading of a markdown document changes which editor you are looking at, and no
-          switch in the section below can. */}
-      {renderers !== undefined && onRenderer !== undefined && editors !== undefined && onEditor !== undefined ? (
+    <SettingsPage
+      title="Appearance"
+      lead={
         <>
-          {/* `wide`: this section is a tree beside a stage beside a live preview, not a column of
-              labels and controls, so it opts out of the width the form half of this screen keeps. */}
-          <div className="ap-divider wide" />
-          <div className="ap-head wide">
-            <span className="app-title">File types</span>
-            <span className="app-secondary">what opens a file, and what that thing looks like</span>
-          </div>
-          <FileTypesPane
-            renderers={renderers}
-            editorTheme={appearance.editorTheme}
-            editors={editors}
-            busy={busy}
-            onRenderer={onRenderer}
-            onEditor={onEditor}
-          />
+          How JaiRA looks on <b>this machine</b>, for every project.
         </>
-      ) : null}
+      }
+    >
+      <SettingsSection id="mode" title="Mode">
+        <ModeTiles mode={theme} palette={appearance.palette} busy={busy} onTheme={onTheme} />
+      </SettingsSection>
 
-      {/*
-        * There is no Editors section any more, and that is the point.
-        *
-        * Every editing surface is reached from File types now: a renderer says which one it is
-        * (`FileRenderer.look`) and its knobs are drawn under the type it was chosen for. The diff was
-        * the last holdout — no file type resolved to it, so its controls sat outside in a section of
-        * their own — and it has a renderer now, `Side by side` under Changes, which is where a person
-        * looking for "how are my diffs drawn" was always going to look.
-        *
-        * The palette went the same way. It is per type and per view (§6.4), and
-        * `Appearance.editorTheme` is what a type nobody has said anything about falls back to — which
-        * is a default rather than a control, and lives with the other defaults in `settings.ts`.
-        */}
-    </div>
+      <SettingsSection id="theme" title="Theme">
+        {/* Choosing a palette puts the board options back to what it was designed with, so it arrives
+            looking the way it was picked. */}
+        <ThemeCards
+          palette={appearance.palette}
+          mode={theme}
+          busy={busy}
+          onPick={(palette) => onChange({ palette, laneColors: null, buckets: null, statusWash: null })}
+        />
+      </SettingsSection>
+
+      <SettingsSection id="board" title="Board">
+        <SettingsRow
+          name="Lane colours"
+          description="Tint each column its own colour, so a step of the workflow is recognisable at a glance."
+          reset={appearance.laneColors !== null ? { label: backTo(own.laneColors ? "on" : "off"), onReset: () => onChange({ laneColors: null }), disabled: busy } : undefined}
+          control={<Switch on={surface.laneColors} label="Lane colours" disabled={busy} onChange={(laneColors) => onChange({ laneColors })} />}
+        />
+        <SettingsRow
+          name="Columns"
+          description="A box around each column's cards, or a rule under its heading."
+          reset={appearance.buckets !== null ? { label: backTo(own.buckets), onReset: () => onChange({ buckets: null }), disabled: busy } : undefined}
+          control={<Segmented label="Columns" value={surface.buckets} options={BUCKET_CHOICES} disabled={busy} onChange={(buckets) => onChange({ buckets })} />}
+        />
+        <SettingsRow
+          name="Status wash"
+          description="Colour a whole card by what it is doing — running, waiting or failed. Finished cards fade."
+          reset={appearance.statusWash !== null ? { label: backTo(own.statusWash ? "on" : "off"), onReset: () => onChange({ statusWash: null }), disabled: busy } : undefined}
+          control={<Switch on={surface.statusWash} label="Status wash" disabled={busy} onChange={(statusWash) => onChange({ statusWash })} />}
+        />
+        <SettingsRow name="Preview" description={`What tasks look like in ${card.label}, with the options above.`} full>
+          <TaskPreview />
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection id="conversation" title="Conversation">
+        <SettingsRow
+          name="Batches that ran in turn"
+          description="A fan-out whose elements ran one after another: down the page in the order they ran, or side by side as a band."
+          info="A band is two columns, or tabs from three elements up — the way elements that ran at the same time are always drawn."
+          reset={conversation.sequentialBatches !== "stacked" ? { label: "Back to one after another", onReset: () => onConversation({ sequentialBatches: "stacked" }), disabled: busy } : undefined}
+          control={
+            <Segmented
+              label="Batches that ran in turn"
+              value={conversation.sequentialBatches}
+              options={BATCH_CHOICES}
+              disabled={busy}
+              onChange={(sequentialBatches) => onConversation({ sequentialBatches })}
+            />
+          }
+        />
+        <SettingsRow name="Preview" description="Two elements of one batch, as a run's conversation will draw them." full>
+          <ConversationPreview layout={conversation.sequentialBatches} />
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection id="text" title="Text">
+        <SettingsRow
+          name="App font"
+          description={
+            <>
+              JaiRA's own words: the names of rooms, actions and states.
+              <span className="set-stack data-faint">
+                <Resolved families={appearance.appFamily} voice="app" fallback={DEFAULT_APP_STACK} />
+              </span>
+            </>
+          }
+          reset={
+            appearance.appFamily.length > 0 || appearance.sizeApp !== SIZE_LIMITS.sizeApp.default
+              ? { label: `Back to ${SHIPPED_APP_FAMILY}, ${SIZE_LIMITS.sizeApp.default} px`, onReset: () => onChange({ appFamily: [], sizeApp: SIZE_LIMITS.sizeApp.default }), disabled: busy }
+              : undefined
+          }
+          control={
+            <div className="set-font">
+              <FamilyStack
+                families={appearance.appFamily}
+                ours={SHIPPED_APP_FAMILY}
+                fallback={DEFAULT_APP_STACK}
+                suggested={SUGGESTED_APP}
+                voice="app"
+                disabled={busy}
+                onChange={(appFamily) => onChange({ appFamily })}
+              />
+              <SizeStep value={appearance.sizeApp} limits={SIZE_LIMITS.sizeApp} disabled={busy} onChange={(sizeApp) => onChange({ sizeApp })} />
+            </div>
+          }
+        />
+        <SettingsRow
+          name="Data font"
+          description={
+            <>
+              Everything else: paths, task titles, commands, counts.
+              <span className="set-stack data-faint">
+                <Resolved families={appearance.dataFamily} voice="data" fallback={DEFAULT_DATA_STACK} />
+              </span>
+            </>
+          }
+          reset={
+            appearance.dataFamily.length > 0 || appearance.sizeData !== SIZE_LIMITS.sizeData.default
+              ? { label: `Back to ${SHIPPED_DATA_FAMILY}, ${SIZE_LIMITS.sizeData.default} px`, onReset: () => onChange({ dataFamily: [], sizeData: SIZE_LIMITS.sizeData.default }), disabled: busy }
+              : undefined
+          }
+          control={
+            <div className="set-font">
+              <FamilyStack
+                families={appearance.dataFamily}
+                ours={SHIPPED_DATA_FAMILY}
+                fallback={DEFAULT_DATA_STACK}
+                suggested={SUGGESTED_DATA}
+                voice="data"
+                disabled={busy}
+                // OURS, and a note rather than a block (§6): two voices can be configured into one, and
+                // a column of counts that no longer lines up is worth saying out loud. It is their app.
+                warn={(family) => (proportional.has(family) ? "not monospaced — columns will not line up" : undefined)}
+                onChange={(dataFamily) => onChange({ dataFamily })}
+              />
+              <SizeStep value={appearance.sizeData} limits={SIZE_LIMITS.sizeData} disabled={busy} onChange={(sizeData) => onChange({ sizeData })} />
+            </div>
+          }
+        />
+        <SettingsRow
+          name="Editor size"
+          description="Editors follow the data font until you give them a size of their own."
+          reset={appearance.advanced ? { label: "Back to following the data font", onReset: () => onChange({ advanced: false }), disabled: busy } : undefined}
+          control={
+            <>
+              {appearance.advanced ? (
+                <SizeStep value={appearance.sizeEditor} limits={SIZE_LIMITS.sizeEditor} disabled={busy} onChange={(sizeEditor) => onChange({ sizeEditor })} />
+              ) : (
+                <span className="set-inherit">follows the data font</span>
+              )}
+              <Switch on={appearance.advanced} label="Separate editor size" disabled={busy} onChange={(advanced) => onChange({ advanced })} />
+            </>
+          }
+        />
+        <SettingsRow
+          name="Smooth text"
+          description="Grayscale antialiasing, instead of the platform's own rendering."
+          control={<Switch on={appearance.smoothing} label="Smooth text" disabled={busy} onChange={(smoothing) => onChange({ smoothing })} />}
+        />
+        <SettingsRow name="Preview" description="Both voices side by side, as a file row and a task row draw them." full>
+          <Preview />
+        </SettingsRow>
+      </SettingsSection>
+
+      {renderers !== undefined && onRenderer !== undefined && editors !== undefined && onEditor !== undefined ? (
+        // A workspace rather than a list of settings — a tree beside a stage beside a live editor — so
+        // it takes the page's full width and draws its own surfaces instead of sitting in a card.
+        <SettingsSection id="file-types" title="File types" plain wide>
+          <FileTypesPane renderers={renderers} editorTheme={appearance.editorTheme} editors={editors} busy={busy} onRenderer={onRenderer} onEditor={onEditor} />
+        </SettingsSection>
+      ) : null}
+    </SettingsPage>
   );
 }
 

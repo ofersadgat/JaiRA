@@ -1201,6 +1201,76 @@ for exactly the five where Monaco's worker binds to the canonical id (TypeScript
 JavaScript, JSON, CSS, HTML) and a synthetic one loses diagnostics and completion.
 Worth it only if two editors of different types are routinely on screen together.
 
+### 6.5 The window's theme, and three things about the board
+
+The person's complaint, 2026-09-23: "grey on grey". Measured, it was exact — the
+sidebar, the ground, the column, the column's heading band and the card were five
+cool greys a few points apart (card : column 1.13:1, column : ground 1.07:1), and a
+card was a 6% wash over its column rather than a surface, so nothing on the board
+read as an object. From a study of fifteen palettes they picked five and a sixth:
+**Ink rail** (the default — a dark sidebar in both themes beside a near-white
+workspace), **Classic** (the original, byte for byte), **Hairline**, **High
+contrast**, **Blueprint** and **Pastel**; then **Pastel rail** (Pastel beside a dark
+aubergine sidebar) and **Zinc** (after t3code's own tokens — its neutrals, one indigo,
+borders rather than fills; deliberately not named after it). Each has a light and a
+dark, and the mode is light, dark or **system**, which follows the OS and again when it
+changes (`resolveTheme`, `useSystemDark`, and `nativeTheme` in main for the frame).
+
+A palette is `Appearance.palette`, written by `applySurface` as `data-palette` on
+`:root` (removed for classic, so the stylesheet's own `:root` paints it) and stamped
+as `ink` in `index.html` so the first paint is already the default. Each is a token
+block per theme plus a few rules; what all but classic share is the fix itself — the
+column is a TRACK and the card a TILE with an edge and a shadow of its own, so a
+thing is brighter than what holds it. `PALETTE_FRAME` is the copy `main` needs for
+the window's background and the OS controls, kept beside the list of palettes.
+
+The three options are about the board, not about a palette, and work over every
+one: **lane colours** (each column its own colour, cycling through six),
+**columns** as a `box` or a `line`, and **status wash** (a card coloured by its
+pill's kind — `data-pill` on the card — and a finished one faded). Each is `null`
+for "what the palette says" (`PALETTE_SURFACE`: line for ink, lanes for pastel),
+resolved by `surfaceOf` before anything reaches the stylesheet, and written as an
+attribute only when it departs from the classic board. Choosing a palette puts all
+three back to null, so a palette arrives the way it was designed.
+`shots/palettes.mts` photographs every palette in both themes over a real board and
+conversation.
+
+### 6.6 Settings pages, after t3code, and the accordion under the tab
+
+The person, shown JaiRA's settings redrawn in t3code's pattern: "i like this much
+better … much more readable than jaira patterns". So a Settings page is
+`settingsLayout.tsx`: a title and one sentence saying whose settings these are; each
+section a quiet sentence-case heading over ONE bordered card; each setting one row —
+its name and one sentence on the left, its control at the right edge, a `↺` beside
+the name only while the value differs from what it would be untouched, and an `ⓘ` for
+whatever did not fit the sentence. The uppercase `app-label` heading over loose rows
+is what it replaced. Appearance is the first page built this way (Mode, Theme, Board,
+Conversation, Text, File types — the Conversation tab held one setting about how
+things look, so it moved in; File types stayed, on the person's call); the other tabs
+follow.
+
+While a tab is open, the sidebar lists that page's sections indented under it, lights
+the one being read as the page scrolls, and scrolls to one when it is clicked (the
+person's design). The list is read off the page, not declared: a section says it is
+one with `data-part` (`SettingsSection`, and a top-level `Level`), and
+`useSettingsParts` finds them, watches the scroll box, and holds a click's choice while
+the smooth scroll it started is still moving.
+
+Then every other tab, on the person's go-ahead ("do the other tabs, and use a switch to
+enable/disable a row"). `App.tsx` wraps each in a page (`SettingsFrame`: its name, the
+sentence saying whose settings these are — `settingsLeadOf` — and the layer switch at
+the head's right edge) and provides `SettingsRowsContext`, under which `Field` draws as
+a row: one sentence, the rest and the config key behind an `ⓘ`. A top-level `Level`
+and every `cfg-group` became a section. A field a layer may or may not state has a
+SWITCH before its name that enables the row (`Field.toggle`, and the schema form's own
+switch with `off`): on, the layer states it and the control edits it; off, the row is
+disabled and shows what it inherits. Switching on pins the inherited value, so nothing
+changes until it is edited — which is also what replaced the Files tab's "Reset to the
+defaults" button. The `SET HERE` tag stays only outside Settings. Run inputs, New task
+and gates are untouched: the context is only provided around the Settings view.
+`shots/settings-tabs.mts` photographs every tab in both themes and drives the
+accordion and a row switch.
+
 
 ## 7. Changes to existing code
 

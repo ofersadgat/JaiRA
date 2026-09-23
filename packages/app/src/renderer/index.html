@@ -1,5 +1,8 @@
 <!doctype html>
-<html lang="en">
+<!-- data-palette is the DEFAULT palette (`DEFAULT_PALETTE`), stamped here so the first paint — before
+     any script has read the saved preference — is already the one most people see. `applyAppearance`
+     rewrites it, or removes it for classic, as soon as settings arrive. -->
+<html lang="en" data-palette="ink">
   <head>
     <meta charset="utf-8" />
     <!-- The renderer loads only its own bundle; no remote code, no inline eval. worker-src and

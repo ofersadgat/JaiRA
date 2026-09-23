@@ -44,7 +44,7 @@ import type {
   JairaSettings,
   Appearance,
   ConversationLook,
-  JairaTheme,
+  ThemeMode,
   PendingApproval,
   ModuleApproval,
   StartTaskRequest,
@@ -81,6 +81,7 @@ import {
   defaultLogPolicy,
   defaultRendererChoice,
   isTextMime,
+  resolveTheme,
   SHARED_SESSION,
   WORKFLOW_JSON,
   type WritingTool,
@@ -120,7 +121,7 @@ import {
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
-import { applyAppearance } from "./appearance";
+import { applyAppearance, useSystemDark } from "./appearance";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pill";
@@ -790,7 +791,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "providers" | "executors" | "toolsets" | "integrations" | "files" | "appearance" | "conversation" | "config" | "history";
+export type SettingsSection = "providers" | "executors" | "toolsets" | "integrations" | "files" | "appearance" | "config" | "history";
 
 const EMPTY: AppState = {
   at: null,
@@ -2127,9 +2128,11 @@ export function useApp() {
    * `:root[data-theme="dark"]` block selects on, and because it is trivially inspectable in
    * devtools when a colour looks wrong.
    */
+  // `system` is resolved here, against the OS, and re-resolved when the OS changes its mind.
+  const systemDark = useSystemDark();
   useEffect(() => {
-    document.documentElement.dataset["theme"] = state.settings.theme;
-  }, [state.settings.theme]);
+    document.documentElement.dataset["theme"] = resolveTheme(state.settings.theme, systemDark);
+  }, [state.settings.theme, systemDark]);
 
   /**
    * Apply the typography preferences to the same element (SHELL.md §6).
@@ -3400,7 +3403,7 @@ export function useApp() {
        * instant, and a settings file that cannot be written is not a reason to refuse the change
        * for this session.
        */
-      setTheme: async (theme: JairaTheme) => {
+      setTheme: async (theme: ThemeMode) => {
         patch({ settings: { ...ref.current.settings, theme } });
         try {
           patch({ settings: keepingUi(await invoke("settings:write", { theme })) });

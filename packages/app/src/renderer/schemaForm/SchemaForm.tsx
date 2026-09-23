@@ -308,6 +308,10 @@ function Member({
       param={ctx.labels === "keys" || ctx.hidePaths === true ? undefined : path}
       {...(pres.tooltip !== undefined ? { hint: pres.tooltip } : {})}
       error={on && sourced === undefined ? errorAt(ctx, path) : undefined}
+      // Switched off, the row says what it inherits and is otherwise disabled — see `Field.toggle`.
+      off={!on}
+      // A nested object or list is a form of its own: it goes under the name, across the row.
+      wide={isComposite(held, root)}
       lead={
         !required && !reading && sourced === undefined ? (
           // In a layered form this switch IS the "set here" mark — it says whether this layer states

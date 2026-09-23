@@ -27,7 +27,8 @@ import {
   type SecretCapabilities,
   type SecretTarget,
 } from "@jaira/shared/browser";
-import { Disclosure, Field, FieldGrid, Level, SelectInput, StatusDot, Switch, TextArea, TextInput, stateWord, type ProviderState } from "./controls";
+import { Disclosure, Field, FieldGrid, Level, SelectInput, StatusDot, Switch, TextArea, TextInput, partIdOf, stateWord, type ProviderState } from "./controls";
+import { SettingsSection } from "./settingsLayout";
 import { BrandIcon, Icon } from "./icons";
 import {
   MODEL_PROVIDERS,
@@ -107,11 +108,7 @@ export function ProvidersPane(props: ProvidersPaneProps): JSX.Element {
   return (
     <div className="cfg-pane">
       {groups.map((group) => (
-        <section key={group.title} className="cfg-group">
-          <header className="cfg-group-head">
-            <h4>{group.title}</h4>
-            <p className="cfg-hint">{group.hint}</p>
-          </header>
+        <SettingsSection key={group.title} id={partIdOf(group.title)} title={group.title} info={group.hint}>
           <ul className="cfg-rows">
             {group.specs.map((spec) => (
               <ProviderRow
@@ -124,9 +121,11 @@ export function ProvidersPane(props: ProvidersPaneProps): JSX.Element {
               />
             ))}
           </ul>
-        </section>
+        </SettingsSection>
       ))}
-      <AddProvider layer={layer} busy={props.busy || !props.editable} onAdd={props.onAdd} />
+      <SettingsSection id="add-agent" title="Another agent">
+        <AddProvider layer={layer} busy={props.busy || !props.editable} onAdd={props.onAdd} />
+      </SettingsSection>
     </div>
   );
 }
@@ -272,7 +271,8 @@ function ProviderRow({
         <div className="cfg-row-body">
           <p className="cfg-hint">{spec.hint}</p>
           {spec.levels.map((level, depth) => (
-            <Level key={level.title} title={level.title} hint={level.hint} depth={depth}>
+            // One level deeper than the page: inside a row, a type level is a band, never a section.
+            <Level key={level.title} title={level.title} hint={level.hint} depth={depth + 1}>
               {level.fields.length === 0 ? (
                 <p className="cfg-hint">Nothing to configure at this level.</p>
               ) : (

@@ -170,7 +170,10 @@ export function FilesPane({
           <Field
             label="Shared"
             param="files.hidden"
-            set={!isDefault}
+            wide
+            // On, this layer states its own list (starting from the one in effect); off, it goes back to
+            // the defaults — which is what "Reset to the defaults" used to be a button for.
+            toggle={{ on: !isDefault, disabled: locked, onChange: (on) => (on ? setShared(shared) : onSaveShared(null, layer)) }}
             hint={
               isDefault
                 ? "What every root hides until someone says otherwise. Adding one keeps these."
@@ -195,7 +198,7 @@ export function FilesPane({
           <Field
             label="Yours"
             param="filesHidden"
-            set={personal.length > 0}
+            wide
             hint="Applied after the shared list and kept out of it — in user-settings.json, so it never arrives through a pull request."
           >
             <RuleBox
@@ -253,13 +256,6 @@ export function FilesPane({
             </span>
           ) : null}
         </div>
-        {!isDefault ? (
-          <div className="pane-actions">
-            <button className="ghost" disabled={locked} onClick={() => onSaveShared(null, layer)}>
-              Reset shared list to the defaults
-            </button>
-          </div>
-        ) : null}
       </Level>
     </div>
   );

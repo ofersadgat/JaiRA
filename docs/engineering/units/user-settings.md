@@ -3,7 +3,7 @@ id: engineering/units/user-settings
 type: engineering-unit
 status: shipped
 updated: 2026-09-13
-implements: [product/read-comfortably, product/all-projects-in-one-place, product/see-what-changed-since-you-looked, ux/patterns/the-window-remembers-its-arrangement, ui/surfaces/settings-appearance, ui/surfaces/settings-conversation]
+implements: [product/read-comfortably, product/all-projects-in-one-place, product/see-what-changed-since-you-looked, ux/patterns/the-window-remembers-its-arrangement, ui/surfaces/settings-appearance]
 layer: data
 owns_contracts: [engineering/contracts/user-settings-json]
 requires: [engineering/units/project-layout, engineering/units/app-log]

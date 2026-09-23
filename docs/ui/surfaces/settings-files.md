@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-files
 type: ui-surface
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 kind: screen
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/absence-is-stated, ux/patterns/verbs-on-the-thing-itself]
 serves: [product/share-processes-across-projects, product/find-out-why-the-app-misbehaves, product/keep-track-of-everything]
@@ -18,9 +18,9 @@ The Files section of the Settings room: three levels that say which paths the fi
 ## The two lists read first, the system switch second, and the combined order last
 
 - **Level.** Each of the three is an uppercase level heading in `--dim` with a hint under it, from [settings-field](../components/settings-field.md).
-- **Hidden in the tree.** Two settings rows. `Shared` writes the layer being edited and carries `SET HERE` once that layer states a list. `Yours` is kept in this person's own settings and carries `SET HERE` whenever it holds a rule. Each control is a [chip-box](../components/chip-box.md) on the right-hand rail.
+- **Hidden in the tree.** Two settings rows. `Shared` is led by a switch: on, the layer being edited states its own list; off, it shows the defaults dimmed and the layer inherits them — the switch is what the old Reset button did. `Yours` is kept in this person's own settings and has no switch. Each control is a [chip-box](../components/chip-box.md) on the right-hand rail.
 - **JaiRA's own directory.** One row, `Show system/`, whose control is a [switch](../components/switch.md) and whose hint says what the switch is doing.
-- **In effect.** Every rule as a chip in one wrapping line with no box around it, the shared list first and the personal list after, each chip ending in its origin word. `Reset shared list to the defaults` follows as a ghost button while the shared list is stated.
+- **In effect.** Every rule as a chip in one wrapping line with no box around it, the shared list first and the personal list after, each chip ending in its origin word.
 
 A rule chip holds a mark, the pattern in `.data-text` and an end part:
 
@@ -47,10 +47,10 @@ A rule chip holds a mark, the pattern in `.data-text` and an end part:
 | --- | --- | --- |
 | Typing a pattern, then Enter or leaving the field | Appends it to that list; an empty entry or a bare `!` adds nothing | A new chip before the field, and the tree re-reads |
 | Escape in the add field | Clears the typed text | The placeholder returns |
-| The first add to a list shown as defaults | Writes every default with the new pattern, so nothing the defaults hid appears | The dashed chips become removable chips and `SET HERE` appears |
+| The first add to a list shown as defaults | Writes every default with the new pattern, so nothing the defaults hid appears | The dashed chips become removable chips and the row's switch turns on |
 | `✕` on a chip | Removes that rule; removing the last shared rule states an empty list, which shows everything | The chip goes from its box and from `In effect` |
 | The system switch | Adds or removes `!system` at the end of the personal list | The hint changes and a reveal chip appears or goes |
-| `Reset shared list to the defaults` | Removes the layer's list, with no confirmation | Dashed `default` chips return and the button goes |
+| `Shared`'s switch, off | Removes the layer's list, with no confirmation | Dashed `default` chips return, dimmed |
 
 ## The copy says where each list is kept and who sees it
 
@@ -63,7 +63,7 @@ A rule chip holds a mark, the pattern in `.data-text` and an end part:
 | Chip | tooltip `remove {pattern}` · origin words `default` · `shared` · `yours` |
 | Level two | `JaiRA's own directory` · `system/ holds the database, tasks, snapshots, logs and artifacts. Nobody authors it, so it is hidden — but reading what a run wrote is a fair thing to want when a run has gone wrong.` |
 | System row | `Show system/`; hint `Shown, for you alone. This is a `!system` rule in your own list.` or `Hidden — the default, and what almost everyone wants.`; switch name `shown` · `hidden` |
-| Level three | `In effect` · `Every rule, in the order it is applied. The last one to match a path decides.` · `Reset shared list to the defaults` · `No rules: every root shows everything, system/ included.` |
+| Level three | `In effect` · `Every rule, in the order it is applied. The last one to match a path decides.` · `No rules: every root shows everything, system/ included.` |
 
 ## A person arrives from the Settings panel and returns to the tree to see the effect
 
