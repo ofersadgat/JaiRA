@@ -73,6 +73,7 @@ describe("a toolset, referenced from a state", () => {
       // A RUN is handed the block whole (upstream `ExecServices.authored`), so nothing is carried twice.
       permissions: {
         tools: { read_file: "allow", glob: "allow", bash: "smart", ...TOOLSET_MARKERS },
+        implementations: {},
         other: "deny",
         subjects: { bash: "deny", "git status": "allow" },
         source: "$/toolsets/chat/read-only",
@@ -89,6 +90,7 @@ describe("a toolset, referenced from a state", () => {
       // line added to the file could be shadowed here, and the source says `inline`.
       permissions: {
         tools: { read_file: "allow", bash: "smart", write_file: "ask", ...TOOLSET_MARKERS },
+        implementations: {},
         other: "deny",
         subjects: { bash: "smart" },
         source: "inline",
@@ -115,8 +117,8 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
     write(project.paths.workflowsDir, "other.json", state({ tools: "$/toolsets/chat/shared-only" }));
-    expect(environmentOf("plan")).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" } });
-    expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow", ...TOOLSET_MARKERS } } });
+    expect(environmentOf("plan")).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } });
+    expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow", ...TOOLSET_MARKERS }, implementations: {} } });
   });
 
   it("is inherited by a child, and a child's own toolset replaces it", () => {
@@ -131,7 +133,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "wf/a.json", leaf);
     write(project.paths.workflowsDir, "wf/b.json", leaf);
     const bundle = load("wf");
-    expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" } });
+    expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } });
     expect(bundle.states["wf/b"]!.environment?.tools).toEqual(["bash"]);
   });
 });
@@ -202,7 +204,7 @@ describe("a toolset inside a REFERENCED block", () => {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     write(project.paths.jairaDir, "envs/reader.json", { tools: { read_file: "deny", other: "deny" } });
     const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
-    expect(pinned.states["plan"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" } });
+    expect(pinned.states["plan"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } });
     expect(snapshotHash(load("plan"))).not.toBe(snap.hash);
   });
 
@@ -246,7 +248,7 @@ describe("the snapshot", () => {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "deny", other: "deny" });
     const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
-    expect(pinned.states["plan"]!.environment?.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" });
+    expect(pinned.states["plan"]!.environment?.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" });
     // …and the edit is a different workflow to the next task.
     expect(snapshotHash(load("plan"))).not.toBe(snap.hash);
   });
@@ -410,6 +412,7 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
           stop_task: "deny",
           ...TOOLSET_MARKERS,
         },
+        implementations: {},
         other: "deny",
         subjects: { bash: "deny" },
         // Beside `subjects`: the file they came from, which is what an approval names.

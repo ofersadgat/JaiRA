@@ -17,7 +17,8 @@
  * answer stays true when any of them changes. Reach is judged, not mechanism: a way in that is
  * refused is not a way in, and a shell every line of which is refused is not a shell.
  */
-import { mcpToolName, type AgentQuery, type AgentQueryOptions } from "@declarative-ai/agents-api";
+import { mcpToolName, type AgentQuery, type AgentQueryOptions, type InjectedTool } from "@declarative-ai/agents-api";
+import type { SpawnProcess, StartMcpBridge } from "@declarative-ai/agents-cli";
 import type { Tool } from "@declarative-ai/exec";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import { loadBundle } from "@declarative-ai/hw";
@@ -28,7 +29,7 @@ import {
   unmappedNatives,
   type PermissionsDecl,
 } from "@jaira/shared";
-import { AGENT_CODEX, registerAgentRuntimes } from "./agents";
+import { AGENT_CLI, AGENT_CODEX, registerAgentRuntimes } from "./agents";
 import { CLAUDE_TOOLS } from "./agentTools";
 import { agentPromptRoutes } from "./modelRoutes";
 import { compilePolicy, type JairaPolicy } from "./policy";
@@ -101,6 +102,11 @@ export interface HandedOptions {
    * merged per key, `tools` one level deeper, the list replaced.
    */
   parent?: HandedEnvironment;
+  /**
+   * How the state reaches the agent: by a model prefix (`model: "<agent>/default"`, the prompt route),
+   * or as a FUNCTION (`operation.function: "<agent>"`), which is registered separately. Default `route`.
+   */
+  via?: "route" | "function";
 }
 
 /** The `policy` and `approve` a probe run is handed, with every approval counted by `onAsk`. */
@@ -194,20 +200,25 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
     seen.push(opts);
     yield { type: "result", result: { text: "Done.", structured: { report: "probe" } } };
   };
+  const viaFunction = options.via === "function";
   const { states, root } = probeStates(
     environment,
-    { kind: "prompt", prompt: "probe", model: "claude-cli/default" },
-    { report: { kind: "text", schema: { type: "string" } } },
+    viaFunction
+      ? { kind: "function", function: AGENT_CLI, args: { prompt: "probe" } }
+      : { kind: "prompt", prompt: "probe", model: `${AGENT_CLI}/default` },
+    viaFunction ? {} : { report: { kind: "text", schema: { type: "string" } } },
     options,
   );
   grantAlwaysGrantedTools(states);
+  const registry = stubRegistry();
+  if (viaFunction) registerAgentRuntimes(registry, { query, adapters: ["cli"] });
 
   let asked = 0;
   const result = await executeWorkflow({
     bundle: loadBundle(states, root),
     inputs: {},
-    registry: stubRegistry(),
-    prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: "claude-cli" } }),
+    registry,
+    prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: AGENT_CLI } }),
     ...governanceOf(options, () => {
       asked += 1;
     }),
@@ -288,32 +299,63 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
   };
 }
 
-/** What a delegated codex is handed: its one channel, the sandbox. */
+/**
+ * What a delegated codex is handed: its sandbox, and the tools of ours served to it over its bridge —
+ * each call to which is put to the gate at the bridge, since codex has no permission callback.
+ */
 export interface CodexHanded {
-  /** `plan` is `--sandbox read-only` on this transport; absent keeps the configured sandbox. */
-  permissionMode: string | undefined;
-  /** Our tools, served over the bridge — which codex refuses to be handed at all. */
+  /** The sandbox `codex exec` is spawned with (`sandbox_mode` on its argv). */
+  sandbox: string | undefined;
+  /** Our tools, served over the bridge. */
   served: string[];
+  /** The `-c mcp_servers.dai=…` override that points codex at the bridge, the run's secret replaced by `<url>`; absent with no bridge. */
+  bridge: string | undefined;
+  /**
+   * What decides a call to each served tool but the shell (whose lines are in {@link shell}), asked
+   * through the bridge's own binding: `ask` when a person was asked, `deny` when the call was refused
+   * without running, `allow` when it ran.
+   */
+  tools: Record<string, HandedDecision>;
+  /** What decides each of {@link SHELL_PROBES} through a served shell; empty when none is served. */
+  shell: Record<string, HandedDecision>;
 }
 
-export interface CodexHandedOptions extends HandedOptions {
-  /**
-   * How the state reaches codex: by a model prefix (`model: "codex-cli/default"`, the prompt route),
-   * or as a FUNCTION (`operation.function: "codex-cli"`), which is registered separately.
-   */
-  via?: "route" | "function";
-}
+export type CodexHandedOptions = HandedOptions;
+
+/** The bridge's URL in a probe run — nothing listens there; the spawn is a double. */
+const PROBE_BRIDGE_URL = "http://127.0.0.1:9/mcp/probe";
 
 /**
- * {@link handedToClaude}'s codex half: one effective environment run to the spawn a real `codex exec`
- * would get, through the engine and whichever wrapper holds that path to its toolset.
+ * {@link handedToClaude}'s codex half: one effective environment run through the engine, whichever
+ * wrapper holds that path to its toolset, and upstream's REAL codex transport — its refusals, its argv
+ * and its bridge — to the process a real `codex exec` would be. A double stands in for the binary (a
+ * spawn that records the argv and answers) and for the listener (a bridge that records what it would
+ * serve); every call is then made through what the bridge would have run, so the gate at the bridge
+ * is what decides it.
  */
 export async function handedToCodex(environment: HandedEnvironment, options: CodexHandedOptions = {}): Promise<CodexHanded> {
-  const seen: AgentQueryOptions[] = [];
-  const query: AgentQuery = async function* (opts) {
-    seen.push(opts);
-    yield { type: "result", result: { text: "Done.", structured: { report: "probe" } } };
+  const argvs: string[][] = [];
+  const spawn: SpawnProcess = (argv) => {
+    argvs.push(argv);
+    const answer = options.via === "function" ? "Done." : JSON.stringify({ report: "probe" });
+    const lines = [
+      JSON.stringify({ type: "thread.started", thread_id: "probe" }),
+      JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: answer } }),
+    ];
+    return {
+      lines: (async function* () {
+        yield* lines;
+      })(),
+      kill: () => undefined,
+      exit: Promise.resolve(0),
+    };
   };
+  let bridged: Record<string, InjectedTool> | undefined;
+  const startBridge: StartMcpBridge = async (spec) => {
+    bridged = spec.tools;
+    return { url: PROBE_BRIDGE_URL, close: async () => undefined };
+  };
+
   const viaFunction = options.via === "function";
   const { states, root } = probeStates(
     environment,
@@ -325,18 +367,44 @@ export async function handedToCodex(environment: HandedEnvironment, options: Cod
   );
   grantAlwaysGrantedTools(states);
   const registry = stubRegistry();
-  if (viaFunction) registerAgentRuntimes(registry, { query, adapters: ["codex"] });
+  if (viaFunction) registerAgentRuntimes(registry, { spawn, startBridge, adapters: ["codex"] });
+  let asked = 0;
   const result = await executeWorkflow({
     bundle: loadBundle(states, root),
     inputs: {},
     registry,
-    prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: AGENT_CODEX } }),
-    ...governanceOf(options, () => {}),
+    prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { spawn, startBridge }), tree: { kind: "agent", agent: AGENT_CODEX } }),
+    ...governanceOf(options, () => {
+      asked += 1;
+    }),
   });
-  const opts = seen[0];
-  if (opts === undefined) {
+  const argv = argvs[0];
+  if (argv === undefined) {
     const reason = (result as { failure?: { reason?: string } }).failure?.reason ?? JSON.stringify(result).slice(0, 400);
     throw new Error(`the engine never reached codex under this block: ${reason}`);
   }
-  return { permissionMode: opts.permissionMode, served: Object.keys(opts.mcpTools ?? {}).sort() };
+
+  const decide = async (tool: InjectedTool, input: Record<string, unknown>): Promise<HandedDecision> => {
+    const before = asked;
+    const answer = await tool.run(input as never);
+    if (asked > before) return "ask";
+    return answer !== null && typeof answer === "object" && (answer as { denied?: unknown }).denied === true ? "deny" : "allow";
+  };
+  const tools: Record<string, HandedDecision> = {};
+  const shell: Record<string, HandedDecision> = {};
+  for (const [name, tool] of Object.entries(bridged ?? {})) {
+    if (name === SHELL_TOOL) {
+      for (const [kind, line] of Object.entries(SHELL_PROBES)) shell[kind] = await decide(tool, { command: line });
+    } else {
+      tools[name] = await decide(tool, PROBE_INPUT);
+    }
+  }
+  const setting = (prefix: string): string | undefined => argv.find((arg) => arg.startsWith(prefix));
+  return {
+    sandbox: /^sandbox_mode="(.*)"$/.exec(setting("sandbox_mode=") ?? "")?.[1],
+    served: Object.keys(bridged ?? {}).sort(),
+    bridge: setting("mcp_servers.")?.replace(PROBE_BRIDGE_URL, "<url>"),
+    tools,
+    shell,
+  };
 }

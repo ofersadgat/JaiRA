@@ -645,6 +645,55 @@ Two failure rows in [tool-policy](../units/tool-policy.md) closed.
   nothing else in the target moves; the snapshot stores the resolved state, so
   a pinned task keeps the lowered map.
 
+### Amended 2026-09-22 (codex and functions): codex is served its tools, a function call is handed what its route is, and a child's map is its own
+
+Two failure rows in [tool-policy](../units/tool-policy.md) closed, and one layering
+question settled. Upstream: declarative-ai branch `task/codex-held-tools`, additive.
+
+- **Codex runs a state held to a toolset as claude does.** Measured against the
+  installed `codex-cli 0.147.0` with a real `codex exec` against a real bridge:
+  codex takes MCP servers as `-c mcp_servers.<name>={url=…}` overrides, and under
+  the `approval_mode = "auto"` upstream used to write, every call came back `user
+  cancelled MCP tool call`; under `approval_mode = "approve"` the call reaches the
+  bridge. Codex also does not wait for a server: with the handshake held back 8 s
+  the turn began without the tools and the run exited 0 having answered without
+  them. `required = true` makes codex block until the server has listed its
+  tools and fail (`required MCP servers failed to initialize`, exit 1) past
+  `startup_timeout_sec`; that closes the handshake race the claude adapter closes
+  by holding its prompt. `tool_timeout_sec` is a day, since a gated call may wait
+  on a person. Codex has no permission callback, so upstream `AgentExecutor` puts
+  every call that crosses the bridge to `ctx.gate` before the tool runs — the
+  subject and input the claude callback would have been asked about — and
+  `codexRefusal` no longer refuses served tools. A real run through the rebuilt
+  executor: an approver's yes ran the tool and codex answered with its result; a
+  no ran nothing and codex said it was refused.
+- **§3's rule for a coarse transport, restated now that ours reach codex.** A
+  subject held with our implementation is served and gated; displacing codex's
+  native for it is shutting the sandbox, since codex cannot lose one tool alone.
+  So `workspace-write` opens only where an entry KEEPS a writer of codex's own
+  (`"bash": { "implementation": "native" }` keeps `shell`, `edit` keeps
+  `apply_patch`), not merely where a writing subject is held — which is what
+  invariant 35 said before and what let codex's own writers bypass an `ask` on
+  our tool. A kept codex writer answers to the sandbox, not to its entry's mode;
+  the composer now offers the implementation pick on codex's line.
+- **A claude agent reached as a function is handed what its route is.** Upstream's
+  function entry takes `wrapExecutor`, a wrapper around the executor it builds for
+  each call; JaiRA passes the route's own `withAgentToolset`, so an entry that
+  says `native` keeps the built-in under an ask rule written into the op the entry
+  builds — where a wrapper of the function's `run` could not reach. Measured with
+  `handedToClaude` by route and by function: identical but for `show_artifact`,
+  which the engine grants to prompt states only, and claude's question tool,
+  withheld from the route's structured-output call. `agentServices` is gone.
+- **A child that writes a toolset does not inherit its parent's implementation
+  choices.** §1 makes a map the whole statement of what a state holds and whose
+  code serves it; a state that wants its parent's toolset and more says so with
+  `$ref` and siblings. Lowering therefore writes `implementations` on every map,
+  empty where none was chosen, so the engine's per-key merge of `permissions`
+  replaces a parent's instead of carrying a `native` down to a child whose line
+  said nothing of it. `other` is still inherited where a child writes none: a map
+  cannot write "no `other`", and an unwritten one is the gate's last resort, not
+  a choice to override.
+
 ## Open
 
 - `smart` on a command subject: what the approver is shown for one part of

@@ -105,7 +105,8 @@ describe("the settings a message would run under", () => {
     const offered = planOf({ taskId, instanceId }).available.tools;
     expect(offered).toEqual(
       expect.arrayContaining([
-        { name: "bash", natives: { "claude-code": "Bash", "claude-cli": "Bash" } },
+        // Codex is served ours over its bridge, so keeping its own shell is a pick on its line too.
+        { name: "bash", natives: { "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" } },
         { name: "read_file", natives: { "claude-code": "Read", "claude-cli": "Read" } },
         { name: "write_file", natives: { "claude-code": "Write", "claude-cli": "Write" } },
         // No agent has a built-in doing this job, so there is nothing to pick.

@@ -589,9 +589,11 @@ the blast radius never depends on the contents of `~/.codex/config.toml`. That i
 `policyEnforcement: "config"`, which **passes** the §5.1 gate where `generic-cli`'s
 `"none"` does not.
 
-The gate does not disappear, it moves: an adapter declaring `config` gets its
-injected tools **policy-wrapped by the engine**, so JaiRA's own `bash`/`write_file`
-are still approved per call. Only codex's own built-ins answer to the sandbox alone.
+The gate does not disappear, it moves: JaiRA's own tools are served to codex over
+the same MCP bridge claude uses, and every call that crosses it is put to the
+state's gate **before the tool runs** — an `allow` runs, an `ask` goes to the
+approval UI, a `deny` is refused and the agent reads why. Only codex's own
+built-ins answer to the sandbox alone.
 
 `plan` maps to `read-only`, `bypassPermissions` to `danger-full-access`, and
 everything else to `workspace-write`. Project settings:
@@ -600,15 +602,24 @@ everything else to `workspace-write`. Project settings:
 "agents": { "codex": { "command": "codex", "sandbox": "read-only" } }
 ```
 
-**A codex state must declare no `tools`.** Codex reaches JaiRA's tool bridge and then
-auto-denies the call — the denial comes back as the text `user cancelled MCP tool
-call`, which the agent would report as its answer, so a state would "succeed" having
-done nothing. Until that is solved the adapter refuses instead, naming the tools.
-Codex works from its own built-ins under the sandbox; a state that needs JaiRA's
-tools belongs on `claude-code`/`claude-cli`.
+**A codex state may hold tools, and runs held to its toolset as a claude state
+does.** What codex is handed (§5.1): the tools of ours the toolset holds, over the
+bridge, each call gated; and a sandbox that is `read-only` unless an entry keeps
+codex's own writer (`"bash": { "mode": "ask", "implementation": "native" }` keeps
+its `shell`, `edit` its `apply_patch`). A kept codex writer answers to the sandbox,
+not to the entry's mode — codex cannot ask.
 
-Two more things codex **refuses rather than silently drops**: a per-tool deny list (it
-has no such flag) and a native tool allow-list. It reports no cost either — codex
+The bridge is declared to codex as a **required** MCP server whose tools codex
+approves on its side (`approval_mode = "approve"`): the approving is ours, at the
+bridge. Measured against `codex-cli 0.147.0`, both are load-bearing — under
+`approval_mode = "auto"` every call came back `user cancelled MCP tool call`, and a
+server that is not required let codex start its turn before the handshake finished
+and answer without the tools. Required, codex waits, and fails the run if the
+bridge has not answered within 30 s.
+
+Two more things codex **refuses rather than silently drops**: a per-tool deny list of
+anything but our tools (it has no such flag) and a pre-approval of one of its own
+built-ins. It reports no cost either — codex
 counts tokens, not money — so its runs land in the roll-up with `costSource:
 "unknown"` rather than a made-up number.
 
@@ -839,8 +850,8 @@ the same rule.
   | The toolset… | What the agent gets |
   | --- | --- |
   | does not hold the tool | its built-in is **removed** (claude: `--disallowedTools`; codex: the sandbox switch left off) |
-  | holds it (the default, `"app"`) | JaiRA's implementation, served over the bridge; the built-in is removed so the model cannot reach past it |
-  | holds it as `"implementation": "native"` | the built-in stays, and is forced through the permission callback, so the **entry's mode still decides** — asked about as `read_file`, not as `Read` |
+  | holds it (the default, `"app"`) | JaiRA's implementation, served over the bridge, every call decided by the entry; the built-in is removed so the model cannot reach past it (codex: its writing sandbox stays shut) |
+  | holds it as `"implementation": "native"` | the built-in stays, and is forced through the permission callback, so the **entry's mode still decides** — asked about as `read_file`, not as `Read`. Codex has no callback: keeping its `shell` or `apply_patch` opens its writing sandbox, and the sandbox alone answers for it |
   | says nothing, and the built-in has no standard tool (`Task`, `Agent`, `SlashCommand`) | it answers to **`other`**: `deny` removes it up front, anything else is what the callback answers with. It is never removed merely for having no entry |
 
   So `"tools": { "read_file": "allow" }` on a claude state means the agent has
@@ -863,7 +874,7 @@ the same rule.
   | --- | --- |
   | provider route | the held tools are the only tools there are, each permission-wrapped |
   | `claude-code` / `claude-cli` | the deny list up front, an ask rule for a kept built-in, and the permission callback underneath |
-  | `codex-cli` | its sandbox, and nothing finer: `workspace-write` when the toolset holds `write_file`, `edit` or `bash` with a mode that is not `deny`, `read-only` otherwise |
+  | `codex-cli` | the held tools of ours over its MCP bridge, each call put to the gate at the bridge before it runs; and its sandbox, `workspace-write` only where an entry keeps codex's own `shell` or `apply_patch` (`"implementation": "native"`, not `deny`), `read-only` otherwise |
   | `generic-cli` | nothing — so a toolset that **denies** anything is **refused** there, naming what it denies |
 
   **One shell line is several requests.** A `bash` call is not judged as a tool.
@@ -932,12 +943,20 @@ the same rule.
   the agent's built-in in a run too (ours is not injected beside it), and a written
   `"other": "ask"` (or `"smart"`) forces `Task`, `Agent` and `SlashCommand` to the
   callback — an `other` you did not write does not. An agent reached as a
-  **function** is held too: `"function": "codex-cli"` runs read-only where the
-  toolset holds no open writer, whatever `permissionMode` the call passes, and a
-  generic CLI function refuses a toolset that denies anything. The one exception:
-  a claude agent reached as a function (`"function": "claude-code"`) has nowhere
-  to put the ask rule a kept built-in needs, so `"native"` there gets JaiRA's
-  implementation — reach the agent through a model prefix to keep its own.
+  **function** is held exactly as its route is: `"function": "claude-code"` or
+  `"claude-cli"` is wrapped by the route's own wrapper, so `"native"` keeps the
+  built-in there too, under an ask rule; `"function": "codex-cli"` is served its
+  held tools and runs read-only unless an entry keeps a writer of codex's own,
+  whatever `permissionMode` the call passes; and a generic CLI function refuses a
+  toolset that denies anything. (A function state is not given `show_artifact`,
+  which every *prompt* state holds.)
+
+  **A child that writes a toolset writes the whole of it.** Its map says which
+  tools it holds and whose code serves each; a parent's `"implementation":
+  "native"` does not carry into a child whose own line says nothing of the kind.
+  To start from the parent's toolset and say more, name it: `{ "$ref": "…",
+  "grep": "ask" }`. Only `other` still comes down from a parent when the child
+  writes none.
 
   `run_command` is a host function with no state toolset in reach: its line
   answers to `policy` alone. A line it is refused fails the state with
@@ -2517,10 +2536,10 @@ two agents were involved.
 
 Three things worth knowing before running it:
 
-- **Declare no `tools` on the codex mount.** Codex reaches JaiRA's tool bridge and
-  auto-denies the call, so the adapter refuses rather than let the agent answer
-  "user cancelled MCP tool call" and report success (§4.2). It reviews with its own
-  built-ins under its sandbox.
+- **A toolset on the codex mount holds it as it holds claude.** Codex is served the
+  held tools over JaiRA's bridge, each call gated, and its writing sandbox stays
+  shut unless an entry keeps codex's own writer (§4.2, §5.1). With no toolset it
+  reviews with its own built-ins under its configured sandbox.
 - **Give the reviewers separate conversations, which is the default.** Naming one
   `session` for both would put two agents in one transcript; here each mount gets
   its own, and only `synthesize` sees both reports.

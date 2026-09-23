@@ -443,12 +443,17 @@ export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[]
   // A MAP leaves its marks, so a run can tell it from a state that declared none. See the module
   // header and {@link TOOLSET_MARKERS}.
   const tools = { ...gateToolModes(toolset), ...TOOLSET_MARKERS };
+  // ALWAYS written, empty when every held tool is ours. Upstream merges `permissions` per key down the
+  // `environment` chain, so a child whose map chose no implementation and so wrote no key inherited its
+  // parent's whole `implementations` — a parent's `grep: native` kept claude's `Grep` on a child whose
+  // own line said nothing of the kind. A map is the whole statement of what a state holds and whose code
+  // serves it (decision 0007 §1); an empty key replaces the parent's.
   const implementations = toolImplementations(toolset);
   return {
     ...(Object.keys(tools).length > 0 ? { tools } : {}),
     ...(toolset.other !== undefined ? { other: toolset.other } : {}),
     ...(hasSubjects ? { subjects, ...(source !== undefined ? { source } : {}) } : {}),
-    ...(Object.keys(implementations).length > 0 ? { implementations } : {}),
+    implementations,
     ...(scopes !== undefined && scopes.length > 0 ? { scopes: [...scopes] } : {}),
   };
 }

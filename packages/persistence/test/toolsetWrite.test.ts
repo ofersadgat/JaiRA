@@ -138,6 +138,7 @@ describe("writing the line", () => {
     expect(loaded.permissions).toEqual({
       // The two marks say the block was a MAP, which is how a run tells it from a state that declared none.
       tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS },
+      implementations: {},
       other: "deny",
       subjects: { bash: "ask", "git status": "allow", "terraform plan": "allow" },
       source: REF,

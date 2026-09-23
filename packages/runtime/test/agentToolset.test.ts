@@ -166,7 +166,7 @@ describe("a read-only toolset MAP reaches claude holding everything `profile: \"
 
 describe("a read-only toolset reaches codex as the same sandbox flag", () => {
   it("is `--sandbox read-only` from a map — codex's `plan` is nothing else", async () => {
-    // No tools held: codex cannot be served ours, and refuses a run that injects any.
+    // No writer held: nothing of ours to serve but what every state gets, and the sandbox is shut.
     const map = (await run({ tools: { edit: "deny", write_file: "deny", other: "deny" } }, { agent: "codex-cli" })).opts!;
     expect(map.permissionMode).toBe("plan");
     // Codex has no deny list and refuses one by name, so the toolset writes NOTHING into it: what is
@@ -175,11 +175,17 @@ describe("a read-only toolset reaches codex as the same sandbox flag", () => {
     for (const native of ["shell", "apply_patch", "Bash", "Edit", "Write", "Task"]) expect(map.disallowedTools ?? []).not.toContain(native);
   });
 
-  it("is derived from the TOOLSET: the writing sandbox is on only for a subject it unlocks", async () => {
+  it("is derived from the TOOLSET: the writing sandbox is on only for a writer of codex's own it keeps", async () => {
     // A state that declared nothing keeps what codex has — the configured sandbox.
     expect((await run({}, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
-    // Holding `bash` (with a fake query nothing refuses the injection) turns the switch on…
-    expect((await run({ tools: { read_file: "allow", bash: "ask" } }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
+    // Holding `bash` with OUR implementation serves ours over the bridge and keeps codex's own shut…
+    const ours = (await run({ tools: { read_file: "allow", bash: "ask" } }, { agent: "codex-cli" })).opts!;
+    expect(ours.permissionMode).toBe("plan");
+    expect(Object.keys(ours.mcpTools ?? {})).toEqual(expect.arrayContaining(["bash", "read_file"]));
+    // …keeping codex's OWN shell turns the switch on, and ours is not served beside it…
+    const kept = (await run({ tools: { read_file: "allow", bash: { mode: "ask", implementation: "native" } } }, { agent: "codex-cli" })).opts!;
+    expect(kept.permissionMode).toBeUndefined();
+    expect(Object.keys(kept.mcpTools ?? {})).not.toContain("bash");
     // …and a toolset that holds only readers leaves it off, with no profile anywhere.
     expect((await run({ tools: { read_file: "allow", glob: "allow" } }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
     // A MAP that holds nothing is still a map: the marks say so, where `ctx.tools` alone could not.
@@ -199,8 +205,10 @@ describe("a read-only toolset reaches codex as the same sandbox flag", () => {
     for (const decl of [withheld, commandsOnly]) {
       expect(planAgentTools(parseToolset(decl).toolset, CODEX_TOOLS).switches).toEqual({ "workspace-write": false });
     }
-    // A shell that asks is a shell that may write: the switch is on, from either path.
-    expect((await run({ tools: { read_file: "allow", bash: "ask" } }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
+    // Codex's own shell kept under `ask` may write: the switch is on, from either path.
+    const kept = { read_file: "allow", bash: { mode: "ask", implementation: "native" } };
+    expect((await run({ tools: kept }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
+    expect(planAgentTools(parseToolset(kept).toolset, CODEX_TOOLS).switches).toEqual({ "workspace-write": true });
   });
 });
 
@@ -373,9 +381,14 @@ describe("an agent reached as a FUNCTION is held to its toolset — every channe
   it("codex-cli: a toolset that leaves the writing switch off runs read-only, over whatever the call itself asked for", async () => {
     const shut = await runFunction({ tools: { other: "deny" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
     expect(shut.opts!.permissionMode).toBe("plan");
-    // A switch the toolset leaves on keeps the call's own mode…
-    const open = await runFunction({ tools: { bash: "ask" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
+    // A shell held with OUR implementation is served over the bridge, so codex's own stays shut…
+    const ours = await runFunction({ tools: { bash: "ask" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
+    expect(ours.opts!.permissionMode).toBe("plan");
+    expect(Object.keys(ours.opts!.mcpTools ?? {})).toContain("bash");
+    // …and a switch the toolset leaves on — codex's own shell kept — keeps the call's own mode…
+    const open = await runFunction({ tools: { bash: { mode: "ask", implementation: "native" } } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
     expect(open.opts!.permissionMode).toBe("acceptEdits");
+    expect(Object.keys(open.opts!.mcpTools ?? {})).not.toContain("bash");
     // …and a state that declares no toolset is handed on exactly as the engine built it.
     const undeclared = await runFunction({}, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
     expect(undeclared.opts!.permissionMode).toBe("acceptEdits");

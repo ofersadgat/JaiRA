@@ -48,6 +48,7 @@
 import {
   finishedHandle,
   permanentFailure,
+  type Executor,
   type ExecServices,
   type InlineFamily,
   type JsonValue,
@@ -105,12 +106,15 @@ export const CLAUDE_TOOLS: AgentToolDeclaration = {
 };
 
 /**
- * Codex — `codex exec` has no per-tool deny list, no allow-list and no permission callback. Its one
- * channel is the sandbox, so the declaration says which standard subjects the WRITING sandbox
- * unlocks, and the flag is derived from the toolset: `workspace-write` when the toolset holds
- * `write_file`, `edit` or `bash`, `read-only` otherwise.
+ * Codex — `codex exec` has no per-tool deny list, no allow-list and no permission callback. What it
+ * has is the sandbox, and an MCP bridge: the tools a toolset holds are served to it over the bridge
+ * and every call is put to the gate there (upstream `AgentExecutor`, for a transport with no
+ * callback), exactly as claude's callback puts them. So the declaration says which standard subjects
+ * the WRITING sandbox unlocks, and the flag is derived from the toolset: `workspace-write` only where
+ * the toolset KEEPS one of codex's own writers (`shell` for `bash`, `apply_patch` for `edit`, held
+ * with `implementation: "native"`), `read-only` otherwise — ours doing the writing, under the gate.
  *
- * Its natives are named so a line in the composer can say what would run; none can be removed alone.
+ * Its natives cannot be removed one by one: shutting the sandbox is how they are displaced.
  */
 export const CODEX_TOOLS: AgentToolDeclaration = {
   channel: "switches",
@@ -265,9 +269,14 @@ export function planAgentTools(grant: Toolset | ToolsetView, declaration: AgentT
     else if (view.otherIsAuthored && (mode === "ask" || mode === "smart")) plan.askNatives.push(native);
   }
 
+  // A switch is the coarse transport's only way to keep or remove its own writers, so it is ON exactly
+  // when the plan KEEPS one of the natives it unlocks — a subject held with `implementation: "native"`
+  // and not denied. A subject held with OUR implementation is served over the bridge and gated there,
+  // which is what displacing the native means on a transport that cannot remove one tool alone: the
+  // sandbox stays shut, so the agent's own writers cannot do the job the toolset gave to ours.
+  const kept = new Set(plan.askNatives);
   for (const [name, subjects] of Object.entries(declaration.switches ?? {})) {
-    const open = (subject: string): boolean => view.modeOf(subject) !== "deny";
-    plan.switches[name] = subjects.some((subject) => holds(subject) !== undefined && open(subject));
+    plan.switches[name] = subjects.some((subject) => nativesOfStandard(declaration, subject).some((native) => kept.has(native)));
   }
   return plan;
 }
@@ -322,14 +331,18 @@ export interface AgentToolsetOptions {
  *    the channel the executor already reads (`ctx.policy.baseline` and `ctx.gate.modeOf`); the kept
  *    ones get an ask rule in the agent's own settings; and the gate the callback consults is asked
  *    about a native by its STANDARD name, so `Read` answers to the `read_file` entry.
- *  - `switches` (codex): the executor for this setting of the switches answers.
+ *  - `switches` (codex): the executor for this setting of the switches answers, handed the held tools
+ *    of ours to serve over its bridge — every call gated there — less any whose entry kept codex's own.
  *  - `none` (a generic CLI): a toolset that refuses anything is refused, by name.
+ *
+ * The same wrapper holds a claude agent reached as a FUNCTION: upstream's function entry takes it as
+ * `wrapExecutor` (see {@link agentFunctionWrapper}), so the two ways into one agent are one code path.
  */
-export function withAgentToolset(
+export function withAgentToolset<E extends Executor<ExecServices, any>>(
   declaration: AgentToolDeclaration,
-  inner: StackedExecutor,
+  inner: E,
   options: AgentToolsetOptions,
-): StackedExecutor {
+): E {
   const executor = inner;
   return {
     capabilities: executor.capabilities,
@@ -360,7 +373,7 @@ export function withAgentToolset(
       }
 
       if (declaration.channel === "switches") {
-        return (options.switched?.(plan.switches) ?? executor).start(op, ctx);
+        return (options.switched?.(plan.switches) ?? executor).start(op, switchedServices(ctx, nativelyServed(view, declaration, ctx)));
       }
 
       const denied = [...new Set([...plan.displaced, ...plan.denyNatives])];
@@ -369,7 +382,47 @@ export function withAgentToolset(
         servicesUnder(ctx, declaration, denied, nativelyServed(view, declaration, ctx)),
       );
     },
-  };
+  } as unknown as E;
+}
+
+/**
+ * The `wrapExecutor` a claude agent reached as a FUNCTION is registered with: the route's own wrapper,
+ * {@link withAgentToolset}, around the executor the function entry builds for each call. A function
+ * call has no op of its own to write an ask rule into until the entry builds one, and this is the door
+ * upstream opened at that moment — so `implementation: "native"`, the deny list and the translated
+ * gate reach a function call exactly as they reach the route.
+ */
+export function agentFunctionWrapper(declaration: AgentToolDeclaration, label: string): <E extends Executor<ExecServices, any>>(executor: E) => E {
+  return (executor) => withAgentToolset(declaration, executor, { label });
+}
+
+/**
+ * The services a `switches` transport (codex) is handed for a call held to a toolset: the tools of ours
+ * it serves, less those whose entry kept codex's own, and a copy of the policy whose baseline names only
+ * those served tools.
+ *
+ * The baseline is where the executor builds its up-front deny list from — every name in it the gate
+ * answers `deny` — and codex has no deny list, so it refuses a run that carries one. Under a toolset the
+ * names left in it are the policy's command-tool vocabulary (`shell`, `sh`, `powershell`, …) and any
+ * standard tool the map does not hold, all answering to the map's `other`: none is a tool of ours codex
+ * could be served, and codex's own writers are shut or kept by the SWITCH, which is where the toolset's
+ * removals reach this transport. The gate itself is untouched, so every call at the bridge is still
+ * decided by the whole map.
+ */
+function switchedServices(ctx: ExecServices, withheldNames: readonly string[]): ExecServices {
+  const tools = ctx.tools === undefined ? undefined : Object.fromEntries(Object.entries(ctx.tools).filter(([name]) => !withheldNames.includes(name)));
+  const baseline = ctx.policy?.baseline?.tools;
+  const policy: ExecPolicy | undefined =
+    ctx.policy === undefined || baseline === undefined
+      ? ctx.policy
+      : {
+          ...ctx.policy,
+          baseline: {
+            ...ctx.policy.baseline,
+            tools: Object.fromEntries(Object.entries(baseline).filter(([name]) => tools !== undefined && Object.hasOwn(tools, name))),
+          },
+        };
+  return { ...ctx, ...(tools !== undefined ? { tools } : {}), ...(policy !== undefined ? { policy } : {}) };
 }
 
 /**
@@ -384,45 +437,30 @@ function nativelyServed(view: ToolsetView, declaration: AgentToolDeclaration, ct
   return Object.keys(ctx.tools ?? {}).filter((name) => view.held(name) === "native" && nativesOfStandard(declaration, name).length > 0);
 }
 
-/**
- * The same holding for a claude agent reached as a FUNCTION (`operation.function: "claude-code"`),
- * which has no prompt op to write an ask rule into: the removals and the translated gate, and nothing
- * else. Only a `tools` transport has anything to apply here — {@link holdAgentFunction} covers the
- * other two channels.
- *
- * `implementation: "native"` is NOT honoured on this path, and ours is injected instead: keeping a
- * built-in is only safe under an ask rule (Claude Code auto-allows its read-only built-ins without
- * consulting the callback), and a function call has nowhere to write one. Ours under the gate is the
- * governed choice.
- */
-export function agentServices(declaration: AgentToolDeclaration, ctx: ExecServices): ExecServices {
-  if (declaration.channel !== "tools") return ctx;
-  const known = toolsetOf(ctx);
-  const read = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
-  if (read === undefined) return ctx;
-  const view: ToolsetView = { ...read, held: (standard) => (read.held(standard) === undefined ? undefined : "app") };
-  const plan = planAgentTools(view, declaration);
-  return servicesUnder(ctx, declaration, [...new Set([...plan.displaced, ...plan.denyNatives])]);
-}
-
 /** A registered agent function's `run`, in the shape `runtimeFunction` takes. */
 export type AgentFunctionRun = (inputs: Record<string, unknown>, ctx: ExecServices) => Promise<unknown>;
 
 /**
- * Hold an agent reached as a FUNCTION to the toolset of each call — every channel, not only claude's.
+ * Hold an agent reached as a FUNCTION to the toolset of each call, for the channels whose holding
+ * reads the call's INPUTS. A `tools` transport (claude) is not held here: its function entry is
+ * registered with {@link agentFunctionWrapper}, the route's own wrapper, because what it needs — an ask
+ * rule for a kept built-in — is written into the op the entry builds, which no wrapper of `run` sees.
  *
- *  - `tools` (claude): {@link agentServices}.
  *  - `switches` (codex): the adapter reads its sandbox off the call's own `permissionMode` input,
  *    and `plan` is nothing but `--sandbox read-only` there — so a toolset that leaves the writing
  *    switch OFF writes `permissionMode: "plan"` over whatever the call carried, as the route picks its
- *    read-only executor. A switch that is on leaves the call as it was: the configured sandbox.
+ *    read-only executor. A switch that is on leaves the call as it was: the configured sandbox. The
+ *    tools of ours it holds are served over the bridge, gated there, less any whose entry kept codex's
+ *    own — as the route serves them.
  *  - `none` (a generic CLI): a toolset that refuses anything is refused, by name, as the route does.
  *
  * A call whose state declared no toolset is handed on untouched, as {@link withAgentToolset} hands one on.
  */
 export function holdAgentFunction<R extends AgentFunctionRun>(declaration: AgentToolDeclaration, run: R, label: string): R {
+  if (declaration.channel === "tools") {
+    throw new Error(`${label}: a \`tools\` transport is held by its route's wrapper (agentFunctionWrapper), not by its run`);
+  }
   return (async (inputs: Record<string, unknown>, ctx: ExecServices) => {
-    if (declaration.channel === "tools") return run(inputs, agentServices(declaration, ctx));
     const known = toolsetOf(ctx);
     const view = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
     if (view === undefined) return run(inputs, ctx);
@@ -442,7 +480,7 @@ export function holdAgentFunction<R extends AgentFunctionRun>(declaration: Agent
     }
     const plan = planAgentTools(view, declaration);
     const shut = Object.values(plan.switches).some((on) => !on);
-    return run(shut ? { ...inputs, permissionMode: "plan" } : inputs, ctx);
+    return run(shut ? { ...inputs, permissionMode: "plan" } : inputs, switchedServices(ctx, nativelyServed(view, declaration, ctx)));
   }) as R;
 }
 

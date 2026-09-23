@@ -183,8 +183,9 @@ describe("the executors' declarations", () => {
 
   it("tells the composer what a route calls its own tool — only where the implementation is a choice", () => {
     expect(nativeNamesByRoute("read_file")).toEqual({ "claude-code": "Read", "claude-cli": "Read" });
-    // Codex cannot be served ours at all, so there is no pick to offer on its line.
-    expect(nativeNamesByRoute("bash")).toEqual({ "claude-code": "Bash", "claude-cli": "Bash" });
+    // Codex is served ours over its bridge, so keeping its own shell is a pick too.
+    expect(nativeNamesByRoute("bash")).toEqual({ "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" });
+    expect(nativeNamesByRoute("edit")).toEqual({ "claude-code": "Edit", "claude-cli": "Edit", "codex-cli": "apply_patch" });
     expect(nativeNamesByRoute("show_artifact")).toEqual({});
   });
 });
@@ -252,12 +253,18 @@ describe("a coarse transport's switch is derived from the toolset", () => {
   const toolset = (map: Record<string, unknown>) => parseToolset(map).toolset;
   const on = (grant: Parameters<typeof planAgentTools>[0]) => planAgentTools(grant, CODEX_TOOLS).switches[CODEX_WRITE_SWITCH];
 
-  it("leaves codex's writing sandbox OFF unless the toolset holds a subject it unlocks", () => {
+  it("leaves codex's writing sandbox OFF unless the toolset KEEPS a writer of codex's own", () => {
     expect(on(toolset({ read_file: "allow", glob: "allow", other: "deny" }))).toBe(false);
-    expect(on(toolset({ read_file: "allow", edit: "ask" }))).toBe(true);
-    expect(on(toolset({ bash: "smart" }))).toBe(true);
-    // Held and refused is not held.
+    // Held with OUR implementation: ours is served over the bridge and the native is displaced — shut.
+    expect(on(toolset({ read_file: "allow", edit: "ask" }))).toBe(false);
+    expect(on(toolset({ bash: "smart" }))).toBe(false);
+    expect(on(toolset({ write_file: "allow" }))).toBe(false);
+    // Kept: codex's own `apply_patch` or `shell` does the job, and only the sandbox lets it.
+    expect(on(toolset({ read_file: "allow", edit: { mode: "ask", implementation: "native" } }))).toBe(true);
+    expect(on(toolset({ bash: { mode: "smart", implementation: "native" } }))).toBe(true);
+    // Held and refused is not held, whoever's code it names.
     expect(on(toolset({ read_file: "allow", bash: "deny", write_file: "deny" }))).toBe(false);
+    expect(on(toolset({ bash: { mode: "deny", implementation: "native" } }))).toBe(false);
   });
 });
 

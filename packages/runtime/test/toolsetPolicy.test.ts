@@ -206,7 +206,7 @@ describe("a conversation turn", () => {
     const written = stateWithChatSettings(host({}), { toolset: { read_file: "allow", "git status": "allow", other: "deny" } });
     expect(written?.environment).toEqual({
       tools: ["read_file"],
-      permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny", subjects: { "git status": "allow" } },
+      permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", subjects: { "git status": "allow" } },
     });
   });
 });

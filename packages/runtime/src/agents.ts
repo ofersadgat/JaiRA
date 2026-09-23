@@ -33,7 +33,7 @@ import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
 import type { ExecEnv } from "./paths";
 import { primaryNativeOf, type AgentToolDeclaration } from "@jaira/shared";
-import { CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction } from "./agentTools";
+import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction } from "./agentTools";
 import { claudeReplacements } from "./tools";
 
 /** The registry names JaiRA registers its agents under. */
@@ -65,13 +65,14 @@ export function agentToolsOf(name: string): AgentToolDeclaration {
 /**
  * What each agent route calls ITS OWN tool doing a standard tool's job — `{ "claude-cli": "Read" }`.
  *
- * Only routes whose implementation is a CHOICE: a `tools` transport can be served ours or keep its
- * own. Codex cannot be served ours at all, so offering the pick there would offer nothing.
+ * Only routes whose implementation is a CHOICE: claude can be served ours or keep its own, and so can
+ * codex now that ours reach it over its bridge — keeping codex's own writer opens its writing sandbox.
+ * A generic CLI has neither, so there is no pick to offer on its line.
  */
 export function nativeNamesByRoute(standard: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [route, declaration] of Object.entries(AGENT_TOOLS)) {
-    const native = declaration.channel === "tools" ? primaryNativeOf(declaration, standard) : undefined;
+    const native = declaration.channel !== "none" ? primaryNativeOf(declaration, standard) : undefined;
     if (native !== undefined) out[route] = native;
   }
   return out;
@@ -281,22 +282,23 @@ export function registerAgentRuntimes(
     replacesNative: claudeReplacements(),
     ...options.sdk,
   };
-  // And the other half of decision 0007 §3: a tool the state's toolset does NOT hold loses its
-  // built-in too. Applied to the services each call is handed, from the claude executor's own
-  // declaration — see `agentServices`. Codex is held by its one channel, the sandbox, and a generic
-  // CLI (`registerGenericAgents`) by refusing what it cannot hold — see `holdAgentFunction`.
-  const held = <F extends (inputs: never, ctx: never) => unknown>(run: F, declaration: AgentToolDeclaration = CLAUDE_TOOLS, label: string = AGENT_SDK): F =>
+  // And the other half of decision 0007 §3: a function call is held to its state's toolset exactly as
+  // the same agent's prompt route is. Claude by the route's own wrapper, around the executor its
+  // function entry builds per call (`wrapExecutor`) — the deny list, the translated gate, and an ask
+  // rule for a built-in an entry keeps with `implementation: "native"`. Codex by its sandbox and the
+  // tools served over its bridge, and a generic CLI (`registerGenericAgents`) by refusing what it
+  // cannot hold — see `holdAgentFunction`.
+  const held = <F extends (inputs: never, ctx: never) => unknown>(run: F, declaration: AgentToolDeclaration, label: string): F =>
     holdAgentFunction(declaration, run as never, label) as unknown as F;
+  const claudeWrapper = (label: string) => ({ wrapExecutor: agentFunctionWrapper(CLAUDE_TOOLS, label) });
 
   if (adapters.includes("sdk")) {
     const sdk = createClaudeCodeFunction({
       ...sdkOptions,
+      ...claudeWrapper(AGENT_SDK),
       ...(options.query !== undefined ? { query: options.query } : {}),
     });
-    registry.functions.set(
-      AGENT_SDK,
-      runtimeFunction(held(sdk.run as never), sdk.capabilities) as never,
-    );
+    registry.functions.set(AGENT_SDK, runtimeFunction(sdk.run as never, sdk.capabilities) as never);
   }
 
   // Both CLI adapters get JaiRA's spawn: it is what maps the argv into the project's
@@ -317,17 +319,15 @@ export function registerAgentRuntimes(
         ? // A supplied query replaces the subprocess entirely, so the CLI adapter
           // becomes the SDK adapter with a different name — which is what makes the
           // registration path testable without a `claude` binary.
-          createClaudeCodeFunction({ ...sdkOptions, query: options.query })
+          createClaudeCodeFunction({ ...sdkOptions, ...claudeWrapper(AGENT_CLI), query: options.query })
         : createCliAgentFunction({
             ...options.sdk,
+            ...claudeWrapper(AGENT_CLI),
             ...(options.cliCommand !== undefined ? { command: options.cliCommand } : {}),
             ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
             spawn,
           });
-    registry.functions.set(
-      AGENT_CLI,
-      runtimeFunction(held(cli.run as never), cli.capabilities) as never,
-    );
+    registry.functions.set(AGENT_CLI, runtimeFunction(cli.run as never, cli.capabilities) as never);
   }
 
   if (adapters.includes("codex")) {
