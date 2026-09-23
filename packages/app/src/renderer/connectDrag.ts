@@ -145,7 +145,27 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
   let say: Words;
   let drop: string;
   if (plan.resolution === "adopt") {
-    say = [{ b: name }, " mounts this task's state as ", { code: plan.adoptedAs ?? "" }, result.ok ? ". The task becomes that child; nothing runs again." : ". The task would become that child."];
+    // A fanned-out mount takes the task as ONE ELEMENT of its batch (decision 0005, 2026-09-22).
+    const element = plan.adopt?.adopted.find((child) => child.childKey === plan.adoptedAs && child.shape === "element");
+    say =
+      element !== undefined
+        ? [
+            { b: name },
+            " runs ",
+            { code: plan.adoptedAs ?? "" },
+            element.each === "task" ? " once per element of a list, each as a task. " : " once per element of a list. ",
+            result.ok ? `The task becomes one of those ${element.each === "task" ? "tasks" : "elements"}; nothing runs again.` : `The task would become one of those ${element.each === "task" ? "tasks" : "elements"}.`,
+          ]
+        : [{ b: name }, " mounts this task's state as ", { code: plan.adoptedAs ?? "" }, result.ok ? ". The task becomes that child; nothing runs again." : ". The task would become that child."];
+    if (element !== undefined) {
+      facts.push(
+        element.appended === true
+          ? ["added to its batch as element ", { b: String((element.index ?? 0) + 1) }]
+          : (element.index ?? 0) === 0
+            ? ["the batch is this task alone"]
+            : ["element ", { b: String((element.index ?? 0) + 1) }, " of the list; the rest are made as tasks"],
+      );
+    }
     if (at.length > 0) facts.push(["stands at ", { b: at }]);
     for (const [input, settled] of Object.entries(plan.adopt?.provenance ?? {})) {
       if (settled.via === "bound" && settled.from !== undefined) facts.push([{ b: input }, " taken from what ", plan.adoptedAs ?? "it", " ran with"]);

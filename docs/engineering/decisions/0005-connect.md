@@ -129,6 +129,10 @@ un-adopts.
 - **An element adopts into the split shape.** A task that ran a state the
   parent mounts with `each: "split"` becomes a task of the parent standing
   past that mount with its element — what a split copy already is.
+- **An element adopts into a fan-out.** A task that ran a state the parent
+  mounts with `each: "inline"` or `"task"` becomes one element of that batch,
+  if its value fits the list's element type. *(Added 2026-09-22 — see
+  "Adopted into a fan-out" below.)*
 
 ### 3. The dynamic workflow, and the conversation that controls it
 
@@ -1098,10 +1102,63 @@ published as a mockup artifact with today's rendering first
 (<https://claude.ai/artifact/DTZzB4EKGaRbCDkEu5Kuk9>), and the catalog
 mockups are rendered from the components (`packages/app/shots/move-static.mts`).
 
+## Adopted into a fan-out (2026-09-22)
+
+The Open list said an adopted child that fans out is refused, because one task
+cannot stand for a batch. The person's ruling: "why is it refused? as long as the
+workflow you adopt it into supports that data type it should be fine, no?" A task
+that ran the state a parent mounts by `each` is ONE ELEMENT of that batch. Built in
+`@jaira/persistence` (`adopt.ts`, `load.ts`), `@jaira/shared` (`AdoptedChild`,
+`element-misfit`) and the board's preview, with no upstream change. The statement
+of record is [adoption](../units/adoption.md) and [run-load](../units/run-load.md).
+
+- **Its value is what it ran with on the mount's one axis**, and it must fit the
+  list's element type: the `items` of the parent input the list is, else of the
+  adopted sibling's output it reads, else the mounted state's own declaration of the
+  axis input. A misfit is refused (`element-misfit`) with a sentence naming the
+  element type and what the task has. Its outputs are the element's, checked as any
+  adopted child's are. A mount over two lists at once is refused: its elements are
+  every combination of them, and one task is an element of one list.
+- **A batch the adoption makes is the task alone.** A plain parent input that
+  nothing determined is recorded `[element]`, `bound` from the task's axis input,
+  and the mirror row carries `element: 0`. A parent that already HAS the batch —
+  it entered the mount, and the batch is the last thing it entered — gets the task
+  APPENDED: its row carries `element: n`, n the batch's length, and shares the
+  batch's occurrence, so the load hands the engine one batch of n + 1. The list the
+  parent recorded is history and is not rewritten; what a later fan-in reads is the
+  mount's record, which now gathers n + 1 outputs.
+- **`.each` reads as the row's `element`** — `.each.index`, and `.each.axis.<input>`
+  on the one axis. Nothing evaluates it again: the element's inputs are what the
+  task ran with.
+- **`each: "task"`**: the adopted task IS one of the batch's tasks. The fan-out host
+  is handed its row with the others and reads its runtime row as it reads any
+  element's task. A supplied list that holds more than the task places it at its
+  index, and the host makes the rest.
+- **`each: "inline"`**: the engine loads a recorded inline element under the MOUNTED
+  state and recomputes it from its own record, which an adopted element does not
+  have in the parent. So an inline batch whose every element is adopted is loaded as
+  ONE history row under a batch stand-in carrying the gathered outputs. An inline
+  batch the parent ran itself cannot take an adopted element and is refused, and a
+  batch an adoption makes is the task alone, since nothing would run the others.
+  One upstream change would lift both: load a recorded element under its row's own
+  `stateId`, as a single child already is (`loadTerminatedFanOut`, `runFanOut`).
+- **`each: "split"`**: a list that is a plain parent input nobody supplied is now
+  `[element]` too — a split over one element is no split, and the parent runs on
+  with it. A parent that has already split is refused: its other elements are
+  tasks standing on the list it recorded, at their own indexes, and the task's
+  element has no place in that list. Appending there would need a split entry that
+  carries its element rather than an index into the list, which is an engine change.
+- **Undo and retry are the existing machinery.** The adoption is the `adopt` step of
+  the drop's intent; a retry after it was written and not marked finds the task's
+  `origin` and appends nothing a second time. Undo cuts the parent at the mirror
+  row, which for a parent the drop made removes it and its batch, and for an
+  appended element takes that element out.
+- **The drop says so.** The preview reads "{workflow} runs {child} once per element
+  of a list", with "each as a task" for `"task"`, and says whether the batch is the
+  task alone or where it is added.
+
 ## Open
 
-- An adopted child that fans out (`each: "inline"` or `"task"`) is refused:
-  one task cannot stand for a batch. Adopting a whole batch is not designed.
 - A move whose missing input belongs to an ANCESTOR entered on the way down
   to a nested target is still refused: a directed transition hands inputs to
   the target only.

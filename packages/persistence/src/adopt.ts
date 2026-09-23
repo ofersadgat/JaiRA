@@ -38,6 +38,42 @@
  *    the new task is split on that list at the element's index, exactly as a split copy is, and the
  *    mount reads as an ordinary one inside it.
  *
+ * ## Into a fan-out: the task is ONE ELEMENT (2026-09-22)
+ *
+ * The person's ruling: "as long as the workflow you adopt it into supports that data type it should
+ * be fine". A state the parent mounts `each: "inline"` or `"task"` is adopted as one element of that
+ * batch (the `element` shape):
+ *
+ *  - **Its value** is what it ran with on the mount's one axis — the input the `each` wire fills —
+ *    and it must fit the list's ELEMENT type: the `items` of the parent input the list is, else of
+ *    the adopted sibling's output it is, else the mounted state's own declaration of the axis input.
+ *    A misfit is refused (`element-misfit`) with the element type and what the task has. Its outputs
+ *    are the element's outputs, checked as any adopted child's are. A mount over several lists at
+ *    once is refused: one task is one element of one list.
+ *  - **Where it lands.** A batch the adoption MAKES is this task alone: a plain parent input nobody
+ *    determined is recorded as `[element]` (bound, from the task), the element is index 0, and the
+ *    mirror row carries `element: 0`. A parent that already HAS the batch — it entered the mount,
+ *    and the batch is the last thing it entered — gets the task APPENDED: the mirror row carries
+ *    `element: n`, n the batch's length, and shares the batch's occurrence (`occurrenceOf`), so the
+ *    load hands the engine one batch of n + 1. The list the parent recorded is history and is not
+ *    rewritten; what a later fan-in reads is the mount's record, which now gathers n + 1.
+ *  - **`.each`.** The element's position is the `element` on its mirror row — what `.each.index`,
+ *    and `.each.axis.<input>` on the one axis, read had the parent entered it. Nothing re-evaluates
+ *    them: the element's inputs are what the task ran with.
+ *  - **`"task"`** — the batch's elements are tasks, and the adopted task IS one of them: the host
+ *    (`fanOut.ts`) is handed its row with the others and reads its runtime row as it reads any
+ *    element's. A list that holds more than the task (a supplied list, an adopted sibling's output)
+ *    places it at its index, and the host makes the rest.
+ *  - **`"inline"`** — a loaded inline element is recomputed by the engine from its own record, under
+ *    the MOUNTED state, and a task that ran alone has no record here; so a batch made of adopted
+ *    elements only is loaded as ONE history row under a batch stand-in ({@link withAdoptedStandIns})
+ *    that carries the gathered outputs. An inline batch the parent ran itself cannot take an adopted
+ *    element (refused), and one made by an adoption is the task alone.
+ *  - **`"split"`** — unchanged, but a list that is a plain parent input nobody supplied is now
+ *    `[element]` as well: a split over one element is no split, and the parent runs on with it. A
+ *    parent that already split is refused: its other elements are tasks standing on the list it
+ *    recorded, at their indexes, and the task's element is not a place in that list.
+ *
  * ## Into a new task, or into one that exists
  *
  * The parent is a NEW task unless the caller names one (`AdoptionInput.parentTaskId`): a task that
@@ -93,8 +129,16 @@ interface PlannedChild extends AdoptedChild {
   inputs: Record<string, JsonValue>;
   outputs?: Record<string, JsonValue>;
   split?: SplitEntry;
+  /** A fanned-out mount's one axis, the list it reads, and this task's element on it. */
+  fan?: { axis: string; list: FanList; element: JsonValue };
   branch?: string;
   worktreePath?: string;
+}
+
+/** Where a fan-out's list comes from: its expression's text, and the parent input it is by a plain path, if it is one. */
+interface FanList {
+  expr: string;
+  input?: string;
 }
 
 export interface PlannedAdoption {
@@ -315,15 +359,39 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
     if (children.some((child) => child.childKey === childKey)) {
       return refuse({ code: "ambiguous-child", message: `two tasks were given for child '${childKey}' of '${input.workflow}'` });
     }
-    const each = decl.each ?? [];
-    if (each.length > 0 && decl.eachKind !== "split") {
+    const axes = decl.each ?? [];
+    const kind = axes.length > 0 ? (decl.eachKind ?? "inline") : undefined;
+    if (kind !== undefined && axes.length > 1) {
       return refuse({
         code: "unsupported-mount",
-        message: `child '${childKey}' of '${input.workflow}' fans out (each: "${decl.eachKind ?? "inline"}") — its elements belong to the batch that made them, and one task cannot stand for the mount`,
+        message: `child '${childKey}' of '${input.workflow}' fans out over ${axes.length} lists at once (${axes.map((axis) => `'${axis}'`).join(", ")}) — its elements are every combination of them, and one task is an element of one list`,
       });
     }
     const def = bundle.states[decl.state];
     if (def === undefined) return refuse({ code: "unknown-workflow", message: `'${input.workflow}' mounts '${decl.state}', which did not load` });
+    const ranInputs = ranWith(project, meta);
+
+    // A fanned-out mount takes the task as ONE ELEMENT — see the header — if what it ran with on the
+    // axis fits the list's element type.
+    let fan: PlannedChild["fan"];
+    if (kind !== undefined) {
+      const axis = axes[0]!;
+      const list = listOf(decl, axis);
+      const element = ranInputs[axis];
+      if (element === undefined) {
+        return refuse({ code: "element-misfit", message: `'${meta.title}' has no '${axis}', and an element of ${list.expr} in '${input.workflow}' is what '${axis}' holds`, path: `inputs.${axis}` });
+      }
+      const schema = elementSchemaOf(bundle, root, decl, axis, list);
+      const miss = schema !== undefined && deps.check !== undefined ? deps.check(schema, element) : undefined;
+      if (miss !== undefined) {
+        return refuse({
+          code: "element-misfit",
+          message: `'${meta.title}' does not fit as an element of ${list.expr} in '${input.workflow}': an element there is ${brief(schema)}, and '${meta.title}' has ${axis} = ${brief(element)} (${miss.path !== "" ? `${miss.path} ` : ""}${miss.message})`,
+          path: `inputs.${axis}${miss.path}`,
+        });
+      }
+      fan = { axis, list, element };
+    }
 
     const pending = !(row.status === "completed" && (row.outcome === undefined || row.outcome === "success"));
     const outputs = pending ? undefined : ((row.outputsJson !== undefined ? JSON.parse(row.outputsJson) : {}) as Record<string, JsonValue>);
@@ -343,11 +411,13 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
       title: meta.title,
       childKey,
       stateId: decl.state,
-      shape: decl.eachKind === "split" ? "split" : "child",
+      shape: kind === "split" ? "split" : kind !== undefined ? "element" : "child",
+      ...(kind === "inline" || kind === "task" ? { each: kind } : {}),
       pending,
       stateChanged,
-      inputs: ranWith(project, meta),
+      inputs: ranInputs,
       ...(outputs !== undefined ? { outputs } : {}),
+      ...(fan !== undefined ? { fan } : {}),
       ...(meta.branch !== undefined ? { branch: meta.branch } : {}),
       ...(row.worktreePath !== undefined ? { worktreePath: row.worktreePath } : {}),
     });
@@ -360,9 +430,37 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
     // past the child would be sent back by them.
     const last = sequence.indexOf(children.at(-1)!.childKey);
     for (const child of children) {
-      if (standing.entered.has(child.childKey)) {
-        return refuse({ code: "parent-state", message: `'${standing.meta.title}' has already entered '${child.childKey}' — rewind it to before that, or adopt into a new task` });
+      if (!standing.entered.has(child.childKey)) continue;
+      const batch = standing.batches.get(child.childKey);
+      // A batch it HAS takes the task at its end (see the header) — while nothing was entered since.
+      if (child.shape === "element" && batch !== undefined) {
+        if (standing.lastKey !== child.childKey) {
+          return refuse({
+            code: "parent-state",
+            message: `'${standing.meta.title}' has entered '${standing.lastKey}' since its batch of '${child.childKey}', and a task joins a batch only while it is the last thing its parent entered`,
+          });
+        }
+        if (child.each === "inline" && batch.some((element) => !element.adopted)) {
+          return refuse({
+            code: "unsupported-mount",
+            message:
+              `'${standing.meta.title}' ran the elements of '${child.childKey}' itself (each: "inline"), and a loaded inline element is recomputed from its own record there — ` +
+              `'${child.title}' ran alone and its record is its own, so it joins an inline batch only of tasks adopted as it is. Adopt it into a new task of '${input.workflow}'`,
+          });
+        }
+        child.index = batch.length;
+        child.appended = true;
+        continue;
       }
+      if (child.shape === "split") {
+        return refuse({
+          code: "parent-state",
+          message:
+            `'${standing.meta.title}' has already split over ${child.fan?.list.expr ?? `'${child.childKey}'`}: every element of it is a task standing on the list it recorded, at its own index, ` +
+            `and '${child.title}' ran with an element that has no place there. Adopt it into a new task of '${input.workflow}'`,
+        });
+      }
+      return refuse({ code: "parent-state", message: `'${standing.meta.title}' has already entered '${child.childKey}' — rewind it to before that, or adopt into a new task` });
     }
     const past = sequence.slice(last + 1).find((key) => standing!.entered.has(key));
     if (past !== undefined) {
@@ -428,6 +526,14 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
     inputs[name] = value;
     provenance[name] = { via: supplied };
   }
+  // A batch the adoption MAKES is the task alone where nothing else says what its list is: a plain
+  // input of the parent that nobody determined is recorded as `[element]` — bound, from the task.
+  for (const child of children) {
+    const name = child.appended === true ? undefined : child.fan?.list.input;
+    if (name === undefined || root.inputs?.[name] === undefined || inputs[name] !== undefined || standing?.rootInstanceId !== undefined) continue;
+    inputs[name] = [child.fan!.element];
+    provenance[name] = { via: "bound", from: { taskId: child.taskId, input: child.fan!.axis } };
+  }
   const asks: AdoptAsk[] = [];
   const entered: Record<string, JsonValue> = { ...inputs };
   for (const [name, slot] of Object.entries(root.inputs ?? {})) {
@@ -444,25 +550,30 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
     });
   }
 
-  // --- the split shape ------------------------------------------------------------------------
+  // --- the element's place in its list: the split shape, and a batch the adoption makes ----------
   const split: SplitEntry[] = [];
   for (const child of children) {
-    if (child.shape !== "split") continue;
+    if (child.fan === undefined || child.appended === true) continue;
     const decl = root.children![child.childKey]!;
-    const axis = decl.each?.[0];
-    const expr = axis !== undefined ? decl.eachExprs?.[axis] : undefined;
-    if (axis === undefined || expr === undefined) return refuse({ code: "split-element", message: `child '${child.childKey}' is each: "split" and names no list` });
-    const element = child.inputs[axis];
+    const { list: source, element } = child.fan;
+    const expr = source.expr;
     const list = splitListOf(expr.trim(), inputs, children);
     if (list === "unknown") {
       return refuse({
         code: "split-element",
-        message: `'${child.childKey}' splits over ${expr}, which is neither an input of '${input.workflow}' nor an output of a child adopted with it — so which element '${child.title}' is cannot be said`,
+        message:
+          child.shape === "split"
+            ? `'${child.childKey}' splits over ${expr}, which is neither an input of '${input.workflow}' nor an output of a child adopted with it — so which element '${child.title}' is cannot be said`
+            : `'${child.childKey}' fans out over ${expr}, which is neither an input of '${input.workflow}' nor an output of a child adopted with it — so a batch holding '${child.title}' cannot be made`,
         reference: expr,
       });
     }
-    // The list is an input nobody has supplied yet: a dry run lists it under `asks`, a real adoption refuses below.
-    if (list === undefined) continue;
+    // The list is an input nobody has supplied yet: a dry run lists it under `asks`, a real adoption
+    // refuses below. (A plain input the adoption could make `[element]` never gets here: it was.)
+    if (list === undefined) {
+      if (child.shape === "element") child.index = 0;
+      continue;
+    }
     const idField = decl.spawn?.id;
     const index = list.findIndex(
       (item) => deepEqual(item, element) || (idField !== undefined && isRecord(item) && isRecord(element) && item[idField] !== undefined && item[idField] === element[idField]),
@@ -470,7 +581,17 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
     if (index < 0) {
       return refuse({ code: "split-element", message: `what '${child.title}' ran with is not an element of ${expr}`, reference: expr });
     }
+    // An inline batch's other elements would run nowhere: the parent stands past the mount, and a
+    // batch of adopted elements is loaded from its rows (see the header). Tasks are made by the host.
+    if (child.shape === "element" && child.each === "inline" && list.length !== 1) {
+      return refuse({
+        code: "split-element",
+        message: `${expr} holds ${list.length} elements, and '${child.childKey}' runs them inline — a batch an adoption makes of '${child.title}' is '${child.title}' alone, since nothing would run the others`,
+        reference: expr,
+      });
+    }
     child.index = index;
+    if (child.shape !== "split") continue;
     child.split = { expr, index };
     split.push(child.split);
   }
@@ -498,7 +619,7 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
     workflow: input.workflow,
     ...(standing !== undefined ? { parentTaskId: standing.meta.id } : {}),
     title: standing?.meta.title ?? input.title ?? children.at(-1)!.title,
-    adopted: children.map(({ inputs: _inputs, outputs: _outputs, split: _split, branch: _branch, worktreePath: _worktree, ...child }) => child),
+    adopted: children.map(({ inputs: _inputs, outputs: _outputs, split: _split, fan: _fan, branch: _branch, worktreePath: _worktree, ...child }) => child),
     cursor: cursorKey,
     ...(sequence[cursor + 1] !== undefined ? { next: sequence[cursor + 1]! } : {}),
     inputs,
@@ -531,6 +652,13 @@ interface StandingParent {
   entered: Set<string>;
   /** Those of them that ended in success — history a later state can read. */
   succeeded: Set<string>;
+  /**
+   * A fanned-out child's LATEST batch, by key: its elements in entry order, and which were adopted —
+   * what an adopted element is appended to.
+   */
+  batches: Map<string, Array<{ id: string; adopted: boolean }>>;
+  /** The child key the root entered last — a batch takes an element only while it is that. */
+  lastKey?: string;
 }
 
 function standingParentOf(project: Project, taskId: string): StandingParent | AdoptRefusal {
@@ -545,6 +673,8 @@ function standingParentOf(project: Project, taskId: string): StandingParent | Ad
   const keyOf = new Map<string, string>();
   const entered = new Set<string>();
   const succeeded = new Set<string>();
+  const batches = new Map<string, Array<{ id: string; adopted: boolean }>>();
+  let lastKey: string | undefined;
   for (const stored of project.events.list(taskId)) {
     const event = stored.event;
     if (event.type === "instance.entered") {
@@ -554,20 +684,29 @@ function standingParentOf(project: Project, taskId: string): StandingParent | Ad
         inputs = (event.inputs ?? {}) as Record<string, JsonValue>;
         entered.clear();
         succeeded.clear();
+        batches.clear();
+        lastKey = undefined;
       } else if (event.parentInstanceId === rootInstanceId && event.childKey !== undefined) {
         keyOf.set(event.instanceId, event.childKey);
         entered.add(event.childKey);
         succeeded.delete(event.childKey);
+        lastKey = event.childKey;
+        // A batch begins at element 0 and the rest join it (`occurrenceOf`'s rule); any other entry under the key ends it.
+        const element = { id: event.instanceId, adopted: (event as { adopted?: boolean }).adopted === true };
+        if (event.element === undefined) batches.delete(event.childKey);
+        else if (event.element === 0 || !batches.has(event.childKey)) batches.set(event.childKey, [element]);
+        else batches.get(event.childKey)!.push(element);
       }
     } else if (event.type === "child.superseded" && event.instanceId === rootInstanceId) {
       entered.delete(event.childKey);
       succeeded.delete(event.childKey);
+      batches.delete(event.childKey);
     } else if (event.type === "instance.terminated" && event.outcome === "success") {
       const key = keyOf.get(event.instanceId);
       if (key !== undefined && entered.has(key)) succeeded.add(key);
     }
   }
-  return { meta, ...(rootInstanceId !== undefined ? { rootInstanceId } : {}), inputs: inputs ?? meta.inputs ?? {}, entered, succeeded };
+  return { meta, ...(rootInstanceId !== undefined ? { rootInstanceId } : {}), inputs: inputs ?? meta.inputs ?? {}, entered, succeeded, batches, ...(lastKey !== undefined ? { lastKey } : {}) };
 }
 
 /** A required input of the plan nobody supplied — what refuses a REAL adoption, and only that. */
@@ -578,6 +717,47 @@ export function missingInputs(plan: AdoptPlan): AdoptRefusal | undefined {
     code: "inputs-missing",
     message: `'${plan.workflow}' needs ${missing.map((ask) => `'${ask.name}'`).join(", ")}, which ${plan.adopted.length === 1 ? `'${plan.adopted[0]!.title}' does` : "the adopted tasks do"} not determine`,
   };
+}
+
+/**
+ * The list a fanned-out mount's axis reads. A hosted mount keeps the wire's authored text
+ * (`eachExprs`); an inline one keeps only the lowered wire, which says a plain input when it is one.
+ */
+function listOf(decl: NonNullable<LoadedState["children"]>[string], axis: string): FanList {
+  const input = plainInputOf(decl.inputs?.[axis]);
+  const expr = decl.eachExprs?.[axis]?.trim() ?? (input !== undefined ? `.inputs.${input}` : `the list '${axis}' is wired to`);
+  return { expr, ...(input !== undefined ? { input } : {}) };
+}
+
+/** A declared schema, when it says something. */
+function said(schema: unknown): JsonValue | undefined {
+  return isRecord(schema) && Object.keys(schema).length > 0 ? (schema as JsonValue) : undefined;
+}
+
+/**
+ * The list's ELEMENT type: the `items` of the parent input the list is, else of the output of the
+ * sibling it reads — the list as declared — else the mounted state's own declaration of the axis input,
+ * which is what an element becomes.
+ */
+function elementSchemaOf(bundle: WorkflowBundle, root: LoadedState, decl: NonNullable<LoadedState["children"]>[string], axis: string, list: FanList): JsonValue | undefined {
+  const itemsOf = (schema: unknown): JsonValue | undefined => (isRecord(schema) ? said(schema["items"]) : undefined);
+  if (list.input !== undefined) {
+    const items = itemsOf(root.inputs?.[list.input]?.schema);
+    if (items !== undefined) return items;
+  }
+  const fromChild = /^\.children\.([A-Za-z_$][\w$-]*)\.outputs?\.([A-Za-z_$][\w$-]*)$/.exec(list.expr);
+  if (fromChild !== null) {
+    const producer = bundle.states[root.children?.[fromChild[1]!]?.state ?? ""];
+    const items = itemsOf(producer?.outputs?.[fromChild[2]!]?.schema);
+    if (items !== undefined) return items;
+  }
+  return said(bundle.states[decl.state]?.inputs?.[axis]?.schema);
+}
+
+/** A value in a sentence: its JSON, cut short. */
+function brief(value: unknown): string {
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length > 160 ? `${text.slice(0, 157)}…` : text;
 }
 
 /** The list a split's wire names — from the parent's inputs, or an adopted sibling's outputs. */
@@ -619,6 +799,8 @@ function mirrorEntered(child: PlannedChild, parentInstanceId: string): EngineEve
     stateId: child.stateId,
     childKey: child.childKey,
     parentInstanceId,
+    // One element of a batch: its position, which is what joins it to the rest (see the header).
+    ...(child.shape === "element" ? { element: child.index ?? 0 } : {}),
     inputs: child.inputs,
     adopted: true,
   } as unknown as EngineEvent;
@@ -896,25 +1078,71 @@ export function adoptedStandInId(stateId: string): string {
 }
 
 /**
+ * The state an INLINE batch made only of adopted elements loads under, as one row — see the header.
+ *
+ * The engine loads a recorded inline element under the MOUNTED state (`loadTerminatedFanOut`), not
+ * under the state its row names, so a per-element stand-in is never consulted there. The whole batch
+ * is therefore handed to it as a single history row whose outputs are the elements' gathered, as the
+ * engine's own `combineElements` would gather them. An upstream change that loaded an element under
+ * its row's state, as a single child already is, would let each element be its own stand-in instead.
+ */
+export const ADOPTED_BATCH_PREFIX = "jaira:adopted-batch:";
+
+export function adoptedBatchStandInId(stateId: string): string {
+  return `${ADOPTED_BATCH_PREFIX}${stateId}`;
+}
+
+/**
  * The bundle a loaded run is handed, with a stand-in state for every adopted child in `loaded` —
- * see the header. The real states are untouched; a bundle with no adoption in its load is returned
- * as it came.
+ * see the header — and a batch stand-in for every inline batch of adopted elements. The real states
+ * are untouched; a bundle with no adoption in its load is returned as it came.
  */
 export function withAdoptedStandIns(bundle: WorkflowBundle, loaded: LoadedInstance | undefined): WorkflowBundle {
   const wanted = new Set<string>();
+  const batches = new Set<string>();
   const walk = (node: LoadedInstance | undefined): void => {
     if (node === undefined) return;
     if (node.stateId.startsWith(ADOPTED_STATE_PREFIX)) wanted.add(node.stateId.slice(ADOPTED_STATE_PREFIX.length));
+    if (node.stateId.startsWith(ADOPTED_BATCH_PREFIX)) batches.add(node.stateId.slice(ADOPTED_BATCH_PREFIX.length));
     for (const child of node.children ?? []) walk(child);
   };
   walk(loaded);
-  if (wanted.size === 0) return bundle;
+  if (wanted.size === 0 && batches.size === 0) return bundle;
   const states = { ...bundle.states };
   for (const stateId of wanted) {
     const real = bundle.states[stateId];
     if (real !== undefined) states[adoptedStandInId(stateId)] = standInOf(real, stateId);
   }
+  for (const stateId of batches) {
+    const real = bundle.states[stateId];
+    if (real !== undefined) states[adoptedBatchStandInId(stateId)] = batchStandInOf(real, stateId);
+  }
   return { ...bundle, states };
+}
+
+/**
+ * An inline batch's stand-in: every output the mounted state declares, as the ARRAY a batch gathers
+ * it into — present for every element, `null` where one produced nothing. Each element's outputs were
+ * checked against the state's slots when it was adopted, so the arrays are taken as they come.
+ */
+function batchStandInOf(real: LoadedState, stateId: string): LoadedState {
+  const outputs = Object.fromEntries(
+    Object.entries(real.outputs ?? {}).map(([name, { binding: _binding, ...slot }]) => [name, { ...slot, kind: "json", schema: { type: "array" } }]),
+  );
+  return {
+    id: adoptedBatchStandInId(stateId),
+    ...(real.label !== undefined ? { label: real.label } : {}),
+    outputs,
+    slotMeta: {},
+    operation: { kind: "function", functionRef: ADOPTED_FUNCTION, input: {}, output: { name: "value", kind: "json" } },
+  } as unknown as LoadedState;
+}
+
+/** The gathered outputs of an inline batch's elements, in element order — `combineElements`' shape. */
+export function gatherElementOutputs(declared: readonly string[], elements: ReadonlyArray<Record<string, JsonValue>>): Record<string, JsonValue> {
+  const names = new Set(declared);
+  for (const outputs of elements) for (const name of Object.keys(outputs)) names.add(name);
+  return Object.fromEntries([...names].map((name) => [name, elements.map((outputs) => outputs[name] ?? null)]));
 }
 
 /** The mounted state's CURRENT output slots, produced by an operation that is never dispatched. */

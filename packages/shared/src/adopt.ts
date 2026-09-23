@@ -10,7 +10,9 @@
  *  - **That a task which ran alone is now somebody's child.** Adoption writes MIRROR ROWS into a new
  *    parent task's journal — `instance.entered` / `instance.terminated` for the child key, whose
  *    instance id IS the adopted task's id, its outputs as the task recorded them — and nothing else:
- *    the adopted task keeps its journal, its sessions and its card. Nothing is copied.
+ *    the adopted task keeps its journal, its sessions and its card. Nothing is copied. Where the
+ *    parent mounts the state by `each`, the task becomes ONE ELEMENT of that batch, provided what it
+ *    ran with fits the list's element type (2026-09-22).
  *
  * The platform never names a workflow's input (decision 0005 §0). Everything here is derived from a
  * state's declared schemas, bindings and descriptions.
@@ -82,7 +84,9 @@ export interface TaskAdoptRequest extends AdoptionTarget {
    * an adoption with a dynamic workflow's task — that has not reached the child yet. With it,
    * `childKey` says which of its root's children the adopted task stands for; the workflow is the
    * parent's own, read from what it runs under. Refused (`parent-state`) when the task is running or
-   * finished, has already entered that child, or stands past it.
+   * finished, has already entered that child — unless the child fans out (`each: "inline"` or
+   * `"task"`) and its batch is the last thing the task entered, which the adopted task is APPENDED
+   * to — or stands past it.
    */
   parentTaskId?: string;
   /** More tasks taken up by the same parent: every spine child before the cursor is adopted or unread. */
@@ -118,11 +122,16 @@ export interface AdoptRefusal {
     | "schema-misfit"
     | "hole"
     | "split-element"
+    | "element-misfit"
     | "inputs-conflict"
     | "inputs-missing"
     | "workspace";
   message: string;
-  /** The output path that failed the current schema (`outputs.plan/steps/0`), for `schema-misfit`. */
+  /**
+   * The path that failed: an output against the current schema (`outputs.plan/steps/0`), for
+   * `schema-misfit`; the task's element against the list's element type (`inputs.item/id`), for
+   * `element-misfit`.
+   */
   path?: string;
   /** The reference that would read a child nobody ran (`children.ux.inputs.brief → children.product`), for `hole`. */
   reference?: string;
@@ -142,10 +151,18 @@ export interface AdoptedChild {
   title: string;
   childKey: string;
   stateId: string;
-  /** `split`: the parent mounts the state `each: "split"`, and the new task stands past it with this element. */
-  shape: "child" | "split";
-  /** The element's position in the list, for the split shape. */
+  /**
+   * `split`: the parent mounts the state `each: "split"`, and the new task stands past it with this element.
+   * `element`: the parent mounts the state `each: "inline"` or `"task"`, and the task is ONE ELEMENT of
+   * that batch — the whole batch where the adoption makes it, the last one where it is {@link appended}.
+   */
+  shape: "child" | "split" | "element";
+  /** For the `element` shape: what the batch's elements are — instances of the parent, or tasks under it. */
+  each?: "inline" | "task";
+  /** The element's position — in the list, for the split shape; in the batch, for the `element` shape. */
   index?: number;
+  /** The parent already had the batch, and the task is added at its end. */
+  appended?: boolean;
   /** The task has not completed: the parent is made holding, and the mirror's end is written when it does. */
   pending: boolean;
   /** The state's definition differs from the one the task was pinned to, so its outputs were re-checked. */

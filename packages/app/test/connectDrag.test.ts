@@ -124,6 +124,33 @@ describe("previewOf", () => {
     expect(preview.refused).toBeUndefined();
   });
 
+  it("ADOPT INTO a fan-out: the task becomes one element, and the preview says of which batch", () => {
+    const child = (patch: Record<string, unknown>) => ({ taskId: "t1", title: "T", childKey: "item", stateId: "review/item", shape: "element" as const, pending: false, stateChanged: false, ...patch });
+    const into = (adopted: ReturnType<typeof child>) =>
+      previewOf(
+        answered({
+          ok: true,
+          dryRun: true,
+          plan: plan({
+            resolution: "adopt",
+            workflowLabel: "Review items",
+            adoptedAs: "item",
+            standsAt: { path: ["gather"], stateId: "review/gather" },
+            adopt: { workflow: "review", title: "T", adopted: [adopted], cursor: "item", next: "gather", inputs: {}, provenance: {}, asks: [], waitsFor: [] },
+          }),
+        }),
+        mine,
+        column("gather"),
+      )!;
+    const alone = into(child({ each: "inline", index: 0 }));
+    expect(text(alone.say)).toBe("Review items runs item once per element of a list. The task becomes one of those elements; nothing runs again.");
+    expect(alone.facts.map(text)).toEqual(["the batch is this task alone", "stands at gather"]);
+    const appended = into(child({ each: "task", index: 2, appended: true }));
+    expect(text(appended.say)).toBe("Review items runs item once per element of a list, each as a task. The task becomes one of those tasks; nothing runs again.");
+    expect(appended.facts.map(text)[0]).toBe("added to its batch as element 3");
+    expect(into(child({ each: "task", index: 1 })).facts.map(text)[0]).toBe("element 2 of the list; the rest are made as tasks");
+  });
+
   it("MOVE WITHIN: backward, next, a FAST-FORWARD, a skip, and a forward move the host cannot run — refused in its own words", () => {
     const back = previewOf(answered({ ok: true, dryRun: true, plan: plan({ move: { direction: "backward", to: "ux", path: [], passes: [] } }) }), mine, column("ux"))!;
     expect([back.kind, text(back.say), back.drop]).toEqual(["Move within", "ux is behind where this task stands. It is entered again, as the next pass.", "Drop to go back"]);

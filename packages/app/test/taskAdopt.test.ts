@@ -569,9 +569,12 @@ describe("the split shape", () => {
     const beta = await ran("batch/work", { item: items[1]! }, "Beta");
 
     const would = plan(await service.adoptTask({ taskId: beta, workflow: "batch", dryRun: true }));
-    // The list is the parent's own input and one element cannot say what the rest of it was.
-    expect(would.asks.map((ask) => ask.name)).toEqual(["items"]);
-    expect(would.adopted[0]).toMatchObject({ shape: "split", childKey: "work" });
+    // The list is the parent's own input, and with nothing else saying what it is, it is the task's
+    // own element alone (2026-09-22) — a split over one element is no split.
+    expect(would.asks).toEqual([]);
+    expect(would.inputs).toEqual({ items: [items[1]] });
+    expect(would.provenance).toEqual({ items: { via: "bound", from: { taskId: beta, input: "item" } } });
+    expect(would.adopted[0]).toMatchObject({ shape: "split", childKey: "work", index: 0 });
 
     expect(refusal(await service.adoptTask({ taskId: beta, workflow: "batch", inputs: { items: [items[0]!] }, dryRun: true }))).toMatchObject({ code: "split-element" });
 

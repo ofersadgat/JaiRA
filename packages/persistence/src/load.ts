@@ -73,6 +73,11 @@
  * is handed. A mirror still OPEN — the adopted task has not completed — blocks the load: continued
  * live, the engine would run the child a second time, inside the parent.
  *
+ * An adopted ELEMENT of a batch keeps its `element`, so the engine regroups it with the batch. A
+ * `"task"` batch's rows go to the host as they are. An inline batch of adopted elements is folded
+ * into one row under a batch stand-in carrying the gathered outputs (`inlineBatches`), because the
+ * engine loads an inline element under the mounted state and would find nothing to recompute.
+ *
  * ## A conversation starts idle (decision 0005 §3, step 6)
  *
  * A dynamic workflow's root is a state with an operation — a conversation — AND children. When a
@@ -97,7 +102,7 @@ import { SqliteEventLog } from "./eventLog";
 import { hydrate } from "./blobStore";
 import type { JairaDb } from "./db";
 import type { Project } from "./project";
-import { adoptedStandInId } from "./adopt";
+import { ADOPTED_STATE_PREFIX, adoptedBatchStandInId, adoptedStandInId, gatherElementOutputs } from "./adopt";
 import { settleConnectUndo } from "./connectUndo";
 
 /** A live leaf of the loaded machine: somewhere the continuing run picks up spending again. */
@@ -605,6 +610,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         stateId: adoptedStandInId(node.stateId),
         ...(node.childKey !== undefined ? { childKey: node.childKey } : {}),
         occurrence,
+        // One element of a batch: the engine regroups it with the rest by this (see `inlineBatches`).
+        ...(node.element !== undefined ? { element: node.element } : {}),
         inputs: node.inputs as Record<string, ResolvedValue>,
         live: false,
         outcome: "success",
@@ -640,6 +647,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       }
       children.push(emit(child, childLive, childOccurrence, address));
     }
+    inlineBatches(children, (shape[node.stateId]?.children ?? {}) as Record<string, { each?: readonly string[]; eachKind?: string } | undefined>, shape);
     // The state's own operation. Required reading for a live instance (re-dispatching a completed
     // op is the double-apply this whole join exists to prevent) and for successful history (its
     // outputs are recomputed from the value); a failed instance's own record is not — it re-runs.
@@ -793,6 +801,47 @@ export function addressKey(address: InstanceAddress): string {
  * projection stamps is compared against an address the load computed, and a walk that counted the
  * elements as passes would put the second element in a different place than the engine did.
  */
+/**
+ * An INLINE batch whose every element is an adopted task, folded into ONE history row under the
+ * batch stand-in (`adoptedBatchStandInId`), its outputs the elements' gathered — in place, in
+ * `children`, which is in entry order.
+ *
+ * The engine loads a recorded inline element under the MOUNTED state and recomputes it from its own
+ * operation and children, which an adopted element does not have here; its per-element stand-in is
+ * never consulted. A hosted (`"task"`) batch is left as rows: the host reads each element's task. A
+ * batch that mixes adopted and run elements is left as rows too — `planAdoption` never makes one.
+ */
+function inlineBatches(
+  children: LoadedInstance[],
+  mounts: Record<string, { each?: readonly string[]; eachKind?: string } | undefined>,
+  shape: SequenceShape,
+): void {
+  for (let start = 0; start < children.length; start += 1) {
+    const first = children[start]!;
+    const key = first.childKey;
+    const mount = key !== undefined ? mounts[key] : undefined;
+    if (first.element === undefined || mount === undefined || (mount.each ?? []).length === 0 || (mount.eachKind ?? "inline") !== "inline") continue;
+    let end = start + 1;
+    while (end < children.length && children[end]!.childKey === key && children[end]!.element !== undefined && children[end]!.element! > 0 && children[end]!.occurrence === first.occurrence) end += 1;
+    const batch = children.slice(start, end);
+    if (!batch.every((element) => element.stateId.startsWith(ADOPTED_STATE_PREFIX))) continue;
+    const stateId = first.stateId.slice(ADOPTED_STATE_PREFIX.length);
+    const declared = Object.keys((shape[stateId] as { outputs?: Record<string, unknown> } | undefined)?.outputs ?? {});
+    const ordered = [...batch].sort((a, b) => a.element! - b.element!);
+    const gathered = gatherElementOutputs(declared, ordered.map((element) => (element.operation?.value ?? {}) as Record<string, JsonValue>));
+    children.splice(start, batch.length, {
+      id: first.id,
+      stateId: adoptedBatchStandInId(stateId),
+      childKey: key!,
+      ...(first.occurrence !== undefined ? { occurrence: first.occurrence } : {}),
+      inputs: {},
+      live: false,
+      outcome: "success",
+      operation: { value: gathered as ResolvedValue },
+    });
+  }
+}
+
 export function occurrenceOf(seen: Map<string, number>, key: string, element: number | undefined): number {
   if (element !== undefined && element > 0) return Math.max(0, (seen.get(key) ?? 1) - 1);
   const occurrence = seen.get(key) ?? 0;

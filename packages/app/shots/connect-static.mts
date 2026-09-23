@@ -44,6 +44,27 @@ const adopt = dry(
     adopt: { workflow: "feature", title: "Pause and stop", adopted: [], cursor: "product", next: "ux", inputs: {}, provenance: { issue: { via: "bound", from: { taskId: "t-pause", input: "issue" } } }, asks: [], waitsFor: [] },
   }),
 );
+// Into a FAN-OUT (2026-09-22): the workflow runs `item` once per element, and the task becomes one.
+const element = dry(
+  plan({
+    resolution: "adopt",
+    workflowLabel: "Review items",
+    adoptedAs: "item",
+    standsAt: { path: ["gather"], stateId: "review/gather" },
+    inputs: [{ name: "docs", via: "wire", from: "item" }],
+    adopt: {
+      workflow: "review",
+      title: "Pause and stop",
+      adopted: [{ taskId: "t-pause", title: "Pause and stop", childKey: "item", stateId: "review/item", shape: "element", each: "task", index: 0, pending: false, stateChanged: false }],
+      cursor: "item",
+      next: "gather",
+      inputs: { items: [{ id: "pause", title: "Pause and stop" }] },
+      provenance: { items: { via: "bound", from: { taskId: "t-pause", input: "item" } } },
+      asks: [],
+      waitsFor: [],
+    },
+  }),
+);
 const within: TaskConnectResult = {
   ok: false,
   dryRun: true,
@@ -124,7 +145,7 @@ const page = h(
     h(
       "div",
       { style: { display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" } },
-      ...[pop(adopt, col("feature", "feature")), pop(back, col("product", "product"), rewind), pop(fresh, col("explore", "explore")), pop(split, col("item", "item")), pop(asked, col("explore", "explore"), rewind)].map((el, i) => h("div", { key: i, style: { width: 300 } }, el)),
+      ...[pop(adopt, col("feature", "feature")), pop(element, col("gather", "gather")), pop(back, col("product", "product"), rewind), pop(fresh, col("explore", "explore")), pop(split, col("item", "item")), pop(asked, col("explore", "explore"), rewind)].map((el, i) => h("div", { key: i, style: { width: 300 } }, el)),
     ),
     true,
   ),
