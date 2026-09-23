@@ -20,6 +20,7 @@ import { useMemo, useState, type JSX } from "react";
 import {
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
+  type AgentAccount,
   type ConfigLayer,
   type ConfigView,
   type ExecutorInfo,
@@ -50,6 +51,7 @@ export function providerState(enabled: boolean, probe: ProbeResult | undefined):
   if (probe.status === "ok") return "available";
   if (probe.status === "failed") return "unavailable";
   if (probe.status === "disabled") return "off";
+  if (probe.status === "needs-sign-in") return "needs-sign-in";
   return "unconfigured";
 }
 
@@ -81,6 +83,11 @@ export interface ProvidersPaneProps {
     target: SecretTarget;
     layer: ConfigLayer;
   }) => void;
+  /** Agents whose sign-in is waiting on the browser. */
+  signingIn: ReadonlySet<string>;
+  onSignIn: (name: string) => void;
+  onCancelSignIn: (name: string) => void;
+  onSignOut: (name: string) => void;
 }
 
 export function ProvidersPane(props: ProvidersPaneProps): JSX.Element {
@@ -130,6 +137,178 @@ export function ProvidersPane(props: ProvidersPaneProps): JSX.Element {
   );
 }
 
+/**
+ * The logins an agent holds, as one card each, under the row that describes the connector.
+ *
+ * The row says what the BINARY is doing; who it calls as is the cards' to say, with the controls that
+ * change it: Log out on each, and a Sign in tile when there is nobody. A login a run's call was refused
+ * on is a warning card with the reason and Sign in again — nothing about the connector is broken.
+ *
+ * Laid out for several (a grid, the one in use outlined and tagged) though every CLI today holds one:
+ * the tag and the outline appear only when there is something to tell apart.
+ */
+export function LoginCards({
+  agent,
+  command,
+  accounts,
+  signingIn,
+  busy,
+  onSignIn,
+  onCancel,
+  onSignOut,
+}: {
+  agent: string;
+  command: string | undefined;
+  accounts: AgentAccount[];
+  signingIn: boolean;
+  busy: boolean;
+  onSignIn: () => void;
+  onCancel: () => void;
+  onSignOut: () => void;
+}): JSX.Element {
+  const several = accounts.length > 1;
+  const binary = command ?? agent.replace(/-cli$/, "");
+  const login = agent === "claude-cli" ? `${binary} auth login` : `${binary} login`;
+  return (
+    <ul className="cfg-logins" aria-label={`${agent} logins`}>
+      {accounts.map((account, i) => (
+        <LoginCard
+          key={`${account.label}:${i}`}
+          account={account}
+          binary={binary}
+          tagged={several && account.active}
+          signingIn={signingIn}
+          busy={busy}
+          onSignIn={onSignIn}
+          onCancel={onCancel}
+          onSignOut={onSignOut}
+        />
+      ))}
+      {accounts.length === 0 ? (
+        <li className="cfg-login-tile">
+          {signingIn ? (
+            <div className="cfg-login-add waiting" role="status">
+              <span className="cfg-login-spin" aria-hidden="true" />
+              <span className="cfg-login-add-title">Finish signing in in your browser</span>
+              <span className="cfg-login-add-sub">
+                Nothing opened? Run <code>{login}</code> in a terminal.
+              </span>
+              <button className="ghost" onClick={onCancel}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button className="cfg-login-add" onClick={onSignIn} disabled={busy}>
+              <span className="cfg-login-plus" aria-hidden="true">
+                +
+              </span>
+              <span className="cfg-login-add-title">Sign in</span>
+              <span className="cfg-login-add-sub">Opens the sign-in page in your browser</span>
+            </button>
+          )}
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+function LoginCard({
+  account,
+  binary,
+  tagged,
+  signingIn,
+  busy,
+  onSignIn,
+  onCancel,
+  onSignOut,
+}: {
+  account: AgentAccount;
+  binary: string;
+  tagged: boolean;
+  signingIn: boolean;
+  busy: boolean;
+  onSignIn: () => void;
+  onCancel: () => void;
+  onSignOut: () => void;
+}): JSX.Element {
+  // Logging out is the CLI's own, so it is machine-wide — the person's terminal loses the login too.
+  // Asked once, in place, rather than in a dialog.
+  const [confirming, setConfirming] = useState(false);
+  const refused = account.refused !== undefined;
+  return (
+    <li className={`cfg-login-card${tagged ? " active" : ""}${refused ? " refused" : ""}`}>
+      <div className="cfg-login-top">
+        <span className="cfg-login-mark" aria-hidden="true">
+          {account.label.charAt(0).toUpperCase()}
+        </span>
+        {refused ? <span className="cfg-login-tag warn">refused</span> : tagged ? <span className="cfg-login-tag accent">in use</span> : null}
+      </div>
+      <div className="cfg-login-who">{account.label}</div>
+      <div className="cfg-login-facts">
+        {loginFacts(account).map((fact) => (
+          <span key={fact}>{fact}</span>
+        ))}
+      </div>
+      {refused ? <div className="cfg-login-note">The last run&apos;s call was refused: {account.refused}</div> : null}
+      {confirming ? (
+        <div className="cfg-login-confirm">
+          <span>
+            Sign <code>{binary}</code> out on this computer? Its terminal sessions lose this login too.
+          </span>
+          <div className="cfg-login-actions">
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => {
+                setConfirming(false);
+                onSignOut();
+              }}
+            >
+              Log out
+            </button>
+            <button className="ghost" onClick={() => setConfirming(false)}>
+              Keep
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="cfg-login-actions">
+          {refused && signingIn ? (
+            <>
+              <span className="cfg-login-waiting" role="status">
+                <span className="cfg-login-spin" aria-hidden="true" />
+                Finish signing in in your browser
+              </span>
+              <button className="ghost" onClick={onCancel}>
+                Cancel
+              </button>
+            </>
+          ) : refused ? (
+            <button className="primary" onClick={onSignIn} disabled={busy}>
+              Sign in again
+            </button>
+          ) : null}
+          {signingIn ? null : (
+            <button className="ghost" onClick={() => setConfirming(true)} disabled={busy}>
+              Log out
+            </button>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** The login's plan, method and organization, in the agent's own words — each only when it adds to the label. */
+function loginFacts(account: AgentAccount): string[] {
+  return [
+    ...(account.plan !== undefined ? [`${account.plan.charAt(0).toUpperCase()}${account.plan.slice(1)} plan`] : []),
+    ...(account.method !== undefined && account.method !== account.label ? [`via ${account.method}`] : []),
+    // A personal organization is named after its owner ("a@b.dev's Organization") and says nothing the label did not.
+    ...(account.organization !== undefined && !account.organization.includes(account.label) ? [account.organization] : []),
+  ];
+}
+
 /** This layer's own block for a provider, and the merged one — values and placeholders respectively. */
 function blocksFor(spec: ProviderSpec, layerDoc: unknown, effective: unknown): {
   here: Record<string, unknown>;
@@ -161,6 +340,10 @@ function ProviderRow({
   onSaveExecutor,
   onRemove,
   onSaveCredential,
+  signingIn,
+  onSignIn,
+  onCancelSignIn,
+  onSignOut,
 }: ProvidersPaneProps & {
   spec: ProviderSpec;
   probe: ProbeResult | undefined;
@@ -262,10 +445,22 @@ function ProviderRow({
           right now; `spec.hint` — the standing "would you want this at all" line — moved inside,
           where it is read once while deciding rather than on every pass down the list. */}
       <p className="cfg-say">
-        <span className="cfg-say-state">{stateWord(state)}</span>
+        <span className="cfg-say-state">{probe?.accounts?.some((account) => account.refused !== undefined) === true ? "sign-in expired" : stateWord(state)}</span>
         {probe && state !== "off" && probe.detail ? <> — {probe.detail}</> : null}
         {probe && state !== "off" && probe.fix ? <span className="cfg-fix">→ {probe.fix}</span> : null}
       </p>
+      {probe?.accounts !== undefined && state !== "off" ? (
+        <LoginCards
+          agent={spec.id}
+          command={typeof merged["command"] === "string" ? merged["command"] : undefined}
+          accounts={probe.accounts}
+          signingIn={signingIn.has(spec.id)}
+          busy={busy}
+          onSignIn={() => onSignIn(spec.id)}
+          onCancel={() => onCancelSignIn(spec.id)}
+          onSignOut={() => onSignOut(spec.id)}
+        />
+      ) : null}
 
       {open ? (
         <div className="cfg-row-body">
@@ -444,12 +639,8 @@ function CredentialBlock({
     // signs itself in, and the useful thing to say is how. A model provider that simply has no key —
     // weights on disk — has nothing to say at all, and the old wording told someone to run
     // `embedded login`, which is not a program.
-    return spec.family === "agent" ? (
-      <p className="cfg-hint">
-        No API key — this runtime signs itself in. If it is not authenticated, run{" "}
-        <code>{typeof merged["command"] === "string" ? merged["command"] : spec.id} login</code> in a terminal.
-      </p>
-    ) : null;
+    // An agent that signs itself in says who it is, and offers to sign in, in its login cards.
+    return null;
   }
 
   // What a stored key would be filed under: what config already names, else what has been typed

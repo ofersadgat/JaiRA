@@ -1,0 +1,353 @@
+{
+  "label": "Link verified_by",
+  "description": "Writes verified_by into the feature doc and names the claims no test reached.",
+  "inputs": {
+    "acceptance_tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "results": {
+      "kind": "json",
+      "schema": {}
+    },
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "verified_by": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "verified_by"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "verified_by"
+    },
+    "unverified": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "unverified"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "unverified"
+    },
+    "paths": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "paths"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "paths"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Record which tests defend the feature.\n\n## The tests\n\n{{.inputs.acceptance_tests}}\n\n## The results\n\n{{.inputs.results}}\n\n## The feature\n\n{{.inputs.feature}}\n\nOpen the feature doc and fill `verified_by` in its frontmatter with the test files that passed. Change nothing else.\n\n## What to produce\n\n`verified_by`: one row per claim: `{ claim, tests }`.\n\n`unverified`: the claims no passing test reaches.\n\n`paths`: the docs edited.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verified_by": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "unverified": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "verified_by",
+          "unverified",
+          "paths"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "glob",
+      "grep",
+      "edit",
+      "write_file",
+      "bash",
+      "web_fetch",
+      "web_search"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "glob": "ask",
+        "grep": "ask",
+        "edit": "ask",
+        "write_file": "allow",
+        "bash": "ask",
+        "web_fetch": "ask",
+        "web_search": "ask",
+        "jaira:toolset+": "allow",
+        "jaira:toolset-": "deny"
+      },
+      "other": "ask",
+      "subjects": {
+        "bash": "ask"
+      },
+      "source": "$/toolsets/feature/write-files",
+      "functions": {
+        "bash": "smart"
+      },
+      "implementations": {},
+      "scopes": [
+        {
+          "path": "docs/**",
+          "tools": {
+            "read_file": "allow",
+            "write_file": "allow"
+          }
+        }
+      ]
+    }
+  },
+  "slotMeta": {
+    "inputs.acceptance_tests": {
+      "optional": true
+    },
+    "inputs.results": {
+      "optional": true
+    },
+    "outputs.paths": {
+      "optional": true
+    }
+  }
+}

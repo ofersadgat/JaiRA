@@ -457,7 +457,7 @@ export function Chip({
  * on a machine configured for none. "Enabled" is an intention; "available" is an observation; they
  * disagree constantly and the UI has to be able to say so.
  */
-export type ProviderState = "available" | "unavailable" | "unconfigured" | "off" | "unchecked";
+export type ProviderState = "available" | "unavailable" | "unconfigured" | "off" | "unchecked" | "needs-sign-in";
 
 const STATE_WORDS: Record<ProviderState, string> = {
   available: "ready",
@@ -465,6 +465,7 @@ const STATE_WORDS: Record<ProviderState, string> = {
   unconfigured: "not set up",
   off: "turned off",
   unchecked: "not checked",
+  "needs-sign-in": "not signed in",
 };
 
 /**

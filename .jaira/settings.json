@@ -1,8 +1,5 @@
 {
   "models": {},
-  "memo": {
-    "enabled": false
-  },
   "artifacts": {
     "destination": "$DEFAULT",
     "dir": "artifacts",

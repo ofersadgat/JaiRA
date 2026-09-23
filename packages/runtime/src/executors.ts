@@ -12,8 +12,8 @@
  *    the registry rather than registering a stub that refuses when called, so a workflow that
  *    cannot run here fails at start with "unregistered function" instead of halfway through.
  *  - **Would this one work if a state named it?** {@link probeExecutor} runs the check without
- *    running the agent: the binary resolves and answers, and the credential the config names is
- *    findable. It never starts a session and never spends money.
+ *    running the agent: the binary resolves and answers, it is signed in (claude, codex), and the
+ *    credential the config names is findable. It never starts a session and never spends money.
  *
  * A probe reports what it OBSERVED, and says so when it could not observe anything. "Not checked"
  * is a distinct outcome from "working", because reporting an unverifiable executor as healthy is
@@ -24,6 +24,8 @@ import { join } from "node:path";
 import {
   BUILTIN_EXECUTORS,
   EXECUTOR_KINDS,
+  type AgentAccount,
+  type SignInOutcome,
   type CredentialUse,
   type ExecutorInfo,
   type ExecutorKind,
@@ -36,6 +38,7 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK } from "./agents";
+import { SIGN_IN_COMMANDS, signInCommand } from "./agentOutcome";
 import { AGENT_GENERIC_CLI } from "./genericAgent";
 import type { Exec } from "./exec";
 import type { ExecEnv } from "./paths";
@@ -188,7 +191,8 @@ export function defaultResolve(id: string): string {
  * The version flag is the check because it is the one invocation every one of these binaries
  * supports, exits from immediately, and cannot be talked into doing work. Anything richer would
  * mean starting a session — which costs money and is exactly what a user pressing "Test" does not
- * expect to happen.
+ * expect to happen. A runtime that signs itself in is then asked its sign-in status, which is as
+ * free: installed and signed out is `failed`, because no session it starts can make a call.
  */
 export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): Promise<ProbeResult> {
   if (!info.enabled) {
@@ -285,6 +289,22 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
   }
 
   const version = (result.stdout || result.stderr).trim().split(/\r?\n/)[0]?.trim();
+
+  // A binary that answers `--version` is installed, not usable: signed out, every session it starts
+  // fails at its first call. A configured key is how codex runs instead of its sign-in, so its sign-in
+  // is only asked about when no key is named.
+  const signIn = SIGN_IN[info.kind];
+  let accounts: AgentAccount[] | undefined;
+  if (signIn !== undefined && info.credential === undefined) {
+    const read = await checkSignIn(info.command, signIn, options);
+    accounts = read?.accounts;
+    // A warning, not a failure: the connector works, and the logins under it say who is missing. The
+    // detail stays about the CONNECTOR; signing in is the logins list's to offer.
+    if (read?.signedIn === false) {
+      return { name: info.name, status: "needs-sign-in", detail: `'${info.command}' responded`, ...(version ? { version } : {}), accounts: [] };
+    }
+  }
+
   if (credential.credentialMissing !== undefined) {
     return {
       name: info.name,
@@ -298,13 +318,87 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
   return {
     name: info.name,
     status: "ok",
+    // Who it signs in as is the logins list's to say; the sentence says so only when there is no list.
     detail:
-      info.credentialUse === "none"
+      info.credentialUse === "none" && accounts === undefined
         ? `'${info.command}' responded — it signs itself in, so no key is needed`
         : `'${info.command}' responded`,
     ...(version ? { version } : {}),
     ...credential,
+    ...(accounts !== undefined ? { accounts } : {}),
   };
+}
+
+/** What a sign-in status said: whether it is signed in, and as whom. */
+interface SignInRead {
+  signedIn: boolean;
+  /** Every sign-in the binary holds, the one it uses marked `active`. Empty when signed out. */
+  accounts: AgentAccount[];
+}
+
+/** How a runtime that signs itself in reports whether it is. */
+interface SignInCheck {
+  status: string[];
+  /** A clear answer, or undefined when the output says neither. */
+  read: (result: { code: number | null; stdout: string; stderr: string }) => SignInRead | undefined;
+}
+
+const SIGN_IN: Partial<Record<ExecutorKind, SignInCheck>> = {
+  // ✅ OBSERVED (claude 2.1.142) — signed in, exit 0: `{ "loggedIn": true, "authMethod": "claude.ai",
+  // "apiProvider": "firstParty", "email": "…", "orgId": "…", "orgName": "…", "subscriptionType": "max" }`;
+  // signed out, exit 1: `{ "loggedIn": false, "authMethod": "none", "apiProvider": "firstParty" }`.
+  cli: {
+    status: ["auth", "status", "--json"],
+    read: ({ stdout }) => {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(stdout) as Record<string, unknown>;
+      } catch {
+        return undefined;
+      }
+      if (parsed === null || typeof parsed !== "object" || typeof parsed["loggedIn"] !== "boolean") return undefined;
+      if (!parsed["loggedIn"]) return { signedIn: false, accounts: [] };
+      const text = (key: string): string | undefined => (typeof parsed[key] === "string" && parsed[key] !== "" ? (parsed[key] as string) : undefined);
+      // A cloud provider (bedrock, vertex) signs in through that provider, which is the method worth naming.
+      const provider = text("apiProvider");
+      const method = provider !== undefined && provider !== "firstParty" ? provider : text("authMethod");
+      const account: AgentAccount = { label: text("email") ?? method ?? "signed in", active: true };
+      if (method !== undefined) account.method = method;
+      if (text("subscriptionType") !== undefined) account.plan = text("subscriptionType")!;
+      if (text("orgName") !== undefined) account.organization = text("orgName")!;
+      return { signedIn: true, accounts: [account] };
+    },
+  },
+  // ✅ OBSERVED (codex-cli 0.147.0): "Logged in using ChatGPT", or "Not logged in" with exit 1. An API
+  // key sign-in follows its method with " - " and a masked key; only the method is kept.
+  codex: {
+    status: ["login", "status"],
+    read: ({ stdout, stderr }) => {
+      const said = `${stdout}\n${stderr}`;
+      if (/\bnot logged in\b/i.test(said)) return { signedIn: false, accounts: [] };
+      const using = /\blogged in using (.+?)(?:\s+-\s+.*)?$/im.exec(said)?.[1]?.trim();
+      if (using !== undefined) return { signedIn: true, accounts: [{ label: using, method: using, active: true }] };
+      if (/\blogged in\b/i.test(said)) return { signedIn: true, accounts: [] };
+      return undefined;
+    },
+  },
+};
+
+/**
+ * Ask the binary whether it is signed in. Anything short of a clear answer — a version too old to
+ * have the subcommand, a hang, output in a shape not recognized — is `undefined`, never a verdict:
+ * failing a working executor on an unreadable answer is as wrong as passing a signed-out one.
+ */
+async function checkSignIn(command: string, check: SignInCheck, options: ProbeOptions): Promise<SignInRead | undefined> {
+  try {
+    const result = await options.exec.run(command, check.status, {
+      ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
+    return result.timedOut ? undefined : check.read(result);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The variables the in-process SDK will read a key from if config names none. */
@@ -338,6 +432,73 @@ function probeCredential(
   const origin = secrets?.describe(info.credential);
   if (origin === undefined) return { credentialMissing: info.credential };
   return { credential: origin };
+}
+
+/**
+ * A probe with a run's refused sign-in laid over it.
+ *
+ * The probe can only read the stored sign-in; `refusal` is the reason a real call through this agent
+ * was refused, which outranks it. It belongs to the LOGIN, so it lands on the one in use and the
+ * connector reads `needs-sign-in` — a warning: nothing is broken, the login wants renewing. An agent
+ * with no login to hang it on (a key, or a sign-in that could not be read) fails with the reason, since
+ * a refused key is broken. A probe that already concluded otherwise, or no refusal, is left as it is.
+ */
+export function withSignInRefusal(info: ExecutorInfo, probe: ProbeResult, refusal: string | undefined): ProbeResult {
+  if (refusal === undefined || probe.status !== "ok") return probe;
+  // The agent's own sentence, without the layers that wrapped it (`claude-cli: AgentError: claude-cli
+  // agent error: …`); a reason in another shape is shown whole.
+  const words = refusal.split("agent error: ").pop()!.trim();
+  if (probe.accounts?.some((account) => account.active) === true) {
+    return { ...probe, status: "needs-sign-in", accounts: probe.accounts.map((account) => (account.active ? { ...account, refused: words } : account)) };
+  }
+  const login = signInCommand(info.name, info.command);
+  return {
+    ...probe,
+    status: "failed",
+    detail: `its sign-in was refused when a run last used it: ${words}`,
+    fix: login !== undefined ? `run '${login}' in a terminal, then Re-check` : "check the key it signs in with, then Re-check",
+  };
+}
+
+export interface SignInOptions {
+  exec: Exec;
+  execEnv?: ExecEnv;
+  /** Cancel a sign-in someone gave up on — the process is killed. */
+  abortSignal?: AbortSignal;
+}
+
+/**
+ * Sign an agent in: run its login command and wait for it to exit.
+ *
+ * The command opens the browser itself and returns once the person finishes there, so this can take
+ * minutes — no timeout, only the abort. Nothing is typed into it: both CLIs finish through the
+ * browser, and one that stops to ask on the terminal fails here with what it asked.
+ */
+export async function signInAgent(info: ExecutorInfo, options: SignInOptions): Promise<SignInOutcome> {
+  return runSignInCommand(info, SIGN_IN_COMMANDS[info.name]?.login, "sign in", options);
+}
+
+/** Sign an agent out: its logout command. Machine-wide — the CLI's terminal sessions are signed out too. */
+export async function signOutAgent(info: ExecutorInfo, options: SignInOptions): Promise<SignInOutcome> {
+  return runSignInCommand(info, SIGN_IN_COMMANDS[info.name]?.logout, "sign out", options);
+}
+
+async function runSignInCommand(info: ExecutorInfo, args: readonly string[] | undefined, verb: string, options: SignInOptions): Promise<SignInOutcome> {
+  const known = SIGN_IN_COMMANDS[info.name];
+  if (known === undefined || args === undefined) return { ok: false, reason: `${info.name} has no ${verb} of its own` };
+  const command = info.command ?? known.command;
+  try {
+    const result = await options.exec.run(command, args, {
+      ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+      ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+    });
+    if (result.aborted) return { ok: false, reason: `the ${verb} was cancelled` };
+    if (result.code === 0) return { ok: true };
+    const said = (result.stderr || result.stdout).trim().split(/\r?\n/).filter(Boolean).pop() ?? "";
+    return { ok: false, reason: `'${[command, ...args].join(" ")}' exited ${result.code}${said ? `: ${said}` : ""}` };
+  } catch (e) {
+    return { ok: false, reason: `'${command}' could not be started: ${(e as Error).message}` };
+  }
 }
 
 /** Probe every executor a project has. Concurrent: each is an independent short-lived process. */

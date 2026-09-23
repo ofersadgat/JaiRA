@@ -49,6 +49,7 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
+import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
 import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, withAgentToolset } from "./agentTools";
 import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
@@ -191,6 +192,8 @@ export interface AgentRouteOptions {
   /** The bridge seam, the same one {@link AgentRuntimeOptions.startBridge} is: the persistent
    *  worker-hosted listener in production, upstream's per-run bridge when absent. */
   startBridge?: StartMcpBridge;
+  /** Hears every agent call's outcome — the same observer {@link AgentRuntimeOptions.onOutcome} is. */
+  onOutcome?: AgentOutcomeObserver;
 }
 
 /**
@@ -206,8 +209,9 @@ export interface AgentRouteOptions {
  */
 export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentRouteOptions = {}): Record<string, PromptRoute> {
   const routes: Record<string, PromptRoute> = {};
+  const commands: Record<string, string | undefined> = { [AGENT_CLI]: agents.claudeCli?.command, [AGENT_CODEX]: agents.codex?.command };
   const bind = (name: string, executor: PromptRoute): void => {
-    routes[name] = normaliseAgentModel(name, executor);
+    routes[name] = normaliseAgentModel(name, observeAgentRoute(name, executor, options.onOutcome, commands[name]));
   };
   const adapters = enabledAdapters(agents);
   const spawn =

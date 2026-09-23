@@ -7340,6 +7340,7 @@ button.link.change-path {
 .cfg-mark .cfg-dot.unavailable {
   background: var(--bad);
 }
+.cfg-mark .cfg-dot.needs-sign-in,
 .cfg-mark .cfg-dot.unconfigured {
   background: var(--warn);
 }
@@ -7365,6 +7366,172 @@ button.link.change-path {
 }
 .cfg-row.unavailable .cfg-say-state {
   color: var(--bad);
+}
+.cfg-row.needs-sign-in .cfg-say-state {
+  color: var(--warn);
+}
+/* An agent's logins: one card each under the row that describes the connector, and a dashed tile to
+   sign in when there is nobody. A grid, because a runtime holding several draws several — the one in
+   use outlined and tagged only then. */
+.cfg-logins {
+  list-style: none;
+  margin: 8px 0 2px 30px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+.cfg-login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--panel);
+  min-width: 0;
+}
+.cfg-login-card.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+/* A login a run's call was refused on: a warning — the login wants renewing, nothing is broken. */
+.cfg-login-card.refused {
+  background: var(--tint-warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}
+.cfg-login-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.cfg-login-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel-3);
+  color: var(--dim);
+  font-weight: 600;
+  font-size: calc(var(--size-app) * 14 / 12.5);
+}
+.cfg-login-tag {
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  padding: 0 7px;
+  border-radius: 999px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.cfg-login-tag.accent {
+  color: var(--accent);
+  background: var(--tint-accent);
+}
+.cfg-login-tag.warn {
+  color: var(--warn);
+  background: var(--tint-warn);
+}
+/* Who: the agent's word for the account, so the data voice. */
+.cfg-login-who {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.cfg-login-facts {
+  display: flex;
+  flex-direction: column;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
+.cfg-login-note {
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+.cfg-login-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+.cfg-login-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--text);
+}
+.cfg-login-confirm .cfg-login-actions {
+  padding-top: 4px;
+}
+.cfg-login-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
+.cfg-login-tile {
+  display: flex;
+}
+.cfg-login-add {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 150px;
+  padding: 12px;
+  border: 1.5px dashed var(--rule);
+  border-radius: var(--card-radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--dim);
+  text-align: center;
+}
+button.cfg-login-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--tint-accent);
+}
+/* Nobody signed in is a warning, and the tile is where that is resolved. */
+.cfg-row.needs-sign-in .cfg-login-add:not(.waiting) {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--rule));
+}
+.cfg-login-add.waiting {
+  border-style: solid;
+  border-color: var(--line);
+}
+.cfg-login-plus {
+  font-size: calc(var(--size-app) * 20 / 12.5);
+  line-height: 1;
+  color: var(--accent);
+}
+.cfg-login-add-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.cfg-login-add-sub {
+  font-size: calc(var(--size-app) * 11 / 12.5);
+}
+.cfg-login-spin {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: cfg-login-spin 0.9s linear infinite;
+}
+@keyframes cfg-login-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .cfg-row.off {
   opacity: 1;
@@ -7707,6 +7874,7 @@ textarea.cfg-input {
 .cfg-disclosure-head {
   width: 100%;
   display: flex;
+  justify-content: flex-start;
   align-items: center;
   gap: 8px;
   padding: 7px 4px;

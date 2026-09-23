@@ -2485,6 +2485,10 @@ export default function App(): JSX.Element {
                     onAdd={actions.addExecutor}
                     onRemove={actions.removeExecutor}
                     onSaveCredential={actions.saveCredential}
+                    signingIn={new Set(state.signingIn)}
+                    onSignIn={(name) => void actions.signIn(name)}
+                    onCancelSignIn={(name) => void actions.cancelSignIn(name)}
+                    onSignOut={(name) => void actions.signOut(name)}
                   />
                 ) : null}
                 {state.section === "integrations" ? (

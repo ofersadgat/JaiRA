@@ -15,7 +15,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { BaselineFile, Changeset } from "./changeset";
 import type { Choice, ComponentConfig } from "./components";
-import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
+import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget, SignInOutcome } from "./executors";
 import type { RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
@@ -1840,8 +1840,23 @@ export interface IpcContract {
    * it: the app should already know, and a user should not have to press anything to find out.
    */
   "availability:read": { request: void; response: AvailabilitySnapshot };
-  /** Re-observe everything now — for a server that has since been started, or a key just installed. */
-  "availability:refresh": { request: void; response: AvailabilitySnapshot };
+  /**
+   * Sign an agent in with its own login command (`claude auth login`, `codex login`), which opens the
+   * browser. Answers when the command exits — minutes, when someone takes their time — and a fresh
+   * availability check follows it, so the logins list redraws from what the agent now reports.
+   */
+  "executor:signIn": { request: { name: string }; response: SignInOutcome };
+  /** Give up on a sign-in still waiting on the browser: its command is killed. */
+  "executor:cancelSignIn": { request: { name: string }; response: void };
+  /** Sign an agent out (`claude auth logout`, `codex logout`) — machine-wide, the agent's terminal included. */
+  "executor:signOut": { request: { name: string }; response: SignInOutcome };
+  /**
+   * Re-observe everything now — for a server that has since been started, or a key just installed.
+   *
+   * `recheck` is a PERSON asking (the Re-check button), which also clears the sign-in refusals runs
+   * observed: pressing it is how someone says they signed an agent in again, which no check can see.
+   */
+  "availability:refresh": { request: { recheck?: boolean } | void; response: AvailabilitySnapshot };
   /** Check a document against a registered schema — see {@link ValidateSchemaRequest}. */
   "schema:validate": { request: ValidateSchemaRequest; response: ValidateSchemaResult };
   /** Check values against the schemas a form is drawn from — see {@link SchemaCheckRequest}. */
@@ -2111,6 +2126,9 @@ export const IPC_CHANNELS = [
   "executor:probe",
   "model:probe",
   "availability:read",
+  "executor:signIn",
+  "executor:cancelSignIn",
+  "executor:signOut",
   "availability:refresh",
   "secret:capabilities",
   "secret:set",

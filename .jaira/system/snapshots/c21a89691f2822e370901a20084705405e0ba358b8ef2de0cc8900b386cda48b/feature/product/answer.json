@@ -1,0 +1,121 @@
+{
+  "label": "Answer the questions",
+  "description": "The questions the draft could not settle from the docs, put to the person one at a time with the draft's reading pre-picked. A passed question means the draft's reading stands. The person may allow follow-up questions: the component then asks a model whether the answers opened anything else only a person can settle, asks that too, and returns every round's answers together. Entered only when the draft raised any.",
+  "inputs": {
+    "questions": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "question",
+            "options"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "header": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "default": {
+              "type": "string"
+            },
+            "custom": {
+              "type": "boolean"
+            },
+            "optional": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "issue": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "docs": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    }
+  },
+  "outputs": {
+    "answers": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      },
+      "name": "answers"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "choose_option",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "The product draft could not settle these from the docs. Each shows the reading it took. Confirm it, pick another, say it in your own words, or pass to keep the reading."
+        }
+      },
+      "follow_up": {
+        "kind": "json",
+        "binding": {
+          "json": true
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.questions": {
+      "default": []
+    },
+    "inputs.issue": {
+      "optional": true,
+      "description": "Context for follow-up questions: what the run was asked to do."
+    },
+    "inputs.docs": {
+      "optional": true,
+      "description": "Context for follow-up questions: the draft the questions came from."
+    },
+    "outputs.answers": {
+      "description": "One key per question, by name — the follow-up questions' too. An absent key is a passed question: the draft's default stands."
+    }
+  }
+}

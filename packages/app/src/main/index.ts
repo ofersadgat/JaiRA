@@ -503,7 +503,10 @@ const handlers: Record<IpcChannel, Handler> = {
   "executor:probe": ((request: { name?: string } | undefined) => service.probeExecutors(request?.name)) as Handler,
   "model:probe": (() => service.probeModelRoutes()) as Handler,
   "availability:read": (() => service.readAvailability()) as Handler,
-  "availability:refresh": (() => service.refreshAvailability()) as Handler,
+  "executor:signIn": ((request: { name: string }) => service.signInExecutor(request.name)) as Handler,
+  "executor:cancelSignIn": ((request: { name: string }) => service.cancelSignIn(request.name)) as Handler,
+  "executor:signOut": ((request: { name: string }) => service.signOutExecutor(request.name)) as Handler,
+  "availability:refresh": ((request: { recheck?: boolean } | undefined) => service.refreshAvailability(request ?? {})) as Handler,
   "secret:capabilities": (() => service.secretCapabilities()) as Handler,
   "secret:set": ((request: Parameters<typeof service.setSecret>[0]) => service.setSecret(request)) as Handler,
 };

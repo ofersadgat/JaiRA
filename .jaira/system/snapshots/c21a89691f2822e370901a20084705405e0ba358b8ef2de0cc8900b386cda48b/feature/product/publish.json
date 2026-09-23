@@ -1,0 +1,236 @@
+{
+  "label": "Publish the feature docs",
+  "description": "Writes each feature doc to its path and adds its index row. Publishes only on approve.",
+  "inputs": {
+    "phase": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "area": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "docs": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "entries": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "residue": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "amendment": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "decision": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "doc_paths": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "paths": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "paths"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "paths"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Write this phase's docs into the doc tree and add their index rows.\n\nYou are publishing for the **{{.inputs.phase}}** phase, into `docs/{{.inputs.area}}/`.\n\n## The docs\n\n{{.inputs.docs}}\n\n## The entries they describe\n\n{{.inputs.entries}}\n\n## The paths\n\n{{.inputs.doc_paths}}\n\nOne path per entry, in order. Write exactly these files. If the lists differ in length, write nothing and report it.\n\n## The residue\n\n{{.inputs.residue}}\n\n## The amendment\n\n{{.inputs.amendment}}\n\n## The decision\n\n{{.inputs.decision}}\n\nPublish only on `approve`. On anything else, write nothing and report what you would have written.\n\n## What to do\n\nWrite each doc to its path with `write_file`. Add its row to the area's `index.md` table: a row and a link, nothing else. Apply the amendment to the standing doc it names. Update the area's dependency graph where it has one. Change no other text.\n\n## What to produce\n\n`paths`: every path written or edited.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "glob",
+      "grep",
+      "edit",
+      "write_file",
+      "bash",
+      "web_fetch",
+      "web_search"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "glob": "ask",
+        "grep": "ask",
+        "edit": "ask",
+        "write_file": "allow",
+        "bash": "ask",
+        "web_fetch": "ask",
+        "web_search": "ask",
+        "jaira:toolset+": "allow",
+        "jaira:toolset-": "deny"
+      },
+      "other": "ask",
+      "subjects": {
+        "bash": "ask"
+      },
+      "source": "$/toolsets/feature/write-files",
+      "functions": {
+        "bash": "smart"
+      },
+      "implementations": {},
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow",
+            "write_file": "allow"
+          }
+        }
+      ]
+    }
+  },
+  "slotMeta": {
+    "inputs.phase": {
+      "default": "product"
+    },
+    "inputs.area": {
+      "default": "product"
+    },
+    "inputs.docs": {
+      "optional": true
+    },
+    "inputs.entries": {
+      "optional": true
+    },
+    "inputs.residue": {
+      "optional": true
+    },
+    "inputs.amendment": {
+      "optional": true
+    },
+    "inputs.decision": {
+      "optional": true
+    },
+    "inputs.doc_paths": {
+      "optional": true
+    }
+  }
+}

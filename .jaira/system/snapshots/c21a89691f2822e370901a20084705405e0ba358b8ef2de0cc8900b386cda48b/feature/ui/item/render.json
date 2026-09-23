@@ -1,0 +1,197 @@
+{
+  "label": "Render the mockups",
+  "description": "One mockup per state the doc declares, written under docs/ui/assets/<component>/ and stamped with when it was captured and which doc revision it reflects. An agent, because it writes files.",
+  "inputs": {
+    "doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "spec": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "brief"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The doc id under docs/, e.g. ux/patterns/grouped-list."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Which template: pattern | component | surface | unit | contract."
+          },
+          "brief": {
+            "type": "string",
+            "description": "What this concept is and what the feature needs from it, in a few sentences."
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "mockups": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "mockups"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "mockups"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Render one mockup per state the doc declares.\n\n## The doc\n\n{{.inputs.doc}}\n\n## The concept\n\n{{.inputs.spec}}\n\nWrite each mockup under `docs/ui/assets/<component id>/<state>.html` or `.svg`, using the product's own tokens and type. Every state the doc's States table names gets one, including empty and error.\n\n## What to produce\n\n`mockups`: one row per state: `{ state, path, captured: <today>, reflects: \"proposal\" }`.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "mockups": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "mockups"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "glob",
+      "grep",
+      "edit",
+      "write_file",
+      "bash",
+      "web_fetch",
+      "web_search"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "glob": "ask",
+        "grep": "ask",
+        "edit": "ask",
+        "write_file": "allow",
+        "bash": "ask",
+        "web_fetch": "ask",
+        "web_search": "ask",
+        "jaira:toolset+": "allow",
+        "jaira:toolset-": "deny"
+      },
+      "other": "ask",
+      "subjects": {
+        "bash": "ask"
+      },
+      "source": "$/toolsets/feature/write-files",
+      "functions": {
+        "bash": "smart"
+      },
+      "implementations": {},
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ux/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/assets/**",
+          "tools": {
+            "read_file": "allow",
+            "write_file": "allow"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,302 @@
+{
+  "label": "Sync the docs",
+  "description": "Records which unit and component docs the change made true or false, and fills implemented_by and verified_by.",
+  "inputs": {
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "unit_tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "components": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "docs_touched": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "docs_touched"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "docs_touched"
+    },
+    "verified_by": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "verified_by"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "verified_by"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Bring the docs in step with what landed.\n\n## The changes\n\n{{.inputs.changes}}\n\n## The tests\n\n{{.inputs.unit_tests}}\n\n## The units and components\n\n{{.inputs.units}}\n\n{{.inputs.components}}\n\n## The feature\n\n{{.inputs.feature}}\n\nFor each unit and component doc: fill `implemented_by` and `verified_by` in the frontmatter, and correct any statement the change made false. Change nothing else.\n\n## What to produce\n\n`docs_touched`: every doc path edited.\n\n`verified_by`: one row per unit: `{ unit, tests }`.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "docs_touched": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verified_by": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "docs_touched",
+          "verified_by"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "glob",
+      "grep",
+      "edit",
+      "write_file",
+      "bash",
+      "web_fetch",
+      "web_search"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "ask",
+        "glob": "ask",
+        "grep": "ask",
+        "edit": "ask",
+        "write_file": "ask",
+        "bash": "ask",
+        "web_fetch": "ask",
+        "web_search": "ask",
+        "jaira:toolset+": "allow",
+        "jaira:toolset-": "deny"
+      },
+      "other": "ask",
+      "subjects": {
+        "bash": "ask"
+      },
+      "source": "$/toolsets/feature/ask-first",
+      "functions": {
+        "bash": "smart"
+      },
+      "implementations": {}
+    }
+  },
+  "slotMeta": {
+    "inputs.changes": {
+      "optional": true
+    },
+    "inputs.unit_tests": {
+      "optional": true
+    },
+    "inputs.units": {
+      "optional": true
+    },
+    "inputs.components": {
+      "optional": true
+    },
+    "outputs.verified_by": {
+      "optional": true
+    }
+  }
+}

@@ -35,6 +35,7 @@ import type { ExecEnv } from "./paths";
 import { primaryNativeOf, type AgentToolDeclaration } from "@jaira/shared";
 import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction } from "./agentTools";
 import { claudeReplacements } from "./tools";
+import { observeAgentRun, type AgentOutcomeObserver } from "./agentOutcome";
 
 /** The registry names JaiRA registers its agents under. */
 export const AGENT_SDK = "claude-code";
@@ -250,6 +251,8 @@ export interface AgentRuntimeOptions {
   startBridge?: StartMcpBridge;
   /** Path to the codex binary (default: `codex` on PATH). */
   codexCommand?: string;
+  /** Hears every agent call's outcome — how a refused sign-in reaches the settings screen. */
+  onOutcome?: AgentOutcomeObserver;
   /**
    * The sandbox a codex run gets when the state names no permission mode
    * (default `workspace-write`).
@@ -298,7 +301,7 @@ export function registerAgentRuntimes(
       ...claudeWrapper(AGENT_SDK),
       ...(options.query !== undefined ? { query: options.query } : {}),
     });
-    registry.functions.set(AGENT_SDK, runtimeFunction(sdk.run as never, sdk.capabilities) as never);
+    registry.functions.set(AGENT_SDK, runtimeFunction(observeAgentRun(AGENT_SDK, sdk.run as never, options.onOutcome), sdk.capabilities) as never);
   }
 
   // Both CLI adapters get JaiRA's spawn: it is what maps the argv into the project's
@@ -327,7 +330,10 @@ export function registerAgentRuntimes(
             ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
             spawn,
           });
-    registry.functions.set(AGENT_CLI, runtimeFunction(cli.run as never, cli.capabilities) as never);
+    registry.functions.set(
+      AGENT_CLI,
+      runtimeFunction(observeAgentRun(AGENT_CLI, cli.run as never, options.onOutcome, options.cliCommand), cli.capabilities) as never,
+    );
   }
 
   if (adapters.includes("codex")) {
@@ -348,7 +354,10 @@ export function registerAgentRuntimes(
       AGENT_CODEX,
       // Held by its one channel: where the toolset leaves the writing switch off, the call's
       // `permissionMode` is `plan`, which this adapter runs as `--sandbox read-only`.
-      runtimeFunction(held(codex.run as never, CODEX_TOOLS, AGENT_CODEX), codex.capabilities) as never,
+      runtimeFunction(
+        observeAgentRun(AGENT_CODEX, held(codex.run as never, CODEX_TOOLS, AGENT_CODEX), options.onOutcome, options.codexCommand),
+        codex.capabilities,
+      ) as never,
     );
   }
 

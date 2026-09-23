@@ -194,6 +194,12 @@ import {
   enabledGenericAgents,
   listExecutors,
   probeExecutor,
+  withSignInRefusal,
+  signInAgent,
+  signOutAgent,
+  signInCommand,
+  isSignInRefused,
+  type AgentOutcomeObserver,
   checkForges,
   registerRemoteFunctions,
   reviewWithRemote,
@@ -478,6 +484,7 @@ import type {
   InputSourcesRequest,
   InputSourcesResponse,
   ProbeResult,
+  SignInOutcome,
   PruneRequest,
   PruneResult,
   PushMessage,
@@ -1471,6 +1478,28 @@ export class AppService {
    * deliberately optimistic — see {@link stateViewOptions}.
    */
   private readonly lastProbes = new Map<string, ProbeResult>();
+
+  /**
+   * Agents whose sign-in a run's call was REFUSED, with the refusal's reason.
+   *
+   * What the free check cannot see: `claude auth status` reads the stored sign-in and never asks the
+   * server, so a token that expired and could not be renewed reads as signed in until a call is
+   * refused. A refusal is laid over that agent's probe (see {@link AppService.probeExecutors}) until a
+   * later call through it succeeds — proof it works — or the person presses Re-check, which is them
+   * saying they signed in again. In memory: a restart forgets it, and the next refused call says it again.
+   */
+  private readonly signInRefusals = new Map<string, string>();
+
+  /** Hears every agent call — handed to both places agents are registered (functions and routes). */
+  private readonly onAgentOutcome: AgentOutcomeObserver = (agent, error) => {
+    if (isSignInRefused(error)) {
+      if (this.signInRefusals.get(agent) === error!.reason) return;
+      this.signInRefusals.set(agent, error!.reason);
+      this.kickAvailability();
+    } else if (error === undefined && this.signInRefusals.delete(agent)) {
+      this.kickAvailability();
+    }
+  };
 
   /**
    * The last availability check: what answered, what did not, and when it was asked.
@@ -2891,7 +2920,7 @@ export class AppService {
     const all = this.listExecutors();
     const available = new Set(
       all
-        .filter((info) => info.enabled && this.lastProbes.get(info.name)?.status !== "failed")
+        .filter((info) => info.enabled && !["failed", "needs-sign-in"].includes(this.lastProbes.get(info.name)?.status ?? ""))
         .map((info) => info.name),
     );
     return {
@@ -3336,6 +3365,7 @@ export class AppService {
         execEnv: config.execEnvironment,
         observer,
         startBridge: this.startBridge,
+        onOutcome: this.onAgentOutcome,
         adapters: enabledAdapters(config.agents),
         ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
         ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
@@ -7251,7 +7281,10 @@ export class AppService {
    * So a request that arrives mid-pass is promised a FOLLOW-UP pass instead, and gets that one's
    * answer. Coalesced to one follow-up however many arrive, and re-armed if more arrive during it.
    */
-  async refreshAvailability(): Promise<AvailabilitySnapshot> {
+  async refreshAvailability(opts: { recheck?: boolean } = {}): Promise<AvailabilitySnapshot> {
+    // A person pressing Re-check is saying something changed that no check can see — most often that
+    // they signed an agent in again — so the refusals a run observed are theirs to clear.
+    if (opts.recheck === true) this.signInRefusals.clear();
     if (this.availabilityRun !== undefined) {
       // `catch` rather than `then`: a pass that THREW must still be followed by the one that was
       // asked for, or one failed socket connect strands every later request behind it forever.
@@ -7362,9 +7395,9 @@ export class AppService {
   /**
    * Health-check executors without running them.
    *
-   * Each probe is a `--version` call: the one invocation these binaries all support, that exits
-   * immediately, and that cannot be talked into doing work. Pressing "Test" must not start a
-   * session or spend money.
+   * Each probe is a `--version` call — the one invocation these binaries all support, that exits
+   * immediately, and that cannot be talked into doing work — then, for claude and codex, their
+   * sign-in status. Pressing "Test" must not start a session or spend money.
    */
   async probeExecutors(name?: string): Promise<ProbeResult[]> {
     const config = this.effectiveConfig();
@@ -7373,8 +7406,8 @@ export class AppService {
     const exec = new NodeExec({ execEnv: config.execEnvironment });
     const secrets = this.secretResolver();
     const results = await Promise.all(
-      wanted.map((info) =>
-        probeExecutor(info, { exec, execEnv: config.execEnvironment, secrets }),
+      wanted.map(async (info) =>
+        withSignInRefusal(info, await probeExecutor(info, { exec, execEnv: config.execEnvironment, secrets }), this.signInRefusals.get(info.name)),
       ),
     );
     // Remembered so a state view can say "this executor is not available" without probing again.
@@ -7383,6 +7416,63 @@ export class AppService {
     for (const result of results) this.lastProbes.set(result.name, result);
     this.publish({ type: "store:invalidate", scope: "workflows" });
     return results;
+  }
+
+  /** Sign-ins waiting on the browser, by agent — what Cancel aborts. */
+  private readonly signIns = new Map<string, AbortController>();
+
+  /**
+   * Sign an agent in with its own login command, and re-check once it exits.
+   *
+   * One at a time per agent: a second press while the browser is open answers with the first's
+   * outcome rather than opening a second window. A sign-in that succeeds clears the refusal a run
+   * recorded against that agent — the login it was about is the one just replaced.
+   */
+  async signInExecutor(name: string): Promise<SignInOutcome> {
+    const info = this.agentWithSignIn(name);
+    if (this.signIns.has(name)) return { ok: false, reason: `${name} is already waiting on a sign-in in the browser` };
+    const config = this.effectiveConfig();
+    const controller = new AbortController();
+    this.signIns.set(name, controller);
+    try {
+      const outcome = await signInAgent(info, {
+        exec: new NodeExec({ execEnv: config.execEnvironment }),
+        execEnv: config.execEnvironment,
+        abortSignal: controller.signal,
+      });
+      if (outcome.ok) this.signInRefusals.delete(name);
+      return outcome;
+    } finally {
+      this.signIns.delete(name);
+      // Awaited, so the caller's next read is the check that saw the new login.
+      await this.refreshAvailability().catch(() => undefined);
+    }
+  }
+
+  /** Give up on a sign-in still waiting on the browser. */
+  cancelSignIn(name: string): void {
+    this.signIns.get(name)?.abort();
+  }
+
+  /** Sign an agent out — machine-wide: its terminal sessions lose the login too — and re-check. */
+  async signOutExecutor(name: string): Promise<SignInOutcome> {
+    const info = this.agentWithSignIn(name);
+    const config = this.effectiveConfig();
+    try {
+      const outcome = await signOutAgent(info, { exec: new NodeExec({ execEnv: config.execEnvironment }), execEnv: config.execEnvironment });
+      if (outcome.ok) this.signInRefusals.delete(name);
+      return outcome;
+    } finally {
+      await this.refreshAvailability().catch(() => undefined);
+    }
+  }
+
+  /** The executor, refused unless it is one that signs itself in. */
+  private agentWithSignIn(name: string): ExecutorInfo {
+    const info = this.listExecutors().find((candidate) => candidate.name === name);
+    if (info === undefined) throw this.refusal("config", `unknown executor '${name}'`);
+    if (signInCommand(name, info.command) === undefined) throw this.refusal("config", `'${name}' has no sign-in of its own — it uses a key`);
+    return info;
   }
 
   // --- secrets ---------------------------------------------------------------
@@ -9619,6 +9709,7 @@ export class AppService {
         // disagreed about what a run leaves behind — and the app is the one with a Stop button.
         ...(opts.observer !== undefined ? { observer: opts.observer } : {}),
         startBridge: this.startBridge,
+        onOutcome: this.onAgentOutcome,
       }),
       ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
       // The named stacks. Each becomes a route keyed by its name, so a state naming `review/…` gets

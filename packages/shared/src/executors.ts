@@ -145,8 +145,11 @@ export interface ExecutorInfo {
  *
  * `not-checked` is a first-class outcome and not a synonym for `ok`: reporting an executor as
  * healthy when nothing was actually observed is the failure this surface exists to prevent.
+ *
+ * `needs-sign-in` is its own word, and a WARNING rather than a failure: the binary answers and nothing
+ * is broken — somebody has to sign it in (or in again, when a run's call on its login was refused).
  */
-export type ProbeStatus = "ok" | "failed" | "disabled" | "not-checked";
+export type ProbeStatus = "ok" | "failed" | "disabled" | "not-checked" | "needs-sign-in";
 
 export interface ProbeResult {
   name: string;
@@ -167,6 +170,33 @@ export interface ProbeResult {
    * without saying how to change that is the thing this whole surface was added to stop doing.
    */
   fix?: string;
+  /**
+   * Who an agent that signs itself in is signed in AS — only for one whose sign-in could be read.
+   *
+   * A LIST with the one in use marked `active`, though every CLI today holds exactly one: a runtime
+   * that keeps several sign-ins (and the app switching between them) is a new row here, not a new
+   * shape. Empty means it was read and there is none; absent means it could not be read, or the
+   * executor has no sign-in to read (a key, an SDK).
+   */
+  accounts?: AgentAccount[];
+}
+
+/** What a sign-in or sign-out came to: done, or the binary's own words for why not. */
+export type SignInOutcome = { ok: true } | { ok: false; reason: string };
+
+/** One sign-in an agent holds — never a secret, only what the agent itself prints about it. */
+export interface AgentAccount {
+  /** Who: the account's email, or the kind of sign-in when the agent names no one ("ChatGPT"). */
+  label: string;
+  /** How it signed in, in the agent's own word: `claude.ai`, `console`, `ChatGPT`, `bedrock`. */
+  method?: string;
+  /** The subscription it carries, in the agent's own word: `max`, `pro`. */
+  plan?: string;
+  organization?: string;
+  /** The sign-in calls go out on. */
+  active: boolean;
+  /** Why a run's call on this sign-in was REFUSED, in the agent's words — the stored sign-in reads fine and does not work. */
+  refused?: string;
 }
 
 /**

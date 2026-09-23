@@ -1,0 +1,554 @@
+{
+  "label": "Plan the UI",
+  "description": "Reads the UI catalog and the layers above and says what this feature needs from this layer: which existing components serve it as they are, and which must be written. Reads docs only.",
+  "inputs": {
+    "layer": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "concept": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "concepts": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "folders": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "catalog": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "standing": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "templates": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "patterns": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "returned_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "comments": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "reuse": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "reuse"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "reuse"
+    },
+    "new": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "new"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "new"
+    },
+    "rationale": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "rationale"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "rationale"
+    },
+    "plan_doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "plan_doc"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "plan_doc"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Decide what this feature needs from the {{.inputs.layer}} layer.\n\n## The feature\n\n{{.inputs.feature}}\n\n## What the layers above decided\n\nPatterns: {{.inputs.patterns}}\n\nComponents: {{.inputs.components}}\n\n## The catalog\n\n{{.inputs.catalog}}\n\n## The standing docs\n\n{{.inputs.standing}}\n\n## The templates\n\n{{.inputs.templates}}\n\n## What came back\n\n{{.inputs.returned_findings}}\n\n{{.inputs.comments}}\n\n{{.inputs.notes}}\n\nA note above is anchored to a passage of the plan you wrote last time: `quote` is the passage the person selected, verbatim, and `body` is what they said about it. The other fields are bookkeeping.\n\n## What to do\n\nOpen the catalog index with `read_file`, then the entries that could serve this feature. Read the standing docs.\n\nAnswer: which existing {{.inputs.concepts}} serve this feature as they are, and which {{.inputs.concepts}} must be written for it. A {{.inputs.concept}} is reused when it does the job without change. A new one is written when nothing in the catalog does the job. Changing an existing {{.inputs.concept}} is writing a new version of it: list it under `new` with its existing id.\n\nEach new {{.inputs.concept}} is one concept: one doc under {{.inputs.folders}}. Two concepts are two entries.\n\n## What to produce\n\n`reuse`: the ids of existing {{.inputs.concepts}} this feature uses as they are.\n\n`new`: one entry per {{.inputs.concept}} to write, `{ id, kind, brief }`. `id` is the doc id under docs/. `kind` names the template. `brief` says what the concept is and what the feature needs from it, in a few sentences. Empty when the catalog covers the feature.\n\n`rationale`: a few sentences: why each reuse fits, and why each new one is not a reuse.\n\n`plan_doc`: the plan as a short markdown document the person reads before approving it. Three headings, each a sentence stating its conclusion: the {{.inputs.concepts}} reused, one line each on what it does for the feature; the {{.inputs.concepts}} to write, each with its id, its kind and its brief; and why. It says the same thing as `reuse`, `new` and `rationale`. Those are for the machine; this is for the person.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "reuse": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "new": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "brief"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The doc id under docs/, e.g. ux/patterns/grouped-list."
+                },
+                "kind": {
+                  "type": "string",
+                  "description": "Which template: pattern | component | surface | unit | contract."
+                },
+                "brief": {
+                  "type": "string",
+                  "description": "What this concept is and what the feature needs from it, in a few sentences."
+                }
+              }
+            }
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "plan_doc": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          }
+        },
+        "required": [
+          "reuse",
+          "new",
+          "rationale",
+          "plan_doc"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "glob",
+      "grep",
+      "web_fetch",
+      "web_search"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "glob": "ask",
+        "grep": "ask",
+        "web_fetch": "ask",
+        "web_search": "ask",
+        "jaira:toolset+": "allow",
+        "jaira:toolset-": "deny"
+      },
+      "other": "deny",
+      "functions": {},
+      "implementations": {},
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ux/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        }
+      ]
+    }
+  },
+  "slotMeta": {
+    "inputs.layer": {
+      "default": "ui"
+    },
+    "inputs.concept": {
+      "default": "component"
+    },
+    "inputs.concepts": {
+      "default": "components"
+    },
+    "inputs.folders": {
+      "default": [
+        "ui/components",
+        "ui/surfaces"
+      ]
+    },
+    "inputs.catalog": {
+      "default": "docs/ui/index.md"
+    },
+    "inputs.standing": {
+      "default": [
+        "docs/ui/principles.md",
+        "docs/ui/direction.md"
+      ]
+    },
+    "inputs.templates": {
+      "default": [
+        "docs/_templates/ui-component.md",
+        "docs/_templates/ui-surface.md"
+      ]
+    },
+    "inputs.patterns": {
+      "optional": true,
+      "description": "The patterns this feature uses, reused and new alike."
+    },
+    "inputs.returned_findings": {
+      "optional": true,
+      "description": "What a later phase found wrong with this one. Absent on the way down."
+    },
+    "inputs.comments": {
+      "optional": true,
+      "description": "What the person said when sending the plan back."
+    },
+    "inputs.notes": {
+      "optional": true,
+      "description": "The person's comments anchored to passages of the last plan: each has `quote` and `body`."
+    }
+  }
+}

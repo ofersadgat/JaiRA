@@ -282,6 +282,8 @@ export interface AppState {
   availability: AvailabilitySnapshot;
   /** True while a re-check is in flight, so the button can say so. */
   rechecking: boolean;
+  /** Agents whose sign-in is waiting on the browser — their login cards say so and offer Cancel. */
+  signingIn: string[];
   /** What the secret store can do here — decides which "save key to…" options are offered. */
   secrets: SecretCapabilities;
   /**
@@ -833,6 +835,7 @@ const EMPTY: AppState = {
   modelProbes: {},
   availability: { routes: [], executors: [], checkedAt: 0 },
   rechecking: false,
+  signingIn: [],
   secrets: { keychain: false },
   schemaChoice: {},
   sync: { status: null, result: null, running: false, error: null, progress: [] },
@@ -3795,11 +3798,51 @@ export function useApp() {
         if (ref.current.rechecking) return;
         patch({ rechecking: true, error: null });
         try {
-          applyAvailability(patch, await invoke("availability:refresh", undefined));
+          applyAvailability(patch, await invoke("availability:refresh", { recheck: true }));
         } catch (e) {
           fail(e);
         } finally {
           patch({ rechecking: false });
+        }
+      },
+
+      /**
+       * Sign an agent in with its own login command, which opens the browser; the card waits until
+       * the command exits. Main has re-checked by the time it answers, so the snapshot read here is
+       * the one that saw the new login.
+       */
+      signIn: async (name: string) => {
+        if (ref.current.signingIn.includes(name)) return;
+        patch({ signingIn: [...ref.current.signingIn, name], error: null });
+        try {
+          const outcome = await invoke("executor:signIn", { name });
+          // A cancel is the person's own doing, and says nothing they need told.
+          if (!outcome.ok && !/cancelled$/.test(outcome.reason)) patch({ error: outcome.reason });
+          applyAvailability(patch, await invoke("availability:read", undefined));
+        } catch (e) {
+          fail(e);
+        } finally {
+          patch({ signingIn: ref.current.signingIn.filter((waiting) => waiting !== name) });
+        }
+      },
+      cancelSignIn: async (name: string) => {
+        try {
+          await invoke("executor:cancelSignIn", { name });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /** Sign an agent out — the card already asked, since it is machine-wide. */
+      signOut: async (name: string) => {
+        patch({ busy: true, error: null });
+        try {
+          const outcome = await invoke("executor:signOut", { name });
+          if (!outcome.ok) patch({ error: outcome.reason });
+          applyAvailability(patch, await invoke("availability:read", undefined));
+        } catch (e) {
+          fail(e);
+        } finally {
+          patch({ busy: false });
         }
       },
 

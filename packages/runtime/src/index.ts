@@ -55,6 +55,7 @@ export * from "./remoteWatch";
 export * from "./remoteReview";
 export * from "./remoteEvents";
 export * from "./executors";
+export * from "./agentOutcome";
 export * from "./executorStack";
 export * from "./executorTree";
 export * from "./chatOperation";
