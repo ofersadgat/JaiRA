@@ -33,6 +33,7 @@ export * from "./agentTools";
 export * from "./toolsets";
 export * from "./toolsetBuckets";
 export * from "./commandParts";
+export * from "./permissionFunctions";
 export * from "./toolsetEdit";
 // Node-side only (it carries the YAML serializer): a state file's list and block rewritten as a toolset.
 export * from "./toolsetSettings";

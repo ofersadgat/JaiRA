@@ -17,8 +17,8 @@
  * process calls it.
  */
 import { findNodeAtLocation, parse as parseJsonc, parseTree, type Node, type ParseError } from "jsonc-parser";
-import type { PermissionMode } from "./operationVocabulary";
-import { MODE_WHEN_UNSET, OTHER_SUBJECT, TOOLSET_REF_KEY, type ToolsetDecl, type ToolsetEntryDecl } from "./toolsets";
+import { isFunctionMode, type PermissionMode } from "./operationVocabulary";
+import { entryOfDecl, MODE_WHEN_UNSET, OTHER_SUBJECT, TOOLSET_REF_KEY, type ToolsetDecl, type ToolsetEntryDecl } from "./toolsets";
 
 /** What a remembered answer writes: a subject and one of the two modes a person can answer with. */
 export type ToolsetAddition = Record<string, Extract<PermissionMode, "allow" | "deny">>;
@@ -98,7 +98,14 @@ export function addToToolsetText(text: string, entries: ToolsetAddition): string
     // A value already there is replaced where it stands — the `mode` alone of an entry written as an
     // object, so its implementation stays — and a new subject goes on a line of its own.
     const node = (isEntryObject ? findNodeAtLocation(tree, [key, "mode"]) : undefined) ?? findNodeAtLocation(tree, [key]);
-    out = node !== undefined ? out.slice(0, node.offset) + JSON.stringify(mode) + out.slice(node.offset + node.length) : appendProperty(out, tree, key, JSON.stringify(mode));
+    // A FUNCTION entry that chose an implementation (`{ "function": …, "implementation": … }`) has no
+    // `mode` to replace: the answer takes the function's place, and the implementation stays.
+    const implementation = isEntryObject && Object.hasOwn(held as object, "function") ? (held as { implementation?: unknown }).implementation : undefined;
+    const valueText =
+      typeof implementation === "string" && implementation !== "app"
+        ? `{ "mode": ${JSON.stringify(mode)}, "implementation": ${JSON.stringify(implementation)} }`
+        : JSON.stringify(mode);
+    out = node !== undefined ? out.slice(0, node.offset) + valueText + out.slice(node.offset + node.length) : appendProperty(out, tree, key, JSON.stringify(mode));
   }
   return out;
 }
@@ -112,20 +119,25 @@ export function addToToolsetText(text: string, entries: ToolsetAddition): string
 /** An entry as one comparable thing: a bare mode and `{ mode }` say the same, and ours is the default. */
 function entryKey(entry: ToolsetEntryDecl | undefined): string | undefined {
   if (entry === undefined) return undefined;
-  return typeof entry === "string" ? `${entry}/app` : `${entry.mode}/${entry.implementation ?? "app"}`;
+  const { mode, implementation } = entryOfDecl(entry);
+  return `${JSON.stringify(mode)}/${implementation ?? "app"}`;
 }
 
-/** An entry as it is written on one line. */
+/** An entry as it is written on one line — a function as `{ "function": … }`, beside its implementation. */
 function entryText(entry: ToolsetEntryDecl): string {
-  if (typeof entry === "string") return JSON.stringify(entry);
-  return entry.implementation === undefined || entry.implementation === "app"
-    ? JSON.stringify(entry.mode)
-    : `{ "mode": ${JSON.stringify(entry.mode)}, "implementation": ${JSON.stringify(entry.implementation)} }`;
+  const { mode, implementation } = entryOfDecl(entry);
+  const own = implementation !== undefined && implementation !== "app";
+  if (isFunctionMode(mode)) {
+    return own
+      ? `{ "function": ${JSON.stringify(mode.function)}, "implementation": ${JSON.stringify(implementation)} }`
+      : `{ "function": ${JSON.stringify(mode.function)} }`;
+  }
+  return own ? `{ "mode": ${JSON.stringify(mode)}, "implementation": ${JSON.stringify(implementation)} }` : JSON.stringify(mode);
 }
 
 /** Do two entries say the same thing? `other` left out reads as the mode an unset line reads as. */
 export function sameToolsetEntry(subject: string, a: ToolsetEntryDecl | undefined, b: ToolsetEntryDecl | undefined): boolean {
-  const unset = subject === OTHER_SUBJECT ? `${MODE_WHEN_UNSET}/app` : undefined;
+  const unset = subject === OTHER_SUBJECT ? `${JSON.stringify(MODE_WHEN_UNSET)}/app` : undefined;
   return (entryKey(a) ?? unset) === (entryKey(b) ?? unset);
 }
 

@@ -55,8 +55,9 @@ import {
   type Operation,
 } from "@declarative-ai/exec";
 import { emptyWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
-import type { ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permissions";
+import type { ExecPolicy, PermissionMode as GateMode, ToolGate } from "@declarative-ai/permissions";
 import {
+  isFunctionMode,
   isLoweredToolset,
   nativesOfStandard,
   offeredTools,
@@ -69,6 +70,7 @@ import {
   type PermissionsDecl,
   type ToolImplementation,
   type Toolset,
+  type ToolsetMode,
 } from "@jaira/shared";
 import type { StackedExecutor } from "./executorStack";
 
@@ -145,14 +147,20 @@ export function standardOfAnyNative(native: string): string | undefined {
 
 // --- the toolset, as a call sees it ---------------------------------------------
 
+/**
+ * A mode as the plan reads it: what a toolset line says — a word, or a FUNCTION — or, where the line
+ * says nothing, what the gate resolves to (upstream's vocabulary, which still has `smart`).
+ */
+export type ViewMode = ToolsetMode | GateMode;
+
 /** One call's toolset, reduced to the questions the plan asks of it. */
 export interface ToolsetView {
   /** Whose code runs a standard tool the toolset HOLDS; `undefined` when it does not hold it. */
   held(standard: string): ToolImplementation | undefined;
   /** The mode a standard tool resolves to, where anything says. */
-  modeOf(standard: string): PermissionMode | undefined;
+  modeOf(standard: string): ViewMode | undefined;
   /** The mode a name with no standard tool resolves to — `other`, unless something named it. */
-  otherFor(name: string): PermissionMode | undefined;
+  otherFor(name: string): ViewMode | undefined;
   /**
    * Is `other` KNOWN to have been written, as against read off a gate that answers `ask` for want of
    * anything better? Only a written `ask` forces an unmapped native through the callback: forcing it
@@ -179,7 +187,7 @@ export function viewOfToolset(toolset: Toolset): ToolsetView {
  *
  * `ctx.tools` is the state's resolved tool list, so membership is exact. `ctx.authored` is the
  * state's resolved block, so what was WRITTEN is exact: a map's marks, whose code serves a tool, a
- * written `other`, and the shell's authored mode (lowered as `smart`, carried in `subjects`) — read
+ * written `other`, and the shell's authored mode (lowered as `ask`, carried in `subjects`) — read
  * through `toolsetOfEnvironment`, the reader a conversation turn uses for the same block. `ctx.gate`
  * resolves a mode through that block, the run's ledger and the project baseline, and answers where
  * the block says nothing.
@@ -189,7 +197,7 @@ export function viewOfServices(ctx: ExecServices): ToolsetView | undefined {
   if (!isLoweredToolset(authored)) return undefined;
   const held = new Set(Object.keys(ctx.tools ?? {}));
   const baseline = ctx.policy?.baseline?.tools;
-  const gated = (name: string): PermissionMode | undefined =>
+  const gated = (name: string): GateMode | undefined =>
     ctx.gate?.modeOf({ name }) ?? (baseline !== undefined && Object.hasOwn(baseline, name) ? baseline[name] : undefined);
   const toolset = toolsetOfEnvironment([...held], authored);
   const entry = (name: string) => (Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined);
@@ -266,7 +274,9 @@ export function planAgentTools(grant: Toolset | ToolsetView, declaration: AgentT
   for (const native of unmappedNatives(declaration)) {
     const mode = view.otherFor(native);
     if (mode === "deny") plan.denyNatives.push(native);
-    else if (view.otherIsAuthored && (mode === "ask" || mode === "smart")) plan.askNatives.push(native);
+    // A written `ask`, or a written FUNCTION: either way the callback must be reached for the call to
+    // be decided — the function runs there, before anybody is asked.
+    else if (view.otherIsAuthored && (mode === "ask" || mode === "smart" || isFunctionMode(mode))) plan.askNatives.push(native);
   }
 
   // A switch is the coarse transport's only way to keep or remove its own writers, so it is ON exactly
@@ -511,7 +521,7 @@ export function servicesUnder(
           ...ctx.policy,
           baseline: {
             ...ctx.policy?.baseline,
-            tools: { ...ctx.policy?.baseline?.tools, ...Object.fromEntries(denied.map((native) => [native, "deny" as PermissionMode])) },
+            tools: { ...ctx.policy?.baseline?.tools, ...Object.fromEntries(denied.map((native) => [native, "deny" as GateMode])) },
           },
         };
   const gate = ctx.gate === undefined ? undefined : translatedGate(ctx.gate, declaration, refused);

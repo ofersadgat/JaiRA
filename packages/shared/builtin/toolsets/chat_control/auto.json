@@ -1,11 +1,11 @@
 {
-  "list_workflows": "smart",
-  "start_task": "smart",
-  "move_task": "smart",
-  "list_tasks": "smart",
-  "answer_question": "smart",
-  "hold_task": "smart",
-  "release_task": "smart",
-  "stop_task": "smart",
+  "list_workflows": { "function": "smart" },
+  "start_task": { "function": "smart" },
+  "move_task": { "function": "smart" },
+  "list_tasks": { "function": "smart" },
+  "answer_question": { "function": "smart" },
+  "hold_task": { "function": "smart" },
+  "release_task": { "function": "smart" },
+  "stop_task": { "function": "smart" },
   "other": "deny"
 }

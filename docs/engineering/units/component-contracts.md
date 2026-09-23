@@ -2,7 +2,7 @@
 id: engineering/units/component-contracts
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-22
 implements: [ui/components/choose-option-gate, ui/components/review-artifact-gate, ui/components/edit-artifact-gate, ui/components/fill-form-gate, ui/components/confirm-action-gate, ui/components/choice-list, ui/components/question-stepper, ui/components/review-notes, ui/components/changeset-review, ui/surfaces/components-view, ux/patterns/quote-anchored-note, ux/patterns/own-answer-beside-offered-options, ux/patterns/ask-one-or-several-questions, ux/patterns/comments-turn-a-verdict-into-send-back, product/decide-with-the-context-in-front-of-you]
 layer: core
 owns_contracts: []
@@ -18,7 +18,7 @@ siblings: [engineering/units/interaction-gateway, engineering/units/interaction-
 
 These three files implement [gate-components](../contracts/gate-components.md), which [interaction-hub](interaction-hub.md) owns. The configs and result shapes are that contract's, and are not repeated here.
 
-- `COMPONENT_NAMES` and `isComponentName` name the six built-in components.
+- `COMPONENT_NAMES` and `isComponentName` name the seven built-in components — `approve_tool_call`, the approval prompt a permission function calls, the seventh (2026-09-22).
 - `parseComponentConfig(component, raw)` normalizes a config into `ComponentConfig`, or throws a message naming the path it refused, such as `choose_option.questions[1].default 'z' is not one of its options`. `raw` is what the function received: `operation.args` merged with the state's resolved inputs into one flat object. There is no `config` key.
 - `validateComponentResult(config, value, inputs?)` answers `{ok: true}` or `{ok: false, errors}`. For `review_artifacts` it finds the changeset among `inputs` by shape through `changesetInputOf` and checks every decision with `checkDecisions`; without `inputs` it checks shape only.
 - `choicesOfConfig` reduces a `choose_option` or `review_artifact` config to `Choice[]`, the one question shape the renderer draws, and `choicesOfQuestions` in `ipc.ts` reduces an agent's questions to the same shape. `sendBackOption` names the author's second option that is not `danger`.
@@ -46,7 +46,7 @@ It deliberately does not own:
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| The six `component-<name>` schema entries | registered once when `componentGallery.ts` is first imported | the schema registry in `schemas.ts` | `schema:validate` resolves the gallery's documents through them |
+| The seven `component-<name>` schema entries | registered once when `componentGallery.ts` is first imported | the schema registry in `schemas.ts` | `schema:validate` resolves the gallery's documents through them |
 | `GALLERY_GROUPS` and `GALLERY_SURFACES` | read only | this module | the renderer's Components view |
 
 ## The invariants refuse any answer that nothing on screen could have produced

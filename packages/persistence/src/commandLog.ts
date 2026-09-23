@@ -36,8 +36,12 @@ export function policyAuditRow(taskId: string, entry: PolicyAuditEntry): Command
 /** What was decided about a command, and by whom. */
 export type CommandDecision = "allowed" | "blocked" | "approved" | "denied";
 
-/** Who decided: policy alone, or a human answering an escalation. */
-export type CommandDecider = "policy" | "user";
+/**
+ * Who decided: policy alone, a human answering an escalation, or a permission FUNCTION a toolset line
+ * named (decision 0007, amended 2026-09-22) — which may itself have asked the human, through the
+ * approval prompt; the row says the function decided, and its reason names the function.
+ */
+export type CommandDecider = "policy" | "user" | "function";
 
 export interface CommandLogEntry {
   taskId: string;

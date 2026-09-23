@@ -23,7 +23,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { PERMISSION_MODES, READ_ONLY_PRESET_TOOLS, type PermissionMode } from "../src/operationVocabulary";
+import { isToolsetMode, READ_ONLY_PRESET_TOOLS, SMART_MODE, type ToolsetMode } from "../src/operationVocabulary";
 import { TOOL_SPEC_BY_NAME, TOOL_SPECS } from "../src/toolVocabulary";
 import { heldTools, offeredTools, parseToolset, toolImplementations, toolModes } from "../src/toolsets";
 
@@ -32,10 +32,12 @@ const TOOLSETS = join(dirname(fileURLToPath(import.meta.url)), "..", "builtin", 
 const shipped = (id: string): unknown => JSON.parse(readFileSync(join(TOOLSETS, `${id}.json`), "utf8"));
 
 /** FROZEN — `PERMISSION_PRESETS` as it stood at a1a0581, the last commit that had it. */
-const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: string) => PermissionMode }> = [
+const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: string) => ToolsetMode }> = [
   { id: "ask", file: "ask-first", modeFor: () => "ask" },
   { id: "read-only", file: "read-only", modeFor: (name) => (READ_ONLY_PRESET_TOOLS.includes(name) ? "allow" : "deny") },
-  { id: "auto", file: "auto", modeFor: () => "smart" },
+  // The preset wrote the word `smart`; the word became the shipped FUNCTION of that name (decision 0007,
+  // amended 2026-09-22), so what `auto` wrote is read as that function — the one change to the frozen map.
+  { id: "auto", file: "auto", modeFor: () => SMART_MODE },
   { id: "full", file: "full", modeFor: () => "allow" },
 ];
 
@@ -63,7 +65,7 @@ describe("the chat bucket is the four presets, written down", () => {
     // …with nobody's implementation chosen, because a preset never chose one.
     expect(toolImplementations(toolset)).toEqual({});
     // "A name the preset has never heard of gets its strictest" is what `other` says.
-    expect(toolset.other).toBe(modeFor("a tool nobody has heard of"));
+    expect(toolset.other).toEqual(modeFor("a tool nobody has heard of"));
   });
 
   it("read-only allows exactly the frozen list, and that list is still in the vocabulary", () => {
@@ -123,11 +125,11 @@ describe("chat_control has its OWN versions of the same names", () => {
 });
 
 describe("every shipped toolset", () => {
-  it("only ever writes modes the ledger knows", () => {
+  it("only ever writes a mode a toolset takes — one of the three words, or a function", () => {
     for (const bucket of readdirSync(TOOLSETS)) {
       for (const file of readdirSync(join(TOOLSETS, bucket))) {
         const map = shipped(`${bucket}/${file.replace(/\.json$/, "")}`) as Record<string, unknown>;
-        for (const [subject, mode] of Object.entries(map)) expect(PERMISSION_MODES, `${bucket}/${file}: ${subject}`).toContain(mode);
+        for (const [subject, mode] of Object.entries(map)) expect(isToolsetMode(mode), `${bucket}/${file}: ${subject}`).toBe(true);
         // `other` is the LAST line, where a person reading the file looks for it.
         expect(Object.keys(map).at(-1), `${bucket}/${file}`).toBe("other");
       }

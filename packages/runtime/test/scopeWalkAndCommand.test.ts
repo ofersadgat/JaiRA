@@ -231,11 +231,6 @@ describe("compiling a table into the agent's own rules", () => {
     }
   });
 
-  it("leaves `smart` to our callback — a rule cannot inspect the call", () => {
-    const rules = compileClaudeScopeRules([{ path: "/work/**", tools: { bash: "smart" } }] as never);
-    expect(Object.values(rules).flat()).toEqual([]);
-  });
-
   it("emits nothing for a tool that names no place", () => {
     // `web_search` takes a query — there is nothing for a path rule to scope.
     expect(compileClaudeScopeRules([{ path: "/work/**", tools: { web_search: "allow" } }] as never).allow).toEqual([]);

@@ -177,6 +177,8 @@ export interface ToolsetsViewProps {
   /** For a still picture: the card's folds, and an add-menu drawn open. */
   folds?: ReadonlySet<string> | undefined;
   startAdding?: string | undefined;
+  /** For a still picture: a tool line's mode menu drawn open. */
+  startMode?: { subject: string; open: "menu" | "function" } | undefined;
 }
 
 export function ToolsetsView(props: ToolsetsViewProps): JSX.Element {
@@ -259,6 +261,7 @@ function OpenToolset({ at, ...props }: ToolsetsViewProps & { at: ToolsetAt }): J
           onChange={editable ? (next) => props.onDraft(at.id, next) : undefined}
           folds={props.folds}
           startAdding={props.startAdding}
+          startMode={props.startMode}
         />
       )}
 

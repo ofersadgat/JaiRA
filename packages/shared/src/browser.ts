@@ -49,6 +49,7 @@ export * from "./agentTools";
 export * from "./toolsets";
 export * from "./toolsetBuckets";
 export * from "./commandParts";
+export * from "./permissionFunctions";
 export * from "./toolsetEdit";
 export * from "./toolsetSettings";
 export * from "./scopes";

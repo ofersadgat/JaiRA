@@ -475,7 +475,10 @@ function browseLayers(
     // A task pinned to a different hash is running older source — worth showing,
     // since execution reads the snapshot and never live `workflows/` (§5.3).
     const drifted = (tasks.pins.get(rootId) ?? []).filter((pin) => pin.snapshotHash !== hash).map((p) => p.taskId);
-    return { ...base, states, snapshotHash: hash, issues, driftedTasks: drifted };
+    // A toolset line whose FUNCTION is an unapproved module still loads — lint reports the line — and
+    // the file to approve is what that line is about, so it is said here as on a load that failed.
+    const withheld = modules !== undefined && watch !== undefined ? withheldApprovalsOf(modules, watch.withheld()) : [];
+    return { ...base, states, snapshotHash: hash, issues, driftedTasks: drifted, ...(withheld.length > 0 ? { needsApproval: withheld } : {}) };
   });
 
   const unreachable = [...byStateId.keys()].filter((id) => !covered.has(id)).sort();

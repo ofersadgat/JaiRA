@@ -196,7 +196,7 @@ describe("a read-only toolset reaches codex as the same sandbox flag", () => {
     // Denied outright: the shell is withheld, so nothing unlocks the switch.
     const withheld = { read_file: "allow", bash: "deny", other: "deny" };
     expect((await run({ tools: withheld }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
-    // "No shell but these commands": the shell is OFFERED, the gate is told `smart` so the lines are
+    // "No shell but these commands": the shell is OFFERED, the gate is told `ask` so the lines are
     // read — and the switch still follows the entry's authored `deny`, which the run reads off the
     // block's `subjects`.
     const commandsOnly = { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" };

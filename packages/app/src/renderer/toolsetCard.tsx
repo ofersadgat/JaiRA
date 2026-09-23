@@ -87,9 +87,11 @@ export interface ToolsetCardProps {
   onFold?: ((id: string, open: boolean) => void) | undefined;
   /** An add-menu drawn open from the first render, by its fold key — for a still picture. */
   startAdding?: string | undefined;
+  /** A tool line's mode menu drawn open from the first render — on its words or on the function form — for a still picture. */
+  startMode?: { subject: string; open: "menu" | "function" } | undefined;
 }
 
-export function ToolsetCard({ toolset, tools, onChange, readOnly, folds, onFold, startAdding }: ToolsetCardProps): JSX.Element {
+export function ToolsetCard({ toolset, tools, onChange, readOnly, folds, onFold, startAdding, startMode }: ToolsetCardProps): JSX.Element {
   const [own, setOwn] = useState<ReadonlySet<string>>(() => new Set(openSectionsOf(toolset)));
   const open = folds ?? own;
   const toggle = (id: string, to?: boolean): void => {
@@ -146,6 +148,7 @@ export function ToolsetCard({ toolset, tools, onChange, readOnly, folds, onFold,
                 onRemove={locked ? undefined : () => write(withToolHeld(toolset, NO_PARKED, tool.name, false))}
                 onMode={(next) => write(withSubjectMode(toolset, tool.name, next))}
                 onImpl={(next) => write(withToolImplementation(toolset, tool.name, next))}
+                modeOpen={startMode?.subject === tool.name ? startMode.open : undefined}
               />
             ))}
             {groups.map((group) => (

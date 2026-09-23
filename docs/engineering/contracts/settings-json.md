@@ -2,7 +2,7 @@
 id: engineering/contracts/settings-json
 type: engineering-contract
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 visibility: public
 kind: format
 owned_by: [engineering/units/project-config]
@@ -34,7 +34,7 @@ The shared layer is `<base>/settings.json`. The project layer is `<project>/.jai
 - `agents.genericCli` merges by entry `name`, an absent name counting as `generic-cli`: a project entry with a base entry's name merges into it in the base's position, and a new name is appended.
 - A layer that is not a plain object yields the other layer.
 
-### The top-level keys are twelve blocks, and an unknown top-level key is ignored
+### The top-level keys are thirteen blocks, and an unknown top-level key is ignored
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -48,6 +48,7 @@ The shared layer is `<base>/settings.json`. The project layer is `<project>/.jai
 | `agents` | object | no | the agent runtimes this project registers |
 | `workflows` | `{path?: string[]}` | no | the search path a bare workflow reference walks |
 | `files` | `{hidden?: string[]}` | no | the Files tree's shared hidden globs |
+| `smart` | `{model?: string, prompt?: string}` | no, default `{}` | the shipped `smart` permission function a toolset line names as `{ "function": "smart" }` ([decision 0007](../decisions/0007-toolsets.md), amended 2026-09-22): `model` is the route that judges a call (absent: the executor default), `prompt` what it is told (absent: `DEFAULT_SMART_PROMPT`); a non-string is refused as `config.smart.<key> must be a string`; edited in Settings → Configuration → smart |
 | `autopilot` | `{askBelow?: number}` | no, default `{askBelow: 0.2}` | how sure a fast-forward's controlling conversation must be before its answer stands in for the person's ([decision 0005](../decisions/0005-connect.md) §6); `0`–`1`, `1` never answers for you and `0` always. It is no workflow's threshold and names no workflow input. Left out of the file `initProject` writes, because it is a person's setting and belongs in the shared root |
 
 ### A route block's allowed fields follow from its key
@@ -114,8 +115,8 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `scopes` | array | no | where anything under the node may act; enforcement belongs to [tool-policy](../units/tool-policy.md) |
 | `scopes[i].path` | non-empty glob | exactly one of `path` and `url` | a filesystem place |
 | `scopes[i].url` | non-empty glob | exactly one of `path` and `url` | a network place |
-| `scopes[i].tools` | object of `allow`, `deny`, `ask` or `smart` by tool name | one of `tools` and `default` | per-tool modes in that place |
-| `scopes[i].default` | `allow`, `deny`, `ask` or `smart` | one of `tools` and `default` | the mode for a tool with no entry |
+| `scopes[i].tools` | object of `allow`, `deny` or `ask` by tool name (a function is a toolset's, never a place's) | one of `tools` and `default` | per-tool modes in that place |
+| `scopes[i].default` | `allow`, `deny` or `ask` | one of `tools` and `default` | the mode for a tool with no entry |
 
 ### Artifacts, storage, workflows and files each have fixed fields and defaults
 

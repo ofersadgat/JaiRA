@@ -24,11 +24,15 @@ import {
   PERMISSION_MODES,
   SCRIPT_SUBJECT,
   SHELL_TOOL,
+  SMART_FUNCTION,
+  isFunctionMode,
+  modeFunction,
   type PermissionMode,
   type ToolCategory,
   type ToolChoice,
   type ToolImplementation,
   type Toolset,
+  type ToolsetMode,
   type ToolSpec,
 } from "@jaira/shared/browser";
 import { groupModeOf, groupSentence, groupSummary, type CommandGroup } from "./composerToolset";
@@ -50,15 +54,34 @@ export const SCRIPT_HINT = "running a file — ./x.sh, npm run, python x.py, mak
  * What one permission MODE means, and the glyph for it.
  *
  * Drawn as what the agent may DO rather than as a tier: a shut lock asks every time, the same lock
- * open goes ahead, a shield refuses, a star is the approver deciding per call. Somebody scanning a
- * tool row is asking what happens when that tool is reached, and a rank answers a different question.
+ * open goes ahead, a shield refuses. Somebody scanning a tool row is asking what happens when that
+ * tool is reached, and a rank answers a different question. A line that names a FUNCTION wears a
+ * star and the function's name — see {@link modeMeta}.
  */
 export const MODE_META: Record<PermissionMode, { icon: Parameters<typeof Icon>[0]["name"]; label: string; hint: string }> = {
   ask: { icon: "lock", label: "ask", hint: "stop and ask before each call" },
-  smart: { icon: "star", label: "auto", hint: "decided per call by the approver" },
   allow: { icon: "unlocked", label: "allow", hint: "goes ahead without asking" },
   deny: { icon: "shield", label: "deny", hint: "refused every time" },
 };
+
+/** The glyph for a line that names a function — the star the approval draws beside what one decided. */
+export const FUNCTION_ICON: Parameters<typeof Icon>[0]["name"] = "star";
+
+/** {@link MODE_META} for any mode: a function reads as its own name, decided per call. */
+export function modeMeta(mode: ToolsetMode): { icon: Parameters<typeof Icon>[0]["name"]; label: string; hint: string } {
+  if (!isFunctionMode(mode)) return MODE_META[mode];
+  return {
+    icon: FUNCTION_ICON,
+    label: mode.function,
+    hint:
+      mode.function === SMART_FUNCTION
+        ? "a model judges each call, and asks you when it is unsure"
+        : `the function ${mode.function} decides each call`,
+  };
+}
+
+/** The css class a mode's button wears: the word, or `function`. */
+const modeClass = (mode: ToolsetMode): string => (isFunctionMode(mode) ? "function" : mode);
 
 /**
  * The red minus that starts a held line in a toolset being edited: out of the toolset.
@@ -111,28 +134,39 @@ export function ModePicker({
   title,
   onMode,
   readOnly,
+  startOpen,
 }: {
   /** `undefined` reads as `custom`: the things under this do not agree. See {@link categoryModeOf}. */
-  mode: PermissionMode | undefined;
+  mode: ToolsetMode | undefined;
   title: string;
-  onMode: (next: PermissionMode) => void;
+  onMode: (next: ToolsetMode) => void;
   /** The mode is shown and cannot be changed — what ships, read in Settings. */
   readOnly?: boolean | undefined;
+  /** Drawn open from the first render, on the menu or on the function form — for a still picture. */
+  startOpen?: "menu" | "function" | undefined;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
-  const meta = mode === undefined ? undefined : MODE_META[mode];
+  const [open, setOpen] = useState(startOpen !== undefined);
+  // The fourth row is not a word but a NAME: picking it asks which function, through the schema form
+  // every typed input goes through, and a line that already names one opens on its name.
+  const [naming, setNaming] = useState(startOpen === "function");
+  const box = useAway<HTMLDivElement>(open, () => {
+    setOpen(false);
+    setNaming(false);
+  });
+  const meta = mode === undefined ? undefined : modeMeta(mode);
   return (
     <div className="cx-mode-wrap" ref={box}>
       <button
         type="button"
-        className={`cx-tool-mode ${mode === undefined ? "cx-mode-custom" : `cx-mode-${mode}`}`}
+        className={`cx-tool-mode ${mode === undefined ? "cx-mode-custom" : `cx-mode-${modeClass(mode)}`}`}
         aria-expanded={open}
         aria-disabled={readOnly === true ? true : undefined}
         title={title}
         onClick={(e) => {
           e.stopPropagation();
-          if (readOnly !== true) setOpen((v) => !v);
+          if (readOnly === true) return;
+          setOpen((v) => !v);
+          setNaming(false);
         }}
       >
         {meta !== undefined ? (
@@ -140,34 +174,114 @@ export function ModePicker({
             <Icon name={meta.icon} />
           </span>
         ) : null}
-        <span className="ellip">{meta?.label ?? "custom"}</span>
+        <span className={isFunctionMode(mode) ? "ellip mono" : "ellip"}>{meta?.label ?? "custom"}</span>
         <span className="cx-more">›</span>
       </button>
       {open ? (
         <div className="cx-submenu">
-          {PERMISSION_MODES.map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={value === mode ? "on" : undefined}
-              onClick={(e) => {
-                e.stopPropagation();
-                onMode(value);
+          {naming ? (
+            <FunctionForm
+              initial={modeFunction(mode) ?? SMART_FUNCTION}
+              onSet={(reference) => {
+                onMode({ function: reference });
+                setNaming(false);
                 setOpen(false);
               }}
-            >
-              <span className="cx-tick">{value === mode ? "✓" : ""}</span>
-              <span className="cx-chip-icon">
-                <Icon name={MODE_META[value].icon} />
-              </span>
-              <span className="cx-opt-text">
-                <span className="cx-opt-name ellip">{MODE_META[value].label}</span>
-                <span className="cx-opt-hint ellip">{MODE_META[value].hint}</span>
-              </span>
-            </button>
-          ))}
+              onCancel={() => setNaming(false)}
+            />
+          ) : (
+            <>
+              {PERMISSION_MODES.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={value === mode ? "on" : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMode(value);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="cx-tick">{value === mode ? "✓" : ""}</span>
+                  <span className="cx-chip-icon">
+                    <Icon name={MODE_META[value].icon} />
+                  </span>
+                  <span className="cx-opt-text">
+                    <span className="cx-opt-name ellip">{MODE_META[value].label}</span>
+                    <span className="cx-opt-hint ellip">{MODE_META[value].hint}</span>
+                  </span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className={isFunctionMode(mode) ? "on" : undefined}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setNaming(true);
+                }}
+              >
+                <span className="cx-tick">{isFunctionMode(mode) ? "✓" : ""}</span>
+                <span className="cx-chip-icon">
+                  <Icon name={FUNCTION_ICON} />
+                </span>
+                <span className="cx-opt-text">
+                  <span className="cx-opt-name ellip">{isFunctionMode(mode) ? <span className="mono">{mode.function}</span> : "function…"}</span>
+                  <span className="cx-opt-hint ellip">a function decides each call, and may ask you — smart, or your own</span>
+                </span>
+              </button>
+            </>
+          )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Which function decides a line — one string, asked through the schema form like every other typed
+ * input. `smart` is the one JaiRA ships; anything an expression can call with one argument, or an
+ * expression document, is a function here.
+ */
+export function FunctionForm({
+  initial,
+  onSet,
+  onCancel,
+}: {
+  initial: string;
+  onSet: (reference: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [typed, setTyped] = useState(initial);
+  const schema: Schema = {
+    type: "object",
+    properties: {
+      function: {
+        type: "string",
+        title: "function",
+        minLength: 1,
+        description: "smart, or a function of your own — a name on the search path, a module symbol, or $BASE/functions/…",
+      },
+    },
+    required: ["function"],
+  };
+  const reference = typed.trim();
+  return (
+    <div className="cx-set-line-form cx-function-form" onClick={(e) => e.stopPropagation()}>
+      <SchemaForm
+        schema={schema}
+        value={{ function: typed }}
+        onChange={(next) => setTyped(String((next as { function?: unknown } | undefined)?.function ?? ""))}
+        ctx={{ path: "", hidePaths: true }}
+      />
+      <p className="sub">It is handed the call and answers allow or deny; to ask you, it calls approve_tool_call.</p>
+      <div className="cx-set-new-foot">
+        <button type="button" className="ghost" onClick={onCancel}>
+          Back
+        </button>
+        <button type="button" className="primary" disabled={reference.length === 0} onClick={() => onSet(reference)}>
+          Set
+        </button>
+      </div>
     </div>
   );
 }
@@ -278,17 +392,18 @@ export function ToolRow({
   note,
   onRemove,
   readOnly,
+  modeOpen,
 }: {
   tool: ToolChoice;
   /** The vocabulary entry, when this tool has one — what supplies its label and hint. */
   spec?: ToolSpec | undefined;
   granted: boolean;
-  mode: PermissionMode;
+  mode: ToolsetMode;
   impl: ToolImplementation;
   /** Which agent is answering, if one is — what decides whether the implementation is a choice. */
   cliRoute?: string | undefined;
   onGrant?: (() => void) | undefined;
-  onMode: (next: PermissionMode) => void;
+  onMode: (next: ToolsetMode) => void;
   onImpl: (next: ToolImplementation) => void;
   /** A line of a toolset on the page, not a tick box — see above. */
   held?: boolean | undefined;
@@ -296,6 +411,8 @@ export function ToolRow({
   note?: string | undefined;
   onRemove?: (() => void) | undefined;
   readOnly?: boolean | undefined;
+  /** The mode menu drawn open from the first render — for a still picture. */
+  modeOpen?: "menu" | "function" | undefined;
 }): JSX.Element {
   // What the ANSWERING agent calls its own tool doing this job — off that executor's declaration, by
   // route. Absent ⇒ that agent has no built-in to pick instead, so there is no choice to draw. A
@@ -334,7 +451,7 @@ export function ToolRow({
         </button>
       )}
       {native !== undefined ? <ImplPicker value={impl} native={native} nativeHint={nativeHint} onPick={onImpl} readOnly={readOnly} /> : null}
-      <ModePicker mode={mode} title={`${tool.name}: ${MODE_META[mode].hint}`} onMode={onMode} readOnly={readOnly} />
+      <ModePicker mode={mode} title={`${tool.name}: ${modeMeta(mode).hint}`} onMode={onMode} readOnly={readOnly} startOpen={modeOpen} />
     </div>
   );
 }
@@ -362,14 +479,14 @@ export function CategoryRow({
   children: ReactNode;
   granted: number;
   total: number;
-  mode: PermissionMode | undefined;
+  mode: ToolsetMode | undefined;
   open: boolean;
   onOpen: () => void;
   /**
    * Set every line under it. Absent ⇒ no button: a toolset on the page lists only what it HOLDS, and
    * a head that re-moded those lines would be a second way to do what each line's own button does.
    */
-  onMode?: ((next: PermissionMode) => void) | undefined;
+  onMode?: ((next: ToolsetMode) => void) | undefined;
 }): JSX.Element {
   return (
     <div className={`cx-cat${open ? " open" : ""}`}>
@@ -411,9 +528,9 @@ export function SubjectRow({
   subject: string;
   hint?: string;
   held: boolean;
-  mode: PermissionMode;
+  mode: ToolsetMode;
   onHeld?: (() => void) | undefined;
-  onMode: (next: PermissionMode) => void;
+  onMode: (next: ToolsetMode) => void;
   /** A line of a toolset on the page, not a tick box — see {@link ToolRow}. */
   line?: boolean | undefined;
   onRemove?: (() => void) | undefined;
@@ -444,7 +561,7 @@ export function SubjectRow({
           {words}
         </button>
       )}
-      <ModePicker mode={mode} title={`${subject}: ${MODE_META[mode].hint}`} onMode={onMode} readOnly={readOnly} />
+      <ModePicker mode={mode} title={`${subject}: ${modeMeta(mode).hint}`} onMode={onMode} readOnly={readOnly} />
     </div>
   );
 }
@@ -658,7 +775,7 @@ export function CommandGroupRow({
   toolset: Toolset;
   open: boolean;
   onOpen: () => void;
-  onMode: (next: PermissionMode) => void;
+  onMode: (next: ToolsetMode) => void;
   children: ReactNode;
   /** Take the whole program out — its own line and every subcommand under it. Draws the minus. */
   onRemove?: (() => void) | undefined;

@@ -77,12 +77,9 @@ describe("specificity", () => {
 });
 
 describe("strictest", () => {
-  it("orders deny over ask over smart over allow", () => {
+  it("orders deny over ask over allow", () => {
     expect(strictest("allow", "ask")).toBe("ask");
     expect(strictest("ask", "deny")).toBe("deny");
-    // `smart` MAY escalate and is not guaranteed to, so it cannot dominate an explicit `ask`.
-    expect(strictest("smart", "ask")).toBe("ask");
-    expect(strictest("allow", "smart")).toBe("smart");
     expect(strictest("allow", "allow")).toBe("allow");
   });
 

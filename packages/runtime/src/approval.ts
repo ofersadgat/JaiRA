@@ -15,7 +15,8 @@
  */
 import type { Approver, PermissionDecision, PermissionRequest, PermissionScope } from "@declarative-ai/permissions";
 import type { CommandApproval } from "@jaira/shared";
-import { CommandGrants, commandDecisionOf, type PolicyAuditEntry } from "./policy";
+import { CommandGrants, approvalReasonOf, commandDecisionOf, type PolicyAuditEntry } from "./policy";
+import { withPermissionFunctions, type PermissionFunctionsOptions } from "./permissionFunctions";
 
 /** Why an approval was refused, by the call's own input object — see {@link refusalOf}. */
 const REFUSALS = new WeakMap<object, string>();
@@ -155,9 +156,22 @@ export class ApprovalHub {
     return this.stopping.has(taskId);
   }
 
-  /** The `Approver` to place on `ctx.approve`. */
-  approver(context: { taskId?: string } = {}): Approver {
-    return (req: PermissionRequest) => this.park(req, context.taskId);
+  /**
+   * The `Approver` to place on `ctx.approve`.
+   *
+   * Every call reaches a person only through {@link withPermissionFunctions}: a toolset's shell is
+   * lowered as `ask` so that no line runs unread (decision 0007, amended 2026-09-22), and what a line
+   * came to decides it here first — a line every part of which the toolset allows runs without anybody
+   * being asked, one with a denied part is refused, and the parts a FUNCTION decides are put to it.
+   * `functions` is how those are run; without it such a part is put to the person, with the reason.
+   */
+  approver(context: { taskId?: string; functions?: Omit<PermissionFunctionsOptions, "task"> } = {}): Approver {
+    const park: Approver = (req: PermissionRequest) => this.park(req, context.taskId);
+    const decide = withPermissionFunctions(park, { ...context.functions, ...(context.taskId !== undefined ? { task: context.taskId } : {}) });
+    // A stopping run's gate is shut before any function is asked: a judge's model call, or a function's
+    // own question, about a run that is winding down is one nobody should pay for or answer.
+    return async (req: PermissionRequest) =>
+      context.taskId !== undefined && this.stopping.has(context.taskId) ? { decision: "deny", scope: "once" } : decide(req);
   }
 
   private park(req: PermissionRequest, taskId?: string): Promise<PermissionDecision> {
@@ -171,7 +185,9 @@ export class ApprovalHub {
     const command = typeof input["command"] === "string" ? (input["command"] as string) : undefined;
     // The policy judged this very call a moment ago and kept what it found against the input.
     const decided = commandDecisionOf(req.input);
-    const reason = command !== undefined && this.reasons.has(command) ? this.reasons.get(command)! : decided?.reason;
+    // The decision kept against the call is the freshest word — after the functions a line names have
+    // answered, its reason is theirs, not the escalation the policy audited on the way in.
+    const reason = decided?.reason ?? (command !== undefined ? this.reasons.get(command) : undefined) ?? approvalReasonOf(req.input);
     const request: ApprovalRequest = {
       requestId,
       tool: req.tool,

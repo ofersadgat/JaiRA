@@ -16,7 +16,7 @@
  * (`ChatPlanView.effective.permissions`), and the renderer asks again for whichever bucket the
  * person has picked.
  */
-import type { PermissionMode, ToolImplementation } from "./operationVocabulary";
+import { modeWord, sameMode, SMART_MODE, type ToolImplementation, type ToolsetMode } from "./operationVocabulary";
 import { holdsTool, MODE_WHEN_UNSET, parseToolset, type Toolset, type ToolsetDecl } from "./toolsets";
 import type { WorkflowLayer } from "./view";
 
@@ -52,7 +52,7 @@ export interface ToolsetChoice {
  */
 export function toolsetSignature(toolset: Toolset, registered?: readonly string[]): string {
   const known = registered === undefined ? undefined : new Set(registered);
-  const lines: Array<[string, PermissionMode, ToolImplementation | ""]> = [];
+  const lines: Array<[string, ToolsetMode, ToolImplementation | ""]> = [];
   for (const [subject, entry] of Object.entries(toolset.entries)) {
     if (entry.kind === "tool") {
       if (!holdsTool(toolset, subject)) continue;
@@ -115,14 +115,14 @@ export function bucketOf(current: Toolset, choices: readonly ToolsetChoice[], re
  * `toolVocabulary.ts`. A toolset anybody else writes is called by its file name and described by
  * what is in it ({@link toolsetSummary}).
  */
-const SHIPPED_TOOLSET_WORDS: Readonly<Record<string, { label: string; hint: string; glyph: PermissionMode }>> = {
+const SHIPPED_TOOLSET_WORDS: Readonly<Record<string, { label: string; hint: string; glyph: ToolsetMode }>> = {
   "chat/ask-first": { label: "ask first", hint: "stop and ask before every call", glyph: "ask" },
   "chat/read-only": { label: "read-only", hint: "reading goes ahead, anything that writes is refused", glyph: "deny" },
-  "chat/auto": { label: "auto", hint: "each call decided by the approver", glyph: "smart" },
+  "chat/auto": { label: "auto", hint: "each call judged by the smart function, which asks you when unsure", glyph: SMART_MODE },
   "chat/full": { label: "full access", hint: "anything, without asking", glyph: "allow" },
   "chat_control/ask-first": { label: "ask first", hint: "ask before starting, moving or answering anything", glyph: "ask" },
   "chat_control/read-only": { label: "read-only", hint: "may look at tasks and workflows; starts and moves nothing", glyph: "deny" },
-  "chat_control/auto": { label: "auto", hint: "each call decided by the approver", glyph: "smart" },
+  "chat_control/auto": { label: "auto", hint: "each call judged by the smart function, which asks you when unsure", glyph: SMART_MODE },
   "chat_control/full": { label: "full access", hint: "steer without asking", glyph: "allow" },
 };
 
@@ -150,7 +150,7 @@ export function toolsetsOfBucket(choices: readonly ToolsetChoice[], bucket: stri
  * otherwise all wear the shield. Anybody else's wears the glyph of its `other`, which is the one line
  * every toolset has.
  */
-export function toolsetGlyph(choice: ToolsetChoice): PermissionMode {
+export function toolsetGlyph(choice: ToolsetChoice): ToolsetMode {
   return SHIPPED_TOOLSET_WORDS[choice.id]?.glyph ?? parseToolset(choice.decl).toolset.other ?? MODE_WHEN_UNSET;
 }
 
@@ -173,8 +173,7 @@ export function toolsetSummary(toolset: Toolset): string {
   const modes = Object.values(toolset.entries).map((entry) => entry.mode ?? MODE_WHEN_UNSET);
   const other = toolset.other ?? MODE_WHEN_UNSET;
   const count = `${modes.length} ${modes.length === 1 ? "line" : "lines"}`;
-  const word = (mode: PermissionMode): string => (mode === "smart" ? "auto" : mode);
-  return modes.length > 0 && modes.every((mode) => mode === other) ? `${count} · all ${word(other)}` : `${count} · other ${word(other)}`;
+  return modes.length > 0 && modes.every((mode) => sameMode(mode, other)) ? `${count} · all ${modeWord(other)}` : `${count} · other ${modeWord(other)}`;
 }
 
 /** The sentence under a toolset's name: the shipped words for a shipped file, a summary otherwise. */

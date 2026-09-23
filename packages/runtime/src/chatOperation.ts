@@ -151,7 +151,7 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
   const reasoning = inherited<ReasoningSpec>("reasoning", config["reasoning"]);
   const tools = inherited<readonly string[]>("tools", host?.environment?.tools);
   const lowered = inherited<PermissionsDecl>("permissions", host?.environment?.permissions);
-  // The shell's entry lowers as `smart`, with the mode its author wrote carried in `subjects`
+  // The shell's entry lowers as `ask`, with the mode its author wrote carried in `subjects`
   // (decision 0007 §4). A composer shows and edits the AUTHORED mode, so it is put back here; sending
   // lowers it again, and `toolsetOfEnvironment` reads either spelling as the same toolset.
   const shellMode = lowered?.subjects?.[SHELL_TOOL];
@@ -264,7 +264,7 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
       // it with what the file declared would make that the one instruction it cannot give.
       ...(settings.tools !== undefined ? { tools: [...settings.tools] } : {}),
       // A block that carries `subjects` holds a shell whose mode the plan showed as authored, so it
-      // is lowered again (the shell back to `smart`); any other block goes in as it came.
+      // is lowered again (the shell back to `ask`); any other block goes in as it came.
       ...(settings.permissions?.subjects !== undefined
         ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions.scopes) }
         : settings.permissions !== undefined
@@ -331,7 +331,7 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
       // than dropping them: the model would be told about tools nothing had gated.
       ...tools.environment,
       // A toolset travels as the block it lowers to. An INHERITED block that carries `subjects` is
-      // lowered again, which puts the shell's entry back to the `smart` the plan showed as its
+      // lowered again, which puts the shell's entry back to the `ask` the plan showed as its
       // authored mode (decision 0007 §4); any other block travels as it came.
       ...(settings.toolset !== undefined || settings.permissions?.subjects !== undefined
         ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions?.scopes) }

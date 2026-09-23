@@ -193,7 +193,8 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     // `autopilot` is left out for the same reason and a stronger one: how sure a conversation has to
     // be before it answers FOR YOU is a fact about you, not about a checkout, and a project that
     // spelled the default out would silently override the answer you gave once in the shared root.
-    const { integrations: _machineWide, autopilot: _yours, ...starter } = defaultConfig();
+    // `smart` likewise: which model judges your tool calls, and what it is told, is set once for you.
+    const { integrations: _machineWide, autopilot: _yours, smart: _alsoYours, ...starter } = defaultConfig();
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");

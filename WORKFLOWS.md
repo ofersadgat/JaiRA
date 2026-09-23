@@ -570,6 +570,7 @@ string.
 | `edit_artifact` | UI gate | |
 | `fill_form` | UI gate | |
 | `confirm_action` | UI gate | |
+| `approve_tool_call` | UI gate | The approval prompt a permission function calls (§5.1); answered `{ decision: "allow" \| "deny" }`, by the person only |
 | `claude-code` | Delegated agent, in-process SDK | `policyEnforcement: "callback"` |
 | `claude-cli` | Delegated agent, `claude` subprocess | `policyEnforcement: "callback"` via the MCP bridge |
 | `codex-cli` | Delegated agent, `codex exec` subprocess | `policyEnforcement: "config"` — see below |
@@ -803,8 +804,9 @@ the same rule.
   ```
 
   - **Present means offered, with that mode. Absent means not offered.** The
-    modes are `allow`, `ask`, `deny` and `smart` (decided per call by the
-    approver).
+    modes are `allow`, `ask`, `deny` — and a **function**, `{ "function": "smart" }`,
+    which decides each call (below). `"smart"` as a word is refused: it is the
+    function JaiRA ships, and a line names it as one.
   - A **subject** is a standard tool (`read_file`, `glob`, `grep`, `edit`,
     `write_file`, `show_artifact`, `bash`, `web_fetch`, `web_search`), a
     **command** (`git commit`, or `git` for every command of that program),
@@ -838,7 +840,9 @@ the same rule.
     behind.
 
   The linter resolves the reference and checks every line: a mode that is not one
-  of the four is an **error** at the entry; a tool name nothing knows
+  of the three words or a function is an **error** at the entry, and so is a
+  function that does not resolve (a typo, or a module nobody approved — see below);
+  a tool name nothing knows
   (`reed_file`, `Glob`) is a **warning** — nothing is offered under it, and a call
   by that name answers to `other`.
 
@@ -914,13 +918,65 @@ the same rule.
 
   So `"bash": "deny", "git status": "allow"` offers the shell, runs `git status`
   and refuses everything else: `bash`'s mode is the answer for a command nothing
-  else names, not a switch on the tool. (It reaches the engine as `smart`, with the
-  mode you wrote carried in `permissions.subjects` — that is what makes the gate
-  read the line before it answers, in a run as in a conversation.) **`smart`** on a
-  shell subject defers to the project's command policy.
+  else names, not a switch on the tool. (It reaches the engine as `ask`, with the
+  mode you wrote carried in `permissions.subjects` — no line runs before the host
+  has read it: the line is taken apart, and one every part of which the toolset
+  allows runs without anybody being asked, in a run as in a conversation.)
 
-  `"bash": "deny"` with no command and no `script` entry that allows, asks or is
-  `smart` leaves nothing for the shell to run, so the shell is **withheld**: the
+  **A line may name a FUNCTION instead of a mode** — on a tool, a command,
+  `script`, `bash` or `other`:
+
+  ```jsonc
+  "tools": {
+    "read_file": "allow",
+    "bash": { "function": "smart" },                       // JaiRA's own
+    "write_file": { "function": "policy.judgeWrite" },     // a module of yours
+    "git push": { "function": "$BASE/functions/push_ok" }, // a rooted document
+    "edit": { "function": "smart", "implementation": "native" },
+    "other": "deny"
+  }
+  ```
+
+  - The reference is written as a call's callee is (§9): a bare name searched
+    along the path (a file of that name in `functions/` in any layer, else a host
+    function), a dotted module symbol, or a `$ROOT/…` path. It is **anything an
+    expression can call with one argument** — a prompt or function operation
+    document, a `.ts` module symbol, a host function — or an **expression document**
+    (`{ "$expr": … }`) that reads `.inputs.request`.
+  - It is handed **one argument**, `request`: what an approver would be shown.
+    `tool` (the tool called), `subject` (the line that answers for it — `bash`,
+    `git push`, `write_file`, `other`), `function` (its own reference), `input`
+    (the call's input), and for a shell line `line` and `part` — the ONE part being
+    judged, with `text`, `kind`, `subject`, `span`, `program`, `subcommand`,
+    `args`, `flags`, `paths`, `url`, `via` — plus `cwd`, `state`, `task` and
+    `toolset`.
+  - It returns **`"allow"` or `"deny"`**, nothing else. Anything else, a failure,
+    or a function that does not load, has not decided: that part is put to the
+    person, with the reason.
+  - It is asked **per part** of a shell line, where a mode would apply: a part
+    another line names (`"git status": "allow"`) never reaches it, the floor,
+    `.jaira/`, a rule's deny and a line the parser cannot read are decided before
+    any function is, and a built-in ask (a push, an install) is stricter than a
+    function on `bash` — unless the line that names the function names the program.
+    One part denied refuses the line and the functions after it are not asked.
+  - **To ask the person, a function calls the approval prompt**,
+    `approve_tool_call(request)` — a function like `choose_option`, drawn in the
+    task's conversation, durable like any gate, and never offered to a
+    fast-forward's conversation (it is an approval). Its answer is the function's.
+    ⚠️ A binding evaluates both branches of `? :`, so an expression document that
+    asks only sometimes asks every time; write that logic in a host function or
+    call the prompt unconditionally.
+  - A `.ts` module it reaches is held to the **module approval** like any other
+    (§9.1): a task will not start until it is approved, and it is frozen with the
+    run.
+  - **`smart`** is the function JaiRA ships: one model call judges the request
+    `allow`, `deny` or `unsure`, and `unsure` calls the approval prompt. Its model
+    and what it is told are **Settings → Configuration → smart** (`smart.model`,
+    `smart.prompt` in `settings.json`); a file named `smart` on the path replaces
+    it outright. The shipped `auto` toolsets give every line `{ "function": "smart" }`.
+
+  `"bash": "deny"` with no command and no `script` entry that allows, asks or
+  names a function leaves nothing for the shell to run, so the shell is **withheld**: the
   agent gets no shell at all, not even its own, and codex's writing sandbox stays
   off. Reading a file goes through `read_file`, `glob` and `grep`.
 
@@ -941,7 +997,7 @@ the same rule.
   **A run reads the toolset as a conversation turn does.** The engine hands the
   agent executor the state's resolved block, so `"implementation": "native"` keeps
   the agent's built-in in a run too (ours is not injected beside it), and a written
-  `"other": "ask"` (or `"smart"`) forces `Task`, `Agent` and `SlashCommand` to the
+  `"other": "ask"` (or a function) forces `Task`, `Agent` and `SlashCommand` to the
   callback — an `other` you did not write does not. An agent reached as a
   **function** is held exactly as its route is: `"function": "claude-code"` or
   `"claude-cli"` is wrapped by the route's own wrapper, so `"native"` keeps the

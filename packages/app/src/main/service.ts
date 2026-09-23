@@ -82,6 +82,8 @@ import {
   parseSessionRef,
   loadPinnedBundle,
   userModules,
+  loadPermissionFunction,
+  workflowLoadOptions,
   canonicalModulePath,
   prepareUserModules,
   resolveUserFunctions,
@@ -246,6 +248,10 @@ import {
   newRegistry,
   registerUserFunctions,
   prepareUserFunctions,
+  permissionFunctionRunner,
+  registerApprovalPrompt,
+  registerSmartFunction,
+  type PermissionFunctionRunner,
   Git,
   NodeExec,
   parseFakeRules,
@@ -336,6 +342,8 @@ import {
   type ForgeProvider,
   type RemoteStatusView,
   validateComponentResult,
+  APPROVAL_PROMPT_FUNCTION,
+  approvalRequestKey,
   WORKFLOW_JSON,
   unnamedRouteOf,
   ALWAYS_GRANTED_TOOLS,
@@ -3670,7 +3678,19 @@ export class AppService {
     // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
     // task that can never touch a file, failing for a reason nothing on screen would explain.
     open.approvals.allow(taskId);
-    const approve = open.approvals.approver({ taskId });
+    // Which state each instance is, so a permission function is told the state its call belongs to —
+    // seeded from what the journal holds (a loaded run re-enters nothing it already entered), and kept
+    // current as this run enters more (`persistence.record` below).
+    const instanceStates = new Map<string, string>();
+    for (const row of project.events.list(taskId)) {
+      if (row.event.type === "instance.entered") instanceStates.set(row.event.instanceId, row.event.stateId);
+    }
+    // A toolset line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
+    // amended 2026-09-22): the approval prompt and `smart` join this run's registry, and the approver
+    // asks the functions first.
+    const approve = this.approverWithFunctions(open, taskId, this.permissionFunctionsFor(open, taskId, registry, prompt, abort.signal), {
+      stateOf: (instanceId) => instanceStates.get(instanceId),
+    });
 
     const recorder = project.events.recorder(taskId);
     let seq = 0;
@@ -3726,6 +3746,7 @@ export class AppService {
           persistence: {
             record: (event, atMs) => {
               recorder.record(event, atMs);
+              if (event.type === "instance.entered") instanceStates.set(event.instanceId, event.stateId);
               // A move on its way DOWN to a nested target directs its next step here, the moment
               // the composite above it enters (decision 0005 §1).
               // A fast-forward's arrival, its progress, and a failure that ends it (decision 0005 §4).
@@ -4413,7 +4434,13 @@ export class AppService {
     // The workflow tools (decision 0005 §3), bound to THIS conversation: a typed turn is how a
     // person steers work, and it is the path both `chat/session` and `chat/control` are held on.
     registerWorkflowTools(registry, this.workflowHostFor(open, request.taskId));
-    const approve = open.approvals.approver({ taskId: request.taskId });
+    // A toolset line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
+    // amended 2026-09-22) — in a typed turn as in a run. The functions get a registry of their own:
+    // this turn's holds tools, and a function is none.
+    const functionRegistry = newRegistry();
+    const approve = this.approverWithFunctions(open, request.taskId, this.permissionFunctionsFor(open, request.taskId, functionRegistry, prompt), {
+      state: context.stateId,
+    });
     /**
      * The project policy with THIS message's per-tool modes folded into its baseline.
      *
@@ -6907,6 +6934,73 @@ export class AppService {
   }
 
   /**
+   * What a toolset line that names a FUNCTION needs in one run or one turn (decision 0007, amended
+   * 2026-09-22), put on `registry`: the approval prompt, parked on this project's gate hub for the
+   * task — so it is durable and drawn in the task's conversation like any gate — and `smart`, judging
+   * with this project's `smart` settings through `prompt`. What comes back runs a function the way this
+   * project loads a workflow: along the same path, with the same module approvals, its modules merged
+   * into `registry` and prepared before it runs.
+   */
+  private permissionFunctionsFor(
+    open: ProjectSession,
+    taskId: string,
+    registry: ReturnType<typeof newRegistry>,
+    prompt: ReturnType<typeof buildPromptExecutor>,
+    abortSignal?: AbortSignal,
+  ): PermissionFunctionRunner {
+    const project = open.project;
+    registerApprovalPrompt(registry, (component, inputs) => open.hub.ask(component, inputs, taskId));
+    registerSmartFunction(registry, { prompt, config: () => project.config.smart });
+    const modules = userModules();
+    return permissionFunctionRunner({
+      registry,
+      prompt,
+      ...(abortSignal !== undefined ? { abortSignal } : {}),
+      load: async (reference) => {
+        const bundle = loadPermissionFunction(reference, workflowLoadOptions(project.paths, { path: project.config.workflows.path }));
+        if (modules !== undefined) {
+          resolveUserFunctions(modules, bundle);
+          registerUserFunctions(registry, modules.userFunctions);
+          await prepareUserFunctions(modules.userFunctions);
+        }
+        return bundle;
+      },
+    });
+  }
+
+  /**
+   * The approver a run or a turn hands the engine: the functions a toolset names asked first, then the
+   * person (`withPermissionFunctions`). Every answer a function gives is written to the command log.
+   */
+  private approverWithFunctions(
+    open: ProjectSession,
+    taskId: string,
+    run: PermissionFunctionRunner,
+    where: { stateOf?: (instanceId: string) => string | undefined; state?: string },
+  ): ReturnType<ApprovalHub["approver"]> {
+    return open.approvals.approver({
+      taskId,
+      functions: {
+        run,
+        ...(where.stateOf !== undefined ? { stateOf: where.stateOf } : {}),
+        ...(where.state !== undefined ? { state: where.state } : {}),
+        onDecided: (decided) => {
+          if (decided.answer === undefined) return;
+          const request = decided.request;
+          open.project.commands.record({
+            taskId,
+            tool: request.tool,
+            ...(request.line !== undefined ? { command: request.line } : {}),
+            decision: decided.answer === "allow" ? "allowed" : "blocked",
+            decidedBy: "function",
+            reason: `'${request.function}' ${decided.answer === "allow" ? "allowed" : "denied"} ${request.part?.text ?? request.subject}`,
+          });
+        },
+      },
+    });
+  }
+
+  /**
    * One model call, outside any run: does this round of answers open more questions?
    *
    * The DEFAULT executor, built the way every UI-initiated call is (`defaultTree`) and under the
@@ -6948,7 +7042,14 @@ export class AppService {
     const found = this.findStoredInteraction(requestId);
     if (found === undefined) throw this.refusal("run", `no pending interaction '${requestId}'`);
     const { session, row } = found;
-    session.hub.seed(row.taskId, row.component, value);
+    // An approval prompt's answer is about ONE call. The resumed run re-asks whatever its agent asks
+    // next, which need not be the call this answered — so the seed says which request it answers, and
+    // the prompt asks again when a different one comes (`registerApprovalPrompt`).
+    const seeded =
+      row.component === APPROVAL_PROMPT_FUNCTION && value !== null && typeof value === "object" && !Array.isArray(value)
+        ? { ...value, about: approvalRequestKey((row.inputs as Record<string, JsonValue>)["request"]) }
+        : value;
+    session.hub.seed(row.taskId, row.component, seeded);
     session.project.interactions.close(requestId);
     this.publish({ type: "interaction:resolved", requestId });
     void this.resumeTask({ taskId: row.taskId, project: session.dir }).catch((e: unknown) => {
@@ -9958,7 +10059,7 @@ function postureOf(config: JairaConfigOf, tools: readonly ToolChoice[], toolsets
   if (Object.keys(toolset.entries).length === 0) {
     const { baseline } = compilePolicy(config.policy, { execEnv: config.execEnvironment });
     const mode = toolset.other ?? baseline?.default ?? "ask";
-    return `${mode === "smart" ? "auto" : mode} by default`;
+    return `${typeof mode === "object" ? mode.function : mode === "smart" ? "auto" : mode} by default`;
   }
   const registered = tools.map((tool) => tool.name);
   const match = matchToolset(toolset, toolsets, bucketOf(toolset, toolsets, registered), registered);

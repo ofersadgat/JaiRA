@@ -70,7 +70,6 @@ import {
   TOOLSET_LAYER_LABELS,
   type ChatPlanView,
   type ChatSettings,
-  type PermissionMode,
   type ReasoningEffort,
   type SaveToolsetRequest,
   type SettingOrigin,
@@ -107,7 +106,7 @@ import {
   type Parked,
 } from "./composerToolset";
 import { BrandIcon, Icon } from "./icons";
-import { AddLine, CategoryRow, CommandGroupRow, MODE_META, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow, useAway } from "./toolsetRows";
+import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow, useAway } from "./toolsetRows";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 
@@ -1199,7 +1198,7 @@ export function Composer({
                     <Opt
                       key={choice.id}
                       on={matched?.id === choice.id}
-                      icon={MODE_META[toolsetGlyph(choice)].icon}
+                      icon={modeMeta(toolsetGlyph(choice)).icon}
                       name={toolsetLabel(choice)}
                       hint={toolsetHint(choice)}
                       // Its ticks, implementations and modes, written onto the Tools card whole. What

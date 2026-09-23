@@ -86,7 +86,16 @@ describe("which toolset a map is", () => {
     expect(matchToolset(of({ read_file: "ask", bash: "ask", write_file: "ask", other: "ask" }), CHOICES, "chat", REGISTERED)).toBeUndefined();
   });
 
-  it("still matches after a state LOWERED it — the shell's `smart`, the marks, and a tool nothing serves", () => {
+  it("matches a map whose lines name FUNCTIONS by the function's name, and still after it is lowered", () => {
+    const auto = choice("chat/auto", { read_file: { function: "smart" }, bash: { function: "smart" }, other: { function: "smart" } });
+    const lowered = lowerToolset(of(auto.decl));
+    expect(matchToolset(toolsetOfEnvironment(lowered.tools, lowered.permissions), [auto], "chat", REGISTERED)?.id).toBe("chat/auto");
+    // The same lines under ANOTHER function are another toolset — and a word is not a function.
+    expect(matchToolset(of({ read_file: { function: "judge" }, bash: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
+    expect(matchToolset(of({ read_file: "ask", bash: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
+  });
+
+  it("still matches after a state LOWERED it — the shell's `ask`, a function, the marks, and a tool nothing serves", () => {
     // What a loaded state holds is the list and block its toolset lowered to. Read back, that has to
     // be the same toolset, or a conversation started from `$/toolsets/chat/read-only` would read
     // `custom` before anybody had touched it. `start` and `move` are named and not served yet, so
@@ -147,7 +156,7 @@ describe("what a toolset is called", () => {
   it("summarises a map by its lines and its `other`", () => {
     expect(toolsetSummary(of(ASK_FIRST))).toBe("2 lines · all ask");
     expect(toolsetSummary(of(READ_ONLY))).toBe("3 lines · other deny");
-    expect(toolsetSummary(of({ bash: "smart", other: "smart" }))).toBe("1 line · all auto");
+    expect(toolsetSummary(of({ bash: { function: "smart" }, other: { function: "smart" } }))).toBe("1 line · all smart");
   });
 });
 

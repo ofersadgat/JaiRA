@@ -50,6 +50,52 @@ describe("handedToClaude", () => {
   });
 });
 
+describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09-22)", () => {
+  // A runner that allows `git` and `write_file` and denies the rest — what a host's function would say.
+  const judge: Parameters<typeof handedToClaude>[1] = {
+    functions: async (_reference, request) => (request.part?.program === "git" || request.tool === "write_file" ? "allow" : "deny"),
+  };
+
+  it("hands claude the shell and the tool the function answers for, and each CALL is what the function said", async () => {
+    const decl = { read_file: "allow", write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" };
+    const handed = await handedToClaude(map(decl), judge);
+    // Served like any held line — the function decides calls, not whether the tool exists.
+    expect(handed.served).toEqual(["bash", "read_file", "show_artifact", "write_file"]);
+    expect(handed.removed).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "Glob"]));
+    // Nothing a function answers for is pre-approved: every call has to reach it.
+    expect(handed.preApproved).not.toContain("bash");
+    expect(handed.preApproved).not.toContain("write_file");
+    expect(handed.tools["write_file"]).toEqual({ reachable: true, via: ["app"], decision: "allow" });
+    // Per part: `git status` the function allows, `cat` is the map's `read_file`, `rm` its `other`.
+    expect(handed.shell).toEqual({ command: "allow", read: "allow", write: "deny", script: "deny" });
+  });
+
+  it("is refused where the function refuses, without anybody being asked", async () => {
+    const handed = await handedToClaude(map({ write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" }), {
+      functions: async () => "deny",
+    });
+    // A way in that is refused is not a way in, and a shell every line of which is refused is not a shell.
+    expect(handed.tools["write_file"]).toEqual({ reachable: false, via: [] });
+    expect(handed.tools["bash"]).toEqual({ reachable: false, via: [] });
+  });
+
+  it("ASKS where nothing can run the function — a host with no runner lets nothing through", async () => {
+    const handed = await handedToClaude(map({ write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" }));
+    expect(handed.tools["write_file"]!.decision).toBe("ask");
+    expect(handed.shell).toMatchObject({ command: "ask" });
+  });
+
+  it("forces claude's own natives to the callback for a written `other` that is a function", async () => {
+    const handed = await handedToClaude(map({ read_file: "allow", other: { function: "judge" } }), judge);
+    expect(handed.askRules).toEqual(expect.arrayContaining(["Task", "Agent", "SlashCommand"]));
+    expect(handed.natives).toEqual({ Task: "deny", Agent: "deny", SlashCommand: "deny" });
+  });
+
+  it("turns codex's writing sandbox ON for a writer a function answers for — the function may allow it", async () => {
+    expect((await handedToCodex(map({ read_file: "allow", write_file: { function: "judge" }, other: "deny" }))).permissionMode).toBeUndefined();
+  });
+});
+
 describe("a shell the toolset denies, MEASURED in a run", () => {
   it("hands claude NO shell for `\"bash\": \"deny\"` — not ours, not its own", async () => {
     const handed = await handedToClaude(map({ read_file: "allow", bash: "deny", other: "deny" }));

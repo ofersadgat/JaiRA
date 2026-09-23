@@ -182,15 +182,14 @@ export function specificityOf(glob: string): number {
 
 // --- resolution --------------------------------------------------------------
 
-/** deny ▸ ask ▸ smart ▸ allow — how restrictive each mode is, for {@link strictest}. */
-const RANK: Record<ToolMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
+/** deny ▸ ask ▸ allow — how restrictive each mode is, for {@link strictest}. */
+const RANK: Record<ToolMode, number> = { allow: 0, ask: 1, deny: 2 };
 
 /**
  * The most restrictive of several modes — what a call about several places resolves to.
  *
- * `smart` sits under `ask` because it MAY escalate to a human and is not guaranteed to, so it cannot
- * dominate an explicit `ask`. Empty is `deny`, which is the same rule as an unmatched path: nothing
- * said anything, so nothing permitted it.
+ * Empty is `deny`, which is the same rule as an unmatched path: nothing said anything, so nothing
+ * permitted it.
  */
 export function strictest(...modes: readonly ToolMode[]): ToolMode {
   let worst: ToolMode = "deny";

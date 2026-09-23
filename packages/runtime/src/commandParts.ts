@@ -13,15 +13,17 @@ import {
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
   isAbsolutePath,
+  isFunctionMode,
   isToolsetMarkKey,
   shellSubjects,
   subjectKindOf,
   toolModes,
+  toolsetOfEnvironment,
   type CommandPartKind,
-  type PermissionMode,
   type PermissionsDecl,
   type TextSpan,
   type Toolset,
+  type ToolsetMode,
 } from "@jaira/shared";
 import type { CommandDialect, CommandWord, ParsedCommand, ShellRequest } from "./command";
 import {
@@ -240,10 +242,13 @@ export function classifyRequest(request: ShellRequest, dialect: CommandDialect):
 
 // --- the toolset, as the shell reads it ---------------------------------------
 
-/** Every subject a shell part can answer to, with its mode: tools, commands, `script`, and `other`. */
+/**
+ * Every subject a shell part can answer to, with its mode: tools, commands, `script`, and `other`. A
+ * mode may be a FUNCTION — the part is then put to it (see `policy.ts`, the `function` verdict).
+ */
 export interface ShellToolset {
-  entries: Record<string, PermissionMode>;
-  other?: PermissionMode;
+  entries: Record<string, ToolsetMode>;
+  other?: ToolsetMode;
 }
 
 /**
@@ -275,16 +280,20 @@ export interface JudgingToolset {
  */
 export function shellToolsetOfBlock(block: PermissionsDecl | undefined): JudgingToolset | undefined {
   if (block?.subjects === undefined) return undefined;
-  const tools = Object.fromEntries(Object.entries(block.tools ?? {}).filter(([name]) => !isToolsetMarkKey(name)));
+  // The block read back into the one map — the gate's modes, the subjects' authored ones, and every
+  // line a FUNCTION answers for, which lowering wrote as `ask` and named in `functions`.
+  const read = toolsetOfEnvironment(undefined, block);
+  const entries: Record<string, ToolsetMode> = {};
+  for (const [subject, entry] of Object.entries(read.entries)) if (entry.mode !== undefined) entries[subject] = entry.mode;
   return {
-    toolset: { entries: { ...tools, ...block.subjects }, ...(block.other !== undefined ? { other: block.other } : {}) },
+    toolset: { entries, ...(read.other !== undefined ? { other: read.other } : {}) },
     ...(block.source !== undefined ? { source: block.source } : {}),
   };
 }
 
 export interface ToolsetAnswer {
-  /** Absent when the entry is `smart`: the toolset defers to the command policy. */
-  mode?: Exclude<PermissionMode, "smart">;
+  /** The entry's mode — a word, or a FUNCTION the part is to be put to. */
+  mode?: ToolsetMode;
   /** The entry that answered — `git commit`, `git`, `bash`, `write_file`, `script`, `other` — or none. */
   entry?: string;
   /** True when the entry NAMES this program (`git commit`, `rm`), as against a fallback. */
@@ -295,11 +304,14 @@ export interface ToolsetAnswer {
 
 interface CommandEntry {
   key: string;
-  mode: PermissionMode;
+  mode: ToolsetMode;
   program: string;
   subs: string[];
   flags: string[];
 }
+
+/** How strict a mode is, for picking between two equally specific entries: allow ▸ function ▸ ask ▸ deny. */
+const MODE_RANK = (mode: ToolsetMode): number => (isFunctionMode(mode) ? 1 : { allow: 0, ask: 2, deny: 3 }[mode]);
 
 function commandEntriesOf(toolset: ShellToolset): CommandEntry[] {
   const out: CommandEntry[] = [];
@@ -322,8 +334,7 @@ function matchCommandEntry(toolset: ShellToolset, command: ParsedCommand): { ent
     if (!entry.subs.every((s, i) => subs[i]?.value.toLowerCase() === s)) continue;
     if (!entry.flags.every((f) => command.flags.includes(f))) continue;
     const score = entry.subs.length * 2 + entry.flags.length;
-    const rank: Record<PermissionMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
-    if (best !== undefined && (score < best.score || (score === best.score && rank[entry.mode] <= rank[best.entry.mode]))) continue;
+    if (best !== undefined && (score < best.score || (score === best.score && MODE_RANK(entry.mode) <= MODE_RANK(best.entry.mode)))) continue;
     const all = command.words ?? [];
     const program = all[command.programIndex ?? 0];
     const flagWords = entry.flags.flatMap((f) => all.find((w) => w.value === f) ?? []);
@@ -341,9 +352,9 @@ function matchCommandEntry(toolset: ShellToolset, command: ParsedCommand): { ent
  * `other`. With nothing at all the answer is `ask`: absent means not offered.
  */
 export function lookUp(toolset: ShellToolset, part: ClassifiedPart): ToolsetAnswer {
-  const own = (key: string): PermissionMode | undefined => (Object.hasOwn(toolset.entries, key) ? toolset.entries[key] : undefined);
-  const answer = (mode: PermissionMode, entry: string, specific: boolean, matched?: TextSpan[]): ToolsetAnswer => ({
-    ...(mode !== "smart" ? { mode } : {}),
+  const own = (key: string): ToolsetMode | undefined => (Object.hasOwn(toolset.entries, key) ? toolset.entries[key] : undefined);
+  const answer = (mode: ToolsetMode, entry: string, specific: boolean, matched?: TextSpan[]): ToolsetAnswer => ({
+    mode,
     entry,
     specific,
     ...(matched !== undefined ? { matched } : {}),

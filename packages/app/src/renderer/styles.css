@@ -7113,6 +7113,19 @@ button.link.change-path {
   color: var(--dim);
   background: var(--panel-2);
 }
+/* The FUNCTION that decided a part (decision 0007, amended 2026-09-22) rides in the verdict's own
+   pill — a star and its name, then what it answered — so the row keeps its five columns. */
+.approval-parts .part-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  font-weight: 500;
+}
+.approval-parts .part-by svg {
+  width: 1em;
+  height: 1em;
+}
 .approval-parts .part.hot {
   background: color-mix(in srgb, var(--hue) 9%, transparent);
 }

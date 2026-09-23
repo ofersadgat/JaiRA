@@ -236,19 +236,25 @@ export function toolsInCategory(category: ToolCategoryId): ToolSpec[] {
   return TOOL_SPECS.filter((spec) => spec.category === category);
 }
 
-/** The four modes, restated here so this module stands alone for a renderer that only draws them. */
-export type ToolMode = "ask" | "smart" | "allow" | "deny";
+/**
+ * The three fixed modes, restated here so this module stands alone for a renderer that only draws
+ * them. A toolset line may also name a FUNCTION (`ToolsetMode` in `operationVocabulary.ts`); a scope
+ * table may not — where a tool may act is a fixed answer.
+ */
+export type ToolMode = "ask" | "allow" | "deny";
 
 /**
  * What a category reads as, given the modes under it — see the module header on derivation.
  *
  * `undefined` for a category whose tools are not all the same, which the menu draws as `custom`. Not
- * a mode: "these disagree" is a different statement from any of the four, and collapsing it to one
- * would make the row lie about what pressing it would preserve.
+ * a mode: "these disagree" is a different statement from any of the modes, and collapsing it to one
+ * would make the row lie about what pressing it would preserve. Two functions agree when they name
+ * the same one.
  */
-export function categoryModeOf(category: ToolCategoryId, modeOf: (tool: string) => ToolMode): ToolMode | undefined {
+export function categoryModeOf<M extends string | { function: string }>(category: ToolCategoryId, modeOf: (tool: string) => M): M | undefined {
   const tools = toolsInCategory(category);
   if (tools.length === 0) return undefined;
   const first = modeOf(tools[0]!.name);
-  return tools.every((spec) => modeOf(spec.name) === first) ? first : undefined;
+  const key = (mode: M): string => JSON.stringify(mode);
+  return tools.every((spec) => key(modeOf(spec.name)) === key(first)) ? first : undefined;
 }

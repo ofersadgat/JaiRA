@@ -257,11 +257,12 @@ describe("a coarse transport's switch is derived from the toolset", () => {
     expect(on(toolset({ read_file: "allow", glob: "allow", other: "deny" }))).toBe(false);
     // Held with OUR implementation: ours is served over the bridge and the native is displaced — shut.
     expect(on(toolset({ read_file: "allow", edit: "ask" }))).toBe(false);
-    expect(on(toolset({ bash: "smart" }))).toBe(false);
+    // A line a FUNCTION decides is held like any other: ours serves it, the function judging each call.
+    expect(on(toolset({ bash: { function: "smart" } }))).toBe(false);
     expect(on(toolset({ write_file: "allow" }))).toBe(false);
     // Kept: codex's own `apply_patch` or `shell` does the job, and only the sandbox lets it.
     expect(on(toolset({ read_file: "allow", edit: { mode: "ask", implementation: "native" } }))).toBe(true);
-    expect(on(toolset({ bash: { mode: "smart", implementation: "native" } }))).toBe(true);
+    expect(on(toolset({ bash: { function: "smart", implementation: "native" } }))).toBe(true);
     // Held and refused is not held, whoever's code it names.
     expect(on(toolset({ read_file: "allow", bash: "deny", write_file: "deny" }))).toBe(false);
     expect(on(toolset({ bash: { mode: "deny", implementation: "native" } }))).toBe(false);

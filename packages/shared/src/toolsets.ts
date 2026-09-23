@@ -34,15 +34,25 @@
  * §4, `@jaira/runtime`'s `decideCommand`).
  *
  * The shell tool's OWN entry (`bash`) is the answer for "any other command" on such a line — not a
- * mode for the tool. So it lowers as `smart` in `permissions.tools` — the one mode under which the
- * gate reads the line before it answers — and its authored mode rides in `subjects` beside the
- * commands it stands behind. `"bash": "deny", "git status": "allow"` therefore offers the shell and
- * runs `git status`; every reader that wants the authored mode back goes through
+ * mode for the tool. So it lowers as `ask` in `permissions.tools` — no line runs before the host has
+ * read it: the narrowing takes the line apart, and the approver JaiRA hands the engine lets a line
+ * every part of which is allowed through without asking anybody — and its authored mode rides in
+ * `subjects` beside the commands it stands behind. `"bash": "deny", "git status": "allow"` therefore
+ * offers the shell and runs `git status`; every reader that wants the authored mode back goes through
  * {@link toolsetOfEnvironment}.
  *
  * A shell the map denies OUTRIGHT — `"bash": "deny"` and no command subject or `script` that allows,
- * asks or defers — is WITHHELD ({@link shellWithheld}): held as written, left off the lowered list,
- * `deny` at the gate, so an agent loses its own shell and codex's writing sandbox stays off.
+ * asks or names a function — is WITHHELD ({@link shellWithheld}): held as written, left off the
+ * lowered list, `deny` at the gate, so an agent loses its own shell and codex's writing sandbox stays
+ * off.
+ *
+ * ## A mode that is a function
+ *
+ * Any entry — a tool, a command, `script`, `bash`, `other` — may name a FUNCTION instead of a word:
+ * `"bash": { "function": "smart" }` (see `FunctionMode`). It lowers as `ask` wherever the gate reads a
+ * mode, and the reference rides in `permissions.functions`, by subject, which every lowered map
+ * carries (empty when nothing is a function). The function is called per call — per PART of a shell
+ * line — by the approver the host hands the engine, before any person is asked.
  *
  * ## What a run reads
  *
@@ -62,7 +72,17 @@
  * so a child that inherits its parent's map inherits its marks with it.
  */
 import { INLINE_TOOLSET } from "./commandParts";
-import { PERMISSION_MODES, type ChatSettings, type PermissionMode, type PermissionsDecl, type ToolImplementation } from "./operationVocabulary";
+import {
+  PERMISSION_MODES,
+  gateModeOf,
+  isFunctionMode,
+  isToolsetMode,
+  type ChatSettings,
+  type PermissionMode,
+  type PermissionsDecl,
+  type ToolImplementation,
+  type ToolsetMode,
+} from "./operationVocabulary";
 import type { Scope } from "./scopes";
 import { TOOL_SPEC_BY_NAME } from "./toolVocabulary";
 
@@ -97,8 +117,27 @@ export function isLoweredToolset(permissions: Pick<PermissionsDecl, "tools"> | u
 
 const IMPLEMENTATIONS: readonly ToolImplementation[] = ["app", "native"];
 
-/** One authored entry: a mode, or a mode with the implementation chosen too. */
-export type ToolsetEntryDecl = PermissionMode | { mode: PermissionMode; implementation?: ToolImplementation };
+/**
+ * One authored entry: a mode, or a mode with the implementation chosen too. A function mode may carry
+ * the implementation beside its reference — `{ "function": "smart", "implementation": "native" }` —
+ * as well as under `mode`.
+ */
+export type ToolsetEntryDecl =
+  | ToolsetMode
+  | { mode: ToolsetMode; implementation?: ToolImplementation }
+  | { function: string; implementation?: ToolImplementation };
+
+/**
+ * One authored entry as its two parts, whichever of the spellings it was written in — `"ask"`,
+ * `{ "function": "smart" }`, `{ "mode": …, "implementation": … }`, `{ "function": …, "implementation": … }`.
+ * For an entry already known to parse; what `parseToolset` refuses is not re-judged here.
+ */
+export function entryOfDecl(entry: ToolsetEntryDecl): { mode: ToolsetMode; implementation?: ToolImplementation } {
+  if (typeof entry === "string") return { mode: entry };
+  const implementation = "implementation" in entry ? entry.implementation : undefined;
+  const mode: ToolsetMode = "mode" in entry ? entry.mode : { function: entry.function };
+  return { mode, ...(implementation !== undefined ? { implementation } : {}) };
+}
 
 /** A toolset as AUTHORED, references already followed: subject → entry. */
 export type ToolsetDecl = Record<string, ToolsetEntryDecl>;
@@ -113,7 +152,7 @@ export interface ToolsetEntry {
    * ({@link toolsetOfEnvironment}) lists a tool it gives no mode — the always-granted tools of a turn
    * that declared no toolset — which resolves through the project baseline.
    */
-  mode?: PermissionMode;
+  mode?: ToolsetMode;
   implementation?: ToolImplementation;
   /**
    * `false` only from {@link toolsetOfEnvironment}: the lowered `permissions.tools` gives a mode for
@@ -129,7 +168,7 @@ export interface Toolset {
   /** Subject → entry, in authored order. Never holds `other`. */
   entries: Record<string, ToolsetEntry>;
   /** The mode for everything no entry names. */
-  other?: PermissionMode;
+  other?: ToolsetMode;
 }
 
 export interface ToolsetIssue {
@@ -160,9 +199,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isMode(value: unknown): value is PermissionMode {
-  return typeof value === "string" && (PERMISSION_MODES as readonly string[]).includes(value);
-}
+/** What a mode may be, as a sentence the linter can say after "a mode is". */
+const MODE_SENTENCE = `one of ${PERMISSION_MODES.join(", ")}, or a function — { "function": "smart" }`;
 
 /**
  * Read a RESOLVED map (no `$ref` left in it) into a {@link Toolset}, saying what is wrong with it.
@@ -192,20 +230,42 @@ export function parseToolset(decl: unknown): { toolset: Toolset; issues: Toolset
     let mode: unknown;
     let implementation: unknown;
     if (isPlainObject(value)) {
-      mode = value["mode"];
+      // Two object spellings: `{ "mode": …, "implementation": … }`, and a FUNCTION mode, which may
+      // carry the implementation beside its reference — `{ "function": "smart", "implementation": … }`.
+      const named = value["function"] !== undefined;
+      if (named && value["mode"] !== undefined) {
+        error(`'${subject}' says both 'mode' and 'function' — a function IS the mode: write { "function": … }, or { "mode": { "function": … } }`);
+        continue;
+      }
+      mode = named ? { function: value["function"] } : value["mode"];
       implementation = value["implementation"];
       for (const key of Object.keys(value)) {
-        if (key !== "mode" && key !== "implementation") warn(`'${key}' is not a field of an entry — it takes 'mode' and 'implementation'`);
+        if (key !== "mode" && key !== "implementation" && key !== "function") {
+          warn(`'${key}' is not a field of an entry — it takes 'mode' (or 'function') and 'implementation'`);
+        }
       }
       if (mode === undefined) {
-        error(`'${subject}' has no mode — write one of ${PERMISSION_MODES.join(", ")}`);
+        error(`'${subject}' has no mode — write ${MODE_SENTENCE}`);
         continue;
       }
     } else {
       mode = value;
     }
-    if (!isMode(mode)) {
-      error(`'${subject}' has the mode ${JSON.stringify(mode)} — a mode is one of ${PERMISSION_MODES.join(", ")}`);
+    if (isPlainObject(mode) && Object.hasOwn(mode, "function") && typeof mode["function"] === "string") {
+      // A function mode: the reference is what the call names, trimmed, and it must name something.
+      const reference = mode["function"].trim();
+      if (reference.length === 0 || Object.keys(mode).length !== 1) {
+        error(`'${subject}' names a function ${JSON.stringify(mode)} — a function mode is { "function": "<reference>" } and nothing else`);
+        continue;
+      }
+      mode = { function: reference };
+    }
+    if (!isToolsetMode(mode)) {
+      error(
+        mode === "smart"
+          ? `'${subject}' has the mode "smart" — smart is a function now: write { "function": "smart" }`
+          : `'${subject}' has the mode ${JSON.stringify(mode)} — a mode is ${MODE_SENTENCE}`,
+      );
       continue;
     }
     if (implementation !== undefined && !IMPLEMENTATIONS.includes(implementation as ToolImplementation)) {
@@ -324,10 +384,10 @@ export function offeredTools(toolset: Toolset): string[] {
  *
  * Present means offered, and a map's `bash` entry is the answer for "any other command" on a line
  * taken apart (decision 0007 §4). When that answer is `deny` and no command subject and no `script`
- * entry allows, asks or defers (`smart`) anything, every line the shell could run is refused — or
- * duplicates a standard tool the toolset serves directly (`cat` is `read_file`). Offering such a shell
- * is a door with nothing behind it that a RUN cannot see is shut: the gate is told `smart`, and on
- * codex a held shell turns the writing sandbox on. So it is withheld: {@link offeredTools} leaves it
+ * entry allows, asks or names a function, every line the shell could run is refused — or duplicates a
+ * standard tool the toolset serves directly (`cat` is `read_file`). Offering such a shell is a door
+ * with nothing behind it that a RUN cannot see is shut: the gate is told `ask`, and on codex a held
+ * shell turns the writing sandbox on. So it is withheld: {@link offeredTools} leaves it
  * out, {@link gateToolModes} answers `deny` for it, and an agent loses its own shell with it. The
  * entry is still HELD — it is what the author wrote, and it is what a person reads and matches.
  */
@@ -378,15 +438,21 @@ export function declOfToolset(toolset: Toolset): ToolsetDecl {
   for (const [subject, entry] of Object.entries(toolset.entries)) {
     if (entry.kind === "tool" && !holdsTool(toolset, subject)) continue;
     const mode = entry.mode ?? MODE_WHEN_UNSET;
-    out[subject] = entry.kind === "tool" && entry.implementation === "native" ? { mode, implementation: "native" } : mode;
+    if (entry.kind === "tool" && entry.implementation === "native") {
+      // A function carries the implementation beside its reference — the spelling `parseToolset` reads.
+      out[subject] = isFunctionMode(mode) ? { function: mode.function, implementation: "native" } : { mode, implementation: "native" };
+    } else {
+      out[subject] = isFunctionMode(mode) ? { function: mode.function } : mode;
+    }
   }
-  out[OTHER_SUBJECT] = toolset.other ?? MODE_WHEN_UNSET;
+  const other = toolset.other ?? MODE_WHEN_UNSET;
+  out[OTHER_SUBJECT] = isFunctionMode(other) ? { function: other.function } : other;
   return out;
 }
 
 /** Every tool entry's mode, offered or not — what shadows the project baseline, per tool. */
-export function toolModes(toolset: Toolset): Record<string, PermissionMode> {
-  const out: Record<string, PermissionMode> = {};
+export function toolModes(toolset: Toolset): Record<string, ToolsetMode> {
+  const out: Record<string, ToolsetMode> = {};
   for (const [name, entry] of Object.entries(toolset.entries)) {
     if (entry.kind === "tool" && entry.mode !== undefined) out[name] = entry.mode;
   }
@@ -394,19 +460,41 @@ export function toolModes(toolset: Toolset): Record<string, PermissionMode> {
 }
 
 /**
- * {@link toolModes} as the GATE takes them: the shell's entry is `smart`, whatever it says — or
- * `deny` where the shell is withheld ({@link shellWithheld}), since there is then no line to read.
+ * {@link toolModes} as the GATE takes them: a function is `ask` (see `gateModeOf`), and the shell's
+ * entry is `ask` whatever it says — or `deny` where the shell is withheld ({@link shellWithheld}),
+ * since there is then no line to read.
  *
- * Any other mode would answer for the tool before its line was read — `deny` would refuse the
+ * Any other mode would answer for the shell before its line was read — `deny` would refuse the
  * `git status` the same toolset allows, `allow` would pre-approve a delegated agent's shell so that
- * no line was ever judged at all. The authored mode is not lost: it is the `bash` subject a part
- * falls to ({@link shellSubjects}).
+ * no line was ever judged at all. `ask` reaches the host with the line in hand, every time: the
+ * narrowing takes it apart, and the approver the host hands the engine runs the functions it names
+ * and lets through, without asking anybody, a line every part of which the toolset allows. The
+ * authored mode is not lost: it is the `bash` subject a part falls to ({@link shellSubjects}).
  */
 export function gateToolModes(toolset: Toolset): Record<string, PermissionMode> {
-  const modes = toolModes(toolset);
+  const modes: Record<string, PermissionMode> = {};
+  for (const [name, mode] of Object.entries(toolModes(toolset))) modes[name] = gateModeOf(mode);
   // A withheld shell has no line to read: nothing is offered, and the gate refuses it by name.
-  if (Object.hasOwn(modes, SHELL_TOOL)) modes[SHELL_TOOL] = shellWithheld(toolset) ? "deny" : "smart";
+  if (Object.hasOwn(modes, SHELL_TOOL)) modes[SHELL_TOOL] = shellWithheld(toolset) ? "deny" : "ask";
   return modes;
+}
+
+/**
+ * Every subject whose entry is a FUNCTION, to the function's reference — tools, commands, `script`,
+ * the shell's own entry and `other` alike. What lowering writes as `permissions.functions`.
+ */
+export function toolsetFunctions(toolset: Toolset): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [subject, entry] of Object.entries(toolset.entries)) {
+    if (isFunctionMode(entry.mode)) out[subject] = entry.mode.function;
+  }
+  if (isFunctionMode(toolset.other)) out[OTHER_SUBJECT] = toolset.other.function;
+  return out;
+}
+
+/** Every function a toolset names, each once, in the order first met. */
+export function functionReferencesOf(toolset: Toolset): string[] {
+  return [...new Set(Object.values(toolsetFunctions(toolset)))];
 }
 
 /** Whose code runs each tool, where an entry chose. */
@@ -422,8 +510,8 @@ export function toolImplementations(toolset: Toolset): Record<string, ToolImplem
  * What a shell line's parts answer to beyond the standard tools: the command subjects, `script`, and
  * the shell's own entry (`bash`) as the mode for any other command — see the module header.
  */
-export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> {
-  const out: Record<string, PermissionMode> = {};
+export function shellSubjects(toolset: Toolset): Record<string, ToolsetMode> {
+  const out: Record<string, ToolsetMode> = {};
   for (const [subject, entry] of Object.entries(toolset.entries)) {
     if ((entry.kind !== "tool" || subject === SHELL_TOOL) && entry.mode !== undefined) out[subject] = entry.mode;
   }
@@ -435,10 +523,12 @@ export function shellSubjects(toolset: Toolset): Record<string, PermissionMode> 
  *
  * `default` is never written: every offered tool carries its own mode by now, and what `default`
  * used to answer for a name nobody registered is what `other` says. `scopes` are not part of a
- * toolset and pass through beside it.
+ * toolset and pass through beside it. A function is `ask` wherever the block says a mode, and named
+ * in `functions` — see `PermissionsDecl.functions` for why that key is on every lowered map.
  */
 export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[] | undefined, source?: string | undefined): PermissionsDecl {
-  const subjects = shellSubjects(toolset);
+  const subjects: Record<string, PermissionMode> = {};
+  for (const [subject, mode] of Object.entries(shellSubjects(toolset))) subjects[subject] = gateModeOf(mode);
   const hasSubjects = Object.keys(subjects).length > 0;
   // A MAP leaves its marks, so a run can tell it from a state that declared none. See the module
   // header and {@link TOOLSET_MARKERS}.
@@ -451,8 +541,9 @@ export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[]
   const implementations = toolImplementations(toolset);
   return {
     ...(Object.keys(tools).length > 0 ? { tools } : {}),
-    ...(toolset.other !== undefined ? { other: toolset.other } : {}),
+    ...(toolset.other !== undefined ? { other: gateModeOf(toolset.other) } : {}),
     ...(hasSubjects ? { subjects, ...(source !== undefined ? { source } : {}) } : {}),
+    functions: toolsetFunctions(toolset),
     implementations,
     ...(scopes !== undefined && scopes.length > 0 ? { scopes: [...scopes] } : {}),
   };
@@ -469,8 +560,9 @@ export function permissionsOfToolset(toolset: Toolset, scopes?: readonly Scope[]
  *  - a `permissions.tools` mode for a tool the list does not offer is an un-offered entry
  *    ({@link ToolsetEntry.offered});
  *  - `other`, and the carried `subjects` and `implementations`, come back as what they were — the
- *    shell's entry at its AUTHORED mode, which lowering carried in `subjects` beside the `smart` (or
- *    the withheld shell's `deny`) it wrote for the gate.
+ *    shell's entry at its AUTHORED mode, which lowering carried in `subjects` beside the `ask` (or
+ *    the withheld shell's `deny`) it wrote for the gate;
+ *  - a subject `functions` names comes back as that function, over the `ask` the gate was told.
  *
  * `implementations` is the composer's map, folded over the block's own.
  */
@@ -495,7 +587,7 @@ export function toolsetOfEnvironment(
   for (const [subject, mode] of Object.entries(permissions?.subjects ?? {})) {
     const held = Object.hasOwn(entries, subject) ? entries[subject] : undefined;
     if (subject === SHELL_TOOL) {
-      // The shell's entry was lowered as `smart` (or, WITHHELD — {@link shellWithheld} — left off the
+      // The shell's entry was lowered as `ask` (or, WITHHELD — {@link shellWithheld} — left off the
       // list with the gate's `deny`, and held all the same); its authored mode is the one carried
       // here. A block that carries the shell's mode and holds no entry for it keeps it un-offered.
       if (held === undefined) {
@@ -509,7 +601,17 @@ export function toolsetOfEnvironment(
     if (held !== undefined) continue;
     entries[subject] = { kind: subject === SCRIPT_SUBJECT ? "script" : "command", mode };
   }
-  const other = permissions?.other;
+  // A function was lowered as `ask` wherever a mode is written; the reference is what it was.
+  let other: ToolsetMode | undefined = permissions?.other;
+  for (const [subject, reference] of Object.entries(permissions?.functions ?? {})) {
+    if (typeof reference !== "string" || reference.length === 0) continue;
+    if (subject === OTHER_SUBJECT) {
+      other = { function: reference };
+      continue;
+    }
+    const held = Object.hasOwn(entries, subject) ? entries[subject] : undefined;
+    if (held !== undefined) entries[subject] = { ...held, mode: { function: reference } };
+  }
   return { entries, ...(other !== undefined ? { other } : {}) };
 }
 
@@ -586,11 +688,17 @@ function isToolsetNode(value: unknown): boolean {
  *
  * On an error the node lowers to what could be read (nothing, for a broken reference), so a tolerant
  * caller — the lint surface — can go on to load the rest; a strict one throws on the issues.
+ *
+ * `checkFunction`, when given, is asked about every function a toolset names — once per reference
+ * per block — and what it answers is an ERROR at each entry naming it: a permission function that
+ * does not resolve (a typo, a module nobody approved) must stop a run before it starts, not surface at
+ * the first tool call. `@jaira/persistence` answers it by loading the call the way a run will.
  */
 export function lowerStateToolsets(
   stateId: string,
   def: unknown,
   read: ToolsetReader,
+  checkFunction?: ((reference: string, stateId: string) => string | undefined) | undefined,
 ): { def: unknown; issues: StateToolsetIssue[] } {
   const issues: StateToolsetIssue[] = [];
   if (!isPlainObject(def)) return { def, issues };
@@ -633,6 +741,14 @@ export function lowerStateToolsets(
     } else if (own !== undefined) {
       rest = own as PermissionsDecl;
       if (oldKeys.length > 0) found.push({ path: "", message: oldPermissionsMessage(oldKeys), severity: "error" });
+    }
+    if (checkFunction !== undefined) {
+      const answered = new Map<string, string | undefined>();
+      for (const [subject, reference] of Object.entries(toolsetFunctions(toolset))) {
+        if (!answered.has(reference)) answered.set(reference, checkFunction(reference, stateId));
+        const problem = answered.get(reference);
+        if (problem !== undefined) found.push({ path: subject, message: `the function '${reference}' does not resolve: ${problem}`, severity: "error" });
+      }
     }
     for (const issue of found) {
       issues.push({

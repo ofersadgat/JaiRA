@@ -31,9 +31,9 @@ describe("compilePolicy", () => {
 
   it("folds the call's modes OVER the project's, and leaves the project's alone where it says nothing", () => {
     const { baseline } = compilePolicy({ tools: { glob: "allow", read_file: "deny" } }, { toolset: mapToolset });
-    // The shell folds as `smart` whatever its entry says: `bash: "ask"` is the answer for any command
+    // The shell folds as `ask` whatever its entry says: `bash: "ask"` is the answer for any command
     // nothing else names, on a line that is taken apart — not a mode for the tool (decision 0007 §4).
-    expect(baseline?.tools).toMatchObject({ glob: "allow", read_file: "allow", bash: "smart", write_file: "deny", run_command: "smart" });
+    expect(baseline?.tools).toMatchObject({ glob: "allow", read_file: "allow", bash: "ask", write_file: "deny", run_command: "smart" });
   });
 
   it("is what it always was with no toolset", () => {
@@ -42,7 +42,7 @@ describe("compilePolicy", () => {
   });
 
   it("JUDGES a shell line against the toolset's command subjects — and keeps the floor above them", () => {
-    const toolset = parseToolset({ bash: "smart", "git push": "allow", "git reset": "allow" }).toolset;
+    const toolset = parseToolset({ bash: "allow", "git push": "allow", "git reset": "allow" }).toolset;
     const policy = compilePolicy({}, { toolset });
     const smart = (command: string) => policy.smart!["bash"]!({ tool: "bash", input: { command }, sessionId: "s" } as never);
     // Not folded into the baseline: `git push` is not a tool, and nothing there would read it.
@@ -50,7 +50,7 @@ describe("compilePolicy", () => {
     // An entry that NAMES the command replaces the built-in ask it stood in for…
     expect(smart("git push")).toBe("allow");
     // …and with no such entry the built-in ask still stands.
-    expect(compilePolicy({}, { toolset: parseToolset({ bash: "smart" }).toolset }).smart!["bash"]!({ tool: "bash", input: { command: "git push" }, sessionId: "s" } as never)).toBe("ask");
+    expect(compilePolicy({}, { toolset: parseToolset({ bash: "allow" }).toolset }).smart!["bash"]!({ tool: "bash", input: { command: "git push" }, sessionId: "s" } as never)).toBe("ask");
     // The destructive floor is above every toolset: naming the command does not open it.
     expect(smart("git push --force")).toBe("deny");
     expect(smart("git reset --hard")).toBe("deny");
@@ -60,7 +60,7 @@ describe("compilePolicy", () => {
     // A run compiles one policy for the project; each state's toolset arrives on its own block.
     const policy = compilePolicy({});
     const block = lowerToolset(parseToolset({ bash: "deny", "git status": "allow", read_file: "allow", other: "deny" }).toolset).permissions;
-    expect(block).toMatchObject({ tools: { bash: "smart" }, subjects: { bash: "deny", "git status": "allow" } });
+    expect(block).toMatchObject({ tools: { bash: "ask" }, subjects: { bash: "deny", "git status": "allow" } });
     const narrowed = (command: string) => {
       const input = { command };
       const mode = policy.scopeOf!({ name: "bash" }, input as never, block as never);
@@ -112,7 +112,7 @@ describe("compilePolicy", () => {
 
 describe("planAgentTools", () => {
   it("serves and keeps the same tools from a toolset as from its lowered block — and removes the rest", () => {
-    const toolset = parseToolset({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, bash: "smart" }).toolset;
+    const toolset = parseToolset({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, bash: { function: "smart" } }).toolset;
     const lowered = lowerToolset(toolset);
     const fromMap = planAgentTools(toolset);
     expect(planAgentTools(toolsetOfEnvironment(lowered.tools, lowered.permissions))).toEqual(fromMap);
@@ -122,7 +122,7 @@ describe("planAgentTools", () => {
   });
 
   it("hands an agent TOOLS only — a command subject or `script` is not one", () => {
-    const plan = planAgentTools(parseToolset({ bash: "smart", "git commit": "ask", script: "deny", other: "deny" }).toolset);
+    const plan = planAgentTools(parseToolset({ bash: { function: "smart" }, "git commit": "ask", script: "deny", other: "deny" }).toolset);
     expect(plan.inject).toEqual(["show_artifact", "bash"]);
   });
 
@@ -194,7 +194,7 @@ describe("a conversation turn", () => {
     expect(chatOperationOf(plan, { message: "hi", session: { id: "s@1" } }).environment.tools).toEqual(["show_artifact"]);
   });
 
-  it("shows the composer the shell's AUTHORED mode, not the `smart` it was lowered as", () => {
+  it("shows the composer the shell's AUTHORED mode, not the `ask` it was lowered as", () => {
     const lowered = lowerToolset(parseToolset({ bash: "deny", "git status": "allow" }).toolset);
     const plan = chatPlanFor([host({ tools: lowered.tools, permissions: lowered.permissions as never })]);
     expect(plan.settings.permissions).toMatchObject({ tools: { bash: "deny" }, subjects: { bash: "deny", "git status": "allow" } });
@@ -206,7 +206,7 @@ describe("a conversation turn", () => {
     const written = stateWithChatSettings(host({}), { toolset: { read_file: "allow", "git status": "allow", other: "deny" } });
     expect(written?.environment).toEqual({
       tools: ["read_file"],
-      permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", subjects: { "git status": "allow" } },
+      permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", subjects: { "git status": "allow" }, functions: {} },
     });
   });
 });

@@ -2,12 +2,12 @@
 id: ui/surfaces/settings-toolsets
 type: ui-surface
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-22
 kind: panel
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exists, ux/patterns/name-it-where-it-will-live, ux/patterns/absence-is-stated, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/agents-act-only-where-allowed, product/risky-actions-wait-for-approval, product/share-processes-across-projects]
 components: [ui/components/toolset-card, ui/components/settings-header, ui/components/schema-form, ui/components/settings-field, ui/components/icon]
-mockups: [ui/assets/settings-toolsets/project.html, ui/assets/settings-toolsets/built-in.html, ui/assets/settings-toolsets/inherited.html, ui/assets/settings-toolsets/unsaved.html, ui/assets/settings-toolsets/nested.html, ui/assets/settings-toolsets/new-toolset.html, ui/assets/settings-toolsets/new-bucket.html, ui/assets/settings-toolsets/refused.html]
+mockups: [ui/assets/settings-toolsets/project.html, ui/assets/settings-toolsets/built-in.html, ui/assets/settings-toolsets/inherited.html, ui/assets/settings-toolsets/unsaved.html, ui/assets/settings-toolsets/nested.html, ui/assets/settings-toolsets/new-toolset.html, ui/assets/settings-toolsets/new-bucket.html, ui/assets/settings-toolsets/refused.html, ui/assets/settings-toolsets/function.html, ui/assets/settings-toolsets/function-menu.html, ui/assets/settings-toolsets/function-form.html]
 siblings: [ui/surfaces/settings-view, ui/surfaces/settings-executors, ui/surfaces/settings-providers, ui/surfaces/settings-configuration]
 ---
 
@@ -41,6 +41,9 @@ The Toolsets section of the [Settings view](settings-view.md): every toolset thi
 | nested | A project's own toolset in a bucket that holds another bucket, indented under it; Execution open with a command group and the add menu. | [nested.html](../assets/settings-toolsets/nested.html) |
 | new toolset | `+ toolset` chosen with a name typed that the bucket already holds: the box outlined in `--bad`, the reason under it, `Add it` inactive. | [new-toolset.html](../assets/settings-toolsets/new-toolset.html) |
 | new bucket | `+ bucket` chosen: a bucket and a first toolset, both required, and `Add it` live. | [new-bucket.html](../assets/settings-toolsets/new-bucket.html) |
+| a line names a function | A line whose mode is `{ "function": … }` ([decision 0007](../../engineering/decisions/0007-toolsets.md), amended 2026-09-22): its mode chip is a star and the function's name in the data face; the `Other` row reads the same way. | [function.html](../assets/settings-toolsets/function.html) |
+| mode menu | `allow` · `ask` · `deny`, each with its hint, then a rule and `function…` — `a function decides each call, and may ask you — smart, or your own`; on a line that names one, that row reads the name, ticked. | [function-menu.html](../assets/settings-toolsets/function-menu.html) |
+| naming a function | `function…` chosen: the one schema form with a `function` field, its hint naming what a reference may be, the sentence under it, and `Back` / `Set`, `Set` inactive while the box is empty. | [function-form.html](../assets/settings-toolsets/function-form.html) |
 | refused | While a write is in flight: every control at half strength and inert, and what the last write was refused with said above the actions. | [refused.html](../assets/settings-toolsets/refused.html) |
 | empty | Cannot occur: eight toolsets ship, and the built-in layer is on the search path of every project. A layer with nothing of its own still lists them. | |
 | error | The toolsets cannot be read: `Toolsets could not be read — {reason}` in `--dim` in place of the box. A single FILE that cannot be read is listed in the rail and says so in the pane instead. | |
@@ -50,7 +53,9 @@ The Toolsets section of the [Settings view](settings-view.md): every toolset thi
 | Group head | `Toolsets` · `Which tools are offered, and what happens when each is called. A state names one as $/toolsets/<bucket>/<name>; a bucket is a place with its own versions of the same names.` |
 | Layer picker | `This project` · `Shared (all projects)` · `Built in`, the last titled `what ships with JaiRA — read-only; it is changed by overriding it in one of the other two` |
 | Rail | `{name}` with the dot's tooltip `set in the layer you are editing` · `+ toolset` · `+ bucket` |
-| Rail summary | `{n} lines · other {mode}` · `{n} lines · all {mode}` · prefixed `unsaved · ` · `could not be read` |
+| Rail summary | `{n} lines · other {mode}` · `{n} lines · all {mode}` · prefixed `unsaved · ` · `could not be read`; a function reads as its name |
+| Mode menu | `allow` — `goes ahead without asking` · `ask` — `stop and ask before each call` · `deny` — `refused every time` · `function…` — `a function decides each call, and may ask you — smart, or your own` |
+| Naming a function | `function`, hint `smart, or a function of your own — a name on the search path, a module symbol, or $BASE/functions/…` · `It is handed the call and answers allow or deny; to ask you, it calls approve_tool_call.` · `Back` · `Set` |
 | Standing | `overrides built in` · `overrides all projects` · `built in` · `all projects` · `this project` · `overridden in this project` · `overridden for all projects` |
 | Used by | `used by {state}` · `used by {a} and {b}` · `used by {state} and {n} more states` · `no state names it` |
 | Actions | `Save` · `Revert` · `Compare with what ships` / `Compare with the shared one` / `Hide the comparison` · `Reset to built in` / `Reset to shared` |

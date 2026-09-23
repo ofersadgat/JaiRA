@@ -306,7 +306,41 @@ export interface JairaConfig {
   integrations: JairaIntegrationsConfig;
   /** What a fast-forward answers for you, and what it leaves to you (decision 0005 §6). */
   autopilot: JairaAutopilotConfig;
+  /** The shipped `smart` permission function: which model judges a tool call, and what it is told. */
+  smart: JairaSmartConfig;
 }
+
+/**
+ * The shipped `smart` permission function (decision 0007, amended 2026-09-22) — Settings →
+ * Configuration → "smart". A toolset line that says `{ "function": "smart" }` hands each call to it:
+ * one model call judges it `allow`, `deny` or `unsure`, and `unsure` puts it to the person through
+ * the approval prompt. Both fields layer like every other setting (the project over `~/.jaira`).
+ */
+export interface JairaSmartConfig {
+  /**
+   * The model that judges, written as a state's `model` is (`claude-haiku-4`, or `claude-cli/haiku`
+   * to insist on a route). Absent ⇒ whatever this machine's default executor answers with.
+   */
+  model?: string;
+  /**
+   * What the judge is told, in place of {@link DEFAULT_SMART_PROMPT}. The call it judges is appended
+   * after it, as JSON, whatever this says.
+   */
+  prompt?: string;
+}
+
+/**
+ * What the `smart` function tells its model when no `smart.prompt` is set. The call being judged is
+ * appended below it, as JSON — the tool, the subject, the part of a shell line, the state, the task.
+ */
+export const DEFAULT_SMART_PROMPT = [
+  "You are the permission judge for an autonomous coding agent. It is about to make the tool call below.",
+  "Decide whether the call may run without asking the person who owns the project.",
+  "",
+  "Answer `allow` only when the call is plainly safe and ordinary for the task: reading or searching the project, running its own tests or builds, a read-only git command, writing inside the project in a way the task calls for.",
+  "Answer `deny` when the call is plainly destructive or out of bounds: deleting work outside the project, rewriting published history, leaking secrets or credentials, disabling safety checks, reaching production systems.",
+  "Answer `unsure` for everything else — the person will be asked. When in doubt, say `unsure`: asking costs a click, a wrong `allow` can cost the project.",
+].join("\n");
 
 /**
  * The one platform setting a fast-forward reads (decision 0005 §6).
@@ -538,7 +572,26 @@ export function defaultConfig(): JairaConfig {
     files: {},
     integrations: defaultIntegrations(),
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
+    smart: {},
   };
+}
+
+/**
+ * Parse the `smart` block. Strict: a model or a prompt that is not a string is a judge running on
+ * something other than what the person configured, and it would say nothing about it.
+ */
+function parseSmart(raw: unknown): JairaSmartConfig {
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.smart must be an object");
+  const record = raw as Record<string, unknown>;
+  const out: JairaSmartConfig = {};
+  for (const key of ["model", "prompt"] as const) {
+    const value = record[key];
+    if (value === undefined || value === "") continue;
+    if (typeof value !== "string") throw new Error(`config.smart.${key} must be a string`);
+    out[key] = value;
+  }
+  return out;
 }
 
 /**
@@ -1045,6 +1098,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     files: parseFiles(cfg["files"]),
     integrations: parseIntegrations(cfg["integrations"]),
     autopilot: parseAutopilot(cfg["autopilot"]),
+    smart: parseSmart(cfg["smart"]),
   };
 }
 

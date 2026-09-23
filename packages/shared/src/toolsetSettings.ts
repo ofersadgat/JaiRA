@@ -9,8 +9,8 @@
  * `@jaira/persistence` `readToolsetLayers`, and everything below is a pure function of it — main
  * sends the records, the renderer draws them, and both agree because there is one reading.
  */
-import type { ToolChoice } from "./operationVocabulary";
-import { parseToolset, type Toolset, type ToolsetDecl } from "./toolsets";
+import { isFunctionMode, type ToolChoice } from "./operationVocabulary";
+import { entryOfDecl, parseToolset, type Toolset, type ToolsetDecl } from "./toolsets";
 import { sameToolset, toolsetBuckets, toolsetSummary, type ToolsetBucket, type ToolsetChoice } from "./toolsetBuckets";
 import { sameToolsetEntry } from "./toolsetEdit";
 import type { WorkflowLayer } from "./view";
@@ -174,8 +174,9 @@ export interface ToolsetDifference {
 }
 
 function entryWords(entry: ToolsetDecl[string]): string {
-  const word = (mode: string): string => (mode === "smart" ? "auto" : mode);
-  return typeof entry === "string" ? word(entry) : entry.implementation === "native" ? `${word(entry.mode)} · native` : word(entry.mode);
+  const { mode, implementation } = entryOfDecl(entry);
+  const word = isFunctionMode(mode) ? `function ${mode.function}` : mode;
+  return implementation === "native" ? `${word} · native` : word;
 }
 
 /** Every line on which two maps differ, `theirs` order first — what "Compare with what ships" lists. */

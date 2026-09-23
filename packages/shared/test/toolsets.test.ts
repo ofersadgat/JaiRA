@@ -25,6 +25,7 @@ import {
   TOOLSET_MARKERS,
   toolsetOfEnvironment,
   toolsetOfSettings,
+  functionReferencesOf,
   type ToolsetIssue,
   type ToolsetReader,
 } from "../src/toolsets";
@@ -83,12 +84,12 @@ describe("parsing the map", () => {
     expect(gateToolModes(toolset)).toEqual({ read_file: "allow", bash: "deny" });
     // A command subject that denies too leaves nothing to run: still withheld.
     expect(shellWithheld(parseToolset({ bash: "deny", "git push": "deny" }).toolset)).toBe(true);
-    // One that allows, asks or defers keeps the shell OFFERED, for those lines.
-    for (const mode of ["allow", "ask", "smart"]) {
+    // One that allows, asks or names a function keeps the shell OFFERED, for those lines.
+    for (const mode of ["allow", "ask", { function: "smart" }]) {
       const offered = parseToolset({ bash: "deny", "git status": mode }).toolset;
       expect(shellWithheld(offered)).toBe(false);
       expect(offeredTools(offered)).toEqual(["bash"]);
-      expect(gateToolModes(offered)).toEqual({ bash: "smart" });
+      expect(gateToolModes(offered)).toEqual({ bash: "ask" });
     }
     expect(shellWithheld(parseToolset({ bash: "deny", script: "ask" }).toolset)).toBe(false);
   });
@@ -97,7 +98,7 @@ describe("parsing the map", () => {
     const toolset = parseToolset({ read_file: "allow", bash: "deny", other: "deny" }).toolset;
     const lowered = lowerToolset(toolset);
     expect(lowered.tools).toEqual(["read_file"]);
-    expect(lowered.permissions).toEqual({ tools: { read_file: "allow", bash: "deny", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", subjects: { bash: "deny" } });
+    expect(lowered.permissions).toEqual({ tools: { read_file: "allow", bash: "deny", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", subjects: { bash: "deny" }, functions: {} });
     const back = toolsetOfEnvironment(lowered.tools, lowered.permissions);
     expect(back).toEqual(toolset);
     expect(declOfToolset(back)).toEqual({ read_file: "allow", bash: "deny", other: "deny" });
@@ -106,7 +107,7 @@ describe("parsing the map", () => {
   it("carries an offered shell's subjects in `subjects` alone — `permissions.tools` holds tools and the marks", () => {
     const lowered = lowerToolset(parseToolset({ bash: "deny", "git status": "allow", other: "deny" }).toolset, undefined, "$/toolsets/x/y");
     const tools = lowered.permissions!.tools!;
-    expect(tools).toEqual({ bash: "smart", ...TOOLSET_MARKERS });
+    expect(tools).toEqual({ bash: "ask", ...TOOLSET_MARKERS });
     expect(lowered.permissions).toMatchObject({ subjects: { bash: "deny", "git status": "allow" }, source: "$/toolsets/x/y" });
     expect(Object.keys(toolsetOfEnvironment(lowered.tools, lowered.permissions).entries)).toEqual(["bash", "git status"]);
   });
@@ -132,9 +133,9 @@ describe("parsing the map", () => {
     // Whitespace in a command subject is normalized, so two spellings of one command are one entry.
     // The shell's own entry is among them: it is the mode for any command no other entry names (§4).
     expect(shellSubjects(toolset)).toEqual({ bash: "ask", "git status": "allow", "git commit": "ask", git: "deny", script: "ask" });
-    // …and the gate is handed `smart` for it, so the line is read before anything answers for the tool.
+    // …and the gate is handed `ask` for it, so no line runs before the host has read it.
     expect(toolModes(toolset)).toEqual({ bash: "ask" });
-    expect(gateToolModes(toolset)).toEqual({ bash: "smart" });
+    expect(gateToolModes(toolset)).toEqual({ bash: "ask" });
   });
 
   it("WARNS about a tool name nothing knows, and drops it — it falls to `other`", () => {
@@ -147,7 +148,7 @@ describe("parsing the map", () => {
   });
 
   it.each([
-    [{ read_file: "yes" }, /a mode is one of allow, deny, ask, smart/],
+    [{ read_file: "yes" }, /a mode is one of allow, deny, ask, or a function/],
     [{ read_file: { implementation: "native" } }, /has no mode/],
     [{ read_file: { mode: "ask", implementation: "theirs" } }, /implementation.*one of app, native/],
     [{ read_file: 3 }, /a mode is one of/],
@@ -174,7 +175,7 @@ describe("references", () => {
   const files = {
     "$/toolsets/chat/read-only": { read_file: "allow", glob: "allow", bash: "deny", other: "deny" },
     "$/toolsets/chat/writer": { $ref: "$/toolsets/chat/read-only", write_file: { mode: "ask", implementation: "native" } },
-    "$/toolsets/feature/implementation/build": { $ref: "$/toolsets/chat/writer", bash: "smart" },
+    "$/toolsets/feature/implementation/build": { $ref: "$/toolsets/chat/writer", bash: { function: "smart" } },
     "$/toolsets/loop/a": { $ref: "$/toolsets/loop/b", read_file: "allow" },
     "$/toolsets/loop/b": { $ref: "$/toolsets/loop/a" },
     "$/toolsets/loop/self": "$/toolsets/loop/self",
@@ -202,7 +203,7 @@ describe("references", () => {
     expect(decl).toEqual({
       read_file: "allow",
       glob: "allow",
-      bash: "smart",
+      bash: { function: "smart" },
       other: "deny",
       write_file: { mode: "ask", implementation: "native" },
     });
@@ -233,10 +234,10 @@ describe("reading a lowered block back", () => {
 
   it("lowers the shell's mode as a SUBJECT, and leaves the marks that say a toolset was declared", () => {
     // `bash: "ask"` is the answer for any command nothing else names, not a mode for the tool: the
-    // gate is handed `smart` so the line is taken apart first, and the authored mode rides beside it.
-    expect(lowerToolset(parseToolset(map).toolset)).toEqual({
+    // gate is handed `ask` so no line runs before it is taken apart, and the authored mode rides beside it.
+    expect(lowerToolset(parseToolset({ ...map, bash: "allow" }).toolset)).toEqual({
       tools: ["read_file", "bash", "write_file"],
-      permissions: { tools: { read_file: "allow", bash: "smart", write_file: "deny", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", subjects: { bash: "ask" } },
+      permissions: { tools: { read_file: "allow", bash: "ask", write_file: "deny", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", subjects: { bash: "allow" }, functions: {} },
     });
   });
 
@@ -249,7 +250,7 @@ describe("reading a lowered block back", () => {
     const back = toolsetOfEnvironment(lowered.tools, lowered.permissions);
     expect(back).toEqual(parseToolset(map).toolset);
     // An empty map still says it was one.
-    expect(lowerToolset(parseToolset({}).toolset)).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS }, implementations: {} } });
+    expect(lowerToolset(parseToolset({}).toolset)).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS }, implementations: {}, functions: {} } });
   });
 
   it("keeps a mode for a tool the list does not offer as an UN-offered entry — a child's inherited key", () => {
@@ -265,12 +266,13 @@ describe("reading a lowered block back", () => {
   });
 
   it("round-trips through the lowered shape, command subjects and implementations included", () => {
-    const authored = parseToolset({ read_file: { mode: "allow", implementation: "native" }, bash: "smart", "git commit": "ask", script: "deny", other: "ask" }).toolset;
+    const authored = parseToolset({ read_file: { mode: "allow", implementation: "native" }, bash: "deny", "git commit": "ask", script: "deny", other: "ask" }).toolset;
     const lowered = lowerToolset(authored);
     expect(lowered.permissions).toEqual({
-      tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS },
+      tools: { read_file: "allow", bash: "ask", ...TOOLSET_MARKERS },
       other: "ask",
-      subjects: { bash: "smart", "git commit": "ask", script: "deny" },
+      subjects: { bash: "deny", "git commit": "ask", script: "deny" },
+      functions: {},
       implementations: { read_file: "native" },
     });
     expect(toolsetOfEnvironment(lowered.tools, lowered.permissions)).toEqual(authored);
@@ -279,7 +281,82 @@ describe("reading a lowered block back", () => {
   it("keeps `scopes` beside a toolset, and never writes `default` or a profile", () => {
     const scopes = [{ path: "app/**", default: "allow" as const }];
     const lowered = lowerToolset(parseToolset({ read_file: "allow" }).toolset, { scopes });
-    expect(lowered.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, scopes });
+    expect(lowered.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, functions: {}, scopes });
+  });
+});
+
+describe("a line that names a FUNCTION (decision 0007, amended 2026-09-22)", () => {
+  it("reads { function } as a mode on any line — a tool, a command, script, the shell, other", () => {
+    const { toolset, issues } = parseToolset({
+      write_file: { function: "judge" },
+      read_file: { function: "smart", implementation: "native" },
+      glob: { mode: { function: "policy.judge" } },
+      bash: { function: "smart" },
+      "git push": { function: "$BASE/functions/push_judge" },
+      script: { function: "smart" },
+      other: { function: "smart" },
+    });
+    expect(issues).toEqual([]);
+    expect(toolModes(toolset)).toEqual({ write_file: { function: "judge" }, read_file: { function: "smart" }, glob: { function: "policy.judge" }, bash: { function: "smart" } });
+    expect(toolImplementations(toolset)).toEqual({ read_file: "native" });
+    expect(shellSubjects(toolset)).toEqual({ bash: { function: "smart" }, "git push": { function: "$BASE/functions/push_judge" }, script: { function: "smart" } });
+    expect(toolset.other).toEqual({ function: "smart" });
+  });
+
+  it("refuses the word `smart` — it is a function now — and a function with no name or with company", () => {
+    expect(parseToolset({ bash: "smart" }).issues[0]!.message).toBe(`'bash' has the mode "smart" — smart is a function now: write { "function": "smart" }`);
+    expect(parseToolset({ bash: { function: "  " } }).issues[0]!.message).toMatch(/a function mode is \{ "function": "<reference>" \}/);
+    expect(parseToolset({ bash: { function: "smart", mode: "ask" } }).issues[0]!.message).toMatch(/says both 'mode' and 'function'/);
+    expect(parseToolset({ bash: { mode: { function: "smart", extra: 1 } } }).issues[0]!.severity).toBe("error");
+  });
+
+  it("lowers a function as `ask` wherever the gate reads a mode, and names it in `functions`", () => {
+    const toolset = parseToolset({ write_file: { function: "judge" }, bash: { function: "smart" }, "git push": "deny", other: { function: "smart" } }).toolset;
+    const lowered = lowerToolset(toolset, undefined, "$/toolsets/x/y");
+    expect(lowered).toEqual({
+      tools: ["write_file", "bash"],
+      permissions: {
+        tools: { write_file: "ask", bash: "ask", ...TOOLSET_MARKERS },
+        implementations: {},
+        other: "ask",
+        subjects: { bash: "ask", "git push": "deny" },
+        source: "$/toolsets/x/y",
+        functions: { write_file: "judge", bash: "smart", other: "smart" },
+      },
+    });
+    // …and reads back as the same map.
+    expect(toolsetOfEnvironment(lowered.tools, lowered.permissions)).toEqual(toolset);
+    expect(declOfToolset(toolset)).toEqual({ write_file: { function: "judge" }, bash: { function: "smart" }, "git push": "deny", other: { function: "smart" } });
+    expect(functionReferencesOf(toolset)).toEqual(["judge", "smart"]);
+  });
+
+  it("writes `functions` on EVERY lowered map, so a child's own map never inherits its parent's function", () => {
+    // `permissions` merges per key down the chain: a parent's `functions` beside a child's `tools` would
+    // hand the child's `ask` to the parent's function. An empty map on the child replaces it.
+    const parent = lowerToolset(parseToolset({ bash: { function: "smart" } }).toolset).permissions!;
+    const child = lowerToolset(parseToolset({ bash: "ask" }).toolset).permissions!;
+    const merged = { ...parent, ...child, tools: { ...parent.tools, ...child.tools } };
+    expect(merged.functions).toEqual({});
+    expect(toolsetOfEnvironment(["bash"], merged).entries["bash"]!.mode).toBe("ask");
+  });
+
+  it("withholds nothing a function could let through", () => {
+    expect(shellWithheld(parseToolset({ bash: { function: "smart" } }).toolset)).toBe(false);
+    expect(shellWithheld(parseToolset({ bash: "deny", "git status": { function: "smart" } }).toolset)).toBe(false);
+  });
+
+  it("asks the host about every function a state's toolset names, and makes one it cannot find an ERROR there", () => {
+    const asked: string[] = [];
+    const check = (reference: string): string | undefined => {
+      asked.push(reference);
+      return reference === "nope" ? "'nope' is not a known operation" : undefined;
+    };
+    const { issues } = lowerStateToolsets("wf", { operation: { kind: "prompt", tools: { bash: { function: "smart" }, write_file: { function: "nope" }, edit: { function: "nope" } } } }, NO_FILES, check);
+    expect(asked).toEqual(["smart", "nope"]);
+    expect(issues).toEqual([
+      { stateId: "wf", path: "operation.tools.write_file", message: "the function 'nope' does not resolve: 'nope' is not a known operation", severity: "error" },
+      { stateId: "wf", path: "operation.tools.edit", message: "the function 'nope' does not resolve: 'nope' is not a known operation", severity: "error" },
+    ]);
   });
 });
 
@@ -305,7 +382,7 @@ describe("lowering a state file", () => {
       const { def, issues } = lowerStateToolsets("wf", { environment: { tools } }, read);
       expect(issues, JSON.stringify(tools)).toEqual([expect.objectContaining({ stateId: "wf", path: "environment.tools", severity: "error" })]);
       expect(issues[0]!.message).toMatch(/the list form was removed/);
-      expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS }, implementations: {} } });
+      expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS }, implementations: {}, functions: {} } });
     }
   });
 
@@ -318,7 +395,7 @@ describe("lowering a state file", () => {
     );
     expect(beside.issues).toEqual([expect.objectContaining({ severity: "error", path: "environment.tools" })]);
     expect(beside.issues[0]!.message).toMatch(/permissions\.tools, permissions\.default are no longer read/);
-    expect((beside.def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, scopes } });
+    expect((beside.def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, functions: {}, scopes } });
 
     const alone = lowerStateToolsets("wf", { operation: { kind: "prompt", permissions: { profile: "read-only", scopes } } }, read);
     expect(alone.issues).toEqual([expect.objectContaining({ severity: "error", path: "operation.permissions" })]);
@@ -331,30 +408,31 @@ describe("lowering a state file", () => {
       "wf",
       {
         environment: { model: "m", tools: "$/toolsets/chat/read-only" },
-        operation: { kind: "prompt", prompt: "go", tools: { bash: "smart", "git status": "allow" } },
+        operation: { kind: "prompt", prompt: "go", tools: { bash: { function: "smart" }, "git status": "allow" } },
         children: { review: { state: "./review", environment: { tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask" } } } },
       },
       read,
     );
     expect(issues).toEqual([]);
     expect(def).toEqual({
-      environment: { model: "m", tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } },
+      environment: { model: "m", tools: ["read_file", "glob"], permissions: { tools: { read_file: "allow", glob: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", functions: {} } },
       // `source` is written beside `subjects`, and only there: where a shell line's subjects came from.
       operation: {
         kind: "prompt",
         prompt: "go",
         tools: ["bash"],
         permissions: {
-          tools: { bash: "smart", ...TOOLSET_MARKERS },
+          tools: { bash: "ask", ...TOOLSET_MARKERS },
           implementations: {},
-          subjects: { bash: "smart", "git status": "allow" },
+          subjects: { bash: "ask", "git status": "allow" },
           source: "inline",
+          functions: { bash: "smart" },
         },
       },
       children: {
         review: {
           state: "./review",
-          environment: { tools: ["read_file", "glob", "write_file"], permissions: { tools: { read_file: "allow", glob: "allow", write_file: "ask", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } },
+          environment: { tools: ["read_file", "glob", "write_file"], permissions: { tools: { read_file: "allow", glob: "allow", write_file: "ask", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", functions: {} } },
         },
       },
     });
@@ -373,13 +451,13 @@ describe("lowering a state file", () => {
       expect.objectContaining({ stateId: "wf", path: "environment.tools.bash", severity: "error" }),
       expect.objectContaining({ stateId: "wf", path: "environment.tools.Glob", severity: "warning" }),
     ]);
-    expect((def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {} } });
+    expect((def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, functions: {} } });
   });
 
   it("offers nothing under a reference it could not follow", () => {
     const { def, issues } = lowerStateToolsets("wf", { environment: { tools: "$/toolsets/chat/nope" } }, read);
     expect(issues).toEqual([expect.objectContaining({ path: "environment.tools", severity: "error" })]);
-    expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS }, implementations: {} } });
+    expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...TOOLSET_MARKERS }, implementations: {}, functions: {} } });
   });
 });
 
@@ -454,7 +532,7 @@ describe("a message's settings", () => {
   it("reads a state's lowered declaration and the map form as the same toolset", () => {
     const inherited = toolsetOfSettings({
       tools: ["read_file", "bash"],
-      permissions: { tools: { read_file: "allow", bash: "smart", ...TOOLSET_MARKERS }, other: "deny", subjects: { bash: "ask" } },
+      permissions: { tools: { read_file: "allow", bash: "ask", ...TOOLSET_MARKERS }, other: "deny", subjects: { bash: "ask" } },
       implementations: { read_file: "native" },
     });
     const map = toolsetOfSettings({ toolset: { read_file: { mode: "allow", implementation: "native" }, bash: "ask", other: "deny" } });

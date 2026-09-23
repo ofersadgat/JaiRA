@@ -37,6 +37,7 @@ import {
   addToToolsetText,
   INLINE_TOOLSET,
   isWritableLayer,
+  isLoweredToolset,
   lowerStateToolsets,
   newToolsetText,
   overridesOf,
@@ -60,6 +61,7 @@ import {
   type WorkflowLayer,
   type WritableLayer,
 } from "@jaira/shared";
+import { hostCalleeSignatures, PERMISSION_FUNCTION_STATE, permissionFunctionState } from "@jaira/runtime";
 import { workflowLoadOptions } from "./workflowRefs";
 
 /** The folder toolsets live in, under every layer root. */
@@ -106,16 +108,88 @@ export function toolsetReader(options: LoadBundleOptions): ToolsetReader {
 export function lowerWorkflowToolsets(
   files: Record<string, unknown>,
   options: LoadBundleOptions = {},
+  check: (reference: string) => string | undefined = permissionFunctionCheck(options),
 ): { files: Record<string, unknown>; issues: StateToolsetIssue[] } {
   const read = toolsetReader(options);
   const out: Record<string, unknown> = {};
   const issues: StateToolsetIssue[] = [];
   for (const [file, def] of Object.entries(files)) {
-    const lowered = lowerStateToolsets(stateIdFromPath(file), def, read);
+    const lowered = lowerStateToolsets(stateIdFromPath(file), def, read, check);
     out[file] = lowered.def;
     issues.push(...lowered.issues);
   }
   return { files: out, issues };
+}
+
+// --- permission functions ------------------------------------------------------
+
+/**
+ * A toolset line's FUNCTION, loaded as the one state it is run as (`permissionFunctionState` in
+ * `@jaira/runtime`) — with the options the workflow itself loads with, so the name resolves along the
+ * same path and a `.ts` module contributes only if it is approved, exactly as a call in a binding would.
+ *
+ * Tried as a CALL first (`smart(.inputs.request)`: a host function, an operation document, a module
+ * symbol) and then as a VALUE (`{ "$expr": … }`, a document that reads `.inputs.request`). Throws the
+ * call's error when neither loads — that is the one that says what was wrong with the name.
+ */
+export function loadPermissionFunction(reference: string, options: LoadBundleOptions): WorkflowBundle {
+  // The host's own functions are on the path whatever the caller passed: `smart` and the approval
+  // prompt are JaiRA's, and a load that did not name the registry must still find them.
+  const withHost: LoadBundleOptions = { ...options, functions: options.functions ?? hostCalleeSignatures() };
+  const load = (form: "call" | "value"): WorkflowBundle =>
+    loadBundle({ [PERMISSION_FUNCTION_STATE]: permissionFunctionState(reference, form) }, PERMISSION_FUNCTION_STATE, withHost);
+  try {
+    return load("call");
+  } catch (first) {
+    try {
+      return load("value");
+    } catch {
+      throw first;
+    }
+  }
+}
+
+/**
+ * The check lowering asks about every function a toolset names: `undefined` when it loads, the reason
+ * when it does not. One answer per reference for the life of the check — one load of a workflow.
+ */
+export function permissionFunctionCheck(options: LoadBundleOptions): (reference: string) => string | undefined {
+  const answered = new Map<string, string | undefined>();
+  return (reference) => {
+    if (!answered.has(reference)) {
+      let problem: string | undefined;
+      try {
+        loadPermissionFunction(reference, options);
+      } catch (e) {
+        problem = (e as Error).message;
+      }
+      answered.set(reference, problem);
+    }
+    return answered.get(reference);
+  };
+}
+
+/**
+ * Every function a loaded bundle's toolsets name, each once — read off the lowered blocks, where
+ * lowering wrote `functions` beside the marks of a map.
+ */
+export function permissionFunctionRefsOf(bundle: WorkflowBundle): string[] {
+  const out = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const functions = record["functions"];
+    if (isLoweredToolset(record as never) && functions !== null && typeof functions === "object" && !Array.isArray(functions)) {
+      for (const reference of Object.values(functions as Record<string, unknown>)) if (typeof reference === "string") out.add(reference);
+    }
+    for (const value of Object.values(record)) walk(value);
+  };
+  walk(bundle.states);
+  return [...out];
 }
 
 export interface LoadWorkflowBundleOptions extends LoadBundleOptions {
@@ -133,13 +207,15 @@ export interface LoadWorkflowBundleOptions extends LoadBundleOptions {
 export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: string, options: LoadWorkflowBundleOptions = {}): WorkflowBundle {
   const { onToolsetIssue, ...loadOptions } = options;
   const read = toolsetReader(loadOptions);
+  // One check for the whole load, so a function every state names is loaded once.
+  const check = permissionFunctionCheck(loadOptions);
   const report = (issues: readonly StateToolsetIssue[]): void => {
     for (const issue of issues) {
       if (onToolsetIssue !== undefined) onToolsetIssue(issue);
       else if (issue.severity === "error") throw new WorkflowLoadError(`${issue.path}: ${issue.message}`, issue.stateId);
     }
   };
-  const lowered = lowerWorkflowToolsets(files, loadOptions);
+  const lowered = lowerWorkflowToolsets(files, loadOptions, check);
   report(lowered.issues);
   const loadState = loadOptions.loadState;
   return loadBundle(lowered.files, rootRef, {
@@ -151,7 +227,7 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
           loadState: (id: string) => {
             const def = loadState(id);
             if (def === undefined) return undefined;
-            const one = lowerStateToolsets(id, def, read);
+            const one = lowerStateToolsets(id, def, read, check);
             report(one.issues);
             return one.def;
           },

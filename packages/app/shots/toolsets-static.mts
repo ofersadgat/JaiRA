@@ -61,6 +61,21 @@ const records: ToolsetRecord[] = [
     files: [{ layer: "project", file: ".jaira/toolsets/feature/writes-asking.json", format: "json", decl: { read_file: "allow", glob: "allow", grep: "allow", edit: "ask", write_file: "ask", bash: "ask", "npm test": "allow", script: "ask", other: "ask" } }],
   },
   {
+    // Lines that name FUNCTIONS (decision 0007, amended 2026-09-22): the shipped `smart` on the shell,
+    // a project's own judge on writes.
+    id: "feature/judged",
+    bucket: "feature",
+    name: "judged",
+    files: [
+      {
+        layer: "project",
+        file: ".jaira/toolsets/feature/judged.json",
+        format: "json",
+        decl: { read_file: "allow", edit: "ask", write_file: { function: "judge.writes" }, bash: { function: "smart" }, "git push": "ask", other: "deny" },
+      },
+    ],
+  },
+  {
     id: "feature/implementation/reads-only",
     bucket: "feature/implementation",
     name: "reads-only",
@@ -129,6 +144,21 @@ const stages: Array<{ name: string; caption: string; html: string; panel?: true 
     html: view("project", "chat/read-only", { drafts: { "chat/read-only": withoutGlob }, comparing: true, folds: new Set(["files"]) }),
   },
   { name: "nested", caption: "a project's own toolset, in a bucket that holds another bucket; Execution's add line open", html: view("project", "feature/writes-asking", { folds: new Set(["execution", programFold("npm")]), startAdding: "execution" }) },
+  {
+    name: "function",
+    caption: "Built in — chat / auto: every line hands its call to the smart function, which asks you when it is unsure",
+    html: view("system", "chat/auto", { folds: new Set(["files", "execution"]) }),
+  },
+  {
+    name: "function-menu",
+    caption: "a project's toolset whose lines name functions — the shell's mode menu open: the three words, then function…",
+    html: view("project", "feature/judged", { folds: new Set(["files", "execution", programFold("git")]), startMode: { subject: "bash", open: "menu" } }),
+  },
+  {
+    name: "function-form",
+    caption: "function… picked — which function decides the line, asked through the schema form",
+    html: view("project", "feature/judged", { folds: new Set(["files", "execution"]), startMode: { subject: "write_file", open: "function" } }),
+  },
   { name: "new-toolset", caption: "+ toolset, a name it has to refuse", html: view("project", "", { choice: { newIn: "chat" }, naming: { name: "read-only" } }) },
   { name: "new-bucket", caption: "+ bucket", html: view("base", "", { choice: "bucket", naming: { bucket: "review", name: "reads" } }) },
   { name: "refused", caption: "while a write is in flight, and what the last one was refused with", html: view("project", "feature/writes-asking", { locked: true, problem: "'feature/writes-asking' changed on disk since it was read — nothing was written", folds: new Set(["files"]) }) },

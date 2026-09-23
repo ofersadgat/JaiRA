@@ -8,7 +8,7 @@ import { createLogger } from "@declarative-ai/log";
 import { ApprovalRequired, approvalRefusalMessage, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
-import { loadWorkflowBundle } from "./toolsets";
+import { loadPermissionFunction, loadWorkflowBundle, permissionFunctionRefsOf } from "./toolsets";
 import { newTaskId, isStartableStatus, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } from "./documents";
@@ -348,7 +348,10 @@ export async function snapshotWithModules(
   project: Project,
   bundle: WorkflowBundle,
 ): Promise<{ hash: string; dir: string; bundle: WorkflowBundle }> {
-  const entries = moduleEntriesOf(bundle);
+  // A toolset line's FUNCTION is not in the resolved states — lowering carries its NAME — so the
+  // modules it reaches are found by loading it the way a run will, and are held to the same approval
+  // and the same freeze as a module a state calls (decision 0007, amended 2026-09-22).
+  const entries = [...new Set([...moduleEntriesOf(bundle), ...permissionFunctionModulesOf(project, bundle)])].sort();
   if (entries.length === 0) {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     return { hash: snap.hash, dir: snap.dir, bundle };
@@ -371,6 +374,27 @@ export async function snapshotWithModules(
   const withDigest: WorkflowBundle = { ...bundle, moduleDigest: frozen.digest };
   const snap = await ensureSnapshot(project.paths.snapshotsDir, withDigest, { modules: frozen.emitted });
   return { hash: snap.hash, dir: snap.dir, bundle: withDigest };
+}
+
+/**
+ * The module files the permission functions a bundle's toolsets name reach — each function loaded as
+ * the one state it runs as, with this project's options. A function that does not load reaches nothing
+ * here: the load that pinned the bundle has already refused it (`lowerStateToolsets` checks every
+ * function a toolset names).
+ */
+function permissionFunctionModulesOf(project: Project, bundle: WorkflowBundle): string[] {
+  const references = permissionFunctionRefsOf(bundle);
+  if (references.length === 0) return [];
+  const options = workflowLoadOptions(project.paths, { vfs: nodeVfs(), path: project.config.workflows.path });
+  const out: string[] = [];
+  for (const reference of references) {
+    try {
+      out.push(...moduleEntriesOf(loadPermissionFunction(reference, options)));
+    } catch {
+      // Reported where the workflow was loaded; nothing to freeze for a function that does not load.
+    }
+  }
+  return out;
 }
 
 /**

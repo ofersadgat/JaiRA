@@ -12,15 +12,17 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseToolset, type ApprovalToolset, type PendingApproval } from "@jaira/shared";
-import { decideCommand } from "../../runtime/src/policy";
+import { lowerToolset, parseComponentConfig, parseToolset, type ApprovalToolset, type CommandApproval, type PendingApproval, type PendingInteraction, type ToolsetDecl } from "@jaira/shared";
+import { commandDecisionOf, compilePolicy, decideCommand } from "../../runtime/src/policy";
 import { shellToolsetOf } from "../../runtime/src/commandParts";
+import { withPermissionFunctions, type PermissionFunctionRunner } from "../../runtime/src/permissionFunctions";
 import { ApprovalSurface } from "../src/renderer/approvalSurface";
+import { GateSurface } from "../src/renderer/components";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
 const outDir = process.argv[2] ?? join(REPO, "docs", "ui", "assets", "command-approval");
 mkdirSync(outDir, { recursive: true });
-const CAPTURED = "2026-09-21";
+const CAPTURED = "2026-09-22";
 
 const WRITES_ASKING = { bash: "ask", read_file: "allow", glob: "allow", write_file: "allow", script: "ask", "git commit": "ask", "git log": "allow", other: "deny" };
 const WRITES_REF = "$/toolsets/feature/implementation/writes-asking";
@@ -104,6 +106,64 @@ function page(state: string, body: string): string {
 
 const builder = { session: "builder", workflow: "feature/build", state: "implement", label: "Implement the cache" };
 
+/**
+ * A shell line under a toolset whose lines name FUNCTIONS, decided the way a run decides it: the REAL
+ * narrowing takes it apart, and the REAL approver asks `run` about each part a function answers for,
+ * before the approval this page draws — which is what the person then sees.
+ */
+async function judged(line: string, toolset: ToolsetDecl, run: PermissionFunctionRunner): Promise<PendingApproval> {
+  const block = lowerToolset(parseToolset(toolset).toolset, undefined, "$/toolsets/chat/auto").permissions!;
+  const input = { command: line };
+  compilePolicy({}).scopeOf!({ name: "bash" }, input as never, block as never);
+  let asked: CommandApproval | undefined;
+  await withPermissionFunctions(
+    (req) => {
+      asked = commandDecisionOf(req.input)?.parts;
+      return { decision: "deny", scope: "once" };
+    },
+    { run },
+  )({ tool: "bash", input: input as never, sessionId: "s" });
+  const parts = asked ?? commandDecisionOf(input)!.parts;
+  return { requestId: "apr", tool: "Bash", command: line, reason: commandDecisionOf(input)!.reason, parts, toolset: ASK_FIRST, input, taskId: "t-1", project: "p", at: 0 };
+}
+
+const AUTO: ToolsetDecl = { read_file: { function: "smart" }, bash: { function: "smart" }, other: { function: "smart" } };
+const smartSaid = (allowed: string[]): PermissionFunctionRunner => async (_reference, request) => (allowed.includes(request.part?.program ?? "") ? "allow" : "deny");
+const functionAsking = await judged("npm test && git push origin cache-probe", AUTO, smartSaid(["npm"]));
+const functionFailed = await judged("cargo check && tsc --noEmit", AUTO, async (_reference, request) => {
+  if (request.part?.program === "tsc") throw new Error("'smart' failed: the judge's model is not reachable");
+  return "allow";
+});
+
+/** The approval PROMPT as a function calls it (`approve_tool_call`) — parked as a gate, for the person. */
+function promptGate(prompt: string, request: Record<string, unknown>): PendingInteraction {
+  const inputs = { prompt, request } as never;
+  return { requestId: "ui-9", taskId: "t-1", project: "", component: "approve_tool_call", inputs, config: parseComponentConfig("approve_tool_call", inputs) };
+}
+const unsure = promptGate("smart is unsure — publishing a package is public and cannot be taken back", {
+  tool: "bash",
+  subject: "bash",
+  function: "smart",
+  input: { command: "npm test && npm publish --access public", cwd: "/repo" },
+  line: "npm test && npm publish --access public",
+  part: { text: "npm publish --access public", kind: "command", subject: "npm publish", span: { start: 12, end: 39 }, program: "npm", subcommand: "publish", args: [], flags: ["--access"] },
+  cwd: "/repo",
+  state: "feature/release/publish",
+  task: "t-1",
+  toolset: "$/toolsets/chat/auto",
+});
+const writeAsked = promptGate("Allow this tool call?", {
+  tool: "write_file",
+  subject: "write_file",
+  function: "judge.writes",
+  input: { path: "deploy/production.env", content: "API_URL=https://api.internal" },
+  state: "feature/build/implement",
+  task: "t-1",
+  toolset: "$/toolsets/feature/judged",
+});
+const gate = (pending: PendingInteraction, settled?: string): string =>
+  renderToStaticMarkup(h(GateSurface, { pending, onSubmit: () => undefined, ...(settled !== undefined ? { settled: { value: settled } } : {}) }));
+
 const twoRequests = shell("rm foo.txt && git commit -m wip", WRITES_ASKING, WRITES_REF, WRITES);
 const terraform = shell("terraform plan -out tf.plan", { bash: "ask", read_file: "allow", other: "deny" }, "$/toolsets/chat/ask-first", ASK_FIRST);
 const hosts: PendingApproval = { requestId: "apr", tool: "write_file", reason: "writes outside the worktree", input: { path: "/etc/hosts", content: "127.0.0.1 registry.internal" }, taskId: "t-1", project: "p", at: 0 };
@@ -178,6 +238,37 @@ const pages: Record<string, string> = {
       caption: "a line nobody could read: one part, the parser's reason, and an answer that cannot be remembered",
       body: surface(shell("git commit -m 'unterminated", WRITES_ASKING, WRITES_REF, WRITES), "allow"),
       room: 120,
+    }),
+  ].join("\n"),
+
+  function: [
+    sheet({
+      ...builder,
+      at: "15:40:12",
+      caption: "ui/components/command-approval · function · the toolset hands the shell to the smart function: it allowed npm test, which says so and is not asked about; the push still asks, because a built-in ask is stricter than a function",
+      says: "Tests pass locally. Pushing the branch.",
+      body: surface(functionAsking),
+    }),
+    sheet({
+      ...builder,
+      at: "15:41:30",
+      caption: "a function that could not decide: its part asks, with the function's own sentence; the part it did decide is marked",
+      body: surface(functionFailed),
+    }),
+    sheet({
+      session: "release",
+      workflow: "feature/release",
+      state: "publish",
+      label: "Publish the package",
+      at: "16:02:55",
+      caption: "the approval PROMPT a function calls (approve_tool_call) — smart was unsure, so it asked: the part it is asking about, which toolset line and which function, and Allow or Deny, which is what the function returns",
+      body: gate(unsure),
+    }),
+    sheet({
+      ...builder,
+      at: "16:05:10",
+      caption: "the same prompt for a tool that is not the shell — its arguments — and, once answered, drawn as it was answered",
+      body: gate(writeAsked, "deny"),
     }),
   ].join("\n"),
 

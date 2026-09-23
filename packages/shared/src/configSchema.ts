@@ -171,6 +171,30 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
     },
   },
   {
+    key: "smart",
+    title: "smart",
+    hint: "The permission function JaiRA ships: the model that judges a tool call, and what it is told.",
+    schema: {
+      $type: "smart",
+      type: "object",
+      properties: {
+        model: {
+          type: "string",
+          title: "model",
+          description:
+            "Which model judges each call a toolset hands to { \"function\": \"smart\" }, written as a state's model is — claude-haiku-4, or claude-cli/haiku to insist on a route. Empty uses whatever this machine's default executor answers with. A fast, cheap model is the point: it runs once per call.",
+        },
+        prompt: {
+          type: "string",
+          title: "prompt",
+          contentMediaType: "text/markdown",
+          description:
+            "What the judge is told. It answers allow, deny or unsure, and unsure asks you through the approval prompt. The call it judges — the tool, the part of a shell line, the state, the task — is added below this, as JSON. Empty uses the prompt JaiRA ships.",
+        },
+      },
+    },
+  },
+  {
     key: "workflows",
     title: "Workflow lookup",
     hint: "The roots a bare workflow reference is searched along — shell PATH semantics, first match wins.",

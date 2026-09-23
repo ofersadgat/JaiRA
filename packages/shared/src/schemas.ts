@@ -367,17 +367,38 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
  * admits in an object position (§2.2); `$ref` beside the subjects starts from one and says more.
  */
 export function toolsSchema(): SchemaDoc {
-  const mode: SchemaDoc = { type: "string", enum: [...PERMISSION_MODES] };
+  const word: SchemaDoc = { type: "string", enum: [...PERMISSION_MODES] };
+  const reference: SchemaDoc = {
+    type: "string",
+    minLength: 1,
+    description: "the function that decides each call — returns allow or deny; `smart` is the one JaiRA ships",
+  };
+  const fn: SchemaDoc = {
+    type: "object",
+    properties: { function: reference },
+    required: ["function"],
+    additionalProperties: false,
+    description: "a function decides each call, and may ask you through approve_tool_call",
+  };
+  const mode: SchemaDoc = { anyOf: [word, fn] };
+  const implementation: SchemaDoc = { type: "string", enum: ["app", "native"], description: "whose code runs the tool — JaiRA's, or the agent's own built-in" };
   const entry: SchemaDoc = {
     anyOf: [
-      mode,
+      word,
+      fn,
       {
         type: "object",
         properties: {
-          mode: { ...mode, description: "allow, ask, deny, or smart — decided per call by the approver" },
-          implementation: { type: "string", enum: ["app", "native"], description: "whose code runs the tool — JaiRA's, or the agent's own built-in" },
+          mode: { ...mode, description: "allow, ask, deny, or { \"function\": … } — decided per call by that function" },
+          implementation,
         },
         required: ["mode"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: { function: reference, implementation },
+        required: ["function"],
         additionalProperties: false,
       },
     ],

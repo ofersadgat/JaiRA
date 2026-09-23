@@ -32,8 +32,16 @@ export type CommandPartKind =
   /** The line, or a payload inside it, that the parser could not model. Never allowed without asking. */
   | "unparsed";
 
-/** The three answers a part can have. A line runs only if every part is `allowed`. */
-export type CommandPartVerdict = "allowed" | "asks" | "denied";
+/**
+ * The answers a part can have. A line runs only if every part is `allowed`.
+ *
+ * `function` is a part whose toolset entry names a FUNCTION (`"bash": { "function": "smart" }`) and
+ * which has not been put to it yet — `decidedBy.function` says which. It is never what a person is
+ * shown: the approver the host hands the engine calls the function for each such part before anybody
+ * is asked, and the part is then `allowed` or `denied` by it, or `asks` when the function failed. It
+ * ranks between `allowed` and `asks`: a built-in ask or a rule's ask is stricter than a function.
+ */
+export type CommandPartVerdict = "allowed" | "function" | "asks" | "denied";
 
 /** Which layer decided a part, strictest layer named. */
 export type CommandPartDecider =
@@ -52,7 +60,12 @@ export type CommandPartDecider =
   /** Nothing matched: the policy's `default`. */
   | "default"
   /** The parser could not model it, or what runs is decided at run time (`$CMD args`). */
-  | "parser";
+  | "parser"
+  /**
+   * A permission FUNCTION the toolset entry names answered — `entry` is that entry, `function` its
+   * reference. When the function could not answer, the part asks and the reason says why.
+   */
+  | "function";
 
 export interface CommandPart {
   /** The whole part, in the original line — what the approval TINTS. */
@@ -73,11 +86,21 @@ export interface CommandPart {
   paths?: string[];
   /** The url, for a `web_fetch` request. */
   url?: string;
+  /**
+   * The command the part runs, as parsed — absent on a redirect and on what the parser could not
+   * read. What a permission function is handed about the part (`PermissionRequestPart`).
+   */
+  command?: { program: string; subcommand?: string; args: string[]; flags: string[] };
   verdict: CommandPartVerdict;
   decidedBy: {
     source: CommandPartDecider;
     /** The toolset entry (or remembered width) that decided, when one did. */
     entry?: string;
+    /**
+     * The FUNCTION the entry names, when it names one — on a part still waiting for it (verdict
+     * `function`), and on one it answered (source `function`).
+     */
+    function?: string;
     /** A sentence a person can read. */
     reason: string;
   };
@@ -155,8 +178,15 @@ export function entriesToRemember(
   return out;
 }
 
-/** Strictest of the three, for folding parts into a line. */
+/** How strict each verdict is: allowed ▸ function ▸ asks ▸ denied. */
+export const VERDICT_RANK: Readonly<Record<CommandPartVerdict, number>> = { allowed: 0, function: 1, asks: 2, denied: 3 };
+
+/** Strictest of the verdicts, for folding parts into a line. */
 export function strictestVerdict(a: CommandPartVerdict, b: CommandPartVerdict): CommandPartVerdict {
-  const rank: Record<CommandPartVerdict, number> = { allowed: 0, asks: 1, denied: 2 };
-  return rank[a] >= rank[b] ? a : b;
+  return VERDICT_RANK[a] >= VERDICT_RANK[b] ? a : b;
+}
+
+/** The parts still waiting for a permission function — see the `function` verdict. */
+export function functionParts(approval: CommandApproval): CommandPart[] {
+  return approval.parts.filter((part) => part.verdict === "function");
 }

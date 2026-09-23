@@ -131,9 +131,17 @@ export interface PartRow {
   verdict: CommandPartVerdict;
   /** How many parts this one is written inside (`rm {}` inside its `find` is 1). */
   depth: number;
+  /**
+   * The FUNCTION that decided this part, when one did (decision 0007, amended 2026-09-22) — drawn as
+   * the function's name beside what it answered, so a line whose other parts ask says which of its
+   * parts a function already allowed and will not be asked about.
+   */
+  by?: string;
 }
 
-const VERDICT_LABEL: Record<CommandPartVerdict, string> = { allowed: "allowed", asks: "asks", denied: "denied" };
+// `function` is a part not yet put to the function its line names — never on screen: the approver asks
+// every function before any person is asked, so a drawn part is allowed, denied or asking by then.
+const VERDICT_LABEL: Record<CommandPartVerdict, string> = { allowed: "allowed", function: "to a function", asks: "asks", denied: "denied" };
 export const verdictLabel = (verdict: CommandPartVerdict): string => VERDICT_LABEL[verdict];
 
 const FALLBACK_ENTRIES: Record<string, string> = { bash: "any other command", other: "everything no line names" };
@@ -163,7 +171,10 @@ export function partRows(approval: CommandApproval): PartRow[] {
     if (fellThrough(part)) notes.push(`no line names ${part.subject} — ${FALLBACK_ENTRIES[entry!]}`);
     // Beside a toolset's entry the policy keeps the built-in's reason after a dash; it is why the ask matters.
     if (source === "toolset" && reason.includes(" — ")) notes.push(reason.slice(reason.indexOf(" — ") + 3));
-    else if (source !== "toolset" && source !== "default") notes.push(reason);
+    // A function's answer is drawn as its name beside the verdict; one that could NOT answer says why
+    // once, on the reason line under the rows (`reasonLines`).
+    else if (source !== "toolset" && source !== "default" && source !== "function") notes.push(reason);
+    const by = source === "function" ? part.decidedBy.function : undefined;
     return {
       index,
       hue: hueOf(index),
@@ -172,6 +183,7 @@ export function partRows(approval: CommandApproval): PartRow[] {
       ...(notes.length > 0 ? { note: notes.join(" · ") } : {}),
       verdict: part.verdict,
       depth,
+      ...(by !== undefined ? { by } : {}),
     };
   });
 }
@@ -183,6 +195,8 @@ export type ReasonLine =
   | { kind: "toolset"; toolset?: string; entries: string[] }
   /** The toolset holds no line for these subjects, and that is why they ask. */
   | { kind: "unheld"; toolset?: string; subjects: string[] }
+  /** A function a line names could not decide, so the person is asked — its own sentence. */
+  | { kind: "function"; text: string }
   | { kind: "policy"; text: string };
 
 /** The toolset's name as a person reads it: `feature/implementation/writes-asking`. */
@@ -200,17 +214,83 @@ export function reasonLines(pending: PendingApproval): ReasonLine[] {
   const entries: string[] = [];
   const unheld: string[] = [];
   const policy: string[] = [];
+  const failed: string[] = [];
   const add = (list: string[], value: string): void => void (list.includes(value) ? undefined : list.push(value));
   for (const part of asking) {
-    if (part.decidedBy.source !== "toolset") add(policy, part.decidedBy.reason);
+    if (part.decidedBy.source === "function") add(failed, part.decidedBy.reason);
+    else if (part.decidedBy.source !== "toolset") add(policy, part.decidedBy.reason);
     else if (part.decidedBy.entry !== undefined) add(entries, part.decidedBy.entry);
     else add(unheld, part.subject);
   }
   return [
     ...(entries.length > 0 ? [{ kind: "toolset" as const, ...named, entries }] : []),
     ...(unheld.length > 0 ? [{ kind: "unheld" as const, ...named, subjects: unheld }] : []),
+    ...failed.map((text) => ({ kind: "function" as const, text })),
     ...policy.map((text) => ({ kind: "policy" as const, text })),
   ];
+}
+
+// --- the approval prompt, called by a function ---------------------------------------
+
+/**
+ * What `approve_tool_call` draws — the request a permission function was handed, read back: the line
+ * with the ONE part being asked about tinted (the rest of the line is glue: those parts are some other
+ * function's, or no one's, to decide), or the call's arguments for a tool that is not the shell.
+ */
+export interface ApprovalRequestView {
+  tool: string;
+  subject: string;
+  function?: string;
+  toolset?: string;
+  state?: string;
+  task?: string;
+  cwd?: string;
+  /** The shell line and the part being asked about, as the line's one part. */
+  line?: { text: string; parts: CommandPart[] };
+  /** What the call would do, for a tool with no line. */
+  input: unknown;
+}
+
+const stringOf = (value: unknown): string | undefined => (typeof value === "string" && value.length > 0 ? value : undefined);
+
+export function approvalRequestView(raw: unknown): ApprovalRequestView {
+  const request = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const part = request["part"] !== null && typeof request["part"] === "object" ? (request["part"] as Record<string, unknown>) : undefined;
+  const lineText = stringOf(request["line"]);
+  const span = part?.["span"] as TextSpan | undefined;
+  const subject = stringOf(request["subject"]) ?? stringOf(part?.["subject"]) ?? stringOf(request["tool"]) ?? "?";
+  const fields = {
+    tool: stringOf(request["tool"]) ?? "?",
+    subject,
+    ...(stringOf(request["function"]) !== undefined ? { function: stringOf(request["function"])! } : {}),
+    ...(stringOf(request["toolset"]) !== undefined ? { toolset: stringOf(request["toolset"])! } : {}),
+    ...(stringOf(request["state"]) !== undefined ? { state: stringOf(request["state"])! } : {}),
+    ...(stringOf(request["task"]) !== undefined ? { task: stringOf(request["task"])! } : {}),
+    ...(stringOf(request["cwd"]) !== undefined ? { cwd: stringOf(request["cwd"])! } : {}),
+    input: request["input"] ?? {},
+  };
+  if (lineText === undefined || part === undefined || span === undefined || typeof span.start !== "number" || typeof span.end !== "number") return fields;
+  // The program and its subcommand are what a person reads first: underlined, as a matched entry is.
+  const text = stringOf(part["text"]) ?? lineText.slice(span.start, span.end);
+  const program = stringOf(part["program"]);
+  const sub = stringOf(part["subcommand"]);
+  const head = program !== undefined ? text.indexOf(program) : -1;
+  const headEnd = head >= 0 && sub !== undefined && text.indexOf(sub, head + program!.length) >= 0 ? text.indexOf(sub, head + program!.length) + sub.length : head >= 0 ? head + program!.length : -1;
+  const asked: CommandPart = {
+    span: { start: span.start, end: span.end },
+    matched: head >= 0 ? [{ start: span.start + head, end: span.start + headEnd }] : [],
+    text,
+    kind: (stringOf(part["kind"]) ?? "command") as CommandPart["kind"],
+    subject: stringOf(part["subject"]) ?? subject,
+    verdict: "asks",
+    decidedBy: {
+      source: "function",
+      ...(fields.function !== undefined ? { function: fields.function } : {}),
+      reason: fields.function !== undefined ? `'${fields.function}' asks you` : "a function asks you",
+    },
+    widths: [],
+  };
+  return { ...fields, line: { text: lineText, parts: [asked] } };
 }
 
 // --- the answer menu --------------------------------------------------------------

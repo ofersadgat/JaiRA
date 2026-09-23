@@ -693,11 +693,89 @@ question settled. Upstream: declarative-ai branch `task/codex-held-tools`, addit
   said nothing of it. `other` is still inherited where a child writes none: a map
   cannot write "no `other`", and an unwritten one is the gate's last resort, not
   a choice to override.
+### Amended 2026-09-22 (a mode that is a function)
+
+The person's ruling: "a better generalization is to allow a function as a tool
+option (where the function returns true/false) … the function can be an LLM call
+which takes a command and returns true false and that call can be configured by
+the user", and "if the function wants to ask the user, it should call the function
+which shows the ui to ask the user … its return value is either allow/deny". So:
+
+- **A mode may be a function.** `"bash": { "function": "smart" }`, on any line — a
+  tool, a command, `script`, `bash`, `other` — and beside an implementation as
+  `{ "function": …, "implementation": "native" }`. The reference is a callee as an
+  expression names one: a bare name on the search path, a dotted module symbol, a
+  `$ROOT/…` path. It is anything an expression can call with one argument (a host
+  function, a prompt or function operation document, a `.ts` symbol) or an
+  expression document that reads `.inputs.request`. §1's "the four modes" is now
+  three words and a function.
+- **What it is handed and what it answers.** One argument, `request`
+  (`PermissionFunctionRequest` in `@jaira/shared`): `tool`, `subject`, `function`,
+  `input`, and for a shell line `line` and the ONE `part` being judged (its text,
+  kind, subject, span, program, subcommand, args, flags, paths, url, via), with
+  `cwd`, `state`, `task` and `toolset`. It answers `"allow"` or `"deny"` and nothing
+  else; anything else, a failure, or a function that does not load, has not
+  decided, and the part is put to the person with the reason.
+- **Where it is asked** is exactly where a mode applies, per part of a line (§4),
+  which closes the Open item below. A part's verdict is `function` until the
+  function answers, ranked between `allowed` and `asks`: rules, the floor,
+  `.jaira/` and an unreadable line are decided before any function is; a built-in
+  ask is stricter than a function on `bash`, and an entry that names the program
+  replaces it as it replaces any built-in ask. One denied part refuses the line and
+  the functions after it are not asked. What is remembered "for this run" is still
+  the asking parts, never a part a function decided.
+- **The approval prompt is a function.** `approve_tool_call(request)` shows the
+  approval and returns what the person answered. It is registered like a gate
+  component (interactive, `approve_tool_call` in `COMPONENT_NAMES`), parked on the
+  gate hub for the task, so it is durable (`pending_interactions`) and drawn in the
+  conversation; a seeded answer after a restart names the request it answered and a
+  resumed run that asks about another call is asked again. It is an approval, so it
+  is not in `ANSWERABLE_COMPONENTS` and a fast-forward's conversation is never
+  offered it (0005 §4, unchanged).
+- **`smart` is a shipped function** — a host function, registered beside the approval prompt
+  rather than a file: one model call judges the request `allow`,
+  `deny` or `unsure`, and `unsure` (or a judge that failed) calls the approval
+  prompt. Its model and prompt are **Settings → Configuration → smart**
+  (`smart.model`, `smart.prompt`), layered like every setting; a document named
+  `smart` on the path replaces it. The word `smart` is removed from the vocabulary
+  (`PERMISSION_MODES` is `allow`, `deny`, `ask`; a scope table takes the same three)
+  and a toolset that writes it is refused, with the spelling that replaces it. The
+  shipped `chat/auto` and `chat_control/auto` give every line `{ "function": "smart" }`.
+- **Lowering, re-derived.** A function is `ask` wherever the gate reads a mode, and
+  its reference rides in `permissions.functions`, by subject — on EVERY lowered map,
+  empty when nothing is a function, because `permissions` merges per key and a
+  child's map must never inherit its parent's function. The shell is `ask` whatever
+  its line says (it was `smart`), or `deny` when withheld: `ask` reaches the host
+  with the line in hand every time, and the host decides. The upstream `smart` mode
+  is no longer written by any lowering; the project `policy` still uses it for a
+  state that declares no toolset (command tools, and `show_artifact` where
+  `policy.tools` names it), which is the policy's own vocabulary.
+- **The host decides before anybody is asked.** `withPermissionFunctions` wraps the
+  approver (`ApprovalHub.approver` applies it, so every host that parks approvals
+  gets it): a line the parts allow runs without a person, a denied one is refused,
+  the parts a function names are put to it in order, and only what still asks
+  reaches the person — with each function's answer on the request, drawn as the
+  function's name beside its verdict. A tool call (not a line) whose line names a
+  function is found the same way: the narrowing notes it against the call's input.
+- **Module approval.** A function is loaded as the one state it runs as
+  (`permissionFunctionState`) with the workflow's own load options, so a `.ts`
+  module it reaches contributes only if approved: lowering checks every function a
+  toolset names and an unresolvable one is a lint error and refuses the start; an
+  unapproved module raises `ApprovalRequired` naming the file, like any other; the
+  modules it reaches are frozen into the run's digest (`snapshotWithModules`).
+
+Measured with `handedToClaude`: a map whose `write_file` and `bash` name a function
+serves both, pre-approves neither, and each call and each shell part is what the
+function answered; a function that denies everything leaves no way in; with no
+runner every such call asks; a written `other` that is a function forces `Task`,
+`Agent` and `SlashCommand` to the callback. `handedToCodex`: a writer a function
+answers for turns the writing sandbox on. For `~/.jaira`, `"bash": "smart"` becomes
+`"bash": { "function": "smart" }`.
 
 ## Open
 
-- `smart` on a command subject: what the approver is shown for one part of
-  a line.
+Nothing. (`smart` on a command subject — what the approver is shown for one part of
+a line — closed 2026-09-22 by the amendment above: the part, handed to a function.)
 
 ## Revisit when
 

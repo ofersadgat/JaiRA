@@ -27,6 +27,7 @@ describe("component names", () => {
       "fill_form",
       "confirm_action",
       "review_artifacts",
+      "approve_tool_call",
     ]);
     expect(isComponentName("choose_option")).toBe(true);
     expect(isComponentName("review_artifacts")).toBe(true);

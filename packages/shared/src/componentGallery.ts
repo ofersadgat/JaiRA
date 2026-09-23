@@ -318,6 +318,11 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
     }),
     expected: ["prompt"],
   },
+  approve_tool_call: {
+    hint: "the approval prompt a permission function calls — `approve_tool_call`'s args",
+    document: configSchema("approve_tool_call", "a tool call, allowed or denied by the person — what it shows is its `request` input", {}),
+    expected: ["prompt"],
+  },
   review_artifacts: {
     hint: "the changeset gate — `review_artifacts`'s args (CHANGESETS.md §4.1)",
     document: configSchema("review_artifacts", "every change decided, one at a time", {
@@ -620,6 +625,8 @@ export const GALLERY_VARIANT_ORDER: readonly string[] = [
   // A review that is also a merge request (decision 0004), seen from the two components it touches:
   // the gate with its second door, and the question that door asks before anything is published.
   "remote",
+  // A shell line some of whose parts a permission FUNCTION decided (decision 0007, amended 2026-09-22).
+  "function",
   "input",
   "empty",
 ];
@@ -977,6 +984,63 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
     ],
   },
   {
+    id: "approve_tool_call",
+    kind: "interaction",
+    component: "approve_tool_call",
+    title: "Approve a tool call, for a function",
+    blurb:
+      "The approval prompt as a FUNCTION: what a permission function calls when it wants the person to decide — the shipped `smart` does when it is unsure. It shows the request the function was handed (the tool, the part of the shell line, where it runs) and answers allow or deny, nothing else; what, if anything, is remembered is the function's business. An approval, so a fast-forward's conversation is never offered it.",
+    schemaId: componentConfigSchemaId("approve_tool_call"),
+    variants: [
+      {
+        id: "basic",
+        title: "One part of a shell line",
+        note: "`smart` was unsure about `git push`, so it asked. The line is drawn whole with the part being asked about tinted; the rows under it say what the function is deciding and for which toolset line.",
+        sample: { prompt: "smart is unsure — allow this?" },
+        inputs: {
+          request: {
+            tool: "bash",
+            subject: "git push",
+            function: "smart",
+            input: { command: "npm test && git push origin feature/probe", cwd: "/repo" },
+            line: "npm test && git push origin feature/probe",
+            part: {
+              text: "git push origin feature/probe",
+              kind: "command",
+              subject: "git push",
+              span: { start: 12, end: 41 },
+              program: "git",
+              subcommand: "push",
+              args: ["origin", "feature/probe"],
+              flags: [],
+            },
+            cwd: "/repo",
+            state: "feature/implementation/build",
+            task: "t-qfr49rm80m",
+            toolset: "$/toolsets/chat/auto",
+          },
+        },
+      },
+      {
+        id: "input",
+        title: "A tool that is not the shell",
+        note: "A file tool has no line to take apart, so the prompt shows its arguments — the whole of what the call would do.",
+        sample: { prompt: "Allow this tool call?" },
+        inputs: {
+          request: {
+            tool: "write_file",
+            subject: "write_file",
+            function: "smart",
+            input: { path: "deploy/production.env", content: "API_URL=https://api.internal" },
+            state: "feature/implementation/build",
+            task: "t-qfr49rm80m",
+            toolset: "$/toolsets/chat/auto",
+          },
+        },
+      },
+    ],
+  },
+  {
     id: "unknown-function",
     kind: "interaction",
     component: "unknown_function",
@@ -1045,6 +1109,44 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             ],
           },
           input: { command: "rm foo.txt && git commit -m wip" },
+        },
+      },
+      {
+        id: "function",
+        title: "Parts a function decided",
+        note: "The toolset gives `bash` to the `smart` function, which allowed `npm test`; `git push` still asks, because the built-in ask on a push is stricter than a function. A part a function decided says which function and what it answered — and it is not asked about again.",
+        sample: {
+          tool: "Bash",
+          command: "npm test && git push origin feature/probe",
+          parts: {
+            line: "npm test && git push origin feature/probe",
+            dialect: "posix",
+            verdict: "asks",
+            toolset: "$/toolsets/chat/auto",
+            parts: [
+              {
+                span: { start: 0, end: 8 },
+                matched: [{ start: 0, end: 3 }],
+                text: "npm test",
+                kind: "command",
+                subject: "npm test",
+                verdict: "allowed",
+                decidedBy: { source: "function", entry: "bash", function: "smart", reason: "'smart' allowed it" },
+                widths: ["npm test", "npm"],
+              },
+              {
+                span: { start: 12, end: 41 },
+                matched: [{ start: 12, end: 20 }],
+                text: "git push origin feature/probe",
+                kind: "command",
+                subject: "git push",
+                verdict: "asks",
+                decidedBy: { source: "builtin", reason: "pushes publish work" },
+                widths: ["git push", "git"],
+              },
+            ],
+          },
+          input: { command: "npm test && git push origin feature/probe" },
         },
       },
       {

@@ -17,7 +17,9 @@ import {
   subjectKindOf,
   TOOL_SPEC_BY_NAME,
   toolsInCategory,
-  type PermissionMode,
+  isFunctionMode,
+  sameMode,
+  type ToolsetMode,
   type Toolset,
   type ToolsetEntry,
   type ToolCategoryId,
@@ -32,7 +34,7 @@ import {
  * you untick loses what you had set; this is where that lives, for as long as the composer does. It
  * is never sent, and it is not a record of where the map came from.
  */
-export type Parked = Readonly<Record<string, { mode?: PermissionMode; implementation?: ToolImplementation }>>;
+export type Parked = Readonly<Record<string, { mode?: ToolsetMode; implementation?: ToolImplementation }>>;
 
 /** A toolset of these entries — whatever the composer writes is a map. */
 function edited(toolset: Toolset, entries: Record<string, ToolsetEntry>, other = toolset.other): Toolset {
@@ -40,7 +42,7 @@ function edited(toolset: Toolset, entries: Record<string, ToolsetEntry>, other =
 }
 
 /** The mode a tool's line shows: its entry's when held, else what it would be ticked back to. */
-export function toolModeOf(toolset: Toolset, parked: Parked, name: string): PermissionMode {
+export function toolModeOf(toolset: Toolset, parked: Parked, name: string): ToolsetMode {
   const entry = Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined;
   if (holdsTool(toolset, name)) return entry?.mode ?? MODE_WHEN_UNSET;
   return parked[name]?.mode ?? entry?.mode ?? MODE_WHEN_UNSET;
@@ -70,7 +72,7 @@ export function withToolHeld(toolset: Toolset, parked: Parked, name: string, hel
 }
 
 /** Set the mode of a line the map HOLDS — a tool, a command subject or `script`. */
-export function withSubjectMode(toolset: Toolset, subject: string, mode: PermissionMode): Toolset {
+export function withSubjectMode(toolset: Toolset, subject: string, mode: ToolsetMode): Toolset {
   const entry = Object.hasOwn(toolset.entries, subject) ? toolset.entries[subject] : undefined;
   if (entry === undefined) return toolset;
   const { offered: _offered, ...rest } = entry;
@@ -86,7 +88,7 @@ export function withToolImplementation(toolset: Toolset, name: string, implement
 }
 
 /** Set the mode for everything no line names. */
-export function withOther(toolset: Toolset, mode: PermissionMode): Toolset {
+export function withOther(toolset: Toolset, mode: ToolsetMode): Toolset {
   return edited(toolset, { ...toolset.entries }, mode);
 }
 
@@ -98,7 +100,7 @@ export function withoutSubject(toolset: Toolset, subject: string): Toolset {
 }
 
 /** Add (or re-mode) a command subject or `script`. */
-export function withSubject(toolset: Toolset, subject: string, mode: PermissionMode): Toolset {
+export function withSubject(toolset: Toolset, subject: string, mode: ToolsetMode): Toolset {
   const kind = subject === SCRIPT_SUBJECT ? "script" : "command";
   return edited(toolset, { ...toolset.entries, [subject]: { kind, mode } });
 }
@@ -113,9 +115,9 @@ export interface CommandGroup {
    * The mode of the entry for the BARE program (`"git": …`), which stands for any other `git`.
    * Absent when the toolset names only subcommands — any other `git` then falls to the shell's line.
    */
-  own?: PermissionMode;
+  own?: ToolsetMode;
   /** `git status`, `git push --force` — in authored order. */
-  subs: Array<{ subject: string; mode: PermissionMode }>;
+  subs: Array<{ subject: string; mode: ToolsetMode }>;
 }
 
 /** The command subjects of a toolset, grouped under their program, programs in authored order. */
@@ -134,26 +136,25 @@ export function commandGroupsOf(toolset: Toolset): CommandGroup[] {
 }
 
 /** What any command with no line of its own answers to: the shell's line, then `other`. */
-export function shellFallbackOf(toolset: Toolset): PermissionMode {
+export function shellFallbackOf(toolset: Toolset): ToolsetMode {
   const shell = Object.hasOwn(toolset.entries, SHELL_TOOL) ? toolset.entries[SHELL_TOOL] : undefined;
   return (shell !== undefined && holdsTool(toolset, SHELL_TOOL) ? shell.mode : undefined) ?? toolset.other ?? MODE_WHEN_UNSET;
 }
 
 /** The mode a program's group row shows: its own entry's, else what any other command of it gets. */
-export function groupModeOf(toolset: Toolset, group: CommandGroup): PermissionMode {
+export function groupModeOf(toolset: Toolset, group: CommandGroup): ToolsetMode {
   return group.own ?? shellFallbackOf(toolset);
 }
 
-const REST_VERBS: Readonly<Record<PermissionMode, string>> = {
-  ask: "asks",
-  allow: "is allowed",
-  deny: "is refused",
-  smart: "goes to the approver",
-};
+/** What a mode does to a command, as the end of a sentence: `asks`, `is decided by smart`. */
+function restVerb(mode: ToolsetMode): string {
+  if (isFunctionMode(mode)) return `is decided by ${mode.function}`;
+  return { ask: "asks", allow: "is allowed", deny: "is refused" }[mode];
+}
 
 /** The sentence under an open group: `5 subcommands named; any other git asks`. */
 export function groupSentence(toolset: Toolset, group: CommandGroup): string {
-  const rest = `any other ${group.program} ${REST_VERBS[groupModeOf(toolset, group)]}`;
+  const rest = `any other ${group.program} ${restVerb(groupModeOf(toolset, group))}`;
   if (group.subs.length === 0) return `every ${group.program} command — ${rest.slice("any other ".length)}`;
   return `${group.subs.length} ${group.subs.length === 1 ? "subcommand" : "subcommands"} named; ${rest}`;
 }
@@ -254,8 +255,8 @@ export function withoutProgram(toolset: Toolset, program: string): Toolset {
 // --- sections -----------------------------------------------------------------
 
 /** Every line a section's own mode button reads and writes, as `[subject, mode]`. */
-function sectionLines(toolset: Toolset, parked: Parked, category: ToolCategoryId): Array<[string, PermissionMode]> {
-  const lines: Array<[string, PermissionMode]> = toolsInCategory(category).map((spec) => [spec.name, toolModeOf(toolset, parked, spec.name)]);
+function sectionLines(toolset: Toolset, parked: Parked, category: ToolCategoryId): Array<[string, ToolsetMode]> {
+  const lines: Array<[string, ToolsetMode]> = toolsInCategory(category).map((spec) => [spec.name, toolModeOf(toolset, parked, spec.name)]);
   if (category !== "execution") return lines;
   for (const [subject, entry] of Object.entries(toolset.entries)) {
     if (entry.kind !== "tool") lines.push([subject, entry.mode ?? MODE_WHEN_UNSET]);
@@ -267,10 +268,10 @@ function sectionLines(toolset: Toolset, parked: Parked, category: ToolCategoryId
  * What a section reads as: the mode its lines share, or `undefined` — drawn `custom` — when they
  * do not. Execution's lines are the shell, `script` when held, and every command the toolset names.
  */
-export function sectionModeOf(toolset: Toolset, parked: Parked, category: ToolCategoryId): PermissionMode | undefined {
+export function sectionModeOf(toolset: Toolset, parked: Parked, category: ToolCategoryId): ToolsetMode | undefined {
   const lines = sectionLines(toolset, parked, category);
   if (lines.length === 0) return undefined;
-  return lines.every(([, mode]) => mode === lines[0]![1]) ? lines[0]![1] : undefined;
+  return lines.every(([, mode]) => sameMode(mode, lines[0]![1])) ? lines[0]![1] : undefined;
 }
 
 /**
@@ -281,10 +282,10 @@ export function withSectionMode(
   toolset: Toolset,
   parked: Parked,
   category: ToolCategoryId,
-  mode: PermissionMode,
+  mode: ToolsetMode,
 ): { toolset: Toolset; parked: Parked } {
   let next = toolset;
-  const nextParked: Record<string, { mode?: PermissionMode; implementation?: ToolImplementation }> = { ...parked };
+  const nextParked: Record<string, { mode?: ToolsetMode; implementation?: ToolImplementation }> = { ...parked };
   for (const [subject] of sectionLines(toolset, parked, category)) {
     const isTool = TOOL_SPEC_BY_NAME.has(subject);
     if (!isTool || holdsTool(toolset, subject)) next = withSubjectMode(next, subject, mode);

@@ -40,10 +40,17 @@ import { dialectFor, type ExecEnv } from "./paths";
 import {
   DEFAULT_ASK_ABOVE_BYTES,
   INLINE_TOOLSET,
+  OTHER_SUBJECT,
+  VERDICT_RANK,
   absolutize,
   entriesToRemember,
   isAbsolutePath,
+  isFunctionMode,
+  isToolsetMarkKey,
   gateToolModes,
+  modeFunction,
+  modeWord,
+  toolsetFunctions,
   type CommandApproval,
   type CommandPart,
   type CommandPartDecider,
@@ -51,7 +58,9 @@ import {
   type PermissionsDecl,
   type Scope,
   type TextSpan,
+  type ToolMode,
   type Toolset,
+  type ToolsetMode,
 } from "@jaira/shared";
 // Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
 import { standardOfAnyNative } from "./agentTools";
@@ -211,9 +220,14 @@ export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; 
 /** Strictest wins, so nothing benign on the same line can soften a verdict. */
 const RANK: Record<PolicyAction, number> = { allow: 0, require_approval: 1, deny: 2 };
 
-const ACTION_OF: Record<CommandPartVerdict, PolicyAction> = { allowed: "allow", asks: "require_approval", denied: "deny" };
+/**
+ * A part a FUNCTION decides is, to the line, a part that is not yet allowed: the line is escalated so
+ * that the approver — which runs the functions before it asks anybody — gets it.
+ */
+const ACTION_OF: Record<CommandPartVerdict, PolicyAction> = { allowed: "allow", function: "require_approval", asks: "require_approval", denied: "deny" };
 const VERDICT_OF: Record<PolicyAction, CommandPartVerdict> = { allow: "allowed", require_approval: "asks", deny: "denied" };
-const VERDICT_OF_MODE: Record<Exclude<PermissionMode, "smart">, CommandPartVerdict> = { allow: "allowed", ask: "asks", deny: "denied" };
+const VERDICT_OF_WORD: Record<ToolMode, CommandPartVerdict> = { allow: "allowed", ask: "asks", deny: "denied" };
+const verdictOfMode = (mode: ToolsetMode): CommandPartVerdict => (isFunctionMode(mode) ? "function" : VERDICT_OF_WORD[mode]);
 
 export interface CommandDecision {
   action: PolicyAction;
@@ -307,11 +321,13 @@ interface Composed {
   source: CommandPartDecider;
   reason: string;
   entry?: string;
+  /** The function the toolset entry names, when the verdict is `function`. */
+  function?: string;
   /** The words a toolset entry matched, when one decided. */
   matched?: TextSpan[];
 }
 
-const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => RANK[ACTION_OF[a]] > RANK[ACTION_OF[b]];
+const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VERDICT_RANK[a] > VERDICT_RANK[b];
 
 /**
  * Judge one part. `undefined` when it is no request at all (`cd foo`, `echo hi`).
@@ -325,10 +341,14 @@ const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => RA
  *     with one exception: an entry that NAMES the program (`git push`, `git`) replaces a built-in ask
  *     or the `default` — naming it is the decision those two stand in for. It never replaces a rule,
  *     and never the floor: the floor stays above every toolset, and an authored rule is the project's
- *     own statement, which a state may tighten and not loosen.
- *  4. A part the parser cannot vouch for asks at least.
+ *     own statement, which a state may tighten and not loosen. An entry that names a FUNCTION answers
+ *     `function`, which ranks between `allowed` and `asks`: the function is asked unless something
+ *     stricter already answered — a built-in ask on a push is still a person's to answer, unless the
+ *     entry that names the function names the program too.
+ *  4. A part the parser cannot vouch for asks at least — never a function: what it cannot read is
+ *     never allowed without a person, whatever the toolset hands it to.
  *  5. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied`. It never
- *     lifts `denied`, and never what the parser could not read.
+ *     lifts `denied`, and never what the parser could not read, and never a part a function decides.
  *  6. A SCOPE table's answer for the part's place, by the standard tool the part is. Strictest again,
  *     and after (5): a remembered `rm` does not open a place the table shut.
  */
@@ -365,11 +385,18 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
   if (options.toolset !== undefined && part.noRequest !== true) {
     const answer = lookUp(options.toolset, part);
     if (answer.mode !== undefined) {
+      const reference = modeFunction(answer.mode);
       const fromToolset: Composed = {
-        verdict: VERDICT_OF_MODE[answer.mode],
+        verdict: verdictOfMode(answer.mode),
         source: "toolset",
         ...(answer.entry !== undefined ? { entry: answer.entry } : {}),
-        reason: answer.entry === undefined ? `the toolset does not hold '${part.subject}'` : `the toolset's '${answer.entry}' is ${answer.mode}`,
+        ...(reference !== undefined ? { function: reference } : {}),
+        reason:
+          answer.entry === undefined
+            ? `the toolset does not hold '${part.subject}'`
+            : reference !== undefined
+              ? `the toolset's '${answer.entry}' is decided by the function '${reference}'`
+              : `the toolset's '${answer.entry}' is ${modeWord(answer.mode)}`,
         ...(answer.matched !== undefined ? { matched: answer.matched } : {}),
       };
       const builtinAsk = composed.source === "builtin" && composed.verdict === "asks";
@@ -405,9 +432,10 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
     const places: Array<{ path?: string; url?: string }> = [...part.paths.map((path) => ({ path: resolved(path) })), ...(part.url !== undefined ? [{ url: part.url }] : [])];
     for (const place of places) {
       const mode = options.scopeOf(part.tool, place);
+      // A scope table says a fixed word; upstream's `smart` is not one a table can hold.
       if (mode === undefined || mode === "allow" || mode === "smart") continue;
-      if (isStricter(VERDICT_OF_MODE[mode], composed.verdict)) {
-        composed = { verdict: VERDICT_OF_MODE[mode], source: "scope", reason: `${part.tool} is ${mode === "deny" ? "denied" : "asked about"} at ${place.path ?? place.url}` };
+      if (isStricter(VERDICT_OF_WORD[mode], composed.verdict)) {
+        composed = { verdict: VERDICT_OF_WORD[mode], source: "scope", reason: `${part.tool} is ${mode === "deny" ? "denied" : "asked about"} at ${place.path ?? place.url}` };
       }
     }
   }
@@ -460,8 +488,24 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
       subject: named && classified.kind === "command" ? judged.entry! : classified.subject,
       ...(classified.paths.length > 0 && classified.noRequest !== true ? { paths: classified.paths } : {}),
       ...(classified.url !== undefined ? { url: classified.url } : {}),
+      // What the function a part is put to is handed about it — the command, parsed.
+      ...(judged.verdict === "function" && classified.command !== undefined
+        ? {
+            command: {
+              program: classified.command.program,
+              ...(classified.command.subcommand !== undefined ? { subcommand: classified.command.subcommand } : {}),
+              args: [...classified.command.args],
+              flags: [...classified.command.flags],
+            },
+          }
+        : {}),
       verdict: judged.verdict,
-      decidedBy: { source: judged.source, ...(judged.entry !== undefined ? { entry: judged.entry } : {}), reason: judged.reason },
+      decidedBy: {
+        source: judged.source,
+        ...(judged.entry !== undefined ? { entry: judged.entry } : {}),
+        ...(judged.verdict === "function" && judged.function !== undefined ? { function: judged.function } : {}),
+        reason: judged.reason,
+      },
       widths: classified.widths,
       ...(classified.via !== undefined ? { via: classified.via } : {}),
     });
@@ -488,18 +532,23 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     ...(options.toolset !== undefined && options.toolsetSource !== undefined ? { toolset: options.toolsetSource } : {}),
   });
 
+  // The strictest PART names the line's reason — ranked by verdict, so an asking part explains an
+  // escalation before a part a function is about to decide does.
   let worst: Omit<CommandDecision, "parts"> | undefined;
+  let worstVerdict: CommandPartVerdict | undefined;
   parts.forEach((part, index) => {
-    const action = ACTION_OF[part.verdict];
-    if (worst === undefined || RANK[action] >= RANK[worst.action]) {
+    if (worstVerdict === undefined || VERDICT_RANK[part.verdict] >= VERDICT_RANK[worstVerdict]) {
       const command = commands[index];
-      worst = { action, reason: part.decidedBy.reason, ...(command !== undefined ? { command } : {}) };
+      worstVerdict = part.verdict;
+      worst = { action: ACTION_OF[part.verdict], reason: part.decidedBy.reason, ...(command !== undefined ? { command } : {}) };
     }
   });
 
-  if ((taken.unparsed || taken.requests.length === 0) && worst?.action !== "deny" && worst?.action !== "require_approval") {
+  if ((taken.unparsed || taken.requests.length === 0) && worstVerdict !== "denied" && worstVerdict !== "asks") {
     // DESIGN §10.1: "Unparsable commands default to require_approval." A deny beside the unreadable
-    // piece stands; an allow does not. An empty line has nothing to judge, and still must not allow.
+    // piece stands; an allow does not — and neither does a function's: a line with a piece nobody
+    // could read asks a PERSON, whatever a function would say about the pieces it can see. An empty
+    // line has nothing to judge, and still must not allow.
     const reason = taken.reason !== undefined ? `command could not be parsed (${taken.reason})` : "command could not be parsed";
     if (!parts.some((part) => part.kind === "unparsed")) {
       parts.push({
@@ -520,7 +569,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     const action = policy.default ?? "allow";
     return { action, reason: "no rule matched", parts: payload(VERDICT_OF[action]) };
   }
-  return { ...worst, parts: payload(VERDICT_OF[worst.action]) };
+  return { ...worst, parts: payload(worstVerdict ?? VERDICT_OF[worst.action]) };
 }
 
 /**
@@ -751,17 +800,38 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
    * otherwise wave through the next line's asking parts, and it is parts that are remembered, never
    * lines. Without a toolset an ask is left to the `smart` approver, as it always was.
    */
+  /**
+   * The lines a FUNCTION answers for, by subject: the state's own block's (every lowered map carries
+   * `functions`), else the toolset this policy was compiled for.
+   */
+  const functionsFor = (block: PermissionsDecl | undefined): Record<string, string> | undefined =>
+    block?.functions ?? (options.toolset !== undefined ? toolsetFunctions(options.toolset) : undefined);
+
   const commandNarrowing: ScopeNarrowing = (tool, input, authored) => {
     const name = COMMAND_TOOLS.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
     const args = (input ?? {}) as Record<string, unknown>;
-    const line = COMMAND_TOOLS.has(name) ? commandOf(args) : undefined;
-    if (line === undefined) return undefined;
     const block = authored as PermissionsDecl | undefined;
+    const line = COMMAND_TOOLS.has(name) ? commandOf(args) : undefined;
+    if (line === undefined) {
+      // Not a shell line — but a tool whose line names a FUNCTION is decided by it, per call. The gate
+      // was told `ask` for it; which function, and for which line, is kept against the call's input,
+      // where the approver finds it before anybody is asked (`withPermissionFunctions`).
+      const functions = functionsFor(block);
+      if (functions !== undefined && input !== null && typeof input === "object") {
+        const held = block?.tools !== undefined && Object.hasOwn(block.tools, name) && !isToolsetMarkKey(name);
+        const subject = Object.hasOwn(functions, name) ? name : !held && Object.hasOwn(functions, OTHER_SUBJECT) ? OTHER_SUBJECT : undefined;
+        if (subject !== undefined) {
+          FUNCTION_CALLS.set(input, { tool: name, subject, function: functions[subject]!, ...(block?.source !== undefined ? { toolset: block.source } : {}) });
+        }
+      }
+      return undefined;
+    }
     const decision = lineDecisionFor(args, block);
     const judged = toolsetFor(block) !== undefined;
+    // A line a toolset judges is written down HERE, whatever it came to: the gate asks the approver
+    // for a toolset's shell, not the `smart` rule, so nothing after this sees an allowed line again.
+    if (judged || decision.action === "deny") auditLine(name, line, decision, "");
     if (decision.action === "allow" || (decision.action === "require_approval" && !judged)) return undefined;
-    // The approver will not run, so this is the only place the decision can be written down.
-    auditLine(name, line, decision, "");
     return decision.action === "deny" ? "deny" : "ask";
   };
 
@@ -776,7 +846,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       // about, and its size is a reason to ask harder rather than a reason to stop asking.
       ...Object.fromEntries([...COMMAND_TOOLS].map((tool) => [tool, "smart" as PermissionMode])),
       ...policy.tools,
-      // `gateToolModes`: the shell's entry folds as `smart` whatever it says, because its mode is the
+      // `gateToolModes`: the shell's entry folds as `ask` whatever it says, because its mode is the
       // answer for "any other command" on a line that is taken apart — not a mode for the tool.
       ...(options.toolset !== undefined ? gateToolModes(options.toolset) : {}),
     },
@@ -820,6 +890,46 @@ const COMMAND_NARROWINGS = new WeakMap<ExecPolicy, ScopeNarrowing>();
  */
 export function commandDecisionOf(input: unknown): CommandDecision | undefined {
   return input !== null && typeof input === "object" ? LINE_DECISIONS.get(input) : undefined;
+}
+
+/**
+ * Replace what is kept against a call's input — the decision once the functions its parts named have
+ * answered, so the approval hub puts the ANSWERED parts on the request a person sees.
+ */
+export function setCommandDecision(input: unknown, decision: CommandDecision): void {
+  if (input !== null && typeof input === "object") LINE_DECISIONS.set(input, decision);
+}
+
+/** A tool call (not a shell line) whose toolset line names a FUNCTION — found by the call's input. */
+export interface FunctionCall {
+  /** The tool, by its standard name where it has one. */
+  tool: string;
+  /** The line that answers for it: the tool's own, or `other`. */
+  subject: string;
+  /** The function's reference. */
+  function: string;
+  /** Which toolset judged it, when the block says. */
+  toolset?: string;
+}
+
+const FUNCTION_CALLS = new WeakMap<object, FunctionCall>();
+
+/** Why an approval is being asked when a function could not decide — found by the call's input. */
+const APPROVAL_REASONS = new WeakMap<object, string>();
+
+/** Leave the person a reason, against the call's input, for the approval hub to put on the request. */
+export function noteApprovalReason(input: unknown, reason: string): void {
+  if (input !== null && typeof input === "object") APPROVAL_REASONS.set(input, reason);
+}
+
+/** The reason {@link noteApprovalReason} left, if any. */
+export function approvalReasonOf(input: unknown): string | undefined {
+  return input !== null && typeof input === "object" ? APPROVAL_REASONS.get(input) : undefined;
+}
+
+/** The function a call is decided by, kept by the narrowing against the call's own input. */
+export function functionCallOf(input: unknown): FunctionCall | undefined {
+  return input !== null && typeof input === "object" ? FUNCTION_CALLS.get(input) : undefined;
 }
 
 /**

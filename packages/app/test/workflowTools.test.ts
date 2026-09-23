@@ -32,6 +32,7 @@ import { ANSWERED_EVENT, MOVED_EVENT, type AnsweredEvent, type MovedEvent, type 
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { ANSWERABLE_COMPONENTS } from "../src/main/workflowHost";
+import { APPROVAL_PROMPT_FUNCTION } from "@jaira/shared";
 
 const BOOL: JsonValue = { type: "boolean" };
 const ITEM = { type: "object", required: ["id", "title"], properties: { id: { type: "string" }, title: { type: "string" } } };
@@ -71,6 +72,13 @@ function files(): Record<string, JsonValue> {
     // A state a task can stand INSIDE, so a move has to clone.
     flow: { label: "Flow", children: { a: { state: "lib/done" }, b: { state: "flow/b" } }, sequence: ["a", "b"] },
     "flow/b": gate("b"),
+    // The approval prompt, called as the function a permission function calls (decision 0007, amended
+    // 2026-09-22) — an APPROVAL, so the one a conversation can never answer.
+    "lib/approve": {
+      label: "approve",
+      outputs: {},
+      operation: { kind: "function", function: "approve_tool_call", args: { request: { tool: "bash", subject: "bash", function: "smart", input: { command: "npm publish" } } } },
+    },
   };
 }
 
@@ -390,6 +398,31 @@ describe("answer_question", () => {
     });
     expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(true);
     expect(statusOf(session)).not.toBe("completed");
+  });
+
+  it("never reaches the APPROVAL PROMPT a permission function calls — the person answers it, never a fast-forward's conversation", async () => {
+    // Structural, as for every approval: the component is not on the list a conversation may answer,
+    // and a fast-forward offers its conversation only what is on that list (decision 0005 §4).
+    expect(ANSWERABLE_COMPONENTS.has(APPROVAL_PROMPT_FUNCTION)).toBe(false);
+
+    const session = await conversation("chat/session");
+    await call(session, "start_task", { state: "lib/approve" });
+    const gate = await parked();
+    const pending = service.pendingInteractions().find((p) => p.requestId === gate.requestId)!;
+    expect(pending.component).toBe(APPROVAL_PROMPT_FUNCTION);
+    expect(pending.inputs).toMatchObject({ request: { tool: "bash", function: "smart", input: { command: "npm publish" } } });
+    // It is not listed as something the conversation's task is asking…
+    const listed = (await call(session, "list_tasks", {})) as unknown as TasksResult;
+    expect(listed.tasks.find((t) => t.task === gate.taskId)?.asking).toBeUndefined();
+    // …and the tool refuses it by name, leaving it parked for the person.
+    expect(await call(session, "answer_question", { request: gate.requestId, confidence: 1, value: { decision: "allow" } })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("approval"),
+    });
+    expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(true);
+    // The person's answer is the word the function returns, and the task goes on.
+    service.submitInteraction(gate.requestId, { decision: "allow" });
+    await until(() => statusOf(gate.taskId) === "completed", "the approval to settle");
   });
 
   it("refuses a request nobody is waiting on, and one that belongs to a task this conversation did not start", async () => {

@@ -33,6 +33,7 @@ import { AGENT_CLI, AGENT_CODEX, registerAgentRuntimes } from "./agents";
 import { CLAUDE_TOOLS } from "./agentTools";
 import { agentPromptRoutes } from "./modelRoutes";
 import { compilePolicy, type JairaPolicy } from "./policy";
+import { withPermissionFunctions, type PermissionFunctionRunner } from "./permissionFunctions";
 import { grantAlwaysGrantedTools, JAIRA_TOOL_NAMES } from "./tools";
 import { buildPromptExecutor, executeWorkflow, newRegistry } from "./wiring";
 
@@ -107,6 +108,13 @@ export interface HandedOptions {
    * or as a FUNCTION (`operation.function: "<agent>"`), which is registered separately. Default `route`.
    */
   via?: "route" | "function";
+  /**
+   * How a toolset line that names a FUNCTION is decided in the probe — what a host's runner would
+   * answer. Absent ⇒ nothing can run one, and such a call is put to the (refusing) person, which is
+   * what a host with no runner does. Ignored when {@link run} is given: a host's approver already asks
+   * the functions (`ApprovalHub.approver`).
+   */
+  functions?: PermissionFunctionRunner;
 }
 
 /** The `policy` and `approve` a probe run is handed, with every approval counted by `onAsk`. */
@@ -114,10 +122,15 @@ function governanceOf(options: HandedOptions, onAsk: () => void): { policy?: Exe
   if (options.run === undefined) {
     return {
       policy: compilePolicy(options.policy ?? {}),
-      approve: () => {
-        onAsk();
-        return { decision: "deny", scope: "once" };
-      },
+      // The approver a host hands the engine: the functions a toolset names asked first, then the
+      // person — who, here, refuses, and is counted, since being asked at all is the measurement.
+      approve: withPermissionFunctions(
+        () => {
+          onAsk();
+          return { decision: "deny", scope: "once" };
+        },
+        { run: options.functions },
+      ),
     };
   }
   const { policy, approve } = options.run;

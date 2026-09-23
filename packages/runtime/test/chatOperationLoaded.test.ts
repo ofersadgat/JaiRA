@@ -29,7 +29,7 @@ const files: Record<string, unknown> = {
       model: "root/model",
       temperature: 0.4,
       tools: ["bash"],
-      permissions: { tools: { bash: "smart" }, other: "deny" },
+      permissions: { tools: { bash: "ask" }, other: "deny" },
       conversation: { mode: "summary" },
       system: "You are careful.",
     },

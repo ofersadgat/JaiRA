@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-configuration
 type: ui-surface
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-22
 kind: screen
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/schema-driven-form, ux/patterns/verbs-on-the-thing-itself, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/draft-belongs-to-the-file, ux/patterns/absence-is-stated]
 serves: [product/risky-actions-wait-for-approval, product/share-processes-across-projects, product/bring-your-own-models-and-agents, product/work-inside-wsl, product/read-what-work-produced]
@@ -22,7 +22,7 @@ The Configuration section of the Settings room: one scrolling column, at most 78
 - **Where commands run.** `Environment` as a select. `Distro` appears under it only while a WSL distro is chosen.
 - **Default environment.** `Default model` in a mono box, the [llm-config-form](../components/llm-config-form.md) under it, then a `.app-secondary` line summarising the call settings.
 - **Safety policy.** Three selects, `Anything else`, `Unlisted tools` and `Built-in rules`, then a nested level `Rules ({n})` holding one rule card per rule and a plain `Add a rule` button.
-- **Memoization and Workflow lookup.** Each is a [schema-form](../components/schema-form.md) in its layered reading, where a [switch](../components/switch.md) before a name means set in this layer.
+- **Memoization, Workflow lookup and smart.** Each is a [schema-form](../components/schema-form.md) in its layered reading, where a [switch](../components/switch.md) before a name means set in this layer. `smart` holds the `model` and the markdown `prompt` of the permission function JaiRA ships, the one a toolset line names as `{ "function": "smart" }` ([decision 0007](../../engineering/decisions/0007-toolsets.md), amended 2026-09-22).
 - **The raw document.** A disclosure closed on every visit. Open, it holds a hint, the layer's file path in `.app-secondary` ellipsised from the left, a shared-root notice on the shared layer, a plain text box of the JSON with the [editor-chrome](../components/editor-chrome.md) `Save` and `Revert` pinned under it, and a ghost `Show effective`.
 
 ## A rule card is numbered, carries its verdict first, and moves in place
@@ -66,7 +66,7 @@ The cards list the rules in effect. A project layer that states no rules shows t
 
 | Where | String |
 | --- | --- |
-| Group headings | `Artifacts` · `Where commands run` · `Default environment` · `Safety policy` · `Memoization` · `Workflow lookup` |
+| Group headings | `Artifacts` · `Where commands run` · `Default environment` · `Safety policy` · `Memoization` · `Workflow lookup` · `smart`, hint `The permission function JaiRA ships: the model that judges a tool call, and what it is told.` |
 | Destination chips | `the workspace` · `one directory per task` · `one flat directory` · `memory only` |
 | Destination box | placeholder `$JAIRA/artifacts/$TASK_ID/$RELPATH`, then `Variables: $JAIRA $PROJECT $TASK_ID $RELPATH $ARTIFACT_DIR` |
 | Environment options | `natively on Windows` · `inside a WSL distro`; Distro placeholder `Ubuntu` |

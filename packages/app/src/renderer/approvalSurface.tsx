@@ -78,8 +78,21 @@ function Hint({ hint }: { hint: readonly HintPiece[] }): JSX.Element {
   );
 }
 
+/**
+ * Which function decided a part — a star and its name, before the verdict it gave. The same glyph the
+ * toolset card gives a line that names a function, so the two read as one thing.
+ */
+export function FunctionBy({ name }: { name: string }): JSX.Element {
+  return (
+    <span className="part-by" title={`decided by the function ${name}`}>
+      <Icon name="star" /> <span className="mono">{name}</span>
+    </span>
+  );
+}
+
 function Reason({ line }: { line: ReasonLine }): JSX.Element {
   if (line.kind === "policy") return <p className="reason-note">Policy: {line.text}</p>;
+  if (line.kind === "function") return <p className="reason-note">{line.text}</p>;
   const who = line.toolset !== undefined ? (
     <>
       Toolset <span className="mono">{line.toolset}</span>
@@ -184,7 +197,10 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
                     {row.note}
                   </span>
                 ) : null}
-                <span className="part-verdict">{verdictLabel(row.verdict)}</span>
+                <span className="part-verdict">
+                  {row.by !== undefined ? <FunctionBy name={row.by} /> : null}
+                  {verdictLabel(row.verdict)}
+                </span>
               </li>
             ))}
           </ul>

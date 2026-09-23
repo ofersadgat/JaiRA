@@ -65,35 +65,37 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "glob", "bash"],
-      // The shell is offered and its LINES are judged: the gate is handed `smart` for it, and the
+      // The shell is offered and its LINES are judged: the gate is handed `ask` for it, and the
       // `deny` its author wrote is the answer for any command no entry names (decision 0007 §4).
       // The two marks say the block was a MAP, which is how a run tells it from a state that declared none.
       // `source` rides beside `subjects`: the FILE those subjects came from, which is what an approval
       // names and what "add to the toolset" writes into.
       // A RUN is handed the block whole (upstream `ExecServices.authored`), so nothing is carried twice.
       permissions: {
-        tools: { read_file: "allow", glob: "allow", bash: "smart", ...TOOLSET_MARKERS },
+        tools: { read_file: "allow", glob: "allow", bash: "ask", ...TOOLSET_MARKERS },
         implementations: {},
         other: "deny",
         subjects: { bash: "deny", "git status": "allow" },
         source: "$/toolsets/chat/read-only",
+        functions: {},
       },
     });
   });
 
   it("starts from one and says more — sibling keys override", () => {
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "allow", bash: "deny", other: "deny" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask", bash: "smart" } }));
+    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask", bash: { function: "smart" } } }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "bash", "write_file"],
       // A `$ref` that says more is written on the STATE: a sibling is an entry no file holds, so a
       // line added to the file could be shadowed here, and the source says `inline`.
       permissions: {
-        tools: { read_file: "allow", bash: "smart", write_file: "ask", ...TOOLSET_MARKERS },
+        tools: { read_file: "allow", bash: "ask", write_file: "ask", ...TOOLSET_MARKERS },
         implementations: {},
         other: "deny",
-        subjects: { bash: "smart" },
+        subjects: { bash: "ask" },
         source: "inline",
+        functions: { bash: "smart" },
       },
     });
   });
@@ -107,7 +109,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/feature/implementation/build" }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "edit"],
-      permissions: { tools: { read_file: "allow", edit: "ask", ...TOOLSET_MARKERS }, other: "deny", implementations: { edit: "native" } },
+      permissions: { tools: { read_file: "allow", edit: "ask", ...TOOLSET_MARKERS }, other: "deny", functions: {}, implementations: { edit: "native" } },
     });
   });
 
@@ -117,15 +119,15 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/toolsets/chat/read-only" }));
     write(project.paths.workflowsDir, "other.json", state({ tools: "$/toolsets/chat/shared-only" }));
-    expect(environmentOf("plan")).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } });
-    expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow", ...TOOLSET_MARKERS }, implementations: {} } });
+    expect(environmentOf("plan")).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", functions: {} } });
+    expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow", ...TOOLSET_MARKERS }, implementations: {}, functions: {} } });
   });
 
   it("is inherited by a child, and a child's own toolset replaces it", () => {
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.workflowsDir, "wf.json", {
       environment: { tools: "$/toolsets/chat/read-only" },
-      children: { a: {}, b: { environment: { tools: { bash: "smart" } } } },
+      children: { a: {}, b: { environment: { tools: { bash: { function: "smart" } } } } },
       sequence: ["a", "b"],
     });
     const leaf = (state({}) as Record<string, unknown>);
@@ -133,7 +135,7 @@ describe("a toolset, referenced from a state", () => {
     write(project.paths.workflowsDir, "wf/a.json", leaf);
     write(project.paths.workflowsDir, "wf/b.json", leaf);
     const bundle = load("wf");
-    expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } });
+    expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", functions: {} } });
     expect(bundle.states["wf/b"]!.environment?.tools).toEqual(["bash"]);
   });
 });
@@ -248,7 +250,7 @@ describe("the snapshot", () => {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     write(project.paths.jairaDir, "toolsets/chat/read-only.json", { read_file: "deny", other: "deny" });
     const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
-    expect(pinned.states["plan"]!.environment?.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" });
+    expect(pinned.states["plan"]!.environment?.permissions).toEqual({ tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", functions: {} });
     // …and the edit is a different workflow to the next task.
     expect(snapshotHash(load("plan"))).not.toBe(snap.hash);
   });
@@ -294,7 +296,7 @@ describe("the linter", () => {
     const entry = issuesOf("plan");
     expect(entry.loadError).toBeUndefined();
     expect(entry.issues).toEqual([
-      { stateId: "plan", path: "environment.tools.read_file", severity: "error", message: expect.stringMatching(/a mode is one of allow, deny, ask, smart/) },
+      { stateId: "plan", path: "environment.tools.read_file", severity: "error", message: expect.stringMatching(/a mode is one of allow, deny, ask, or a function/) },
     ]);
     // A RUN is refused rather than started under a toolset nobody could read.
     expect(() => load("plan")).toThrow(/plan: environment\.tools\.read_file: .*a mode is one of/);
@@ -417,6 +419,7 @@ describe("the toolsets that SHIP (decision 0007 step 4)", () => {
         subjects: { bash: "deny" },
         // Beside `subjects`: the file they came from, which is what an approval names.
         source: "$/toolsets/chat/read-only",
+        functions: {},
       },
     });
     // `chat_control` holds the workflow tools and NOTHING of the project: the engine resolves those

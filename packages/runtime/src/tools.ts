@@ -28,6 +28,7 @@ import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } 
 import {
   absolutize,
   ALWAYS_GRANTED_TOOLS,
+  gateModeOf,
   isAbsolutePath,
   nativesOfStandard,
   replacementsOf,
@@ -307,7 +308,7 @@ export function gateTools(options: {
    * tools with no mode, which resolve through the baseline. Only TOOL entries are read HERE. A toolset's command subjects and
    * `script` ride on the block handed to the gate and to each wrapped tool, where the policy's
    * narrowing reads them to judge a shell line part by part (decision 0007 §4) — which is also why
-   * the shell's own mode reaches both as `smart`: see `gateToolModes`.
+   * the shell's own mode reaches both as `ask`: see `gateToolModes`.
    */
   toolset?: Toolset | undefined;
   /** What a relative scope glob and a relative call path are resolved against. */
@@ -361,9 +362,10 @@ export function gateTools(options: {
     // OWN entries only. The map is keyed by TOOL NAME, so a tool called `constructor` would
     // otherwise resolve its mode — and its smart rule — to a prototype member.
     // Read off the LOWERED block where there is one, so the wrapper and the gate resolve one mode:
-    // the shell's entry is `smart` there, its authored mode being what a line's parts fall to.
+    // the shell's entry is `ask` there, and a FUNCTION's line too — see `gateToolModes`.
     const lowered = authored?.tools !== undefined && Object.hasOwn(authored.tools, name) ? authored.tools[name] : undefined;
-    const authoredMode = lowered ?? (Object.hasOwn(toolset.entries, name) ? toolset.entries[name]!.mode : undefined);
+    const own = Object.hasOwn(toolset.entries, name) ? toolset.entries[name]!.mode : undefined;
+    const authoredMode = lowered ?? (own !== undefined ? gateModeOf(own) : undefined);
     out[name] = withPermission(tool, {
       ledger,
       sessionId: options.sessionId,
@@ -713,9 +715,7 @@ export function compileClaudeScopeRules(
     for (const spec of TOOL_SPECS) {
       if ((spec.pathArgs ?? []).length === 0) continue;
       const mode = scope.tools?.[spec.name] ?? scope.default;
-      // `smart` inspects the call, so it cannot be a rule — it has to reach our callback to be
-      // decided at all. Emitting it as `ask` would be a lie about who decides.
-      if (mode === undefined || mode === "smart") continue;
+      if (mode === undefined) continue;
       for (const native of nativesOfStandard(declaration, spec.name)) {
         const rule = `${native}(${glob})`;
         if (mode === "allow") out.allow.push(rule);

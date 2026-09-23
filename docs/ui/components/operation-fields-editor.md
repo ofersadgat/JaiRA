@@ -85,7 +85,7 @@ A linked field swaps its box for a mono reference box, adds `spliced in where it
 | Fork | `fork the session rather than appending` · tooltip `always branch, rather than appending when the position is still the head` |
 | Conversation | `not declared` · `full_history` · `summary` · `fresh` · `selected_artifacts` · artifacts placeholder `plan_doc, critique` · tooltip `the transcript preamble injected into THIS call (SPEC §4.7)` |
 | Function notes | `built-in human gate` · `{executor kind}` · `{executor kind} — turned off, so it is not registered` |
-| Permissions | `+ Tool` · profile placeholder `profile — which effects are in scope`, offering `read-only` · `plan` · `full` · `default mode…` · modes `allow` · `deny` · `ask` · `smart` · tool placeholder `tool name` · tooltip `remove` |
+| Permissions | `+ Tool` · profile placeholder `profile — which effects are in scope`, offering `read-only` · `plan` · `full` · `default mode…` · modes `allow` · `deny` · `ask` · tool placeholder `tool name` · tooltip `remove` |
 | Reasoning | `effort…` · `low` · `medium` · `high` · `budget tokens` |
 
 ## The fields take the column's width, and long values scroll inside their boxes

@@ -58,6 +58,7 @@ Four ideas, composed rather than parallel. `review_artifact` is a viewer plus a
 | `edit_artifact` | `{ content }` |
 | `fill_form` | a flat object of its fields, or of its `schema`'s properties |
 | `confirm_action` | `{ confirmed }` |
+| `approve_tool_call` | `{ decision: "allow" \| "deny" }` — the APPROVAL PROMPT, which a permission function calls to ask the person about one tool call ([decision 0007](../decisions/0007-toolsets.md), amended 2026-09-22); its config is `{ request, prompt? }`, `request` the `PermissionFunctionRequest` the function was handed, and the function's own value is the `decision` |
 
 `fill_form` reads a JSON-Schema **subset**: `string` · `number` · `boolean` ·
 `enum`, with `optional`, `default`, `multiline`, and — on an `enum` only —
@@ -327,6 +328,7 @@ in the dialog's sub-line rather than in the author's prompt.
 | `edit_artifact` | a pencil |
 | `fill_form` | a sheet with fields |
 | `confirm_action` | a check |
+| `approve_tool_call` | a shield |
 | A change's action | a file marked `+` / `−` / lines, beside `CRE` / `DEL` / `UPD` |
 | The submit summary | check · cross · comment · alert, one per count |
 
@@ -349,6 +351,7 @@ gates it may answer is a property of the COMPONENT, fixed here and nowhere else
 | `edit_artifact` | yes | a judgement on a document |
 | `confirm_action` | **no** | an approval — a publish, a push, a merge |
 | `review_artifacts` | **no** | applies, merges or publishes a changeset |
+| `approve_tool_call` | **no** | an approval — whether a tool call may run |
 
 A tool permission and an agent's parked approval are not gates at all: they are
 on the approval hub, which neither the workflow tools nor the fast-forward are
@@ -390,7 +393,7 @@ gate waits for the person as it would have.
 | `follow_up` beside `options` | ERROR at parse time | A single decision has no turn to ask more |
 | A `review_artifacts` result missing an artifact | Refused in the main process | The set must be complete |
 | A conversation's answer that does not fit the contract | Refused before anything is journaled; the gate stays parked for the person | Nothing — the fast-forward counts it as left to you |
-| A conversation naming a `confirm_action` or `review_artifacts` request | Refused by component: `'<component>' is an approval, not a question` | Nothing — it is the person's |
+| A conversation naming a `confirm_action`, `review_artifacts` or `approve_tool_call` request | Refused by component: `'<component>' is an approval, not a question` | Nothing — it is the person's |
 
 Re-validation happens in main because the renderer is the untrusted side of the
 IPC boundary; the engine's own output-schema check is a second, independent

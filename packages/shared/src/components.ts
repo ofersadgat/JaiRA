@@ -39,6 +39,10 @@ export const COMPONENT_NAMES = [
   // N artifacts, each decided — the changeset gate is its N-artifact case (CHANGESETS.md §4.1,
   // decision 0002). Its implementation is still changeset-shaped; the generalization is staged.
   "review_artifacts",
+  // The APPROVAL PROMPT as a function (decision 0007, amended 2026-09-22): what a permission function
+  // calls to put a tool call to the person. Its answer is `allow` or `deny`. An approval, never a
+  // question — so a fast-forward's conversation is never offered it (decision 0005 §4).
+  "approve_tool_call",
 ] as const;
 
 export type ComponentName = (typeof COMPONENT_NAMES)[number];
@@ -452,13 +456,27 @@ export interface ReviewRemote {
   key?: string;
 }
 
+/**
+ * The approval prompt, called as a function — `approve_tool_call(request)`.
+ *
+ * What it shows is its `request` INPUT (the same object a permission function is handed: the tool,
+ * the subject, the part of a shell line with its arguments and working directory, the state and the
+ * task), not anything authored here: the config is only the sentence over it. The person's answer is
+ * `{ decision: "allow" | "deny" }`, and the function returns the word alone.
+ */
+export interface ApproveToolCallConfig {
+  component: "approve_tool_call";
+  prompt: string;
+}
+
 export type ComponentConfig =
   | ChooseOptionConfig
   | ReviewArtifactConfig
   | EditArtifactConfig
   | FillFormConfig
   | ConfirmActionConfig
-  | ReviewArtifactsConfig;
+  | ReviewArtifactsConfig
+  | ApproveToolCallConfig;
 
 // --- parsing the authored config ---------------------------------------------
 
@@ -715,6 +733,8 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
       if (config["remote"] !== undefined && config["remote"] !== null) parsed.remote = reviewRemote(config["remote"]);
       return parsed;
     }
+    case "approve_tool_call":
+      return { component, prompt };
   }
 }
 
@@ -732,6 +752,8 @@ function defaultPrompt(component: ComponentName): string {
       return "Confirm this action";
     case "review_artifacts":
       return "Review the proposed changes";
+    case "approve_tool_call":
+      return "Allow this tool call?";
   }
 }
 
@@ -927,6 +949,10 @@ export function validateComponentResult(
     }
     case "edit_artifact":
       return typeof result["content"] === "string" ? { ok: true } : bad("result.content must be a string");
+    case "approve_tool_call":
+      // The two answers an approval has. What it remembers, if anything, is the calling function's
+      // business — the prompt itself answers this call and no other.
+      return result["decision"] === "allow" || result["decision"] === "deny" ? { ok: true } : bad("result.decision must be allow or deny");
     case "confirm_action": {
       if (typeof result["confirmed"] !== "boolean") return bad("result.confirmed must be a boolean");
       const choice = result["choice"];

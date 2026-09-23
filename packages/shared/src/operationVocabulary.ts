@@ -90,7 +90,7 @@ export const SIMPLE_FIELDS: readonly SimpleField[] = [
   // diagnostics for the block.
   { name: "tools", key: "tools", type: "list", label: "Tools", group: "operation",
     placeholder: "a toolset map, in JSON",
-    hint: "a toolset: a map from a tool or a command to allow / ask / deny / smart, or a reference to one — `{}` drops the inherited ones" },
+    hint: "a toolset: a map from a tool or a command to allow / ask / deny or { \"function\": … }, or a reference to one — `{}` drops the inherited ones" },
   { name: "model", key: "model", type: "string", label: "Model", group: "model",
     kinds: ["prompt"], prominent: true,
     placeholder: "claude-sonnet-5, or claude-cli/sonnet to pin the route",
@@ -153,8 +153,13 @@ export const JSON_FIELDS: readonly JsonField[] = [
  */
 export const CONVERSATION_MODES = ["full_history", "summary", "fresh", "selected_artifacts"] as const;
 
-/** DESIGN §5.1. `smart` defers to an approver that inspects the call rather than just the tool name. */
-export const PERMISSION_MODES = ["allow", "deny", "ask", "smart"] as const;
+/**
+ * The three FIXED modes a toolset entry may say (DESIGN §5.1, decision 0007). The fourth kind of
+ * answer is not a word: a {@link FunctionMode} names a function that decides each call — see
+ * {@link ToolsetMode}. (`smart` was a fourth word until 2026-09-22; it is the shipped function of that
+ * name now, `{ "function": "smart" }`.)
+ */
+export const PERMISSION_MODES = ["allow", "deny", "ask"] as const;
 
 /** True when a field is authorable on an operation of this kind. */
 export function fieldAppliesTo(field: { kinds?: readonly string[] }, kind: "prompt" | "function"): boolean {
@@ -187,6 +192,86 @@ export interface ReasoningDecl {
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /**
+ * A mode that is a FUNCTION: `{ "function": "smart" }` (decision 0007, amended 2026-09-22).
+ *
+ * The function is handed what an approver would be shown — the tool, the subject the entry answers
+ * for, and for a shell line the PART being judged with its arguments and working directory, plus the
+ * state and the task — and returns `"allow"` or `"deny"`, nothing else. It may call the function that
+ * SHOWS the approval prompt (`approve_tool_call`) and return that answer, which is how a function
+ * that is unsure asks the person. `function` is a reference exactly as a call in an expression names
+ * its callee: a bare name searched along the path (`smart`), a dotted module symbol
+ * (`policy.judge`), or a rooted path (`$BASE/functions/judge`).
+ */
+export interface FunctionMode {
+  function: string;
+}
+
+/** What a toolset entry may say: one of the {@link PERMISSION_MODES}, or a {@link FunctionMode}. */
+export type ToolsetMode = PermissionMode | FunctionMode;
+
+/**
+ * The permission function JaiRA SHIPS: an LLM call that judges the call it is handed, and — when it is
+ * unsure — asks the person through {@link APPROVAL_PROMPT_FUNCTION}. Configured in Settings →
+ * Configuration → "smart" (`smart.model`, `smart.prompt`); a file named `smart` on the search path
+ * replaces it, as any layer's file replaces a shipped one.
+ */
+export const SMART_FUNCTION = "smart";
+
+/**
+ * The function that SHOWS the approval prompt and returns what the person answered — `"allow"` or
+ * `"deny"`. An interactive function like any gate (`choose_option`, `fill_form`): durable, drawn in
+ * the task's conversation, callable from a permission function as `approve_tool_call(request)` and
+ * never answered by a fast-forward's conversation, which is only ever offered questions.
+ */
+export const APPROVAL_PROMPT_FUNCTION = "approve_tool_call";
+
+/** `{ "function": "smart" }` — the mode the shipped `auto` toolsets give every line. */
+export const SMART_MODE: FunctionMode = Object.freeze({ function: SMART_FUNCTION }) as FunctionMode;
+
+/** Is this mode a function rather than one of the fixed words? */
+export function isFunctionMode(mode: unknown): mode is FunctionMode {
+  return (
+    mode !== null &&
+    typeof mode === "object" &&
+    !Array.isArray(mode) &&
+    typeof (mode as { function?: unknown }).function === "string" &&
+    Object.keys(mode).length === 1
+  );
+}
+
+/** Is this a mode at all — a fixed word, or a function with a non-empty reference? */
+export function isToolsetMode(mode: unknown): mode is ToolsetMode {
+  if (typeof mode === "string") return (PERMISSION_MODES as readonly string[]).includes(mode);
+  return isFunctionMode(mode) && mode.function.trim().length > 0;
+}
+
+/** The function a mode names, or `undefined` for a fixed mode. */
+export function modeFunction(mode: ToolsetMode | undefined): string | undefined {
+  return isFunctionMode(mode) ? mode.function : undefined;
+}
+
+/**
+ * The mode the UPSTREAM gate is handed for a toolset mode. A function decides per call, and the one
+ * upstream mode that reaches a host with the call in hand and nothing decided is `ask` — the approver
+ * JaiRA hands the engine runs the function before any person is asked (`withPermissionFunctions` in
+ * `@jaira/runtime`).
+ */
+export function gateModeOf(mode: ToolsetMode): PermissionMode {
+  return isFunctionMode(mode) ? "ask" : mode;
+}
+
+/** Two modes say the same thing — the same word, or a function by the same reference. */
+export function sameMode(a: ToolsetMode | undefined, b: ToolsetMode | undefined): boolean {
+  if (isFunctionMode(a) || isFunctionMode(b)) return isFunctionMode(a) && isFunctionMode(b) && a.function === b.function;
+  return a === b;
+}
+
+/** A mode as one short word for a summary line: the fixed word, or the function's reference. */
+export function modeWord(mode: ToolsetMode): string {
+  return isFunctionMode(mode) ? mode.function : mode;
+}
+
+/**
  * A `permissions` block in the shape the upstream engine takes — what a toolset LOWERS to.
  *
  * An author writes a toolset in `tools` (`toolsets.ts`, decision 0007) and, here, only `scopes`;
@@ -195,7 +280,10 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
  * carries either, and the linter refuses an authored one.
  */
 export interface PermissionsDecl {
-  /** WRITTEN BY LOWERING: each tool entry's mode — the shell's as `smart` (see {@link subjects}). */
+  /**
+   * WRITTEN BY LOWERING: each tool entry's mode as the upstream gate takes it — a function as `ask`
+   * (see {@link functions}), and the shell's as `ask` whatever it says (see {@link subjects}).
+   */
   tools?: Record<string, PermissionMode>;
   /**
    * The mode for a tool that is not in the vocabulary at all — see `toolVocabulary.ts`.
@@ -222,9 +310,20 @@ export interface PermissionsDecl {
    *
    * What a shell line's PARTS are judged against (decision 0007 §4). The shell's own entry is here
    * too — `bash`, the mode for any command nothing else names — because `tools.bash` is lowered as
-   * `smart` so that the line is read before anything answers for the tool.
+   * `ask`, so that no line runs before the host has read it. A subject whose entry is a function is
+   * `ask` here, as it is at the gate, and named in {@link functions}.
    */
   subjects?: Record<string, PermissionMode>;
+  /**
+   * WRITTEN BY LOWERING, never authored, and on EVERY lowered map (empty when nothing is a function):
+   * the subjects whose entry is a function, by subject — a tool, a command, `script`, `bash` or
+   * `other` — each to the function's reference (`{ "bash": "smart" }`).
+   *
+   * Always written because `permissions` merges per key down the `environment` chain: a child whose
+   * map named no function would otherwise inherit its parent's, and a line it meant to ASK about would
+   * be handed to the parent's function instead.
+   */
+  functions?: Record<string, string>;
   /**
    * WRITTEN BY LOWERING, never authored, and only beside {@link subjects}: where those subjects came
    * from — the reference the state named its toolset by (`$/toolsets/chat/ask-first`), or `inline`
