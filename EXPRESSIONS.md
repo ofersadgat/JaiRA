@@ -350,8 +350,8 @@ here takes a REFERENCE, so folding a column with `reduce` means authoring a docu
 while `sum(pluck(xs, 'total'))` needs no file. For the numeric cases — a weighted score, a winning
 row, the margin between two — that is the whole cost, which is why both spellings are worth having.
 
-**Why it cannot be a static walk.** `runEmbeddedOps` finds the operations to run by walking the
-binding tree. For `map`, the set depends on the resolved array — one operation per element. So the
+**Why it cannot be a static walk.** `runEmbeddedOps` used to find the operations to run by walking
+the binding tree (it is demand-driven now — §6). For `map`, the set depends on the resolved array — one operation per element. So the
 engine has to resolve the array argument first, then construct one bound operation per element.
 
 **The pattern already exists, and extends.** A call is: the engine runs it, records the result under
@@ -878,7 +878,7 @@ mint a second one.
 
 ---
 
-## 6. Laziness — deferred, and it is a correctness debt
+## 6. Laziness — paid for (2026-09-22)
 
 `&&`, `||` and `?:` are not ordinary functions today. Evaluation short-circuits on *determinate*
 values: `false && PENDING` is `false`, and a conditional evaluates only the taken branch. But
@@ -890,6 +890,12 @@ Lower them to plain two-input ops and two things break, one of them silently:
    behavior regression, not a cost regression.**
 2. Once §3 admits arbitrary callees, the untaken branch of a conditional *runs* — with a budget
    attached.
+
+**Since 2026-09-22 every binding position is demand-driven** (declarative-ai `9646cb5`): wires,
+outputs, an operation's arguments and a transition's wiring run only the calls evaluation reaches, as
+guards and computed fields already did. `? :`, `&&`, `||` and `coalesce` run only the side they take,
+and a `map` / `filter` / `flatMap` / `reduce` in an untaken branch does not run. Static checks still
+read both branches. What follows is the history of how it got there.
 
 **Interim:** `op.and`, `op.or`, `op.cond` stay hw resolver ops, resolved in `runResolver` and never
 dispatched to `exec`. This is a special case, and it is the one the eventual work removes.
@@ -912,9 +918,8 @@ evaluating anything.
 Guard calls are now DEMAND-DRIVEN: resolution reports each call whose result is missing, those run,
 and the guard is resolved again. Not asking for a branch is not running it, which is what §6 wanted,
 and it arrives without `Parameter.lazy` or a thunk in `exec` because nothing is passed unevaluated —
-the round simply asks twice. An operation's INPUT bindings still use the eager walk, where every
-input is going to be read anyway; the remaining debt is a `?:` in an input binding, which pays for
-both branches.
+the round simply asks twice. Operation INPUT bindings, wires and outputs followed on 2026-09-22 (see the
+top of this section): no binding position walks the tree eagerly any more.
 
 The reason it became urgent is §18: for a computation the eager walk is a wasted call, and for a call
 that WAITS it is a request shown to somebody who should never have seen it.

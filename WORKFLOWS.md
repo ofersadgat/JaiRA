@@ -963,9 +963,8 @@ the same rule.
     `approve_tool_call(request)` — a function like `choose_option`, drawn in the
     task's conversation, durable like any gate, and never offered to a
     fast-forward's conversation (it is an approval). Its answer is the function's.
-    ⚠️ A binding evaluates both branches of `? :`, so an expression document that
-    asks only sometimes asks every time; write that logic in a host function or
-    call the prompt unconditionally.
+    `? :`, `&&`, `||` and `coalesce` run only the side they take, so an expression
+    document can ask only sometimes.
   - A `.ts` module it reaches is held to the **module approval** like any other
     (§9.1): a task will not start until it is approved, and it is frozen with the
     run.
