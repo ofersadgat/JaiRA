@@ -149,6 +149,7 @@ It deliberately does not own:
 | 67 | The approval prompt is never a fast-forward's conversation's to answer | `workflowTools.test.ts` "never reaches the APPROVAL PROMPT a permission function calls…" |
 | 68 | A `.ts` module a toolset's function reaches is held to the module approval: the start refuses with `ApprovalRequired` naming it, lint names it, an edit asks again, and once approved it is frozen into the run's digest | `permissionFunctions.test.ts` in persistence "refuses to start the task until the file is approved…", "says so in the linter…", "once approved, starts…", "refuses again once the file changes…" |
 | 69 | Every lowered map carries `functions`, so a child's map never inherits a parent's function | `toolsets.test.ts` in shared "writes `functions` on EVERY lowered map…" |
+| 70 | A CLI run asks a line's functions before anybody, as an app run does, and puts the approval prompt a function calls to the person at the terminal, or fails it when nobody can be asked so the call is refused saying why | `commandApproval.test.ts` in the CLI "claude is handed the same under a shell a FUNCTION judges", "codex is handed the same under a shell a FUNCTION judges, by a route and as a function", "asks a line's FUNCTION before anybody…", "answers %j as %s, showing which function asks about which call", "fails with nobody to ask…", "lets a line through that the person allows at the terminal, and refuses one they deny" |
 
 ## A conversation turn is governed less than a run, and the audit records only policy's side
 

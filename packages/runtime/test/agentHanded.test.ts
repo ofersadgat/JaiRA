@@ -91,8 +91,15 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
     expect(handed.natives).toEqual({ Task: "deny", Agent: "deny", SlashCommand: "deny" });
   });
 
-  it("turns codex's writing sandbox ON for a writer a function answers for — the function may allow it", async () => {
-    expect((await handedToCodex(map({ read_file: "allow", write_file: { function: "judge" }, other: "deny" }))).permissionMode).toBeUndefined();
+  it("serves codex a writer a function answers for over the bridge, each call what the function said — its own sandbox shut", async () => {
+    const handed = await handedToCodex(map({ read_file: "allow", write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" }), judge);
+    expect(handed.served).toEqual(expect.arrayContaining(["bash", "read_file", "write_file"]));
+    expect(handed.tools["write_file"]).toBe("allow");
+    expect(handed.shell).toMatchObject({ command: "allow", write: "deny" });
+    // Ours serves the line, so codex's own writers are displaced: the sandbox stays read-only.
+    expect(handed.sandbox).toBe("read-only");
+    // …and one whose line keeps codex's native opens it, the function still judging each call.
+    expect((await handedToCodex(map({ bash: { function: "judge", implementation: "native" }, other: "deny" }), judge)).sandbox).toBe("workspace-write");
   });
 });
 

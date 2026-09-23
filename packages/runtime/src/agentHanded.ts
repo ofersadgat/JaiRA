@@ -33,7 +33,7 @@ import { AGENT_CLI, AGENT_CODEX, registerAgentRuntimes } from "./agents";
 import { CLAUDE_TOOLS } from "./agentTools";
 import { agentPromptRoutes } from "./modelRoutes";
 import { compilePolicy, type JairaPolicy } from "./policy";
-import { withPermissionFunctions, type PermissionFunctionRunner } from "./permissionFunctions";
+import { answeredWithoutAsking, withPermissionFunctions, type PermissionFunctionRunner } from "./permissionFunctions";
 import { grantAlwaysGrantedTools, JAIRA_TOOL_NAMES } from "./tools";
 import { buildPromptExecutor, executeWorkflow, newRegistry } from "./wiring";
 
@@ -138,9 +138,12 @@ function governanceOf(options: HandedOptions, onAsk: () => void): { policy?: Exe
     ...(policy !== undefined ? { policy } : {}),
     ...(approve !== undefined
       ? {
-          approve: (request: Parameters<Approver>[0]) => {
-            onAsk();
-            return approve(request);
+          // Counted only when somebody was asked: the host's approver asks a line's functions first,
+          // and a call they answered reached nobody (`answeredWithoutAsking`).
+          approve: async (request: Parameters<Approver>[0]) => {
+            const decision = await approve(request);
+            if (!answeredWithoutAsking(decision)) onAsk();
+            return decision;
           },
         }
       : {}),

@@ -15,10 +15,20 @@
  * Both are an {@link ApprovalHub} — the app's own seam — so the request a person sees here carries the
  * same `parts`, and "for this run" remembers the same widths in the same `CommandGrants`.
  */
+import type { FunctionResult, JsonValue, ResolvedValue } from "@declarative-ai/exec";
+import type { WorkflowMetrics } from "@declarative-ai/hw";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import { policyAuditRow, type Project } from "@jaira/persistence";
-import { ApprovalHub, compileRunPolicy, type ApprovalRequest, type RunPolicyConfig } from "@jaira/runtime";
-import { askingParts, INLINE_TOOLSET, type CommandApproval, type CommandPart } from "@jaira/shared";
+import {
+  ApprovalHub,
+  compileRunPolicy,
+  type ApprovalRequest,
+  type ParkQuestion,
+  type PermissionFunctionDecision,
+  type PermissionFunctionsOptions,
+  type RunPolicyConfig,
+} from "@jaira/runtime";
+import { askingParts, INLINE_TOOLSET, type CommandApproval, type CommandPart, type PermissionFunctionRequest } from "@jaira/shared";
 
 /** How a run answers an ask: at the terminal, or with a refusal. */
 export type ApproveMode = "ask" | "deny";
@@ -49,6 +59,13 @@ export interface CliApprovals {
    * standing answer somebody gave, so a run under it is not unattended in `gateCapabilities`' sense.
    */
   unattended: boolean;
+  /**
+   * The APPROVAL PROMPT a permission function calls (`approve_tool_call`, decision 0007 amended
+   * 2026-09-22), put to the person at the terminal — in the same queue as the approvals, so one
+   * question is on screen at a time — and answered allow or deny, never remembered. With nobody to
+   * ask it fails, and the call it was about asks the person through the hub, which refuses it saying why.
+   */
+  prompt: ParkQuestion;
 }
 
 /**
@@ -60,7 +77,12 @@ export interface CliApprovals {
 export function governRun(
   config: RunPolicyConfig,
   approvals: CliApprovals,
-  where: { workspaceRoot?: string; audit?: { project: Project; taskId: string } } = {},
+  where: {
+    workspaceRoot?: string;
+    audit?: { project: Project; taskId: string };
+    /** What decides a toolset line that names a FUNCTION — asked before the person, as in the app. */
+    functions?: PermissionFunctionsOptions;
+  } = {},
 ): { policy: ExecPolicy; approve: Approver } {
   const audit = where.audit;
   // A run with no task still remembers "for this run" answers — under a key of its own.
@@ -75,7 +97,23 @@ export function governRun(
     },
     grants: approvals.hub.grants(taskId),
   });
-  return { policy, approve: approvals.hub.approver({ taskId }) };
+  const functions = where.functions;
+  if (functions === undefined) return { policy, approve: approvals.hub.approver({ taskId }) };
+  // Every answer a function gives is audited as the app audits it: one `command_log` row per call.
+  const onDecided = (decided: PermissionFunctionDecision): void => {
+    functions.onDecided?.(decided);
+    if (audit === undefined || decided.answer === undefined) return;
+    const request = decided.request;
+    audit.project.commands.record({
+      taskId: audit.taskId,
+      tool: request.tool,
+      ...(request.line !== undefined ? { command: request.line } : {}),
+      decision: decided.answer === "allow" ? "allowed" : "blocked",
+      decidedBy: "function",
+      reason: `'${request.function}' ${decided.answer === "allow" ? "allowed" : "denied"} ${request.part?.text ?? request.subject}`,
+    });
+  };
+  return { policy, approve: approvals.hub.approver({ taskId, functions: { ...functions, onDecided } }) };
 }
 
 /** The hub a CLI run's `approve` parks on, answered at the terminal or refused with a reason. */
@@ -90,7 +128,8 @@ export function cliApprovals(options: CliApprovalOptions): CliApprovals {
         hub.decide(request.requestId, "deny", "once", undefined, why);
       },
     });
-    return { hub, asks: false, unattended: unasked !== "flag" };
+    const prompt: ParkQuestion = async () => failed(`nobody can be asked — ${HOW_TO_BE_ASKED[unasked]}`);
+    return { hub, asks: false, unattended: unasked !== "flag", prompt };
   }
   const { ask, write, signal } = options;
   // One question at a time: parallel states and an agent's parallel tool calls ask concurrently, and
@@ -103,7 +142,44 @@ export function cliApprovals(options: CliApprovalOptions): CliApprovals {
       });
     },
   });
-  return { hub, asks: true, unattended: false };
+  const prompt: ParkQuestion = (_component, inputs) => {
+    const asked = queue.then(async (): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> => {
+      if (signal?.aborted === true) return failed("the run was stopped");
+      write(renderApprovalPrompt(inputs));
+      const answer = (await ask("  [y] allow  [n] deny  (default: deny) › ", signal))?.trim();
+      const decision = answer === "y" ? "allow" : "deny";
+      write(`  ${decision === "allow" ? "allowed" : "denied"}\n`);
+      return { value: { decision }, metrics: promptMetrics() };
+    });
+    queue = asked.then(
+      () => undefined,
+      () => undefined,
+    );
+    return asked;
+  };
+  return { hub, asks: true, unattended: false, prompt };
+}
+
+const promptMetrics = (): WorkflowMetrics => ({ startMs: Date.now(), durationMs: 0, costUsd: 0, costSource: "unknown" });
+
+function failed(reason: string): FunctionResult<ResolvedValue, WorkflowMetrics> {
+  return { error: { classification: "permanent", reason }, metrics: promptMetrics() };
+}
+
+/** What `approve_tool_call` shows at a terminal: which function asks, about which call, and where. */
+export function renderApprovalPrompt(inputs: Record<string, JsonValue>): string {
+  const request = (inputs["request"] ?? {}) as Partial<PermissionFunctionRequest>;
+  const heading = typeof inputs["prompt"] === "string" ? inputs["prompt"] : "Allow this tool call?";
+  const lines = [`\napproval · ${request.tool ?? "?"} — the function '${request.function ?? "?"}' asks you: ${heading}`];
+  if (request.line !== undefined) {
+    lines.push(`    $ ${request.line}`);
+    if (request.part !== undefined && request.part.text !== request.line) lines.push(`    about: ${request.part.text} → ${request.subject ?? request.part.subject}`);
+  } else {
+    lines.push(`    ${JSON.stringify(request.input ?? {})}`);
+  }
+  const where = [request.state !== undefined ? `state ${request.state}` : undefined, request.cwd !== undefined ? `in ${request.cwd}` : undefined].filter((s) => s !== undefined);
+  if (where.length > 0) lines.push(`    ${where.join(" · ")}`);
+  return `${lines.join("\n")}\n`;
 }
 
 async function askAtTerminal(hub: ApprovalHub, request: ApprovalRequest, ask: AskLine, write: (text: string) => void, signal?: AbortSignal): Promise<void> {
@@ -226,7 +302,7 @@ function labelOf(index: number): string {
   return index < 9 ? String(index + 1) : String.fromCharCode(97 + ((index - 9) % 26));
 }
 
-const VERDICT: Record<CommandPart["verdict"], string> = { allowed: "allowed", asks: "ASKS", denied: "DENIED" };
+const VERDICT: Record<CommandPart["verdict"], string> = { allowed: "allowed", function: "to a function", asks: "ASKS", denied: "DENIED" };
 
 function partColumns(part: CommandPart, index: number): string[] {
   const place = part.url ?? (part.paths !== undefined && part.paths.length > 0 ? part.paths.join(", ") : undefined);
@@ -248,6 +324,8 @@ function deciderOf(part: CommandPart): string {
       return `policy rule: ${reason}`;
     case "default":
       return `policy default: ${reason}`;
+    case "function":
+      return `function ${part.decidedBy.function ?? "?"}: ${reason}`;
     default:
       return `${source}: ${reason}`;
   }

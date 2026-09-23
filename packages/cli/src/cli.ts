@@ -46,6 +46,7 @@ import {
   sessionStoreFor,
   loadWorkflowBundle,
   loadLayeredConfig,
+  loadPermissionFunction,
   standaloneLoadOptions,
   workflowDigest,
   workflowLoadOptions,
@@ -121,6 +122,10 @@ import {
   registerTools,
   registerUserFunctions,
   prepareUserFunctions,
+  permissionFunctionRunner,
+  registerApprovalPrompt,
+  registerSmartFunction,
+  type PermissionFunctionsOptions,
   samePathKey,
   ScriptedFunctions,
   sessionServicesFor,
@@ -713,7 +718,10 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
     const approvals = commandApprovalsOf(gate, io, io.abortSignal);
     assertCapabilities(registry, bundle, config, approvals);
     // No task, so nothing to audit into: the run is governed all the same.
-    const governed = governRun(config, approvals, { workspaceRoot: projectDir });
+    const governed = governRun(config, approvals, {
+      workspaceRoot: projectDir,
+      functions: runPermissionFunctions(registry, prompt, config, approvals, standaloneLoadOptions(workflowsDir), io.abortSignal),
+    });
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
     // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
@@ -825,7 +833,11 @@ async function cmdChangesetReview(argv: string[], io: CliIo): Promise<number> {
       throw new Error("nothing can answer the gate: attach a terminal, or script it with --interactions");
     }
     // Governed like any other run: the reviewer's revise step is an agent too.
-    const governed = governRun(project.config, commandApprovalsOf(DEFAULT_GATE, io, io.abortSignal), { workspaceRoot: worktree });
+    const reviewApprovals = commandApprovalsOf(DEFAULT_GATE, io, io.abortSignal);
+    const governed = governRun(project.config, reviewApprovals, {
+      workspaceRoot: worktree,
+      functions: runPermissionFunctions(registry, prompt, project.config, reviewApprovals, workflowLoadOptions(project.paths), io.abortSignal),
+    });
     io.stdout(`reviewing ${changeset.changes.length} change(s) in ${worktree} against ${base}\n`);
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
@@ -1204,7 +1216,11 @@ async function runTaskNow(
     // the terminal (or a refusal that says why nobody was asked) where the app has its inbox.
     const approvals = commandApprovalsOf(gate, io, stop.signal);
     stop.signal.addEventListener("abort", () => approvals.hub.stop(taskId), { once: true });
-    const governed = governRun(project.config, approvals, { workspaceRoot: workspace.root, audit: { project, taskId } });
+    const governed = governRun(project.config, approvals, {
+      workspaceRoot: workspace.root,
+      audit: { project, taskId },
+      functions: runPermissionFunctions(registry, prompt, project.config, approvals, workflowLoadOptions(project.paths), stop.signal),
+    });
     // Remotes (decision 0004): the primitives, `on_remote_event` with a watcher that lives as long as
     // this run, and the gate's second door around whatever answers the gate here. Only a durable run
     // gets them — a merge request has to be remembered on a task — and after the registry is built,
@@ -1609,7 +1625,10 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
     );
     const approvals = commandApprovalsOf(DEFAULT_GATE, io, io.abortSignal);
     assertCapabilities(registry, bundle, project.config, approvals);
-    const governed = governRun(project.config, approvals, { workspaceRoot: project.paths.projectDir });
+    const governed = governRun(project.config, approvals, {
+      workspaceRoot: project.paths.projectDir,
+      functions: runPermissionFunctions(registry, prompt, project.config, approvals, workflowLoadOptions(project.paths), io.abortSignal),
+    });
     io.stderr(`checking ${digest.roots.join(", ")} (${digest.states} states) against ${specPath}\n`);
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
@@ -1844,6 +1863,41 @@ async function cmdTaskCancel(argv: string[], io: CliIo): Promise<number> {
  * this is the step that would be unsafe *without* it, which is why the two are ordered and not
  * merged.
  */
+/**
+ * What a toolset line that names a FUNCTION needs in a CLI run (decision 0007, amended 2026-09-22) —
+ * the app's recipe with the terminal in place of the conversation: the approval prompt answered where
+ * the run's approvals are (`approvals.prompt`), `smart` judging with this project's `smart` settings
+ * through the run's `prompt`, and a function loaded the way this run loads its workflow — the same
+ * path, the same module approvals, its modules merged into `registry` and prepared before it runs.
+ */
+function runPermissionFunctions(
+  registry: ReturnType<typeof newRegistry>,
+  prompt: ReturnType<typeof buildPromptExecutor>,
+  config: JairaConfig,
+  approvals: CliApprovals,
+  loadOptions: Parameters<typeof loadPermissionFunction>[1],
+  abortSignal?: AbortSignal,
+): PermissionFunctionsOptions {
+  registerApprovalPrompt(registry, approvals.prompt);
+  registerSmartFunction(registry, { prompt, config: () => config.smart });
+  const run = permissionFunctionRunner({
+    registry,
+    prompt,
+    ...(abortSignal !== undefined ? { abortSignal } : {}),
+    load: async (reference) => {
+      const bundle = loadPermissionFunction(reference, loadOptions);
+      const modules = userModules();
+      if (modules !== undefined) {
+        resolveUserFunctions(modules, bundle);
+        registerUserFunctions(registry, modules.userFunctions);
+        await prepareUserFunctions(modules.userFunctions);
+      }
+      return bundle;
+    },
+  });
+  return { run };
+}
+
 async function prepareResolvedFunctions(): Promise<void> {
   const modules = userModules();
   if (modules === undefined) return;

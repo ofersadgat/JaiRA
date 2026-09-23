@@ -191,7 +191,23 @@ function lineVerdict(parts: readonly CommandPart[], fallback: CommandPartVerdict
   return worst ?? fallback;
 }
 
-const ONCE = (decision: PermissionAnswer): PermissionDecision => ({ decision, scope: "once" });
+/** The answers {@link withPermissionFunctions} gave itself — see {@link answeredWithoutAsking}. */
+const UNASKED = new WeakSet<PermissionDecision>();
+
+const ONCE = (decision: PermissionAnswer): PermissionDecision => {
+  const answered: PermissionDecision = { decision, scope: "once" };
+  UNASKED.add(answered);
+  return answered;
+};
+
+/**
+ * Whether this decision was given without anybody being asked — by what a line's parts came to, or by
+ * the functions it names. What lets a probe that holds a HOST's whole approver (`handedToClaude` with
+ * `run`) tell a call a function answered from one a person was asked about.
+ */
+export function answeredWithoutAsking(decision: PermissionDecision): boolean {
+  return UNASKED.has(decision);
+}
 
 /**
  * The approver a host hands the engine, with the functions put first — see the module header.

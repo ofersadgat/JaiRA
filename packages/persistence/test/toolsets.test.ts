@@ -206,7 +206,7 @@ describe("a toolset inside a REFERENCED block", () => {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     write(project.paths.jairaDir, "envs/reader.json", { tools: { read_file: "deny", other: "deny" } });
     const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
-    expect(pinned.states["plan"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny" } });
+    expect(pinned.states["plan"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, implementations: {}, other: "deny", functions: {} } });
     expect(snapshotHash(load("plan"))).not.toBe(snap.hash);
   });
 

@@ -769,8 +769,21 @@ serves both, pre-approves neither, and each call and each shell part is what the
 function answered; a function that denies everything leaves no way in; with no
 runner every such call asks; a written `other` that is a function forces `Task`,
 `Agent` and `SlashCommand` to the callback. `handedToCodex`: a writer a function
-answers for turns the writing sandbox on. For `~/.jaira`, `"bash": "smart"` becomes
-`"bash": { "function": "smart" }`.
+answers for is served over the bridge and each call is what the function said, with
+codex's sandbox shut (ours serves the line, as the codex amendment above has it); a
+line that keeps codex's native opens it, the function still judging each call.
+
+**A CLI run** asks the functions too: `governRun` takes the same
+`PermissionFunctionsOptions`, `jaira run` builds them as the app does (the run's
+registry and prompt executor, `smart` with the project's settings, a function loaded
+along the run's own path and module approvals), and the approval prompt is asked at
+the terminal in the approvals' queue — `[y] allow  [n] deny` — or, with nobody to
+ask, fails, so the call it was about is refused by the hub saying why. A host whose
+whole approver `handedToClaude` holds (`run`) counts a call as asked only when a
+person was (`answeredWithoutAsking`), which is what measures a CLI run and an app run
+handing claude and codex the same under a map whose lines name functions.
+
+For `~/.jaira`, `"bash": "smart"` becomes `"bash": { "function": "smart" }`.
 
 ## Open
 

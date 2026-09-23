@@ -11,19 +11,23 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { testHome } from "@jaira/testing";
-import { initProject, openProject } from "@jaira/persistence";
+import { initProject, loadPermissionFunction, openProject } from "@jaira/persistence";
 import {
   ApprovalHub,
   compileRunPolicy,
   decideCommand,
   handedToClaude,
   handedToCodex,
+  newRegistry,
+  permissionFunctionRunner,
+  registerApprovalPrompt,
   type ApprovalRequest,
   type HandedEnvironment,
   type JairaPolicy,
+  type PermissionFunctionRunner,
   type PolicyRule,
 } from "@jaira/runtime";
-import { defaultConfig, lowerToolset, parseToolset } from "@jaira/shared";
+import { APPROVAL_PROMPT_FUNCTION, defaultConfig, lowerToolset, parseToolset, type PermissionFunctionRequest } from "@jaira/shared";
 import { runCli, type CliIo } from "../src/cli";
 import { cliApprovals, governRun, renderApproval, unattendedRefusal } from "../src/commandApprover";
 
@@ -231,16 +235,19 @@ describe("toolsets under a CLI run", () => {
   const ENVIRONMENTS: Record<string, HandedEnvironment> = {
     "read-only": lowered({ read_file: "allow", glob: "allow", grep: "allow", other: "deny" }),
     "a shell with named commands": lowered({ bash: "deny", "git status": "allow", "node": "ask", read_file: "allow" }),
-    "a native built-in, other ask": lowered({ edit: { mode: "ask", implementation: "native" }, bash: "smart", other: "ask" }),
+    "a native built-in, other ask": lowered({ edit: { mode: "ask", implementation: "native" }, bash: "ask", other: "ask" }),
+    "a shell a FUNCTION judges": lowered({ bash: { function: "judge" }, write_file: { function: "judge" }, read_file: "allow", other: "deny" }),
     "no toolset": {},
   };
+  /** What each host's runner would answer for `judge`: git and write_file may, nothing else. */
+  const judge: PermissionFunctionRunner = async (_reference, request) => (request.part?.program === "git" || request.tool === "write_file" ? "allow" : "deny");
   /** The app's `startRun`: the run recipe, and its hub's approver — which refuses when nobody is listening. */
   const app = () => {
     const hub = new ApprovalHub();
-    return { policy: compileRunPolicy(config, { workspaceRoot: dir, grants: hub.grants("t") }), approve: hub.approver({ taskId: "t" }) };
+    return { policy: compileRunPolicy(config, { workspaceRoot: dir, grants: hub.grants("t") }), approve: hub.approver({ taskId: "t", functions: { run: judge } }) };
   };
   /** The CLI's, with nobody at a terminal — a refusal that never waits on a person. */
-  const cli = () => governRun(config, cliApprovals({ mode: "deny", unasked: "no-terminal", write: () => {} }), { workspaceRoot: dir });
+  const cli = () => governRun(config, cliApprovals({ mode: "deny", unasked: "no-terminal", write: () => {} }), { workspaceRoot: dir, functions: { run: judge } });
 
   it.each(Object.keys(ENVIRONMENTS))("claude is handed the same under %s", async (name) => {
     const environment = ENVIRONMENTS[name]!;
@@ -261,5 +268,75 @@ describe("toolsets under a CLI run", () => {
     // `git status` is allowed by its line, and `rm notes.txt` (write_file, which the map does not hold) asks.
     expect(now.shell).toMatchObject({ command: "allow", write: "ask" });
     expect(before.shell).not.toEqual(now.shell);
+  });
+
+  it("asks a line's FUNCTION before anybody, in a CLI run as in the app — nobody at the terminal is asked", async () => {
+    const handed = await handedToClaude(ENVIRONMENTS["a shell a FUNCTION judges"]!, { run: cli() });
+    // `git status` the function allows, `rm` it refuses; `cat` is the map's read_file line.
+    expect(handed.shell).toMatchObject({ command: "allow", read: "allow", write: "deny" });
+    expect(handed.tools["write_file"]).toMatchObject({ decision: "allow" });
+  });
+});
+
+/**
+ * `approve_tool_call` in a CLI run (decision 0007, amended 2026-09-22): the approval prompt a function
+ * calls is put to the person at the terminal — the same queue as the approvals — and answered allow or
+ * deny; with nobody to ask it fails, which leaves the call asking, and the hub refuses it saying why.
+ */
+describe("the approval prompt a function calls, at a terminal", () => {
+  const config = { ...defaultConfig(), policy: POLICY as never };
+  const REQUEST: PermissionFunctionRequest = {
+    tool: "bash",
+    subject: "npm publish",
+    function: "smart",
+    input: { command: "npm publish" },
+    line: "npm publish",
+    part: { text: "npm publish", kind: "command", subject: "npm publish", span: { start: 0, end: 11 }, program: "npm", subcommand: "publish", args: [], flags: [] },
+    state: "release",
+    cwd: "/work",
+  };
+  const NO_PROMPT = { start: () => ({ result: Promise.resolve({ error: { classification: "permanent", reason: "no model here" } }) }) } as never;
+  /** The CLI's runner over one registry holding the terminal's approval prompt, as `jaira run` builds it. */
+  const runnerFor = (approvals: ReturnType<typeof cliApprovals>) => {
+    const registry = newRegistry();
+    registerApprovalPrompt(registry, approvals.prompt);
+    return permissionFunctionRunner({ registry, prompt: NO_PROMPT, load: (reference) => loadPermissionFunction(reference, {}) });
+  };
+
+  it.each([
+    ["y", "allow"],
+    ["n", "deny"],
+    ["", "deny"],
+  ] as const)("answers %j as %s, showing which function asks about which call", async (typed, decision) => {
+    let shown = "";
+    const approvals = cliApprovals({ mode: "ask", ask: async () => typed, write: (text) => (shown += text) });
+    expect(await runnerFor(approvals)(APPROVAL_PROMPT_FUNCTION, REQUEST)).toBe(decision);
+    expect(shown).toContain("the function 'smart' asks you");
+    expect(shown).toContain("$ npm publish");
+    expect(shown).toContain("state release · in /work");
+  });
+
+  it("fails with nobody to ask — and the call it was about is refused by the hub, saying why", async () => {
+    const approvals = cliApprovals({ mode: "deny", unasked: "non-interactive", write: () => {} });
+    const result = await approvals.prompt(APPROVAL_PROMPT_FUNCTION, { request: REQUEST as never });
+    expect(result).toMatchObject({ error: { reason: expect.stringMatching(/^nobody can be asked — --non-interactive refuses every approval/) } });
+    const run = governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } });
+    const handed = await handedToClaude(lowerToolset(parseToolset({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).toolset), { run });
+    expect(handed.shell).toMatchObject({ command: "ask" });
+  });
+
+  it("lets a line through that the person allows at the terminal, and refuses one they deny", async () => {
+    const environment = lowerToolset(parseToolset({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).toolset);
+    const handedWith = (typed: string) => {
+      const approvals = cliApprovals({ mode: "ask", ask: async () => typed, write: () => {} });
+      return handedToClaude(environment, { run: governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } }) });
+    };
+    // The command the person allows runs — answered by the prompt, so the hub asked nobody; a file part
+    // or a script answers to its own line, which this map leaves to `other: deny`.
+    expect((await handedWith("y")).shell).toEqual({ command: "allow", read: "deny", write: "deny", script: "deny" });
+    // Every line they deny is refused, and a shell every line of which is refused is not a shell.
+    const denied = await handedWith("n");
+    expect(denied.shell).toEqual({});
+    expect(denied.tools["bash"]).toEqual({ reachable: false, via: [] });
   });
 });
