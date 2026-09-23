@@ -154,7 +154,8 @@ export interface AdoptedChild {
   /**
    * `split`: the parent mounts the state `each: "split"`, and the new task stands past it with this element.
    * `element`: the parent mounts the state `each: "inline"` or `"task"`, and the task is ONE ELEMENT of
-   * that batch — the whole batch where the adoption makes it, the last one where it is {@link appended}.
+   * that batch — alone, or at its place in a list that holds more, where the adoption makes the batch;
+   * past the batch's end where it is {@link appended}.
    */
   shape: "child" | "split" | "element";
   /** For the `element` shape: what the batch's elements are — instances of the parent, or tasks under it. */

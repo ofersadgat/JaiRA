@@ -4,15 +4,16 @@
  * The person's ruling: "why is it refused? as long as the workflow you adopt it into supports that
  * data type it should be fine, no?" A task that ran the state a parent mounts by `each` becomes ONE
  * ELEMENT of that batch, if what it ran with fits the list's element type. A batch the adoption makes
- * is the task alone; a parent that already has the batch gets the task appended. A later fan-in reads
- * the batch — so the assertion that matters is what the fan-in state was HANDED, and that no model
- * was called again for an element that was adopted.
+ * is the task alone, or the task at its place in a list that holds more — the parent runs the rest; a
+ * parent that already has the batch, run by itself or adopted, gets the task appended. A later fan-in
+ * reads the batch — so the assertion that matters is what the fan-in state was HANDED, and that no
+ * model was called again for an element that was adopted.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ADOPTED_BATCH_PREFIX, buildTaskLoad, initProject, loadSnapshot, openProject, SqliteEventLog } from "@jaira/persistence";
+import { ADOPTED_STATE_PREFIX, buildTaskLoad, initProject, loadSnapshot, openProject, SqliteEventLog } from "@jaira/persistence";
 import { writeWorkflowFiles, type FakeRule } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
@@ -25,11 +26,11 @@ const ITEM = { type: "object", required: ["id", "title"], properties: { id: { ty
 const OWNED = { ...ITEM, required: ["id", "title", "owner"], properties: { ...ITEM.properties, owner: { type: "string" } } };
 
 /** A prompt leaf: one model, one output bound off the operation. */
-const leaf = (label: string, model: string, inputs: Record<string, JsonValue>, output: string, schema: JsonValue = { type: "string" }): JsonValue => ({
+const leaf = (label: string, model: string, inputs: Record<string, JsonValue>, output: string, schema: JsonValue = { type: "string" }, prompt = `${label}.`): JsonValue => ({
   label,
   inputs,
   outputs: { [output]: { schema, binding: `.operation.output.${output}` } },
-  operation: { model, prompt: `${label}.`, output: { [output]: { schema } } },
+  operation: { model, prompt, output: { [output]: { schema } } },
 });
 
 /** `work` once per item — `each` of the given kind — then `gather`, which reads every element's doc. */
@@ -49,7 +50,7 @@ const FILES: Record<string, JsonValue> = {
   fan: fanned("inline"),
   tfan: fanned("task"),
   strict: fanned("inline", { type: "array", items: OWNED }),
-  "fan/work": leaf("Work", "worker", { item: { schema: ITEM } }, "doc"),
+  "fan/work": leaf("Work", "worker", { item: { schema: ITEM } }, "doc", { type: "string" }, "Work on {{.inputs.item.title}}."),
   "fan/gather": leaf("Gather", "gatherer", { docs: { schema: { type: "array", items: { type: "string" } } } }, "final"),
 };
 
@@ -62,6 +63,13 @@ const worker = (doc: string): FakeRule[] => [{ model: "worker", output: { doc } 
 
 const ALPHA = { id: "a", title: "Alpha" };
 const BETA = { id: "b", title: "Beta" };
+const GAMMA = { id: "c", title: "Gamma" };
+/** A worker that answers per element, by the title its prompt names. */
+const per = (docs: Record<string, string>, fails: string[] = []): FakeRule[] => [
+  ...fails.map((title): FakeRule => ({ model: "worker", promptIncludes: `Work on ${title}`, error: `${title} broke` })),
+  ...Object.entries(docs).map(([title, doc]): FakeRule => ({ model: "worker", promptIncludes: `Work on ${title}`, output: { doc } })),
+  ...RULES,
+];
 
 let dir: string;
 let service: AppService;
@@ -106,6 +114,11 @@ const gathered = (taskId: string): unknown => (events(taskId).filter((e) => e.ty
 /** The mirror rows of the batch under `work`: which task each is, and at which element. */
 const batchOf = (taskId: string): Array<[string, number | undefined]> =>
   events(taskId).flatMap((e) => (e.type === "instance.entered" && e.childKey === "work" ? [[e.instanceId, e.element] as [string, number | undefined]] : []));
+/** The model calls `work` made in a task's journal, by the element each was. */
+const workCalls = (taskId: string): Array<number | undefined> => {
+  const entered = new Map(batchOf(taskId));
+  return events(taskId).flatMap((e) => (e.type === "operation.started" && entered.has(e.instanceId) ? [entered.get(e.instanceId)] : []));
+};
 
 async function ran(workflow: string, inputs: Record<string, JsonValue>, title: string, rules: FakeRule[] = RULES): Promise<string> {
   const { taskId } = service.createTask({ title, workflow, inputs });
@@ -168,7 +181,7 @@ describe("an inline fan-out", () => {
     expect(metaOf(beta)?.origin).toMatchObject({ kind: "adopt", taskId: parent, key: "work", index: 1 });
   });
 
-  it("loads the batch as ONE history row under the batch stand-in, its outputs gathered", async () => {
+  it("loads each adopted element as its own history row under the stand-in, one batch by occurrence", async () => {
     const alpha = await ran("fan/work", { item: ALPHA }, "Alpha", worker("alpha doc"));
     const beta = await ran("fan/work", { item: BETA }, "Beta", worker("beta doc"));
     const parent = parentOf(await service.adoptTask({ taskId: alpha, workflow: "fan", start: false }));
@@ -176,9 +189,9 @@ describe("an inline fan-out", () => {
 
     const load = read((p) => buildTaskLoad(p, parent, loadSnapshot(p.paths.snapshotsDir, p.runtime.get(parent)!.snapshotHash!).states));
     expect(load.blocked).toBeUndefined();
-    expect(load.loaded?.children).toEqual([
-      expect.objectContaining({ id: alpha, stateId: `${ADOPTED_BATCH_PREFIX}fan/work`, childKey: "work", live: false, outcome: "success", operation: { value: { doc: ["alpha doc", "beta doc"] } } }),
-    ]);
+    const row = (id: string, element: number, doc: string) =>
+      expect.objectContaining({ id, stateId: `${ADOPTED_STATE_PREFIX}fan/work`, childKey: "work", occurrence: 0, element, live: false, outcome: "success", operation: { value: { doc } } });
+    expect(load.loaded?.children).toEqual([row(alpha, 0, "alpha doc"), row(beta, 1, "beta doc")]);
     expect(load.loaded).toMatchObject({ unanswered: ["work"] });
   });
 
@@ -191,12 +204,57 @@ describe("an inline fan-out", () => {
     expect(metaOf(alpha)?.origin).toBeUndefined();
   });
 
-  it("refuses a supplied list the task is not alone in: nothing would run the other elements", async () => {
-    const alpha = await ran("fan/work", { item: ALPHA }, "Alpha");
-    const result = await service.adoptTask({ taskId: alpha, workflow: "fan", inputs: { items: [ALPHA, BETA] }, dryRun: true });
-    expect(refusal(result)).toMatchObject({ code: "split-element" });
-    expect(refusal(result).message).toContain("holds 2 elements");
+  it("places the task in a supplied list that holds more: it loads as done, the parent runs the rest, and the fan-in reads them all", async () => {
+    const alpha = await ran("fan/work", { item: ALPHA }, "Alpha", worker("alpha doc"));
+    // Alpha is element 1 of [Beta, Alpha, Gamma]: elements 0 and 2 are the parent's to run.
+    const result = await service.adoptTask({ taskId: alpha, workflow: "fan", inputs: { items: [BETA, ALPHA, GAMMA] }, fake: per({ Beta: "beta doc", Gamma: "gamma doc" }) as unknown as JsonValue });
+    expect(plan(result)).toMatchObject({
+      adopted: [{ taskId: alpha, shape: "element", each: "inline", index: 1 }],
+      inputs: { items: [BETA, ALPHA, GAMMA] },
+      provenance: { items: { via: "asked" } },
+    });
+    const parent = parentOf(result);
+    await until(() => statusOf(parent) === "completed", "the parent to complete");
+
+    // The adopted element was never run again; the parent ran elements 0 and 2, at their own positions.
+    expect(workCalls(parent)).toEqual([0, 2]);
+    expect(dispatched(alpha)).toBe(1);
+    expect(batchOf(parent).map(([id, element]) => [id === alpha, element])).toEqual([
+      [true, 1],
+      [false, 0],
+      [false, 2],
+    ]);
+    expect(gathered(parent)).toEqual(["beta doc", "alpha doc", "gamma doc"]);
+    expect(outputsOf(parent)).toEqual({ final: "gathered" });
+    expect(metaOf(alpha)?.origin).toMatchObject({ kind: "adopt", taskId: parent, key: "work", index: 1 });
   });
+
+  it("joins a batch the parent ran ITSELF: appended past its list, the element it owes retried, and the fan-in reads all three", async () => {
+    // The parent ran [Alpha, Beta] inline and Beta failed: the batch is the last thing it entered.
+    const { taskId: parent } = service.createTask({ title: "Parent", workflow: "fan", inputs: { items: [ALPHA, BETA] } });
+    await service.startTask({ taskId: parent, fake: per({ Alpha: "alpha doc" }, ["Beta"]) as unknown as JsonValue });
+    await until(() => statusOf(parent) === "failed", "the parent to fail on Beta");
+    expect(workCalls(parent)).toEqual([0, 1]);
+    const gamma = await ran("fan/work", { item: GAMMA }, "Gamma", worker("gamma doc"));
+
+    const result = await service.adoptTask({ taskId: gamma, parentTaskId: parent, fake: per({ Beta: "beta doc" }) as unknown as JsonValue });
+    expect(plan(result).adopted).toEqual([expect.objectContaining({ taskId: gamma, shape: "element", each: "inline", index: 2, appended: true })]);
+    await until(() => statusOf(parent) === "completed", "the parent to complete");
+
+    // Alpha was not run again, Beta was retried where it stood, and Gamma loaded as done.
+    expect(workCalls(parent)).toEqual([0, 1, 1]);
+    expect(dispatched(gamma)).toBe(1);
+    expect(gathered(parent)).toEqual(["alpha doc", "beta doc", "gamma doc"]);
+    expect(metaOf(parent)?.inputs).toEqual({ items: [ALPHA, BETA] });
+    expect(metaOf(gamma)?.origin).toMatchObject({ kind: "adopt", taskId: parent, key: "work", index: 2 });
+
+    // Taken back: a rewind past Gamma's mirror row takes it out, and the fan-in reads what the parent ran.
+    const mirror = journal(parent).find((row) => row.event.type === "instance.entered" && row.event.instanceId === gamma)!;
+    await service.rewindTask({ taskId: parent, at: mirror.seq, fake: per({ Beta: "beta doc" }) as unknown as JsonValue });
+    await until(() => statusOf(parent) === "completed", "the rewound parent to complete");
+    expect(metaOf(gamma)?.origin).toBeUndefined();
+    expect(gathered(parent)).toEqual(["alpha doc", "beta doc"]);
+  }, 30_000);
 });
 
 describe("a task fan-out (each: \"task\")", () => {

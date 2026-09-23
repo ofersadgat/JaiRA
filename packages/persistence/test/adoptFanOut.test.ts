@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EngineEvent } from "@declarative-ai/hw";
 import { testHome } from "@jaira/testing";
 import type { TaskAdoptResult, TaskConnectResult } from "@jaira/shared";
-import { ADOPTED_BATCH_PREFIX, ADOPTED_STATE_PREFIX } from "../src/adopt";
+import { ADOPTED_STATE_PREFIX } from "../src/adopt";
 import { adoptTaskIn, connectTask, type ConnectHost } from "../src/connect";
 import { openConnectIntent } from "../src/hostRows";
 import { beginTaskRun, createTask, finishTaskRun } from "../src/lifecycle";
@@ -110,20 +110,22 @@ describe("which batches take an element", () => {
     expect(refusalOf(await adoptTaskIn(project, { taskId: "t-none", workflow: "fan", dryRun: true }))).toMatchObject({ code: "element-misfit", path: "inputs.item" });
   });
 
-  it("refuses an inline batch the parent ran ITSELF, and a batch it has entered something after", async () => {
+  it("appends to an inline batch the parent ran ITSELF — past its list, where it stopped short — and refuses a batch it has entered something after", async () => {
     await finished("t-beta", "fan/work", { item: { id: "b" } }, { doc: "beta" });
-    // A parent that ran element 0 of `work` inline and stopped there.
-    createTask(project, { id: "t-parent", title: "Parent", workflow: "fan", inputs: { items: [{ id: "a" }] } as never });
+    // A parent that ran element 0 of `work` inline over a list of three, and stopped there.
+    const items = [{ id: "a" }, { id: "x" }, { id: "y" }];
+    createTask(project, { id: "t-parent", title: "Parent", workflow: "fan", inputs: { items } as never });
     await beginTaskRun(project, "t-parent", { nowMs: tick() });
     const recorder = project.events.recorder("t-parent");
-    recorder.record({ type: "instance.entered", instanceId: "p-root", stateId: "fan", inputs: { items: [{ id: "a" }] } } as EngineEvent, tick());
+    recorder.record({ type: "instance.entered", instanceId: "p-root", stateId: "fan", inputs: { items } } as EngineEvent, tick());
     recorder.record({ type: "instance.entered", instanceId: "p-a", stateId: "fan/work", childKey: "work", parentInstanceId: "p-root", element: 0, inputs: { item: { id: "a" } } } as EngineEvent, tick());
     recorder.record({ type: "instance.terminated", instanceId: "p-a", stateId: "fan/work", outcome: "success" } as EngineEvent, tick());
     finishTaskRun(project, "t-parent", "canceled", undefined, tick());
 
-    const ran = refusalOf(await adoptTaskIn(project, { taskId: "t-beta", parentTaskId: "t-parent", dryRun: true }));
-    expect(ran).toMatchObject({ code: "unsupported-mount" });
-    expect(ran.message).toContain(`'Parent' ran the elements of 'work' itself (each: "inline")`);
+    // Past the three the list holds, not at 1: elements 1 and 2 are still the parent's to run.
+    expect(planOf(await adoptTaskIn(project, { taskId: "t-beta", parentTaskId: "t-parent", dryRun: true }))).toMatchObject({
+      adopted: [{ taskId: "t-beta", shape: "element", each: "inline", index: 3, appended: true }],
+    });
 
     recorder.record({ type: "instance.entered", instanceId: "p-gather", stateId: "fan/gather", childKey: "gather", parentInstanceId: "p-root", inputs: { docs: ["a"] } } as EngineEvent, tick());
     const since = refusalOf(await adoptTaskIn(project, { taskId: "t-beta", parentTaskId: "t-parent", dryRun: true }));
@@ -133,15 +135,37 @@ describe("which batches take an element", () => {
 });
 
 describe("what the load hands the engine", () => {
-  it("an inline batch of adopted elements is ONE row with the outputs gathered; a task batch keeps its rows for the host", async () => {
+  it("an element appended to a batch the parent ran is not the parent moving on: an element that failed there is still live", async () => {
+    await finished("t-beta", "fan/work", { item: { id: "b" } }, { doc: "beta" });
+    const items = [{ id: "a" }, { id: "x" }];
+    createTask(project, { id: "t-parent", title: "Parent", workflow: "fan", inputs: { items } as never });
+    await beginTaskRun(project, "t-parent", { nowMs: tick() });
+    const recorder = project.events.recorder("t-parent");
+    recorder.record({ type: "instance.entered", instanceId: "p-root", stateId: "fan", inputs: { items } } as EngineEvent, tick());
+    recorder.record({ type: "instance.entered", instanceId: "p-x", stateId: "fan/work", childKey: "work", parentInstanceId: "p-root", element: 1, inputs: { item: { id: "x" } } } as EngineEvent, tick());
+    recorder.record({ type: "instance.terminated", instanceId: "p-x", stateId: "fan/work", outcome: "error", failure: { classification: "permanent", reason: "x broke" } } as EngineEvent, tick());
+    finishTaskRun(project, "t-parent", "failed", undefined, tick());
+
+    expect(planOf(await adoptTaskIn(project, { taskId: "t-beta", parentTaskId: "t-parent" }))).toMatchObject({ adopted: [{ index: 2, appended: true }] });
+    const children = loadOf("t-parent").loaded?.children ?? [];
+    expect(children.map((child) => [child.id, child.element, child.live])).toEqual([
+      ["p-x", 1, true],
+      ["t-beta", 2, false],
+    ]);
+  });
+
+
+  it("every adopted element is its own row under the stand-in, inline or for the host", async () => {
     await finished("t-alpha", "fan/work", { item: { id: "a" } }, { doc: "alpha" });
     await finished("t-beta", "fan/work", { item: { id: "b" } }, { doc: "beta" });
     const inline = await adoptTaskIn(project, { taskId: "t-alpha", workflow: "fan" });
     const parent = (inline as { taskId: string }).taskId;
     expect(planOf(await adoptTaskIn(project, { taskId: "t-beta", parentTaskId: parent }))).toMatchObject({ adopted: [{ index: 1, appended: true }] });
     expect(mirrorsOf(parent, "t-beta")).toEqual([expect.objectContaining({ element: 1, adopted: true, childKey: "work" })]);
+    // One batch — one occurrence — of two rows, each read by the engine under the stand-in its row names.
     expect(loadOf(parent).loaded?.children).toEqual([
-      expect.objectContaining({ id: "t-alpha", stateId: `${ADOPTED_BATCH_PREFIX}fan/work`, occurrence: 0, operation: { value: { doc: ["alpha", "beta"] } } }),
+      expect.objectContaining({ id: "t-alpha", stateId: `${ADOPTED_STATE_PREFIX}fan/work`, element: 0, occurrence: 0, operation: { value: { doc: "alpha" } } }),
+      expect.objectContaining({ id: "t-beta", stateId: `${ADOPTED_STATE_PREFIX}fan/work`, element: 1, occurrence: 0, operation: { value: { doc: "beta" } } }),
     ]);
 
     await finished("t-gamma", "fan/work", { item: { id: "c" } }, { doc: "gamma" });

@@ -149,6 +149,7 @@ describe("previewOf", () => {
     expect(text(appended.say)).toBe("Review items runs item once per element of a list, each as a task. The task becomes one of those tasks; nothing runs again.");
     expect(appended.facts.map(text)[0]).toBe("added to its batch as element 3");
     expect(into(child({ each: "task", index: 1 })).facts.map(text)[0]).toBe("element 2 of the list; the rest are made as tasks");
+    expect(into(child({ each: "inline", index: 1 })).facts.map(text)[0]).toBe("element 2 of the list; the rest run here");
   });
 
   it("MOVE WITHIN: backward, next, a FAST-FORWARD, a skip, and a forward move the host cannot run — refused in its own words", () => {

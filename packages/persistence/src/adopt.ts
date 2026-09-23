@@ -50,13 +50,15 @@
  *    A misfit is refused (`element-misfit`) with the element type and what the task has. Its outputs
  *    are the element's outputs, checked as any adopted child's are. A mount over several lists at
  *    once is refused: one task is one element of one list.
- *  - **Where it lands.** A batch the adoption MAKES is this task alone: a plain parent input nobody
- *    determined is recorded as `[element]` (bound, from the task), the element is index 0, and the
- *    mirror row carries `element: 0`. A parent that already HAS the batch — it entered the mount,
- *    and the batch is the last thing it entered — gets the task APPENDED: the mirror row carries
- *    `element: n`, n the batch's length, and shares the batch's occurrence (`occurrenceOf`), so the
- *    load hands the engine one batch of n + 1. The list the parent recorded is history and is not
- *    rewritten; what a later fan-in reads is the mount's record, which now gathers n + 1.
+ *  - **Where it lands.** In a batch the adoption MAKES, a plain parent input nobody determined is
+ *    recorded as `[element]` (bound, from the task), and the task is element 0, alone; a list that
+ *    holds more (a supplied list, an adopted sibling's output) places it at its index, and the
+ *    parent runs the rest. A parent that already HAS the batch — it entered the mount, and the batch
+ *    is the last thing it entered — gets the task APPENDED: the mirror row carries `element: n`, n
+ *    past every element the batch entered and past the list the parent recorded, and shares the
+ *    batch's occurrence (`occurrenceOf`), so the load hands the engine one batch of n + 1. The list
+ *    the parent recorded is history and is not rewritten; what a later fan-in reads is the mount's
+ *    record, which now gathers n + 1.
  *  - **`.each`.** The element's position is the `element` on its mirror row — what `.each.index`,
  *    and `.each.axis.<input>` on the one axis, read had the parent entered it. Nothing re-evaluates
  *    them: the element's inputs are what the task ran with.
@@ -64,11 +66,11 @@
  *    (`fanOut.ts`) is handed its row with the others and reads its runtime row as it reads any
  *    element's. A list that holds more than the task (a supplied list, an adopted sibling's output)
  *    places it at its index, and the host makes the rest.
- *  - **`"inline"`** — a loaded inline element is recomputed by the engine from its own record, under
- *    the MOUNTED state, and a task that ran alone has no record here; so a batch made of adopted
- *    elements only is loaded as ONE history row under a batch stand-in ({@link withAdoptedStandIns})
- *    that carries the gathered outputs. An inline batch the parent ran itself cannot take an adopted
- *    element (refused), and one made by an adoption is the task alone.
+ *  - **`"inline"`** — the engine reads a recorded element under the state its row names, so the
+ *    adopted element loads as its own row under the stand-in, as a single adopted child does, beside
+ *    elements the parent ran itself. Where the batch is short of its list — a list that holds more
+ *    than the task — the engine re-reads the list and runs the rest (the parent owes the batch its
+ *    answer and every recorded element succeeded), and the fan-in gathers every element's outputs.
  *  - **`"split"`** — unchanged, but a list that is a plain parent input nobody supplied is now
  *    `[element]` as well: a split over one element is no split, and the parent runs on with it. A
  *    parent that already split is refused: its other elements are tasks standing on the list it
@@ -95,6 +97,7 @@ import type { AdoptAsk, AdoptPlan, AdoptRefusal, AdoptedChild, AdoptionTarget, I
 import { createTask } from "./lifecycle";
 import { loadPinnedBundle } from "./documents";
 import { loadSnapshot } from "./snapshots";
+import { occurrenceOf } from "./load";
 import { sessionStoreFor, type Project } from "./project";
 
 const log = createLogger("jaira.persistence.adopt");
@@ -440,15 +443,10 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
             message: `'${standing.meta.title}' has entered '${standing.lastKey}' since its batch of '${child.childKey}', and a task joins a batch only while it is the last thing its parent entered`,
           });
         }
-        if (child.each === "inline" && batch.some((element) => !element.adopted)) {
-          return refuse({
-            code: "unsupported-mount",
-            message:
-              `'${standing.meta.title}' ran the elements of '${child.childKey}' itself (each: "inline"), and a loaded inline element is recomputed from its own record there — ` +
-              `'${child.title}' ran alone and its record is its own, so it joins an inline batch only of tasks adopted as it is. Adopt it into a new task of '${input.workflow}'`,
-          });
-        }
-        child.index = batch.length;
+        // Past every element the batch entered, and past the list it recorded: a batch stopped part-way
+        // still owes the elements it never reached, and they keep their places.
+        const listed = child.fan?.list.input !== undefined ? standing.inputs[child.fan.list.input] : undefined;
+        child.index = Math.max(Math.max(-1, ...batch.map((element) => element.element)) + 1, Array.isArray(listed) ? listed.length : 0);
         child.appended = true;
         continue;
       }
@@ -581,15 +579,8 @@ export function planAdoption(project: Project, bundle: WorkflowBundle, input: Ad
     if (index < 0) {
       return refuse({ code: "split-element", message: `what '${child.title}' ran with is not an element of ${expr}`, reference: expr });
     }
-    // An inline batch's other elements would run nowhere: the parent stands past the mount, and a
-    // batch of adopted elements is loaded from its rows (see the header). Tasks are made by the host.
-    if (child.shape === "element" && child.each === "inline" && list.length !== 1) {
-      return refuse({
-        code: "split-element",
-        message: `${expr} holds ${list.length} elements, and '${child.childKey}' runs them inline — a batch an adoption makes of '${child.title}' is '${child.title}' alone, since nothing would run the others`,
-        reference: expr,
-      });
-    }
+    // The rest of the list is the parent's to run: inline, the engine re-reads the list beside the
+    // recorded element and enters the others; as tasks, the host makes them.
     child.index = index;
     if (child.shape !== "split") continue;
     child.split = { expr, index };
@@ -653,10 +644,10 @@ interface StandingParent {
   /** Those of them that ended in success — history a later state can read. */
   succeeded: Set<string>;
   /**
-   * A fanned-out child's LATEST batch, by key: its elements in entry order, and which were adopted —
-   * what an adopted element is appended to.
+   * A fanned-out child's LATEST batch, by key: its elements in entry order and their positions — what
+   * an adopted element is appended to.
    */
-  batches: Map<string, Array<{ id: string; adopted: boolean }>>;
+  batches: Map<string, Array<{ id: string; element: number }>>;
   /** The child key the root entered last — a batch takes an element only while it is that. */
   lastKey?: string;
 }
@@ -673,7 +664,11 @@ function standingParentOf(project: Project, taskId: string): StandingParent | Ad
   const keyOf = new Map<string, string>();
   const entered = new Set<string>();
   const succeeded = new Set<string>();
-  const batches = new Map<string, Array<{ id: string; adopted: boolean }>>();
+  const batches = new Map<string, Array<{ id: string; element: number }>>();
+  // Which entry under each key its batch is — the load's own rule (`occurrenceOf`), so an adopted
+  // element recorded ahead of the elements its parent ran after it stays in their batch.
+  const seen = new Map<string, number>();
+  const batchAt = new Map<string, number>();
   let lastKey: string | undefined;
   for (const stored of project.events.list(taskId)) {
     const event = stored.event;
@@ -685,17 +680,23 @@ function standingParentOf(project: Project, taskId: string): StandingParent | Ad
         entered.clear();
         succeeded.clear();
         batches.clear();
+        seen.clear();
+        batchAt.clear();
         lastKey = undefined;
       } else if (event.parentInstanceId === rootInstanceId && event.childKey !== undefined) {
         keyOf.set(event.instanceId, event.childKey);
         entered.add(event.childKey);
         succeeded.delete(event.childKey);
         lastKey = event.childKey;
-        // A batch begins at element 0 and the rest join it (`occurrenceOf`'s rule); any other entry under the key ends it.
-        const element = { id: event.instanceId, adopted: (event as { adopted?: boolean }).adopted === true };
+        // The elements of one entry share its occurrence; any other entry under the key ends the batch.
+        const occurrence = occurrenceOf(seen, event.childKey, event.element);
         if (event.element === undefined) batches.delete(event.childKey);
-        else if (event.element === 0 || !batches.has(event.childKey)) batches.set(event.childKey, [element]);
-        else batches.get(event.childKey)!.push(element);
+        else {
+          const element = { id: event.instanceId, element: event.element };
+          if (batchAt.get(event.childKey) !== occurrence || !batches.has(event.childKey)) batches.set(event.childKey, [element]);
+          else batches.get(event.childKey)!.push(element);
+          batchAt.set(event.childKey, occurrence);
+        }
       }
     } else if (event.type === "child.superseded" && event.instanceId === rootInstanceId) {
       entered.delete(event.childKey);
@@ -1078,71 +1079,25 @@ export function adoptedStandInId(stateId: string): string {
 }
 
 /**
- * The state an INLINE batch made only of adopted elements loads under, as one row — see the header.
- *
- * The engine loads a recorded inline element under the MOUNTED state (`loadTerminatedFanOut`), not
- * under the state its row names, so a per-element stand-in is never consulted there. The whole batch
- * is therefore handed to it as a single history row whose outputs are the elements' gathered, as the
- * engine's own `combineElements` would gather them. An upstream change that loaded an element under
- * its row's state, as a single child already is, would let each element be its own stand-in instead.
- */
-export const ADOPTED_BATCH_PREFIX = "jaira:adopted-batch:";
-
-export function adoptedBatchStandInId(stateId: string): string {
-  return `${ADOPTED_BATCH_PREFIX}${stateId}`;
-}
-
-/**
- * The bundle a loaded run is handed, with a stand-in state for every adopted child in `loaded` —
- * see the header — and a batch stand-in for every inline batch of adopted elements. The real states
- * are untouched; a bundle with no adoption in its load is returned as it came.
+ * The bundle a loaded run is handed, with a stand-in state for every adopted child in `loaded` — a
+ * single child or one element of a batch, which the engine reads under the state its row names — see
+ * the header. The real states are untouched; a bundle with no adoption in its load is returned as it came.
  */
 export function withAdoptedStandIns(bundle: WorkflowBundle, loaded: LoadedInstance | undefined): WorkflowBundle {
   const wanted = new Set<string>();
-  const batches = new Set<string>();
   const walk = (node: LoadedInstance | undefined): void => {
     if (node === undefined) return;
     if (node.stateId.startsWith(ADOPTED_STATE_PREFIX)) wanted.add(node.stateId.slice(ADOPTED_STATE_PREFIX.length));
-    if (node.stateId.startsWith(ADOPTED_BATCH_PREFIX)) batches.add(node.stateId.slice(ADOPTED_BATCH_PREFIX.length));
     for (const child of node.children ?? []) walk(child);
   };
   walk(loaded);
-  if (wanted.size === 0 && batches.size === 0) return bundle;
+  if (wanted.size === 0) return bundle;
   const states = { ...bundle.states };
   for (const stateId of wanted) {
     const real = bundle.states[stateId];
     if (real !== undefined) states[adoptedStandInId(stateId)] = standInOf(real, stateId);
   }
-  for (const stateId of batches) {
-    const real = bundle.states[stateId];
-    if (real !== undefined) states[adoptedBatchStandInId(stateId)] = batchStandInOf(real, stateId);
-  }
   return { ...bundle, states };
-}
-
-/**
- * An inline batch's stand-in: every output the mounted state declares, as the ARRAY a batch gathers
- * it into — present for every element, `null` where one produced nothing. Each element's outputs were
- * checked against the state's slots when it was adopted, so the arrays are taken as they come.
- */
-function batchStandInOf(real: LoadedState, stateId: string): LoadedState {
-  const outputs = Object.fromEntries(
-    Object.entries(real.outputs ?? {}).map(([name, { binding: _binding, ...slot }]) => [name, { ...slot, kind: "json", schema: { type: "array" } }]),
-  );
-  return {
-    id: adoptedBatchStandInId(stateId),
-    ...(real.label !== undefined ? { label: real.label } : {}),
-    outputs,
-    slotMeta: {},
-    operation: { kind: "function", functionRef: ADOPTED_FUNCTION, input: {}, output: { name: "value", kind: "json" } },
-  } as unknown as LoadedState;
-}
-
-/** The gathered outputs of an inline batch's elements, in element order — `combineElements`' shape. */
-export function gatherElementOutputs(declared: readonly string[], elements: ReadonlyArray<Record<string, JsonValue>>): Record<string, JsonValue> {
-  const names = new Set(declared);
-  for (const outputs of elements) for (const name of Object.keys(outputs)) names.add(name);
-  return Object.fromEntries([...names].map((name) => [name, elements.map((outputs) => outputs[name] ?? null)]));
 }
 
 /** The mounted state's CURRENT output slots, produced by an operation that is never dispatched. */

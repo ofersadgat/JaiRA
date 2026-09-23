@@ -163,7 +163,7 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
           ? ["added to its batch as element ", { b: String((element.index ?? 0) + 1) }]
           : (element.index ?? 0) === 0
             ? ["the batch is this task alone"]
-            : ["element ", { b: String((element.index ?? 0) + 1) }, " of the list; the rest are made as tasks"],
+            : ["element ", { b: String((element.index ?? 0) + 1) }, element.each === "task" ? " of the list; the rest are made as tasks" : " of the list; the rest run here"],
       );
     }
     if (at.length > 0) facts.push(["stands at ", { b: at }]);

@@ -1109,8 +1109,9 @@ cannot stand for a batch. The person's ruling: "why is it refused? as long as th
 workflow you adopt it into supports that data type it should be fine, no?" A task
 that ran the state a parent mounts by `each` is ONE ELEMENT of that batch. Built in
 `@jaira/persistence` (`adopt.ts`, `load.ts`), `@jaira/shared` (`AdoptedChild`,
-`element-misfit`) and the board's preview, with no upstream change. The statement
-of record is [adoption](../units/adoption.md) and [run-load](../units/run-load.md).
+`element-misfit`) and the board's preview, with one upstream change for the inline
+kind (amended the same day, below). The statement of record is
+[adoption](../units/adoption.md) and [run-load](../units/run-load.md).
 
 - **Its value is what it ran with on the mount's one axis**, and it must fit the
   list's element type: the `items` of the parent input the list is, else of the
@@ -1119,14 +1120,18 @@ of record is [adoption](../units/adoption.md) and [run-load](../units/run-load.m
   element type and what the task has. Its outputs are the element's, checked as any
   adopted child's are. A mount over two lists at once is refused: its elements are
   every combination of them, and one task is an element of one list.
-- **A batch the adoption makes is the task alone.** A plain parent input that
-  nothing determined is recorded `[element]`, `bound` from the task's axis input,
-  and the mirror row carries `element: 0`. A parent that already HAS the batch —
-  it entered the mount, and the batch is the last thing it entered — gets the task
-  APPENDED: its row carries `element: n`, n the batch's length, and shares the
-  batch's occurrence, so the load hands the engine one batch of n + 1. The list the
-  parent recorded is history and is not rewritten; what a later fan-in reads is the
-  mount's record, which now gathers n + 1 outputs.
+- **A batch the adoption makes is the task alone, or the task in its place.** A
+  plain parent input that nothing determined is recorded `[element]`, `bound` from
+  the task's axis input, and the mirror row carries `element: 0`. A list that holds
+  more — supplied, or an adopted sibling's output — places the task at its index,
+  and the parent runs the rest. A parent that already HAS the batch — it entered
+  the mount, and the batch is the last thing it entered — gets the task APPENDED:
+  its row carries `element: n`, n past every element the batch entered and past
+  the list the parent recorded (a batch stopped short still owes the elements it
+  never reached, at their places), and shares the batch's occurrence, so the load
+  hands the engine one batch of n + 1. The list the parent recorded is history and
+  is not rewritten; what a later fan-in reads is the mount's record, which now
+  gathers n + 1 outputs.
 - **`.each` reads as the row's `element`** — `.each.index`, and `.each.axis.<input>`
   on the one axis. Nothing evaluates it again: the element's inputs are what the
   task ran with.
@@ -1134,14 +1139,13 @@ of record is [adoption](../units/adoption.md) and [run-load](../units/run-load.m
   is handed its row with the others and reads its runtime row as it reads any
   element's task. A supplied list that holds more than the task places it at its
   index, and the host makes the rest.
-- **`each: "inline"`**: the engine loads a recorded inline element under the MOUNTED
-  state and recomputes it from its own record, which an adopted element does not
-  have in the parent. So an inline batch whose every element is adopted is loaded as
-  ONE history row under a batch stand-in carrying the gathered outputs. An inline
-  batch the parent ran itself cannot take an adopted element and is refused, and a
-  batch an adoption makes is the task alone, since nothing would run the others.
-  One upstream change would lift both: load a recorded element under its row's own
-  `stateId`, as a single child already is (`loadTerminatedFanOut`, `runFanOut`).
+- **`each: "inline"`**: the adopted element is its own row under the stand-in, as a
+  single adopted child is, and the engine reads it there beside elements the parent
+  ran itself. A batch short of its list runs the rest; the fan-in gathers every
+  element's outputs. *(Amended 2026-09-22, second — see below. As first built, the
+  engine read a recorded inline element under the MOUNTED state, so an inline batch
+  of adopted elements was folded into one row under a batch stand-in, and an inline
+  batch the parent ran itself, and a list the task was not alone in, were refused.)*
 - **`each: "split"`**: a list that is a plain parent input nobody supplied is now
   `[element]` too — a split over one element is no split, and the parent runs on
   with it. A parent that has already split is refused: its other elements are
@@ -1155,7 +1159,30 @@ of record is [adoption](../units/adoption.md) and [run-load](../units/run-load.m
   appended element takes that element out.
 - **The drop says so.** The preview reads "{workflow} runs {child} once per element
   of a list", with "each as a task" for `"task"`, and says whether the batch is the
-  task alone or where it is added.
+  task alone, where in the list it stands and who runs the rest, or where it is added.
+
+**Amended 2026-09-22, second — an inline element is read under its own stand-in**
+(upstream `@declarative-ai/hw`, branch `task/adopted-inline-elements`). The engine
+now loads a recorded element of a fan-out under `bundle.states[element.stateId]`,
+falling back to the mounted state, in both `loadTerminatedFanOut` and `runFanOut` —
+as `loadTerminated` already read a single child. And `resumeFanOut` re-reads the
+list not only when an element is live but when the parent still owes the batch its
+answer and every recorded element succeeded, and never counts fewer elements than
+were recorded. With that:
+
+- The batch stand-in (`jaira:adopted-batch:<state>`) and the load's fold into it are
+  deleted. Every adopted element, inline or for the host, is one row under
+  `jaira:adopted:<state>` with its own `element`.
+- An adopted element joins an inline batch the parent ran itself, appended past it.
+  An element the parent owes there — one that failed — is still owed: the load does
+  not count an appended element's entry as the parent moving on, so the failure is
+  retried where it stood when the parent resumes.
+- A list that holds more than the task places it, and the parent runs the other
+  elements while the adopted one loads as done; `.each.index` of each run element is
+  its place in the list.
+- Undo and retry are unchanged: an Undo that removes the parent removes what it ran,
+  and a rewind past an appended element's row takes it out, the fan-in reading the
+  rest.
 
 ## Open
 
