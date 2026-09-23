@@ -1081,22 +1081,15 @@ function MadeRow({
 }
 
 /**
- * A move's INPUT QUESTION, where the move asked it (decision 0005, the rulings of 2026-09-22): a row
- * that says what the move is, and under it the question itself — the gate, live while it is open and
- * as it was answered once it is not. The body is the host's (`body`): only it holds the pending gate
- * and the channel that answers it.
+ * A move's INPUT QUESTION, where the move asked it (decision 0005, the rulings of 2026-09-22): the
+ * question UI and nothing around it ("it should use the question UI") — its heading says what the
+ * move is, live while it is open and as it was answered once it is not. The body is the host's
+ * (`body`): only it holds the pending question and the channel that answers it.
  */
 function MoveQuestionRow({ asked, body }: { asked: MoveQuestionView; body?: ((asked: MoveQuestionView) => ReactNode) | undefined }): JSX.Element {
-  const target = asked.targetLabel ?? asked.target;
-  const verb = asked.outcome === undefined ? "asked" : asked.outcome === "moved" ? "answered" : asked.outcome === "refused" ? "answered" : "withdrawn";
   return (
-    <div className="sb-note step sb-asked" role="note" data-asked={asked.requestId}>
-      <Icon name="choice" className="sb-note-icon" />
-      <span className="sb-note-verb">{verb}</span>
-      <span className="sb-note-text">
-        for the move to <b>{target}</b> · {asked.missing.map((m) => m.name).join(", ")}
-      </span>
-      {body !== undefined ? <div className="sb-move-question">{body(asked)}</div> : null}
+    <div className="sb-move-question" data-asked={asked.requestId}>
+      {body !== undefined ? body(asked) : null}
     </div>
   );
 }

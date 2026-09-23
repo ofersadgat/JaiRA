@@ -97,6 +97,13 @@ describe("what the gallery covers", () => {
     for (const knob of ["options", "comments", "multiple", "require_confirm", "custom", "questions", "follow_up", "icon"]) {
       expect(keys, `choose_option has no card showing ${knob}`).toContain(knob);
     }
+    // And a part's own knobs, the typed one included.
+    const partKeys = new Set(
+      chooser.variants.flatMap((v) => ((v.sample as { questions?: Record<string, unknown>[] }).questions ?? []).flatMap((q) => Object.keys(q))),
+    );
+    for (const knob of ["header", "description", "custom", "optional", "default", "schema"]) {
+      expect(partKeys, `choose_option has no card showing questions[].${knob}`).toContain(knob);
+    }
     const form = GALLERY_GROUPS.find((g) => g.id === "fill_form")!;
     const fieldKeys = new Set(
       form.variants.flatMap((v) => ((v.sample as { fields: Record<string, unknown>[] }).fields).flatMap((f) => Object.keys(f))),

@@ -88,7 +88,7 @@ export const AUTOPILOT_OUTPUT_SCHEMA: JsonValue = {
 /** The result shape each answerable component takes back, in the words the model is given. */
 const SHAPES: Record<string, string> = {
   choose_option:
-    "`{ \"decision\": \"<one of the options' values>\", \"comments\": \"<optional>\" }` — or, when the config carries `questions`, `{ \"answers\": { \"<question name>\": \"<that question's option value>\" } }` with one key per question that is not optional.",
+    "`{ \"decision\": \"<one of the options' values>\", \"comments\": \"<optional>\" }` — or, when the config carries `questions`, `{ \"answers\": { \"<question name>\": \"<that question's option value>\" } }` with one key per question that is not optional — a question that carries a `schema` takes a value of that schema instead (its options are that value's words).",
   review_artifact: "`{ \"decision\": \"<one of the options' values>\", \"comments\": \"<optional>\" }`.",
   edit_artifact: "`{ \"content\": \"<the whole document, as it should now read>\" }`.",
   fill_form: "`{ \"<field name>\": <value of that field's type> }`, one key per field that is not optional.",

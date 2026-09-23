@@ -5520,8 +5520,8 @@ export class AppService {
 
   /**
    * Park the INPUT QUESTION a legal move needs answered, in the task's own conversation (decision
-   * 0005, the rulings of 2026-09-22, 2): a `fill_form` gate over the inputs' own schemas, durable as
-   * every gate is, with the move it holds journaled beside it (`moveQuestion.ts`). The renderer draws
+   * 0005, the rulings of 2026-09-22, 2): the question UI, one step per input, typed by the input's own
+   * schema, durable as every gate is, with the move it holds journaled beside it (`moveQuestion.ts`). The renderer draws
    * it where the journal row sits; answering it is {@link answerMoveQuestion}.
    */
   private async askMoveQuestion(open: ProjectSession, question: MoveQuestion): Promise<{ requestId: string }> {
@@ -5543,12 +5543,11 @@ export class AppService {
     const found = session !== undefined ? openMoveQuestion(session.project, requestId) : undefined;
     if (session === undefined || found === undefined) throw this.refusal("run", `no open move question '${requestId}'`);
     const { taskId, asked } = found;
-    const answers = (value !== null && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, JsonValue>;
-    // The form's own schema, checked with the run's validator — the shape check in the component
-    // contract reads only what is required.
-    const schema = session.project.interactions.get(requestId)?.inputs["schema"];
-    const problem = schema !== undefined ? this.valueCheck()(schema, answers as JsonValue) : undefined;
-    if (problem !== undefined) throw this.refusal("run", `invalid answer: ${problem}`, { project: session.key, taskId });
+    // The question UI's answer, `{ answers: { [input]: value } }` — each value already read as a value
+    // of its input's schema and checked against it (`submitInteraction`, before this is reached).
+    const record = (value !== null && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, JsonValue>;
+    const held = record["answers"];
+    const answers = (held !== null && typeof held === "object" && !Array.isArray(held) ? held : {}) as Record<string, JsonValue>;
     const given = Object.fromEntries(Object.entries(answers).filter(([, v]) => v !== undefined && v !== null && v !== ""));
     const supplied = Object.fromEntries(Object.entries(given).map(([name, v]) => [name, { value: v, via: "asked" as const }]));
     const result = await this.connectTask({
@@ -6860,6 +6859,18 @@ export class AppService {
     if (contract) {
       const check = validateComponentResult(contract.config, value, contract.inputs);
       if (!check.ok) throw this.refusal("run", `invalid ${contract.config.component} response: ${check.errors}`);
+      // A TYPED question's answer is a value of its schema, checked here with the run's validator —
+      // the contract above reads only its shape, having no validator of its own. The control already
+      // held the step until the schema accepted it; this is the untrusted half being asked again.
+      if (contract.config.component === "choose_option" && contract.config.questions !== undefined) {
+        const answers = ((value as { answers?: Record<string, JsonValue> }).answers ?? {}) as Record<string, JsonValue>;
+        for (const question of contract.config.questions) {
+          const given = answers[question.name];
+          if (question.schema === undefined || given === undefined) continue;
+          const problem = this.valueCheck()(question.schema, given);
+          if (problem !== undefined) throw this.refusal("run", `invalid answer: ${question.name}${problem.path} ${problem.message}`);
+        }
+      }
     }
     // A MOVE's question (decision 0005, the rulings of 2026-09-22): no run is waiting on it — the
     // answer takes the move it holds.

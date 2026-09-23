@@ -4,12 +4,13 @@
  *
  * A legal move whose target lacks required inputs does not wait on a separate conversation, and no
  * model asks for them in words: the host parks a QUESTION in the task's conversation, drawn with the
- * gate UI and filled through the one schema form, and answering it takes the move with the values
- * recorded `asked`. Two writes make it durable, one for each thing that has to survive a restart:
+ * question UI — the multi-part `choose_option`, one step per input (`moveQuestionConfig`) — and
+ * answering it takes the move with the values recorded `asked`. Two writes make it durable, one for
+ * each thing that has to survive a restart:
  *
- *  - the GATE — a `pending_interactions` row (`fill_form` over the inputs' own declared schemas), which
- *    is what every gate list, the inbox and the conversation already read, so it is offered again after
- *    a restart exactly as a parked gate is;
+ *  - the GATE — a `pending_interactions` row (a `choose_option` whose steps carry the inputs' own
+ *    declared names, descriptions and schemas), which is what every gate list, the inbox and the
+ *    conversation already read, so it is offered again after a restart exactly as a parked gate is;
  *  - the MOVE — a `jaira.moveAsked` row in the task's journal, saying what move the answer takes and
  *    where in the task's history it was asked. `jaira.moveAnswered` closes it.
  *
@@ -22,8 +23,7 @@ import {
   MOVE_ANSWERED_EVENT,
   MOVE_ASKED_EVENT,
   MOVE_QUESTION_PREFIX,
-  moveQuestionPrompt,
-  moveQuestionSchema,
+  moveQuestionConfig,
   type MoveAnsweredEvent,
   type MoveAskedEvent,
 } from "@jaira/shared";
@@ -35,18 +35,13 @@ export function moveQuestionId(nowMs = Date.now()): string {
   return `${MOVE_QUESTION_PREFIX}${nowMs.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** The gate a move question is drawn as: its inputs are the `fill_form` contract. */
-export function moveQuestionInputs(title: string, targetLabel: string, missing: MoveAskedEvent["missing"], optional: readonly MoveAskedEvent["missing"][number][] = []): Record<string, JsonValue> {
-  return { prompt: moveQuestionPrompt(title, targetLabel, missing), schema: moveQuestionSchema(missing, optional) as JsonValue };
-}
-
 /** Park the question: the gate row, then the journal row that says what answering it does. */
 export function parkMoveQuestion(project: Project, question: MoveQuestion, requestId: string, nowMs = Date.now()): MoveAskedEvent {
   project.interactions.open({
     requestId,
     taskId: question.taskId,
-    component: "fill_form",
-    inputs: moveQuestionInputs(question.title, question.targetLabel, question.missing, question.optional),
+    component: "choose_option",
+    inputs: moveQuestionConfig(question.title, question.targetLabel, question.missing, question.optional),
     createdAt: nowMs,
   });
   const row: MoveAskedEvent = {

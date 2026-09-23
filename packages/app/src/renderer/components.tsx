@@ -16,6 +16,7 @@ import {
   choicesOfQuestions,
   diffStrategyFor,
   displayText,
+  readAnswer,
   editorKindOf,
   mimeOfPath,
   type ApproveToolCallConfig,
@@ -128,10 +129,15 @@ function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOption
   // nothing about it, and nothing here offers the person a say.
   if (config.questions !== undefined) {
     const submit = (): void => {
-      const out: Record<string, string | string[]> = {};
+      const out: Record<string, JsonValue> = {};
       for (const choice of choices) {
         const value = answerOf(choice, answers[choice.question] ?? EMPTY_ANSWER);
-        if (value !== undefined) out[choice.name ?? choice.question] = value;
+        if (value === undefined) continue;
+        // A typed question answers the VALUE its words read as; the stepper held the step until
+        // the schema accepted it, so an unreadable answer cannot reach here.
+        const read = choice.schema !== undefined ? readAnswer(choice.schema, value) : undefined;
+        if (read !== undefined && !read.ok) return;
+        out[choice.name ?? choice.question] = read !== undefined && read.ok ? read.value : value;
       }
       onSubmit({ answers: out });
     };
@@ -644,7 +650,7 @@ function formStartsWith(fields: readonly FormField[], schema: Schema): Record<st
 
 function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>): JSX.Element {
   const readOnly = settled !== undefined;
-  const schema = useMemo(() => (config.schema ?? fillFormSchema(config.fields)) as Schema, [config.schema, config.fields]);
+  const schema = useMemo(() => fillFormSchema(config.fields) as Schema, [config.fields]);
   // Settled: what was submitted, and nothing else — a field the record does not name is drawn NOT SET,
   // because a default the person never saw sent is not their answer.
   const [value, setValue] = useState<Record<string, unknown>>(() =>

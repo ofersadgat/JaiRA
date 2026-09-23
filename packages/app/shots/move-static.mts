@@ -7,14 +7,17 @@
  *  - the move table in the hover preview: an illegal column, the two ASK columns, and inputs that will
  *    be asked (`previewOf` over dry-run answers);
  *  - the table's question put in front of the commit, in the column the task lands in (`MoveConfirm`);
- *  - the INPUT QUESTION in the task's own conversation, where the move asked it — open, answered, and
- *    refused when it came to be taken (`NoteRow` over `notesOf`, the gate a `GateSurface`);
+ *  - the INPUT QUESTION in the task's own conversation, where the move asked it — drawn WITH THE
+ *    QUESTION UI (the ruling: "it should use the question UI"): open, a typed answer refused in place,
+ *    answered, and refused when it came to be taken (`NoteRow` over `notesOf`, the question a
+ *    `GateSurface` over `moveQuestionConfig`) — beside an agent's batch of questions (`QuestionSurface`)
+ *    and an authored stepped `choose_option`, the two it has to read as;
  *  - an adopted task's history EXPANDED under the line that adopted it.
  *
  * `npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/move-static.mts <out.html> [light|dark] [--inline] [--catalog]`
  *
- * `--catalog` also writes the catalog mockups (`reflects: shipped`) of the conversation's two new rows:
- * `docs/ui/assets/run-step-note/{asked,asked-answered,adopted-history}.html`.
+ * `--catalog` also writes the catalog mockups (`reflects: shipped`) of the conversation's rows:
+ * `docs/ui/assets/run-step-note/{asked,asked-enum,asked-boolean,asked-refused-in-place,asked-answered,asked-refused,adopted-history}.html`.
  *
  * `--inline` puts the stylesheet into the page and the faces on Google Fonts, for a page that has to
  * stand on its own (the published mockup). A drag is pointer state a static page cannot have, so the
@@ -26,9 +29,11 @@ import { pathToFileURL } from "node:url";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  moveQuestionPrompt,
-  moveQuestionSchema,
+  GALLERY_SURFACES,
+  choicesOfConfig,
+  moveQuestionConfig,
   parseComponentConfig,
+  type ChooseOptionConfig,
   type BoardCard,
   type BoardColumn,
   type ConnectMissingInput,
@@ -37,11 +42,14 @@ import {
   type MoveQuestionView,
   type NextMove,
   type PendingInteraction,
+  type PendingQuestion,
   type TaskConnectResult,
 } from "@jaira/shared/browser";
 import { Card, Column, ConnectPop, MoveConfirm } from "../src/renderer/board";
 import { previewOf } from "../src/renderer/connectDrag";
-import { GateSurface } from "../src/renderer/components";
+import { GateSurface, QuestionSurface } from "../src/renderer/components";
+import { ChoiceSteps } from "../src/renderer/choices";
+import { Icon } from "../src/renderer/icons";
 import { notesOf } from "../src/renderer/sessionBands";
 import { NoteRow } from "../src/renderer/sessionPanels";
 
@@ -126,6 +134,8 @@ const elsewhereWorking: TaskConnectResult = {
 };
 const QUESTION: ConnectMissingInput = { state: "explore", name: "question", schema: { type: "string", minLength: 1 }, description: "What to find out, in a sentence.", reason: "nothing the task produced fits it" };
 const DEPTH: ConnectMissingInput = { state: "explore", name: "depth", schema: { type: "integer", minimum: 1, maximum: 5 }, description: "How many rounds of looking before a verdict.", reason: "nothing the task produced fits it" };
+const MODE: ConnectMissingInput = { state: "explore", name: "mode", schema: { type: "string", enum: ["fast", "thorough"] }, description: "How hard to look.", reason: "nothing the task produced fits it" };
+const DRY: ConnectMissingInput = { state: "explore", name: "dry", schema: { type: "boolean" }, description: "Whether to look without writing anything down.", reason: "nothing the task produced fits it" };
 const needsInputs: TaskConnectResult = {
   ok: true,
   dryRun: true,
@@ -135,24 +145,56 @@ const needsInputs: TaskConnectResult = {
 // --- the conversation -----------------------------------------------------------------------------
 
 const turn = (seq: number, patch: Partial<ConversationTurn>): ConversationTurn => ({ seq, at: now + seq * 1000, kind: "entered", ...patch }) as ConversationTurn;
-const askedView = { requestId: "move:1", target: "explore", targetLabel: "explore", missing: [QUESTION, DEPTH] };
-const gateOf = (requestId: string): PendingInteraction => {
-  const inputs = { prompt: moveQuestionPrompt("Forge event sources", "explore", [QUESTION, DEPTH]), schema: moveQuestionSchema([QUESTION, DEPTH]) as never };
-  return { requestId, taskId: "t-c", project: "", component: "fill_form", inputs, config: parseComponentConfig("fill_form", inputs), moves: true };
+const askedView: MoveQuestionView = { requestId: "move:1", target: "explore", targetLabel: "explore", missing: [QUESTION, DEPTH, MODE] };
+const ANSWERED = { question: "Which forge events can we poll without a webhook?", depth: 2, mode: "thorough" };
+const moveInputs = moveQuestionConfig("Forge event sources", "explore", [QUESTION, DEPTH, MODE]);
+const gateOf = (requestId: string): PendingInteraction => ({
+  requestId,
+  taskId: "t-c",
+  project: "",
+  component: "choose_option",
+  inputs: moveInputs,
+  config: parseComponentConfig("choose_option", moveInputs),
+  moves: true,
+});
+// What `RunConversation`'s `moveQuestion` draws (runViews.tsx): the question UI, live or as answered.
+const body = (asked: MoveQuestionView): ReactElement =>
+  h(
+    "div",
+    { className: "inline-gate" },
+    asked.outcome === undefined
+      ? h(GateSurface, { pending: gateOf(asked.requestId), onSubmit: noop })
+      : h(GateSurface, {
+          pending: gateOf(asked.requestId),
+          onSubmit: noop,
+          settled: asked.answered !== undefined ? { value: { answers: asked.answered } as never } : {},
+          ...(asked.outcome === "refused" ? { error: `The move could not be taken: ${asked.message ?? "refused"}` } : {}),
+        }),
+  );
+// A typed answer the input's schema cannot read, refused IN PLACE: the chooser's own state, which a
+// static page cannot type into, so the stepper is handed it — under the gate's own heading, as
+// `GateSurface` draws it for `choose_option`.
+const refusedInPlace = (): ReactElement => {
+  const config = parseComponentConfig("choose_option", moveQuestionConfig("Forge event sources", "explore", [DEPTH, QUESTION, MODE])) as ChooseOptionConfig;
+  const choices = choicesOfConfig(config);
+  return h(
+    "div",
+    { className: "sb-move-question" },
+    h(
+      "div",
+      { className: "inline-gate" },
+      h("h3", null, h(Icon, { name: "choice", className: "gate-icon" }), " ", config.prompt),
+      h(ChoiceSteps, { choices, answers: { [choices[0]!.question]: { picked: [], text: "three", own: true } }, onAnswer: noop, onSubmit: noop }),
+    ),
+  );
 };
-const body = (asked: { requestId: string; outcome?: string; answered?: Record<string, unknown>; message?: string }): ReactElement =>
-  asked.outcome === undefined
-    ? h("div", { className: "inline-gate" }, h(GateSurface, { pending: gateOf(asked.requestId), onSubmit: noop }))
-    : h(
-        "div",
-        null,
-        asked.answered !== undefined ? h("div", { className: "inline-gate" }, h(GateSurface, { pending: gateOf(asked.requestId), onSubmit: noop, settled: { value: asked.answered as never } })) : null,
-        h(
-          "p",
-          { className: `sb-move-outcome${asked.outcome === "refused" ? " is-refused" : ""}` },
-          asked.outcome === "moved" ? "Answered — the move to explore was taken." : `Answered, and the move could not be taken: ${asked.message ?? ""}`,
-        ),
-      );
+// A step that is not the first cannot be turned to on a static page, so these ask the enum, and the
+// boolean, first — the same question with its steps in another order.
+const firstStep = (missing: ConnectMissingInput[]): ReactElement => {
+  const inputs = moveQuestionConfig("Forge event sources", "explore", missing);
+  const pending: PendingInteraction = { requestId: "move:2", taskId: "t-c", project: "", component: "choose_option", inputs, config: parseComponentConfig("choose_option", inputs), moves: true };
+  return h("div", { className: "sb", style: { padding: "8px 12px" } }, h("div", { className: "sb-move-question" }, h("div", { className: "inline-gate" }, h(GateSurface, { pending, onSubmit: noop }))));
+};
 const conversationWith = (asked: MoveQuestionView): ReactElement => {
   const notes = notesOf([
     turn(1, { kind: "entered", path: "verdict", stateId: "explore/verdict", instanceId: "i1" }),
@@ -195,6 +237,27 @@ const adoptedView = h(
   ),
 );
 
+// --- the two it has to read as ------------------------------------------------------------------------
+
+const AGENT: PendingQuestion = {
+  requestId: "q-1",
+  taskId: "t-c",
+  questions: [
+    {
+      question: "Which cache interval should the probe use?",
+      header: "Interval",
+      options: [
+        { label: "30 seconds", description: "fresh enough that a settings change is visible almost at once" },
+        { label: "5 minutes", description: "cheaper, at the cost of a stale badge after a write" },
+      ],
+      multiSelect: false,
+    },
+    { question: "Should a failed probe retry?", header: "Retry", options: [{ label: "Yes" }, { label: "No" }], multiSelect: false },
+  ],
+} as PendingQuestion;
+const stepsSample = GALLERY_SURFACES.find((s) => s.id === "choose_option/steps")!.sample as Record<string, unknown>;
+const STEPS: PendingInteraction = { requestId: "g-1", taskId: "t-c", project: "", component: "choose_option", inputs: stepsSample as never, config: parseComponentConfig("choose_option", stepsSample) };
+
 // --- the page -------------------------------------------------------------------------------------
 
 const section = (title: string, bodyEl: ReactElement, bare = false): ReactElement =>
@@ -229,12 +292,17 @@ const page = h(
       h(Column, { name: "ux", count: 1, empty: "—" }, tile(looping, { onMove: noop })),
     ),
   ),
-  section("the input question, in the task's own conversation where the move asked it — open", conversationWith(askedView)),
-  section("…answered: the same form as it was answered, and the move taken", conversationWith({ ...askedView, outcome: "moved", answered: { question: "Which forge events can we poll without a webhook?", depth: 2 } })),
+  section("the input question, in the task's own conversation where the move asked it — THE QUESTION UI, open", conversationWith(askedView)),
+  section("…an enum input's step: its values are the options", firstStep([MODE, QUESTION, DEPTH])),
+  section("…a boolean input's step: Yes and No", firstStep([DRY])),
+  section("…a typed answer its schema cannot read, refused in place: the reason under the step, the step held", h("div", { className: "sb", style: { padding: "8px 12px" } }, refusedInPlace())),
+  section("…answered: the question as it was answered, as any settled question is drawn", conversationWith({ ...askedView, outcome: "moved", answered: ANSWERED })),
   section(
-    "…answered, and refused when it came to be taken (the task had moved on)",
-    conversationWith({ ...askedView, outcome: "refused", answered: { question: "Which forge events can we poll without a webhook?", depth: 2 }, message: "'Forge event sources' is running in another process — move it there" }),
+    "…answered, and refused when it came to be taken (the task had moved on) — in the question's own error line",
+    conversationWith({ ...askedView, outcome: "refused", answered: ANSWERED, message: "'Forge event sources' is running in another process — move it there" }),
   ),
+  section("BESIDE IT — an agent's batch of questions (AskUserQuestion), as the conversation hosts it", h("div", { className: "sb", style: { padding: "8px 12px" } }, h("div", { className: "inline-gate" }, h(QuestionSurface, { pending: AGENT, onSubmit: noop })))),
+  section("BESIDE IT — an authored stepped choose_option (the gallery's steps card), as the conversation hosts it", h("div", { className: "sb", style: { padding: "8px 12px" } }, h("div", { className: "inline-gate" }, h(GateSurface, { pending: STEPS, onSubmit: noop })))),
   section("an adoption expands the conversation — the adopted task's history, open where it was adopted", adoptedView),
 );
 
@@ -282,6 +350,10 @@ if (process.argv.includes("--catalog")) {
     console.log(`wrote run-step-note/${state}.html`);
   };
   catalog("asked", 720, conversationWith(askedView));
-  catalog("asked-answered", 720, conversationWith({ ...askedView, outcome: "moved", answered: { question: "Which forge events can we poll without a webhook?", depth: 2 } }));
+  catalog("asked-enum", 720, firstStep([MODE, QUESTION, DEPTH]));
+  catalog("asked-boolean", 720, firstStep([DRY]));
+  catalog("asked-refused-in-place", 720, h("div", { className: "sb", style: { padding: "8px 12px" } }, refusedInPlace()));
+  catalog("asked-answered", 720, conversationWith({ ...askedView, outcome: "moved", answered: ANSWERED }));
+  catalog("asked-refused", 720, conversationWith({ ...askedView, outcome: "refused", answered: ANSWERED, message: "'Forge event sources' is running in another process — move it there" }));
   catalog("adopted-history", 720, adoptedView);
 }

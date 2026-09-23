@@ -92,6 +92,14 @@ function files(): Record<string, JsonValue> {
     },
     "lib/second": gate("second", flag),
     "lib/needs": gate("needs", { text: { schema: { type: "string", minLength: 3 }, description: "What to call it." } }),
+    // One of each kind of step the question UI makes of an input the task produced nothing for: an
+    // enum, a bounded number and a list — the last two answered in the question's own-answer box. (A
+    // boolean is `flag` below: here the task's own `confirmed` would fill it by schema.)
+    "lib/many": gate("many", {
+      mode: { schema: { type: "string", enum: ["fast", "slow"] }, description: "How to run it." },
+      limit: { schema: { type: "integer", minimum: 1 }, description: "How many at most." },
+      tags: { schema: { type: "array", items: { type: "string" } }, description: "Labels to put on it." },
+    }),
   };
 }
 
@@ -400,19 +408,28 @@ describe("the input question — asked in the task's own conversation", () => {
     expect(turn?.asked).toMatchObject({ requestId, target: "lib/needs", missing: [TEXT] });
     expect(hostRows(product, "jaira.moveAsked")).toMatchObject([{ requestId, move: { target: "lib/needs", by: "person" }, missing: [TEXT] }]);
 
-    // A restart: the question is still being asked — the same gate, drawn by the schema form.
+    // A restart: the question is still being asked — the same question, drawn by the question UI.
     await service.close();
     await open();
     seen.clear(); // a new hub mints request ids afresh
     const pending = service.pendingInteractions().find((p) => p.requestId === requestId);
-    expect(pending).toMatchObject({ taskId: product, component: "fill_form", moves: true, config: { component: "fill_form", fields: [], schema: { type: "object", required: ["text"] } } });
+    expect(pending).toMatchObject({
+      taskId: product,
+      component: "choose_option",
+      moves: true,
+      config: {
+        component: "choose_option",
+        prompt: "Moving 'Ran feat/product' to needs needs an input.",
+        questions: [{ name: "text", header: "text", question: "What to call it.", custom: true, options: [], schema: { type: "string", minLength: 3 } }],
+      },
+    });
     expect(pending?.resumes).toBeUndefined();
 
-    // The form's own schema is enforced in main: two letters is not three.
-    await expect(Promise.resolve().then(() => service.submitInteraction(requestId, { text: "ab" }))).rejects.toThrow(/invalid answer/);
+    // The input's own schema is enforced in main: two letters is not three — and the question stays.
+    await expect(Promise.resolve().then(() => service.submitInteraction(requestId, { answers: { text: "ab" } }))).rejects.toThrow(/invalid answer: text/);
     expect(service.pendingInteractions().some((p) => p.requestId === requestId)).toBe(true);
 
-    await service.submitInteraction(requestId, { text: "Widget" });
+    await service.submitInteraction(requestId, { answers: { text: "Widget" } });
     expect(service.pendingInteractions().some((p) => p.requestId === requestId)).toBe(false);
     expect(documents()).toHaveLength(1);
     const parent = metaOf(product)!.origin!.taskId;
@@ -426,11 +443,46 @@ describe("the input question — asked in the task's own conversation", () => {
     const taskId = await standingIn("feat", []); // at product
     const done = ok(await service.connectTask({ taskId, target: "feat/ship", skip: true }));
     expect(done.asked?.missing).toMatchObject([{ state: "feat/ship", name: "flag" }]);
+    // A boolean is asked as two answers, Yes and No — a value of its schema, not a word.
+    expect(service.pendingInteractions().find((p) => p.requestId === done.asked!.requestId)?.config).toMatchObject({
+      component: "choose_option",
+      questions: [{ name: "flag", header: "flag", question: "Whether the step before was confirmed.", options: [{ value: "true", label: "Yes" }, { value: "false", label: "No" }], schema: BOOLEAN }],
+    });
     expect(journal(taskId).some((e) => e.type === "transition.taken")).toBe(false);
-    await service.submitInteraction(done.asked!.requestId, { flag: true });
+    await service.submitInteraction(done.asked!.requestId, { answers: { flag: true } });
     expect(await parked()).toMatchObject({ state: "ship", inputs: { flag: true } });
     expect(hostRows(taskId, "jaira.supplied")).toMatchObject([{ to: "ship", provenance: { flag: { via: "asked" } } }]);
     expect(ended(taskId)).toContainEqual(["ux", "skipped"]);
+  });
+
+  it("is one step of the question UI per missing input: an enum's values as options, anything else in the own-answer box", async () => {
+    const product = await ran("feat/product", [true]);
+    const done = ok(await service.connectTask({ taskId: product, target: "lib/many" }));
+    const requestId = done.asked!.requestId;
+    const pending = service.pendingInteractions().find((p) => p.requestId === requestId)!;
+    expect(pending.component).toBe("choose_option");
+    const config = pending.config as Extract<typeof pending.config, { component: "choose_option" }>;
+    expect(config.questions!.map((q) => q.name).sort()).toEqual(["limit", "mode", "tags"]);
+    const step = (name: string) => config.questions!.find((q) => q.name === name)!;
+    // The chip is the input's name; the question is its declared description.
+    expect(step("mode")).toMatchObject({ header: "mode", question: "How to run it.", options: [{ value: "fast" }, { value: "slow" }] });
+    expect(step("mode").custom).toBeUndefined();
+    expect(step("limit")).toMatchObject({ question: "How many at most.", custom: true, options: [], schema: { type: "integer", minimum: 1 } });
+    expect(step("tags")).toMatchObject({ custom: true, options: [], schema: { type: "array", items: { type: "string" } } });
+
+    // An answer the options do not hold is refused by the contract; a typed one its schema refuses, by
+    // the run's validator. Either way the question is still asked.
+    const answers = { mode: "fast", limit: 3, tags: ["x", "y"] };
+    const submit = (value: Record<string, JsonValue>) => Promise.resolve().then(() => service.submitInteraction(requestId, { answers: value }));
+    await expect(submit({ ...answers, mode: "medium" })).rejects.toThrow(/invalid choose_option response: result.answers.mode/);
+    await expect(submit({ ...answers, limit: 0 })).rejects.toThrow(/invalid answer: limit/);
+    await expect(submit({ ...answers, tags: "x, y" })).rejects.toThrow(/invalid answer: tags/);
+    expect(service.pendingInteractions().some((p) => p.requestId === requestId)).toBe(true);
+
+    // Answered: the move is taken with every value as its own type.
+    await submit(answers);
+    expect(await parked()).toMatchObject({ state: "many", inputs: answers });
+    expect(hostRows(product, "jaira.moveAnswered")).toMatchObject([{ requestId, outcome: "moved", answered: answers }]);
   });
 
   it("the dry run says what will be asked, and writes nothing", async () => {

@@ -549,7 +549,7 @@ describe("rule 3 — the workflow is modified", () => {
     // Nothing moved: no document, no task, the source its own — only the question, in ITS conversation.
     expect({ tasks: taskIds(), documents: documents() }).toEqual(before);
     expect(metaOf(product)?.origin).toBeUndefined();
-    expect(service.pendingInteractions()).toMatchObject([{ requestId: asked.asked!.requestId, taskId: product, component: "fill_form", moves: true }]);
+    expect(service.pendingInteractions()).toMatchObject([{ requestId: asked.asked!.requestId, taskId: product, component: "choose_option", moves: true }]);
     expect(no(await service.connectTask({ taskId: product, target: "lib/nowhere" })).refusal).toMatchObject({ code: "unknown-target", message: "no state 'lib/nowhere' was found on the workflow path" });
   });
 });

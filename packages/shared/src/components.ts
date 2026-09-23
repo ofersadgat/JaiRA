@@ -141,10 +141,108 @@ export interface Choice {
   optional?: boolean;
   /** The option pre-picked when the question first appears — the reading the author took. */
   default?: string;
+  /**
+   * The answer is a VALUE of this JSON Schema, not a word (a multi-part `choose_option`'s
+   * `questions[].schema`): a pick and an own answer are both read as one ({@link readAnswer}), and
+   * the control holds a step whose answer the schema refuses, saying why, until it is changed.
+   */
+  schema?: JsonValue;
 }
 
 /** The "own answer" field an authored state offers when it says `custom: true`. */
 const OWN_ANSWER: ChoiceFreeText = { label: "Your own answer", placeholder: "Type your own answer…", role: "instead" };
+
+// ---------------------------------------------------------------------------------------------------
+// typed answers
+// ---------------------------------------------------------------------------------------------------
+
+/** The JSON types a schema admits at its top — `undefined` when it names none (anything goes). */
+function typesOf(schema: JsonValue): Set<string> | undefined {
+  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return undefined;
+  const type = (schema as Record<string, JsonValue>)["type"];
+  if (typeof type === "string") return new Set([type]);
+  if (Array.isArray(type)) return new Set(type.filter((t): t is string => typeof t === "string"));
+  return undefined;
+}
+
+/** The JSON type of a parsed value, in schema words (`integer` is a `number` too — see {@link admits}). */
+function jsonTypeOf(value: JsonValue): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+const admits = (types: Set<string>, value: JsonValue): boolean => {
+  const type = jsonTypeOf(value);
+  return types.has(type) || (type === "number" && types.has("integer") && Number.isInteger(value));
+};
+
+/**
+ * The words a value is offered and typed as: a string is itself, anything else is its JSON — which
+ * is how an enum member becomes an option's `value` and how a recorded typed answer is drawn again.
+ */
+export function answerText(value: JsonValue): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** What an own answer is written as, for a schema whose values are not text. */
+function expecting(types: Set<string> | undefined): string {
+  if (types?.has("object") === true) return 'a JSON object, like {"key": "value"}';
+  if (types?.has("array") === true) return 'a JSON list, like ["one", "two"]';
+  if (types?.has("number") === true || types?.has("integer") === true) return "a number";
+  if (types?.has("boolean") === true) return "true or false";
+  return "JSON";
+}
+
+/** How the own-answer box invites a value of `schema` — words for text, the shape otherwise. */
+export function placeholderFor(schema: JsonValue): string {
+  const types = typesOf(schema);
+  if (types === undefined || types.has("string")) return OWN_ANSWER.placeholder!;
+  return `Type ${expecting(types)}…`;
+}
+
+/** One answer's words as a value of `schema` — see {@link readAnswer}. */
+function readOne(schema: JsonValue, text: string): { ok: true; value: JsonValue } | { ok: false; error: string } {
+  // A declared member reads as itself: an enum of numbers offered as "3" answers 3.
+  const members = schema !== null && typeof schema === "object" && !Array.isArray(schema) ? (schema as Record<string, JsonValue>)["enum"] : undefined;
+  if (Array.isArray(members)) {
+    const hit = members.find((member) => answerText(member) === text);
+    if (hit !== undefined) return { ok: true, value: hit };
+  }
+  const types = typesOf(schema);
+  const text_ = types === undefined || types.has("string");
+  if (types !== undefined && types.size === 1 && text_) return { ok: true, value: text };
+  let parsed: JsonValue;
+  try {
+    parsed = JSON.parse(text) as JsonValue;
+  } catch {
+    return text_ ? { ok: true, value: text } : { ok: false, error: `expects ${expecting(types)}` };
+  }
+  // Words that happen to parse are still words where the schema takes text and not that JSON type.
+  if (types !== undefined && text_ && !admits(types, parsed)) return { ok: true, value: text };
+  return { ok: true, value: parsed };
+}
+
+/**
+ * An answer read as a VALUE of its question's schema ({@link Choice.schema}): a picked option by its
+ * value, an own answer by what was typed. Text is taken as written where the schema takes text, and
+ * as JSON otherwise — so `3` answers an integer, `true` a boolean and `{"a": 1}` an object. A
+ * multi-select's picks are each read against the schema's `items`.
+ *
+ * Only the reading: whether the value then FITS the schema is the run's validator's to say (main's
+ * `schema:check`), which the control asks before a step can be confirmed and main asks again on submit.
+ */
+export function readAnswer(schema: JsonValue, answer: string | readonly string[]): { ok: true; value: JsonValue } | { ok: false; error: string } {
+  if (typeof answer === "string") return readOne(schema, answer);
+  const items = schema !== null && typeof schema === "object" && !Array.isArray(schema) ? ((schema as Record<string, JsonValue>)["items"] ?? true) : true;
+  const out: JsonValue[] = [];
+  for (const one of answer) {
+    const read = readOne(items, one);
+    if (!read.ok) return read;
+    out.push(read.value);
+  }
+  return { ok: true, value: out };
+}
 
 /**
  * What an authored `choose_option` (or a review's decision row) asks, as the renderer draws it.
@@ -163,7 +261,8 @@ export function choicesOfConfig(config: ChooseOptionConfig | ReviewArtifactConfi
       if (q.multiple === true) choice.multiple = true;
       if (q.optional === true) choice.optional = true;
       if (q.default !== undefined) choice.default = q.default;
-      if (q.custom === true) choice.freeText = OWN_ANSWER;
+      if (q.custom === true) choice.freeText = q.schema === undefined ? OWN_ANSWER : { ...OWN_ANSWER, placeholder: placeholderFor(q.schema) };
+      if (q.schema !== undefined) choice.schema = q.schema;
       return choice;
     });
   }
@@ -285,6 +384,7 @@ export interface ChoiceQuestion {
   question: string;
   header?: string;
   description?: string;
+  /** The choices. Absent (empty) only with `custom`: the question is answered in the person's own words. */
   options: ComponentOption[];
   multiple?: boolean;
   /** Offer an "own answer" text box — any non-empty string is then accepted. */
@@ -293,6 +393,13 @@ export interface ChoiceQuestion {
   optional?: boolean;
   /** Pre-picked when the question appears. Must be one of the options. */
   default?: string;
+  /**
+   * The answer is a VALUE of this JSON Schema rather than a word: the pick or own answer is read as
+   * one ({@link readAnswer}) and must satisfy it — the control holds the step until it does, and main
+   * checks it again with the run's validator. An option's `value` is then the value's words
+   * ({@link answerText}), so an enum member `3` is offered as `"3"` and answers `3`.
+   */
+  schema?: JsonValue;
 }
 
 export interface ChooseOptionConfig {
@@ -362,15 +469,7 @@ export interface EditArtifactConfig {
 export interface FillFormConfig {
   component: "fill_form";
   prompt: string;
-  /** The form's fields. EMPTY when `schema` carries the form instead — the two spellings are exclusive. */
   fields: FormField[];
-  /**
-   * The form as a whole JSON Schema object — for values the field subset cannot say (an object, a
-   * list, a number with bounds). Drawn by the same schema form; its `required` are required. A host
-   * that parks one checks the answer against the schema itself (the move question does, with the
-   * run's validator), since the shape check here reads only `required`.
-   */
-  schema?: Record<string, JsonValue>;
 }
 
 export interface ConfirmActionConfig {
@@ -606,11 +705,20 @@ function questions(raw: unknown, where: string): ChoiceQuestion[] {
     const name = str(record["name"], `${where}[${i}].name`);
     if (names.has(name)) throw new ConfigError(`${where}[${i}].name '${name}' is used twice — answers are keyed by it`);
     names.add(name);
+    // A question answered only in the person's own words has nothing to offer but the box.
+    const ownOnly = record["options"] === undefined && record["custom"] === true;
     const question: ChoiceQuestion = {
       name,
       question: str(record["question"], `${where}[${i}].question`),
-      options: options(record["options"], `${where}[${i}].options`),
+      options: ownOnly ? [] : options(record["options"], `${where}[${i}].options`),
     };
+    if (record["schema"] !== undefined) {
+      const schema = record["schema"];
+      if (typeof schema !== "boolean" && (schema === null || typeof schema !== "object" || Array.isArray(schema))) {
+        throw new ConfigError(`${where}[${i}].schema must be a JSON Schema (an object or a boolean)`);
+      }
+      question.schema = schema as JsonValue;
+    }
     if (record["header"] !== undefined) question.header = str(record["header"], `${where}[${i}].header`);
     if (record["description"] !== undefined) {
       question.description = str(record["description"], `${where}[${i}].description`);
@@ -699,17 +807,8 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
       if (config["source"] !== undefined) parsed.source = str(config["source"], "edit_artifact.source");
       return parsed;
     }
-    case "fill_form": {
-      const schema = config["schema"];
-      if (schema !== undefined) {
-        if (config["fields"] !== undefined) throw new ConfigError("fill_form.schema and fill_form.fields are exclusive — one form");
-        if (schema === null || typeof schema !== "object" || Array.isArray(schema) || (schema as { type?: unknown }).type !== "object") {
-          throw new ConfigError('fill_form.schema must be a JSON Schema object with type "object"');
-        }
-        return { component, prompt, fields: [], schema: schema as Record<string, JsonValue> };
-      }
+    case "fill_form":
       return { component, prompt, fields: fields(config["fields"], "fill_form.fields") };
-    }
     case "confirm_action":
       return {
         component,
@@ -916,6 +1015,15 @@ export function validateComponentResult(
             if (question.optional === true) continue;
             return bad(`result.answers.${question.name} is required`);
           }
+          if (question.schema !== undefined) {
+            // A typed answer: a pick is one of the options by its words, and an own answer is any
+            // value — whether it fits the schema is the run's validator's to say, which main asks.
+            if (question.custom === true) continue;
+            const words = question.multiple === true && Array.isArray(value) ? value.map((one) => answerText(one as JsonValue)) : answerText(value as JsonValue);
+            const picked = checkPick(`result.answers.${question.name}`, words, question.options, { multiple: question.multiple });
+            if (picked !== undefined) return bad(picked);
+            continue;
+          }
           const checked = checkPick(`result.answers.${question.name}`, value, question.options, question);
           if (checked !== undefined) return bad(checked);
         }
@@ -963,16 +1071,6 @@ export function validateComponentResult(
     }
     case "fill_form": {
       const problems: string[] = [];
-      if (config.schema !== undefined) {
-        // The shape the form promises and nothing more: every required name answered. The values
-        // themselves are the schema's to judge, which the host that parked the form does.
-        const required = Array.isArray(config.schema["required"]) ? (config.schema["required"] as unknown[]).filter((n): n is string => typeof n === "string") : [];
-        for (const name of required) {
-          const raw = result[name];
-          if (raw === undefined || raw === null || raw === "") problems.push(`result.${name} is required`);
-        }
-        return problems.length === 0 ? { ok: true } : bad(problems.join("; "));
-      }
       for (const field of config.fields) {
         const present = Object.prototype.hasOwnProperty.call(result, field.name);
         const raw = result[field.name];

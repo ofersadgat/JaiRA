@@ -21,6 +21,7 @@
  * conversation (`MoveQuestion`), never by a separate conversation or a model in words.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import { answerText } from "./components";
 import type { ConnectMissingInput } from "./connect";
 
 /**
@@ -113,9 +114,9 @@ export interface NextMove {
 
 /**
  * A legal move whose target still lacks required inputs ASKS FOR THEM in the task's own conversation
- * (the rulings of 2026-09-22, 2): the host parks a question there — a `fill_form` gate over the
- * inputs' own declared schemas, drawn by the one schema form — and answering it supplies the inputs,
- * recorded `asked`, and takes the move. The question is a gate like any other, so it outlives the
+ * (the rulings of 2026-09-22, 2): the host parks a question there — drawn with the QUESTION UI, one
+ * step per input ({@link moveQuestionConfig}) — and answering it supplies the inputs, recorded
+ * `asked`, and takes the move. The question is a gate like any other, so it outlives the
  * process (`pending_interactions`), and the journal says where in the task's history it was asked.
  *
  * Its request id carries this prefix, so a reader that only has the id — the inbox, the gate list —
@@ -161,24 +162,64 @@ export interface MoveAnsweredEvent {
 }
 
 /**
- * The question's form: each input under its OWN declared name, with its declared schema and
- * description — nothing the platform names (§0). Required inputs are required; optional ones may be
- * left out.
+ * One input the move asks for, as ONE STEP of the question UI (the rulings of 2026-09-22, 2: "it
+ * should use the question ui") — a part of a multi-part `choose_option`, keyed by the input's OWN
+ * declared name, which is also its chip; the question is the input's declared description (§0:
+ * nothing the platform names). The input's schema is the step's `schema`, so what is answered is a
+ * value of it:
+ *
+ *  - an `enum` offers its members as options (a list of an enum offers them as a multi-select);
+ *  - a `boolean` offers Yes and No;
+ *  - anything else is answered in the question UI's own-answer box — text as written, JSON otherwise
+ *    (a number, an object, a list) — and the step holds, saying why, until the schema accepts it.
  */
-export function moveQuestionSchema(missing: readonly ConnectMissingInput[], optional: readonly ConnectMissingInput[] = []): Record<string, unknown> {
-  const properties: Record<string, unknown> = {};
-  const add = (input: ConnectMissingInput): void => {
-    const base = input.schema !== null && typeof input.schema === "object" && !Array.isArray(input.schema) ? { ...(input.schema as Record<string, unknown>) } : {};
-    if (input.description !== undefined && base["description"] === undefined) base["description"] = input.description;
-    properties[input.name] = base;
-  };
-  for (const input of missing) add(input);
-  for (const input of optional) if (properties[input.name] === undefined) add(input);
-  return { type: "object", properties, required: [...new Set(missing.map((input) => input.name))] };
+export function moveQuestionStep(input: ConnectMissingInput, optional = false): Record<string, JsonValue> {
+  const schema: JsonValue = input.schema ?? true;
+  const declared = schema !== null && typeof schema === "object" && !Array.isArray(schema) ? (schema as Record<string, JsonValue>) : {};
+  const described = input.description ?? (typeof declared["description"] === "string" ? declared["description"] : undefined);
+  const step: Record<string, JsonValue> = { name: input.name, header: input.name, question: described ?? `What should ${input.name} be?`, schema };
+  const rawItems = declared["items"];
+  const items = rawItems !== null && typeof rawItems === "object" && !Array.isArray(rawItems) ? (rawItems as Record<string, JsonValue>) : undefined;
+  const members = declared["enum"];
+  const itemMembers = items?.["enum"];
+  if (Array.isArray(members) && members.length > 0) {
+    step["options"] = members.map((member) => answerText(member));
+  } else if (declared["type"] === "boolean") {
+    step["options"] = [
+      { value: "true", label: "Yes" },
+      { value: "false", label: "No" },
+    ];
+  } else if (declared["type"] === "array" && Array.isArray(itemMembers) && itemMembers.length > 0) {
+    step["options"] = itemMembers.map((member) => answerText(member));
+    step["multiple"] = true;
+  } else {
+    step["custom"] = true;
+  }
+  if (optional) step["optional"] = true;
+  const options = step["options"];
+  if (declared["default"] !== undefined && Array.isArray(options) && step["multiple"] !== true) {
+    const preset = answerText(declared["default"]);
+    if (options.some((option) => (typeof option === "string" ? option : (option as { value: string }).value) === preset)) step["default"] = preset;
+  }
+  return step;
 }
 
-/** The question's heading: what the move is, in a sentence. */
-export function moveQuestionPrompt(title: string, targetLabel: string, missing: readonly ConnectMissingInput[]): string {
+/**
+ * The question a move parks: a multi-part `choose_option` — the question UI's stepped chooser — with
+ * one step per input it asks for, the required ones first and then the optional ones, under a heading
+ * that says what the move is. Its answer is `{ answers: { [input]: value } }`.
+ */
+export function moveQuestionConfig(
+  title: string,
+  targetLabel: string,
+  missing: readonly ConnectMissingInput[],
+  optional: readonly ConnectMissingInput[] = [],
+): Record<string, JsonValue> {
+  const names = new Set(missing.map((input) => input.name));
+  const questions = [
+    ...missing.map((input) => moveQuestionStep(input)),
+    ...optional.filter((input) => !names.has(input.name)).map((input) => moveQuestionStep(input, true)),
+  ];
   const one = missing.length === 1;
-  return `Moving '${title}' to ${targetLabel} needs ${one ? "an input" : `${missing.length} inputs`} nothing the task produced gives. The move is taken when ${one ? "it is" : "they are"} answered.`;
+  return { prompt: `Moving '${title}' to ${targetLabel} needs ${one ? "an input" : `${missing.length} inputs`}.`, questions };
 }

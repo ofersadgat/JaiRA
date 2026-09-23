@@ -219,13 +219,19 @@ const CHOICE_QUESTION: SchemaDoc = {
     question: str("question", "the complete question, as the person reads it"),
     header: str("header", "a short chip beside it, e.g. Library"),
     description: str("description", "why it is asked, or what each answer would change — a line under the question"),
-    options: OPTIONS,
+    options: { ...OPTIONS, description: "the choices, in order; absent only with custom — the question is then answered in the person's own words" },
     multiple: bool("multiple", "several options may be chosen; the answer is then a list"),
     custom: bool("custom", "offer an own-answer box; any non-empty string is then accepted"),
     optional: bool("optional", "may be left unanswered; the key is then absent"),
     default: str("default", "the option pre-picked when the question appears; must be one of the options"),
+    schema: {
+      type: ["object", "boolean"],
+      title: "schema",
+      description:
+        "the answer is a VALUE of this JSON Schema: a pick or an own answer is read as one (text where it takes text, JSON otherwise) and must satisfy it before the step confirms; an option's value is the value's words",
+    },
   },
-  required: ["name", "question", "options"],
+  required: ["name", "question"],
   additionalProperties: false,
 };
 
@@ -617,6 +623,7 @@ export const GALLERY_VARIANT_ORDER: readonly string[] = [
   "multiple",
   "steps",
   "follow_up",
+  "typed",
   "confirm",
   "defaults",
   "editable",
@@ -727,6 +734,19 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
           prompt: "The product questions the spec cannot answer from the repo.",
           questions: PRODUCT_QUESTIONS,
           follow_up: true,
+        },
+      },
+      {
+        id: "typed",
+        title: "Typed answers",
+        note: "`schema` on a question makes its answer a VALUE of that schema rather than a word: a pick or an own answer is read as one (text where the schema takes text, JSON otherwise), and the step holds, saying why, until the schema accepts it. A question with `custom` and no `options` is answered in the person's own words alone — the shape a move's input question takes.",
+        sample: {
+          prompt: "Moving 'Forge event sources' to explore needs 3 inputs",
+          questions: [
+            { name: "question", header: "question", question: "What to find out, in a sentence.", custom: true, schema: { type: "string", minLength: 1 } },
+            { name: "depth", header: "depth", question: "How many rounds of looking before a verdict.", options: ["1", "2", "3"], default: "2", schema: { type: "integer", enum: [1, 2, 3] } },
+            { name: "sources", header: "sources", question: "Where to look, as a list of forge names.", custom: true, optional: true, schema: { type: "array", items: { type: "string" } } },
+          ],
         },
       },
     ],

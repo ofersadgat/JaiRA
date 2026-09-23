@@ -56,7 +56,7 @@ Four ideas, composed rather than parallel. `review_artifact` is a viewer plus a
 | `review_artifact` | `{ decision, comments?, notes? }` |
 | `review_artifacts` | `{ decision?, comments?, decisions: [{ id, decision, comment?, notes?, content? }] }` |
 | `edit_artifact` | `{ content }` |
-| `fill_form` | a flat object of its fields, or of its `schema`'s properties |
+| `fill_form` | a flat object of its fields |
 | `confirm_action` | `{ confirmed }` |
 | `approve_tool_call` | `{ decision: "allow" \| "deny" }` — the APPROVAL PROMPT, which a permission function calls to ask the person about one tool call ([decision 0007](../decisions/0007-toolsets.md), amended 2026-09-22); its config is `{ request, prompt? }`, `request` the `PermissionFunctionRequest` the function was handed, and the function's own value is the `decision` |
 
@@ -68,13 +68,6 @@ converted to a JSON Schema (`fillFormSchema`) and drawn by the app's one schema
 form — the renderer the Run panel and Settings use — so an optional field has a
 switch that leaves it out of the answer, and a `default` is the answer the form
 starts on.
-
-`fill_form` may instead carry `schema` — a whole JSON Schema object (`type: "object"`), exclusive with
-`fields` — for values the subset cannot say: a bounded number, a list, an object. The same form draws it;
-the contract check here reads only its `required`, and the host that parked it checks the values against
-the schema itself. The host's own MOVE QUESTION is one ([task-channels](task-channels.md), "Inputs"): its
-properties are the target's declared inputs with their own schemas and descriptions, and it is listed with
-`moves: true`, since answering it takes a move rather than continuing a run.
 
 ### `choose_option` — one component, two callers
 
@@ -113,13 +106,26 @@ longer one question for them to be about.
 | --- | --- | --- |
 | `questions[].name` | yes | The key the answer lands on. Unique within the state |
 | `questions[].question` | yes | The question, as the person reads it |
-| `questions[].options` | yes | As above |
+| `questions[].options` | yes, unless `custom` | As above. Absent with `custom`: the part is answered in the person's own words alone |
 | `questions[].header` | no | A short chip beside the question |
 | `questions[].description` | no | Why it is asked, or what each answer would change — a line under it |
 | `questions[].multiple` | no | The answer is a list |
 | `questions[].custom` | no | Offer an own-answer box on this part |
 | `questions[].optional` | no | The step may be passed; the key is then **absent** from `answers` |
 | `questions[].default` | no | Pre-picked when the step appears. Must be one of its options |
+| `questions[].schema` | no | The answer is a VALUE of this JSON Schema, not a word — see below |
+
+**A typed part.** With `schema`, what the part answers is a value of that schema: the pick, or
+the own answer, is READ as one (`readAnswer`) — as written where the schema takes text, as JSON
+where it does not, so `3` answers an integer, `false` a boolean and `{"a": 1}` an object — and an
+option's `value` is that value's words (`answerText`: an enum member `3` is offered as `"3"`). The
+stepper holds the step while the words cannot be read or the schema refuses the value, saying why
+under the options (the run's own validator, through `schema:check`), and the own-answer box says
+what to type ("Type a number…"). The contract check reads only that a pick is one of the options;
+main then checks every typed answer against its schema with the run's validator and refuses
+`invalid answer: {name}…` otherwise. The host's own MOVE QUESTION is this shape
+([task-channels](task-channels.md), "Inputs"): one part per input, and it is listed with
+`moves: true`, since answering it takes a move rather than continuing a run.
 
 A passed question is an absent key, never a word. That is what makes "they had
 no view" reach the state as an absence it can test for rather than a value it

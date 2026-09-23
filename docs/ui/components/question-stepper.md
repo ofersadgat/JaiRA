@@ -26,7 +26,8 @@ Several questions shown one at a time: a grey `Question 2 of 3 · optional` line
 ## The position reads first, the step's options second, and the buttons last
 
 - **Step line.** `Question {i} of {n}` in `--dim`, 6px above the question, followed by ` · optional` at 11/12.5 of the app size when the question may be passed.
-- **Question.** The step's header in a pill, then its description in `--dim`, then its options, drawn by [choice-list](choice-list.md). The question's own sentence is not drawn; a step with no header and no description shows only its options.
+- **Question.** The step's header in a pill followed by the question's own sentence, then its description in `--dim`, then its options, drawn by [choice-list](choice-list.md). The heading above is the set's, so each step prints its own question (until 2026-09-22 it did not, and a step showed only its pill and options).
+- **A typed step.** A question with a `schema` answers a value of it. While the pick or the own answer cannot be read as one, or the schema refuses it, the reason stands under the options in `--bad` (`expects a number`, `must be ≥ 1`) and the step button is disabled; the own-answer box says what to type (`Type a number…`).
 - **Buttons.** A row 14px under the options, 8px apart: a ghost `Back` from the second question on, then the step button. The host may add its own button after them, such as an agent question's `Let the agent decide`.
 
 ## The step button says whether this step answers, passes or sends

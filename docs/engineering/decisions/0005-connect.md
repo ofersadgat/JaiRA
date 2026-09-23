@@ -1003,7 +1003,7 @@ move`; `connect` stays only the host operation's name. The statement of record
 is [task-channels](../contracts/task-channels.md) (`task:connect`: the move
 table, "Inputs"), [journal-events](../contracts/journal-events.md)
 (`jaira.moveAsked` / `jaira.moveAnswered`), [gate-components](../contracts/gate-components.md)
-(`fill_form` `schema`), [host-tool-vocabulary](../contracts/host-tool-vocabulary.md)
+(typed `choose_option` parts), [host-tool-vocabulary](../contracts/host-tool-vocabulary.md)
 (`move_task`), [task-board](../../ui/components/task-board.md),
 [task-card](../../ui/components/task-card.md) and
 [run-step-note](../../ui/components/run-step-note.md).
@@ -1068,16 +1068,29 @@ transition — the last row.
 **2. Missing inputs are asked in the task's own conversation.** "It shouldn't
 replace the conversation … the conversation is essentially the history of the
 task." A legal move whose target lacks a required input it declares parks a
-QUESTION there (`ConnectHost.ask`, `persistence/moveQuestion.ts`): a
-`fill_form` gate over the inputs' own schemas and descriptions (`fill_form`
-gained a whole-schema form for this, drawn by the one schema form), written to
+QUESTION there (`ConnectHost.ask`, `persistence/moveQuestion.ts`), drawn WITH
+THE QUESTION UI — the person's ruling, the same day: "the input question, it
+should look like the question UI" / "it should use the question UI". It is the
+multi-part `choose_option` an agent's batch of questions and a gate's stepped
+chooser are drawn with (`moveQuestionConfig`): one step per input, its chip the
+input's name and its question the input's declared description; an `enum`
+offers its values as options and a `boolean` Yes and No; anything else is
+answered in the question UI's own-answer box, read as a value of the input's
+schema (text as written, JSON otherwise — a number, a list, an object) and held
+in place, with the reason under the step, until the schema accepts it. The row
+that said "asked for the move to …" and the sentence under it are gone: the
+question's heading says what the move is, and nothing is drawn around it.
+Answered, it is drawn as any settled question is; a move refused when it came
+to be taken says so in the question's own error line. A first build drew a
+`fill_form` over a whole-schema form (the schema form); the ruling replaced it,
+and the whole-schema `fill_form` it added is removed. The question is written to
 `pending_interactions` like any gate — so it survives a restart — beside a
 `jaira.moveAsked` row that says what move it holds and where in the history it
-was asked. The conversation draws it at that row, live; answering it checks the
-values against the schema with the run's validator, records them `asked`, takes
-the move (judged again, since the task may have gone on), and journals
-`jaira.moveAnswered`, after which the row draws the form as answered and what
-became of the move. Nothing is written before the answer but the question. The
+was asked. The conversation draws it at that row, live; answering it checks
+each value against its input's schema with the run's validator, records them
+`asked`, takes the move (judged again, since the task may have gone on), and
+journals `jaira.moveAnswered`, after which the row draws the question as
+answered. Nothing is written before the answer but the question. The
 askAfter design is removed: `askAfter`, `asking`, `askingMessage`,
 `ConnectUndo.asking`, the generator's `withoutTarget` / `deferTarget`, and the
 opening turn. An input of an ancestor entered on the way down cannot be handed

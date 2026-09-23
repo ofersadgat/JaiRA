@@ -6311,6 +6311,10 @@ button.layer-on:hover:not(:disabled) {
   color: var(--dim);
   margin: 0 0 6px;
 }
+/* A typed step's answer its schema refuses, under the options it was given in. */
+.question-problem {
+  margin: 8px 0 0;
+}
 /* The box that says an option list is a multi-select. On the right, so the labels stay aligned. */
 /* A grid rather than a wrapping flex row: the box has to centre against the WHOLE option, and in a
    flex row it centres against the first line only — so an option with a description put its box up
@@ -13889,33 +13893,14 @@ fieldset.reading {
   color: var(--dim);
 }
 
-/* A move's INPUT QUESTION, in the task's conversation where the move asked it: the gate's own
-   surface under a row that says what the move is. Answered, the same form drawn as it was answered. */
-.sb-note.sb-asked {
-  flex-wrap: wrap;
-  align-items: center;
-}
-.sb-asked .sb-note-text b {
-  color: var(--text);
-  font-weight: 600;
-}
+/* A move's INPUT QUESTION, in the task's conversation where the move asked it: the question UI and
+   nothing around it — the same inline host an agent's question and a gate have. Only the place is
+   this row's: the rail's column, at the text's size and colour rather than a note's. */
 .sb-move-question {
-  flex-basis: 100%;
   min-width: 0;
-  margin: 4px 0 8px 18px;
+  margin: 0 0 8px;
   color: var(--text);
   font-size: var(--size-app);
-}
-.sb-move-question .inline-gate {
-  margin: 4px 0 0;
-}
-.sb-move-outcome {
-  color: var(--dim);
-  font-size: calc(var(--size-app) * 11.5 / 12.5);
-  margin: 4px 0 0;
-}
-.sb-move-outcome.is-refused {
-  color: var(--bad);
 }
 
 /* An ADOPTED task's history, expanded where the adoption happened: the conversation simply grows. */

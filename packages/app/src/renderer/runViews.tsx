@@ -45,8 +45,7 @@ import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { AnsweredForYou, Paper, Pulse, Transcript, clockOf, durationOf, useElapsed, type CallSurface } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
-import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionPrompt, moveQuestionSchema, type ReadCall } from "@jaira/shared/browser";
-import type { JsonValue as SharedJson } from "@declarative-ai/json";
+import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
 import { SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
@@ -1078,8 +1077,9 @@ export function RunConversation({
 
   /**
    * A move's INPUT QUESTION, where the move asked it (decision 0005, the rulings of 2026-09-22): the
-   * gate itself while it is open — answering it takes the move — and, once it is not, the same form
-   * as it was answered with what became of the move.
+   * question UI itself while it is open — answering it takes the move — and, once it is not, the same
+   * question as it was answered, as any settled question is drawn. A move refused when it came to be
+   * taken says so in the question's own error line; one withdrawn is a question never answered.
    */
   const moveQuestion = (asked: MoveQuestionView): ReactNode => {
     const live = context.moveQuestions?.find((pending) => pending.requestId === asked.requestId);
@@ -1090,34 +1090,24 @@ export function RunConversation({
         </div>
       );
     }
-    const target = asked.targetLabel ?? asked.target;
+    const inputs = moveQuestionConfig(detail?.title ?? "this task", asked.targetLabel ?? asked.target, asked.missing, asked.optional ?? []);
     const settled: PendingInteraction = {
       requestId: asked.requestId,
       taskId: detail?.taskId ?? "",
       project: "",
-      component: "fill_form",
-      inputs: {},
-      config: { component: "fill_form", prompt: moveQuestionPrompt(detail?.title ?? "this task", target, asked.missing), fields: [], schema: moveQuestionSchema(asked.missing, asked.optional ?? []) as Record<string, SharedJson> },
+      component: "choose_option",
+      inputs,
+      config: parseComponentConfig("choose_option", inputs),
     };
-    const outcome =
-      asked.outcome === "moved"
-        ? asked.message !== undefined
-          ? `Answered — ${asked.message}.`
-          : `Answered — the move to ${target} was taken.`
-        : asked.outcome === "refused"
-          ? `Answered, and the move could not be taken: ${asked.message ?? "refused"}`
-          : asked.outcome === "dismissed"
-            ? "Withdrawn — the move was not taken."
-            : "No longer open — the move was not taken.";
     return (
-      <>
-        {asked.answered !== undefined ? (
-          <div className="inline-gate">
-            <GateSurface pending={settled} onSubmit={() => undefined} settled={{ value: asked.answered }} />
-          </div>
-        ) : null}
-        <p className={`sb-move-outcome${asked.outcome === "refused" ? " is-refused" : ""}`}>{outcome}</p>
-      </>
+      <div className="inline-gate">
+        <GateSurface
+          pending={settled}
+          onSubmit={() => undefined}
+          settled={asked.answered !== undefined ? { value: { answers: asked.answered } } : {}}
+          {...(asked.outcome === "refused" ? { error: `The move could not be taken: ${asked.message ?? "refused"}` } : {})}
+        />
+      </div>
     );
   };
   /** An ADOPTED task's history, expanded where the adoption happened: the conversation simply grows. */

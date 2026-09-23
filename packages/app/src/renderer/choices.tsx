@@ -10,10 +10,12 @@
  * multi-select; the agent's questions gained `tone`. Neither side lost anything.
  */
 
-import type { Choice } from "@jaira/shared/browser";
+import { answerText, readAnswer, type Choice } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { useState, type JSX } from "react";
 import { Icon, PATHS } from "./icons";
+import { useSchemaCheck } from "./schemaForm/check";
+import type { Schema } from "./schemaForm/types";
 
 /**
  * A glyph an AUTHOR named, drawn only if the renderer actually has it.
@@ -100,6 +102,14 @@ export function answersOfValue(choices: readonly Choice[], value: JsonValue | un
 /** One question's recorded answer as the control's state — see {@link answersOfValue}. */
 function answerFrom(choice: Choice, given: JsonValue, comments: string | undefined): Answer {
   const known = new Set(choice.options.map((o) => o.value));
+  // A TYPED answer came back as the value it was read as: a pick by its words, anything else as what
+  // was typed — a structure laid out the way a person would have written it.
+  if (choice.schema !== undefined) {
+    if (choice.multiple === true && Array.isArray(given)) return { picked: given.map((one) => answerText(one)), text: "" };
+    const words = answerText(given);
+    if (known.has(words)) return { picked: [words], text: "" };
+    return { picked: [], text: given !== null && typeof given === "object" ? JSON.stringify(given, null, 2) : words, own: true };
+  }
   const alongside = choice.freeText?.role === "alongside" && comments !== undefined ? comments : "";
   if (Array.isArray(given)) {
     return { picked: given.filter((v): v is string => typeof v === "string"), text: alongside };
@@ -249,10 +259,12 @@ export function ChoiceSteps({
   const choice = choices[at]!;
   const last = at === choices.length - 1;
   const answer = answers[choice.question] ?? EMPTY_ANSWER;
-  const answered = answerOf(choice, answer) !== undefined;
+  const given = answerOf(choice, answer);
+  const answered = given !== undefined;
   // An optional question can be passed unanswered; the button says so rather than pretending an
   // empty step was confirmed.
   const passing = !answered && choice.optional === true;
+  const typed = useTypedStep(choice, readOnly === true ? undefined : given);
 
   return (
     <>
@@ -260,7 +272,10 @@ export function ChoiceSteps({
         Question {at + 1} of {choices.length}
         {choice.optional === true ? <span className="sub"> · optional</span> : null}
       </p>
-      <ChoiceList choices={[choice]} answers={answers} onAnswer={onAnswer} {...(readOnly === true ? { readOnly } : {})} />
+      <ChoiceList choices={[choice]} answers={answers} onAnswer={onAnswer} stepped {...(readOnly === true ? { readOnly } : {})} />
+      {/* A typed step's answer the schema refuses, said where it was given — the step holds until it
+          is changed, so a value that cannot be used never leaves the question. */}
+      {typed.problem !== undefined ? <p className="reason question-problem">{typed.problem}</p> : null}
       <div className="options">
         {at > 0 ? (
           <button className="ghost" onClick={() => setStep(at - 1)}>
@@ -276,7 +291,7 @@ export function ChoiceSteps({
         ) : (
           <button
             className={passing ? "ghost" : "primary"}
-            disabled={!settled(choice, answer)}
+            disabled={!settled(choice, answer) || typed.holds}
             onClick={() => (last ? onSubmit() : setStep(at + 1))}
           >
             {last ? (passing ? "Skip and confirm" : "Confirm") : passing ? "Skip" : "Next"}
@@ -286,6 +301,24 @@ export function ChoiceSteps({
       </div>
     </>
   );
+}
+
+/**
+ * Whether a TYPED step's answer ({@link Choice.schema}) can be sent, and why not.
+ *
+ * The answer is read as a value of the schema (`readAnswer`: text where it takes text, JSON
+ * otherwise), and the value is put to main's `schema:check` — the run's own validator, the one the
+ * schema form asks — so what the step accepts is what the run would. A step with no schema, or with
+ * nothing answered yet, holds nothing.
+ */
+function useTypedStep(choice: Choice, given: string | string[] | undefined): { holds: boolean; problem?: string } {
+  const read = choice.schema !== undefined && given !== undefined ? readAnswer(choice.schema, given) : undefined;
+  const check = useSchemaCheck(read?.ok === true ? [{ path: "", schema: choice.schema as Schema, value: read.value }] : []);
+  if (read === undefined) return { holds: false };
+  if (!read.ok) return { holds: true, problem: read.error };
+  const first = check.errors[0];
+  if (first !== undefined) return { holds: true, problem: first.path === "" ? first.message : `${first.path}: ${first.message}` };
+  return { holds: check.pending };
 }
 
 /**
@@ -380,12 +413,18 @@ export function ChoiceList({
   onAnswer,
   onImmediate,
   readOnly,
+  stepped,
 }: {
   choices: readonly Choice[];
   answers: Record<string, Answer>;
   onAnswer: (question: string, answer: Answer) => void;
   /** Called instead of recording a pick, when {@link submitsOnClick}. */
   onImmediate?: ((question: string, value: string) => void) | undefined;
+  /**
+   * The one question on screen is a STEP of several ({@link ChoiceSteps}): the heading above is the
+   * set's, not this question's, so it prints its own — as each of several drawn together does.
+   */
+  stepped?: boolean | undefined;
   /**
    * The question as it WAS answered — the same picture, with nothing in it that can be pressed.
    *
@@ -397,6 +436,8 @@ export function ChoiceList({
   readOnly?: boolean | undefined;
 }): JSX.Element {
   const immediate = submitsOnClick(choices, answers);
+  // Several questions, or one step of several: each prints its own question.
+  const several = choices.length > 1 || stepped === true;
 
   const toggle = (choice: Choice, value: string): void => {
     if (readOnly === true) return;
@@ -440,10 +481,10 @@ export function ChoiceList({
                 No glyph on this row either: the question's icon belongs to the dialog TITLE, and
                 drawing it here as well printed the same bubble twice on every agent question —
                 which is what a caller-supplied default looks like when two places both apply it. */}
-            {choices.length > 1 || choice.header !== undefined ? (
+            {several || choice.header !== undefined ? (
               <p className="question-text">
                 {choice.header !== undefined ? <span className="chip">{choice.header}</span> : null}{" "}
-                {choices.length > 1 ? choice.question : null}
+                {several ? choice.question : null}
               </p>
             ) : null}
             {/* Why it is asked, or what each answer would change. Under the question rather than in

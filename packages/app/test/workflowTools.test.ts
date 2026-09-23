@@ -343,7 +343,7 @@ describe("move_task", () => {
     const asked = (await call(session, "move_task", { task: done, to: "lib/needs" })) as unknown as MoveResult;
     expect(asked).toMatchObject({ ok: true, task: done, asked: { inputs: [{ name: "text", description: "What to call it." }] } });
     const request = (asked as { asked: { request: string } }).asked.request;
-    expect(service.pendingInteractions().find((p) => p.requestId === request)).toMatchObject({ taskId: done, component: "fill_form", moves: true });
+    expect(service.pendingInteractions().find((p) => p.requestId === request)).toMatchObject({ taskId: done, component: "choose_option", moves: true });
   });
 
   it("refuses a task it does not know, and says so rather than throwing", async () => {
