@@ -99,22 +99,21 @@ export function arrivedAt(run: FastForwardRun, event: EngineEvent): boolean {
  *
  * A skip interrupts the running child. A parked GATE withdraws itself, because the gate hub is
  * handed the calling state's abort signal and honours a `SkipAbort`. An agent's parked tool
- * APPROVAL and its `AskUserQuestion` are not: `Approver` and `AskUser` are called with no signal,
- * placed once per run on the executor's services, and cannot tell which instance asked. So the agent
- * is interrupted and its question stays on screen, answerable, about a turn that no longer exists.
- * Fast-forwarding makes that common — Skip is always showing.
+ * APPROVAL and its `AskUserQuestion` are not: `Approver` and `AskUser` are called with no signal.
+ * So the agent is interrupted and its question stays on screen, answerable, about a turn that no
+ * longer exists. Fast-forwarding makes that common — Skip is always showing.
  *
- * This watches the journal a run writes and answers ONE question: when a child ends `skipped`, is
- * every prompt operation still running in this task inside what was skipped? Then every approval and
- * question the task has parked belongs to an agent that was just interrupted, and the host withdraws
- * them — a question dismissed ("decide yourself", which is what the adapter tells a dead agent
- * anyway), an approval denied once. When a prompt operation is still running OUTSIDE the skipped
- * subtree (an `async` sibling), the asks cannot be told apart and none is withdrawn: leaving a stale
- * one is recoverable, denying a live agent's tool is not. `blockedBy` says which kept them.
+ * What makes them withdrawable is that each names the instance that asked: the engine stamps
+ * `instanceId` on every approval and question request it hands an operation. This watches the
+ * journal a run writes and, when a child ends `skipped`, answers which instances are INSIDE what was
+ * skipped — the skipped instance and everything entered under it. The host withdraws exactly the
+ * asks those instances made — a question dismissed ("decide yourself", which is what the adapter
+ * tells a dead agent anyway), an approval denied once — and leaves an `async` sibling's, which is
+ * still running and still waiting for its answer. An ask that names no instance (a chat turn's) is
+ * never inside anything skipped.
  */
 export class SkipWithdrawals {
   private readonly parentOf = new Map<string, string>();
-  private readonly prompts = new Set<string>();
 
   /**
    * `history` is the journal as it stood when the run started. A RESUMED run does not enter its
@@ -125,26 +124,18 @@ export class SkipWithdrawals {
     for (const event of history) if (event.type === "instance.entered" && event.parentInstanceId !== undefined) this.parentOf.set(event.instanceId, event.parentInstanceId);
   }
 
-  /** Feed every journaled event, in order. Returns what to do when a skip lands, else nothing. */
-  note(event: EngineEvent): { withdraw: boolean; blockedBy: string[] } | undefined {
+  /**
+   * Feed every journaled event, in order. When a child ends `skipped`, returns the test for whether
+   * an asking instance is inside what was skipped; else nothing.
+   */
+  note(event: EngineEvent): ((instanceId: string | undefined) => boolean) | undefined {
     if (event.type === "instance.entered" && event.parentInstanceId !== undefined) this.parentOf.set(event.instanceId, event.parentInstanceId);
-    if (event.type === "operation.started" && event.op === "prompt") this.prompts.add(event.instanceId);
-    if (event.type === "operation.completed" || event.type === "operation.failed") this.prompts.delete(event.instanceId);
-    if (event.type !== "instance.terminated") return undefined;
-    if (event.outcome !== "skipped") {
-      this.prompts.delete(event.instanceId);
-      return undefined;
-    }
-    const inside = (id: string): boolean => {
-      for (let at: string | undefined = id; at !== undefined; at = this.parentOf.get(at)) if (at === event.instanceId) return true;
+    if (event.type !== "instance.terminated" || event.outcome !== "skipped") return undefined;
+    const skipped = event.instanceId;
+    return (instanceId) => {
+      for (let at: string | undefined = instanceId; at !== undefined; at = this.parentOf.get(at)) if (at === skipped) return true;
       return false;
     };
-    const within = [...this.prompts].filter(inside);
-    const outside = [...this.prompts].filter((id) => !inside(id));
-    for (const id of within) this.prompts.delete(id);
-    // Nothing was running inside it: a never-entered member ends `skipped` too, and it asked nothing.
-    if (within.length === 0) return undefined;
-    return { withdraw: outside.length === 0, blockedBy: outside };
   }
 }
 

@@ -15,7 +15,7 @@ import { pathToFileURL } from "node:url";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { workflowOutcomeOf, type ConversationTurn, type InstanceNode, type SessionRef, type SessionTurn, type SessionView } from "@jaira/shared/browser";
-import { entriesOf } from "../src/renderer/transcript";
+import { entriesOf, entriesOfPart } from "../src/renderer/transcript";
 import { Transcript } from "../src/renderer/transcriptView";
 import { bandsOf, notesOf, piecesOf } from "../src/renderer/sessionBands";
 import { SessionBandsView } from "../src/renderer/sessionPanels";
@@ -101,14 +101,14 @@ const sheet = (turns: SessionTurn[], stateId = "chat/session"): ReactElement =>
 
 /**
  * The same move in the TASKS view, where the conversation has a rail: the note is the `jaira.moved`
- * row the host journaled, drawn by `notesOf` → `NoteRow` between the turn that moved and the one after
- * it, and the call's row says nothing more (`calls.outcomes: "rail"`).
+ * row the host journaled, drawn by `notesOf` → `NoteRow` right after the `move_task` call that did it
+ * (the row names the call, and `splitAtNotes` cuts the turn there) and before the reply, and the
+ * call's row says nothing more (`calls.outcomes: "rail"`).
  */
 const railTurns: Record<string, SessionTurn[]> = {
-  "i-t1": later.slice(0, 3),
-  "i-t2": [
-    said("assistant", "Product gave us three features, so there are three ux tasks, all held. Start them all, or tell me which.", 20_000),
-  ],
+  // One turn: the move, a look at the tasks, and the reply — the note belongs after the FIRST call.
+  "i-t1": later.slice(0, 6),
+  "i-t2": later.slice(6),
 };
 const railRoot: InstanceNode = {
   instanceId: "i-root",
@@ -123,8 +123,8 @@ const railRoot: InstanceNode = {
 railTurns["i-product"] = [said("assistant", "Three features: pause, resume, and the stop reasons.", -45_000)];
 const railRefs: SessionRef[] = [
   { instanceId: "i-product", stateId: "feature/product", sessionId: "product", seq: 1, startedAt: at - 50_000, at: at - 40_000, status: "success" },
-  { instanceId: "i-t1", stateId: "chat/session", sessionId: "session", seq: 1, startedAt: at, at: at + 2_000, status: "success" },
-  { instanceId: "i-t2", stateId: "chat/session", sessionId: "session", seq: 2, startedAt: at + 20_000, at: at + 21_000, status: "success" },
+  { instanceId: "i-t1", stateId: "chat/session", sessionId: "session", seq: 1, startedAt: at, at: at + 3_000, status: "success" },
+  { instanceId: "i-t2", stateId: "chat/session", sessionId: "session", seq: 2, startedAt: at + 60_000, at: at + 62_000, status: "success" },
 ];
 const railNotes = notesOf([
   {
@@ -134,13 +134,18 @@ const railNotes = notesOf([
     path: "",
     text: "move_task",
     moved: workflowOutcomeOf({ ok: true, task: "t-2", resolution: "adopt", workflow: "Feature workflow", standsAt: "feature → ux", adoptedAs: "product" })!,
+    toolCallId: "c3",
   },
 ] as ConversationTurn[]);
 const rail = h(SessionBandsView, {
   bands: bandsOf(piecesOf(railRoot, railRefs)),
   notes: railNotes,
   render: (piece) =>
-    h(Transcript, { entries: entriesOf(view(railTurns[piece.instanceId ?? piece.node.instanceId] ?? [], "chat/session")), live: null, calls: { outcomes: "rail" } }),
+    h(Transcript, {
+      entries: entriesOfPart(entriesOf(view(railTurns[piece.instanceId ?? piece.node.instanceId] ?? [], "chat/session")), piece.part),
+      live: null,
+      calls: { outcomes: "rail" },
+    }),
 });
 
 const section = (title: string, body: ReactElement): ReactElement =>
@@ -156,7 +161,7 @@ const page = h(
   { style: { width: 760, margin: "24px auto", padding: 16 } },
   section("chat/session — the tool rows, and the note a `start` leaves under its own row", sheet(session)),
   section("…and later: a move that adopted the task, the tasks it made held, and the release that started two", sheet(later)),
-  section("the same move in the Tasks view — the note is a row on the rail, between the turn that moved and the next", rail),
+  section("the same move in the Tasks view — the note is a row on the rail, right after the call that moved and before the reply", rail),
   section("chat/control — a conversation made by a move: it reads, asks in words, and starts with what it was told", sheet(control, "chat/control")),
   section("a `start` whose required input nothing binds — the call did nothing, and says what to supply", sheet(asking)),
 );

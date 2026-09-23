@@ -75,6 +75,20 @@ export interface SessionPiece {
   status?: "success" | "error" | "interrupted" | "running";
   /** Where this conversation left another — `SessionRef.branch`, carried through unchanged. */
   branch?: { parent: string; at: number };
+  /**
+   * The STRETCH of this operation's transcript the piece draws, when a note cut the turn at a tool
+   * call (see {@link splitAtNotes}). Absent ⇒ all of it.
+   */
+  part?: PiecePart;
+}
+
+/**
+ * A stretch of one turn's transcript, bounded by tool calls (by the model's id for each): the entries
+ * after the call `after`, up to and including the call `through`. Absent bounds are the turn's ends.
+ */
+export interface PiecePart {
+  after?: string;
+  through?: string;
 }
 
 /** One session's contribution to one band — a panel. */
@@ -480,6 +494,8 @@ export interface BandNote {
    * `jaira.moved` row — the row the mockup draws beside the panel, in the tool note's own words.
    */
   moved?: WorkflowOutcome;
+  /** For a `moved` note: the tool call that did it, when the row names it — where {@link splitAtNotes} cuts. */
+  toolCallId?: string;
   /**
    * For a `skipped` note that stands for SEVERAL states never entered: their child keys, in the order
    * they were stepped over, the first being the note's own. One Skip steps over a run of siblings, and
@@ -702,7 +718,9 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
     // What the conversation's own workflow tool did (`jaira.moved`, decision 0005 §3). At the ROOT —
     // the conversation is the root — and never a lane: nothing was entered by saying so.
     if (turn.kind === "moved") {
-      if (turn.moved !== undefined) out.push({ seq: turn.seq, at: turn.at, kind: "moved", path: "", text: "", moved: turn.moved });
+      if (turn.moved !== undefined) {
+        out.push({ seq: turn.seq, at: turn.at, kind: "moved", path: "", text: "", moved: turn.moved, ...(turn.toolCallId !== undefined ? { toolCallId: turn.toolCallId } : {}) });
+      }
       continue;
     }
     if (turn.kind === "transition") {
@@ -761,45 +779,66 @@ export function groupNeverEntered(notes: readonly BandNote[]): BandNote[] {
 }
 
 /**
- * Split a conversation's band where a `moved` note falls between two of its turns, so the note is a
- * row BETWEEN the turns it came after and before — the mockup's "adopted into Feature workflow …"
- * beside the panel that said it, with the conversation carrying on underneath.
+ * Split a conversation's band where a `moved` note falls inside it, so the note is a row AT the point
+ * it happened — the mockup's "adopted into Feature workflow …" right after the `move_task` call that
+ * did it, with the conversation's reply carrying on underneath.
  *
  * Needed because consecutive turns of one conversation are one band (see the module comment), and a
  * note is placed between bands; unsplit, every tool note of a long conversation would pile up after
- * its last turn. Only a band holding ONE conversation splits: across several, the turns overlap by
- * definition, and there is no "between" to put the row in. The split is at turn granularity — a note
- * written during a turn follows that turn — because a turn's record is one transcript and the rows
- * inside it are not the rail's to cut.
+ * its last turn. A note that names its CALL (`toolCallId`) cuts the turn that made the call in two —
+ * the transcript through the call, and the rest of it ({@link PiecePart}) — and the band after the
+ * cut starts at the note's own instant, so {@link placeNotes} puts the row between the halves. A note
+ * whose runtime did not say which call made it cuts at turn granularity instead: after the turn it
+ * fell in, before the next.
  *
- * Nothing about the conversation changes: no pause or resume mark is drawn at the split, because
- * nothing else ran in the gap. The halves keep the marks the band had at its two ends.
+ * Only a band holding ONE conversation splits: across several, the turns overlap by definition, and
+ * there is no "between" to put the row in. Nothing about the conversation changes: no pause or resume
+ * mark is drawn at a cut, because nothing else ran in the gap. The halves keep the marks the band had
+ * at its two ends.
  */
 export function splitAtNotes(bands: readonly SessionBand[], notes: readonly BandNote[]): SessionBand[] {
-  const cuts = notes.filter((note) => note.kind === "moved").map((note) => note.at);
-  if (cuts.length === 0) return [...bands];
+  const moved = notes.filter((note) => note.kind === "moved");
+  if (moved.length === 0) return [...bands];
+  const inside = (piece: SessionPiece, at: number): boolean => piece.startedAt <= at && (piece.endedAt === undefined || at <= piece.endedAt);
   const out: SessionBand[] = [];
   for (const band of bands) {
     const only = band.segments.length === 1 ? band.segments[0]! : undefined;
-    if (only === undefined || only.pieces.length < 2) {
+    if (only === undefined) {
       out.push(band);
       continue;
     }
-    let rest = only.pieces;
-    const halves: SessionPiece[][] = [];
-    for (let k = 0; k < rest.length - 1; ) {
-      const next = rest[k + 1]!;
-      if (cuts.some((at) => rest[k]!.startedAt <= at && at < next.startedAt)) {
-        halves.push(rest.slice(0, k + 1));
-        rest = rest.slice(k + 1);
-        k = 0;
-      } else k += 1;
+    // A note names a call it can be cut at only when it fell inside one of this band's turns.
+    const atCall = moved.filter((note) => note.toolCallId !== undefined && only.pieces.some((piece) => inside(piece, note.at)));
+    const atTurn = moved.filter((note) => !atCall.includes(note)).map((note) => note.at);
+    const halves: Array<{ pieces: SessionPiece[]; startedAt?: number }> = [];
+    let current: SessionPiece[] = [];
+    let startedAt: number | undefined;
+    const cut = (next?: number): void => {
+      if (current.length > 0) halves.push({ pieces: current, ...(startedAt !== undefined ? { startedAt } : {}) });
+      current = [];
+      startedAt = next;
+    };
+    only.pieces.forEach((piece, k) => {
+      const calls = atCall.filter((note) => inside(piece, note.at)).sort((a, b) => a.at - b.at || a.seq - b.seq);
+      let after: string | undefined;
+      for (const note of calls) {
+        current.push({ ...piece, part: { ...(after !== undefined ? { after } : {}), through: note.toolCallId! } });
+        cut(note.at);
+        after = note.toolCallId;
+      }
+      current.push(after === undefined ? piece : { ...piece, part: { after } });
+      const next = only.pieces[k + 1];
+      if (next !== undefined && atTurn.some((at) => piece.startedAt <= at && at < next.startedAt)) cut();
+    });
+    cut();
+    if (halves.length === 1) {
+      out.push(band);
+      continue;
     }
-    halves.push(rest);
-    halves.forEach((pieces, i) => {
+    halves.forEach((half, i) => {
       out.push({
-        startedAt: pieces[0]!.startedAt,
-        segments: [{ ...only, pieces, resumed: i === 0 && only.resumed, paused: i === halves.length - 1 && only.paused }],
+        startedAt: half.startedAt ?? half.pieces[0]!.startedAt,
+        segments: [{ ...only, pieces: half.pieces, resumed: i === 0 && only.resumed, paused: i === halves.length - 1 && only.paused }],
       });
     });
   }

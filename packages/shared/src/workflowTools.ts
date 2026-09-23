@@ -218,12 +218,11 @@ export interface AnsweredEvent {
   kind: "interaction" | "question";
   instanceId?: string;
   /**
-   * For `question`: the texts of the questions it answered, in the agent's order — what joins the row
-   * to the `AskUserQuestion` call in the agent's transcript. The hub's park carries no tool-call id, and
-   * the texts are what the call and the parked request both hold. Absent on a row written before
-   * 2026-09-22.
+   * For `question`: the id of the agent's `AskUserQuestion` call it answered — the same id the call
+   * carries in the agent's transcript, which is what marks exactly that block "answered for you".
+   * Absent where the agent's transport did not report the call's id.
    */
-  questions?: string[];
+  toolCallId?: string;
   /** The conversation's task. */
   byTaskId: string;
   settled_by: SettledByControl;
@@ -299,6 +298,12 @@ export interface MovedEvent {
   /** The task that stands at the target. */
   task: string;
   outcome: WorkflowOutcome;
+  /**
+   * The tool call that did it — the model's id for the call, the same one the call's row carries in
+   * the conversation's transcript. What lets the rail cut the conversation AT the call, so the row
+   * sits right after it and before the reply. Absent where the runtime serving the tool did not say.
+   */
+  toolCallId?: string;
 }
 
 /** The journal row that says how values a conversation handed an entry were settled. */

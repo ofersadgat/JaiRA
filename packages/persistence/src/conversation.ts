@@ -159,7 +159,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
     // a fact about the conversation, so it sits at the ROOT, which is the conversation.
     if ((event as { type: string }).type === MOVED_EVENT) {
       const row = event as unknown as MovedEvent;
-      turns.push({ seq, at, kind: "moved", path: "", text: row.tool, moved: row.outcome });
+      turns.push({ seq, at, kind: "moved", path: "", text: row.tool, moved: row.outcome, ...(row.toolCallId !== undefined ? { toolCallId: row.toolCallId } : {}) });
       continue;
     }
     switch (event.type) {

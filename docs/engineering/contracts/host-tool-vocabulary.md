@@ -155,11 +155,14 @@ tools do.
 | `hold_task`, `release_task`, `stop_task` out `results` | array of `{task, ok, did?, reason?}` | yes | one entry per task named, in order |
 
 **A successful `start_task` or `move_task` is journaled on the CONVERSATION's own task** as
-`{type: "jaira.moved", tool, task, outcome}` — host vocabulary, like `jaira.answered` — where `outcome` is
-`WorkflowOutcome` (`verb`, `standsAt`, `workflow?`, `adoptedAs?`, `held?`, `through?`), the one reading
-`workflowOutcomeOf` makes of the answer. `conversationView` projects it as a `moved` turn at the root, and the
-run conversation draws it as a note on its rail between the turn that moved and the next; a one-column
-transcript with no rail draws the same words under the call. A refusal writes nothing.
+`{type: "jaira.moved", tool, task, outcome, toolCallId?}` — host vocabulary, like `jaira.answered` — where
+`outcome` is `WorkflowOutcome` (`verb`, `standsAt`, `workflow?`, `adoptedAs?`, `held?`, `through?`), the one
+reading `workflowOutcomeOf` makes of the answer, and `toolCallId` is the model's id for the call that did it
+(the tool's `ctx.toolCallId`, handed to the host as `WorkflowToolCall`). `conversationView` projects it as a
+`moved` turn at the root, and the run conversation draws it as a note on its rail right after that call and
+before the reply (`splitAtNotes` cuts the turn at the call); a row whose runtime did not report the id is placed
+after the whole turn. A one-column transcript with no rail draws the same words under the call. A refusal writes
+nothing.
 
 **An approval is not reachable through `answer`.** Only a question or a judgement on a document can be
 settled by a conversation ([0005](../decisions/0005-connect.md) §4), and that holds in two places at once:

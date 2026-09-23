@@ -73,7 +73,7 @@ The vocabulary is `EngineEvent` in `@declarative-ai/hw` `ports.ts`. `failure` is
 | `call.settled` | `instanceId, stateId, call, operationId, outcome` where `outcome` is `value` or `error` | engine | the deferred call ended; a cancelled wait is `error` |
 | `value.settled` | `instanceId, stateId, field, outcome, value?, error?, fallback?` | engine | a computed field such as `title` settled, with its value |
 | `fanout.made` | `instanceId, stateId, childKey, occurrence, kind, runs: [{element, id?, runId, title}]` where `kind` is `task` or `split` | fan-out host | the tasks a hosted fan-out made of its elements; `runId` is a task id |
-| `transition.taken` | `instanceId, stateId, to, index, iteration, by?, skip?, inputs?` where `by` is `person` or `control` | engine; chat turns | a transition fired; `index` counts every transition and `iteration` only backward ones. `by` is present exactly when the transition was directed |
+| `transition.taken` | `instanceId, stateId, to, index, iteration, by?, skip?, inputs?, descent?` where `by` is `person` or `control` | engine; chat turns | a transition fired; `index` counts every transition and `iteration` only backward ones. `by` is present exactly when the transition was directed |
 | `child.superseded` | `instanceId, stateId, childKey` | engine | the instance named dropped its child under `childKey` |
 | `instance.terminated` | `instanceId, stateId, outcome, failure?` | engine; fan-out host; chat turns | the instance ended |
 
@@ -120,6 +120,7 @@ Three reading rules follow, and `load.ts`, `projection.ts` and every other folde
 - `skipped` is an answer. `buildTaskLoad` never revives a skipped instance, although its row lands after the transition that decided it, which is the shape the revival rule otherwise brings back.
 - A directed `transition.taken` on an instance that had already written `instance.terminated` reopens it, and every ancestor with it, exactly as a chat turn's transition reopens its instance. The reopened instances write `instance.terminated` again when they end, so one instance can hold two ends with a directed transition between them.
 - A directed `transition.taken` with no later `instance.entered` under that instance for `to` is an entry still owed: the process died between the rows. `buildTaskLoad` hands it to the engine as `LoadedInstance.directed`, and the loaded run makes the entry without writing the transition again.
+- A move to a NESTED target writes one directed `transition.taken` per level, each on the composite that took it; a step whose target is not the end of the move carries `descent: {path, inputs?, by, skip?}` — the child keys still to go beneath `to`, and what the last of them is handed (the step's own `inputs` are only what a standing rule wired). The instance that step entered owes the next step until it writes a directed `transition.taken` of its own; `buildTaskLoad` hands a live one that still owes it `LoadedInstance.descent` (and an owed entry its `directed.descent`), and the loaded engine takes the step before the composite's spine.
 
 ### What a person asked of a task that outlives the process is JaiRA's own row, opened and closed in order
 

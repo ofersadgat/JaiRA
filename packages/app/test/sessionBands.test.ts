@@ -590,9 +590,9 @@ describe("the notes a Skip leaves", () => {
 });
 
 describe("what a conversation's workflow tool did, on the rail", () => {
-  it("is a `moved` note at the root, carrying the tool note's words", () => {
-    const notes = notesOf([turn({ seq: 5, kind: "moved", path: "", text: "move_task", moved: { verb: "adopted into", standsAt: "ux", workflow: "feature", adoptedAs: "product" } })]);
-    expect(notes).toEqual([{ seq: 5, at: 50, kind: "moved", path: "", text: "", moved: { verb: "adopted into", standsAt: "ux", workflow: "feature", adoptedAs: "product" } }]);
+  it("is a `moved` note at the root, carrying the tool note's words — and the call that did it", () => {
+    const notes = notesOf([turn({ seq: 5, kind: "moved", path: "", text: "move_task", moved: { verb: "adopted into", standsAt: "ux", workflow: "feature", adoptedAs: "product" }, toolCallId: "toolu_m" })]);
+    expect(notes).toEqual([{ seq: 5, at: 50, kind: "moved", path: "", text: "", moved: { verb: "adopted into", standsAt: "ux", workflow: "feature", adoptedAs: "product" }, toolCallId: "toolu_m" }]);
   });
 
   // One conversation, three turns in a row — one band, as consecutive turns of a session are.
@@ -611,6 +611,38 @@ describe("what a conversation's workflow tool did, on the rail", () => {
     ]);
     // …and the row is placed between the halves.
     expect(placeNotes([moved(25)], cut).map((bucket) => bucket.length)).toEqual([0, 1, 0]);
+  });
+
+  it("cuts AT THE CALL when the note names it: the turn's transcript through the call, the note, then the reply", () => {
+    const bands = conversation();
+    const at = (n: number): BandNote => ({ ...moved(n), toolCallId: `call-${n}` });
+    // Inside the second turn, which ran from 20 to 30.
+    const cut = splitAtNotes(bands, [at(25)]);
+    expect(shape(cut)).toEqual([[["C", 2]], [["C", 2]]]);
+    const [first, second] = cut.map((band) => band.segments[0]!.pieces);
+    expect(first!.map((p) => [p.node.instanceId, p.part])).toEqual([
+      ["2", undefined],
+      ["3", { through: "call-25" }],
+    ]);
+    expect(second!.map((p) => [p.node.instanceId, p.part])).toEqual([
+      ["3", { after: "call-25" }],
+      ["4", undefined],
+    ]);
+    // The band after the cut starts at the note, so the row is placed between the call and the reply.
+    expect(cut[1]!.startedAt).toBe(25);
+    expect(placeNotes([at(25)], cut).map((bucket) => bucket.length)).toEqual([0, 1, 0]);
+    // Two calls in one turn: three stretches of it, a row after each call.
+    const twice = splitAtNotes(bands, [at(22), at(27)]);
+    expect(twice.map((band) => band.segments[0]!.pieces.map((p) => p.part ?? null))).toEqual([
+      [null, { through: "call-22" }],
+      [{ after: "call-22", through: "call-27" }],
+      [{ after: "call-27" }, null],
+    ]);
+    // Inside the LAST turn — which at turn granularity could not be cut at all.
+    expect(shape(splitAtNotes(bands, [at(45)]))).toEqual([[["C", 3]], [["C", 1]]]);
+    // A single-turn conversation is cut too.
+    const one = bandsOf(piecesOf(tree([{ id: 2, from: 0, to: 10 }]), [ref(2, "C", 0, 10)]));
+    expect(splitAtNotes(one, [at(5)]).map((band) => band.segments[0]!.pieces.map((p) => p.part))).toEqual([[{ through: "call-5" }], [{ after: "call-5" }]]);
   });
 
   it("leaves a band alone for any other note, for a note after its last turn, and across several conversations", () => {

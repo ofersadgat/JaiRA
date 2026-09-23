@@ -17,7 +17,6 @@
 import type { FakeRule } from "@jaira/runtime";
 import type { FSWatcher } from "node:fs";
 import type { DirectedTransitions } from "@declarative-ai/hw";
-import type { EngineEvent } from "@declarative-ai/hw";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
 import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub, RemoteEventHub, UserEventHub } from "@jaira/runtime";
@@ -35,12 +34,6 @@ export interface LiveRun {
    * that arrives before it attaches — or after it has detached — waits on the port.
    */
   directed: DirectedTransitions;
-  /**
-   * Moves still on their WAY DOWN (decision 0005 §1): a target nested under the state a move
-   * entered. Each is fed every journaled event and directs the next step at the composite the
-   * moment it enters — see `descentFollower`.
-   */
-  descents: Array<(event: EngineEvent) => void>;
   /** Resolves when the run has finished recording and settled its task row. */
   done: Promise<void>;
 }

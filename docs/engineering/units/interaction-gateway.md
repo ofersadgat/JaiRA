@@ -27,7 +27,7 @@ siblings: [engineering/units/interaction-hub, engineering/units/component-contra
 - answers a stored gate in `answerRecoveredInteraction`: seeds the value on the hub, closes the row, publishes `interaction:resolved` and calls `resumeTask` without awaiting it;
 - runs the follow-up loop for a `choose_option` whose state says `follow_up` beside `questions`;
 - offers a gate or an agent's question to a task's controlling conversation while the task is being FAST-FORWARDED ([decision 0005](../decisions/0005-connect.md) §4): `offerToControl` is called from `publishInteraction` and the question hub's `onRequest` — never the approval hub's — and skips a gate whose component is not in `ANSWERABLE_COMPONENTS`; `autopilotAnswer` makes one prompt call outside any run, as the follow-up loop does, and hands an answer at or above `autopilot.askBelow` to the workflow host's `answer`, which checks it against the contract before it journals `jaira.answered`, then submits it;
-- withdraws what a skip's interrupted agent parked (`withdrawSkipped`, fed by `SkipWithdrawals` over each run's journal): the task's questions dismissed and its approvals denied once, only when no prompt operation outside the skipped subtree is still running.
+- withdraws what a skip's interrupted agent parked (`withdrawSkipped`, fed by `SkipWithdrawals` over each run's journal): every question and approval whose `instanceId` — which the engine stamps on each request — is the skipped instance or one entered under it is dismissed or denied once; an `async` sibling's asks stay parked.
 
 The follow-up loop, in `followUp` and `askFollowUp`, holds the park, then:
 

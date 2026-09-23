@@ -1256,12 +1256,14 @@ export function SessionBandsView({
   // — a true sentence standing where the reason belonged.
   if (given.length === 0 && notes.length === 0) return <p className="empty">{empty ?? "This run has not said anything yet."}</p>;
   // A conversation's band is cut where one of its workflow tools took effect, so the row saying what
-  // it did sits between the turns it came between. See `splitAtNotes`.
+  // it did sits right after the call that did it, before the reply. See `splitAtNotes`.
   const bands = splitAtNotes(given, notes);
   const bare = isSolo(bands);
   const placed = placeNotes(notes, bands);
   const starters = startersOf(bands);
-  const forks = forksOf(bands.flatMap((band) => band.segments.flatMap((segment) => segment.pieces)));
+  // From the bands as GIVEN: a turn a note cut is two pieces of one position, and counted twice it
+  // would read as a fork of itself.
+  const forks = forksOf(given.flatMap((band) => band.segments.flatMap((segment) => segment.pieces)));
 
   /**
    * The page as one flat sequence of rows, so the rail can draw the hierarchy beside it.

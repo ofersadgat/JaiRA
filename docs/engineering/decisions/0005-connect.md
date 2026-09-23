@@ -593,7 +593,9 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
   entry and takes a waiting move before it walks the spine, so the composite
   goes straight to the named child. What comes before that child inside it is
   stepped over like anything else, and needs `skip` like anything else. An
-  upstream `path` on `DirectedTransition` would replace the follower.
+  upstream `path` on `DirectedTransition` would replace the follower. *(Amended
+  2026-09-22: it has — the engine takes the way down itself and journals each
+  step; see "Signals and paths" below.)*
 - **Whether inputs bind is decided before anything is written, statically.**
   From the lowered wires and the loaded machine: a wire binds when every child
   it reads has ended well — or is running now, for a move that is held until
@@ -845,7 +847,9 @@ open:
   journal is watched instead (`SkipWithdrawals`): when a child ends `skipped` and
   every prompt operation still running is inside it, the task's questions are
   dismissed and its approvals denied once. Every Skip gets this, not only a
-  fast-forward's.
+  fast-forward's. *(Amended 2026-09-22: a request now names the instance that
+  asked, and exactly the skipped subtree's asks are withdrawn — see "Signals and
+  paths" below.)*
 - **`autopilot` is a layered block, and a person's.** `{askBelow: 0.2}` by
   default, strict from 0 to 1, drawn in Settings by the declared form beside
   Memoization and Workflow lookup, and left out of the file `initProject`
@@ -968,9 +972,9 @@ about the task or at the task's own progress past where the drop landed.
   are the table's, and the drop's own resume deletes the unwound rows it stood
   behind.
 
-What stays in memory: the descent follower of a move to a nested target, so a
-process that dies after such a move was taken and before the way down was
-directed leaves the composite walking its own spine.
+What stayed in memory was the descent follower of a move to a nested target, so a
+process that died part-way down left the composite walking its own spine. *(Closed
+the same day — the way down is journaled upstream; see "Signals and paths" below.)*
 
 ## Open
 
@@ -997,11 +1001,6 @@ directed leaves the composite walking its own spine.
   marks it as the host's.
 - A fast-forward of a task that is RUNNING with no conversation is refused
   until it is paused, for the reason a new transition is.
-- A skip that lands while an agent OUTSIDE the skipped subtree is still running
-  (an `async` sibling) withdraws nothing — whose ask is whose cannot be told —
-  and those asks stay on the inbox until answered or the task is stopped. An
-  upstream signal on `Approver` and `AskUser`, or an instance on their requests,
-  would close it.
 - A question stays on screen while the conversation considers it; a person who
   answers first wins, and the conversation's answer is counted as left to them.
 
@@ -1031,6 +1030,48 @@ Closed 2026-09-22 (three drawing gaps from step 7's list, no upstream change):
   has no rail and still draws the same words under the call; which of the two a
   transcript does is its host's choice (`CallSurface.outcomes`). The cut is at
   turn granularity: a note follows the whole turn that moved, reply included.
+  *(Both joins amended the same day — the call's id replaced the texts and the
+  turn granularity; see "Signals and paths".)*
+
+Closed 2026-09-22 — **signals and paths** (upstream `@declarative-ai` on branch
+`task/signals-and-paths`, and JaiRA):
+
+- **A skip with an `async` sibling withdraws only what was skipped.** The engine
+  stamps the asking instance on the approver and the question channel it hands
+  each operation (`PermissionRequest.instanceId`, `UserQuestionRequest.instanceId`
+  — the tool gate's escalation included, and an existing stamp kept, so the
+  innermost instance of a nested run is named). The hubs keep it on the parked
+  request, and `SkipWithdrawals` now answers only "is this instance inside what
+  was skipped": `withdrawSkipped` dismisses or denies exactly those asks and
+  leaves a still-running sibling's parked. The "prompt operations still running"
+  bookkeeping and the warning that kept every ask are gone.
+- **The way down is journaled.** `DirectedTransition.path` names the child keys
+  beneath `to`; the engine checks the whole path against the definition, then
+  directs each step at the composite it has just entered, writing one directed
+  `transition.taken` per level with the rest of the way on it (`descent: {path,
+  inputs?, by, skip?}` — the asker's inputs travel to the target and are handed
+  only there). The load re-arms it: `buildTaskLoad` gives a live instance that
+  was entered on the way and has not taken its step `LoadedInstance.descent`
+  (and an owed entry its `directed.descent`), and the loaded engine takes the
+  step before its own spine. `descentFollower` and every `descents` list are
+  deleted; `task:move`, a held move's re-queue and the CLI hand the engine the
+  path. A move the port hands such a composite after the restart is the later
+  word and replaces the step.
+- **The `jaira.moved` note sits at its call.** A tool's ctx carries the model's
+  id for the call it answers (`ExecServices.toolCallId` — the composed loop's own
+  id, the Claude CLI's `_meta["claudecode/toolUseId"]` on MCP `tools/call`,
+  carried through the worker bridge); the workflow tools hand it to the host
+  (`WorkflowToolCall`), which writes it on the row. `splitAtNotes` cuts the turn
+  that made the call into two pieces of one record (`SessionPiece.part`: through
+  the call, then after it) and starts the band after the cut at the note, so the
+  row is drawn right after the call and before the reply, as the mockup has it.
+  A row whose runtime reported no id is still placed after its whole turn.
+- **"Answered for you" joins by id.** The `AskUserQuestion` call's own id reaches
+  the question (`UserQuestionRequest.toolCallId`, from the SDK's `toolUseID` and
+  the CLI's `tool_use_id`), `jaira.answered` carries `toolCallId` and the
+  instance the request named, and `markAnsweredQuestions` marks the block with
+  that `callId`. The question-text join, and the pairing of an untexted row, are
+  deleted; rows written before this are not drawn.
 
 ## Revisit when
 

@@ -35,7 +35,7 @@ import { Board, Column, Tile } from "./board";
 import { ApprovalSurface, GateSurface, QuestionSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
-import { entriesOf, journalFor, markAnsweredQuestions, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
+import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
 import { ValueView } from "./valueView";
 import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
@@ -1021,8 +1021,12 @@ export function RunConversation({
     // sidechains included, which is what lets a doorway row show its subagent talking live.
     const live = matches ? liveTurn : null;
     // The agent's questions the control conversation answered say so, as a gate does — the marks are
-    // the instance's `jaira.answered` rows, joined to the blocks by question text.
-    const entries = markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions);
+    // the instance's `jaira.answered` rows, joined to the blocks by the call each answered. A piece
+    // that is one stretch of a turn a workflow tool's note cut draws only that stretch (`splitAtNotes`).
+    const entries = entriesOfPart(
+      markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions),
+      piece.part,
+    );
     const transcript = (
       <Transcript
         session={view}

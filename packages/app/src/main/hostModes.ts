@@ -22,8 +22,8 @@
  * drops no hold (`ProjectSession.closing`); only a person, or the run itself, ends what a person began.
  * A close does not drop a kept Undo either.
  */
-import { DirectedTransitions, type DirectedTransition, type EngineEvent } from "@declarative-ai/hw";
-import { descentFollower, heldMoves, openFastForward, recordHostRow, type Project, type TaskRuntimeRow } from "@jaira/persistence";
+import { DirectedTransitions, type DirectedTransition } from "@declarative-ai/hw";
+import { heldMoves, openFastForward, recordHostRow, type Project, type TaskRuntimeRow } from "@jaira/persistence";
 import {
   FAST_FORWARD_ENDED_EVENT,
   FAST_FORWARD_EVENT,
@@ -33,6 +33,7 @@ import {
   type FastForwardEnd,
   type TaskMoveRequest,
 } from "@jaira/shared";
+import type { JsonValue } from "@declarative-ai/json";
 import { restoredFastForward, type FastForwardRun } from "./fastForward";
 import type { ProjectSession } from "./session";
 
@@ -67,7 +68,6 @@ export interface RestoredModes {
   arrived?: boolean;
   /** The run's move port, already holding the moves that were held when the process went away. */
   directed?: DirectedTransitions;
-  descents?: Array<(event: EngineEvent) => void>;
   held: number;
 }
 
@@ -103,21 +103,16 @@ export function restoreHostModes(open: ProjectSession, taskId: string): Restored
   const held = heldMoves(project, taskId, events);
   if (held.length > 0) {
     const port = new DirectedTransitions();
-    const descents: Array<(event: EngineEvent) => void> = [];
-    const root = project.runtime.get(taskId)?.rootInstanceId;
     for (const hold of held) {
-      const descends = hold.path !== undefined && hold.path.length > 0;
-      const move: DirectedTransition = {
+      port.direct({
         to: hold.to,
         by: hold.by,
         ...(hold.under !== undefined ? { instanceId: hold.under } : {}),
-        ...(hold.inputs !== undefined && !descends ? { inputs: hold.inputs } : {}),
-      };
-      port.direct(move);
-      if (descends) descents.push(descentFollower(port, { parentInstanceId: hold.under ?? root, key: hold.to }, hold.path!, move, hold.inputs));
+        ...(hold.path !== undefined && hold.path.length > 0 ? { path: hold.path } : {}),
+        ...(hold.inputs !== undefined ? { inputs: hold.inputs } : {}),
+      });
     }
     out.directed = port;
-    if (descents.length > 0) out.descents = descents;
     out.held = held.length;
   }
   return out;
@@ -154,8 +149,8 @@ export function noteHeldMove(project: Project, request: TaskMoveRequest, move: D
     ...(move.instanceId !== undefined ? { under: move.instanceId } : {}),
     to: move.to,
     by: move.by,
-    ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
-    ...(request.path !== undefined && request.path.length > 0 ? { path: [...request.path] } : {}),
+    ...(move.inputs !== undefined ? { inputs: move.inputs as Record<string, JsonValue> } : {}),
+    ...(move.path !== undefined && move.path.length > 0 ? { path: [...move.path] } : {}),
   });
 }
 

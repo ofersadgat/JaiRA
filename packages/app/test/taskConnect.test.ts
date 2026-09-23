@@ -63,6 +63,16 @@ function files(): Record<string, JsonValue> {
     "deep/two/x": gate("x"),
     "deep/two/y": gate("y"),
     "deep/two/z": gate("z"),
+    // The same, with a composite on the way down that ASKS before its children run: its own operation
+    // runs first, so a move through it waits there — the place a process can die part-way down.
+    held: { label: "Held", children: { one: { state: "deep/one" }, two: { state: "held/two" } }, sequence: ["one", "two"] },
+    "held/two": {
+      label: "Two, asking first",
+      outputs: { confirmed: { schema: BOOLEAN } },
+      operation: { kind: "function", function: "confirm_action", args: { prompt: "two?" } },
+      children: { x: { state: "deep/two/x" }, y: { state: "deep/two/y" }, z: { state: "deep/two/z" } },
+      sequence: ["x", "y", "z"],
+    },
     // Rule 2: a workflow that mounts a phase somebody ran alone. `build` reads `product`, so it can
     // be reached past `ux`; `ship` reads `ux`, so it cannot.
     feat: {
@@ -256,6 +266,36 @@ describe("rule 1 — the target is in the task's workflow", () => {
     expect(no(await service.connectTask({ taskId, target: "flow/b" })).refusal).toMatchObject({ code: "never-run", message: "'Queued' has never run, so it stands nowhere to be moved from — start it instead" });
     expect(no(await service.connectTask({ taskId, target: "flow" })).refusal).toMatchObject({ code: "already-there", message: "'Queued' already runs 'flow'" });
     expect(no(await service.connectTask({ taskId: "t-nope", target: "flow" })).refusal).toMatchObject({ code: "unknown-task", message: "unknown task 't-nope'" });
+  });
+});
+
+describe("the way down survives a restart (decision 0005, the descent)", () => {
+  it("a move to a nested target is journaled with its path, and a restart part-way down still reaches the target", async () => {
+    const taskId = await standingIn("held", 0); // parked at one
+    ok(await service.connectTask({ taskId, target: "deep/two/y", skip: true }));
+    // The root took its step: `two` is entered, and asks before the next step can be taken.
+    expect((await parked()).state).toBe("two");
+    const steps = journal(taskId).filter((e): e is Extract<EngineEvent, { type: "transition.taken" }> => e.type === "transition.taken");
+    expect(steps).toMatchObject([{ to: "two", by: "person", skip: true, descent: { path: ["y"] } }]);
+
+    // The process goes away here. Nothing in memory carries the rest of the way down any more.
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    await service.open(dir);
+    seen.clear();
+    // The resumed run asks `two`'s question again, and once it is answered goes straight to `y` —
+    // not to `x`, which is where `two`'s own spine would have started.
+    expect(await answer()).toBe("two");
+    expect((await parked()).state).toBe("y");
+    expect(ended(taskId)).toEqual([
+      ["one", "skipped"],
+      ["x", "skipped"],
+    ]);
+    const after = journal(taskId).filter((e): e is Extract<EngineEvent, { type: "transition.taken" }> => e.type === "transition.taken");
+    expect(after.map((e) => [e.stateId, e.to])).toEqual([
+      ["held", "two"],
+      ["held/two", "y"],
+    ]);
   });
 });
 

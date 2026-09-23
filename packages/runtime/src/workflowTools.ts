@@ -17,7 +17,7 @@
  * Like every tool here a refusal is RETURNED — `{ ok: false, … }` or `{ error }` — never thrown: the
  * model reads it and says so, or supplies what was missing and calls again.
  */
-import type { Tool } from "@declarative-ai/exec";
+import type { ExecServices, Tool } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
 import type {
   AnswerInput,
@@ -35,10 +35,19 @@ import type {
 } from "@jaira/shared";
 
 /** What serves the tools: the host's own operations, bound to the conversation that holds them. */
+/**
+ * What the runtime knows about the tool call being served — the model's own id for it
+ * (`ExecServices.toolCallId`), when the runtime executing the tool reported one. A host that records
+ * what a call did names it by this, which is the id the call carries in the conversation's transcript.
+ */
+export interface WorkflowToolCall {
+  toolCallId?: string;
+}
+
 export interface WorkflowToolHost {
   workflows(input: WorkflowsInput): Promise<WorkflowsResult> | WorkflowsResult;
-  start(input: StartInput): Promise<StartResult>;
-  move(input: MoveInput): Promise<MoveResult>;
+  start(input: StartInput, call?: WorkflowToolCall): Promise<StartResult>;
+  move(input: MoveInput, call?: WorkflowToolCall): Promise<MoveResult>;
   tasks(input: TasksInput): Promise<TasksResult> | TasksResult;
   answer(input: AnswerInput): Promise<AnswerResult> | AnswerResult;
   hold(input: TaskGestureInput): Promise<TaskGestureResult>;
@@ -61,6 +70,9 @@ export function noWorkflowHost(where = "here"): WorkflowToolHost {
     stop: gesture,
   };
 }
+
+/** The call a tool is serving, as its ctx says it — see {@link WorkflowToolCall}. */
+const callOf = (ctx: ExecServices | undefined): WorkflowToolCall => (ctx?.toolCallId !== undefined ? { toolCallId: ctx.toolCallId } : {});
 
 const record = (input: unknown): Record<string, unknown> => (input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {});
 
@@ -135,12 +147,12 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
         "Start a state as a child of this conversation. `inputs` are the TARGET STATE'S own inputs. The host binds what the workflow wires itself; if a required input is still open the call does nothing and answers `ok: false` with `missing` (each open input, its schema and description) and `schema` (the target's input schema) — supply the values, or ask the person in words and name what they answered in `asked`, then call again.",
       inputSchema: { type: "object", properties: { state: { type: "string", description: "The state to start, e.g. `feature/product`." }, ...SUPPLIED_PROPERTIES }, required: ["state"] } as unknown as Tool["inputSchema"],
       readOnly: false,
-      run: async (input) => {
+      run: async (input, ctx) => {
         const args = record(input);
         if (typeof args["state"] !== "string" || args["state"].length === 0) return { error: "name the state to start: `state`" };
         const supplied = suppliedOf(args);
         if ("error" in supplied) return supplied;
-        return (await host.start({ state: args["state"], ...supplied })) as unknown as JsonValue;
+        return (await host.start({ state: args["state"], ...supplied }, callOf(ctx))) as unknown as JsonValue;
       },
     },
     move_task: {
@@ -158,18 +170,21 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
         required: ["to"],
       } as unknown as Tool["inputSchema"],
       readOnly: false,
-      run: async (input) => {
+      run: async (input, ctx) => {
         const args = record(input);
         if (typeof args["to"] !== "string" || args["to"].length === 0) return { error: "name the target state: `to`" };
         const supplied = suppliedOf(args);
         if ("error" in supplied) return supplied;
-        return (await host.move({
-          to: args["to"],
-          ...(typeof args["task"] === "string" && args["task"].length > 0 ? { task: args["task"] } : {}),
-          ...(typeof args["workflow"] === "string" && args["workflow"].length > 0 ? { workflow: args["workflow"] } : {}),
-          ...(args["skip"] === true ? { skip: true } : {}),
-          ...supplied,
-        })) as unknown as JsonValue;
+        return (await host.move(
+          {
+            to: args["to"],
+            ...(typeof args["task"] === "string" && args["task"].length > 0 ? { task: args["task"] } : {}),
+            ...(typeof args["workflow"] === "string" && args["workflow"].length > 0 ? { workflow: args["workflow"] } : {}),
+            ...(args["skip"] === true ? { skip: true } : {}),
+            ...supplied,
+          },
+          callOf(ctx),
+        )) as unknown as JsonValue;
       },
     },
     list_tasks: {

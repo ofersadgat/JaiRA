@@ -46,7 +46,7 @@
  * a string is given the sentence that says what the person did — and anything else refuses.
  */
 import type { FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
-import { sourceStateId, type DirectedTransition, type DirectedTransitions, type EngineEvent, type LoadedInstance, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
+import { sourceStateId, type EngineEvent, type LoadedInstance, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
 import { createLogger } from "@declarative-ai/log";
 import type {
   AdoptAsk,
@@ -967,48 +967,6 @@ async function adoptInto(
   }
   const moved = await host.move(moveRequest(request, parentId, within!.move, handed));
   return { ok: true, dryRun, plan: { ...plan, adopt: adopted.plan }, taskId: parentId, moved: moved.status, undo };
-}
-
-// ---------------------------------------------------------------------------------------------------
-// the way down
-// ---------------------------------------------------------------------------------------------------
-
-/**
- * Take a move's `path` — the child keys beneath its target — as the run enters each composite.
- *
- * A directed transition names an instance by id, and an instance that has not entered has none. So
- * the way down is handed over one level at a time: when the journal says the composite named by the
- * previous step has entered, the next step is directed at it, by the id it was just given. The
- * engine registers an instance before it journals its entry and takes a waiting move before it
- * walks the spine, so the composite goes straight to the named child.
- *
- * Returns the observer to feed every journaled event, in order.
- */
-export function descentFollower(
-  port: Pick<DirectedTransitions, "direct">,
-  first: { parentInstanceId: string | undefined; key: string },
-  path: readonly string[],
-  move: Pick<DirectedTransition, "by" | "skip">,
-  /** What the asker hands the LAST state on the way down — the target itself. */
-  finalInputs?: DirectedTransition["inputs"],
-): (event: EngineEvent) => void {
-  let waiting: { parentInstanceId: string | undefined; key: string } | undefined = path.length > 0 ? first : undefined;
-  let rest = [...path];
-  return (event) => {
-    if (waiting === undefined || event.type !== "instance.entered" || event.childKey !== waiting.key) return;
-    if (waiting.parentInstanceId !== undefined && event.parentInstanceId !== waiting.parentInstanceId) return;
-    const to = rest[0]!;
-    rest = rest.slice(1);
-    waiting = rest.length > 0 ? { parentInstanceId: event.instanceId, key: to } : undefined;
-    const outcome = port.direct({
-      instanceId: event.instanceId,
-      to,
-      by: move.by,
-      ...(move.skip === true ? { skip: true } : {}),
-      ...(rest.length === 0 && finalInputs !== undefined ? { inputs: finalInputs } : {}),
-    });
-    if (outcome.status === "refused") log.warn(`the way down to '${to}' was refused: ${outcome.reason}`);
-  };
 }
 
 // ---------------------------------------------------------------------------------------------------

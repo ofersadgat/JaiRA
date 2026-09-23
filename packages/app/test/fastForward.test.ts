@@ -561,50 +561,51 @@ describe("the drop's Undo — the fast-forward is the drop's while it runs, and 
 
 describe("the stale inbox — what an interrupted agent asked is withdrawn by the skip", () => {
   const entry = (instanceId: string, parent: string, childKey: string): EngineEvent => ({ type: "instance.entered", instanceId, parentInstanceId: parent, childKey, stateId: childKey, inputs: {} }) as never;
-  const started = (instanceId: string): EngineEvent => ({ type: "operation.started", instanceId, stateId: "s", op: "prompt" }) as never;
   const skipped = (instanceId: string): EngineEvent => ({ type: "instance.terminated", instanceId, stateId: "s", outcome: "skipped" }) as never;
 
-  it("withdraws when every agent still running was inside what was skipped", () => {
+  it("answers, for a skip, which asking instances are inside what was skipped — the skipped one and all below it", () => {
     const w = new SkipWithdrawals();
     w.note(entry("i2", "i1", "ux"));
     w.note(entry("i3", "i2", "item"));
-    w.note(started("i3"));
-    expect(w.note(skipped("i2"))).toEqual({ withdraw: true, blockedBy: [] });
-  });
-
-  it("keeps them when an agent OUTSIDE the skipped subtree is still running — whose they are cannot be told", () => {
-    const w = new SkipWithdrawals();
-    w.note(entry("i2", "i1", "ux"));
     w.note(entry("i4", "i1", "side"));
-    w.note(started("i2"));
-    w.note(started("i4"));
-    expect(w.note(skipped("i2"))).toEqual({ withdraw: false, blockedBy: ["i4"] });
+    const inside = w.note(skipped("i2"))!;
+    expect([inside("i2"), inside("i3"), inside("i4"), inside("i1"), inside(undefined)]).toEqual([true, true, false, false, false]);
   });
 
-  it("says nothing for a member that never ran, and knows a RESUMED run's loaded parents from the journal", () => {
+  it("says nothing but a skip, and knows a RESUMED run's loaded parents from the journal", () => {
     const w = new SkipWithdrawals([entry("i2", "i1", "ux"), entry("i3", "i2", "item")]);
-    expect(w.note(skipped("i9"))).toBeUndefined();
+    expect(w.note({ type: "instance.terminated", instanceId: "i3", stateId: "s", outcome: "success" } as never)).toBeUndefined();
     // Re-dispatched after a resume: no entry this time, and still known to be inside `ux`.
-    w.note(started("i3"));
-    expect(w.note(skipped("i2"))).toEqual({ withdraw: true, blockedBy: [] });
+    expect(w.note(skipped("i2"))!("i3")).toBe(true);
   });
 
-  it("clears a skipped task's parked approval and question from the inbox, through the service", async () => {
+  it("a real Skip withdraws the skipped state's asks and leaves an async sibling's standing", async () => {
     const taskId = await stoppedAtFirst();
     ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // at `c`
-    // What an agent inside the running state would have parked: an approval and a question.
+    const c = nodeByKey(taskId, "c")!.instanceId;
+    // What agents would have parked, each naming the instance that asked (the engine stamps it): one
+    // inside the running state, one in a sibling still running beside it.
     const open = (service as unknown as { session(p?: string): { approvals: { approver(c: { taskId?: string }): (r: unknown) => Promise<unknown> }; questions: { asker(c: { taskId?: string }): (r: unknown) => Promise<unknown> } } }).session();
-    const approved = open.approvals.approver({ taskId })({ tool: "bash", input: { command: "git push" }, sessionId: "s" });
-    const asked = open.questions.asker({ taskId })({ questions: [{ question: "Which way?", options: [{ label: "left" }, { label: "right" }] }], sessionId: "s" });
-    await until(() => service.pendingApprovals().some((p) => p.taskId === taskId) && service.pendingQuestions().some((p) => p.taskId === taskId), "the agent's asks");
-    // The skip ends `c` — and with a prompt call running inside it, its asks go with it.
-    const inside = nodeByKey(taskId, "c")!;
-    (service as unknown as { withdrawSkipped(o: unknown, t: string, v: { withdraw: boolean; blockedBy: string[] }): void }).withdrawSkipped(open, taskId, { withdraw: true, blockedBy: [] });
-    expect(inside).toBeDefined();
-    await expect(approved).resolves.toEqual({ decision: "deny", scope: "once" });
-    await expect(asked).resolves.toBeUndefined();
-    expect(service.pendingApprovals().filter((p) => p.taskId === taskId)).toEqual([]);
-    expect(service.pendingQuestions().filter((p) => p.taskId === taskId)).toEqual([]);
+    const ask = (instanceId: string) => ({
+      approved: open.approvals.approver({ taskId })({ tool: "bash", input: { command: "git push" }, sessionId: "s", instanceId }),
+      asked: open.questions.asker({ taskId })({ questions: [{ question: `Which way, ${instanceId}?`, options: [{ label: "left" }, { label: "right" }] }], sessionId: "s", instanceId }),
+    });
+    const skippedAgent = ask(c);
+    const sibling = ask("the-async-sibling");
+    await until(() => service.pendingApprovals().filter((p) => p.taskId === taskId).length === 2 && service.pendingQuestions().filter((p) => p.taskId === taskId).length === 2, "the agents' asks");
+
+    await service.skipFastForward({ taskId });
+    await expect(skippedAgent.approved).resolves.toEqual({ decision: "deny", scope: "once" });
+    await expect(skippedAgent.asked).resolves.toBeUndefined();
+    // The sibling's are still waiting for their answers.
+    expect(service.pendingApprovals().filter((p) => p.taskId === taskId)).toHaveLength(1);
+    expect(service.pendingQuestions().filter((p) => p.taskId === taskId).map((p) => p.questions[0]!.question)).toEqual(["Which way, the-async-sibling?"]);
+    const pendingApproval = service.pendingApprovals().find((p) => p.taskId === taskId)!;
+    const pendingQuestion = service.pendingQuestions().find((p) => p.taskId === taskId)!;
+    service.submitApproval(pendingApproval.requestId, "allow");
+    service.submitQuestion(pendingQuestion.requestId, { "Which way, the-async-sibling?": "left" });
+    await expect(sibling.approved).resolves.toMatchObject({ decision: "allow" });
+    await expect(sibling.asked).resolves.toEqual({ "Which way, the-async-sibling?": "left" });
   });
 });

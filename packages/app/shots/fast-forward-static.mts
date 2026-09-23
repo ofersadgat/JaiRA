@@ -136,7 +136,7 @@ const agentAnswered = h(
       { className: "sb-body" },
       h(Transcript, {
         entries: markAnsweredQuestions(entriesOf({ taskId: "t", instanceId: "i", stateId: "feature/ux/item", sessionId: "s", seq: 1, turns: agentAsked } as SessionView), [
-          { via: "control", confidence: 0.86, byTaskId: "t-1", at: 11, questions: ["Should a paused run keep its worktree?"] },
+          { via: "control", confidence: 0.86, byTaskId: "t-1", at: 11, toolCallId: "q1" },
         ]),
         live: null,
         calls: { outcomes: "rail", onAnswerYourself: () => undefined },

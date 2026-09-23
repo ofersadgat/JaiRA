@@ -152,8 +152,9 @@ async function ran(workflow: string, gates: number, title = `Ran ${workflow}`): 
 /** The host, as the eight tools reach it, for the conversation `taskId` is. */
 const host = (taskId: string) => service.workflowHostFor(dir, taskId);
 /** The eight tools over that host, as a MODEL calls them: by name, with a bag of arguments. */
-const call = async (taskId: string, tool: string, input: unknown): Promise<Record<string, JsonValue>> =>
-  (await createWorkflowTools(host(taskId))[tool]!.run(input as never, {} as never)) as Record<string, JsonValue>;
+/** One tool call, as a runtime makes it — `toolCallId` is what it says the model called the call. */
+const call = async (taskId: string, tool: string, input: unknown, toolCallId?: string): Promise<Record<string, JsonValue>> =>
+  (await createWorkflowTools(host(taskId))[tool]!.run(input as never, (toolCallId !== undefined ? { toolCallId } : {}) as never)) as Record<string, JsonValue>;
 
 /** A conversation of `state`, started and settled — what a person typing in the Chat view makes. */
 async function conversation(state: string, message = "let's work on this"): Promise<string> {
@@ -275,9 +276,10 @@ describe("start_task", () => {
     const session = await conversation("chat/session");
     await call(session, "start_task", { state: "lib/needs" });
     expect(movedRows(session)).toEqual([]);
-    const done = (await call(session, "start_task", { state: "lib/needs", inputs: { text: "the thing" }, asked: ["text"] })) as unknown as StartResult;
+    const done = (await call(session, "start_task", { state: "lib/needs", inputs: { text: "the thing" }, asked: ["text"] }, "toolu_start")) as unknown as StartResult;
     await parked();
-    expect(movedRows(session)).toEqual([{ type: MOVED_EVENT, tool: "start_task", task: session, outcome: { verb: "entered", standsAt: (done as { key: string }).key } }]);
+    // The row names the CALL that did it, so the rail can place its note right after that call.
+    expect(movedRows(session)).toEqual([{ type: MOVED_EVENT, tool: "start_task", task: session, outcome: { verb: "entered", standsAt: (done as { key: string }).key }, toolCallId: "toolu_start" }]);
   });
 
   it("dispatches no second model call of its own: what it starts is a CHILD, not another turn", async () => {
@@ -396,7 +398,7 @@ describe("answer_question", () => {
     });
   });
 
-  it("journals an agent's answered questions WITH their texts — what the transcript marks the block by", async () => {
+  it("journals an agent's answered question with the call and the instance that asked — what the transcript marks the block by", async () => {
     const session = await conversation("chat/session");
     // What an agent in this conversation's own task would park: the hub's asker, as a run hands it on.
     const open = (service as unknown as { session(p?: string): { questions: { asker(c: { taskId?: string }): (r: unknown) => Promise<unknown> } } }).session();
@@ -406,13 +408,17 @@ describe("answer_question", () => {
         { question: "How far?", options: [{ label: "near" }, { label: "far" }] },
       ],
       sessionId: "s",
+      // What the engine and the agent's transport put on the request.
+      instanceId: "i-agent",
+      toolCallId: "toolu_ask",
     });
     await until(() => service.pendingQuestions().some((p) => p.taskId === session), "the agent's question");
     const request = service.pendingQuestions().find((p) => p.taskId === session)!.requestId;
     expect(await call(session, "answer_question", { request, confidence: 0.8, answers: { "Which way?": "left", "How far?": "near" } })).toMatchObject({ ok: true });
     await expect(asked).resolves.toMatchObject({ "Which way?": "left" });
     const row = journal(session).find((e) => (e as { type: string }).type === ANSWERED_EVENT) as unknown as AnsweredEvent;
-    expect(row).toMatchObject({ kind: "question", questions: ["Which way?", "How far?"], settled_by: { via: "control", confidence: 0.8 } });
+    expect(row).toMatchObject({ kind: "question", instanceId: "i-agent", toolCallId: "toolu_ask", settled_by: { via: "control", confidence: 0.8 } });
+    expect(row).not.toHaveProperty("questions");
   });
 
   it("leaves a question nobody answered parked DURABLY, across a close and an open", async () => {

@@ -978,6 +978,8 @@ export interface ConversationTurn {
   made?: MadeBatch;
   /** For a `moved` turn: what the conversation's workflow tool did (`jaira.moved`). */
   moved?: WorkflowOutcome;
+  /** For a `moved` turn: the tool call that did it, when the row names it — see `MovedEvent.toolCallId`. */
+  toolCallId?: string;
 }
 
 /**

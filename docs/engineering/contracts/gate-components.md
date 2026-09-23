@@ -353,20 +353,20 @@ person's (checked BEFORE it is journaled), and recorded as
 { "type": "jaira.answered", "requestId": "ui-7", "kind": "interaction",
   "instanceId": "<the gate's instance>", "byTaskId": "<the conversation's task>",
   "settled_by": { "via": "control", "confidence": 0.86 } }
-// an agent's AskUserQuestion: kind "question", and the question TEXTS it answered
+// an agent's AskUserQuestion: kind "question", and the id of the call it answered
 { "type": "jaira.answered", "requestId": "question-3", "kind": "question",
-  "instanceId": "<the asking agent's instance>", "questions": ["Which way?"],
+  "instanceId": "<the asking agent's instance>", "toolCallId": "toolu_01…",
   "byTaskId": "<the conversation's task>", "settled_by": { "via": "control", "confidence": 0.8 } }
 ```
 
 which the projection folds onto the instance as `settledBy` — drawn on the gate
 as "Answered for you by the conversation", with "Answer it yourself", a rewind to
 where that state was entered. Every `question` row also lands in the instance's
-`answeredQuestions`, each with its `questions`, and the agent's transcript draws the
-same line under the `AskUserQuestion` block asking exactly those questions
-(`markAnsweredQuestions`) — the texts are the join, because the hub's park carries no
-tool-call id. A row written before 2026-09-22 has no `questions`, and is drawn only
-where the instance has that one mark and one answered block. The RESULT is unchanged: a gate's outputs do not
+`answeredQuestions`, each with its `toolCallId`, and the agent's transcript draws the
+same line under the `AskUserQuestion` block whose call has that id
+(`markAnsweredQuestions`). Both ids ride the parked request: the engine names the asking
+instance on every question it hands on, and the agent's transport reports the call's own id.
+A row naming no call is drawn nowhere. The RESULT is unchanged: a gate's outputs do not
 say who answered, so nothing downstream can tell and nothing downstream has to.
 The confidence is the one `autopilot.askBelow` was held against; below it the
 gate waits for the person as it would have.

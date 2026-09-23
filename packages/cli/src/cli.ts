@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { formatRecord, setLogSink } from "@declarative-ai/log";
-import { DirectedTransitions, loadBundle, validateBundle, moduleHash as moduleHashOf, type DirectedTransition, type EngineEvent } from "@declarative-ai/hw";
+import { DirectedTransitions, loadBundle, validateBundle, moduleHash as moduleHashOf, type DirectedTransition } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { registerCliChangesetReviewer } from "./changesetReviewer";
 import { cliApprovals, governRun, type ApproveMode, type AskLine, type CliApprovals } from "./commandApprover";
@@ -31,7 +31,6 @@ import {
   openProject,
   adoptTaskIn,
   connectTask,
-  descentFollower,
   prepareUserModules,
   resetUserModules,
   resolveUserFunctions,
@@ -1143,22 +1142,20 @@ async function runTaskNow(
       gate,
       io,
     );
-    // The port, already holding the move — and the way DOWN from it, when the target is nested.
-    // Nothing is running in a task that is not running: a state it stopped in is stepped past.
+    // The port, already holding the move — with the way DOWN from it, when the target is nested,
+    // which the engine takes a level at a time. Nothing is running in a task that is not running: a
+    // state it stopped in is stepped past.
     const directed = move !== undefined ? new DirectedTransitions() : undefined;
     const recorder = project.events.recorder(taskId);
-    let follow: ((event: EngineEvent) => void) | undefined;
     if (move !== undefined && directed !== undefined) {
       const asked: DirectedTransition = {
         to: move.toState,
         by: move.by ?? "person",
         ...(move.instanceId !== undefined ? { instanceId: move.instanceId } : {}),
+        ...(move.path !== undefined && move.path.length > 0 ? { path: move.path } : {}),
         ...(move.skip === true || runtime?.status !== "completed" ? { skip: true } : {}),
       };
       directed.direct(asked);
-      if (move.path !== undefined && move.path.length > 0) {
-        follow = descentFollower(directed, { parentInstanceId: move.instanceId ?? resume!.loaded.id, key: move.toState }, move.path, asked);
-      }
     }
     // Artifact placement (DESIGN §7.6), assembled once and shared by the file tools
     // and the post-run sink so both put files in the same place.
@@ -1245,7 +1242,7 @@ async function runTaskNow(
       registry,
       prompt,
       session,
-      persistence: follow === undefined ? recorder : { record: (event, atMs) => (recorder.record(event, atMs), follow!(event)) },
+      persistence: recorder,
       ...(directed !== undefined ? { directed } : {}),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       // The project's policy, audited into `command_log`, and the approver — as an app run gets them.

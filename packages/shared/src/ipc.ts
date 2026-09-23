@@ -260,6 +260,10 @@ export interface PendingQuestion {
   requestId: string;
   questions: AgentQuestion[];
   taskId?: string;
+  /** The workflow instance whose agent asked — stamped by the engine on the request. */
+  instanceId?: string;
+  /** The asking `AskUserQuestion` call's own id, when the agent's transport reported it. */
+  toolCallId?: string;
   /** Where {@link taskId} is recorded. Same reason as {@link PendingApproval.project}. */
   project: ProjectRef;
   at: number;

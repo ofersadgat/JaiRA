@@ -56,6 +56,12 @@
  * OWES (`LoadedInstance.directed`): the run died between the two rows, and the load makes the entry
  * without journaling the transition again.
  *
+ * A move to a NESTED target is taken a level at a time, each step's row carrying the rest of the way
+ * down (`transition.taken`'s `descent`). The instance a step entered owes the next step until it
+ * journals a directed transition of its own; one still owing it is loaded with it
+ * (`LoadedInstance.descent`), so a restart part-way down continues to the target instead of walking
+ * the composite's spine from its first child.
+ *
  * ## An adopted child is history whose outputs are ON its row (decision 0005 §2)
  *
  * An adoption (`adopt.ts`) mirrors a task that ran alone into this journal: an `instance.entered`
@@ -84,7 +90,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { hashOperation, scopedOperationId, type Failure, type ResolvedValue } from "@declarative-ai/exec";
-import type { CallResult, LoadedInstance, WorkflowMetrics } from "@declarative-ai/hw";
+import type { CallResult, DirectedDescent, LoadedInstance, WorkflowMetrics } from "@declarative-ai/hw";
 import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { InstanceAddress } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
@@ -141,7 +147,9 @@ interface FoldNode {
   /** The instance that entered this one — walked upward when a directed transition reopens a path. */
   parentId?: string;
   /** A DIRECTED transition journaled here whose target has not entered since — see the header. */
-  directed?: { to: string; inputs?: Record<string, JsonValue> };
+  directed?: { to: string; inputs?: Record<string, JsonValue>; descent?: DirectedDescent };
+  /** The next step of a way down this instance was entered to take, and has not — see the header. */
+  descent?: DirectedDescent;
   childKey?: string;
   /** The element of a fanned-out mount this instance is — see `InstanceNode.element`. */
   element?: number;
@@ -395,8 +403,13 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           parent.children.push(node);
           // Entering a NEW child is the parent acting: whatever finished before this was answered.
           parent.advancedAt = at;
-          // The entry a directed transition owed has been made.
-          if (parent.directed?.to === event.childKey) delete parent.directed;
+          // The entry a directed transition owed has been made — and, on a way down, this instance
+          // owes the next step until it takes one.
+          const owed = parent.directed;
+          if (owed !== undefined && owed.to === event.childKey) {
+            if (owed.descent !== undefined) node.descent = owed.descent;
+            delete parent.directed;
+          }
         } else {
           lastRootId = node.id;
         }
@@ -424,7 +437,13 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           if (event.by !== undefined) {
             // DIRECTED (see the header): the target's entry is owed until it is seen, and an
             // instance that had terminated is live again — with everything above it.
-            node.directed = { to: event.to, ...(event.inputs !== undefined ? { inputs: event.inputs as Record<string, JsonValue> } : {}) };
+            node.directed = {
+              to: event.to,
+              ...(event.inputs !== undefined ? { inputs: event.inputs as Record<string, JsonValue> } : {}),
+              ...(event.descent !== undefined ? { descent: event.descent } : {}),
+            };
+            // A directed step of its own is the step a way down was waiting for — or a later word.
+            delete node.descent;
             for (let up: FoldNode | undefined = node; up !== undefined; up = up.parentId === undefined ? undefined : nodes.get(up.parentId)) {
               delete up.terminated;
             }
@@ -670,6 +689,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       ...(sites !== undefined ? { sites } : {}),
       ...(nextSite !== undefined ? { nextSite } : {}),
       ...(live && node.directed !== undefined ? { directed: node.directed as NonNullable<LoadedInstance["directed"]> } : {}),
+      ...(live && node.descent !== undefined && node.descent.path.length > 0 ? { descent: node.descent } : {}),
       // Settled fields are used verbatim by `loadRun` and never re-evaluated; an absent one is.
       ...(node.fields.size > 0 ? { fields: Object.fromEntries(node.fields) } : {}),
       ...(children.length > 0 ? { children } : {}),

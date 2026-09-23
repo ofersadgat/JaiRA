@@ -644,7 +644,7 @@ function markAnswered(nodes: readonly InstanceNode[], rows: readonly { seq: numb
       // The same rewind point for each: taking back any of an agent's answers re-enters the state.
       const asked = questions.get(node.instanceId);
       if (asked !== undefined) {
-        node.answeredQuestions = asked.map((row) => ({ ...row.settled_by, byTaskId: row.byTaskId, at, ...(row.questions !== undefined ? { questions: row.questions } : {}) }));
+        node.answeredQuestions = asked.map((row) => ({ ...row.settled_by, byTaskId: row.byTaskId, at, ...(row.toolCallId !== undefined ? { toolCallId: row.toolCallId } : {}) }));
       }
       walk(node.children);
     }

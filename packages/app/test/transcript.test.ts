@@ -16,6 +16,7 @@ import {
   agentTitleOf,
   blocksOf,
   entriesOf,
+  entriesOfPart,
   iconOf,
   journalFor,
   liveStatusOf,
@@ -947,6 +948,24 @@ describe("a structured output that arrived through a tool", () => {
   });
 });
 
+describe("one stretch of a turn — what a piece draws when a note cut it at a call", () => {
+  const call = (id: string): TranscriptEntry => ({ kind: "tool", name: "move_task", summary: "", callId: id, ok: true });
+  const say = (text: string): TranscriptEntry => ({ kind: "message", role: "assistant", text });
+  const turn: TranscriptEntry[] = [say("on it"), call("a"), say("between"), call("b"), say("done")];
+
+  it("draws through the call, then after it — each entry exactly once", () => {
+    expect(entriesOfPart(turn, undefined)).toBe(turn);
+    expect(entriesOfPart(turn, { through: "a" })).toEqual([say("on it"), call("a")]);
+    expect(entriesOfPart(turn, { after: "a", through: "b" })).toEqual([say("between"), call("b")]);
+    expect(entriesOfPart(turn, { after: "b" })).toEqual([say("done")]);
+  });
+
+  it("takes a call not (yet) in the transcript as the turn's end, so two halves never draw the same entries", () => {
+    expect(entriesOfPart(turn, { through: "later" })).toEqual(turn);
+    expect(entriesOfPart(turn, { after: "later" })).toEqual([]);
+  });
+});
+
 describe("an agent's question the control conversation answered (decision 0005 §4)", () => {
   const ask = (question: string, answered = true): ToolEntry => ({
     kind: "tool",
@@ -957,38 +976,36 @@ describe("an agent's question the control conversation answered (decision 0005 �
     args: { questions: [{ question, options: [{ label: "left" }, { label: "right" }] }] },
     ...(answered ? { detail: { answers: { [question]: "left" } }, result: `User has answered your questions: "${question}"="left".` } : {}),
   });
-  const mark = (confidence: number, questions?: string[]) => ({ via: "control" as const, confidence, byTaskId: "t-conv", at: 7, ...(questions !== undefined ? { questions } : {}) });
+  const mark = (confidence: number, toolCallId?: string) => ({ via: "control" as const, confidence, byTaskId: "t-conv", at: 7, ...(toolCallId !== undefined ? { toolCallId } : {}) });
 
-  it("marks the block whose questions the row names — and not the one the person answered", () => {
+  it("marks the block whose CALL the row names — and not the one the person answered", () => {
     const entries: TranscriptEntry[] = [ask("Which way?"), { kind: "message", role: "assistant", text: "ok" }, ask("How far?")];
-    const marked = markAnsweredQuestions(entries, [mark(0.86, ["How far?"])]);
+    const marked = markAnsweredQuestions(entries, [mark(0.86, "How far?")]);
     expect(marked.map((e) => (e.kind === "tool" ? e.settledBy?.confidence : undefined))).toEqual([undefined, undefined, 0.86]);
     // Nothing is mutated: the input list still says nothing.
     expect((entries[2] as ToolEntry).settledBy).toBeUndefined();
   });
 
-  it("hands each mark out once, so the same question asked twice gets one mark per answer", () => {
-    const marked = markAnsweredQuestions([ask("Which way?"), ask("Which way?")], [mark(0.9, ["Which way?"])]);
-    expect(marked.map((e) => (e.kind === "tool" ? e.settledBy?.confidence : undefined))).toEqual([0.9, undefined]);
+  it("tells the same question asked twice apart by its call, not its words", () => {
+    const first = { ...ask("Which way?"), callId: "toolu_1" };
+    const second = { ...ask("Which way?"), callId: "toolu_2" };
+    const marked = markAnsweredQuestions([first, second], [mark(0.9, "toolu_2")]);
+    expect(marked.map((e) => (e.kind === "tool" ? e.settledBy?.confidence : undefined))).toEqual([undefined, 0.9]);
   });
 
-  it("pairs a mark written before rows carried their texts only when nothing else could be meant", () => {
-    expect((markAnsweredQuestions([ask("Which way?")], [mark(0.5)])[0] as ToolEntry).settledBy?.confidence).toBe(0.5);
-    // Two answered blocks and one untexted mark: which one got it is a guess, and none is drawn.
-    const two = markAnsweredQuestions([ask("Which way?"), ask("How far?")], [mark(0.5)]);
-    expect(two.every((e) => e.kind !== "tool" || e.settledBy === undefined)).toBe(true);
-    // A block still in flight was answered by nobody yet.
-    expect((markAnsweredQuestions([ask("Which way?", false)], [mark(0.5)])[0] as ToolEntry).settledBy).toBeUndefined();
+  it("draws a mark that names no call nowhere — there is no guessing which block it meant", () => {
+    const entries: TranscriptEntry[] = [ask("Which way?")];
+    expect(markAnsweredQuestions(entries, [mark(0.5)])).toBe(entries);
   });
 
   it("returns the very same list when there is nothing to mark", () => {
     const entries: TranscriptEntry[] = [ask("Which way?")];
     expect(markAnsweredQuestions(entries, undefined)).toBe(entries);
-    expect(markAnsweredQuestions(entries, [mark(0.9, ["Something else?"])])).toBe(entries);
+    expect(markAnsweredQuestions(entries, [mark(0.9, "toolu_elsewhere")])).toBe(entries);
   });
 
   it("draws who answered under the block, and the way back only where the host lends one", () => {
-    const [marked] = markAnsweredQuestions([ask("Which way?")], [mark(0.86, ["Which way?"])]);
+    const [marked] = markAnsweredQuestions([ask("Which way?")], [mark(0.86, "Which way?")]);
     const bare = renderToStaticMarkup(createElement(Transcript, { entries: [marked!] }));
     expect(bare).toContain('data-testid="asked"');
     expect(bare).toContain('data-testid="answered-for-you"');

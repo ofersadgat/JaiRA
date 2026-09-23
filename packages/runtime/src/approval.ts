@@ -54,6 +54,12 @@ export interface ApprovalRequest {
   sessionId: string;
   /** Which task's run raised it (set by the host that owns the runs). */
   taskId?: string;
+  /**
+   * Which workflow INSTANCE's operation asked — the engine names it on every request it hands
+   * over (`PermissionRequest.instanceId`). What lets a host withdraw exactly the asks a skip
+   * interrupted and leave a still-running sibling's. Absent for an ask no instance made (a chat turn).
+   */
+  instanceId?: string;
   at: number;
 }
 
@@ -175,6 +181,7 @@ export class ApprovalHub {
       input,
       sessionId: req.sessionId,
       ...(taskId !== undefined ? { taskId } : {}),
+      ...(req.instanceId !== undefined ? { instanceId: req.instanceId } : {}),
       at: this.options.now?.() ?? Date.now(),
     };
     if (this.options.onRequest === undefined) {

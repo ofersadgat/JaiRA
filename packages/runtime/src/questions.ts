@@ -21,6 +21,14 @@ export interface QuestionRequest {
   sessionId: string;
   /** Which task's run raised it (set by the host that owns the runs). */
   taskId?: string;
+  /** Which workflow instance's agent asked — see `ApprovalRequest.instanceId`. */
+  instanceId?: string;
+  /**
+   * The asking `AskUserQuestion` call's own id, when the transport reported it — the same id the
+   * call carries in the agent's transcript, so an answer given for the person is drawn on exactly
+   * that call.
+   */
+  toolCallId?: string;
   at: number;
 }
 
@@ -64,6 +72,8 @@ export class QuestionHub {
       questions: req.questions,
       sessionId: req.sessionId,
       ...(taskId !== undefined ? { taskId } : {}),
+      ...(req.instanceId !== undefined ? { instanceId: req.instanceId } : {}),
+      ...(req.toolCallId !== undefined ? { toolCallId: req.toolCallId } : {}),
       at: this.options.now?.() ?? Date.now(),
     };
     return new Promise<UserAnswers | undefined>((resolve) => {

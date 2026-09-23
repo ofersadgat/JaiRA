@@ -80,7 +80,7 @@ import {
   type GenerateVersionResult,
   type Project,
 } from "@jaira/persistence";
-import type { WorkflowToolHost } from "@jaira/runtime";
+import type { WorkflowToolCall, WorkflowToolHost } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 
 /**
@@ -211,13 +211,14 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
   /**
    * Journal what a successful `start_task` / `move_task` did, on THIS conversation's task
    * (`jaira.moved`), and hand the answer back unchanged. The row is what the conversation's rail draws
-   * the note from; a refusal writes nothing, because it did nothing.
+   * the note from, placed at the call that did it (`toolCallId`); a refusal writes nothing, because it
+   * did nothing.
    */
-  const journalMoved = <R extends StartResult | MoveResult>(tool: MovedEvent["tool"], result: R): R => {
+  const journalMoved = <R extends StartResult | MoveResult>(tool: MovedEvent["tool"], result: R, call: WorkflowToolCall | undefined): R => {
     const outcome = workflowOutcomeOf(result);
     const settled: StartResult | MoveResult = result;
     if (outcome !== undefined && settled.ok) {
-      const event: MovedEvent = { type: MOVED_EVENT, tool, task: settled.task, outcome };
+      const event: MovedEvent = { type: MOVED_EVENT, tool, task: settled.task, outcome, ...(call?.toolCallId !== undefined ? { toolCallId: call.toolCallId } : {}) };
       try {
         project.events.recorder(taskId).record(event as unknown as EngineEvent, Date.now());
       } catch {
@@ -275,7 +276,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       };
     },
 
-    async start(input: StartInput): Promise<StartResult> {
+    async start(input: StartInput, call?: WorkflowToolCall): Promise<StartResult> {
       const row = project.runtime.get(taskId);
       const meta = project.tasks.tryRead(taskId);
       if (row === undefined || meta === undefined) return { ok: false, code: "unknown-task", reason: `this conversation's task '${taskId}' is gone` };
@@ -307,7 +308,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       recordSupplied(project, taskId, { to: key }, supplied, made.generated.existing ? Object.keys(handed) : made.generated.literals.map((literal) => literal.input));
       const request: TaskMoveRequest = { project: deps.projectRef, taskId, toState: key, by: "control", ...(Object.keys(handed).length > 0 ? { inputs: handed } : {}) };
       const answer = (status: "started" | "queued" | "held"): StartResult =>
-        journalMoved("start_task", { ok: true, task: taskId, key, state: target, status, mount: made.generated.mount, inputs: settledOf(made.generated, supplied) });
+        journalMoved("start_task", { ok: true, task: taskId, key, state: target, status, mount: made.generated.mount, inputs: settledOf(made.generated, supplied) }, call);
       try {
         if (deps.isLive(taskId)) {
           const engineHolds = made.document === undefined || latestVersion(made.document).snapshotHash === project.runtime.get(taskId)?.snapshotHash;
@@ -327,7 +328,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       }
     },
 
-    async move(input: MoveInput): Promise<MoveResult> {
+    async move(input: MoveInput, call?: WorkflowToolCall): Promise<MoveResult> {
       const moved = input.task ?? taskId;
       const supplied = suppliedOfTool(input);
       let result: TaskConnectResult;
@@ -365,7 +366,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         ...(result.moved !== undefined ? { moved: result.moved } : {}),
         ...(result.controlTaskId !== undefined ? { answeredBy: result.controlTaskId } : {}),
         ...(result.moved === "fast-forwarding" && plan.move !== undefined && plan.move.passes.length > 0 ? { through: [...plan.move.passes] } : {}),
-      });
+      }, call);
     },
 
     tasks(input: TasksInput): TasksResult {
@@ -410,13 +411,13 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
     answer(input: AnswerInput): AnswerResult {
       const mine = family();
       const settled_by = { via: "control" as const, confidence: input.confidence };
-      const journal = (askedTaskId: string, kind: AnsweredEvent["kind"], instanceId?: string, questions?: string[]): void => {
+      const journal = (askedTaskId: string, kind: AnsweredEvent["kind"], instanceId?: string, toolCallId?: string): void => {
         const event: AnsweredEvent = {
           type: ANSWERED_EVENT,
           requestId: input.request,
           kind,
           ...(instanceId !== undefined ? { instanceId } : {}),
-          ...(questions !== undefined ? { questions } : {}),
+          ...(toolCallId !== undefined ? { toolCallId } : {}),
           byTaskId: taskId,
           settled_by,
         };
@@ -448,14 +449,10 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
         if (question.taskId === undefined || !mine.has(question.taskId)) return { ok: false, reason: "that question belongs to a task this conversation did not start" };
         if (input.answers === undefined) return { ok: false, reason: "an agent's questions are answered with `answers`: question text → the chosen label" };
         try {
-          // The question TEXTS ride the row: they are what the agent's `AskUserQuestion` call holds
-          // too, and so what the transcript marks its block by — the park carries no call id.
-          journal(
-            question.taskId,
-            "question",
-            deps.askingInstance?.(question.taskId, "question"),
-            question.questions.map((q) => q.question),
-          );
+          // The row names the instance that asked and the `AskUserQuestion` call it answered, both as
+          // the request carries them (the engine stamps the instance; the transport reports the call),
+          // so the transcript marks exactly that block.
+          journal(question.taskId, "question", question.instanceId ?? deps.askingInstance?.(question.taskId, "question"), question.toolCallId);
           deps.submitQuestion(input.request, input.answers);
         } catch (e) {
           return { ok: false, reason: (e as Error).message };

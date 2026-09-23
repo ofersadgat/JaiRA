@@ -57,7 +57,6 @@ import {
   keptConnectUndo,
   currentPin,
   ensureControlConversation,
-  descentFollower,
   missingInputs,
   pinWorkflow,
   planAdoption,
@@ -852,6 +851,8 @@ function pendingQuestionOf(request: QuestionRequest, project: string): PendingQu
     requestId: request.requestId,
     questions: request.questions as PendingQuestion["questions"],
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
+    ...(request.instanceId !== undefined ? { instanceId: request.instanceId } : {}),
+    ...(request.toolCallId !== undefined ? { toolCallId: request.toolCallId } : {}),
     project,
     at: request.at,
   };
@@ -3232,8 +3233,6 @@ export class AppService {
        * the instance it names. Absent ⇒ a fresh port, which every run gets.
        */
       directed?: DirectedTransitions;
-      /** The way DOWN from that move's target, when it is nested deeper — see `LiveRun.descents`. */
-      descents?: Array<(event: EngineEvent) => void>;
       /** This start reopens a COMPLETED task to take that move — `BeginRunOptions.reopen`. */
       reopen?: boolean;
     },
@@ -3429,10 +3428,9 @@ export class AppService {
     const done = new Promise<void>((resolve) => (settle = resolve));
     const directed = opts.directed ?? new DirectedTransitions();
     let endedCompleted = false;
-    const descents = opts.descents ?? [];
     // What a SKIP leaves in the inbox, read off this run's own journal — see `SkipWithdrawals`.
     const withdrawals = new SkipWithdrawals(project.events.list(taskId).map((row) => row.event));
-    open.live.set(taskId, { taskId, abort, done, directed, descents });
+    open.live.set(taskId, { taskId, abort, done, directed });
 
     // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
     // project will see a live heartbeat and leave the task alone instead of
@@ -3716,7 +3714,6 @@ export class AppService {
               recorder.record(event, atMs);
               // A move on its way DOWN to a nested target directs its next step here, the moment
               // the composite above it enters (decision 0005 §1).
-              for (const follow of descents) follow(event);
               // A fast-forward's arrival, its progress, and a failure that ends it (decision 0005 §4).
               this.fastForwardSaw(open, taskId, event);
               // A skip that interrupted an agent: what it asked is withdrawn, not left answerable.
@@ -5247,7 +5244,6 @@ export class AppService {
         loaded: load.loaded,
         answers: load.answers,
         ...(modes.directed !== undefined ? { directed: modes.directed } : {}),
-        ...(modes.descents !== undefined ? { descents: modes.descents } : {}),
         ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
         ...(request.fake !== undefined ? { fake: request.fake } : {}),
       });
@@ -5829,24 +5825,15 @@ export class AppService {
   /**
    * A skip landed in a task's journal — withdraw what the interrupted agent left in the inbox.
    *
-   * See `SkipWithdrawals`: only when every prompt operation still running was inside what was
-   * skipped. A question is dismissed and an approval denied once; both publish `resolved`, so the
-   * inbox is clear by the time the target runs.
+   * See `SkipWithdrawals`: exactly the asks an instance INSIDE what was skipped made — each names
+   * the instance that asked — and none of an `async` sibling's, which is still running and still
+   * waiting. A question is dismissed and an approval denied once; both publish `resolved`, so the
+   * inbox is clear of the interrupted agent's asks by the time the target runs.
    */
-  private withdrawSkipped(open: ProjectSession, taskId: string, verdict: { withdraw: boolean; blockedBy: string[] }): void {
-    const questions = open.questions.list().filter((request) => request.taskId === taskId);
-    const approvals = open.approvals.list().filter((request) => request.taskId === taskId);
+  private withdrawSkipped(open: ProjectSession, taskId: string, inside: (instanceId: string | undefined) => boolean): void {
+    const questions = open.questions.list().filter((request) => request.taskId === taskId && inside(request.instanceId));
+    const approvals = open.approvals.list().filter((request) => request.taskId === taskId && inside(request.instanceId));
     if (questions.length === 0 && approvals.length === 0) return;
-    if (!verdict.withdraw) {
-      this.log({
-        level: "warn",
-        source: "run",
-        message: `a skip in ${taskId} left ${questions.length + approvals.length} question(s) or approval(s) standing: an agent outside what was skipped is still running (${verdict.blockedBy.join(", ")}), and whose they are cannot be told apart`,
-        project: open.key,
-        taskId,
-      });
-      return;
-    }
     for (const request of questions) open.questions.answer(request.requestId, undefined);
     for (const request of approvals) open.approvals.decide(request.requestId, "deny", "once");
     this.log({ level: "info", source: "run", message: `a skip in ${taskId} withdrew ${questions.length} question(s) and ${approvals.length} approval(s) its interrupted agent had asked`, project: open.key, taskId });
@@ -6530,13 +6517,14 @@ export class AppService {
     const at = { project: open.key, taskId };
     const row = open.project.runtime.get(taskId);
     if (row === undefined) throw this.refusal("run", `cannot move unknown task '${taskId}'`, at);
-    // What the asker hands over goes to the LAST state named: `toState`, or the end of `path`.
-    const descends = request.path !== undefined && request.path.length > 0;
+    // A nested target is a `path` beneath `toState`, which the engine takes a level at a time and
+    // journals as it goes; what the asker hands over goes to the LAST state named.
     const move: DirectedTransition = {
       to: request.toState,
       by: request.by ?? "person",
       ...(request.instanceId !== undefined ? { instanceId: request.instanceId } : {}),
-      ...(request.inputs !== undefined && !descends ? { inputs: request.inputs } : {}),
+      ...(request.path !== undefined && request.path.length > 0 ? { path: request.path } : {}),
+      ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
       ...(request.skip === true ? { skip: true } : {}),
     };
 
@@ -6548,9 +6536,6 @@ export class AppService {
       }
       const outcome = live.directed.direct(move);
       if (outcome.status === "refused") throw this.refusal("run", `cannot move task '${taskId}' to '${move.to}': ${outcome.reason}`, at);
-      if (request.path !== undefined && request.path.length > 0) {
-        live.descents.push(descentFollower(live.directed, { parentInstanceId: move.instanceId ?? row.rootInstanceId, key: move.to }, request.path, move, request.inputs));
-      }
       // `queued` is a run whose engine has not attached yet, or has just let go: the port keeps the
       // move, a starting engine claims it, and the run-end handler reopens for one left behind.
       const status = outcome.status === "taking" ? "taking" : "held";
@@ -6607,9 +6592,6 @@ export class AppService {
       loaded: load.loaded,
       answers: load.answers,
       directed: port,
-      ...(request.path !== undefined && request.path.length > 0
-        ? { descents: [descentFollower(port, { parentInstanceId: owner.id, key: move.to }, request.path, move, request.inputs)] }
-        : {}),
       reopen: true,
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
