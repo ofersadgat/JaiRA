@@ -15,11 +15,11 @@ siblings: [engineering/contracts/refusal-errors, engineering/contracts/fake-rule
 
 The `jaira` command line: its commands, flags, environment variables, what each prints and the exit code that is its verdict.
 
-## A caller reaches for the CLI to drive JaiRA without a window, and never for a run that needs a person to approve a tool call
+## A caller reaches for the CLI to drive JaiRA without a window, under the same policy an app run is held to
 
-**Use when.** Setting up a project, creating, starting, resuming, inspecting or cancelling tasks, checking workflows and trimming history from a terminal, a script or CI. Running a process against scripted answers with `--fake` and `--interactions`.
+**Use when.** Setting up a project, creating, starting, resuming, inspecting or cancelling tasks, checking workflows and trimming history from a terminal, a script or CI. Running a process against scripted answers with `--fake` and `--interactions`. Running a workflow whose tool calls and shell lines the project's policy may ask about: at a terminal the CLI asks, and without one it refuses them, saying what would let them run.
 
-**Do not use when.** A run's policy can escalate a tool call to a person: the CLI has no approvals inbox and refuses such a run. A gate must be answered with no TTY attached and no `--interactions` script. A workflow mounts a hosted fan-out, which the CLI has no host for.
+**Do not use when.** A run must get past an `ask` with nobody at a terminal: the CLI refuses it and has no flag that allows everything; write the answer into `policy.rules` or the state's toolset instead. A gate must be answered with no TTY attached and no `--interactions` script. A workflow mounts a hosted fan-out, which the CLI has no host for.
 
 ## The shape is one global layer and one table of commands
 
@@ -30,7 +30,8 @@ The `jaira` command line: its commands, flags, environment variables, what each 
 | `--home <dir>` | path, anywhere on the line | no | the shared root for this invocation; sets `JAIRA_HOME` for the dispatch and restores it after |
 | `JAIRA_HOME` | environment path | no | the shared root when `--home` is absent; default `~/.jaira` |
 | `JAIRA_LOG` | environment, any value | no | library log records are written to stderr with their scopes |
-| stdin and stdout both TTYs | process state | no | enables the y/N module approval prompt and the terminal changeset reviewer |
+| stdin and stdout both TTYs | process state | no | enables the y/N module approval prompt, the terminal changeset reviewer, and the prompt that answers a run's command and tool approvals |
+| `--approve ask\|deny` | flag on `run`, `task start`, `task move` | no | how a run's command and tool approvals are answered: `ask` at the terminal, a usage error with no terminal or beside `--non-interactive`; `deny` refuses each without asking. Absent: ask when both ends are TTYs and `--non-interactive` is not given, else refuse. `changeset review` and `workflow check` take the default |
 | SIGINT | signal | no | aborts the run in flight; the task finishes `canceled` |
 | `<json\|@file>` | string | where a flag takes one | inline JSON, or `@` and a path relative to the working directory |
 | `--project <dir>` | path | no | the project, default the working directory, on every command that opens one |
@@ -48,6 +49,8 @@ The `jaira` command line: its commands, flags, environment variables, what each 
 | `resuming <taskId>: N operation(s) loaded` | a start continues a task with history |
 | `task <taskId>: workflow '<root>' snapshot <12 hex>[ (pinned)][ · worktree <path> (<branch>)]` | a durable run began |
 | `approved N function file(s): <files>` | a start approved modules |
+| `approval · <tool>[ — <reason>]`, the line as `$ <line>` with a row of part numbers and a row of `^` under the words each part's rule matched, one row per part (`<n>  <text>  <subject>  allowed\|ASKS\|DENIED  <what decided it>`), `toolset: <name>` when one judged the line, then `[y] allow once  [r] allow <widths> for this run  [w] allow every <program> command for this run  [n] deny  (default: deny) ›` | a run meets an `ask` at a terminal; `r` remembers the asking parts at their narrowest width, `w` at their widest where wider, a tool call that is not a line offers `r` for the tool, and anything but `y`, `r` or `w` is deny. One question at a time |
+| `refused: <tool>[: <line>] — nobody was asked: <why>. To let it run without asking, write <what>` | a run meets an `ask` with nobody to answer; `<why>` names no terminal, `--non-interactive` or `--approve deny`, and `<what>` names the `policy.rules` entry, the toolset line or the `policy.tools` entry that answers it |
 | `warning: could not store artifact '<name>': <message>` | a returned artifact could not be placed |
 | `nothing was deleted — re-run with --apply to prune` | `prune` without `--apply` |
 
@@ -56,13 +59,13 @@ The `jaira` command line: its commands, flags, environment variables, what each 
 | Command | Flags and arguments | Stdout |
 | --- | --- | --- |
 | `init` | `--project` | text `initialized JaiRA project at <.jaira>` |
-| `run --root <stateId>` | `--project`, `--workflows <dir>`, `--inputs`, `--interactions`, `--fake`, `--repair-turns <n>`, `--non-interactive`, `--approve-functions` | `{taskId, status, outputs?, failure?, metrics, causes?, artifacts?: [{path, storedAt, bytes}]}` from a new task titled `run · <root>` labelled `adhoc`; with `--workflows`, `{status, outputs?, failure?, metrics}` and nothing recorded |
+| `run --root <stateId>` | `--project`, `--workflows <dir>`, `--inputs`, `--interactions`, `--fake`, `--repair-turns <n>`, `--non-interactive`, `--approve-functions`, `--approve ask\|deny` | `{taskId, status, outputs?, failure?, metrics, causes?, artifacts?: [{path, storedAt, bytes}]}` from a new task titled `run · <root>` labelled `adhoc`; with `--workflows`, `{status, outputs?, failure?, metrics}` and nothing recorded |
 | `task create` | `--title` and `--workflow <rootStateId>` required; `--description`, `--label` repeatable, `--inputs`, `--branch`, `--project` | `{taskId, status: "queued"}` |
-| `task start <taskId>` | `--interactions`, `--fake`, `--repair-turns`, `--project`, `--non-interactive`, `--approve-functions` | the durable `run` report; a task with journal history is loaded and continued |
+| `task start <taskId>` | `--interactions`, `--fake`, `--repair-turns`, `--project`, `--non-interactive`, `--approve-functions`, `--approve ask\|deny` | the durable `run` report; a task with journal history is loaded and continued |
 | `task list` | `--project` | `[{taskId, status, title, workflow, snapshotHash?}]`; `title` is `(missing task file)` when the file is gone |
 | `task status <taskId>` | `--events <n>`, `--project` | `{taskId, status, title, workflow, snapshotHash?, runs: [{outcome, startedAt, endedAt?, outputs?, failure?}], events?}`; `runs` holds at most one entry; `events` holds the last n journal events as `{seq, ...event}` |
 | `task cancel <taskId>` | `--project` | `{taskId, status: "canceled"}`, or `"cancel_requested"` when another live process owns the run |
-| `task move <taskId>` | `--to <stateId>` required; `--workflow <rootStateId>`, `--skip`, `--dry-run`, `--interactions`, `--fake`, `--repair-turns`, `--project`, `--non-interactive`, `--approve-functions` | `connect(task, target)` per [task-channels](task-channels.md): with `--dry-run`, or when refused, the `TaskConnectResult`; otherwise the durable `run` report of the task run here to take the move — reopened if it had finished — with `connect: <resolution> — <taskId> will stand at '<path>' in '<workflow>'` on stderr first. One JSON document either way |
+| `task move <taskId>` | `--to <stateId>` required; `--workflow <rootStateId>`, `--skip`, `--dry-run`, `--interactions`, `--fake`, `--repair-turns`, `--project`, `--non-interactive`, `--approve-functions`, `--approve ask\|deny` | `connect(task, target)` per [task-channels](task-channels.md): with `--dry-run`, or when refused, the `TaskConnectResult`; otherwise the durable `run` report of the task run here to take the move — reopened if it had finished — with `connect: <resolution> — <taskId> will stand at '<path>' in '<workflow>'` on stderr first. One JSON document either way |
 | `board` | `--level <stateId>`, `--json`, `--project` | text board, or `BoardView` JSON per [task-view-models](task-view-models.md) |
 | `worktree list` | `--project` | `[{path, branch?, taskId?, status?, prunable?}]` |
 | `worktree remove <taskId>` | `--force`, `--project` | `{taskId, removed, reason?}` |
@@ -88,7 +91,10 @@ The `--fake` and `--interactions` documents are [fake-rules-format](fake-rules-f
 | The task's status cannot start, or it holds for a dependency | exit 1 with the refusal from [refusal-errors](refusal-errors.md) | resume or re-run it in the app, or complete the dependency |
 | Unapproved js/ts modules and nobody to ask, or the answer is no | exit 1, the files listed and `jaira functions approve <files>` appended | run the printed command, or pass `--approve-functions` |
 | A resume finds blocked or unreadable history | exit 1, `task '<id>' cannot be resumed: <reason>` | re-run as a new task |
-| The project's policy can escalate | exit 1, the state and reason, then advice to use the app or set `policy.builtins` to false | use the app |
+| The project's policy can escalate and a state runs an agent function that asks through a callback, with no terminal or under `--non-interactive` | exit 1 before any state runs, the state and reason, then advice to run at a terminal, pass `--approve deny`, use the app, or set `policy.builtins` to false | run at a terminal |
+| A state's policy-enforcement is `none` (a generic CLI) and the policy can escalate | exit 1 before any state runs, as above | set `policy.builtins` to false, or use another executor |
+| `--approve` is neither `ask` nor `deny`; `--approve ask` with no terminal, or beside `--non-interactive` | exit 2 with usage, before a task is made | fix the command line |
+| A `run_command` line, or an agent's tool call, meets `ask` and nobody answers yes | the call is refused and the state fails: `command refused: <the policy's reason>; <the approver's reason>` for `run_command`; `refused: …` on stderr when nobody was asked | answer at a terminal, or write the `policy.rules` entry or toolset line the message names |
 | `changeset review` with no TTY and no `--interactions` | exit 1, `nothing can answer the gate: attach a terminal, or script it with --interactions`, before any work | attach a TTY or script it |
 | `workflow check` finds no description | exit 1 naming both places it looked | write one, or name it |
 | `workflow check --workflow` names an unknown root | exit 1, `unknown workflow '<root>'` with the known roots | name a known root |
@@ -107,7 +113,9 @@ The `--fake` and `--interactions` documents are [fake-rules-format](fake-rules-f
 - `functions approve --all` with no files approves nothing and prints `approved 0 file(s)`.
 - `functions list` lists only files approved on this machine, not every module on the search path.
 - `task status --events` with a value that is not a positive number prints no `events` key and no error.
-- `run --workflows` records nothing: no task, journal or artifacts.
+- `run --workflows` records nothing: no task, journal or artifacts. Its run is still held to the project's policy, with no audit rows.
+- A durable run writes one `command_log` row per policy decision, as an app run does; the answer given at the terminal is not written, as the app's is not.
+- "For this run" at the terminal lasts the invocation: a later `task start` of the same task asks again.
 - Repeating `run` without `--workflows` creates a new task each time.
 - `task start` on a `completed` task deletes its unconsumed failed records and revived failure events before the start is refused.
 - The text `board` omits `finished`, whose cards already stand in their columns.

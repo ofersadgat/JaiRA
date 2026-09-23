@@ -19,6 +19,7 @@
  */
 import { mcpToolName, type AgentQuery, type AgentQueryOptions } from "@declarative-ai/agents-api";
 import type { Tool } from "@declarative-ai/exec";
+import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import { loadBundle } from "@declarative-ai/hw";
 import {
   nativesOfStandard,
@@ -84,14 +85,47 @@ export interface AgentHanded {
 }
 
 export interface HandedOptions {
-  /** The project's policy; the default policy when absent. */
+  /** The project's policy; the default policy when absent. Ignored when {@link run} is given. */
   policy?: JairaPolicy;
+  /**
+   * The policy and approver a HOST builds for a run — the app's `startRun` or the `jaira` CLI — to be
+   * measured as that host hands them to `executeWorkflow`, either field absent where the host passes
+   * none. Absent ⇒ {@link policy} compiled bare and an approver that refuses. The approver is asked for
+   * real: whatever it answers is the answer, and that it was asked is what reads as `ask`, so an
+   * approver used here must not wait on a person.
+   */
+  run?: { policy?: ExecPolicy | undefined; approve?: Approver | undefined };
   /**
    * An ENCLOSING state's `environment`, in the shape the engine takes: the probe then runs as that
    * state's child and inherits it down the chain exactly as a mounted state does — `permissions`
    * merged per key, `tools` one level deeper, the list replaced.
    */
   parent?: HandedEnvironment;
+}
+
+/** The `policy` and `approve` a probe run is handed, with every approval counted by `onAsk`. */
+function governanceOf(options: HandedOptions, onAsk: () => void): { policy?: ExecPolicy; approve?: Approver } {
+  if (options.run === undefined) {
+    return {
+      policy: compilePolicy(options.policy ?? {}),
+      approve: () => {
+        onAsk();
+        return { decision: "deny", scope: "once" };
+      },
+    };
+  }
+  const { policy, approve } = options.run;
+  return {
+    ...(policy !== undefined ? { policy } : {}),
+    ...(approve !== undefined
+      ? {
+          approve: (request: Parameters<Approver>[0]) => {
+            onAsk();
+            return approve(request);
+          },
+        }
+      : {}),
+  };
 }
 
 /** The probe workflow: one prompt state, alone or as the only child of a state holding `parent`. */
@@ -174,11 +208,9 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
     inputs: {},
     registry: stubRegistry(),
     prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: "claude-cli" } }),
-    policy: compilePolicy(options.policy ?? {}),
-    approve: () => {
+    ...governanceOf(options, () => {
       asked += 1;
-      return { decision: "deny", scope: "once" };
-    },
+    }),
   });
   const opts = seen[0];
   if (opts === undefined) {
@@ -299,8 +331,7 @@ export async function handedToCodex(environment: HandedEnvironment, options: Cod
     inputs: {},
     registry,
     prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: AGENT_CODEX } }),
-    policy: compilePolicy(options.policy ?? {}),
-    approve: () => ({ decision: "deny", scope: "once" }),
+    ...governanceOf(options, () => {}),
   });
   const opts = seen[0];
   if (opts === undefined) {

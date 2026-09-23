@@ -11,6 +11,7 @@ import { formatRecord, setLogSink } from "@declarative-ai/log";
 import { DirectedTransitions, loadBundle, validateBundle, moduleHash as moduleHashOf, type DirectedTransition, type EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { registerCliChangesetReviewer } from "./changesetReviewer";
+import { cliApprovals, governRun, type ApproveMode, type AskLine, type CliApprovals } from "./commandApprover";
 import { wireRemotes } from "./remoteWiring";
 import {
   beginTaskRun,
@@ -102,6 +103,8 @@ import {
   parseFakeRules,
   parseInteractionScript,
   policyCanEscalate,
+  securityFloorOf,
+  grantAlwaysGrantedTools,
   enabledAdapters,
   enabledGenericAgents,
   registerAgentRuntimes,
@@ -144,34 +147,68 @@ export interface CliIo {
    * `confirm` refuses with instructions instead of blocking on a stdin nobody is typing into.
    */
   confirm?: (question: string) => Promise<boolean>;
+  /**
+   * Read one line typed at the terminal after showing `question` — how a run's command and tool
+   * approvals are answered (see `commandApprover.ts`). Present exactly where {@link confirm} is; the
+   * question goes to stderr, because stdout is the run's one JSON report. `undefined` at end of input
+   * or once `signal` aborts.
+   */
+  ask?: AskLine;
 }
 
 /**
- * How a command may answer a question the run gate raises (SPEC §7.5.5).
+ * How a command may answer a question the run gate raises (SPEC §7.5.5), and a question a RUN raises
+ * about a tool call or a shell line (DESIGN §10.2).
  *
  * Three states rather than two because "do not ask" and "the answer is yes" are different
  * instructions and a single flag would conflate them: `--non-interactive` says answer nothing and
  * refuse, `--approve-functions` says the answer is yes without asking, and the default is to ask if
- * anybody is there.
+ * anybody is there. A run's approvals have no "yes to everything": `--approve deny` refuses them all
+ * without asking, `--approve ask` insists on a terminal, and the way past a question for good is to
+ * write the answer where the project keeps it — a policy rule or a toolset line.
  */
 interface ApprovalGate {
   /** `--non-interactive`: never prompt, even on a terminal. */
   nonInteractive: boolean;
   /** `--approve-functions`: approve whatever this workflow reaches, as part of starting it. */
   approveFunctions: boolean;
+  /** `--approve ask|deny`: how the run's command and tool approvals are answered. Absent ⇒ ask when a terminal is attached. */
+  approve?: ApproveMode;
 }
 
-/** The two flags every run-starting command carries, for `parseArgs`. */
+/** The flags every run-starting command carries, for `parseArgs`. */
 const APPROVAL_OPTIONS = {
   "non-interactive": { type: "boolean" },
   "approve-functions": { type: "boolean" },
+  approve: { type: "string" },
 } as const;
 
-function approvalGateOf(values: { "non-interactive"?: boolean; "approve-functions"?: boolean }): ApprovalGate {
-  return {
-    nonInteractive: values["non-interactive"] === true,
-    approveFunctions: values["approve-functions"] === true,
-  };
+function approvalGateOf(values: { "non-interactive"?: boolean; "approve-functions"?: boolean; approve?: string }, io: CliIo): ApprovalGate {
+  const approve = values.approve;
+  if (approve !== undefined && approve !== "ask" && approve !== "deny") {
+    throw new UsageError(`--approve takes ask or deny, not '${approve}'`);
+  }
+  const nonInteractive = values["non-interactive"] === true;
+  if (approve === "ask" && nonInteractive) throw new UsageError("--approve ask asks at the terminal, and --non-interactive says never to — pass one");
+  // Refused before anything is minted or started: a run that was told to ask and cannot would
+  // otherwise refuse every approval it meets, which is the opposite of what the flag said.
+  if (approve === "ask" && io.ask === undefined) throw new UsageError("--approve ask needs a terminal on both stdin and stdout to ask at");
+  return { nonInteractive, approveFunctions: values["approve-functions"] === true, ...(approve !== undefined ? { approve } : {}) };
+}
+
+/** Commands that start a run without the approval flags still answer a run's approvals: at a terminal when there is one. */
+const DEFAULT_GATE: ApprovalGate = { nonInteractive: false, approveFunctions: false };
+
+/**
+ * Who answers this run's approvals: the person at the terminal, or nobody — each refusal then saying
+ * which of the three reasons it is, and what to change.
+ */
+function commandApprovalsOf(gate: ApprovalGate, io: CliIo, signal?: AbortSignal): CliApprovals {
+  const write = io.stderr;
+  if (gate.approve === "deny") return cliApprovals({ mode: "deny", unasked: "flag", write });
+  if (gate.nonInteractive) return cliApprovals({ mode: "deny", unasked: "non-interactive", write });
+  if (io.ask === undefined) return cliApprovals({ mode: "deny", unasked: "no-terminal", write });
+  return cliApprovals({ mode: "ask", ask: io.ask, write, ...(signal !== undefined ? { signal } : {}) });
 }
 
 class UsageError extends Error {}
@@ -182,16 +219,18 @@ const USAGE = `usage:
   jaira init [--project <dir>]
   jaira run --root <stateId> [--project <dir>] [--workflows <dir>] [--inputs <json|@file>]
             [--interactions <json|@file>] [--fake <json|@file>] [--repair-turns <n>]
-            [--non-interactive] [--approve-functions]
+            [--non-interactive] [--approve-functions] [--approve ask|deny]
   jaira task create --title <t> --workflow <rootStateId> [--description <s>] [--label <l>]...
             [--inputs <json|@file>] [--branch <b>] [--project <dir>]
   jaira task start <taskId> [--interactions <json|@file>] [--fake <json|@file>]
             [--repair-turns <n>] [--project <dir>] [--non-interactive] [--approve-functions]
+            [--approve ask|deny]
   jaira task list [--project <dir>]
   jaira task status <taskId> [--events <n>] [--project <dir>]
   jaira task cancel <taskId> [--project <dir>]
   jaira task move <taskId> --to <stateId> [--workflow <rootStateId>] [--skip] [--dry-run]
             [--interactions <json|@file>] [--fake <json|@file>] [--project <dir>]
+            [--non-interactive] [--approve-functions] [--approve ask|deny]
   jaira board [--level <stateId>] [--json] [--project <dir>]
   jaira worktree list [--project <dir>]
   jaira worktree remove <taskId> [--force] [--project <dir>]
@@ -205,6 +244,11 @@ const USAGE = `usage:
   jaira functions revoke <file>... [--project <dir>]
   jaira workflow check [<description.md>] [--workflow <rootStateId>]... [--model <id>]
             [--json] [--fake <json|@file>] [--repair-turns <n>] [--project <dir>]
+
+  A run is held to the project's policy (.jaira/settings.json → policy) and each state's toolset, as
+  in the app. A tool call or shell line the policy asks about is put to you at the terminal; with no
+  terminal, --non-interactive or --approve deny it is refused, and the refusal names the policy rule
+  or toolset line that would let it run without asking. --approve ask insists on a terminal.
 `;
 
 /**
@@ -459,6 +503,8 @@ function buildRunEnvironment(
    *  shared base root and the process environment only, which is all an ad-hoc run outside a project
    *  can honestly consult. */
   projectDir?: string,
+  /** The executor's scope floor as a delegated agent's own rules — `securityFloorOf`, as the app folds it. */
+  securityFloor?: Record<string, JsonValue>,
 ): {
   registry: ReturnType<typeof newRegistry>;
   prompt: ReturnType<typeof buildPromptExecutor>;
@@ -557,6 +603,7 @@ function buildRunEnvironment(
   const prompt = buildPromptExecutor({
     ...(wiring.fakeRules !== undefined ? { fakeRules: wiring.fakeRules } : {}),
     ...(wiring.repairTurns !== undefined ? { repairTurns: wiring.repairTurns } : {}),
+    ...(securityFloor !== undefined ? { securityFloor } : {}),
     ...(scripted
       ? {}
       : {
@@ -583,9 +630,10 @@ function buildRunEnvironment(
  * Refuse a state whose runtime cannot enforce the policy it runs under (DESIGN
  * §8.2), before anything executes.
  *
- * `unattended: true` is the honest description of this surface: the CLI has no
- * approvals inbox, so a runtime that escalates tool calls to a human has nobody to
- * ask. The app passes `false` because its inbox can answer.
+ * `unattended` is whether anybody answers this run's approvals: nobody does when no terminal is
+ * attached or `--non-interactive` was passed, and a runtime that escalates tool calls to a human then
+ * has nobody to ask. At a terminal the person does, as the app's inbox does; under `--approve deny`
+ * somebody already answered — no.
  */
 function assertCapabilities(
   registry: ReturnType<typeof newRegistry>,
@@ -594,19 +642,18 @@ function assertCapabilities(
   // pinned run silently, which is worse than not gating at all. `functionRefOf` reads either shape.
   bundle: { states: Record<string, unknown> },
   config: JairaConfig,
+  approvals: CliApprovals,
 ): void {
   const issues = gateCapabilities(registry, bundle.states as never, {
     policyNeedsApproval: policyCanEscalate(config.policy),
-    unattended: true,
+    unattended: approvals.unattended,
   });
   if (issues.length > 0) {
-    // Actionable, because the honest refusal is otherwise a dead end: the two real
-    // ways forward are the app (which has an inbox) or a project that does not
-    // escalate.
+    // Actionable, because the honest refusal is otherwise a dead end.
     throw new Error(
       `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
-        "  run this task in the JaiRA app, which can answer approvals, or set policy.builtins to false " +
-        "in .jaira/settings.json if this workspace is disposable",
+        "  run it at a terminal, where jaira asks, or pass --approve deny to refuse every approval it meets; " +
+        "or run this task in the JaiRA app, or set policy.builtins to false in .jaira/settings.json if this workspace is disposable",
     );
   }
 }
@@ -648,6 +695,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
   const projectDir = projectDirOf(values, io);
   const wiring = runWiringOf(values, io.cwd);
   const inputs = values.inputs !== undefined ? recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd)) : {};
+  const gate = approvalGateOf(values, io);
 
   // The STANDALONE mode (`--workflows <dir>`) stays in-memory: it points at a bare directory of
   // state files, which has no `.jaira/` database to record into. Everything else is durable below.
@@ -662,8 +710,11 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
       throw new Error(`workflow validation failed:\n  ${detail}`);
     }
-    const { registry, prompt, session } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir);
-    assertCapabilities(registry, bundle, config);
+    const { registry, prompt, session } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir, securityFloorOf(config, projectDir));
+    const approvals = commandApprovalsOf(gate, io, io.abortSignal);
+    assertCapabilities(registry, bundle, config, approvals);
+    // No task, so nothing to audit into: the run is governed all the same.
+    const governed = governRun(config, approvals, { workspaceRoot: projectDir });
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
     // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
@@ -674,6 +725,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
       registry,
       prompt,
       session,
+      ...governed,
       ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
     });
     io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
@@ -707,7 +759,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
       ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
       labels: ["adhoc"],
     });
-    return await runTaskNow(project, task.id, wiring, io, approvalGateOf(values));
+    return await runTaskNow(project, task.id, wiring, io, gate);
   } finally {
     project.close();
   }
@@ -766,13 +818,15 @@ async function cmdChangesetReview(argv: string[], io: CliIo): Promise<number> {
       rootId,
     );
     const wiring = runWiringOf(values, io.cwd);
-    const { registry, prompt, session } = buildRunEnvironment(bundle, project.config, wiring, undefined, projectDir);
+    const { registry, prompt, session } = buildRunEnvironment(bundle, project.config, wiring, undefined, projectDir, securityFloorOf(project.config, worktree));
     // buildRunEnvironment registered the apply/status/revise family and, when a terminal is
     // attached and nothing scripted it, the terminal reviewer. Nothing to answer the gate is a
     // refusal HERE, before any work — not a hung run.
     if (!registry.functions.has(REVIEW_ARTIFACTS)) {
       throw new Error("nothing can answer the gate: attach a terminal, or script it with --interactions");
     }
+    // Governed like any other run: the reviewer's revise step is an agent too.
+    const governed = governRun(project.config, commandApprovalsOf(DEFAULT_GATE, io, io.abortSignal), { workspaceRoot: worktree });
     io.stdout(`reviewing ${changeset.changes.length} change(s) in ${worktree} against ${base}\n`);
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
@@ -784,6 +838,7 @@ async function cmdChangesetReview(argv: string[], io: CliIo): Promise<number> {
       registry,
       prompt,
       session,
+      ...governed,
       workspace: { root: worktree },
       ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
     });
@@ -855,9 +910,10 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   const taskId = positionals[0];
   if (taskId === undefined) throw new UsageError("task start requires a task id");
   const wiring = runWiringOf(values, io.cwd);
+  const gate = approvalGateOf(values, io);
   const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
-    return await runTaskNow(project, taskId, wiring, io, approvalGateOf(values));
+    return await runTaskNow(project, taskId, wiring, io, gate);
   } finally {
     project.close();
   }
@@ -940,6 +996,7 @@ async function cmdTaskMove(argv: string[], io: CliIo): Promise<number> {
   if (taskId === undefined) throw new UsageError("task move requires a task id");
   if (values.to === undefined) throw new UsageError("task move requires --to <stateId>");
   const wiring = runWiringOf(values, io.cwd);
+  const gate = approvalGateOf(values, io);
   const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     // The move a connect ends in is not taken by a service here: it is kept, and handed to the run below.
@@ -969,7 +1026,7 @@ async function cmdTaskMove(argv: string[], io: CliIo): Promise<number> {
     const plan = result.plan;
     io.stderr(`connect: ${plan.resolution}${plan.modification !== undefined ? ` (${plan.modification})` : ""} — ${runs} will stand at '${plan.standsAt.path.join("/") || plan.workflow}' in '${plan.workflow}'\n`);
     // An adoption whose target comes next anyway has no move to take: the task it made is started the ordinary way.
-    return await runTaskNow(project, runs, wiring, io, approvalGateOf(values), move);
+    return await runTaskNow(project, runs, wiring, io, gate, move);
   } finally {
     project.close();
   }
@@ -1137,7 +1194,18 @@ async function runTaskNow(
       wiring,
       { artifacts, store: project.artifacts, observer: owner.observer() },
       project.paths.projectDir,
+      // The scope floor as the agent's own rules — the app folds the same over every prompt call.
+      securityFloorOf(project.config, workspace.root),
     );
+    // The run's half of `ToolSpec.alwaysGranted`, as the app's `startRun` folds it: a run resolves
+    // `environment.tools` through the engine, so `show_artifact` has to be granted before the bundle
+    // is handed over, or a CLI run hands an agent one tool fewer than the app does.
+    grantAlwaysGrantedTools(started.bundle.states);
+    // Who answers this run's approvals, and the policy the run is judged by — the app's recipe, with
+    // the terminal (or a refusal that says why nobody was asked) where the app has its inbox.
+    const approvals = commandApprovalsOf(gate, io, stop.signal);
+    stop.signal.addEventListener("abort", () => approvals.hub.stop(taskId), { once: true });
+    const governed = governRun(project.config, approvals, { workspaceRoot: workspace.root, audit: { project, taskId } });
     // Remotes (decision 0004): the primitives, `on_remote_event` with a watcher that lives as long as
     // this run, and the gate's second door around whatever answers the gate here. Only a durable run
     // gets them — a merge request has to be remembered on a task — and after the registry is built,
@@ -1157,7 +1225,7 @@ async function runTaskNow(
     // and left the journal's operation ids pointing at records a resume could never read back.
     const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }) });
     try {
-      assertCapabilities(registry, started.bundle, project.config);
+      assertCapabilities(registry, started.bundle, project.config, approvals);
     } catch (e) {
       // The run row is already open, so a refusal must close it — otherwise the task
       // stays `running` and the next open would call it interrupted.
@@ -1180,6 +1248,8 @@ async function runTaskNow(
       persistence: follow === undefined ? recorder : { record: (event, atMs) => (recorder.record(event, atMs), follow!(event)) },
       ...(directed !== undefined ? { directed } : {}),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
+      // The project's policy, audited into `command_log`, and the approver — as an app run gets them.
+      ...governed,
       // Merged: SIGINT here, or a cancel another process requested through the job.
       abortSignal: stop.signal,
       // The loaded machine and its recorded answers, when this start continues a stopped task.
@@ -1529,8 +1599,17 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
       conformanceWorkflowFiles(values.model !== undefined ? { model: values.model } : {}),
       CONFORMANCE_ID,
     );
-    const { registry, prompt, session } = buildRunEnvironment(bundle, project.config, wiring, undefined, project.paths.projectDir);
-    assertCapabilities(registry, bundle, project.config);
+    const { registry, prompt, session } = buildRunEnvironment(
+      bundle,
+      project.config,
+      wiring,
+      undefined,
+      project.paths.projectDir,
+      securityFloorOf(project.config, project.paths.projectDir),
+    );
+    const approvals = commandApprovalsOf(DEFAULT_GATE, io, io.abortSignal);
+    assertCapabilities(registry, bundle, project.config, approvals);
+    const governed = governRun(project.config, approvals, { workspaceRoot: project.paths.projectDir });
     io.stderr(`checking ${digest.roots.join(", ")} (${digest.states} states) against ${specPath}\n`);
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
@@ -1542,6 +1621,7 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
       registry,
       prompt,
       session,
+      ...governed,
       ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
     });
     if (statusOfResult(result) !== "completed") {

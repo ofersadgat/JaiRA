@@ -382,6 +382,73 @@ describe("lowering a state file", () => {
   });
 });
 
+describe("lowering a toolset inside a REFERENCED block", () => {
+  const scopes = [{ path: "app/**", default: "allow" }];
+  const map = { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" };
+  const read = readerOver({
+    "$/toolsets/chat/read-only": { read_file: "allow", glob: "allow", other: "deny" },
+    "$/envs/inline": { model: "m", tools: map, permissions: { scopes } },
+    "$/envs/named": { tools: "$/toolsets/chat/read-only" },
+    "$/envs/over": { $ref: "$/envs/inline", permissions: { scopes: [] } },
+    "$/envs/plain": { model: "m" },
+    "$/envs/list": { tools: ["bash"] },
+    "$/envs/old": { permissions: { default: "deny" } },
+    "$/ops/plan": { kind: "prompt", prompt: "go", tools: map },
+  });
+  /** What the same map lowers to when it is written on the state. */
+  const written = (block: Record<string, unknown>) => (lowerStateToolsets("wf", { environment: block }, read).def as { environment: Record<string, unknown> }).environment;
+
+  it("opens the block and lowers its map EXACTLY as one written on the state — beside the reference, which stays", () => {
+    const { tools, permissions } = written({ tools: map, permissions: { scopes } });
+    for (const environment of ["$/envs/inline", { $ref: "$/envs/inline" }, { $ref: "$/envs/inline", model: "n" }]) {
+      const { def, issues } = lowerStateToolsets("wf", { environment }, read);
+      expect(issues, JSON.stringify(environment)).toEqual([]);
+      const siblings = typeof environment === "string" ? { $ref: environment } : environment;
+      // The lowered fields are SIBLINGS of the reference: the engine's `$ref` merge lets a sibling
+      // `tools` list replace the target's map, and sibling `permissions` override it per key.
+      expect((def as { environment: unknown }).environment).toEqual({ ...siblings, tools, permissions });
+    }
+  });
+
+  it("does the same for an `operation` and a child mount's `environment`", () => {
+    const { def, issues } = lowerStateToolsets("wf", { operation: "$/ops/plan", children: { a: { state: "./a", environment: "$/envs/named" } } }, read);
+    expect(issues).toEqual([]);
+    const { tools, permissions } = written({ tools: map });
+    expect((def as { operation: unknown }).operation).toEqual({ $ref: "$/ops/plan", tools, permissions });
+    // A toolset REFERENCE inside the block keeps its name as the source, as it would on the state.
+    expect((def as { children: { a: unknown } }).children.a).toEqual({ state: "./a", environment: { $ref: "$/envs/named", ...written({ tools: "$/toolsets/chat/read-only" }) } });
+  });
+
+  it("follows a block that starts from another, merging `permissions` per key the way the engine does", () => {
+    const { def } = lowerStateToolsets("wf", { environment: "$/envs/over" }, read);
+    expect((def as { environment: unknown }).environment).toEqual({ $ref: "$/envs/over", ...written({ tools: map, permissions: { scopes: [] } }) });
+  });
+
+  it("leaves a referenced block with no toolset — and one it cannot follow — as the SAME object", () => {
+    for (const environment of ["$/envs/plain", { $ref: "$/envs/plain", model: "n" }, "$/envs/nope", { $ref: "review" }]) {
+      const def = { environment };
+      const lowered = lowerStateToolsets("wf", def, read);
+      expect(lowered.def, JSON.stringify(environment)).toBe(def);
+      expect(lowered.issues).toEqual([]);
+    }
+  });
+
+  it("refuses the old forms inside a referenced block, naming the block", () => {
+    const list = lowerStateToolsets("wf", { environment: "$/envs/list" }, read);
+    expect(list.issues).toEqual([expect.objectContaining({ stateId: "wf", path: "environment.tools", severity: "error" })]);
+    expect(list.issues[0]!.message).toMatch(/^in the block '\$\/envs\/list' names: .*the list form was removed/);
+    const old = lowerStateToolsets("wf", { environment: "$/envs/old" }, read);
+    expect(old.issues).toEqual([expect.objectContaining({ stateId: "wf", path: "environment.permissions", severity: "error" })]);
+    expect(old.issues[0]!.message).toMatch(/^in the block '\$\/envs\/old' names: permissions\.default is no longer read/);
+  });
+
+  it("lets a block's OWN `tools` win over the one its reference holds, as the engine's merge does", () => {
+    const environment = { $ref: "$/envs/inline", tools: { glob: "allow" } };
+    const { def } = lowerStateToolsets("wf", { environment }, read);
+    expect((def as { environment: { tools: unknown } }).environment.tools).toEqual(["glob"]);
+  });
+});
+
 describe("a message's settings", () => {
   it("reads a state's lowered declaration and the map form as the same toolset", () => {
     const inherited = toolsetOfSettings({

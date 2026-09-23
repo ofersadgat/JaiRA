@@ -809,6 +809,14 @@ the same rule.
     `{ "$ref": "$/toolsets/chat/read-only", "write_file": "ask" }`. A toolset
     *file* starts from another the same way. A reference cycle is a lint error
     naming the cycle.
+  - **A toolset may sit inside a block brought in by reference** —
+    `"environment": "$/lib/agent-env"`, an `operation` or a child mount's
+    `environment` written the same way, or one that starts from another. It
+    means exactly what it would written on the state, and is pinned with the
+    task the same way; a toolset reference written inside that block resolves
+    from the block's own file. The loaded state shows the lowered `tools` list
+    and `permissions` beside the reference, where the engine's `$ref` merge lets
+    them replace the block's map.
   - **Toolsets live in buckets**: `toolsets/<bucket>/<name>.json` under each layer
     root, so the project's `.jaira/toolsets/chat/read-only.json` overrides the
     shared root's file of the same path. A bucket is a folder — a place with its
@@ -932,7 +940,9 @@ the same rule.
   implementation — reach the agent through a model prefix to keep its own.
 
   `run_command` is a host function with no state toolset in reach: its line
-  answers to `policy` alone.
+  answers to `policy` alone. A line it is refused fails the state with
+  `command refused:`, the policy's reason, and — when nobody was asked — why, and
+  what would allow it.
 
   ⚠️ **Across layers a toolset replaces the offered TOOLS, and only those.** It
   reaches the engine as a list and a `permissions` block, and the block merges per
@@ -965,7 +975,32 @@ the same rule.
   ⚠️ The enforcement rides on the run's approval wiring: a run with no approver
   builds no gate, and a delegated agent then runs under its transport's own
   defaults — the documented "without an approver, tools are handed over
-  unguarded" rule, unchanged.
+  unguarded" rule, unchanged. Every run JaiRA starts has one: the app's inbox,
+  or, for a run started by `jaira`, the terminal (below).
+
+  **A run started by `jaira` is held exactly as an app run is** — the project's
+  `policy`, its scopes, the `command_log` audit, and each state's toolset, handed
+  to claude and codex the same. What answers an `ask` is the terminal: with stdin
+  and stdout both a terminal, the CLI shows the request as the app does — the line
+  with its parts numbered under it, the words each rule matched marked `^`, and a
+  row per part — and takes `y` (once), `r` (the asking parts, for this run), `w`
+  (their whole program, for this run) or anything else as deny. With no terminal,
+  under `--non-interactive` or under `--approve deny`, every ask is **refused**
+  at once, never waited on, and the refusal says what would let it run:
+
+  ```text
+  command refused: pushes publish work; nobody was asked: this jaira run has no
+  terminal (stdin and stdout must both be one); run it at a terminal to be asked.
+  To let it run without asking, write a policy.rules entry
+  {"match":{"program":"git","subcommand":"push"},"action":"allow"} in .jaira/settings.json
+  ```
+
+  Where a toolset judged the part, the refusal names the toolset line instead
+  (`"git push": "allow"`), because a policy rule cannot loosen a toolset.
+  `--approve ask` insists on a terminal and is a usage error without one. There is
+  no flag that allows everything: a built-in ask is a question somebody should
+  see, so an unattended way past it is written down where the project keeps its
+  policy.
 - **`configRef`** — the name of a preset in `config.models.presets`, merged
   UNDER this operation's own fields and OVER the project defaults. It is for the
   settings a model call has and a state should not have to repeat —
@@ -1865,7 +1900,10 @@ first time rather than resuming a half-started one.
 | A pipe, CI, `--non-interactive` | Refuses, and prints the `jaira functions approve` line that answers it. |
 | `--approve-functions` | Approves everything the workflow reaches, as part of starting it. |
 
-`--non-interactive` and `--approve-functions` are both on `jaira run` and `jaira task start`.
+`--non-interactive` and `--approve-functions` are both on `jaira run`, `jaira task start`
+and `jaira task move`. `--non-interactive` also refuses the run's command and tool
+approvals without asking (§5.1); `--approve-functions` answers module approvals only, and
+never a command.
 
 This is possible because an unapproved module can be *named* even though it resolves to
 nothing. Resolution consults a gated symbol index and gets a miss; the diagnosis consults an

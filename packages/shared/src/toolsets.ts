@@ -557,9 +557,20 @@ function isToolsetNode(value: unknown): boolean {
  * Lower every toolset in one state file, returning the file the engine is handed and what was wrong.
  *
  * The positions are the ones an `environment` block can sit in: the state's own `environment`, its
- * `operation`, and each child MOUNT's `environment` (§6.1). A block brought in whole by a reference
- * (`"environment": "$/lib/env"`) is not opened — write the toolset on the state, or reference the
- * toolset rather than the block around it.
+ * `operation`, and each child MOUNT's `environment` (§6.1).
+ *
+ * A block brought in whole by a reference — `"environment": "$/lib/env"`, or
+ * `{ "$ref": "$/lib/env", …siblings }` with no `tools` of its own — is OPENED: the reference is
+ * followed through `read`, down every reference its target starts from, to the `tools` and
+ * `permissions` the block holds once expanded (the nearest `tools` wins whole and `permissions` merges
+ * per key, as the engine's own `$ref` merge does). A toolset there lowers exactly as one written on
+ * the state, and a toolset reference inside the target resolves from the target's file. The block
+ * stays the reference it was — so every other field of the target, and every relative reference in
+ * it, still means what it means where it lives — and the lowered `tools` and `permissions` ride
+ * beside it as siblings, which the engine's `$ref` merge lets win: a sibling `tools` list REPLACES the
+ * target's map, and the sibling `permissions` override the target's per key. A referenced block with
+ * no toolset, or a reference that cannot be followed here, is left as it was for the engine, whose own
+ * expansion reports a reference that names nothing.
  *
  * A file with no toolset in it comes back as the SAME object, untouched.
  *
@@ -579,23 +590,16 @@ export function lowerStateToolsets(
   const issues: StateToolsetIssue[] = [];
   if (!isPlainObject(def)) return { def, issues };
 
-  const lowerBlock = (block: unknown, at: string): unknown => {
-    if (!isPlainObject(block)) return block;
-    const node = block["tools"];
-    const own = block["permissions"];
+  /**
+   * One toolset node and the `permissions` beside it, lowered. `from` is the id a reference in the
+   * node is relative to — the state's, or the referenced block's file — and `within` names that
+   * block's reference in a message.
+   */
+  const lowerNode = (node: unknown, own: unknown, from: string, at: string, within: string | undefined): LoweredToolset => {
     const oldKeys = isPlainObject(own) ? OLD_PERMISSION_KEYS.filter((key) => own[key] !== undefined) : [];
-    const list = Array.isArray(node);
-    if (!list && !isToolsetNode(node)) {
-      // No toolset here. A `permissions` block that still says modes is the old statement on its own.
-      if (oldKeys.length === 0) return block;
-      issues.push({ stateId, path: `${at}.permissions`, message: oldPermissionsMessage(oldKeys), severity: "error" });
-      const { permissions: _permissions, ...others } = block;
-      const kept = withoutOldKeys(own as Record<string, unknown>);
-      return { ...others, ...(Object.keys(kept).length > 0 ? { permissions: kept } : {}) };
-    }
     const found: ToolsetIssue[] = [];
     let toolset: Toolset = { entries: {} };
-    if (list) {
+    if (Array.isArray(node)) {
       found.push({ path: "", message: LIST_FORM_MESSAGE, severity: "error" });
     } else {
       // A reference that names a LIST fragment (`["bash"]` in a file) is the list form by reference.
@@ -603,7 +607,7 @@ export function lowerStateToolsets(
       let listed = false;
       if (typeof reference === "string") {
         try {
-          listed = Array.isArray(read(reference, stateId).value);
+          listed = Array.isArray(read(reference, from).value);
         } catch {
           // Reported below, by the resolution that fails the same way.
         }
@@ -611,7 +615,7 @@ export function lowerStateToolsets(
       if (listed) {
         found.push({ path: "", message: `'${String(reference)}' names a list — ${LIST_FORM_MESSAGE}`, severity: "error" });
       } else {
-        const resolved = resolveToolsetDecl(node, read, stateId, found);
+        const resolved = resolveToolsetDecl(node, read, from, found);
         const parsed = parseToolset(resolved ?? {});
         if (resolved !== undefined) found.push(...parsed.issues);
         toolset = parsed.toolset;
@@ -626,14 +630,59 @@ export function lowerStateToolsets(
       if (oldKeys.length > 0) found.push({ path: "", message: oldPermissionsMessage(oldKeys), severity: "error" });
     }
     for (const issue of found) {
-      issues.push({ ...issue, stateId, path: issue.path === "" ? `${at}.tools` : `${at}.tools.${issue.path}` });
+      issues.push({
+        ...issue,
+        ...(within !== undefined ? { message: `in the block '${within}' names: ${issue.message}` } : {}),
+        stateId,
+        path: issue.path === "" ? `${at}.tools` : `${at}.tools.${issue.path}`,
+      });
     }
     // Where the shell's subjects came from, written beside them — see `PermissionsDecl.source`. A
-    // bare reference names a FILE; a map, and a `$ref` that says more, are written on the state.
-    const lowered = lowerToolset(toolset, rest, typeof node === "string" ? node : INLINE_TOOLSET);
-    const permissions = lowered.permissions;
+    // bare reference names a FILE; a map, and a `$ref` that says more, are written where they stand.
+    return lowerToolset(toolset, rest, typeof node === "string" ? node : INLINE_TOOLSET);
+  };
+
+  const lowerBlock = (block: unknown, at: string): unknown => {
+    const reference = blockReference(block);
+    if (reference !== undefined && !(isPlainObject(block) && block["tools"] !== undefined)) return lowerReferenced(block, reference, at);
+    if (!isPlainObject(block)) return block;
+    const node = block["tools"];
+    const own = block["permissions"];
+    if (!Array.isArray(node) && !isToolsetNode(node)) {
+      // No toolset here. A `permissions` block that still says modes is the old statement on its own.
+      const oldKeys = isPlainObject(own) ? OLD_PERMISSION_KEYS.filter((key) => own[key] !== undefined) : [];
+      if (oldKeys.length === 0) return block;
+      issues.push({ stateId, path: `${at}.permissions`, message: oldPermissionsMessage(oldKeys), severity: "error" });
+      const { permissions: _permissions, ...others } = block;
+      const kept = withoutOldKeys(own as Record<string, unknown>);
+      return { ...others, ...(Object.keys(kept).length > 0 ? { permissions: kept } : {}) };
+    }
+    const lowered = lowerNode(node, own, stateId, at, undefined);
     const { permissions: _permissions, ...others } = block;
-    return { ...others, tools: lowered.tools, ...(permissions !== undefined ? { permissions } : {}) };
+    return { ...others, tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) };
+  };
+
+  /**
+   * A block that IS a reference and says no `tools` of its own: opened, and its toolset lowered
+   * BESIDE the reference, as siblings the engine's `$ref` merge lets win — see the function header.
+   */
+  const lowerReferenced = (block: unknown, reference: string, at: string): unknown => {
+    const expanded = expandedFields(block, stateId, read, []);
+    if (expanded === undefined) return block;
+    const node = expanded.tools?.node;
+    if (node === undefined || (!Array.isArray(node) && !isToolsetNode(node))) {
+      // No toolset in it. Old modes in its `permissions` are refused as they are on the state; they
+      // cannot be dropped from beside a reference, which is one more reason a run will not start.
+      const own = expanded.permissions;
+      const oldKeys = isPlainObject(own) ? OLD_PERMISSION_KEYS.filter((key) => own[key] !== undefined) : [];
+      if (oldKeys.length > 0) {
+        issues.push({ stateId, path: `${at}.permissions`, message: `in the block '${reference}' names: ${oldPermissionsMessage(oldKeys)}`, severity: "error" });
+      }
+      return block;
+    }
+    const lowered = lowerNode(node, expanded.permissions, expanded.tools!.from, at, reference);
+    const { permissions: _permissions, ...siblings } = typeof block === "string" ? { [TOOLSET_REF_KEY]: block } : (block as Record<string, unknown>);
+    return { ...siblings, tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) };
   };
 
   let out: Record<string, unknown> = def;
@@ -653,6 +702,62 @@ export function lowerStateToolsets(
     set("children", mounts);
   }
   return { def: out, issues };
+}
+
+/** The reference a block is brought in by — `"$/lib/env"`, or `{ "$ref": "$/lib/env", … }` — when it is one. */
+function blockReference(block: unknown): string | undefined {
+  if (typeof block === "string") return block;
+  if (isPlainObject(block) && typeof block[TOOLSET_REF_KEY] === "string") return block[TOOLSET_REF_KEY] as string;
+  return undefined;
+}
+
+/** The two fields lowering reads off a block, as they stand once its references are expanded. */
+interface ExpandedFields {
+  /** The nearest `tools`, and the id a reference written inside it is relative to. */
+  tools?: { node: unknown; from: string };
+  permissions?: unknown;
+}
+
+/**
+ * Follow a block's references to its `tools` and `permissions`, assembled as the engine's expansion
+ * assembles them: the target first, then each layer of siblings over it — `tools` nearest-wins whole,
+ * `permissions` per key with its own `tools` per key, a bound block on either side replacing. The
+ * block's other fields are not read; they stay the engine's.
+ *
+ * `undefined` when a reference cannot be followed here — no filesystem, a file that is not there, a
+ * cycle — which the engine's own expansion then meets and reports in its own words.
+ */
+function expandedFields(block: unknown, from: string, read: ToolsetReader, active: readonly string[]): ExpandedFields | undefined {
+  const reference = blockReference(block);
+  let base: ExpandedFields = {};
+  if (reference !== undefined) {
+    let source: ToolsetSource;
+    try {
+      source = read(reference, from);
+    } catch {
+      return undefined;
+    }
+    if (active.includes(source.key)) return undefined;
+    const inner = expandedFields(source.value, source.from, read, [...active, source.key]);
+    if (inner === undefined) return undefined;
+    base = inner;
+  }
+  if (!isPlainObject(block)) return reference !== undefined ? base : {};
+  const tools = block["tools"] !== undefined ? { node: block["tools"], from } : base.tools;
+  const permissions = mergePermissionsBlock(base.permissions, block["permissions"]);
+  return { ...(tools !== undefined ? { tools } : {}), ...(permissions !== undefined ? { permissions } : {}) };
+}
+
+/** `over` onto `base`, as the engine merges a `permissions` field down a `$ref` or an `environment` chain. */
+function mergePermissionsBlock(base: unknown, over: unknown): unknown {
+  if (over === undefined) return base;
+  const bound = (p: unknown): boolean => !isPlainObject(p) || "$expr" in p || "$binding" in p;
+  if (base === undefined || bound(base) || bound(over)) return over;
+  const prior = base as Record<string, unknown>;
+  const next = over as Record<string, unknown>;
+  const priorTools = isPlainObject(prior["tools"]) ? prior["tools"] : undefined;
+  const nextTools = isPlainObject(next["tools"]) ? next["tools"] : undefined;
+  return { ...prior, ...next, ...(priorTools !== undefined || nextTools !== undefined ? { tools: { ...priorTools, ...nextTools } } : {}) };
 }
 
 /** The keys of a `permissions` block that said a MODE, before a toolset held them all. `scopes` is not one. */

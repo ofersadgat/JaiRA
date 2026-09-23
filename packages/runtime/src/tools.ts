@@ -55,7 +55,8 @@ import { registerWorkflowTools, type WorkflowToolHost } from "./workflowTools";
 import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
-import { commandNarrowingOf, commandWords, isDeniedPath } from "./policy";
+import { commandDecisionOf, commandNarrowingOf, commandWords, isDeniedPath } from "./policy";
+import { refusalOf } from "./approval";
 import { takeApart } from "./command";
 import { dialectFor, interpreterFor, type ExecEnv } from "./paths";
 
@@ -220,15 +221,34 @@ export function createRunCommandFunction(options: ToolOptions = {}): {
         ...(policy?.profiles !== undefined ? { profiles: policy.profiles } : {}),
       });
 
-      const result = (await gated.run({ command }, ctx)) as JsonValue;
+      // Held on to: the policy keeps its decision about the line, and the approver its reason for a
+      // refusal, against this very object — which is how the refusal below can say WHY.
+      const input = { command };
+      const result = (await gated.run(input, ctx)) as JsonValue;
       if (isPermissionDenied(result)) {
         // A refusal is the state's outcome, classified — not an exception, and not a
         // silent success either.
-        return { error: { classification: "permanent", reason: `command refused: ${result.reason}` }, metrics: metrics() };
+        return { error: { classification: "permanent", reason: `command refused: ${refusalReason(input, result.reason)}` }, metrics: metrics() };
       }
       return { value: result as ResolvedValue, metrics: metrics() };
     },
   };
+}
+
+/**
+ * Why a `run_command` line was refused, in words a person can act on.
+ *
+ * Upstream's refusal says only that the tool was "denied by permission policy". The policy's own
+ * decision about the line says what it was (`git push` — pushes publish work), and an approver that
+ * refused without a person says why nobody was asked and what would let the line run; either is kept
+ * against the call's input. Upstream's sentence is the fallback when neither said anything.
+ */
+function refusalReason(input: object, fallback: string): string {
+  const decided = commandDecisionOf(input);
+  const policy = decided !== undefined && decided.action !== "allow" ? decided.reason : undefined;
+  const approver = refusalOf(input);
+  if (policy === undefined) return approver ?? fallback;
+  return approver !== undefined ? `${policy}; ${approver}` : policy;
 }
 
 /** Register the command-running function on a registry's `functions` facet. */

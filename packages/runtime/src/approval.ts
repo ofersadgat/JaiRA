@@ -17,6 +17,21 @@ import type { Approver, PermissionDecision, PermissionRequest, PermissionScope }
 import type { CommandApproval } from "@jaira/shared";
 import { CommandGrants, commandDecisionOf, type PolicyAuditEntry } from "./policy";
 
+/** Why an approval was refused, by the call's own input object — see {@link refusalOf}. */
+const REFUSALS = new WeakMap<object, string>();
+
+/**
+ * Why the approver refused this call, when it said: an approver that answers `deny` without a person
+ * (a CLI run with nobody at a terminal) says why, and what would let the call run.
+ *
+ * Found by the call's INPUT object, which upstream hands unchanged from the tool to the approver — the
+ * same seam `commandDecisionOf` uses. Upstream's own refusal only ever says "denied by permission
+ * policy", which is true and tells nobody what to change; `run_command` reads this to say more.
+ */
+export function refusalOf(input: unknown): string | undefined {
+  return input !== null && typeof input === "object" ? REFUSALS.get(input) : undefined;
+}
+
 /** A parked approval, as the UI sees it. */
 export interface ApprovalRequest {
   requestId: string;
@@ -181,10 +196,18 @@ export class ApprovalHub {
    * wider scope there would remember the whole shell tool. `[]` remembers each asking part at its
    * narrowest width.
    */
-  decide(requestId: string, decision: "allow" | "deny", scope: PermissionScope = "once", remember?: readonly string[]): boolean {
+  decide(
+    requestId: string,
+    decision: "allow" | "deny",
+    scope: PermissionScope = "once",
+    remember?: readonly string[],
+    /** Why a `deny` was given, when it was not a person's plain no — found again by {@link refusalOf}. */
+    why?: string,
+  ): boolean {
     const entry = this.pending.get(requestId);
     if (!entry) return false;
     this.pending.delete(requestId);
+    if (decision === "deny" && why !== undefined) REFUSALS.set(entry.request.input, why);
     const { parts, taskId } = entry.request;
     if (remember !== undefined && parts !== undefined && taskId !== undefined) {
       this.grants(taskId).rememberParts(parts, decision, remember.length > 0 ? remember : undefined);

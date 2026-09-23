@@ -10,7 +10,28 @@
  * feature that needs it.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import type { PolicyAuditEntry } from "@jaira/runtime";
 import type { JairaDb } from "./db";
+
+/**
+ * The row one policy decision writes — the `onDecision` of every run's policy, the app's and the CLI's
+ * alike, so a run audits the same way whichever host started it.
+ *
+ * A `require_approval` is written `allowed` by `policy`: an escalation is not itself a decision, and
+ * the person's answer is a row of its own when a host records one.
+ */
+export function policyAuditRow(taskId: string, entry: PolicyAuditEntry): CommandLogEntry {
+  return {
+    taskId,
+    tool: entry.tool,
+    ...(entry.command !== undefined ? { command: entry.command } : {}),
+    ...(entry.parsed !== undefined ? { parsed: entry.parsed as unknown as JsonValue } : {}),
+    decision: entry.action === "deny" ? "blocked" : "allowed",
+    decidedBy: "policy",
+    reason: entry.reason,
+    sessionId: entry.sessionId,
+  };
+}
 
 /** What was decided about a command, and by whom. */
 export type CommandDecision = "allowed" | "blocked" | "approved" | "denied";

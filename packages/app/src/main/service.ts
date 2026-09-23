@@ -157,6 +157,7 @@ import {
   toolsetLayers,
   toolsetUsers,
   writeToolset,
+  policyAuditRow,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -213,8 +214,9 @@ import {
   registerWorkflowTools,
   type WorkflowToolHost,
   gateTools,
-  claudePermissionSettings,
-  compileClaudeScopeRules,
+  compileRunPolicy,
+  scopeFloorOf,
+  securityFloorOf,
   grantAlwaysGrantedTools,
   nativeNamesByRoute,
   planAgentTools,
@@ -393,7 +395,6 @@ import {
   settleHostRowsAtRunEnd,
 } from "./hostModes";
 import type {
-  Scope,
   ApprovalScope,
   BoardView,
   ComponentConfig,
@@ -3539,12 +3540,8 @@ export class AppService {
     // prompt call. This is the run path's half of the rule compiler: the chat path emits the same
     // rules per message, and without this a workflow's states bounded nothing but our own callbacks
     // — the agent's built-ins ran under its default posture.
-    const floor = scopeFloorOf(config);
-    const scopeRules =
-      floor === undefined ? {} : claudePermissionSettings(compileClaudeScopeRules(floor, { root: workspace.root }));
-    // `claudePermissionSettings` returns the providerOptions VALUE — the key is this caller's, the
-    // same way `chatOperationOf` writes it.
-    const securityFloor = Object.keys(scopeRules).length > 0 ? { providerOptions: scopeRules as JsonValue } : undefined;
+    // One recipe with the CLI's (`securityFloorOf`), so a run is bounded the same whichever host starts it.
+    const securityFloor = securityFloorOf(config, workspace.root);
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
       ...(securityFloor !== undefined ? { securityFloor } : {}),
@@ -3644,34 +3641,17 @@ export class AppService {
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
     // every decision audited and `require_approval` routed to the inbox (§10.2).
+    // The same recipe the CLI's runs are compiled by (`compileRunPolicy`): the project's rules, the
+    // executor's scope floor on `scopeOf` (which the engine hands to every gate and wrapped tool), the
+    // artifact size above which a payload asks, and what a person answered "for this run" about the
+    // PARTS of a shell line (decision 0007 §4) — the hub writes it on `remember`, the policy reads it.
     const auditPolicy = (entry: PolicyAuditEntry): void => {
       open.approvals.noteDecision(entry);
-      project.commands.record({
-        taskId,
-        tool: entry.tool,
-        ...(entry.command !== undefined ? { command: entry.command } : {}),
-        ...(entry.parsed !== undefined ? { parsed: entry.parsed as never } : {}),
-        // A policy escalation is not itself a decision — the human's answer is
-        // recorded separately when it arrives.
-        decision: entry.action === "allow" ? "allowed" : entry.action === "deny" ? "blocked" : "allowed",
-        decidedBy: "policy",
-        reason: entry.reason,
-        sessionId: entry.sessionId,
-      });
+      project.commands.record(policyAuditRow(taskId, entry));
     };
-    const policy = compilePolicy(config.policy, {
-      execEnv: config.execEnvironment,
+    const policy = compileRunPolicy(config, {
       onDecision: auditPolicy,
-      // The executor's scope floor, compiled onto `ExecPolicy.scopeOf`. The engine hands it to every
-      // gate and every wrapped tool, and a tool that ENUMERATES reads it off `ctx.policy` to withhold
-      // what an open would refuse. Absent ⇒ no narrowing, and nothing pays for the feature.
-      ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
       workspaceRoot: workspace.root,
-      // The size a produced artifact has to exceed before somebody is asked about it. The number is
-      // artifact configuration; turning it into an escalation is the policy's job.
-      askAboveBytes: config.artifacts.askAboveBytes,
-      // What a person answers "for this run" about the PARTS of a shell line (decision 0007 §4) —
-      // the hub writes it when an approval is submitted with `remember`, the policy reads it here.
       grants: open.approvals.grants(taskId),
     });
     // OPEN THE GATE. A previous run of this task may have shut it on the way out (`stop`), and a
@@ -9828,25 +9808,6 @@ function postureOf(config: JairaConfigOf, tools: readonly ToolChoice[], toolsets
   return match === undefined ? "custom" : toolsetLabel(match);
 }
 
-
-/**
- * The scope floor an executor declares — §7's "the screen that configures an executor bounds it".
- *
- * Read off the executor TREE rather than a key of its own, because what an executor may touch is a
- * property of that executor and inherits down its nodes like every other node setting. The topmost
- * declaration wins here; a per-route narrowing is the tree's own business and reaches the gate the
- * same way once the engine resolves which route answered.
- *
- * `undefined` when nobody declared one, which is what keeps a project that has never heard of scopes
- * paying nothing at all.
- */
-function scopeFloorOf(config: JairaConfigOf): readonly Scope[] | undefined {
-  for (const node of Object.values(config.executors ?? {})) {
-    const scopes = (node as { scopes?: Scope[] }).scopes;
-    if (Array.isArray(scopes) && scopes.length > 0) return scopes;
-  }
-  return undefined;
-}
 
 /** The `reason` inside a run row's stored failure, or undefined where there is none or it will not parse. */
 function reasonOf(failureJson: string | undefined): string | undefined {

@@ -618,6 +618,33 @@ old `read-only` profile used to refuse) falls to the project baseline. A carried
 `jaira:shell:` key or `jaira:bash-deny±` pair is read as an un-offered tool
 entry of that name and judges nothing. Starting the task again pins the map.
 
+### Amended 2026-09-22 (closing): a CLI run, and a toolset inside a referenced block
+
+Two failure rows in [tool-policy](../units/tool-policy.md) closed.
+
+- **A run started by `jaira` is governed as an app run is.** Both hosts now
+  compile a run's policy with one recipe, `compileRunPolicy` (the project's
+  rules, the executor's scope floor, `askAboveBytes`, the run's part grants) and
+  fold `securityFloorOf` over the prompt executor; the CLI audits into
+  `command_log` through the same `policyAuditRow` and calls
+  `grantAlwaysGrantedTools` as `startRun` does. What differs is only the
+  approver. At a terminal the CLI asks, drawing the request as the app does —
+  the line with its parts, their subjects, verdicts and deciders — and "for
+  this run" remembers the asking parts at a width. With nobody to ask (no
+  terminal, `--non-interactive`, or `--approve deny`) each ask is refused at
+  once, and the refusal names why and what would allow it: the toolset line
+  where a toolset judged the part, the `policy.rules` entry where a built-in or
+  the default asked. There is deliberately no flag that allows everything.
+  `handedToClaude` and `handedToCodex` take the host's `policy` and `approve`,
+  and measure a CLI run and an app run handing claude and codex the same.
+- **A toolset inside a referenced block lowers as one on the state.** An
+  `environment`, `operation` or mount `environment` that is itself a reference
+  is opened down its chain; its toolset is lowered from the target's file and
+  written beside the reference as sibling `tools` and `permissions`, which the
+  engine's `$ref` merge lets replace the target's map. The reference stays, so
+  nothing else in the target moves; the snapshot stores the resolved state, so
+  a pinned task keeps the lowered map.
+
 ## Open
 
 - `smart` on a command subject: what the approver is shown for one part of

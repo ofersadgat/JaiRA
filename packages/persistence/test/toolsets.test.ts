@@ -136,6 +136,95 @@ describe("a toolset, referenced from a state", () => {
   });
 });
 
+describe("a toolset inside a REFERENCED block", () => {
+  const map = { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" };
+  const scopes = [{ path: "app/**", default: "allow" }];
+
+  it("reaches the engine exactly as the same map written on the state — environment, operation and a child's mount", () => {
+    write(project.paths.jairaDir, "envs/reader.json", { tools: map, permissions: { scopes } });
+    write(project.paths.jairaDir, "envs/named.json", { $ref: "$/envs/base" });
+    write(project.paths.jairaDir, "envs/base.json", { tools: "$/toolsets/chat/read-only" });
+    write(project.paths.jairaDir, "toolsets/chat/read-only.json", map);
+    const op = (state({}) as { operation: Record<string, unknown> }).operation;
+    write(project.paths.jairaDir, "ops/plan.json", { ...op, tools: map });
+    write(project.paths.workflowsDir, "written.json", state({ tools: map, permissions: { scopes } }));
+    write(project.paths.workflowsDir, "byref.json", state("$/envs/reader"));
+    write(project.paths.workflowsDir, "bydollarref.json", state({ $ref: "$/envs/reader", model: "claude-sonnet-5" }));
+    write(project.paths.workflowsDir, "writtenname.json", state({ tools: "$/toolsets/chat/read-only" }));
+    write(project.paths.workflowsDir, "chained.json", state("$/envs/named"));
+    const writtenOp: Record<string, unknown> = { ...(state({}) as Record<string, unknown>), operation: { ...op, tools: map } };
+    delete writtenOp["environment"];
+    write(project.paths.workflowsDir, "writtenop.json", writtenOp);
+    write(project.paths.workflowsDir, "refop.json", { ...writtenOp, operation: "$/ops/plan" });
+
+    // Before 0007's follow-up this load FAILED: the map reached the engine inside the referenced
+    // block and the engine refused it as `unrecognized binding form`.
+    const same = load("written").states["written"]!.environment;
+    expect(same?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(load("byref").states["byref"]!.environment).toEqual(same);
+    const dollar = load("bydollarref").states["bydollarref"]!.environment;
+    expect({ tools: dollar?.tools, permissions: dollar?.permissions }).toEqual(same);
+    // A toolset REFERENCE inside a block that starts from another: resolved, and named as the source.
+    expect(load("chained").states["chained"]!.environment).toEqual(load("writtenname").states["writtenname"]!.environment);
+    // An operation's tools resolve onto the state's environment; the operation itself is the same too.
+    const opOf = (id: string) => {
+      const resolved = load(id).states[id]!;
+      return { operation: resolved.operation, environment: resolved.environment };
+    };
+    expect(opOf("refop")).toEqual(opOf("writtenop"));
+    expect(opOf("refop").environment?.tools).toEqual(["read_file", "glob", "bash"]);
+  });
+
+  it("is inherited by a child exactly as a map written on the parent — or on the child's mount", () => {
+    write(project.paths.jairaDir, "envs/reader.json", { tools: map });
+    const leaf = state({}) as Record<string, unknown>;
+    delete leaf["environment"];
+    for (const [id, environment] of [["wfw", { tools: map }], ["wfr", "$/envs/reader"]] as const) {
+      write(project.paths.workflowsDir, `${id}.json`, { environment, children: { a: {} }, sequence: ["a"] });
+      write(project.paths.workflowsDir, `${id}/a.json`, leaf);
+      write(project.paths.workflowsDir, `m${id}.json`, { children: { a: { environment } }, sequence: ["a"] });
+      write(project.paths.workflowsDir, `m${id}/a.json`, leaf);
+    }
+    const written = load("wfw").states["wfw/a"]!.environment;
+    expect(written?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(load("wfr").states["wfr/a"]!.environment).toEqual(written);
+    expect(load("mwfr").states["mwfr/a"]!.environment).toEqual(load("mwfw").states["mwfw/a"]!.environment);
+    expect(load("mwfr").states["mwfr/a"]!.environment?.tools).toEqual(["read_file", "glob", "bash"]);
+  });
+
+  it("is PINNED: the block's file is in the closure, and a pinned task does not see a later edit to it", async () => {
+    write(project.paths.jairaDir, "envs/reader.json", { tools: { read_file: "allow", other: "deny" } });
+    write(project.paths.workflowsDir, "plan.json", state("$/envs/reader"));
+    const read: string[] = [];
+    const bundle = load("plan", (file) => read.push(file.replace(/\\/g, "/")));
+    expect(read.some((file) => file.endsWith("envs/reader.json"))).toBe(true);
+
+    const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
+    write(project.paths.jairaDir, "envs/reader.json", { tools: { read_file: "deny", other: "deny" } });
+    const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
+    expect(pinned.states["plan"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...TOOLSET_MARKERS }, other: "deny" } });
+    expect(snapshotHash(load("plan"))).not.toBe(snap.hash);
+  });
+
+  it("leaves a referenced block with no toolset untouched: the same state and snapshot hash as around the door", () => {
+    write(project.paths.jairaDir, "envs/plain.json", { model: "claude-sonnet-5" });
+    write(project.paths.workflowsDir, "plain.json", state("$/envs/plain"));
+    const direct = loadBundle(readWorkflowFiles(project.paths.workflowsDir), "plain", workflowLoadOptions(project.paths));
+    expect(load("plain").states["plain"]).toEqual(direct.states["plain"]);
+    expect(snapshotHash(load("plain"))).toBe(snapshotHash(direct));
+  });
+
+  it("refuses the list form inside a referenced block, naming the block, and a run will not start", () => {
+    write(project.paths.jairaDir, "envs/old.json", { tools: ["read_file"] });
+    write(project.paths.workflowsDir, "old.json", state("$/envs/old"));
+    const entry = browseWorkflows(project).workflows.find((w) => w.rootId === "old")!;
+    expect(entry.issues).toEqual([
+      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/^in the block '\$\/envs\/old' names: .*the list form was removed/) }),
+    ]);
+    expect(() => load("old")).toThrow(/the list form was removed/);
+  });
+});
+
 describe("a state that declares no toolset", () => {
   it("loads untouched, through the door and around it", () => {
     write(project.paths.workflowsDir, "plain.json", state({ model: "claude-sonnet-5" }));
