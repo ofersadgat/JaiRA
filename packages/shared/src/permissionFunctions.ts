@@ -2,7 +2,7 @@
  * A PERMISSION FUNCTION's contract — what it is handed and what it may answer (decision 0007,
  * amended 2026-09-22).
  *
- * A toolset line may name a function instead of a mode: `"bash": { "function": "smart" }`. For every
+ * A permission set line may name a function instead of a mode: `"bash": { "function": "smart" }`. For every
  * call the line answers — every PART of a shell line — the function is handed one
  * {@link PermissionFunctionRequest}, exactly what an approver would be shown, and answers `"allow"`
  * or `"deny"`. Nothing else is an answer: a function that returns anything else, or fails, has not
@@ -55,11 +55,11 @@ export interface PermissionFunctionRequest {
   /** The tool called — `bash`, `write_file`, or an agent's own built-in by its own name. */
   tool: string;
   /**
-   * The toolset line the function answers for — `git push`, `bash` (any other command), `write_file`,
+   * The permission set line the function answers for — `git push`, `bash` (any other command), `write_file`,
    * `script`, `other`.
    */
   subject: string;
-  /** The function being asked, as the toolset names it — so one function serving several lines can tell. */
+  /** The function being asked, as the permission set names it — so one function serving several lines can tell. */
   function: string;
   /** The tool call's input, as the model produced it. */
   input: Record<string, JsonValue>;
@@ -73,8 +73,8 @@ export interface PermissionFunctionRequest {
   state?: string;
   /** The task, by id. */
   task?: string;
-  /** Which toolset judged the call: the reference its state names it by, or `inline`. */
-  toolset?: string;
+  /** Which permission set judged the call: the reference its state names it by, or `inline`. */
+  permissionSet?: string;
 }
 
 /**
@@ -90,7 +90,7 @@ export interface ApprovalPromptAnswer {
 
 /**
  * A request, as a key: the same call, the same part, the same place — and nothing that could differ
- * between two askings of one call (the function, the toolset's name). Canonical JSON, keys sorted.
+ * between two askings of one call (the function, the permission set's name). Canonical JSON, keys sorted.
  */
 export function approvalRequestKey(request: unknown): string {
   const record = request !== null && typeof request === "object" && !Array.isArray(request) ? (request as Record<string, unknown>) : {};

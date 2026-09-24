@@ -335,7 +335,7 @@ export function hostCalleeSignatures(): ReadonlyMap<string, EntrySignature> {
   new UserEventHub().register(probe);
   // `on_remote_event`, its sibling on the forge — resolvable from a guard for the same reason.
   new RemoteEventHub().register(probe, undefined, undefined);
-  // `smart` and `approve_tool_call` — what a toolset line names as a function, and what a permission
+  // `smart` and `approve_tool_call` — what a permission set line names as a function, and what a permission
   // function calls to ask the person. Resolvable by name for the same reason (decision 0007).
   registerPermissionFunctionSignatures(probe);
   return signaturesOf(probe);

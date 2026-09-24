@@ -1,5 +1,5 @@
 /**
- * An agent gets its toolset and nothing else (decision 0007 §3).
+ * An agent gets its permission set and nothing else (decision 0007 §3).
  *
  * Three things live here, and they are one argument:
  *
@@ -8,16 +8,16 @@
  *     one is, and for a transport with nothing finer, which coarse switch unlocks which subjects. This
  *     used to be a `natives: { claude: … }` column on the shared vocabulary; the standard list holds
  *     no agent's names now.
- *  2. **The plan** — {@link planAgentTools}: a toolset and a declaration in, and out comes what is
+ *  2. **The plan** — {@link planAgentTools}: a permission set and a declaration in, and out comes what is
  *     injected, which natives are removed, which are kept and forced through the permission callback,
  *     and how each switch is set.
- *  3. **The wrapper** — {@link withAgentToolset}: the plan, applied to ONE call on its way into an
+ *  3. **The wrapper** — {@link withAgentPermissionSet}: the plan, applied to ONE call on its way into an
  *     agent executor. It sits where the route is finally known, which is the only place the right
  *     declaration can be picked.
  *
  * ## The rule, per standard tool
  *
- *  - **Not in the toolset → the native is removed.** The deny list, or the switch left off.
+ *  - **Not in the permission set → the native is removed.** The deny list, or the switch left off.
  *  - **In it → OUR implementation is injected and displaces the native.** The default.
  *  - **In it as `implementation: "native"` → the built-in is kept and forced through the permission
  *    callback**, so the entry's mode still decides — asked about by its STANDARD name, which is the
@@ -27,23 +27,23 @@
  *    (`Task`) would otherwise inherit tools this deny list never sees — and any other `other` is what
  *    the callback answers with.
  *
- * ## Where the toolset comes from
+ * ## Where the permission set comes from
  *
- * A conversation turn KNOWS its toolset and hands it over on the services bundle
- * ({@link TOOLSET_SERVICE}). A run does not build one: the engine resolves a state's `environment`
+ * A conversation turn KNOWS its permission set and hands it over on the services bundle
+ * ({@link PERMISSION_SET_SERVICE}). A run does not build one: the engine resolves a state's `environment`
  * itself and hands an executor the tools it resolved (`ctx.tools`), a gate over the state's modes
  * (`ctx.gate`) and the RESOLVED block itself (`ctx.authored`, upstream since declarative-ai 3f5e5cc),
- * so the toolset is read back from those ({@link viewOfServices}) — the block for what was WRITTEN
+ * so the permission set is read back from those ({@link viewOfServices}) — the block for what was WRITTEN
  * (implementations, a written `other`, the shell's authored mode), the tools for what is held.
  *
- * ## A state that declares no toolset is handed on untouched
+ * ## A state that declares no permission set is handed on untouched
  *
- * The rule is a MAP's, and a state whose `environment` chain names no toolset has made no statement
+ * The rule is a MAP's, and a state whose `environment` chain names no permission set has made no statement
  * about tools at all — which is not the statement "nothing": an empty map removes every built-in. So
  * such a call is passed through exactly as the engine built it, the agent keeping its own tools under
  * the gate. A run tells the two apart by the marks a lowered map leaves in its `permissions.tools`
- * (`TOOLSET_MARKERS` in `@jaira/shared`), read off `ctx.authored`; a conversation turn that declares
- * nothing publishes no toolset and reads the same way.
+ * (`PERMISSION_SET_MARKERS` in `@jaira/shared`), read off `ctx.authored`; a conversation turn that declares
+ * nothing publishes no permission set and reads the same way.
  */
 import {
   finishedHandle,
@@ -58,19 +58,19 @@ import { emptyWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
 import type { ExecPolicy, PermissionMode as GateMode, ToolGate } from "@declarative-ai/permissions";
 import {
   isFunctionMode,
-  isLoweredToolset,
+  isLoweredPermissionSet,
   nativesOfStandard,
   offeredTools,
   standardOfNative,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
-  toolsetOfEnvironment,
+  permissionSetOfEnvironment,
   unmappedNatives,
   type AgentToolDeclaration,
   type PermissionsDecl,
   type ToolImplementation,
-  type Toolset,
-  type ToolsetMode,
+  type PermissionSet,
+  type PermissionSetMode,
 } from "@jaira/shared";
 import type { StackedExecutor } from "./executorStack";
 
@@ -109,11 +109,11 @@ export const CLAUDE_TOOLS: AgentToolDeclaration = {
 
 /**
  * Codex — `codex exec` has no per-tool deny list, no allow-list and no permission callback. What it
- * has is the sandbox, and an MCP bridge: the tools a toolset holds are served to it over the bridge
+ * has is the sandbox, and an MCP bridge: the tools a permission set holds are served to it over the bridge
  * and every call is put to the gate there (upstream `AgentExecutor`, for a transport with no
  * callback), exactly as claude's callback puts them. So the declaration says which standard subjects
- * the WRITING sandbox unlocks, and the flag is derived from the toolset: `workspace-write` only where
- * the toolset KEEPS one of codex's own writers (`shell` for `bash`, `apply_patch` for `edit`, held
+ * the WRITING sandbox unlocks, and the flag is derived from the permission set: `workspace-write` only where
+ * the permission set KEEPS one of codex's own writers (`shell` for `bash`, `apply_patch` for `edit`, held
  * with `implementation: "native"`), `read-only` otherwise — ours doing the writing, under the gate.
  *
  * Its natives cannot be removed one by one: shutting the sandbox is how they are displaced.
@@ -129,7 +129,7 @@ export const CODEX_WRITE_SWITCH = "workspace-write";
 
 /**
  * A generic CLI — a binary JaiRA knows nothing about and can tell nothing to. It declares no tools
- * and no channel, so a toolset that REFUSES anything cannot be held to and the call is refused.
+ * and no channel, so a permission set that REFUSES anything cannot be held to and the call is refused.
  */
 export const GENERIC_CLI_TOOLS: AgentToolDeclaration = { channel: "none", natives: {} };
 
@@ -145,17 +145,17 @@ export function standardOfAnyNative(native: string): string | undefined {
   return undefined;
 }
 
-// --- the toolset, as a call sees it ---------------------------------------------
+// --- the permission set, as a call sees it ---------------------------------------------
 
 /**
- * A mode as the plan reads it: what a toolset line says — a word, or a FUNCTION — or, where the line
+ * A mode as the plan reads it: what a permission set line says — a word, or a FUNCTION — or, where the line
  * says nothing, what the gate resolves to (upstream's vocabulary, which still has `smart`).
  */
-export type ViewMode = ToolsetMode | GateMode;
+export type ViewMode = PermissionSetMode | GateMode;
 
-/** One call's toolset, reduced to the questions the plan asks of it. */
-export interface ToolsetView {
-  /** Whose code runs a standard tool the toolset HOLDS; `undefined` when it does not hold it. */
+/** One call's permission set, reduced to the questions the plan asks of it. */
+export interface PermissionSetView {
+  /** Whose code runs a standard tool the permission set HOLDS; `undefined` when it does not hold it. */
   held(standard: string): ToolImplementation | undefined;
   /** The mode a standard tool resolves to, where anything says. */
   modeOf(standard: string): ViewMode | undefined;
@@ -169,49 +169,49 @@ export interface ToolsetView {
   otherIsAuthored: boolean;
 }
 
-/** A toolset in hand — a conversation turn's. */
-export function viewOfToolset(toolset: Toolset): ToolsetView {
-  const offered = new Set(offeredTools(toolset));
-  const entry = (name: string) => (Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined);
+/** A permission set in hand — a conversation turn's. */
+export function viewOfPermissionSet(permissionSet: PermissionSet): PermissionSetView {
+  const offered = new Set(offeredTools(permissionSet));
+  const entry = (name: string) => (Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name] : undefined);
   return {
     held: (standard) => (offered.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
     modeOf: (standard) => entry(standard)?.mode,
-    otherFor: () => toolset.other,
-    otherIsAuthored: toolset.other !== undefined,
+    otherFor: () => permissionSet.other,
+    otherIsAuthored: permissionSet.other !== undefined,
   };
 }
 
 /**
- * A toolset read back off what the ENGINE hands an executor — a run's — or `undefined` when the
+ * A permission set read back off what the ENGINE hands an executor — a run's — or `undefined` when the
  * state declared none (see the module header).
  *
  * `ctx.tools` is the state's resolved tool list, so membership is exact. `ctx.authored` is the
  * state's resolved block, so what was WRITTEN is exact: a map's marks, whose code serves a tool, a
  * written `other`, and the shell's authored mode (lowered as `ask`, carried in `subjects`) — read
- * through `toolsetOfEnvironment`, the reader a conversation turn uses for the same block. `ctx.gate`
+ * through `permissionSetOfEnvironment`, the reader a conversation turn uses for the same block. `ctx.gate`
  * resolves a mode through that block, the run's ledger and the project baseline, and answers where
  * the block says nothing.
  */
-export function viewOfServices(ctx: ExecServices): ToolsetView | undefined {
+export function viewOfServices(ctx: ExecServices): PermissionSetView | undefined {
   const authored = ctx.authored as PermissionsDecl | undefined;
-  if (!isLoweredToolset(authored)) return undefined;
+  if (!isLoweredPermissionSet(authored)) return undefined;
   const held = new Set(Object.keys(ctx.tools ?? {}));
   const baseline = ctx.policy?.baseline?.tools;
   const gated = (name: string): GateMode | undefined =>
     ctx.gate?.modeOf({ name }) ?? (baseline !== undefined && Object.hasOwn(baseline, name) ? baseline[name] : undefined);
-  const toolset = toolsetOfEnvironment([...held], authored);
-  const entry = (name: string) => (Object.hasOwn(toolset.entries, name) ? toolset.entries[name] : undefined);
+  const permissionSet = permissionSetOfEnvironment([...held], authored);
+  const entry = (name: string) => (Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name] : undefined);
   return {
     held: (standard) => (held.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
     modeOf: (name) => entry(name)?.mode ?? gated(name),
-    otherFor: (name) => toolset.other ?? gated(name),
-    otherIsAuthored: toolset.other !== undefined,
+    otherFor: (name) => permissionSet.other ?? gated(name),
+    otherIsAuthored: permissionSet.other !== undefined,
   };
 }
 
 // --- the plan -----------------------------------------------------------------
 
-/** What an agent should be handed, once a toolset has met a declaration. */
+/** What an agent should be handed, once a permission set has met a declaration. */
 export interface AgentToolPlan {
   /**
    * Standard tools to DECLARE, so ours are injected. This is `environment.tools`: membership of the
@@ -227,35 +227,35 @@ export interface AgentToolPlan {
    * the callback at all — "native" means the implementation, never the access.
    */
   askNatives: string[];
-  /** Natives REMOVED: their standard tool is not in the toolset, or what answers for them is `deny`. */
+  /** Natives REMOVED: their standard tool is not in the permission set, or what answers for them is `deny`. */
   denyNatives: string[];
-  /** Each declared switch, ON when the toolset holds one of its subjects un-denied. */
+  /** Each declared switch, ON when the permission set holds one of its subjects un-denied. */
   switches: Record<string, boolean>;
 }
 
 /**
- * Resolve a toolset against one agent's declaration — see the module header for the rule.
+ * Resolve a permission set against one agent's declaration — see the module header for the rule.
  *
- * A tool marked `alwaysGranted` is held whether the toolset names it or not: its absence is an
+ * A tool marked `alwaysGranted` is held whether the permission set names it or not: its absence is an
  * omission, never a decision. It still answers to the gate.
  *
- * Takes a toolset or a {@link ToolsetView}. The declaration defaults to claude's, which is what every
+ * Takes a permission set or a {@link PermissionSetView}. The declaration defaults to claude's, which is what every
  * caller meant before there was more than one.
  */
-export function planAgentTools(grant: Toolset | ToolsetView, declaration: AgentToolDeclaration = CLAUDE_TOOLS): AgentToolPlan {
-  const view: ToolsetView = isView(grant) ? grant : viewOfToolset(grant);
+export function planAgentTools(grant: PermissionSet | PermissionSetView, declaration: AgentToolDeclaration = CLAUDE_TOOLS): AgentToolPlan {
+  const view: PermissionSetView = isView(grant) ? grant : viewOfPermissionSet(grant);
   const plan: AgentToolPlan = { inject: [], displaced: [], askNatives: [], denyNatives: [], switches: {} };
   const holds = (standard: string): ToolImplementation | undefined =>
     view.held(standard) ?? (TOOL_SPEC_BY_NAME.get(standard)?.alwaysGranted === true ? "app" : undefined);
 
   for (const spec of TOOL_SPECS) {
     // Named and not yet served (`ToolSpec.unserved`): nothing to inject and no agent's built-in to
-    // keep or remove, whatever the toolset says about it.
+    // keep or remove, whatever the permission set says about it.
     if (spec.unserved === true) continue;
     const natives = nativesOfStandard(declaration, spec.name);
     const implementation = holds(spec.name);
     if (implementation === undefined) {
-      // NOT IN THE TOOLSET: removed.
+      // NOT IN THE PERMISSION_SET: removed.
       plan.denyNatives.push(...natives);
       continue;
     }
@@ -283,7 +283,7 @@ export function planAgentTools(grant: Toolset | ToolsetView, declaration: AgentT
   // when the plan KEEPS one of the natives it unlocks — a subject held with `implementation: "native"`
   // and not denied. A subject held with OUR implementation is served over the bridge and gated there,
   // which is what displacing the native means on a transport that cannot remove one tool alone: the
-  // sandbox stays shut, so the agent's own writers cannot do the job the toolset gave to ours.
+  // sandbox stays shut, so the agent's own writers cannot do the job the permission set gave to ours.
   const kept = new Set(plan.askNatives);
   for (const [name, subjects] of Object.entries(declaration.switches ?? {})) {
     plan.switches[name] = subjects.some((subject) => nativesOfStandard(declaration, subject).some((native) => kept.has(native)));
@@ -291,37 +291,37 @@ export function planAgentTools(grant: Toolset | ToolsetView, declaration: AgentT
   return plan;
 }
 
-/** What a toolset REFUSES — the reason a transport that enforces nothing cannot run it. */
-export function refusalsOf(view: ToolsetView): string[] {
+/** What a permission set REFUSES — the reason a transport that enforces nothing cannot run it. */
+export function refusalsOf(view: PermissionSetView): string[] {
   const denied = TOOL_SPECS.filter((spec) => view.modeOf(spec.name) === "deny").map((spec) => spec.name);
   return view.otherFor("other") === "deny" ? [...denied, "other"] : denied;
 }
 
-function isView(grant: Toolset | ToolsetView): grant is ToolsetView {
-  return typeof (grant as ToolsetView).held === "function";
+function isView(grant: PermissionSet | PermissionSetView): grant is PermissionSetView {
+  return typeof (grant as PermissionSetView).held === "function";
 }
 
 // --- the wrapper --------------------------------------------------------------
 
 /**
- * The key a caller that KNOWS its toolset publishes it under, on the services bundle.
+ * The key a caller that KNOWS its permission set publishes it under, on the services bundle.
  *
- * A conversation turn builds its own services, so it can say exactly what the toolset is —
+ * A conversation turn builds its own services, so it can say exactly what the permission set is —
  * implementations included. A run cannot (see the module header) and leaves it absent.
  */
-export const TOOLSET_SERVICE = "jairaToolset";
+export const PERMISSION_SET_SERVICE = "jairaPermissionSet";
 
-/** Publish a toolset on a services bundle — see {@link TOOLSET_SERVICE}. */
-export function withToolsetService<T extends object>(services: T, toolset: Toolset | undefined): T {
-  return toolset === undefined ? services : ({ ...services, [TOOLSET_SERVICE]: toolset } as T);
+/** Publish a permission set on a services bundle — see {@link PERMISSION_SET_SERVICE}. */
+export function withPermissionSetService<T extends object>(services: T, permissionSet: PermissionSet | undefined): T {
+  return permissionSet === undefined ? services : ({ ...services, [PERMISSION_SET_SERVICE]: permissionSet } as T);
 }
 
-function toolsetOf(ctx: ExecServices): Toolset | undefined {
-  const value = (ctx as unknown as Record<string, unknown>)[TOOLSET_SERVICE];
-  return value !== null && typeof value === "object" ? (value as Toolset) : undefined;
+function permissionSetOf(ctx: ExecServices): PermissionSet | undefined {
+  const value = (ctx as unknown as Record<string, unknown>)[PERMISSION_SET_SERVICE];
+  return value !== null && typeof value === "object" ? (value as PermissionSet) : undefined;
 }
 
-export interface AgentToolsetOptions {
+export interface AgentPermissionSetOptions {
   /** What the transport is called in a refusal. */
   label: string;
   /** Which bag of `providerOptions` this agent reads — where an ask rule is written. */
@@ -329,13 +329,13 @@ export interface AgentToolsetOptions {
   /**
    * For a `switches` transport: the executor to use for one setting of the switches, or `undefined`
    * to keep the one that was wrapped. This is how a flag that is fixed at construction is nonetheless
-   * derived per call — there is one executor per setting, and the toolset picks.
+   * derived per call — there is one executor per setting, and the permission set picks.
    */
   switched?: (switches: Readonly<Record<string, boolean>>) => StackedExecutor | undefined;
 }
 
 /**
- * Hold ONE agent executor to the toolset of each call it answers.
+ * Hold ONE agent executor to the permission set of each call it answers.
  *
  *  - `tools` (claude): the removed and displaced natives reach the agent as its deny list, through
  *    the channel the executor already reads (`ctx.policy.baseline` and `ctx.gate.modeOf`); the kept
@@ -343,15 +343,15 @@ export interface AgentToolsetOptions {
  *    about a native by its STANDARD name, so `Read` answers to the `read_file` entry.
  *  - `switches` (codex): the executor for this setting of the switches answers, handed the held tools
  *    of ours to serve over its bridge — every call gated there — less any whose entry kept codex's own.
- *  - `none` (a generic CLI): a toolset that refuses anything is refused, by name.
+ *  - `none` (a generic CLI): a permission set that refuses anything is refused, by name.
  *
  * The same wrapper holds a claude agent reached as a FUNCTION: upstream's function entry takes it as
  * `wrapExecutor` (see {@link agentFunctionWrapper}), so the two ways into one agent are one code path.
  */
-export function withAgentToolset<E extends Executor<ExecServices, any>>(
+export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
   declaration: AgentToolDeclaration,
   inner: E,
-  options: AgentToolsetOptions,
+  options: AgentPermissionSetOptions,
 ): E {
   const executor = inner;
   return {
@@ -362,9 +362,9 @@ export function withAgentToolset<E extends Executor<ExecServices, any>>(
       : {}),
     start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
       if (op.kind !== "prompt") return executor.start(op, ctx);
-      const known = toolsetOf(ctx);
-      const view = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
-      // A state that declared no toolset is handed on exactly as the engine built it — see the
+      const known = permissionSetOf(ctx);
+      const view = known !== undefined ? viewOfPermissionSet(known) : viewOfServices(ctx);
+      // A state that declared no permission set is handed on exactly as the engine built it — see the
       // module header.
       if (view === undefined) return executor.start(op, ctx);
       const plan = planAgentTools(view, declaration);
@@ -374,7 +374,7 @@ export function withAgentToolset<E extends Executor<ExecServices, any>>(
         if (refused.length === 0) return executor.start(op, ctx);
         return finishedHandle(
           permanentFailure<WorkflowMetrics>(
-            `${options.label}: this state's toolset refuses ${refused.map((name) => `'${name}'`).join(", ")}, and this transport ` +
+            `${options.label}: this state's permission set refuses ${refused.map((name) => `'${name}'`).join(", ")}, and this transport ` +
               `enforces nothing — no deny list, no sandbox, no permission callback — so nothing could hold the agent to it. ` +
               `Run the state on claude-code, claude-cli or codex-cli, or drop the restriction`,
             emptyWorkflowMetrics(),
@@ -397,25 +397,25 @@ export function withAgentToolset<E extends Executor<ExecServices, any>>(
 
 /**
  * The `wrapExecutor` a claude agent reached as a FUNCTION is registered with: the route's own wrapper,
- * {@link withAgentToolset}, around the executor the function entry builds for each call. A function
+ * {@link withAgentPermissionSet}, around the executor the function entry builds for each call. A function
  * call has no op of its own to write an ask rule into until the entry builds one, and this is the door
  * upstream opened at that moment — so `implementation: "native"`, the deny list and the translated
  * gate reach a function call exactly as they reach the route.
  */
 export function agentFunctionWrapper(declaration: AgentToolDeclaration, label: string): <E extends Executor<ExecServices, any>>(executor: E) => E {
-  return (executor) => withAgentToolset(declaration, executor, { label });
+  return (executor) => withAgentPermissionSet(declaration, executor, { label });
 }
 
 /**
- * The services a `switches` transport (codex) is handed for a call held to a toolset: the tools of ours
+ * The services a `switches` transport (codex) is handed for a call held to a permission set: the tools of ours
  * it serves, less those whose entry kept codex's own, and a copy of the policy whose baseline names only
  * those served tools.
  *
  * The baseline is where the executor builds its up-front deny list from — every name in it the gate
- * answers `deny` — and codex has no deny list, so it refuses a run that carries one. Under a toolset the
+ * answers `deny` — and codex has no deny list, so it refuses a run that carries one. Under a permission set the
  * names left in it are the policy's command-tool vocabulary (`shell`, `sh`, `powershell`, …) and any
  * standard tool the map does not hold, all answering to the map's `other`: none is a tool of ours codex
- * could be served, and codex's own writers are shut or kept by the SWITCH, which is where the toolset's
+ * could be served, and codex's own writers are shut or kept by the SWITCH, which is where the permission set's
  * removals reach this transport. The gate itself is untouched, so every call at the bridge is still
  * decided by the whole map.
  */
@@ -443,7 +443,7 @@ function switchedServices(ctx: ExecServices, withheldNames: readonly string[]): 
  * gate learns the tool from it), so the engine hands ours over; only the block says whose code was
  * chosen. A conversation turn never registers it in the first place.
  */
-function nativelyServed(view: ToolsetView, declaration: AgentToolDeclaration, ctx: ExecServices): string[] {
+function nativelyServed(view: PermissionSetView, declaration: AgentToolDeclaration, ctx: ExecServices): string[] {
   return Object.keys(ctx.tools ?? {}).filter((name) => view.held(name) === "native" && nativesOfStandard(declaration, name).length > 0);
 }
 
@@ -451,28 +451,28 @@ function nativelyServed(view: ToolsetView, declaration: AgentToolDeclaration, ct
 export type AgentFunctionRun = (inputs: Record<string, unknown>, ctx: ExecServices) => Promise<unknown>;
 
 /**
- * Hold an agent reached as a FUNCTION to the toolset of each call, for the channels whose holding
+ * Hold an agent reached as a FUNCTION to the permission set of each call, for the channels whose holding
  * reads the call's INPUTS. A `tools` transport (claude) is not held here: its function entry is
  * registered with {@link agentFunctionWrapper}, the route's own wrapper, because what it needs — an ask
  * rule for a kept built-in — is written into the op the entry builds, which no wrapper of `run` sees.
  *
  *  - `switches` (codex): the adapter reads its sandbox off the call's own `permissionMode` input,
- *    and `plan` is nothing but `--sandbox read-only` there — so a toolset that leaves the writing
+ *    and `plan` is nothing but `--sandbox read-only` there — so a permission set that leaves the writing
  *    switch OFF writes `permissionMode: "plan"` over whatever the call carried, as the route picks its
  *    read-only executor. A switch that is on leaves the call as it was: the configured sandbox. The
  *    tools of ours it holds are served over the bridge, gated there, less any whose entry kept codex's
  *    own — as the route serves them.
- *  - `none` (a generic CLI): a toolset that refuses anything is refused, by name, as the route does.
+ *  - `none` (a generic CLI): a permission set that refuses anything is refused, by name, as the route does.
  *
- * A call whose state declared no toolset is handed on untouched, as {@link withAgentToolset} hands one on.
+ * A call whose state declared no permission set is handed on untouched, as {@link withAgentPermissionSet} hands one on.
  */
 export function holdAgentFunction<R extends AgentFunctionRun>(declaration: AgentToolDeclaration, run: R, label: string): R {
   if (declaration.channel === "tools") {
     throw new Error(`${label}: a \`tools\` transport is held by its route's wrapper (agentFunctionWrapper), not by its run`);
   }
   return (async (inputs: Record<string, unknown>, ctx: ExecServices) => {
-    const known = toolsetOf(ctx);
-    const view = known !== undefined ? viewOfToolset(known) : viewOfServices(ctx);
+    const known = permissionSetOf(ctx);
+    const view = known !== undefined ? viewOfPermissionSet(known) : viewOfServices(ctx);
     if (view === undefined) return run(inputs, ctx);
     if (declaration.channel === "none") {
       const refused = refusalsOf(view);
@@ -481,7 +481,7 @@ export function holdAgentFunction<R extends AgentFunctionRun>(declaration: Agent
         error: {
           classification: "permanent",
           reason:
-            `${label}: this state's toolset refuses ${refused.map((name) => `'${name}'`).join(", ")}, and this transport ` +
+            `${label}: this state's permission set refuses ${refused.map((name) => `'${name}'`).join(", ")}, and this transport ` +
             `enforces nothing — no deny list, no sandbox, no permission callback — so nothing could hold the agent to it. ` +
             `Run the state on claude-code, claude-cli or codex-cli, or drop the restriction`,
         },
@@ -549,7 +549,7 @@ function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refus
     modeOf: (tool) => (refused.has(tool.name) ? "deny" : gate.modeOf(subject(tool))),
     check: (tool, input) => {
       if (refused.has(tool.name)) {
-        return Promise.resolve({ allow: false as const, reason: `tool '${tool.name}' is not in this state's toolset` });
+        return Promise.resolve({ allow: false as const, reason: `tool '${tool.name}' is not in this state's permission set` });
       }
       const asked = subject(tool);
       return gate.check(asked, asked === tool ? input : standardInput(asked.name, input));

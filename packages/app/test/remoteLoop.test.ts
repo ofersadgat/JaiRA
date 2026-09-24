@@ -62,7 +62,7 @@ describe("run through the service", () => {
     service = new AppService({ baseDir: home, publish: (m) => pushes.push(m), forgeHttp: replay.http, watchWorkflows: false });
     await service.open(rig.work);
     service.setSecret({ name: "GITLAB_TOKEN", value: "good", target: "project-env-local" });
-    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), policy: { remote: { publish: "allow" } } } as JsonValue });
+    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), functions: { review_artifacts: { publish: "allow" } } } as JsonValue });
   });
 
   afterEach(async () => {

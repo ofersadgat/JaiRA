@@ -58,7 +58,7 @@ Four ideas, composed rather than parallel. `review_artifact` is a viewer plus a
 | `edit_artifact` | `{ content }` |
 | `fill_form` | a flat object of its fields |
 | `confirm_action` | `{ confirmed }` |
-| `approve_tool_call` | `{ decision: "allow" \| "deny" }` — the APPROVAL PROMPT, which a permission function calls to ask the person about one tool call ([decision 0007](../decisions/0007-toolsets.md), amended 2026-09-22); its config is `{ request, prompt? }`, `request` the `PermissionFunctionRequest` the function was handed, and the function's own value is the `decision` |
+| `approve_tool_call` | `{ decision: "allow" \| "deny" }` — the APPROVAL PROMPT, which a permission function calls to ask the person about one tool call ([decision 0007](../decisions/0007-permissionSets.md), amended 2026-09-22); its config is `{ request, prompt? }`, `request` the `PermissionFunctionRequest` the function was handed, and the function's own value is the `decision` |
 
 `fill_form` reads a JSON-Schema **subset**: `string` · `number` · `boolean` ·
 `enum`, with `optional`, `default`, `multiline`, and — on an `enum` only —

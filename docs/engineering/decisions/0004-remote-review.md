@@ -2,7 +2,7 @@
 id: engineering/decisions/0004-remote-review
 type: decision
 status: proposed
-updated: 2026-09-19
+updated: 2026-09-23
 decides_for: [engineering/contracts/gate-components, engineering/units/interaction-hub, engineering/units/secret-chain]
 ---
 
@@ -558,6 +558,33 @@ Fixtures are of two kinds and each says which in `_source`: recorded from the pu
 unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both
 `401`s), and built from the documented shapes for what needs a token (every write, GitLab's
 discussions, GitHub's GraphQL). Nothing has been run against a real project with a real token.
+
+**Signing in through the browser (2026-09-23).** A connection's token can now come from OAuth's
+device authorization grant (RFC 8628) as well as from a paste, which stays supported. §1 said the
+connection is `{ provider, host, token }` and the token goes through the secret chain; that holds —
+a sign-in stores its token under the connection's `credential`, keychain first, exactly where a
+pasted one goes. What the build settled ([forge-integrations](../units/forge-integrations.md) has
+the rest):
+
+- **No built-in client id.** JaiRA has no registered OAuth app, so the id is configuration:
+  `integrations.oauth.<provider>.clientId`. With none, Sign in answers why and where to set it.
+  *Superseded the same day:* JaiRA registered its own apps — a GitLab application on gitlab.com and
+  GitHub App 5053987 on github.com — and ships their client IDs (`BUILTIN_OAUTH_APPS`), never their
+  secrets: a device flow is a public client. A layer's `integrations.oauth` still wins, and is what a
+  self-hosted instance needs. GitLab's app allows `api` but not `read_user`, so JaiRA asks for `api` alone.
+- **The device flow, not a redirect.** It needs no listener on this machine; the forge shows the
+  page, the person types the code, and main polls (`slow_down` adds five seconds; GitHub answers a
+  pending poll `200`, GitLab `400`, so the body's `error` is read before the status).
+- **GitLab takes the token as a bearer.** `PRIVATE-TOKEN` accepts a personal access token and
+  refuses an OAuth one; `Authorization: Bearer` takes both, so the provider sends that for every
+  token and the fixtures' header matches moved with it.
+- **A mark, not a second secret kind.** `user-settings.json` `forgeSignIns` records which secret a
+  sign-in wrote and where, so a check can say `via: "oauth"` — and only while the chain still finds
+  the token there; a paste over it drops the mark.
+- **GitLab's two-hour tokens are renewed** from the refresh token stored beside them, before an
+  availability pass that finds one near its end and on a timer while the app is open. Disconnect
+  removes the token locally and does not revoke the grant: GitHub's revocation needs the client
+  secret a public client does not have.
 
 ## Open
 

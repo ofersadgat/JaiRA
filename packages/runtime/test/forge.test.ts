@@ -51,7 +51,8 @@ describe("GitLab", () => {
 
   it("says who the token is, and sends the token as a header and never in a URL", async () => {
     expect(await gitlab().whoami()).toEqual({ login: "jaira-bot", name: "JaiRA Bot" });
-    expect(replay.seen[0]!.headers["PRIVATE-TOKEN"]).toBe("good");
+    // As a bearer, which GitLab takes from a personal token and an OAuth one alike.
+    expect(replay.seen[0]!.headers["Authorization"]).toBe("Bearer good");
     expect(replay.seen.every((request) => !request.url.includes("good"))).toBe(true);
   });
 
@@ -480,7 +481,16 @@ describe("connections", () => {
   it("validates each connection by asking its host who the token is", async () => {
     const checks = await checkForges(parseIntegrations(undefined), { http: replay.http, secrets: secrets({ GITLAB_TOKEN: "good", GITHUB_TOKEN: "refused" }) });
     expect(checks).toEqual([
-      { name: "gitlab", provider: "gitlab", host: "gitlab.com", status: "ok", detail: "signed in as @jaira-bot", identity: { login: "jaira-bot", name: "JaiRA Bot" }, credential: { source: "environment" } },
+      {
+        name: "gitlab",
+        provider: "gitlab",
+        host: "gitlab.com",
+        status: "ok",
+        detail: "signed in as @jaira-bot",
+        identity: { login: "jaira-bot", name: "JaiRA Bot" },
+        credential: { source: "environment" },
+        via: "token",
+      },
       {
         name: "github",
         provider: "github",
@@ -489,8 +499,21 @@ describe("connections", () => {
         detail: "the token was refused (401)",
         fix: "replace the token; it needs the `repo` scope to open and read pull requests",
         credential: { source: "environment" },
+        via: "token",
       },
     ]);
+  });
+
+  it("says a token came from a sign-in only while the chain finds it where the sign-in wrote it", async () => {
+    const env = secrets({ GITLAB_TOKEN: "good", GITHUB_TOKEN: "refused" });
+    const signedIn = (source: "environment" | "keychain") => (name: string) => (name === "GITLAB_TOKEN" || name === "GITHUB_TOKEN" ? source : undefined);
+    const [gitlab, github] = await checkForges(parseIntegrations(undefined), { http: replay.http, secrets: env, signedIn: signedIn("environment") });
+    expect(gitlab).toMatchObject({ status: "ok", via: "oauth" });
+    // A refused sign-in is fixed by signing in again, not by pasting a token over it.
+    expect(github).toMatchObject({ status: "failed", via: "oauth", fix: "sign in again" });
+    // Written to the keychain, found in the environment: somebody else's token, and a plain one.
+    const [elsewhere] = await checkForges(parseIntegrations(undefined), { http: replay.http, secrets: env, signedIn: signedIn("keychain") });
+    expect(elsewhere).toMatchObject({ status: "ok", via: "token" });
   });
 
   it("never puts the token's value in what it reports", async () => {

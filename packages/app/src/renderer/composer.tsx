@@ -34,51 +34,51 @@
  * empty box beside an operation carrying `bash` would offer to add a tool the call already has, and
  * would silently disarm it if the person sent without touching anything.
  *
- * ## Permissions and Tools are two views of one TOOLSET
+ * ## Permissions and Tools are two views of one PERMISSION_SET
  *
  * What a message may do is one map from a subject to a mode (decision 0007). The Permissions card
- * picks a whole one — its rows are the toolsets of a BUCKET, a folder of them on the layered search
+ * picks a whole one — its rows are the permission sets of a BUCKET, a folder of them on the layered search
  * path — and the Tools card changes a line of it. Either way what is sent is the whole map, as
- * `ChatSettings.toolset`; the list, the block and the implementations map are only what a state's
- * own declaration still arrives as, and `toolsetOfSettings` reads both into the one shape drawn here.
+ * `ChatSettings.permission set`; the list, the block and the implementations map are only what a state's
+ * own declaration still arrives as, and `permissionSetOfSettings` reads both into the one shape drawn here.
  *
- * A label is a MATCH, never a memory. The Permissions chip reads a toolset's name while the map is
- * exactly that toolset's, and `custom` the moment a line differs; nothing records where a map began.
- * Every edit is a pure function in `composerToolset.ts`, which is where the tests are.
+ * A label is a MATCH, never a memory. The Permissions chip reads a permission set's name while the map is
+ * exactly that permission set's, and `custom` the moment a line differs; nothing records where a map began.
+ * Every edit is a pure function in `composerPermissionSet.ts`, which is where the tests are.
  */
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import {
   declaresTools,
-  declOfToolset,
-  DEFAULT_TOOLSET_BUCKET,
+  declOfPermissionSet,
+  DEFAULT_PERMISSION_SET_BUCKET,
   heldTools,
   holdsTool,
-  matchToolset,
+  matchPermissionSet,
   MODE_WHEN_UNSET,
-  parseToolset,
+  parsePermissionSet,
   PERMISSION_MODES,
   REASONING_EFFORTS,
   SCRIPT_SUBJECT,
   SHELL_TOOL,
-  toolsetBuckets,
-  toolsetGlyph,
-  toolsetHint,
-  toolsetsOfBucket,
-  toolsetLabel,
-  toolsetNameProblem,
-  toolsetOfSettings,
-  TOOLSET_LAYER_LABELS,
+  permissionSetBuckets,
+  permissionSetGlyph,
+  permissionSetHint,
+  permissionSetsOfBucket,
+  permissionSetLabel,
+  permissionSetNameProblem,
+  permissionSetOfSettings,
+  PERMISSION_SET_LAYER_LABELS,
   type ChatPlanView,
   type ChatSettings,
   type ReasoningEffort,
-  type SaveToolsetRequest,
+  type SavePermissionSetRequest,
   type SettingOrigin,
   type ToolCategory,
   type ToolChoice,
   type ToolImplementation,
-  type Toolset,
-  type ToolsetBucket,
-  type ToolsetChoice,
+  type PermissionSet,
+  type PermissionSetBucket,
+  type PermissionSetChoice,
   type ToolSpec,
   type WritableLayer,
   TOOL_CATEGORIES,
@@ -104,9 +104,9 @@ import {
   withToolImplementation,
   type CommandGroup,
   type Parked,
-} from "./composerToolset";
+} from "./composerPermissionSet";
 import { BrandIcon, Icon } from "./icons";
-import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow, useAway } from "./toolsetRows";
+import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow, useAway } from "./permissionSetRows";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 
@@ -551,7 +551,7 @@ function BucketPicker({
   onPick,
   startOpen,
 }: {
-  buckets: readonly ToolsetBucket[];
+  buckets: readonly PermissionSetBucket[];
   bucket: string;
   onPick: (path: string) => void;
   startOpen?: boolean | undefined;
@@ -560,7 +560,7 @@ function BucketPicker({
   const box = useAway<HTMLDivElement>(open, () => setOpen(false));
   return (
     <div className="cx-origin-wrap" ref={box}>
-      <button type="button" className="cx-origin cx-origin-pick cx-bucket" aria-expanded={open} title="Which bucket of toolsets these rows are" onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="cx-origin cx-origin-pick cx-bucket" aria-expanded={open} title="Which bucket of permission sets these rows are" onClick={() => setOpen((v) => !v)}>
         <span className="cx-chip-icon">
           <Icon name="folder" />
         </span>
@@ -586,7 +586,7 @@ function BucketPicker({
               </span>
               <span className="cx-opt-text">
                 <span className="cx-opt-name ellip">
-                  {row.name} <span className="cx-src">{TOOLSET_LAYER_LABELS[row.layer]}</span>
+                  {row.name} <span className="cx-src">{PERMISSION_SET_LAYER_LABELS[row.layer]}</span>
                 </span>
                 <span className="cx-opt-hint ellip">{row.hint}</span>
               </span>
@@ -598,18 +598,18 @@ function BucketPicker({
   );
 }
 
-/** Where a kept toolset goes, as the form words it. */
+/** Where a kept permission set goes, as the form words it. */
 const KEEP_WHERE: Readonly<Record<WritableLayer, string>> = { project: "in this project", base: "for all projects" };
 
 /**
- * `+` — keep the map on the cards as a NEW toolset in this bucket.
+ * `+` — keep the map on the cards as a NEW permission set in this bucket.
  *
- * Dim while there is nothing to keep: the map already IS one of the bucket's toolsets, or it holds
+ * Dim while there is nothing to keep: the map already IS one of the bucket's permission sets, or it holds
  * nothing. A name and where it goes, asked through the schema form; the write is the host's
- * (`toolset:save`), which refuses what ships, a name a reference could not carry, and an id the
+ * (`permissionSet:save`), which refuses what ships, a name a reference could not carry, and an id the
  * layer already holds — and whatever it refuses with is said here rather than swallowed.
  */
-function KeepToolset({
+function KeepPermissionSet({
   bucket,
   ready,
   layers,
@@ -639,7 +639,7 @@ function KeepToolset({
   const add = (): void => {
     const name = (draft.name ?? "").trim();
     const layer = layers.find((candidate) => KEEP_WHERE[candidate] === (draft.where ?? where[0]));
-    const wrong = toolsetNameProblem(name) ?? (layer === undefined ? "pick where it goes" : undefined);
+    const wrong = permissionSetNameProblem(name) ?? (layer === undefined ? "pick where it goes" : undefined);
     if (wrong !== undefined || layer === undefined) {
       setProblem(wrong ?? null);
       return;
@@ -665,7 +665,7 @@ function KeepToolset({
         className={`cx-set-add${ready ? " ready" : ""}`}
         aria-expanded={open}
         disabled={!ready}
-        title={ready ? `Keep these tools and modes as a new toolset in ${bucket}` : "These tools and modes are already a toolset here"}
+        title={ready ? `Keep these tools and modes as a new permission set in ${bucket}` : "These tools and modes are already a permission set here"}
         onClick={() => setOpen((v) => !v)}
       >
         +
@@ -673,7 +673,7 @@ function KeepToolset({
       {open && ready ? (
         <div className="cx-submenu cx-set-new">
           <span className="cx-opt-hint">
-            Keep these tools and modes as a toolset in <b>{bucket}</b>
+            Keep these tools and modes as a permission set in <b>{bucket}</b>
           </span>
           <SchemaForm
             schema={schema}
@@ -826,7 +826,7 @@ export function Composer({
   onValue,
   mentions,
   readMention,
-  onSaveToolset,
+  onSavePermissionSet,
   saveLayers,
   startOpen,
 }: {
@@ -878,11 +878,11 @@ export function Composer({
    */
   readMention?: ((path: string) => Promise<string>) | undefined;
   /**
-   * Keep the map on the cards as a new toolset file — the Permissions card's `+`. The HOST's, because
+   * Keep the map on the cards as a new permission set file — the Permissions card's `+`. The HOST's, because
    * it is a write and the composer holds no channel of its own; absent ⇒ `+` stays dim, which is the
    * honest shape for a composer with nothing behind it.
    */
-  onSaveToolset?: ((request: Omit<SaveToolsetRequest, "project">) => Promise<unknown>) | undefined;
+  onSavePermissionSet?: ((request: Omit<SavePermissionSetRequest, "project">) => Promise<unknown>) | undefined;
   /** Where `+` may write. A conversation with no project open has only "for all projects". */
   saveLayers?: readonly WritableLayer[] | undefined;
 }): JSX.Element {
@@ -916,22 +916,22 @@ export function Composer({
     tools: "unset" as const,
     permissions: "unset" as const,
     implementations: "unset" as const,
-    toolset: "unset" as const,
+    permissionSet: "unset" as const,
   };
-  // What this project can hold a line for, and THE MAP in force over it: one toolset, read from
+  // What this project can hold a line for, and THE MAP in force over it: one permission set, read from
   // wherever the settings keep it — the map an earlier edit here wrote, or the list, block and
   // implementations a state's own declaration arrives as. The map is what reaches the executor; a
-  // toolset's name is only what to CALL it, and no match means the map is nobody's — `custom`.
+  // permission set's name is only what to CALL it, and no match means the map is nobody's — `custom`.
   const offered = plan?.available.tools ?? [];
   const registered = offered.map((tool) => tool.name);
-  const map = toolsetOfSettings(settings).toolset;
+  const map = permissionSetOfSettings(settings).permissionSet;
   const tools = heldTools(map);
-  const toolsets: readonly ToolsetChoice[] = plan?.available.toolsets ?? [];
-  const buckets = toolsetBuckets(toolsets);
-  const openedOn = plan?.available.bucket ?? DEFAULT_TOOLSET_BUCKET;
+  const permissionSets: readonly PermissionSetChoice[] = plan?.available.permissionSets ?? [];
+  const buckets = permissionSetBuckets(permissionSets);
+  const openedOn = plan?.available.bucket ?? DEFAULT_PERMISSION_SET_BUCKET;
   const bucket = picked !== undefined && buckets.some((row) => row.path === picked) ? picked : openedOn;
-  const rows = toolsetsOfBucket(toolsets, bucket);
-  const matched = matchToolset(map, toolsets, bucket, registered);
+  const rows = permissionSetsOfBucket(permissionSets, bucket);
+  const matched = matchPermissionSet(map, permissionSets, bucket, registered);
   // Never blank. A control with nothing in it cannot be read as "this is what will happen", which is
   // the only question this row exists to answer.
   const effective = plan?.effective ?? { reasoning: "…", permissions: "…" };
@@ -1027,18 +1027,18 @@ export function Composer({
   };
 
   /**
-   * Send the WHOLE map. Every edit on either card ends here: a toolset is one statement, so there is
+   * Send the WHOLE map. Every edit on either card ends here: a permission set is one statement, so there is
    * no writing half of one, and what is written is a map whichever form the state's own declaration
-   * arrived in (`declOfToolset`).
+   * arrived in (`declOfPermissionSet`).
    */
-  const write = (next: Toolset, nextParked: Parked = parked): void => {
+  const write = (next: PermissionSet, nextParked: Parked = parked): void => {
     setParked(nextParked);
-    set({ toolset: declOfToolset(next) });
+    set({ permissionSet: declOfPermissionSet(next) });
   };
   /** Both cards reset together, because they are one setting: back to what the state declares. */
-  const resetToolset = (): void => {
+  const resetPermissionSet = (): void => {
     const next = { ...overrides };
-    delete next.toolset;
+    delete next.permissionSet;
     setParked({});
     // …and to the bucket that declaration opens on: the rows are part of what was chosen here.
     setPicked(undefined);
@@ -1046,7 +1046,7 @@ export function Composer({
   };
   // One origin for both cards, for the same reason: a map chosen here is the person's choice on
   // both, and otherwise each says where its half of the state's declaration came from.
-  const chosen = origin.toolset === "override";
+  const chosen = origin.permissionSet === "override";
   const permissionsOrigin: SettingOrigin = chosen ? "override" : origin.permissions;
   const toolsOrigin: SettingOrigin = chosen ? "override" : origin.tools;
   const toggleCat = (id: string): void =>
@@ -1164,26 +1164,26 @@ export function Composer({
             <Chip
               icon="shield"
               label="Permissions"
-              // A MATCH, never a memory: the toolset's name while the map is exactly that toolset's,
+              // A MATCH, never a memory: the permission set's name while the map is exactly that permission set's,
               // `custom` the moment a line differs. A call that declares no tools has no map to
               // match, and says what decides instead — main words that, from the compiled policy.
-              value={plan === null || tools.length === 0 ? effective.permissions : matched !== undefined ? toolsetLabel(matched) : "custom"}
+              value={plan === null || tools.length === 0 ? effective.permissions : matched !== undefined ? permissionSetLabel(matched) : "custom"}
               origin={permissionsOrigin}
               from={plan?.from}
-              onReset={resetToolset}
+              onReset={resetPermissionSet}
               startOpen={startOpen?.card === "Permissions"}
               lead={<BucketPicker buckets={buckets} bucket={bucket} onPick={setPicked} startOpen={startOpen?.buckets} />}
               trail={
-                <KeepToolset
+                <KeepPermissionSet
                   bucket={bucket}
                   startOpen={startOpen?.keep}
-                  // Dim while the map already IS one of this bucket's toolsets, while it holds nothing,
+                  // Dim while the map already IS one of this bucket's permission sets, while it holds nothing,
                   // and where the host gave this composer nowhere to write.
-                  ready={onSaveToolset !== undefined && matched === undefined && Object.keys(map.entries).length > 0}
+                  ready={onSavePermissionSet !== undefined && matched === undefined && Object.keys(map.entries).length > 0}
                   layers={saveLayers ?? ["project", "base"]}
                   onKeep={async (name, layer) => {
-                    await onSaveToolset?.({ bucket, name, layer, toolset: declOfToolset(map) });
-                    // The map is now a toolset of this bucket, and only a fresh plan lists it. The
+                    await onSavePermissionSet?.({ bucket, name, layer, permissionSet: declOfPermissionSet(map) });
+                    // The map is now a permission set of this bucket, and only a fresh plan lists it. The
                     // hosts re-ask whenever the overrides change, so they are handed the SAME
                     // overrides as a new object: keeping a name must not change what runs.
                     onOverrides({ ...overrides });
@@ -1193,28 +1193,28 @@ export function Composer({
             >
               <div className="cx-opts">
                 {rows.map((choice) => {
-                  const toolset = parseToolset(choice.decl).toolset;
+                  const permissionSet = parsePermissionSet(choice.decl).permissionSet;
                   return (
                     <Opt
                       key={choice.id}
                       on={matched?.id === choice.id}
-                      icon={modeMeta(toolsetGlyph(choice)).icon}
-                      name={toolsetLabel(choice)}
-                      hint={toolsetHint(choice)}
+                      icon={modeMeta(permissionSetGlyph(choice)).icon}
+                      name={permissionSetLabel(choice)}
+                      hint={permissionSetHint(choice)}
                       // Its ticks, implementations and modes, written onto the Tools card whole. What
                       // runs is the map, which is the list under the Tools chip — so the reader can
-                      // see what a toolset did and change any part of it.
-                      onPick={() => write(toolset, {})}
+                      // see what a permission set did and change any part of it.
+                      onPick={() => write(permissionSet, {})}
                     />
                   );
                 })}
               </div>
               <p className="cx-hint">
                 {rows.length === 0
-                  ? `No toolsets in ${bucket} yet. + keeps the tools and modes under Tools as the first.`
+                  ? `No permission sets in ${bucket} yet. + keeps the tools and modes under Tools as the first.`
                   : matched === undefined && tools.length > 0
-                    ? `These tools and modes match no toolset in ${bucket} — + keeps them as a new one.`
-                    : "A toolset: which tools are offered, and what happens when each is called. Change any of it under Tools and this becomes custom."}
+                    ? `These tools and modes match no permission set in ${bucket} — + keeps them as a new one.`
+                    : "A permission set: which tools are offered, and what happens when each is called. Change any of it under Tools and this becomes custom."}
               </p>
             </Chip>
 
@@ -1235,7 +1235,7 @@ export function Composer({
               }
               origin={toolsOrigin}
               from={plan?.from}
-              onReset={resetToolset}
+              onReset={resetPermissionSet}
               startOpen={startOpen?.card === "Tools"}
             >
               <div className="cx-cats">
@@ -1269,7 +1269,7 @@ export function Composer({
                       // the row's own value derivable next render.
                       onMode={(next) => {
                         const cascaded = withSectionMode(map, parked, category.id, next);
-                        write(cascaded.toolset, cascaded.parked);
+                        write(cascaded.permissionSet, cascaded.parked);
                       }}
                     >
                       {inCategory.map((tool) => (
@@ -1299,7 +1299,7 @@ export function Composer({
                       ))}
                       {category.id === "execution" ? (
                         // What Execution holds beyond the shell (decision 0007 §4–§5): the commands the
-                        // toolset names, grouped under their program, then `script`, then the line
+                        // permission set names, grouped under their program, then `script`, then the line
                         // that adds a command. A shell line is taken apart, and each part answers to
                         // its own line here.
                         <>
@@ -1307,7 +1307,7 @@ export function Composer({
                             <CommandGroupRow
                               key={group.program}
                               group={group}
-                              toolset={map}
+                              permissionSet={map}
                               open={openCats.has(`program:${group.program}`)}
                               onOpen={() => toggleCat(`program:${group.program}`)}
                               onMode={(next) => write(withSubject(map, group.program, next))}

@@ -5,7 +5,7 @@ status: shipped
 updated: 2026-09-13
 realizes: []
 serves: []
-surfaces: [ui/surfaces/chat-view, ui/surfaces/conversation-list, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/module-approval-dialog, ui/surfaces/settings-providers]
+surfaces: [ui/surfaces/chat-view, ui/surfaces/conversation-list, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/module-approval-dialog, ui/surfaces/settings-connections]
 reuses: []
 implemented_by: [packages/app/src/renderer/icons.tsx, packages/app/src/renderer/brands.ts]
 verified_by: []

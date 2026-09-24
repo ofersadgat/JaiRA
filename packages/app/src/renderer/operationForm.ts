@@ -135,10 +135,10 @@ export interface OperationFieldsForm {
   /** See {@link RefFields}. Only {@link SimpleField.linkable} fields ever appear here. */
   refs: RefFields;
   /**
-   * `tools` as ONE field — a toolset and the lines written over it (decision 0007 §6).
+   * `tools` as ONE field — a permission set and the lines written over it (decision 0007 §6).
    *
    * Present only for a block this form may edit that way: `undefined` is a `tools` value that is no
-   * toolset (a binding), which the `tools` box shows read-only. See `toolsFieldForm.ts`
+   * permission set (a binding), which the `tools` box shows read-only. See `toolsFieldForm.ts`
    * `showsToolsField`. The block's `permissions` (its `scopes`) is not a field here, and survives an
    * edit untouched.
    */
@@ -206,7 +206,7 @@ export function operationFieldsOf(raw: unknown): OperationFieldsForm {
       fields[spec.name] = "";
       continue;
     }
-    // `tools` is never the list box's: a toolset is the Tools field's, and anything else there (a
+    // `tools` is never the list box's: a permission set is the Tools field's, and anything else there (a
     // binding, or a list the linter refuses) is shown as it is, read-only.
     const ours =
       spec.name === "tools"
@@ -287,7 +287,7 @@ function applySimple(op: Record<string, unknown>, form: OperationFieldsForm): vo
   for (const spec of SIMPLE_FIELDS) {
     if (form.structured[spec.name] === true) continue;
     // `tools` belongs to the ONE field while it is showing — the empty list box beside it is not a
-    // statement that the state has no tools, and writing one would delete the toolset it names.
+    // statement that the state has no tools, and writing one would delete the permission set it names.
     if (spec.name === "tools" && form.toolsField !== undefined) continue;
     // Linked wins over whatever the literal box holds. The two are kept side by side so that
     // toggling the link is not destructive (see {@link RefFields}), which means exactly one of them

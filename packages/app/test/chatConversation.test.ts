@@ -137,7 +137,7 @@ describe("the settings of a conversation that has not started yet", () => {
   it("reads them off the state file — what the first message would inherit, and from where", () => {
     const plan = service.chatStartPlan({ stateId: CHAT_AGENT });
     expect(plan.from).toBe(CHAT_AGENT);
-    // The file's toolset, as the lowered list and block a loaded state holds.
+    // The file's permission set, as the lowered list and block a loaded state holds.
     expect(plan.settings.tools).toEqual(["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search"]);
     expect(plan.origin.tools).toBe("inherited");
     expect(plan.settings.permissions).toMatchObject({ tools: { read_file: "ask", bash: "ask" }, other: "ask", subjects: { bash: "ask" } });

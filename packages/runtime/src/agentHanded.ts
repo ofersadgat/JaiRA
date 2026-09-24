@@ -2,15 +2,15 @@
  * What a delegated claude or codex agent is ACTUALLY handed under one effective `environment` —
  * measured, not modelled (decision 0007).
  *
- * What a toolset does to an agent is the product of the engine, JaiRA's wrapper and the upstream
+ * What a permission set does to an agent is the product of the engine, JaiRA's wrapper and the upstream
  * executor, and a test that restated any of their rules would stay green while the chain drifted.
  * So a lowered block is run through the chain a real run goes through, and what comes out is read:
  *
  *   a one-state workflow → the ENGINE (which resolves the tools and builds the gate) →
- *   `withAgentToolset` (JaiRA's wrapper, by claude's own declaration) → the upstream agent executor
+ *   `withAgentPermissionSet` (JaiRA's wrapper, by claude's own declaration) → the upstream agent executor
  *   → the options a real `claude` would be spawned with.
  *
- * A fake QUERY stands in for the binary alone — the rig `agentToolset.test.ts` pins. What is read off
+ * A fake QUERY stands in for the binary alone — the rig `agentPermissionSet.test.ts` pins. What is read off
  * the spawn: the tools of ours that are served, the built-ins on the deny list, the pre-approvals,
  * and — by asking the spawn's own permission callback — what decides a call by every name the agent
  * could still address. Nothing here restates a rule of the gate, the plan or the executor, so the
@@ -109,7 +109,7 @@ export interface HandedOptions {
    */
   via?: "route" | "function";
   /**
-   * How a toolset line that names a FUNCTION is decided in the probe — what a host's runner would
+   * How a permission set line that names a FUNCTION is decided in the probe — what a host's runner would
    * answer. Absent ⇒ nothing can run one, and such a call is put to the (refusing) person, which is
    * what a host with no runner does. Ignored when {@link run} is given: a host's approver already asks
    * the functions (`ApprovalHub.approver`).
@@ -122,7 +122,7 @@ function governanceOf(options: HandedOptions, onAsk: () => void): { policy?: Exe
   if (options.run === undefined) {
     return {
       policy: compilePolicy(options.policy ?? {}),
-      // The approver a host hands the engine: the functions a toolset names asked first, then the
+      // The approver a host hands the engine: the functions a permission set names asked first, then the
       // person — who, here, refuses, and is counted, since being asked at all is the measurement.
       approve: withPermissionFunctions(
         () => {
@@ -343,7 +343,7 @@ const PROBE_BRIDGE_URL = "http://127.0.0.1:9/mcp/probe";
 
 /**
  * {@link handedToClaude}'s codex half: one effective environment run through the engine, whichever
- * wrapper holds that path to its toolset, and upstream's REAL codex transport — its refusals, its argv
+ * wrapper holds that path to its permission set, and upstream's REAL codex transport — its refusals, its argv
  * and its bridge — to the process a real `codex exec` would be. A double stands in for the binary (a
  * spawn that records the argv and answers) and for the listener (a bridge that records what it would
  * serve); every call is then made through what the bridge would have run, so the gate at the bridge

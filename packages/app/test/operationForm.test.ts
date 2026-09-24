@@ -40,7 +40,7 @@ const FULL = {
   maxOutputTokens: 16000,
   stopSequences: ["</done>"],
   reasoning: { effort: "high", budgetTokens: 4000 },
-  tools: { $ref: "$/toolsets/chat/read-only", write_file: "ask" },
+  tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask" },
   session: "review",
   fork: true,
   conversation: { mode: "selected_artifacts", artifacts: ["plan_doc"] },
@@ -192,7 +192,7 @@ describe("lists", () => {
   /**
    * A block that says NOTHING about tools gets the one Tools field (decision 0007 §6) and draws no
    * list box at all. Typing into a box that is not there writes
-   * nothing — which is the point: an empty list beside a toolset picker would be a second, silent
+   * nothing — which is the point: an empty list beside a permission set picker would be a second, silent
    * way to say "no tools".
    */
   it("gives a block that says nothing the ONE Tools field, and no list box", () => {

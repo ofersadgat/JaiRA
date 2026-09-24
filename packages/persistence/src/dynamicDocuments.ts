@@ -76,7 +76,7 @@ import {
 import { snapshotWithModules } from "./lifecycle";
 import type { Project } from "./project";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
-import { loadWorkflowBundle } from "./toolsets";
+import { loadWorkflowBundle } from "./permissionSets";
 import { workflowLoadOptions } from "./workflowRefs";
 
 const log = createLogger("jaira.persistence.dynamicDocuments");

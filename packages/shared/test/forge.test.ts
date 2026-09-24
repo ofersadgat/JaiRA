@@ -61,7 +61,6 @@ describe("the integrations block", () => {
   it("has the two public hosts built in, each naming a conventional token and holding none", () => {
     const parsed = parseIntegrations(undefined);
     expect(parsed.forges).toEqual(BUILTIN_FORGES);
-    expect(parsed.review.settleAfter).toBe("10m");
     expect(defaultConfig().integrations).toEqual(parsed);
   });
 
@@ -87,7 +86,10 @@ describe("the integrations block", () => {
 
   it("refuses a mis-spelled field by name rather than dropping it", () => {
     expect(() => parseIntegrations({ forges: { gitlab: { credental: "X" } } })).toThrow(/credental is not a setting/);
-    expect(() => parseIntegrations({ review: { settleAfter: "a while" } })).toThrow(/duration/);
+  });
+
+  it("refuses the quiet window where it used to live, naming where it went", () => {
+    expect(() => parseIntegrations({ review: { settleAfter: "30m" } })).toThrow(/functions\.review_artifacts\.settleAfter/);
   });
 
   it("does not pick a connection that is turned off", () => {
@@ -98,21 +100,42 @@ describe("the integrations block", () => {
 
   it("layers like the rest of the config: a project overrides one field of the base's connection", () => {
     const merged = mergeConfigDocuments(
-      { integrations: { forges: { work: { provider: "github", host: "ghe.example.org", credential: "GHE_TOKEN" } }, review: { settleAfter: "30m" } } },
+      { integrations: { forges: { work: { provider: "github", host: "ghe.example.org", credential: "GHE_TOKEN" } } } },
       { integrations: { forges: { work: { enabled: false } } } },
     );
     const config = parseConfig(merged);
     expect(config.integrations.forges["work"]).toEqual({ provider: "github", host: "ghe.example.org", credential: "GHE_TOKEN", enabled: false });
-    expect(config.integrations.review.settleAfter).toBe("30m");
   });
 });
 
-describe("remote.publish", () => {
-  it("asks unless the policy says otherwise — a push leaves the machine", () => {
+describe("the OAuth apps a forge sign-in uses", () => {
+  it("names none by default — JaiRA has no registered app to ship", () => {
+    expect(parseIntegrations(undefined).oauth).toEqual({});
+  });
+
+  it("reads a client id per provider, and layers like the rest", () => {
+    const merged = mergeConfigDocuments(
+      { integrations: { oauth: { github: { clientId: "Iv1.base" }, gitlab: { clientId: "gl-base" } } } },
+      { integrations: { oauth: { gitlab: { clientId: "gl-work" } } } },
+    );
+    expect(parseConfig(merged).integrations.oauth).toEqual({ github: { clientId: "Iv1.base" }, gitlab: { clientId: "gl-work" } });
+  });
+
+  it("refuses a provider that does not exist, a field that is not one, and a client id that is not one word", () => {
+    expect(() => parseIntegrations({ oauth: { bitbucket: { clientId: "x" } } })).toThrow(/keyed by its provider — one of gitlab, github/);
+    expect(() => parseIntegrations({ oauth: { github: { clientId: "x", clientSecret: "y" } } })).toThrow(/clientSecret is not a setting/);
+    expect(() => parseIntegrations({ oauth: { github: { clientId: "two words" } } })).toThrow(/client ID — one word, no spaces/);
+    expect(() => parseIntegrations({ oauth: { github: {} } })).toThrow(/clientId must be/);
+  });
+});
+
+describe("functions.review_artifacts.publish", () => {
+  it("asks unless the block says otherwise — a push leaves the machine", () => {
+    expect(publishModeOf(undefined)).toBe("ask");
     expect(publishModeOf({})).toBe("ask");
-    expect(publishModeOf({ remote: { publish: "allow" } })).toBe("allow");
-    expect(publishModeOf({ remote: { publish: "deny" } })).toBe("deny");
-    expect(publishModeOf({ remote: { publish: "yes please" } })).toBe("ask");
+    expect(publishModeOf({ publish: "allow" })).toBe("allow");
+    expect(publishModeOf({ publish: "deny" })).toBe("deny");
+    expect(publishModeOf({ publish: "yes please" })).toBe("ask");
   });
 });
 

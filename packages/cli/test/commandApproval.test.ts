@@ -23,19 +23,21 @@ import {
   registerApprovalPrompt,
   type ApprovalRequest,
   type HandedEnvironment,
-  type JairaPolicy,
   type PermissionFunctionRunner,
-  type PolicyRule,
 } from "@jaira/runtime";
-import { APPROVAL_PROMPT_FUNCTION, defaultConfig, lowerToolset, parseToolset, type PermissionFunctionRequest } from "@jaira/shared";
+import { APPROVAL_PROMPT_FUNCTION, defaultConfig, lowerPermissionSet, parsePermissionSet, type PermissionFunctionRequest } from "@jaira/shared";
 import { runCli, type CliIo } from "../src/cli";
 import { cliApprovals, governRun, renderApproval, unattendedRefusal } from "../src/commandApprover";
 
 let dir: string;
 
-/** The rule every test runs under: `node` asks, so the line is harmless and still has to be approved. */
-const POLICY = { rules: [{ match: { program: "node" }, action: "require_approval", reason: "this project asks before running node" }] };
-const LINE = "node --version";
+/**
+ * A harmless line a BUILT-IN asks about: naming `.env` is touching a credentials path, and `node
+ * --version` prints its version and reads nothing. `run_command` has no permission set in reach, so the
+ * built-ins are what judge it.
+ */
+const LINE = "node --version .env";
+const ASKED = "the command touches a credentials path";
 
 function write(relPath: string, body: unknown): void {
   const file = join(dir, relPath);
@@ -54,9 +56,7 @@ function commandState(command: string): unknown {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-cli-approve-"));
-  const paths = initProject(dir, testHome());
-  const settings = JSON.parse(readFileSync(paths.settingsFile, "utf8")) as Record<string, unknown>;
-  writeFileSync(paths.settingsFile, JSON.stringify({ ...settings, policy: POLICY }, null, 2), "utf8");
+  initProject(dir, testHome());
   write(".jaira/workflows/check.json", commandState(LINE));
   write(".jaira/workflows/push.json", commandState("git push origin main"));
   // Two states, one line: an answer "for this run" is asked once and remembered for the second.
@@ -115,8 +115,8 @@ describe("a run started by jaira, at a terminal", () => {
     // What the app draws, in terminal clothing: the line, which part each character is, the words
     // its rule matched, and a row per part with its subject, verdict and what decided it.
     expect(cli.err()).toContain(`$ ${LINE}`);
-    expect(cli.err()).toMatch(/\n {6}1{14}\n {6}\^{4}\n/);
-    expect(cli.err()).toMatch(/1\s+node --version\s+node\s+ASKS\s+policy rule: this project asks before running node/);
+    expect(cli.err()).toMatch(/\n {6}1{19}\n {6}\^{4}\n/);
+    expect(cli.err()).toMatch(/1\s+node --version \.env\s+node\s+ASKS\s+built-in: the command touches a credentials path/);
     expect(cli.asked()[0]).toMatch(/\[y\] allow once {2}\[r\] allow node for this run {2}\[n\] deny/);
   });
 
@@ -126,7 +126,7 @@ describe("a run started by jaira, at a terminal", () => {
     expect(code).toBe(1);
     const report = reportOf(cli);
     expect(report.status).toBe("failed");
-    expect(JSON.stringify(report)).toMatch(/command refused: this project asks before running node/);
+    expect(JSON.stringify(report)).toContain(`command refused: ${ASKED}`);
   });
 
   it("remembers an answer FOR THIS RUN by its parts: the second state's line is not asked about", async () => {
@@ -143,13 +143,13 @@ describe("a run started by jaira, at a terminal", () => {
     const project = openProject(dir, { baseDir: testHome() });
     try {
       const rows = project.commands.list(reportOf(cli).taskId!);
-      expect(rows).toEqual([expect.objectContaining({ tool: "bash", command: LINE, decidedBy: "policy", reason: "this project asks before running node" })]);
+      expect(rows).toEqual([expect.objectContaining({ tool: "bash", command: LINE, decidedBy: "policy", reason: ASKED })]);
     } finally {
       project.close();
     }
   });
 
-  it("runs a state whose environment is a REFERENCED block holding a toolset — which used to fail to load", async () => {
+  it("runs a state whose environment is a REFERENCED block holding a permission set — which used to fail to load", async () => {
     write(".jaira/envs/reader.json", { tools: { read_file: "allow", other: "deny" } });
     write(".jaira/workflows/refenv.json", { ...(commandState(LINE) as Record<string, unknown>), environment: "$/envs/reader" });
     const cli = io(["y"]);
@@ -170,25 +170,24 @@ describe("a run started by jaira, with nobody to ask", () => {
     const cli = io();
     expect(await run(cli, "check")).toBe(1);
     const reason = JSON.stringify(reportOf(cli));
-    expect(reason).toMatch(/command refused: this project asks before running node; nobody was asked: this jaira run has no terminal/);
+    expect(reason).toContain(`command refused: ${ASKED}; nobody was asked: this jaira run has no terminal`);
     expect(reason).toMatch(/run it at a terminal to be asked/);
-    // A rule asked, so a rule is what to change.
-    expect(reason).toMatch(/a change to the policy\.rules entry in \.jaira\/settings\.json that asks about \\"node\\"/);
-    expect(cli.err()).toMatch(/^refused: bash: node --version — nobody was asked/m);
+    // A built-in asked and no permission set judges `run_command`'s line, so only turning the built-ins off answers it.
+    expect(reason).toMatch(/nothing short of turning the built-ins off lets \\"node\\" run unasked here/);
+    expect(cli.err()).toMatch(/^refused: bash: node --version \.env — nobody was asked/m);
   });
 
-  it("refuses a BUILT-IN ask with the policy rule that would answer it, and runs nothing", async () => {
+  it("refuses a BUILT-IN ask with the setting that would answer it, and runs nothing", async () => {
     const cli = io();
     expect(await run(cli, "push", "--non-interactive")).toBe(1);
     const reason = JSON.stringify(reportOf(cli));
     expect(reason).toMatch(/--non-interactive refuses every approval/);
-    expect(reason).toContain('a policy.rules entry {\\"match\\":{\\"program\\":\\"git\\",\\"subcommand\\":\\"push\\"},\\"action\\":\\"allow\\"} in .jaira/settings.json');
-    // `run_command` has no toolset in reach, so a toolset line would be advice that changes nothing.
-    expect(reason).not.toMatch(/toolset/);
-    // …and the rule it names is one that does answer it: written into the policy, the line is allowed.
-    const rule = JSON.parse(JSON.parse(`"${/a policy\.rules entry (\{.*?\}) in \.jaira/.exec(reason)![1]!}"`)) as PolicyRule;
-    expect(decideCommand({ ...POLICY, rules: [...POLICY.rules, rule] } as JairaPolicy, "git push origin main").action).toBe("allow");
-    expect(decideCommand(POLICY as JairaPolicy, "git push origin main").action).toBe("require_approval");
+    expect(reason).toContain('\\"functions\\": { \\"bash\\": { \\"builtins\\": false } } in .jaira/settings.json');
+    // `run_command` has no permission set in reach, so a permission set line would be advice that changes nothing.
+    expect(reason).not.toMatch(/permission set/);
+    // …and the setting it names does answer it: with the built-ins off, the line is allowed.
+    expect(decideCommand({ builtins: false }, "git push origin main").action).toBe("allow");
+    expect(decideCommand({}, "git push origin main").action).toBe("require_approval");
   });
 
   it("refuses --approve ask with no terminal as a usage error, before anything is made", async () => {
@@ -204,32 +203,30 @@ describe("the request as a person reads it", () => {
   it("says what a tool call is about when it is not a line, and how to allow it for good", () => {
     const request: ApprovalRequest = { requestId: "r", tool: "write_file", input: { path: "notes.txt", content: "x" }, sessionId: "s", at: 0 };
     expect(renderApproval(request)).toContain("path: notes.txt");
-    expect(unattendedRefusal(request, "no-terminal")).toMatch(/a "write_file": "allow" line in the state's toolset, or "policy": \{ "tools": \{ "write_file": "allow" \} \} in \.jaira\/settings\.json/);
+    expect(unattendedRefusal(request, "no-terminal")).toMatch(/a "write_file": "allow" line in the state's permission set$/);
   });
 
-  it("names the toolset line too where a TOOLSET judged the line — an agent's shell, not run_command", () => {
+  it("names the permission set line too where a PERMISSION_SET judged the line — an agent's shell, not run_command", () => {
     const command = "git push origin main";
-    const parts = { ...decideCommand({}, command).parts, toolset: "$/toolsets/feature/build" };
+    const parts = { ...decideCommand({}, command).parts, permissionSet: "$/permission-sets/feature/build" };
     const request: ApprovalRequest = { requestId: "r", tool: "bash", command, input: { command }, sessionId: "s", at: 0, parts };
-    expect(unattendedRefusal(request, "flag")).toContain(
-      'a policy.rules entry {"match":{"program":"git","subcommand":"push"},"action":"allow"} in .jaira/settings.json, or a "git push": "allow" line in the toolset $/toolsets/feature/build',
-    );
-    // The line, numbered by part, with the words that matched underneath, and the toolset named.
+    expect(unattendedRefusal(request, "flag")).toMatch(/write a "git push": "allow" line in the permission set \$\/permission-sets\/feature\/build$/);
+    // The line, numbered by part, with the words that matched underneath, and the permission set named.
     const drawn = renderApproval(request);
     expect(drawn).toContain(`$ ${command}`);
     expect(drawn).toMatch(/1\s+git push origin main\s+git push\s+ASKS\s+built-in: pushes publish work/);
-    expect(drawn).toContain("toolset: $/toolsets/feature/build");
+    expect(drawn).toContain("permission set: $/permission-sets/feature/build");
   });
 });
 
 /**
- * Toolsets hold in a CLI run EXACTLY as in an app run — measured through the real chain
+ * Permission sets hold in a CLI run EXACTLY as in an app run — measured through the real chain
  * (`handedToClaude` / `handedToCodex`), with each host's policy and approver as it builds them.
  */
-describe("toolsets under a CLI run", () => {
-  const config = { ...defaultConfig(), policy: POLICY as never };
+describe("permission sets under a CLI run", () => {
+  const config = defaultConfig();
   const lowered = (map: Record<string, unknown>): HandedEnvironment => {
-    const { tools, permissions } = lowerToolset(parseToolset(map).toolset);
+    const { tools, permissions } = lowerPermissionSet(parsePermissionSet(map).permissionSet);
     return { tools, permissions };
   };
   const ENVIRONMENTS: Record<string, HandedEnvironment> = {
@@ -237,7 +234,7 @@ describe("toolsets under a CLI run", () => {
     "a shell with named commands": lowered({ bash: "deny", "git status": "allow", "node": "ask", read_file: "allow" }),
     "a native built-in, other ask": lowered({ edit: { mode: "ask", implementation: "native" }, bash: "ask", other: "ask" }),
     "a shell a FUNCTION judges": lowered({ bash: { function: "judge" }, write_file: { function: "judge" }, read_file: "allow", other: "deny" }),
-    "no toolset": {},
+    "no permission set": {},
   };
   /** What each host's runner would answer for `judge`: git and write_file may, nothing else. */
   const judge: PermissionFunctionRunner = async (_reference, request) => (request.part?.program === "git" || request.tool === "write_file" ? "allow" : "deny");
@@ -284,7 +281,7 @@ describe("toolsets under a CLI run", () => {
  * deny; with nobody to ask it fails, which leaves the call asking, and the hub refuses it saying why.
  */
 describe("the approval prompt a function calls, at a terminal", () => {
-  const config = { ...defaultConfig(), policy: POLICY as never };
+  const config = defaultConfig();
   const REQUEST: PermissionFunctionRequest = {
     tool: "bash",
     subject: "npm publish",
@@ -321,12 +318,12 @@ describe("the approval prompt a function calls, at a terminal", () => {
     const result = await approvals.prompt(APPROVAL_PROMPT_FUNCTION, { request: REQUEST as never });
     expect(result).toMatchObject({ error: { reason: expect.stringMatching(/^nobody can be asked — --non-interactive refuses every approval/) } });
     const run = governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } });
-    const handed = await handedToClaude(lowerToolset(parseToolset({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).toolset), { run });
+    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet), { run });
     expect(handed.shell).toMatchObject({ command: "ask" });
   });
 
   it("lets a line through that the person allows at the terminal, and refuses one they deny", async () => {
-    const environment = lowerToolset(parseToolset({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).toolset);
+    const environment = lowerPermissionSet(parsePermissionSet({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet);
     const handedWith = (typed: string) => {
       const approvals = cliApprovals({ mode: "ask", ask: async () => typed, write: () => {} });
       return handedToClaude(environment, { run: governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } }) });

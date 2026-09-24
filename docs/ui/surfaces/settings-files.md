@@ -8,16 +8,16 @@ realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/absence-is-stated,
 serves: [product/share-processes-across-projects, product/find-out-why-the-app-misbehaves, product/keep-track-of-everything]
 components: [ui/components/settings-header, ui/components/settings-field, ui/components/chip-box, ui/components/switch]
 mockups: [ui/assets/settings-files/default.html, ui/assets/settings-files/success.html, ui/assets/settings-files/empty.html, ui/assets/settings-files/disabled.html]
-siblings: [ui/surfaces/settings-view, ui/surfaces/settings-configuration, ui/surfaces/settings-appearance]
+siblings: [ui/surfaces/settings-view, ui/surfaces/settings-data, ui/surfaces/settings-appearance]
 ---
 
 # Settings files
 
-The Files section of the Settings room: three levels that say which paths the file tree hides, a shared list for everyone who opens the project and a personal list for this person alone, a switch that shows JaiRA's own `system/` directory, and every rule in the order it is applied. It fills the settings column under the [settings-header](../components/settings-header.md) and replaces whichever section was showing.
+The Files page of the Settings room, in its `Project & shared` group: three sections that say which paths the file tree hides, a shared list for everyone who opens the project and a personal list for this person alone, a switch that shows JaiRA's own `system/` directory, and every rule in the order it is applied. Its head reads `Files` and `What the Files tree leaves out.` followed by the layer sentence, with the [layer switch](../components/settings-header.md) at the top-right, and it replaces whichever page was showing.
 
 ## The two lists read first, the system switch second, and the combined order last
 
-- **Level.** Each of the three is an uppercase level heading in `--dim` with a hint under it, from [settings-field](../components/settings-field.md).
+- **Section.** Each of the three is a quiet sentence-case heading, its hint behind an `ⓘ`, over one bordered card of [settings-field](../components/settings-field.md) rows.
 - **Hidden in the tree.** Two settings rows. `Shared` is led by a switch: on, the layer being edited states its own list; off, it shows the defaults dimmed and the layer inherits them — the switch is what the old Reset button did. `Yours` is kept in this person's own settings and has no switch. Each control is a [chip-box](../components/chip-box.md) on the right-hand rail.
 - **JaiRA's own directory.** One row, `Show system/`, whose control is a [switch](../components/switch.md) and whose hint says what the switch is doing.
 - **In effect.** Every rule as a chip in one wrapping line with no box around it, the shared list first and the personal list after, each chip ending in its origin word.
@@ -56,24 +56,24 @@ A rule chip holds a mark, the pattern in `.data-text` and an end part:
 
 | Where | String |
 | --- | --- |
-| Level one | `Hidden in the tree` · `Glob patterns, matched against the path inside each root. A folder that matches takes its contents with it. Later rules win, so a !pattern below can put something back.` |
+| Section one | `Hidden in the tree` · `Glob patterns, matched against the path inside each root. A folder that matches takes its contents with it. Later rules win, so a !pattern below can put something back.` |
 | Shared row | `Shared`, key `files.hidden`; hint `What every root hides until someone says otherwise. Adding one keeps these.` while defaults show, else `Written in {the shared root's / this project's} {settings file}, so everyone who opens it sees the same tree.` |
 | Yours row | `Yours`, key `filesHidden`; hint `Applied after the shared list and kept out of it — in {personal settings file}, so it never arrives through a pull request.` |
 | Add fields | `+ pattern…` · `+ pattern, or !pattern to reveal…` |
 | Chip | tooltip `remove {pattern}` · origin words `default` · `shared` · `yours` |
-| Level two | `JaiRA's own directory` · `system/ holds the database, tasks, snapshots, logs and artifacts. Nobody authors it, so it is hidden — but reading what a run wrote is a fair thing to want when a run has gone wrong.` |
+| Section two | `JaiRA's own directory` · `system/ holds the database, tasks, snapshots, logs and artifacts. Nobody authors it, so it is hidden — but reading what a run wrote is a fair thing to want when a run has gone wrong.` |
 | System row | `Show system/`; hint `Shown, for you alone. This is a `!system` rule in your own list.` or `Hidden — the default, and what almost everyone wants.`; switch name `shown` · `hidden` |
-| Level three | `In effect` · `Every rule, in the order it is applied. The last one to match a path decides.` · `No rules: every root shows everything, system/ included.` |
+| Section three | `In effect` · `Every rule, in the order it is applied. The last one to match a path decides.` · `No rules: every root shows everything, system/ included.` |
 
 ## A person arrives from the Settings panel and returns to the tree to see the effect
 
-- The sidebar's Settings panel lists `Files`, with or without a project open. With none open, the shared list is the shared root's.
-- Choosing another section or room leaves. Nothing is held unsaved, and the Files drawer already draws the new rules.
+- The sidebar's Settings panel lists `Files` under `Project & shared`, with or without a project open. With none open, the shared list is the shared root's.
+- Choosing another page or room leaves. Nothing is held unsaved, and the Files drawer already draws the new rules.
 - The personal list and the system switch follow the person into every project and stay editable on either layer.
 
 ## The chip boxes wrap, and the combined order wraps with them
 
-- Resize: chips wrap inside their box, and a long pattern ellipsises within its chip. Rows stack under their statement in a box 380px wide or less. The section has no width cap of its own, so the combined order runs the width of the column.
+- Resize: chips wrap inside their box, and a long pattern ellipsises within its chip. Rows stack under their statement in a box 380px wide or less. Each section stops at 740px, and the combined order wraps within it.
 - Theme: chip grounds, the dashed border, the reveal tint and the marks are tokens in both themes.
 - Focus: nothing takes focus on entry. The order is the layer switch, each chip's `✕` then its box's add field, the system switch, then Reset. Chips in `In effect` take no focus.
 - Long content: the full default list is 18 chips and wraps onto several lines in both places it appears.

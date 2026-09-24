@@ -215,7 +215,7 @@ export function registerGenericAgents(
     });
     registry.functions.set(
       spec.name ?? AGENT_GENERIC_CLI,
-      // It declares no tools and no channel, so a toolset that refuses anything is refused — as the
+      // It declares no tools and no channel, so a permission set that refuses anything is refused — as the
       // prompt route of the same binary refuses it (decision 0007 §3).
       runtimeFunction(holdAgentFunction(GENERIC_CLI_TOOLS, fn.run as never, spec.name ?? AGENT_GENERIC_CLI) as never, fn.capabilities) as never,
     );

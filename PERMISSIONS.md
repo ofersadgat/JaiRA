@@ -407,5 +407,5 @@ Steps 1–2 are shippable on their own and are most of the value.
 - **Constraining a `web_fetch` by what a `web_search` returned.** Tempting and a different
   mechanism: it is taint tracking, not scoping.
 - **Scoping the agent's own built-ins directly.** They reach us as native names through the
-  permission callback and are asked about by their standard name (`withAgentToolset`, from the executor's declaration), so they resolve through the same table as our tools —
+  permission callback and are asked about by their standard name (`withAgentPermissionSet`, from the executor's declaration), so they resolve through the same table as our tools —
   provided the ask-rules are on (`claudeAskSettings`). That is a wiring question, not a design one.

@@ -15,8 +15,16 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { BaselineFile, Changeset } from "./changeset";
 import type { Choice, ComponentConfig } from "./components";
-import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget, SignInOutcome } from "./executors";
-import type { RemoteStatusView } from "./forge";
+import type {
+  AvailabilitySnapshot,
+  EmbeddedWeightsReport,
+  ExecutorInfo,
+  LocalServerDiscovery,
+  ProbeResult,
+  SecretTarget,
+  SignInOutcome,
+} from "./executors";
+import type { ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
 import type { TaskFastForwardRequest, TaskFastForwardResult, TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
@@ -25,9 +33,9 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { CommandApproval } from "./commandParts";
-import type { ToolsetChoice } from "./toolsetBuckets";
-import type { ToolsetDecl } from "./toolsets";
-import type { ToolsetsView, ToolsetWriteKind } from "./toolsetSettings";
+import type { PermissionSetChoice } from "./permissionSetBuckets";
+import type { PermissionSetDecl } from "./permissionSets";
+import type { PermissionSetsView, PermissionSetWriteKind } from "./permissionSetSettings";
 import type {
   BoardView,
   ChatThreadView,
@@ -160,14 +168,14 @@ export interface PendingApproval {
   /**
    * A shell line as the requests it is made of (decision 0007 §4): per part its span in
    * {@link command}, the span of the words that matched, its subject, its path or url, its verdict
-   * and the toolset entry that decided it. Absent for a tool that takes no command line.
+   * and the permission set entry that decided it. Absent for a tool that takes no command line.
    */
   parts?: CommandApproval;
   /**
-   * The toolset that judged the line, and where a remembered answer could be WRITTEN — what the
-   * answer menu's "add to the toolset" offers. Absent when no toolset judged the call.
+   * The permission set that judged the line, and where a remembered answer could be WRITTEN — what the
+   * answer menu's "add to the permission set" offers. Absent when no permission set judged the call.
    */
-  toolset?: ApprovalToolset;
+  permissionSet?: ApprovalPermissionSet;
   input: Record<string, JsonValue>;
   taskId?: string;
   /**
@@ -182,26 +190,26 @@ export interface PendingApproval {
   at: number;
 }
 
-/** One layer an answer can be written into — see {@link ApprovalToolset}. */
-export interface ApprovalToolsetTarget {
+/** One layer an answer can be written into — see {@link ApprovalPermissionSet}. */
+export interface ApprovalPermissionSetTarget {
   layer: WritableLayer;
-  /** The file, as a person reads it: `.jaira/toolsets/chat/ask-first.json`, `~/.jaira/toolsets/…`. */
+  /** The file, as a person reads it: `.jaira/permission-sets/chat/ask-first.json`, `~/.jaira/permission-sets/…`. */
   file: string;
   /**
-   * Set when this layer does not hold the toolset yet: the write CREATES an override here that keeps
-   * following the named lower layer's file (`$SYSTEM/toolsets/chat/ask-first`).
+   * Set when this layer does not hold the permission set yet: the write CREATES an override here that keeps
+   * following the named lower layer's file (`$SYSTEM/permission-sets/chat/ask-first`).
    */
   follows?: string;
   /** A nearer layer holds its own copy that does not follow this one, so a line written here is not read in this project. */
   shadowed?: true;
 }
 
-/** The toolset behind a command approval (decision 0007 §4). */
-export interface ApprovalToolset {
+/** The permission set behind a command approval (decision 0007 §4). */
+export interface ApprovalPermissionSet {
   /** `<bucket>/<name>` — `feature/implementation/writes-asking`. Absent for a map with no file. */
   id?: string;
   /** The layers a line can be written into, nearest first. Empty ⇒ {@link unwritable} says why. */
-  targets: ApprovalToolsetTarget[];
+  targets: ApprovalPermissionSetTarget[];
   /** Why nothing can be written, as a sentence the menu shows. */
   unwritable?: string;
 }
@@ -217,13 +225,13 @@ export interface SubmitApprovalRequest {
   /**
    * "For this run", for a shell line: the widths chosen for its asking PARTS — one of each part's
    * `widths` (`"git commit"`, or `"git"`). `[]` takes each part's narrowest. It is the parts that are
-   * remembered, never the line, so `scope` is not also applied. Writing the entry into a toolset
-   * file ("add to the toolset") is a separate act.
+   * remembered, never the line, so `scope` is not also applied. Writing the entry into a permission set
+   * file ("add to the permission set") is a separate act.
    */
   remember?: string[];
   /**
-   * "Add to the toolset": write the asking parts, at the widths {@link remember} names, into the
-   * toolset file that asked, in this layer — then answer, remembering them for the run as well (a
+   * "Add to the permission set": write the asking parts, at the widths {@link remember} names, into the
+   * permission set file that asked, in this layer — then answer, remembering them for the run as well (a
    * started task reads its pinned snapshot, so the file alone would not stop this run asking). A
    * write that fails refuses the submit and leaves the request parked.
    */
@@ -980,15 +988,15 @@ export interface WriteFileRequest {
 }
 
 /**
- * Keep a map as a NEW toolset in a bucket — the composer's `+` (decision 0007 §5).
+ * Keep a map as a NEW permission set in a bucket — the composer's `+` (decision 0007 §5).
  *
  * Checked before it lands, which is why this is not a bare `file:write`: the map must parse as a
- * toolset with no error, the name must be one a reference can carry, and an id the chosen layer
- * already holds is refused rather than replaced — `+` adds, and replacing a toolset other states
+ * permission set with no error, the name must be one a reference can carry, and an id the chosen layer
+ * already holds is refused rather than replaced — `+` adds, and replacing a permission set other states
  * name is a different act with a different surface. The write itself is `file:write`'s, so the
  * read-only `system` layer is refused by the same sentence it is everywhere else.
  */
-export interface SaveToolsetRequest {
+export interface SavePermissionSetRequest {
   /** The bucket path, `/`-separated — `chat`, `feature/implementation`. */
   bucket: string;
   /** The file's name, without an extension. */
@@ -998,35 +1006,35 @@ export interface SaveToolsetRequest {
   /** WHICH project — see {@link ReadWorkflowRequest.project}. */
   project?: ProjectRef;
   /** The map to keep: subject → mode. */
-  toolset: ToolsetDecl;
+  permissionSet: PermissionSetDecl;
 }
 
 /**
- * Save a toolset from Settings → Toolsets (decision 0007 §6): the WHOLE map, into one layer.
+ * Save a permission set from Settings → Permission sets (decision 0007 §6): the WHOLE map, into one layer.
  *
  * What the write is depends on what the layer holds, and the answer says which it was
- * ({@link WriteToolsetResult.kind}): an edit in place, format kept; an override that keeps following
+ * ({@link WritePermissionSetResult.kind}): an edit in place, format kept; an override that keeps following
  * the nearest lower layer's file, holding only the lines that differ; or — when a line the lower
  * layer holds was taken out, which an override has no way to say — the whole map, no longer
  * following. The built-in layer is refused.
  */
-export interface WriteToolsetRequest {
+export interface WritePermissionSetRequest {
   /** `<bucket>/<name>`. */
   id: string;
   layer: WorkflowLayer;
   /** WHICH project — see {@link ReadWorkflowRequest.project}. */
   project?: ProjectRef;
-  toolset: ToolsetDecl;
+  permissionSet: PermissionSetDecl;
 }
 
-export interface WriteToolsetResult {
+export interface WritePermissionSetResult {
   /** The file written, as a person reads it. */
   file: string;
-  kind: ToolsetWriteKind;
+  kind: PermissionSetWriteKind;
 }
 
 /** "Reset to built in": delete a layer's override, so the layer below answers again. */
-export interface ResetToolsetRequest {
+export interface ResetPermissionSetRequest {
   id: string;
   layer: WorkflowLayer;
   project?: ProjectRef;
@@ -1833,6 +1841,20 @@ export interface IpcContract {
    */
   "model:probe": { request: void; response: ProbeResult[] };
   /**
+   * Ask the well-known local servers — Ollama, LM Studio, llama.cpp's server, vLLM, Jan — for their
+   * models, all at once with a short deadline each, and say which one the `local` route uses.
+   *
+   * On demand only (the page opening, Re-check): nothing polls. `baseURL` is the URL to compare with
+   * in place of the configured one — the field as typed, before it is saved.
+   */
+  "model:probeLocal": { request: { baseURL?: string } | void; response: LocalServerDiscovery };
+  /**
+   * Stat each `embedded` weights file, and say whether the loader package resolves — the embedded
+   * route's startup check, one row per model. `weights` checks entries as typed, before they are
+   * saved; absent, the configured ones are checked.
+   */
+  "model:checkWeights": { request: { weights?: Record<string, { modelPath: string }> } | void; response: EmbeddedWeightsReport };
+  /**
    * What can answer a prompt here, as last observed — routes, executors, and the chosen default.
    *
    * The CACHED snapshot. The checks behind it run by themselves at startup, at project open and after
@@ -1850,6 +1872,27 @@ export interface IpcContract {
   "executor:cancelSignIn": { request: { name: string }; response: void };
   /** Sign an agent out (`claude auth logout`, `codex logout`) — machine-wide, the agent's terminal included. */
   "executor:signOut": { request: { name: string }; response: SignInOutcome };
+  /**
+   * Sign in to a forge connection through the browser (RFC 8628's device flow), beside pasting a token.
+   *
+   * Answers as soon as the forge hands out a code — with the code, the page to type it on (already
+   * opened in the browser) and when it dies — and keeps polling in main. How it ends arrives as the
+   * `forge:signInFinished` push; on success the token is stored where a pasted one would be (the
+   * connection's `credential`, keychain first), marked as OAuth, and availability is re-checked, so the
+   * connection's check names the account. A second start while one waits answers with the one waiting.
+   * No OAuth app configured (`integrations.oauth.<provider>.clientId`) is an `ok: false` answer.
+   */
+  "forge:signIn": { request: { connection: string }; response: ForgeSignInStart };
+  /** Give up on a forge sign-in still waiting; it ends as `canceled`. Nothing waiting is not an error. */
+  "forge:cancelSignIn": { request: { connection: string }; response: void };
+  /** The forge sign-ins waiting on the person now — for a page opened while one is under way. */
+  "forge:signIns": { request: void; response: ForgeSignInPending[] };
+  /**
+   * Disconnect a forge connection: remove its token from where the chain finds it (and its OAuth
+   * mark and refresh token), then re-check. A token that comes from somewhere JaiRA does not write —
+   * a shell variable, a committed `.env` — is an `ok: false` answer naming where it is.
+   */
+  "forge:signOut": { request: { connection: string }; response: ForgeSignOutOutcome };
   /**
    * Re-observe everything now — for a server that has since been started, or a key just installed.
    *
@@ -1916,20 +1959,20 @@ export interface IpcContract {
   "changeset:reviewSync": { request: ReviewSyncRequest; response: ReviewChangesResult };
   /** Write any file under a layer root. Unparsed — see {@link WriteFileRequest}. */
   "file:write": { request: WriteFileRequest; response: FileSource };
-  /** Keep a map as a new toolset file in a bucket — see {@link SaveToolsetRequest}. */
-  "toolset:save": { request: SaveToolsetRequest; response: ToolsetChoice };
+  /** Keep a map as a new permission set file in a bucket — see {@link SavePermissionSetRequest}. */
+  "permissionSet:save": { request: SavePermissionSetRequest; response: PermissionSetChoice };
   /**
-   * Every toolset, layer by layer, and which states name each — what Settings → Toolsets draws.
+   * Every permission set, layer by layer, and which states name each — what Settings → Permission sets draws.
    *
    * `usedBy: false` leaves out the "used by" scan, which reads every state file under every layer:
-   * the state editor's Tools field wants the toolsets and nothing else, and pays for a directory
-   * walk of the toolsets alone.
+   * the state editor's Tools field wants the permission sets and nothing else, and pays for a directory
+   * walk of the permission sets alone.
    */
-  "toolsets:read": { request: { project?: ProjectRef; usedBy?: boolean }; response: ToolsetsView };
-  /** Save a whole toolset into a layer — see {@link WriteToolsetRequest}. */
-  "toolsets:write": { request: WriteToolsetRequest; response: WriteToolsetResult };
-  /** Delete a layer's override of a toolset — see {@link ResetToolsetRequest}. */
-  "toolsets:reset": { request: ResetToolsetRequest; response: { file: string } };
+  "permissionSets:read": { request: { project?: ProjectRef; usedBy?: boolean }; response: PermissionSetsView };
+  /** Save a whole permission set into a layer — see {@link WritePermissionSetRequest}. */
+  "permissionSets:write": { request: WritePermissionSetRequest; response: WritePermissionSetResult };
+  /** Delete a layer's override of a permission set — see {@link ResetPermissionSetRequest}. */
+  "permissionSets:reset": { request: ResetPermissionSetRequest; response: { file: string } };
   /** Create a plain file or a directory under a layer root, addressed by path. */
   "file:create": { request: CreateFileRequest; response: { file: string } };
   /** Rename or move a file or directory within a layer root. Refuses when it would break referrers. */
@@ -2104,10 +2147,10 @@ export const IPC_CHANNELS = [
   "changeset:review",
   "changeset:reviewSync",
   "file:write",
-  "toolset:save",
-  "toolsets:read",
-  "toolsets:write",
-  "toolsets:reset",
+  "permissionSet:save",
+  "permissionSets:read",
+  "permissionSets:write",
+  "permissionSets:reset",
   "file:create",
   "file:rename",
   "file:delete",
@@ -2125,10 +2168,16 @@ export const IPC_CHANNELS = [
   "executor:list",
   "executor:probe",
   "model:probe",
+  "model:probeLocal",
+  "model:checkWeights",
   "availability:read",
   "executor:signIn",
   "executor:cancelSignIn",
   "executor:signOut",
+  "forge:signIn",
+  "forge:cancelSignIn",
+  "forge:signIns",
+  "forge:signOut",
   "availability:refresh",
   "secret:capabilities",
   "secret:set",
@@ -2424,7 +2473,13 @@ export type PushMessage =
       n?: number;
     }
   /** A right-click inside a sandboxed artifact frame — see {@link FrameContextMenu}. */
-  | { type: "frame:contextMenu"; menu: FrameContextMenu };
+  | { type: "frame:contextMenu"; menu: FrameContextMenu }
+  /**
+   * A forge sign-in `forge:signIn` started has ended — signed in, refused, expired or canceled. On
+   * success it is sent AFTER the token is stored and the availability pass that checks it has landed,
+   * so a page that re-reads availability on hearing it sees the account.
+   */
+  | { type: "forge:signInFinished"; outcome: ForgeSignInOutcome };
 
 /** What {@link IpcContract}'s `shell:saveFile` is handed. */
 export interface SaveFileRequest {

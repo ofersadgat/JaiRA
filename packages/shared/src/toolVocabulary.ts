@@ -12,7 +12,7 @@
  *
  *  - the runtime registers implementations for these names;
  *  - the permission menu draws them, grouped by {@link ToolCategory};
- *  - a toolset is a map over them (`toolsets.ts`, decision 0007);
+ *  - a permission set is a map over them (`permissionSets.ts`, decision 0007);
  *  - each agent executor says which of ITS tools is which of these (`agentTools.ts`) — the table
  *    holds no agent's names, and stays the one standard list.
  *
@@ -93,12 +93,12 @@ export interface ToolSpec {
    */
   alwaysGranted?: boolean;
   /**
-   * NAMED, and not yet SERVED: the tool is in the standard list so a toolset can hold it, the menu
+   * NAMED, and not yet SERVED: the tool is in the standard list so a permission set can hold it, the menu
    * can draw it and the linter knows the name — and nothing registers an implementation for it yet.
    *
    * Everything that would HAND a tool to somebody skips one marked this way, in one place each:
    * `offeredTools` (so lowering never writes it into the `tools` list the engine resolves against
-   * the registry, and `viewOfToolset` never sees it held), `planAgentTools` (never injected), and
+   * the registry, and `viewOfPermissionSet` never sees it held), `planAgentTools` (never injected), and
    * `JAIRA_TOOLS` in the runtime (never registered, wrapped, or asserted against an implementation).
    * Its MODE still travels — a mode for a name nothing calls is inert — so the day the tool is
    * implemented, deleting this mark is the whole change.
@@ -238,7 +238,7 @@ export function toolsInCategory(category: ToolCategoryId): ToolSpec[] {
 
 /**
  * The three fixed modes, restated here so this module stands alone for a renderer that only draws
- * them. A toolset line may also name a FUNCTION (`ToolsetMode` in `operationVocabulary.ts`); a scope
+ * them. A permission set line may also name a FUNCTION (`PermissionSetMode` in `operationVocabulary.ts`); a scope
  * table may not — where a tool may act is a fixed answer.
  */
 export type ToolMode = "ask" | "allow" | "deny";

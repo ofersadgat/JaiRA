@@ -37,7 +37,7 @@ export function policyAuditRow(taskId: string, entry: PolicyAuditEntry): Command
 export type CommandDecision = "allowed" | "blocked" | "approved" | "denied";
 
 /**
- * Who decided: policy alone, a human answering an escalation, or a permission FUNCTION a toolset line
+ * Who decided: policy alone, a human answering an escalation, or a permission FUNCTION a permission set line
  * named (decision 0007, amended 2026-09-22) — which may itself have asked the human, through the
  * approval prompt; the row says the function decided, and its reason names the function.
  */

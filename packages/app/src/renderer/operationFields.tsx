@@ -344,12 +344,12 @@ export function OperationFieldsEditor({
           />
         ))}
 
-      {/* ONE Tools field (decision 0007): the toolset the block starts from, and the lines it writes
+      {/* ONE Tools field (decision 0007): the permission set the block starts from, and the lines it writes
           over that. A `tools` value it cannot draw — a binding — shows read-only in the box above. */}
       {form.toolsField !== undefined ? (
         <ToolsFieldControl
           value={form.toolsField}
-          toolsets={toolsFieldData.toolsets}
+          permissionSets={toolsFieldData.permissionSets}
           tools={toolsFieldData.tools}
           readOnly={readOnly}
           {...(path !== undefined ? { block: path } : {})}

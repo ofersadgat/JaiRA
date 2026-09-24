@@ -5,7 +5,7 @@ status: shipped
 updated: 2026-09-13
 realizes: [ux/patterns/schema-driven-form, ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exists, ux/patterns/one-document-several-readings, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/hand-work-to-agents, product/try-one-step-on-its-own, product/decisions-stay-yours, product/bring-your-own-models-and-agents, product/author-processes-without-memorising-the-format, product/try-a-process-without-spending]
-surfaces: [ui/surfaces/new-task-popover, ui/surfaces/context-panel, ui/surfaces/files-view, ui/surfaces/gate-modal, ui/surfaces/run-conversation, ui/surfaces/settings-configuration, ui/surfaces/settings-executors, ui/surfaces/components-view]
+surfaces: [ui/surfaces/new-task-popover, ui/surfaces/context-panel, ui/surfaces/files-view, ui/surfaces/gate-modal, ui/surfaces/run-conversation, ui/surfaces/settings-runs, ui/surfaces/settings-data, ui/surfaces/settings-models, ui/surfaces/settings-tools, ui/surfaces/settings-connections, ui/surfaces/components-view]
 reuses: [ui/components/settings-field, ui/components/switch, ui/components/preset-chips, ui/components/llm-config-form]
 implemented_by: [packages/app/src/renderer/schemaForm/SchemaForm.tsx, packages/app/src/renderer/schemaForm/model.ts, packages/app/src/renderer/schemaForm/check.ts, packages/app/src/renderer/schemaForm/presentation.ts, packages/app/src/renderer/schemaForm/registry.ts, packages/app/src/renderer/runPanel.tsx, packages/app/src/renderer/runForm.ts]
 verified_by: [packages/app/test/schemaForm.test.ts, packages/app/test/schemaFormModel.test.ts, packages/app/test/runForm.test.ts, packages/app/test/schemaCheck.test.ts]

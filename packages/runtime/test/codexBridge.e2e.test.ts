@@ -1,8 +1,8 @@
 /**
- * A codex run of a state HELD TO A TOOLSET, end to end, with a scripted double for the `codex` binary.
+ * A codex run of a state HELD TO A PERMISSION_SET, end to end, with a scripted double for the `codex` binary.
  *
  * Everything but the binary is real: the engine resolves the state's lowered map, JaiRA's route wraps
- * the codex executor (`withAgentToolset`), upstream's codex transport builds its argv and stands up the
+ * the codex executor (`withAgentPermissionSet`), upstream's codex transport builds its argv and stands up the
  * bridge — the production one, `createMcpBridgeHost`, one listener on a worker thread — and the gate is
  * the one the engine builds over the state's block. The double does what `codex exec` 0.147.0 was
  * measured doing with that argv: it reads the `-c mcp_servers.dai={…}` override, connects to the URL as
@@ -20,7 +20,7 @@ import type { Tool } from "@declarative-ai/exec";
 import type { Approver } from "@declarative-ai/permissions";
 import { loadBundle } from "@declarative-ai/hw";
 import type { AgentProcess, SpawnProcess } from "@declarative-ai/agents-cli";
-import { lowerToolset, parseToolset } from "@jaira/shared";
+import { lowerPermissionSet, parsePermissionSet } from "@jaira/shared";
 import { AGENT_CODEX, createMcpBridgeHost, registerAgentRuntimes } from "../src/agents";
 import { agentPromptRoutes } from "../src/modelRoutes";
 import { compilePolicy } from "../src/policy";
@@ -89,7 +89,7 @@ function registry(ran: string[]) {
 }
 
 async function runHeld(via: "route" | "function", answer: "allow" | "deny") {
-  const lowered = lowerToolset(parseToolset({ read_file: "allow", write_file: "ask", other: "deny" }).toolset);
+  const lowered = lowerPermissionSet(parsePermissionSet({ read_file: "allow", write_file: "ask", other: "deny" }).permissionSet);
   const operation =
     via === "route"
       ? { kind: "prompt", prompt: "write the notes", model: `${AGENT_CODEX}/default` }
@@ -127,7 +127,7 @@ async function runHeld(via: "route" | "function", answer: "allow" | "deny") {
   return { result, ran, asked, seen };
 }
 
-describe("codex runs a state held to a toolset: served over MCP, gated at the bridge", () => {
+describe("codex runs a state held to a permission set: served over MCP, gated at the bridge", () => {
   it.each(["route", "function"] as const)("%s: an allowed call runs, an asked call runs on a yes, and what the map does not hold is not there", async (via) => {
     const { result, ran, asked, seen } = await runHeld(via, "allow");
     expect((result as { failure?: unknown }).failure).toBeUndefined();

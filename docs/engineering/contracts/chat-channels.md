@@ -90,7 +90,7 @@ Every request's `project` is the project directory as a string; it may be omitte
 | `model` | string | no | `route/model` or a bare model id |
 | `reasoning` | `{effort, budgetTokens}` | no | `effort` is `low`, `medium`, `high` or `xhigh`; `budgetTokens` a number; both optional |
 | `tools` | string array | no | the whole list; `[]` means none; absent keeps the state's own |
-| `permissions` | `{profile, default, tools, other, scopes}` | no | all optional; modes are `allow`, `deny` or `ask`, and a toolset line may name a function (`{ "function": "smart" }`), which lowers as `ask` with its reference in `functions`; `tools` maps a tool name to a mode; `other` covers a tool outside the vocabulary; `scopes` is a `Scope` array |
+| `permissions` | `{profile, default, tools, other, scopes}` | no | all optional; modes are `allow`, `deny` or `ask`, and a permission set line may name a function (`{ "function": "smart" }`), which lowers as `ask` with its reference in `functions`; `tools` maps a tool name to a mode; `other` covers a tool outside the vocabulary; `scopes` is a `Scope` array |
 | `implementations` | record of tool name to `app` or `native` | no | whose code runs a tool; never inherited |
 
 ### `ChatPlanView` says what was declared, where it came from, and what will actually run

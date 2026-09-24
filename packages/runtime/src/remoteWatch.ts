@@ -59,7 +59,7 @@ export interface WatchTarget {
   handles: RemoteHandlePort;
   /** The provider for a host, with this project's token. Throws a sentence when there is none. */
   provider(host: string): ForgeProvider;
-  /** The default window, from `integrations.review.settleAfter`. */
+  /** The default window, from `functions.review_artifacts.settleAfter`. */
   settleAfter: string;
 }
 

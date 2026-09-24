@@ -538,7 +538,7 @@ export interface ReviewRemote {
   to?: string;
   /** The branch the request asks to merge into. Default: the task's base branch. */
   target?: string;
-  /** The quiet window after a comment, as a duration. Default: Settings → Integrations. */
+  /** The quiet window after a comment, as a duration. Default: `functions.review_artifacts.settleAfter` (Settings → Tools). */
   settle_after?: string;
   draft?: boolean;
   title?: string;

@@ -40,7 +40,7 @@ describe("the table", () => {
 describe("the table is the STANDARD list, and nothing else", () => {
   it("carries no agent's names, no `readOnly` and no profile", () => {
     // Decision 0007 §3 and §1: which built-in is which standard tool is what an agent EXECUTOR
-    // declares (`agentTools.ts`), and what a tool may do is what a toolset says about it.
+    // declares (`agentTools.ts`), and what a tool may do is what a permission set says about it.
     for (const spec of TOOL_SPECS) {
       expect(Object.keys(spec), spec.name).not.toContain("natives");
       expect(Object.keys(spec), spec.name).not.toContain("readOnly");

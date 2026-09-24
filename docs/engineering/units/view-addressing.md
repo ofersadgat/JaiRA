@@ -3,7 +3,7 @@ id: engineering/units/view-addressing
 type: engineering-unit
 status: shipped
 updated: 2026-09-13
-implements: [product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/keep-history-within-bounds, product/share-processes-across-projects, ux/patterns/live-facts-and-unseen-counts, ux/patterns/absence-is-stated, ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/settings-history, ui/components/project-row]
+implements: [product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/keep-history-within-bounds, product/share-processes-across-projects, ux/patterns/live-facts-and-unseen-counts, ux/patterns/absence-is-stated, ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/settings-data, ui/components/project-row]
 layer: service
 owns_contracts: []
 requires: [engineering/units/project-sessions, engineering/units/board-projection, engineering/units/files-view-models, engineering/units/workflow-browser, engineering/units/task-lifecycle, engineering/units/history-pruning, engineering/units/conversation-lookup, engineering/units/operation-record-store, engineering/units/agent-executors, engineering/units/interaction-hub, engineering/units/project-layout]

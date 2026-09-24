@@ -10,18 +10,18 @@
  * configured, displayed, and ignored.
  *
  * The chain under test: `executeWorkflow` → engine (delegation decided by the tree's
- * `capabilitiesFor`, gate built off the services seam) → `withAgentToolset` (the state's toolset →
+ * `capabilitiesFor`, gate built off the services seam) → `withAgentPermissionSet` (the state's permission set →
  * up-front deny of every built-in it does not hold) → `AgentCliExecutor` → the query options a real
  * `claude` would be spawned with. A fake QUERY stands in for the binary alone.
  */
 import { describe, expect, it } from "vitest";
 import { loadBundle } from "@declarative-ai/hw";
 import type { AgentQuery, AgentQueryOptions } from "@declarative-ai/agents-api";
-import { lowerToolset, parseToolset } from "@jaira/shared";
+import { lowerPermissionSet, parsePermissionSet } from "@jaira/shared";
 import { agentPromptRoutes } from "../src/modelRoutes";
 import { buildPromptExecutor, executeWorkflow, newRegistry } from "../src/wiring";
 
-/** The sync shape: one prompt state, a read-only toolset holding one tool, lowered as the loader lowers it. */
+/** The sync shape: one prompt state, a read-only permission set holding one tool, lowered as the loader lowers it. */
 const files: Record<string, unknown> = {
   digest: {
     label: "Read and report",
@@ -31,7 +31,7 @@ const files: Record<string, unknown> = {
       prompt: "Summarize the workflows.",
       model: "claude-cli/default",
     },
-    environment: lowerToolset(parseToolset({ read_file: "allow", other: "deny" }).toolset),
+    environment: lowerPermissionSet(parsePermissionSet({ read_file: "allow", other: "deny" }).permissionSet),
   },
 };
 

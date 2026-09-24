@@ -1,5 +1,5 @@
 /**
- * Settings → Integrations, server-rendered to one static page — the real component over the real
+ * Settings → Connections → Forges, server-rendered to one static page — the real component over the real
  * stylesheet, with no Electron and no native module in the way.
  *
  * `npx tsx packages/app/shots/integrations-static.mts <out.html>`. It exists for the case `run.mts`
@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseConfig, type ConfigView, type ForgeCheck } from "@jaira/shared";
-import { IntegrationsPane } from "../src/renderer/integrationsPane";
+import { ForgeRows } from "../src/renderer/integrationsPane";
 
 const out = process.argv[2];
 if (out === undefined) throw new Error("usage: integrations-static.mts <out.html>");
@@ -43,7 +43,7 @@ const checks: ForgeCheck[] = [
 const pane = (theme: string): string =>
   `<div data-theme-frame="${theme}" style="width:812px;margin:24px auto;background:var(--bg);padding:16px">` +
   renderToStaticMarkup(
-    createElement(IntegrationsPane, {
+    createElement(ForgeRows, {
       config,
       layer: "base",
       busy: false,
@@ -52,6 +52,15 @@ const pane = (theme: string): string =>
       secrets: { keychain: true } as never,
       onSave: () => undefined,
       onSaveToken: () => undefined,
+      oauth: {
+        signingIn: new Set(["github"]),
+        pending: new Map([["github", "WDJB-MJHT"]]),
+        errors: new Map(),
+        viaOAuth: new Set(["gitlab"]),
+        onSignIn: () => undefined,
+        onCancel: () => undefined,
+        onDisconnect: () => undefined,
+      },
     }),
   ) +
   "</div>";

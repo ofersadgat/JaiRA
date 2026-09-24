@@ -21,7 +21,7 @@ The Chat view starts **`chat/session`** ([decision 0005](../../engineering/decis
 
 - **The row of a conversation that controls work** carries a count after its title — `3 tasks` — in the provenance face. A count and not the titles: what each task is doing is the conversation's to say, and it says it.
 - **A control conversation starts idle.** The drop that made it dispatches no model call; the first turn is whatever the person types, or the turn in which the conversation has to ask for an input nothing bound.
-- **The composer's chips read the conversation's own toolset.** A session shows the project's tools and the workflow tools; a control shows the eight and denies the rest outright.
+- **The composer's chips read the conversation's own permission set.** A session shows the project's tools and the workflow tools; a control shows the eight and denies the rest outright.
 
 ## The conversation reads first and the box to answer it sits under it
 

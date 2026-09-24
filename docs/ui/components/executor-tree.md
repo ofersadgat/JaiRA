@@ -2,10 +2,10 @@
 id: ui/components/executor-tree
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exists, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/absence-is-stated]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects]
-surfaces: [ui/surfaces/settings-executors]
+surfaces: [ui/surfaces/settings-models, ui/surfaces/settings-tools]
 reuses: [ui/components/llm-config-form, ui/components/schema-form, ui/components/settings-field, ui/components/switch]
 implemented_by: [packages/app/src/renderer/executorTreePane.tsx]
 verified_by: []
@@ -19,7 +19,7 @@ A tall stack of pale blue banners headed `OPERATION`, `ROUTER` and `AGENT`, with
 
 ## The tree shows the whole default executor and pins only the fields a person changes
 
-**Use when.** The thing being configured is a composition that is worked out from what is available: every level of it is drawn expanded, each value reads as derived or pinned, and a change writes only that one field into the layer being edited. It is the body of Settings, Executors.
+**Use when.** The thing being configured is a composition that is worked out from what is available: every level of it is drawn expanded, each value reads as derived or pinned, and a change writes only that one field into the layer being edited. On [Settings → Models](../surfaces/settings-models.md) its route cards are the Routes section and the whole tree is the Advanced section's disclosure; on [Settings → Tools](../surfaces/settings-tools.md) its rule list is the reach rules of the functions a workflow calls.
 
 **Do not use when.** One provider or agent is being set up with its key and its check: use [provider-row](provider-row.md). A plain block of settings with no derived values: use [schema-form](schema-form.md) or [settings-field](settings-field.md) rows. Only call settings are edited: use [llm-config-form](llm-config-form.md).
 
@@ -27,10 +27,10 @@ A tall stack of pale blue banners headed `OPERATION`, `ROUTER` and `AGENT`, with
 
 - **Banner.** A `--tint-accent` band with `--control-radius` corners and 6px by 9px padding: the level's kind in uppercase app text at 700 in `--accent`, the name of what it builds in dim mono, and a one-line hint in `--dim` that wraps under them when narrow.
 - **Bands.** `FUNCTIONS` and `PROMPTS` are indented behind a 2px `--line` rule, and inside Prompts so are `DEFAULT CALL SETTINGS` and `ROUTES ({n})`. `CALL SETTINGS` inside a route carries no rule. Each band has an uppercase `--dim` title and a hint.
-- **Functions.** A `Rules` row whose control is the rule list, then `Around every function call`. The rule list sits in the row's right-hand rail of at most 240px, so every rule row and the add row wrap into a narrow column.
+- **Functions.** A `Rules` row whose control is the rule list, then `Around every function call`. The rule list sits in the row's right-hand rail of at most 240px, so every rule row and the add row wrap into a narrow column. Drawn under Models, where Tools holds the rules, the row is replaced by `Which functions this executor may reach is Settings → Tools → Functions, the available column.`
 - **Rule row.** 1px `--line` border, 5px by 8px padding: an 18px numbered circle, then either the word `everything` or `nothing` in bold mono, or an `allow` or `deny` choice and a mono pattern box; then ghost `↑`, `↓` and a red `Remove`. `everything` and allow rows are on `--tint-ok`, `nothing` and deny rows on `--tint-bad`, a blank rule on `--tint-warn`.
 - **Add row.** Ghost `+ everything` and `+ nothing`, an `allow` or `deny` choice, a `— pick a function` list of the built-in functions and the project's agents, a mono box to type a name, and `Add`.
-- **Router.** Its banner, `Default call settings` with a mono `Default model` box over an [llm-config-form](llm-config-form.md), `Routes ({n})`, then `Around every routed call`.
+- **Router.** Its banner, `Default call settings` with a mono `Default model` box over an [llm-config-form](llm-config-form.md), `Routes ({n})`, then `Around every routed call`. Drawn under Models, the top router shows `Its defaults and its routes are the Defaults and Routes sections above.` in place of its defaults and routes, which the page draws as sections of their own; a nested router still shows its own.
 - **Route card.** `--panel` ground, 1px border with 8px corners, dashed while derived and solid once pinned. One line: the prefix as `{prefix}/…` in bold mono, a one-line summary ellipsised in `--dim`, a chip with a 6px dot reading `derived` in `--dim` on `--panel-2` or `pinned` in `--ok` on `--tint-ok`, and a ghost `Configure` or `Done`. Opened, a rule and the route's own level below.
 - **Route level.** An `AGENT` or `PROVIDER` banner, rows for `Agent` or `Provider` which cannot be edited, `Model` and `May only run`, `CALL SETTINGS` over an llm-config-form, and `Around this route's calls`.
 - **Step disclosure.** A 1px `--line` rule over a line whose ▶ caret, title and `· {layers}` note sit centred across the row. Open, four cards in fixed order. An off card is `--panel-2` at 72% strength with a grey number and `Add`; an on card is `--panel` with an accent-tinted border, an `--accent` number and `Remove`, and its fields below a rule as a layered schema form, each led by a [switch](switch.md).
@@ -75,7 +75,7 @@ Every write goes to the layer at once. The open cards and disclosures are not ke
 | Bands | `Functions` · `Prompts` with `How a prompt state is answered.` · `Default call settings` with `What a state that names nothing is filled in with — applied BEFORE the prefix is read, which is what lets a default reach an agent at all.` · `Routes ({n})` with `Derived from everything available, so a provider or agent you set up appears here by itself. Configuring one pins only what you changed.` · `Call settings` with `Merged under a state's own config.` |
 | Rules | `Rules` with `Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract. Empty means everything the workflow registers.` · `No rules — everything the workflow registers.` |
 | Rule controls | `everything` · `nothing` · `allow` · `deny` · box `name or pattern` · tooltips `earlier`, `later` · `Remove` · `+ everything` · `+ nothing` · `— pick a function` · `{name} — {what it is}` such as `run_command — tool — run a shell command, under the project's policy` · `…or type a name / pattern` · `Add` |
-| No routes | `Nothing can answer a prompt here yet — no provider key, no local server, and no agent that runs. Set one up under Providers and a route appears.` |
+| No routes | `Nothing can answer a prompt here yet — no provider key, no local server, and no agent that runs. Set one up under Connections and a route appears.` |
 | Route head | `{prefix}/…` · summary `router over {n} route(s)` or `{kind} {owner} · {model or "its own default"} · only {patterns} · {layers} · {call settings}` · `derived` · `pinned` · `Configure` · `Done` |
 | Route fields | `Provider` or `Agent` with `What actually serves the call. Derived from the route this sits under.` · `Model` with `As it knows it — bare, because the route's own name is already the prefix. Empty means the runtime's own default.` and example `the runtime's own default` · `May only run` with `One pattern per line. 'opus' restricts a model; 'openrouter/*' restricts a provider. A state asking for anything else is refused before it runs.` and example `anything` · `Default model` example `left to the state` |
 | Step disclosures | `Around the whole executor` · `Around every function call` · `Around every routed call` · `Around this route's calls`, each with `· no layers` or `· {layers joined by " → "}` |
@@ -84,7 +84,7 @@ Every write goes to the layer at once. The open cards and disclosures are not ke
 
 ## The tree is long and narrow in places, and nothing in it shrinks the page sideways
 
-- Resize: the tree takes the section's width, up to 780px. Banner hints wrap under the kind and build names. Route summaries ellipsise on one line and the head wraps its chip and button when narrow. The rule list stays in a rail of at most 240px at every width, with its controls wrapping one under another. Setting rows stack in a box narrower than 380px.
+- Resize: the tree takes the section's width, up to 740px. Banner hints wrap under the kind and build names. Route summaries ellipsise on one line and the head wraps its chip and button when narrow. The rule list stays in a rail of at most 240px at every width, with its controls wrapping one under another. Setting rows stack in a box narrower than 380px.
 - Theme: banners, tints, chips, borders and the dimmed cards are tokens in both themes.
 - Focus: controls follow the tree top to bottom; the step disclosures announce whether they are open. The route `Configure` button does not announce whether its card is open. Rule rows have no keyboard reordering beyond their `↑` and `↓` buttons.
 - Long or missing content: a long pattern or model fills its box and scrolls within it. A route with no model says `its own default`.

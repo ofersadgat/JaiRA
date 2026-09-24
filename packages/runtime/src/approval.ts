@@ -44,7 +44,7 @@ export interface ApprovalRequest {
   reason?: string;
   /**
    * A shell line as the REQUESTS it is made of, each with its span, its subject, its verdict and the
-   * toolset entry that decided it (decision 0007 §4) — what the approval draws instead of one opaque
+   * permission set entry that decided it (decision 0007 §4) — what the approval draws instead of one opaque
    * line. Present whenever the policy took the line apart; a consumer that ignores it sees the
    * request it always saw.
    */
@@ -159,9 +159,9 @@ export class ApprovalHub {
   /**
    * The `Approver` to place on `ctx.approve`.
    *
-   * Every call reaches a person only through {@link withPermissionFunctions}: a toolset's shell is
+   * Every call reaches a person only through {@link withPermissionFunctions}: a permission set's shell is
    * lowered as `ask` so that no line runs unread (decision 0007, amended 2026-09-22), and what a line
-   * came to decides it here first — a line every part of which the toolset allows runs without anybody
+   * came to decides it here first — a line every part of which the permission set allows runs without anybody
    * being asked, one with a denied part is refused, and the parts a FUNCTION decides are put to it.
    * `functions` is how those are run; without it such a part is put to the person, with the reason.
    */

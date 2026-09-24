@@ -10,6 +10,7 @@ export * from "./wiring";
 // Who answers a prompt state, from config: provider routes with credentials resolved, the agent
 // executors a model prefix can name, and the default id chosen when nothing names one.
 export * from "./modelRoutes";
+export * from "./localServers";
 export * from "./fakeExecutor";
 export * from "./scriptedFunctions";
 export * from "./interaction";
@@ -32,7 +33,7 @@ export * from "./questions";
 export * from "./agents";
 export * from "./agentTools";
 // What a claude or codex agent is handed under one effective environment, MEASURED through the real
-// chain — how a toolset's effect on an agent is tested (decision 0007).
+// chain — how a permission set's effect on an agent is tested (decision 0007).
 export * from "./agentHanded";
 export * from "./tools";
 export * from "./sessionServices";

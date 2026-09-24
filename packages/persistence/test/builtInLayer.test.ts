@@ -95,7 +95,7 @@ describe("the layout", () => {
     const paths = jairaPaths(dir, testHome(), builtIn);
     expect(paths.roots).toEqual([paths.jairaDir, paths.base.baseDir, paths.builtIn.dir]);
     expect(paths.builtIn.workflowsDir).toBe(join(paths.builtIn.dir, "workflows"));
-    expect(paths.builtIn.toolsetsDir).toBe(join(paths.builtIn.dir, "toolsets"));
+    expect(paths.builtIn.permissionSetsDir).toBe(join(paths.builtIn.dir, "permission-sets"));
   });
 
   it("is behind the shared root opened as a project, too", () => {
@@ -169,15 +169,15 @@ describe("three-layer resolution", () => {
     expect((load(p, "parent").states["chat/hello"]!.operation as { user?: unknown }).user).toBe("project");
   });
 
-  it("resolves a toolset-shaped fragment from the layer by the reference form that already exists", () => {
-    // `toolsets/` is a directory of ordinary fragments (decision 0006); what a toolset MEANS is 0007's.
-    write(builtIn, "toolsets/chat/ask-first.json", { model: "from-toolset" });
+  it("resolves a permission-set-shaped fragment from the layer by the reference form that already exists", () => {
+    // `permission-sets/` is a directory of ordinary fragments (decision 0006); what a permission set MEANS is 0007's.
+    write(builtIn, "permission-sets/chat/ask-first.json", { model: "from-permission set" });
     const p = open();
     write(p.paths.workflowsDir, "greet.json", {
       ...promptState("x"),
-      operation: { $ref: "$/toolsets/chat/ask-first", kind: "prompt", prompt: "x" },
+      operation: { $ref: "$/permission-sets/chat/ask-first", kind: "prompt", prompt: "x" },
     });
-    expect((load(p, "greet").states.greet!.operation as { config?: { model?: string } }).config?.model).toBe("from-toolset");
+    expect((load(p, "greet").states.greet!.operation as { config?: { model?: string } }).config?.model).toBe("from-permission set");
   });
 
   it("treats a missing built-in directory as an empty layer", () => {

@@ -28,17 +28,20 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
-import { resolveTheme, toolsetChoicesAt, toolsetsAt } from "@jaira/shared/browser";
+import { resolveTheme, permissionSetChoicesAt, permissionSetsAt } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
+  EmbeddedWeightsReport,
+  ForgeSignInPending,
+  LocalServerProbe,
   PendingApproval,
   ApprovalScope,
   PendingInteraction,
   PendingQuestion,
   ProjectSummary,
   ProjectTask,
-  ToolsetsView as ToolsetsData,
+  PermissionSetsView as PermissionSetsData,
   WorkflowLayer,
 } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
@@ -104,14 +107,15 @@ import "./fenceRender";
 import type { FileSurfaceContext } from "./fileTypes";
 import { LogsPanel } from "./logs";
 import { LayerPicker, SettingsPane } from "./panes";
-import { ConfigPane } from "./configPane";
+import { RawDocument } from "./configPane";
 import { ConfigPanel } from "./configPanel";
 import { DebugPane } from "./debugPane";
 import { GalleryPane } from "./galleryPane";
-import { ProvidersPane } from "./providersPane";
-import { IntegrationsPane } from "./integrationsPane";
-import { ExecutorsPane } from "./executorsPane";
-import { ToolsetsPane, type ToolsetsChannel } from "./toolsetsPane";
+import { ModelsPane, functionRulesOverlay } from "./modelsPane";
+import { PermissionSetsPane, type PermissionSetsChannel } from "./permissionSetsPane";
+import { FunctionsSections } from "./functionsPane";
+import { DataPane, RunsPane } from "./settingsPages";
+import { ConnectionsPage } from "./connectionsPane";
 import { ToolsFieldProvider, type ToolsFieldData } from "./toolsField";
 import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf, settledMarkOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
@@ -140,7 +144,7 @@ import {
 } from "./uiState";
 import { Icon } from "./icons";
 import { History, NewTask } from "./widgets";
-import { invoke, useApp, type SettingsSection, type View } from "./store";
+import { invoke, subscribe, useApp, type SettingsSection, type View } from "./store";
 
 /**
  * How wide each view lets its context panel be dragged while it is describing something.
@@ -200,23 +204,21 @@ function PinnedPane({ pinned, onClose }: { pinned: PinnedValue; onClose: () => v
 }
 
 /**
- * The bar above every settings section: which layer is being edited, and when the checks last ran.
+ * The layer switch at a settings page's top-right corner — always there, whatever the page's lead
+ * runs to (the person's ruling, 2026-09-23: "the this project/shared/built in should always be on the
+ * top right"). When the checks last ran is Connections' to say, on the section it is about.
  *
  * One component rather than a picker in each pane, and it is where the no-project rule lives. With
  * no project open there is no `.jaira/settings.json` to write, so the switch is not merely disabled —
  * it is ABSENT, along with every mention of "this project". A control offering a choice that cannot
- * be made is worse than no control: the old screen showed the switch, let it be clicked, and then
- * explained in a notice that nothing could be saved.
+ * be made is worse than no control.
  */
 function SettingsHeader({
   section,
   layer,
   hasProject,
   busy,
-  rechecking,
-  checkedAt,
   onLayer,
-  onRecheck,
   builtIn,
   onBuiltIn,
 }: {
@@ -224,50 +226,30 @@ function SettingsHeader({
   layer: ConfigLayer;
   hasProject: boolean;
   busy: boolean;
-  rechecking: boolean;
-  checkedAt: number;
   onLayer: (layer: ConfigLayer) => void;
-  onRecheck: () => void;
   /** The section is showing what SHIPS — only ever true where the section holds a built-in value. */
   builtIn: boolean;
   onBuiltIn: (on: boolean) => void;
 }): JSX.Element | null {
   const meta = SECTIONS.find((s) => s.id === section);
-  const observed = section === "providers" || section === "executors" || section === "integrations";
-  if (meta === undefined || (!meta.layered && !observed)) return null;
-  return (
-    <div className="settings-head">
-      {meta.layered ? (
-        meta.builtIn === true ? (
-          // The third, read-only segment (decision 0006) — here because this section holds something
-          // JaiRA ships. With no project open there is still a choice to make, so the switch stays.
-          <LayerPicker<WorkflowLayer>
-            value={builtIn ? "system" : layer}
-            layers={hasProject ? ["project", "base", "system"] : ["base", "system"]}
-            disabled={busy}
-            onChange={(next) => {
-              onBuiltIn(next === "system");
-              if (next !== "system") onLayer(next);
-            }}
-          />
-        ) : hasProject ? (
-          <LayerPicker value={layer} onChange={onLayer} disabled={busy} />
-        ) : // With no project there is one layer to edit, and the page's own sentence says so.
-        null
-      ) : null}
-      {observed ? (
-        <div className="settings-head-right">
-          {/* Not "Test": nothing here is waiting to be tested. The checks ran at startup and after the
-              last save; this is only for a world that changed since — a server started, a key
-              installed in another window. */}
-          <span className="sub">{checkedAgo(checkedAt)}</span>
-          <button className="ghost" onClick={onRecheck} disabled={busy || rechecking}>
-            {rechecking ? "checking…" : "Re-check"}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
+  if (meta === undefined || !meta.layered) return null;
+  if (meta.builtIn === true) {
+    // The third, read-only segment (decision 0006) — here because this page holds something JaiRA
+    // ships. With no project open there is still a choice to make, so the switch stays.
+    return (
+      <LayerPicker<WorkflowLayer>
+        value={builtIn ? "system" : layer}
+        layers={hasProject ? ["project", "base", "system"] : ["base", "system"]}
+        disabled={busy}
+        onChange={(next) => {
+          onBuiltIn(next === "system");
+          if (next !== "system") onLayer(next);
+        }}
+      />
+    );
+  }
+  // With no project there is one layer to edit, and the page's own sentence says so.
+  return hasProject ? <LayerPicker value={layer} onChange={onLayer} disabled={busy} /> : null;
 }
 
 /**
@@ -295,36 +277,28 @@ function SettingsFrame({
 }
 
 /**
- * The page's one sentence: WHOSE settings these are, and what anything left unset falls back to.
- * What the layer switch at the head's right edge changes, said in words.
+ * The page's lead: what the page is FOR, in one clause, then WHOSE settings these are and what anything
+ * left unset falls back to — what the layer switch at the head's right edge changes, said in words.
  */
 function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: string | null, builtIn: boolean): ReactNode {
   const meta = SECTIONS.find((s) => s.id === section);
-  if (section === "history") return project !== null ? <>The runs <b>{projectName(project)}</b> has kept, and what pruning would free.</> : undefined;
   if (meta === undefined || !meta.layered) return undefined;
-  if (builtIn && meta.builtIn === true) return <>What JaiRA <b>ships</b>, read-only — copy a line into a layer of your own to change it.</>;
+  const purpose = meta.purpose;
+  if (builtIn && meta.builtIn === true) return <>{purpose} Showing what JaiRA <b>ships</b>, read-only — override a line in a layer of your own to change it.</>;
   if (layer === "project" && project !== null) {
     return (
       <>
-        Editing <b>{projectName(project)}</b>. Anything left unset comes from <b>~/.jaira</b>.
+        {purpose} Editing <b>{projectName(project)}</b>; anything left unset comes from <b>~/.jaira</b>.
       </>
     );
   }
   return (
     <>
-      Editing <b>~/.jaira</b>, shared by every project on this machine.{project === null ? " Open a project to override it for one." : ""}
+      {purpose} Editing <b>~/.jaira</b>, shared by every project on this machine.{project === null ? " Open a project to override it for one." : ""}
     </>
   );
 }
 
-/** "checked 2 min ago", or the honest absence of one. */
-function checkedAgo(at: number): string {
-  if (at === 0) return "not checked yet";
-  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (seconds < 60) return "checked just now";
-  const minutes = Math.round(seconds / 60);
-  return minutes < 60 ? `checked ${minutes} min ago` : `checked ${Math.round(minutes / 60)} h ago`;
-}
 
 /**
  * The rooms INSIDE a project — nested under whichever one the address is standing on (SHELL.md
@@ -405,26 +379,79 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
  * "prompts go to Anthropic" are different facts, and one row with one checkbox was being asked to
  * mean both.
  */
-const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; needsProject?: boolean; builtIn?: boolean }> = [
-  { id: "providers", label: "Providers", layered: true },
-  { id: "executors", label: "Executors", layered: true },
-  // Beside Executors, because it is the other half of "what may a state's agent do". `builtIn`: the
-  // one section whose values JaiRA SHIPS, so the one whose layer switch has the third segment.
-  { id: "toolsets", label: "Toolsets", layered: true, builtIn: true },
-  // Observed like the two above it: a connection is checked by asking its host who the token is.
-  { id: "integrations", label: "Integrations", layered: true },
-  { id: "config", label: "Configuration", layered: true },
-  // Layered, because a checkout can have an opinion about its own tree worth sharing — and NOT
-  // `needsProject`, because the shared root is a tree too and hiding something in it is exactly what
-  // somebody with nothing open is doing there.
-  { id: "files", label: "Files", layered: true },
-  // Not layered and not project-scoped: typography belongs to a PERSON, not to a checkout, and a
-  // window with nothing open is exactly where somebody sets it up.
-  // How a transcript is laid out lives here too — it was a tab of its own holding one setting, and it
-  // is a way things LOOK (the person's call, 2026-09-23).
-  { id: "appearance", label: "Appearance", layered: false },
-  { id: "history", label: "History", layered: false, needsProject: true },
+/**
+ * The Settings pages, in the sidebar's two groups (the person's reorganisation, 2026-09-23): what is
+ * JUST YOURS — stored in `user-settings.json`, no layer switch — and what is PROJECT & SHARED —
+ * layered, the same switch on every page. The layered pages run in the order a project is set up:
+ * connect a service, pick a model, decide what the tools may do, then adjust how runs behave.
+ */
+interface SettingsPageMeta {
+  id: SettingsSection;
+  label: string;
+  group: "you" | "layered";
+  icon: SettingsIconName;
+  layered: boolean;
+  /** The page holds something JaiRA SHIPS, so its switch has the third, read-only segment. */
+  builtIn?: boolean;
+  /** The lead's first clause: what the page is for. */
+  purpose: string;
+  /** Drawn as the file it opens rather than as a page name. */
+  file?: boolean;
+}
+
+const SECTIONS: readonly SettingsPageMeta[] = [
+  // Not layered: typography and the window's look belong to a PERSON, not to a checkout, and a window
+  // with nothing open is exactly where somebody sets them up. File types stay here (the person's call).
+  { id: "appearance", label: "Appearance", group: "you", icon: "appearance", layered: false, purpose: "" },
+  { id: "connections", label: "Connections", group: "layered", icon: "connections", layered: true, purpose: "What JaiRA can reach, and as whom." },
+  { id: "models", label: "Models", group: "layered", icon: "models", layered: true, purpose: "What answers a state that names nothing, and how." },
+  // `builtIn`: the permission sets are what JaiRA SHIPS, so this page's switch has the third segment.
+  { id: "tools", label: "Tools", group: "layered", icon: "tools", layered: true, builtIn: true, purpose: "What an agent may do, and every function a run can call." },
+  { id: "runs", label: "Runs", group: "layered", icon: "runs", layered: true, purpose: "How a run behaves while it is going." },
+  // Layered, because a checkout can have an opinion about its own tree worth sharing — and not
+  // project-only, because the shared root is a tree too.
+  { id: "files", label: "Files", group: "layered", icon: "files", layered: true, purpose: "What the Files tree leaves out." },
+  { id: "data", label: "Data & history", group: "layered", icon: "data", layered: true, purpose: "Where runs keep what they produce, and how much there is." },
+  // The raw document: the escape hatch, named after the file it opens.
+  { id: "raw", label: "settings.json", group: "layered", icon: "json", layered: true, file: true, purpose: "Everything this layer's settings hold, as stored." },
 ];
+
+/** The sidebar's two groups, as their headings say them. */
+const SETTINGS_GROUPS: ReadonlyArray<{ id: SettingsPageMeta["group"]; label: string; note: string }> = [
+  { id: "you", label: "Just you", note: "this machine" },
+  { id: "layered", label: "Project & shared", note: "layered" },
+];
+
+type SettingsIconName = "appearance" | "connections" | "models" | "tools" | "runs" | "files" | "data" | "json";
+
+/**
+ * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models, Tools,
+ * Files and the document borrow its model, tool, folder and braces; the other four are new: a disc half
+ * filled (how a thing looks), a plug (what it connects to), a play mark (a run), stacked disks (stored).
+ */
+const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
+  appearance: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 3v18"],
+  connections: ["M9 3v5", "M15 3v5", "M6 8h12v3a6 6 0 0 1-12 0Z", "M12 17v4"],
+  models: ["m12 3 8 4.5v9L12 21l-8-4.5v-9Z", "M12 12l8-4.5", "M12 12v9", "M12 12 4 7.5"],
+  tools: ["M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"],
+  runs: ["M7 4.5v15l12-7.5Z"],
+  files: ["M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"],
+  data: ["M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z", "M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6", "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"],
+  json: [
+    "M8 4a3 3 0 0 0-3 3v2a3 3 0 0 1-2 3 3 3 0 0 1 2 3v2a3 3 0 0 0 3 3",
+    "M16 4a3 3 0 0 1 3 3v2a3 3 0 0 0 2 3 3 3 0 0 0-2 3v2a3 3 0 0 1-3 3",
+  ],
+};
+
+function SettingsIcon({ name }: { name: SettingsIconName }): JSX.Element {
+  return (
+    <svg className="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {SETTINGS_ICONS[name].map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
 
 /**
  * The approvals strip.
@@ -580,25 +607,111 @@ export default function App(): JSX.Element {
   /** The state the middle column's conversation is scrolled to — see `FileSurfaceContext.runHere`. */
   const [runHere, setRunHere] = useState<string | undefined>(undefined);
   /**
-   * Settings → Toolsets is showing the BUILT-IN layer (decision 0006).
+   * Settings → Permission sets is showing the BUILT-IN layer (decision 0006).
    *
    * Beside `configLayer` rather than in it: that one names a `settings.json` to write, which what
    * ships does not have, and every other section reads it as one of two. Session-scoped — a window
    * that reopened on a read-only layer would open looking as if nothing could be changed.
    */
-  const [toolsetsBuiltIn, setToolsetsBuiltIn] = useState(false);
-  const toolsetsProject = state.at;
-  const toolsetsChannel = useMemo<ToolsetsChannel>(() => {
-    const project = toolsetsProject !== null ? { project: toolsetsProject } : {};
-    return {
-      read: () => invoke("toolsets:read", { ...project }),
-      write: (request) => invoke("toolsets:write", { ...request, ...project }),
-      reset: (request) => invoke("toolsets:reset", { ...request, ...project }),
-    };
-  }, [toolsetsProject]);
+  const [permissionSetsBuiltIn, setPermissionSetsBuiltIn] = useState(false);
+  /** What the permission sets pane last read — the Functions table below it draws the same records. */
+  const [toolsData, setToolsData] = useState<PermissionSetsData | null>(null);
+  /** A set a Functions cell asked the pane above to open. */
+  const [toolsFocus, setToolsFocus] = useState<{ id: string; nonce: number } | undefined>(undefined);
   /**
-   * The toolsets a STATE can name, for the editor's one Tools field — the winner of each id, which
-   * is what a bare `$/toolsets/…` reference finds.
+   * What answers on the usual local ports, and whether each embedded model's weights are there —
+   * asked when Connections opens, on Re-check (the checks' time moves) and after a settings write
+   * (a server just picked is the one in use), never continuously.
+   */
+  const [localServers, setLocalServers] = useState<LocalServerProbe[] | undefined>(undefined);
+  const [weightsChecks, setWeightsChecks] = useState<EmbeddedWeightsReport | undefined>(undefined);
+  const onConnections = state.view === "settings" && state.section === "connections";
+  useEffect(() => {
+    if (!onConnections) return;
+    let live = true;
+    void invoke("model:probeLocal", undefined).then(
+      (found) => live && setLocalServers(found.servers),
+      () => live && setLocalServers(undefined),
+    );
+    void invoke("model:checkWeights", undefined).then(
+      (report) => live && setWeightsChecks(report),
+      () => live && setWeightsChecks(undefined),
+    );
+    return () => {
+      live = false;
+    };
+  }, [onConnections, state.availability.checkedAt, state.config]);
+  /**
+   * Signing in to a forge through the browser (OAuth device flow): the code the person types there
+   * while main polls, and why the last one did not work. Main tells us when it is over — after the
+   * token is stored and the check that names the account has landed.
+   */
+  const [forgeSignIns, setForgeSignIns] = useState<ReadonlyMap<string, ForgeSignInPending>>(new Map());
+  const [forgeErrors, setForgeErrors] = useState<ReadonlyMap<string, string>>(new Map());
+  const forgeError = useCallback((connection: string, reason: string | undefined): void => {
+    setForgeErrors((current) => {
+      const next = new Map(current);
+      if (reason === undefined) next.delete(connection);
+      else next.set(connection, reason);
+      return next;
+    });
+  }, []);
+  const forgePending = useCallback((connection: string, pending: ForgeSignInPending | undefined): void => {
+    setForgeSignIns((current) => {
+      const next = new Map(current);
+      if (pending === undefined) next.delete(connection);
+      else next.set(connection, pending);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    void invoke("forge:signIns", undefined).then((list) => setForgeSignIns(new Map(list.map((p) => [p.connection, p]))), () => undefined);
+    return subscribe((message) => {
+      if (message.type !== "forge:signInFinished") return;
+      const { outcome } = message;
+      forgePending(outcome.connection, undefined);
+      forgeError(outcome.connection, outcome.ok || outcome.code === "canceled" ? undefined : outcome.reason);
+      actions.readAvailability();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribed once; the setters are stable
+  }, []);
+  const forgeOAuth = {
+    signingIn: new Set(forgeSignIns.keys()),
+    pending: new Map([...forgeSignIns].map(([connection, pending]) => [connection, pending.userCode])),
+    errors: forgeErrors,
+    viaOAuth: new Set((state.availability.forges ?? []).filter((check) => check.via === "oauth").map((check) => check.name)),
+    onSignIn: (connection: string) => {
+      forgeError(connection, undefined);
+      void invoke("forge:signIn", { connection }).then(
+        (start) => (start.ok ? forgePending(connection, start.pending) : forgeError(connection, start.fix !== undefined ? `${start.reason} — ${start.fix}` : start.reason)),
+        (e: unknown) => forgeError(connection, e instanceof Error ? e.message : String(e)),
+      );
+    },
+    onCancel: (connection: string) => {
+      void invoke("forge:cancelSignIn", { connection }).then(() => forgePending(connection, undefined));
+    },
+    onDisconnect: (connection: string) => {
+      void invoke("forge:signOut", { connection }).then(
+        (outcome) => {
+          forgeError(connection, outcome.ok ? undefined : outcome.reason);
+          actions.readAvailability();
+        },
+        (e: unknown) => forgeError(connection, e instanceof Error ? e.message : String(e)),
+      );
+    },
+  };
+  const permissionSetsProject = state.at;
+  const permissionSetsChannel = useMemo<PermissionSetsChannel>(() => {
+    const project = permissionSetsProject !== null ? { project: permissionSetsProject } : {};
+    return {
+      read: () => invoke("permissionSets:read", { ...project }),
+      write: (request) => invoke("permissionSets:write", { ...request, ...project }),
+      reset: (request) => invoke("permissionSets:reset", { ...request, ...project }),
+    };
+  }, [permissionSetsProject]);
+  /**
+   * The permission sets a STATE can name, for the editor's one Tools field — the winner of each id, which
+   * is what a bare `$/permission-sets/…` reference finds.
    *
    * Read here, once per project, and handed down by context: the field is five components inside the
    * state editor, and every host of that editor would otherwise have to carry a prop it has no use
@@ -606,24 +719,24 @@ export default function App(): JSX.Element {
    * state file in every layer. A read that fails leaves the field's picker offering what the state
    * already names and "none", which is what it can prove.
    */
-  const [toolsetsRead, setToolsetsRead] = useState<ToolsetsData | null>(null);
+  const [permissionSetsRead, setPermissionSetsRead] = useState<PermissionSetsData | null>(null);
   useEffect(() => {
     let live = true;
-    void invoke("toolsets:read", { ...(toolsetsProject !== null ? { project: toolsetsProject } : {}), usedBy: false }).then(
-      (found) => live && setToolsetsRead(found),
-      () => live && setToolsetsRead(null),
+    void invoke("permissionSets:read", { ...(permissionSetsProject !== null ? { project: permissionSetsProject } : {}), usedBy: false }).then(
+      (found) => live && setPermissionSetsRead(found),
+      () => live && setPermissionSetsRead(null),
     );
     return () => void (live = false);
     // …and again when the TREE is refetched, which is what a `workflows` invalidate does — the scope
-    // every toolset write publishes. A toolset added in Settings is a file in that tree, so the two
-    // refresh together and the picker never lists a toolset that is not there.
-  }, [toolsetsProject, state.tree]);
+    // every permission set write publishes. A permission set added in Settings is a file in that tree, so the two
+    // refresh together and the picker never lists a permission set that is not there.
+  }, [permissionSetsProject, state.tree]);
   const toolsFieldData = useMemo<ToolsFieldData>(
     () =>
-      toolsetsRead === null
-        ? { toolsets: [], tools: [] }
-        : { toolsets: toolsetChoicesAt(toolsetsAt(toolsetsRead.records, toolsetsRead.layers[0] ?? "project")), tools: toolsetsRead.tools },
-    [toolsetsRead],
+      permissionSetsRead === null
+        ? { permissionSets: [], tools: [] }
+        : { permissionSets: permissionSetChoicesAt(permissionSetsAt(permissionSetsRead.records, permissionSetsRead.layers[0] ?? "project")), tools: permissionSetsRead.tools },
+    [permissionSetsRead],
   );
   /**
    * Which of the sidebar drawers is currently showing its FIND field (SHELL.md §5.1).
@@ -1787,48 +1900,58 @@ export default function App(): JSX.Element {
     glyph: "⚙",
     label: "Settings",
     panel: (
-      <ul className="sections">
-        {SECTIONS.filter((s) => !s.needsProject || state.at !== null).flatMap(({ id, label }) => {
-          const open = view === "settings" && state.section === id;
-          const row = (
-            <li
-              key={id}
-              // Only while Settings is what you are LOOKING at. The list stays drawn in Logs and in
-              // Debug — it is the panel's, not the view's — and a row marked selected there claimed
-              // the window was showing Providers while it was showing the log.
-              className={open ? "sel" : undefined}
-              onClick={() => {
-                actions.setSection(id);
-                // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
-                // Remembering the section without showing it would be a click that did nothing.
-                actions.setView("settings");
-              }}
-            >
-              {label}
-            </li>
-          );
-          // The open tab's own sections, indented under it: lit as the page is scrolled past them,
-          // and a click scrolls to one. A tab of one section has nothing to list.
-          if (!open || settingsParts.parts.length < 2) return [row];
-          return [
-            row,
-            <li key={`${id}:parts`} className="parts">
-              <ul className="section-parts" aria-label={`${label} sections`}>
-                {settingsParts.parts.map((part) => (
+      <div className="sections-groups">
+        {SETTINGS_GROUPS.map((group) => (
+          <div key={group.id} className="sections-group">
+            <div className="sections-group-head">
+              <span>{group.label}</span>
+              <small>{group.note}</small>
+            </div>
+            <ul className="sections icons">
+              {SECTIONS.filter((s) => s.group === group.id).flatMap(({ id, label, icon, file }) => {
+                const open = view === "settings" && state.section === id;
+                const row = (
                   <li
-                    key={part.id}
-                    className={settingsParts.active === part.id ? "on" : undefined}
-                    aria-current={settingsParts.active === part.id ? "location" : undefined}
-                    onClick={() => settingsParts.go(part.id)}
+                    key={id}
+                    // Only while Settings is what you are LOOKING at. The list stays drawn in Logs and in
+                    // Debug — it is the panel's, not the view's — and a row marked selected there claimed
+                    // the window was showing a page while it was showing the log.
+                    className={[open ? "sel" : "", file === true ? "file" : ""].filter(Boolean).join(" ") || undefined}
+                    onClick={() => {
+                      actions.setSection(id);
+                      // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
+                      actions.setView("settings");
+                    }}
                   >
-                    {part.label}
+                    <SettingsIcon name={icon} />
+                    <span className="sections-label">{label}</span>
                   </li>
-                ))}
-              </ul>
-            </li>,
-          ];
-        })}
-      </ul>
+                );
+                // The open page's own sections, indented under it: lit as the page is scrolled past
+                // them, and a click scrolls to one. A page of one section has nothing to list.
+                if (!open || settingsParts.parts.length < 2) return [row];
+                return [
+                  row,
+                  <li key={`${id}:parts`} className="parts">
+                    <ul className="section-parts" aria-label={`${label} sections`}>
+                      {settingsParts.parts.map((part) => (
+                        <li
+                          key={part.id}
+                          className={settingsParts.active === part.id ? "on" : undefined}
+                          aria-current={settingsParts.active === part.id ? "location" : undefined}
+                          onClick={() => settingsParts.go(part.id)}
+                        >
+                          {part.label}
+                        </li>
+                      ))}
+                    </ul>
+                  </li>,
+                ];
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
     ),
   };
 
@@ -2420,91 +2543,51 @@ export default function App(): JSX.Element {
                 <SettingsRowsContext.Provider value={true}>
                 <SettingsFrame
                   section={state.section}
-                  lead={settingsLeadOf(state.section, state.configLayer, state.at, toolsetsBuiltIn)}
+                  lead={settingsLeadOf(state.section, state.configLayer, state.at, permissionSetsBuiltIn)}
                   aside={
                     <SettingsHeader
                       section={state.section}
                       layer={state.configLayer}
                       hasProject={state.at !== null}
                       busy={state.busy}
-                      rechecking={state.rechecking}
-                      checkedAt={state.availability.checkedAt}
                       onLayer={actions.setConfigLayer}
-                      onRecheck={actions.recheckAvailability}
-                      builtIn={toolsetsBuiltIn}
-                      onBuiltIn={setToolsetsBuiltIn}
+                      builtIn={permissionSetsBuiltIn}
+                      onBuiltIn={setPermissionSetsBuiltIn}
                     />
                   }
                 >
-                {state.section === "toolsets" ? (
-                  <ToolsetsPane
-                    // A different project is a different set of files: start clean rather than show
-                    // one project's unsaved lines over another's toolsets.
-                    key={state.at ?? "shared"}
-                    channel={toolsetsChannel}
-                    layer={toolsetsBuiltIn ? "system" : state.configLayer}
-                    onLayer={(next) => {
-                      setToolsetsBuiltIn(next === "system");
-                      if (next !== "system") actions.setConfigLayer(next);
-                    }}
-                    busy={state.busy}
-                  />
-                ) : null}
-                {state.section === "config" ? (
-                  <ConfigPane
-                    config={state.config}
-                    layer={state.configLayer}
-                    busy={state.busy}
-                    editable={state.configLayer === "base" || state.at !== null}
-                    onSave={actions.saveConfig}
-                  >
-                    <SettingsPane
-                      config={state.config}
-                      layer={state.configLayer}
-                      busy={state.busy}
-                      drafts={state.drafts}
-                      onDraft={actions.setDraft}
-                      onSave={actions.saveConfig}
-                      showEffective={openOf(ui, FOLD.settingsEffective)}
-                      onShowEffective={(open) => actions.setFold(FOLD.settingsEffective, open)}
-                    />
-                  </ConfigPane>
-                ) : null}
-                {state.section === "providers" ? (
-                  <ProvidersPane
+                {state.section === "connections" ? (
+                  <ConnectionsPage
                     config={state.config}
                     executors={state.executors}
                     routeProbes={state.modelProbes}
                     executorProbes={state.probes}
+                    forgeChecks={state.availability.forges ?? []}
                     secrets={state.secrets}
                     busy={state.busy}
                     layer={state.configLayer}
                     editable={state.configLayer === "base" || state.at !== null}
+                    checkedAt={state.availability.checkedAt}
+                    rechecking={state.rechecking}
+                    onRecheck={actions.recheckAvailability}
+                    onSave={actions.saveConfig}
                     onSaveRoute={actions.saveModels}
                     onSaveExecutor={actions.setExecutorConfig}
                     onAdd={actions.addExecutor}
                     onRemove={actions.removeExecutor}
                     onSaveCredential={actions.saveCredential}
+                    onSaveToken={actions.saveForgeToken}
                     signingIn={new Set(state.signingIn)}
                     onSignIn={(name) => void actions.signIn(name)}
                     onCancelSignIn={(name) => void actions.cancelSignIn(name)}
                     onSignOut={(name) => void actions.signOut(name)}
+                    localServers={localServers}
+                    weights={weightsChecks}
+                    oauth={forgeOAuth}
                   />
                 ) : null}
-                {state.section === "integrations" ? (
-                  <IntegrationsPane
-                    config={state.config}
-                    layer={state.configLayer}
-                    busy={state.busy}
-                    editable={state.configLayer === "base" || state.at !== null}
-                    checks={state.availability.forges ?? []}
-                    secrets={state.secrets}
-                    onSave={actions.saveConfig}
-                    onSaveToken={actions.saveForgeToken}
-                  />
-                ) : null}
-                {state.section === "executors" ? (
-                  <ExecutorsPane
+                {state.section === "models" ? (
+                  <ModelsPane
                     config={state.config}
                     executors={state.executors}
                     probes={state.probes}
@@ -2515,6 +2598,51 @@ export default function App(): JSX.Element {
                     onSaveModels={actions.saveModels}
                     onSaveExecutor={actions.setExecutorConfig}
                     onSaveDefinition={actions.saveDefinition}
+                    onSave={actions.saveConfig}
+                  />
+                ) : null}
+                {state.section === "tools" ? (
+                  <>
+                    <PermissionSetsPane
+                      // A different project is a different set of files: start clean rather than show
+                      // one project's unsaved lines over another's permission sets.
+                      key={state.at ?? "shared"}
+                      channel={permissionSetsChannel}
+                      layer={permissionSetsBuiltIn ? "system" : state.configLayer}
+                      onLayer={(next) => {
+                        setPermissionSetsBuiltIn(next === "system");
+                        if (next !== "system") actions.setConfigLayer(next);
+                      }}
+                      busy={state.busy}
+                      focus={toolsFocus}
+                      onData={setToolsData}
+                    />
+                    <FunctionsSections
+                      data={toolsData}
+                      layer={permissionSetsBuiltIn ? "system" : state.configLayer}
+                      config={state.config}
+                      busy={state.busy || !(state.configLayer === "base" || state.at !== null)}
+                      onSave={actions.saveConfig}
+                      agents={state.executors.map((e) => e.name)}
+                      rules={state.availability.tree?.function?.rules}
+                      onRules={(next) => {
+                        if (state.config === null) return;
+                        actions.saveDefinition(...functionRulesOverlay(state.config, state.configLayer, next));
+                      }}
+                      onOpenSet={(id) => {
+                        setToolsFocus({ id, nonce: Date.now() });
+                        settingsParts.go("permission-sets");
+                      }}
+                    />
+                  </>
+                ) : null}
+                {state.section === "runs" ? (
+                  <RunsPane
+                    config={state.config}
+                    layer={state.configLayer}
+                    busy={state.busy}
+                    editable={state.configLayer === "base" || state.at !== null}
+                    onSave={actions.saveConfig}
                   />
                 ) : null}
                 {state.section === "files" ? (
@@ -2527,6 +2655,43 @@ export default function App(): JSX.Element {
                     onSaveShared={actions.saveHiddenPaths}
                     onSavePersonal={actions.setFilesHidden}
                   />
+                ) : null}
+                {state.section === "data" ? (
+                  <DataPane
+                    config={state.config}
+                    layer={state.configLayer}
+                    busy={state.busy}
+                    editable={state.configLayer === "base" || state.at !== null}
+                    onSave={actions.saveConfig}
+                    history={
+                      state.at !== null ? (
+                        <History
+                          size={state.history}
+                          report={state.prune}
+                          busy={state.busy}
+                          onPreview={actions.planPrune}
+                          onApply={actions.applyPrune}
+                          onDismiss={actions.dismissPrune}
+                        />
+                      ) : undefined
+                    }
+                  />
+                ) : null}
+                {state.section === "raw" ? (
+                  <div className="cfg-pane">
+                    <RawDocument>
+                      <SettingsPane
+                        config={state.config}
+                        layer={state.configLayer}
+                        busy={state.busy}
+                        drafts={state.drafts}
+                        onDraft={actions.setDraft}
+                        onSave={actions.saveConfig}
+                        showEffective={openOf(ui, FOLD.settingsEffective)}
+                        onShowEffective={(open) => actions.setFold(FOLD.settingsEffective, open)}
+                      />
+                    </RawDocument>
+                  </div>
                 ) : null}
                 {state.section === "appearance" ? (
                   <AppearancePane
@@ -2541,16 +2706,6 @@ export default function App(): JSX.Element {
                     onConversation={actions.setConversation}
                     onEditor={actions.setEditorLook}
                     onRenderer={actions.setRenderer}
-                  />
-                ) : null}
-                {state.section === "history" && state.at !== null ? (
-                  <History
-                    size={state.history}
-                    report={state.prune}
-                    busy={state.busy}
-                    onPreview={actions.planPrune}
-                    onApply={actions.applyPrune}
-                    onDismiss={actions.dismissPrune}
                   />
                 ) : null}
                 </SettingsFrame>

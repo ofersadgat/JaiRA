@@ -228,6 +228,70 @@ export interface AvailabilitySnapshot {
   checkedAt: number;
 }
 
+// --- what is on this machine: local servers and weights ---------------------------------------
+
+/**
+ * One local server JaiRA knows where to look for, and what it said when asked for its models.
+ *
+ * `up` is the strong claim — an OpenAI-compatible server ANSWERED `GET {baseURL}/models` with a model
+ * list. Something else listening on the port (a dev server on 8080 is common) is not up, and its
+ * `error` says what answered instead, so a port that happens to be busy never reads as LM Studio.
+ */
+export interface LocalServerProbe {
+  /** Who conventionally listens there — `Ollama`, `LM Studio` — or `Configured` for the route's own URL. */
+  name: string;
+  /** The OpenAI-compatible base, version path included: what `models.routes.local.baseURL` would hold. */
+  baseURL: string;
+  up: boolean;
+  /** The model ids it serves, in its own order. Empty when it is not up, or serves nothing yet. */
+  models: string[];
+  /** Why it is not up — refused, no answer in time, not a model list — in one line. */
+  error?: string;
+  /** True for the server the `local` route is configured with (its `baseURL` names this one). */
+  inUse: boolean;
+}
+
+/** Every well-known local server, asked once, side by side — what `model:probeLocal` answers. */
+export interface LocalServerDiscovery {
+  /**
+   * The well-known servers in a fixed order, then — only when the `local` route names a URL none of
+   * them is — that URL as a row of its own named `Configured`.
+   */
+  servers: LocalServerProbe[];
+  /** The `local` route's `baseURL` the rows were compared with, when there is one. */
+  configured?: string;
+  /** Epoch ms of the ask. */
+  checkedAt: number;
+}
+
+/** One `embedded.weights` entry, checked on disk — the per-model half of the embedded route's probe. */
+export interface WeightsFileCheck {
+  /** The provider-native model id the entry is keyed by. */
+  id: string;
+  /** As configured: the GGUF, or a split model's first part (`…-00001-of-00003.gguf`). */
+  modelPath: string;
+  /** The file is there and is a file. For a split model: its first part is. */
+  exists: boolean;
+  /** Bytes on disk — every part's, summed, for a split model whose parts are all there. */
+  sizeBytes?: number;
+  /** For a split model: how many parts its first part's name says there are. */
+  parts?: number;
+  /** What is wrong beyond "not there": a directory, an unreadable file, a missing part. */
+  error?: string;
+}
+
+/** What `model:checkWeights` answers: every weights entry, and whether anything can load them. */
+export interface EmbeddedWeightsReport {
+  weights: WeightsFileCheck[];
+  /** The optional package the `embedded` route loads weights with. */
+  loader: {
+    module: string;
+    installed: boolean;
+    /** Why it could not be resolved, when it could not. */
+    error?: string;
+  };
+}
+
 /**
  * The variable each built-in executor's key is conventionally kept under.
  *

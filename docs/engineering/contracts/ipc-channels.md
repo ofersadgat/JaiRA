@@ -2,7 +2,7 @@
 id: engineering/contracts/ipc-channels
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 visibility: internal
 kind: api
 owned_by: [engineering/units/ipc-bridge]
@@ -13,7 +13,7 @@ siblings: [engineering/contracts/preload-bridge, engineering/contracts/push-mess
 
 # IPC channels
 
-The IPC channels are the 96 request and response pairs in `IpcContract` in `@jaira/shared` `ipc.ts` that the renderer invokes on the main process, one handler each in `index.ts`, grouped here by family.
+The IPC channels are the 120 request and response pairs in `IpcContract` in `@jaira/shared` `ipc.ts` that the renderer invokes on the main process, one handler each in `index.ts`, grouped here by family.
 
 ## A caller finds its channel here, and follows the link when its family has a contract of its own
 
@@ -304,6 +304,12 @@ These are [app-shell](../units/app-shell.md).
 | `executor:list` | `void` | `ExecutorInfo[]` |
 | `executor:probe` | `{name?: string}` or `void` | `ProbeResult[]`, every executor when `name` is absent |
 | `model:probe` | `void` | `ProbeResult[]` for the configured routes; no model is called |
+| `model:probeLocal` | `{baseURL?: string}` or `void`; `baseURL` compares with the field as typed instead of the configured `local.baseURL` | `LocalServerDiscovery`: Ollama `:11434`, LM Studio `:1234`, llama.cpp `:8080`, vLLM `:8000` and Jan `:1337`, each asked `GET {base}/v1/models` in parallel with an 800 ms deadline, `inUse` on the row the `local` route names, and a `Configured` row when it names none of them; on demand only |
+| `model:checkWeights` | `{weights?: Record<string, {modelPath: string}>}` or `void`; absent checks the configured `embedded.weights` | `EmbeddedWeightsReport`: one `WeightsFileCheck` per model (`exists`, `sizeBytes`, a split model's `parts` summed, `error`) and whether `node-llama-cpp` resolves — the rows the `embedded` route's probe is decided from |
+| `forge:signIn` | `{connection: string}` | `ForgeSignInStart`: `{ok: true, pending: ForgeSignInPending}` once the forge hands out a code (the page is opened in the browser, polling continues in main), or `{ok: false, reason, fix?}` — no `integrations.oauth.<provider>.clientId`, the connection is off, or the forge refused the app; an unknown connection rejects. A second call while one waits answers with the one waiting. How it ends is the `forge:signInFinished` push ([forge-integrations](../units/forge-integrations.md)) |
+| `forge:cancelSignIn` | `{connection: string}` | `void`; the waiting sign-in ends `canceled`, and nothing waiting is not an error |
+| `forge:signIns` | `void` | `ForgeSignInPending[]`, the sign-ins waiting on the person now |
+| `forge:signOut` | `{connection: string}` | `ForgeSignOutOutcome`: the token removed from where the chain finds it, with its OAuth mark and refresh token, then a re-check; `{ok: false, reason}` naming the place when it is one JaiRA does not write |
 | `availability:read` | `void` | `AvailabilitySnapshot`, as last observed |
 | `availability:refresh` | `void` | `AvailabilitySnapshot` from a pass that starts after the call |
 | `secret:capabilities` | `void` | `{keychain: boolean; keychainReason?: string}` |
@@ -328,6 +334,7 @@ These are [app-shell](../units/app-shell.md).
 | `ProbeResult.credentialMissing`, `fix` | string | no | the named credential nothing supplies; one line saying what would fix a failure |
 | `AvailabilitySnapshot.routes`, `executors` | `ProbeResult[]` | yes | routes in `MODEL_ROUTE_KEYS` order, executors in inventory order |
 | `AvailabilitySnapshot.tree` | `JairaOperationNode` | no | the default executor resolved from the checks, as [executor-tree](../units/executor-tree.md) builds it |
+| `AvailabilitySnapshot.forges` | `ForgeCheck[]` | no | each forge connection, checked by asking its host who the token is; `ForgeCheck.via` is `"oauth"` for a token a browser sign-in stored and the chain still finds there, `"token"` otherwise |
 | `AvailabilitySnapshot.checkedAt` | number | yes | epoch ms, `0` before any pass |
 
 ## Errors are rejections carrying a message, and a few channels answer an empty or refused result instead

@@ -250,7 +250,7 @@ export function History({
   // Two sections of rows (`settingsLayout.tsx`): what is stored, and what pruning would free.
   return (
     <div className="history">
-      <SettingsSection id="stored" title="Stored history">
+      <SettingsSection id="stored" title="Stored history" lead="This project's own records — they are the open project's whichever layer the switch above is on.">
         <SettingsRow name="Tasks" description="Every task this project has kept a record of." control={<span className="set-num data-num">{size.tasks}</span>} />
         <SettingsRow name="Events" description="What its runs recorded, step by step." control={<span className="set-num data-num">{size.events}</span>} />
         <SettingsRow name="Commands" description="Every command an agent ran, and what it was told." control={<span className="set-num data-num">{size.commands}</span>} />

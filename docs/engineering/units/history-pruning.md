@@ -3,7 +3,7 @@ id: engineering/units/history-pruning
 type: engineering-unit
 status: shipped
 updated: 2026-09-13
-implements: [product/keep-history-within-bounds, ux/patterns/second-deliberate-step-for-irreversible, ui/surfaces/settings-history]
+implements: [product/keep-history-within-bounds, ux/patterns/second-deliberate-step-for-irreversible, ui/surfaces/settings-data]
 layer: service
 owns_contracts: []
 requires: [engineering/units/task-lifecycle, engineering/units/event-journal, engineering/units/operation-record-store, engineering/units/storage-policy]
@@ -47,7 +47,7 @@ It deliberately does not own:
 | `sessions` and `session_names` | deleted by age and reference, across every task rather than only the candidates | the database, or the conversation files when file-backed | operation-record-store |
 | `blobs` | released per record, then collected once nothing names them | the database | operation-record-store |
 | `system/journal/<taskId>/` and the task's conversation file | removed after the commit | the files, when file-backed | event-journal and storage-policy |
-| `PruneResult` and `HistorySize` | computed per call | the tables at call time | Settings › History and `jaira prune` |
+| `PruneResult` and `HistorySize` | computed per call | the tables at call time | Settings › Data & history and `jaira prune` |
 
 ## The invariants keep resumable history and referenced rows out of reach
 
@@ -68,7 +68,7 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | A `failed` or `canceled` task ended before the cutoff | both are startable yet outside the protected set, so their journal and records go; the app's resume then refuses `cannot be resumed: nothing was recorded`, and the CLI's `task start` walks the pinned workflow again from its root | re-run it as a new task | Resume is refused; a task the app closed while it waited on a person logs `could not resume` at the next open |
 | A task is `stopping` | it is outside the protected set; with a cutoff of 0 days its rows go while its run still settles and appends, and a task left `stopping` by a dead process goes once it is older than the cutoff | none | the task's history holds only what arrived after the prune |
-| Several projects are open in the app | `history:prune` carries no project, so the service refuses `several projects are open, so this call must name one` | close the other projects, or run `jaira prune --project <dir>` | the refusal shows in Settings › History |
+| Several projects are open in the app | `history:prune` carries no project, so the service refuses `several projects are open, so this call must name one` | close the other projects, or run `jaira prune --project <dir>` | the refusal shows in Settings › Data & history |
 | A task ends between the plan and the apply | the apply scans again with its own cutoff, so it can delete tasks the plan did not list | plan again before applying | the apply deletes more than was shown |
 | Another process starts a candidate between the scan and the transaction | the status is read outside the transaction and not read again | none | the started task loses its history |
 | Two processes prune at once | SQLite serializes the two transactions, and the second deletes nothing more, though it reports the counts it scanned before the first committed | none needed | the second report overstates what it deleted |

@@ -46,7 +46,7 @@
 import type { ExecEnvironmentDecl, LoadedState } from "@declarative-ai/hw";
 import type { InlineFamily, NamedParameter, PromptOp } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
-import { ALWAYS_GRANTED_TOOLS, SHELL_TOOL, declaresTools, lowerToolset, permissionsOfToolset, toolsetOfSettings } from "@jaira/shared";
+import { ALWAYS_GRANTED_TOOLS, SHELL_TOOL, declaresTools, lowerPermissionSet, permissionsOfPermissionSet, permissionSetOfSettings } from "@jaira/shared";
 import type { ChatPlanView, ChatSettings, PermissionsDecl, SettingOrigin, ToolImplementation, UnresolvedSetting } from "@jaira/shared";
 import type { ReasoningSpec } from "@declarative-ai/llm";
 import { planAgentTools } from "./agentTools";
@@ -153,7 +153,7 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
   const lowered = inherited<PermissionsDecl>("permissions", host?.environment?.permissions);
   // The shell's entry lowers as `ask`, with the mode its author wrote carried in `subjects`
   // (decision 0007 §4). A composer shows and edits the AUTHORED mode, so it is put back here; sending
-  // lowers it again, and `toolsetOfEnvironment` reads either spelling as the same toolset.
+  // lowers it again, and `permissionSetOfEnvironment` reads either spelling as the same permission set.
   const shellMode = lowered?.subjects?.[SHELL_TOOL];
   const permissions =
     lowered !== undefined && shellMode !== undefined && lowered.tools?.[SHELL_TOOL] !== undefined
@@ -182,7 +182,7 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
   // is where it has to arrive, and a field the plan quietly drops is a setting that silently
   // stops applying.
   //
-  // …and a state does now: a toolset entry may choose its implementation (decision 0007 §1), and
+  // …and a state does now: a permission set entry may choose its implementation (decision 0007 §1), and
   // lowering carries that choice on the loaded block as `permissions.implementations`.
   const [pickedImplementations, implementationsOrigin] = pick(
     "implementations",
@@ -190,7 +190,7 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
   );
   // The map form of the three fields above. Never inherited AS a map: a loaded state always holds
   // the lowered list and block, whichever form its author wrote, and those are read above.
-  const [pickedToolset, toolsetOrigin] = pick("toolset", undefined);
+  const [pickedPermissionSet, permissionSetOrigin] = pick("permissionSet", undefined);
 
   return {
     settings: {
@@ -199,7 +199,7 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
       ...(pickedTools !== undefined ? { tools: pickedTools } : {}),
       ...(pickedPermissions !== undefined ? { permissions: pickedPermissions } : {}),
       ...(pickedImplementations !== undefined ? { implementations: pickedImplementations } : {}),
-      ...(pickedToolset !== undefined ? { toolset: pickedToolset } : {}),
+      ...(pickedPermissionSet !== undefined ? { permissionSet: pickedPermissionSet } : {}),
     },
     origin: {
       model: modelOrigin,
@@ -207,7 +207,7 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
       tools: toolsOrigin,
       permissions: permissionsOrigin,
       implementations: implementationsOrigin,
-      toolset: toolsetOrigin,
+      permissionSet: permissionSetOrigin,
     },
     ...(host?.id !== undefined ? { from: host.id } : {}),
     ...(host?.operation?.kind === "prompt" && typeof host.operation.system === "string"
@@ -241,10 +241,10 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
   const config = { ...configOf(state) };
   if (settings.model !== undefined) config["model"] = settings.model;
   if (settings.reasoning !== undefined) config["reasoning"] = settings.reasoning as unknown as JsonValue;
-  // A toolset is written as what it LOWERS to — the list and the block a loaded state holds —
+  // A permission set is written as what it LOWERS to — the list and the block a loaded state holds —
   // so the state this returns is shaped like every other one the engine and the chat plan read.
-  if (settings.toolset !== undefined) {
-    const lowered = lowerToolset(toolsetOfSettings(settings).toolset, settings.permissions);
+  if (settings.permissionSet !== undefined) {
+    const lowered = lowerPermissionSet(permissionSetOfSettings(settings).permissionSet, settings.permissions);
     return {
       ...state,
       operation: { ...operation, config: config as typeof operation.config },
@@ -266,7 +266,7 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
       // A block that carries `subjects` holds a shell whose mode the plan showed as authored, so it
       // is lowered again (the shell back to `ask`); any other block goes in as it came.
       ...(settings.permissions?.subjects !== undefined
-        ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions.scopes) }
+        ? { permissions: permissionsOfPermissionSet(permissionSetOfSettings(settings).permissionSet, settings.permissions.scopes) }
         : settings.permissions !== undefined
           ? { permissions: settings.permissions }
           : {}),
@@ -330,11 +330,11 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
       // policy with the same primitive the engine uses. Declaring them without that would be worse
       // than dropping them: the model would be told about tools nothing had gated.
       ...tools.environment,
-      // A toolset travels as the block it lowers to. An INHERITED block that carries `subjects` is
+      // A permission set travels as the block it lowers to. An INHERITED block that carries `subjects` is
       // lowered again, which puts the shell's entry back to the `ask` the plan showed as its
       // authored mode (decision 0007 §4); any other block travels as it came.
-      ...(settings.toolset !== undefined || settings.permissions?.subjects !== undefined
-        ? { permissions: permissionsOfToolset(toolsetOfSettings(settings).toolset, settings.permissions?.scopes) }
+      ...(settings.permissionSet !== undefined || settings.permissions?.subjects !== undefined
+        ? { permissions: permissionsOfPermissionSet(permissionSetOfSettings(settings).permissionSet, settings.permissions?.scopes) }
         : settings.permissions !== undefined
           ? { permissions: settings.permissions }
           : {}),
@@ -357,9 +357,9 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
  *
  * Only what is INJECTED is decided here. Which of the agent's own tools are removed, which are kept
  * and which must ask depends on WHICH agent answers, and that is not known until the route is — so
- * `withAgentToolset` does it, at the executor, from that executor's own declaration and the toolset
- * the caller publishes on the services bundle (`TOOLSET_SERVICE`). An unticked box removes the
- * built-in (decision 0007 §3): an agent is never handed a tool its toolset does not hold.
+ * `withAgentPermissionSet` does it, at the executor, from that executor's own declaration and the permission set
+ * the caller publishes on the services bundle (`PERMISSION_SET_SERVICE`). An unticked box removes the
+ * built-in (decision 0007 §3): an agent is never handed a tool its permission set does not hold.
  */
 function agentToolWiring(settings: ChatSettings): {
   environment: { tools?: string[] };
@@ -370,9 +370,9 @@ function agentToolWiring(settings: ChatSettings): {
   // here, and the always-granted set is the one thing still worth writing: a conversation with no
   // tools is exactly the one that gets asked for a mockup. See `ToolSpec.alwaysGranted`.
   if (!declaresTools(settings)) return { environment: { tools: [...ALWAYS_GRANTED_TOOLS] }, config: {} };
-  // ONE map, whichever way the settings spelled it — a toolset, or the list, the block and the
-  // implementations map an inherited declaration arrives as (`toolsetOfSettings`).
-  const plan = planAgentTools(toolsetOfSettings(settings).toolset);
+  // ONE map, whichever way the settings spelled it — a permission set, or the list, the block and the
+  // implementations map an inherited declaration arrives as (`permissionSetOfSettings`).
+  const plan = planAgentTools(permissionSetOfSettings(settings).permissionSet);
   // The scope table, compiled into the agent's own rules, so its built-ins are bounded UP FRONT
   // rather than one callback at a time. Our gate stays underneath for what rules cannot express.
   const scoped = settings.permissions?.scopes === undefined

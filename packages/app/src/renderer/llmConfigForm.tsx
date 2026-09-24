@@ -97,7 +97,7 @@ export interface RailItem {
   className?: string;
   title?: string;
   /**
-   * A HEADING between tabs and not a tab: a bucket's name over its toolsets. It is drawn in the
+   * A HEADING between tabs and not a tab: a bucket's name over its permission sets. It is drawn in the
    * rail's order, takes no focus and is skipped by the arrows — `label` and `summary` are unused.
    */
   heading?: ReactNode;

@@ -52,13 +52,55 @@ export interface JairaForgeConnection {
 export interface JairaIntegrationsConfig {
   /** Connections by NAME — a name and not the host, because a host has dots and a config path splits on them. */
   forges: Record<string, JairaForgeConnection>;
-  review: {
-    /** The quiet window after a comment, as a duration (`"10m"`). A state's `remote` overrides it. */
-    settleAfter: string;
-  };
+  /**
+   * The OAuth apps a person signs in to a forge through, by provider — see {@link JairaForgeOAuthApp}.
+   *
+   * Empty by default: JaiRA's own apps ({@link BUILTIN_OAUTH_APPS}) answer for gitlab.com and
+   * github.com without being written here. A layer names one for a self-hosted instance, or to use an
+   * app of its own on the public hosts — {@link oauthAppFor} says which is used.
+   */
+  oauth: Partial<Record<ForgeProviderKind, JairaForgeOAuthApp>>;
 }
 
-/** The window the decision names; what `integrations.review.settleAfter` is when nobody set it. */
+/**
+ * An OAuth app registered on a forge, used for the device authorization grant (RFC 8628).
+ *
+ * Only the client ID: the device flow is for a PUBLIC client — one that cannot keep a secret, which a
+ * desktop app is — so there is no secret to name. On GitHub the app has "Enable Device Flow" ticked;
+ * on GitLab it is not confidential. One per provider: a self-hosted GitLab is asked with the same id,
+ * so an instance with an app of its own needs that app's id here, in the layer that uses the instance.
+ */
+export interface JairaForgeOAuthApp {
+  clientId: string;
+}
+
+/**
+ * JaiRA's own OAuth apps, one per public forge, used for the device flow when no layer names another
+ * (registered 2026-09-23). Only the client IDs: a device flow is a public client, and a secret
+ * shipped inside a desktop app is not a secret — neither forge asks for one on this flow.
+ *
+ * GitHub's is a GitHub App (id 5053987), so its token acts only in repositories the app is INSTALLED
+ * on, and carries its permissions rather than scopes. GitLab's allows `api`, which is what JaiRA asks.
+ * Each is registered on its public host and means nothing to a self-hosted instance.
+ */
+export const BUILTIN_OAUTH_APPS: Record<ForgeProviderKind, JairaForgeOAuthApp & { host: string }> = {
+  github: { host: "github.com", clientId: "Iv23liJYmSQiRIpe6dPS" },
+  gitlab: { host: "gitlab.com", clientId: "3324ddfef98706458b7a650cc4c26e8f406c9c486bc46679fc06c24c6a26c963" },
+};
+
+/**
+ * The OAuth app a sign-in to this connection uses: the one a layer names for its provider, else
+ * JaiRA's own when the connection is the public host that app is registered on. Absent ⇒ none, and
+ * a sign-in says what to set.
+ */
+export function oauthAppFor(integrations: Pick<JairaIntegrationsConfig, "oauth">, connection: { provider: ForgeProviderKind; host: string }): JairaForgeOAuthApp | undefined {
+  const named = integrations.oauth[connection.provider];
+  if (named !== undefined) return named;
+  const builtIn = BUILTIN_OAUTH_APPS[connection.provider];
+  return connection.host === builtIn.host ? { clientId: builtIn.clientId } : undefined;
+}
+
+/** The window the decision names; what `functions.review_artifacts.settleAfter` is when nobody set it. */
 export const DEFAULT_SETTLE_AFTER = "10m";
 
 /**
@@ -75,10 +117,10 @@ export const BUILTIN_FORGES: Record<string, JairaForgeConnection> = {
 };
 
 export function defaultIntegrations(): JairaIntegrationsConfig {
-  return { forges: structuredClone(BUILTIN_FORGES), review: { settleAfter: DEFAULT_SETTLE_AFTER } };
+  return { forges: structuredClone(BUILTIN_FORGES), oauth: {} };
 }
 
-/** What `remote.publish` may be set to under `policy` — see {@link PUBLISH_MODE_LABELS}. */
+/** What `functions.review_artifacts.publish` may be set to — see {@link PUBLISH_MODE_LABELS}. */
 export const PUBLISH_MODES = ["ask", "allow", "deny"] as const;
 export type PublishMode = (typeof PUBLISH_MODES)[number];
 
@@ -106,7 +148,10 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
   const out = defaultIntegrations();
   if (raw === undefined) return out;
   const block = objectAt(raw, "config.integrations");
-  onlyFields(block, ["forges", "review"], "config.integrations");
+  if (block["review"] !== undefined) {
+    throw new Error("config.integrations.review has moved: the quiet window after a comment is functions.review_artifacts.settleAfter");
+  }
+  onlyFields(block, ["forges", "oauth"], "config.integrations");
 
   if (block["forges"] !== undefined) {
     for (const [name, entry] of Object.entries(objectAt(block["forges"], "config.integrations.forges"))) {
@@ -160,24 +205,30 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
     byHost.set(connection.host, name);
   }
 
-  if (block["review"] !== undefined) {
-    const review = objectAt(block["review"], "config.integrations.review");
-    onlyFields(review, ["settleAfter"], "config.integrations.review");
-    const settleAfter = review["settleAfter"];
-    if (settleAfter !== undefined) {
-      if (typeof settleAfter !== "string" || parseDuration(settleAfter) === undefined) {
-        throw new Error(`config.integrations.review.settleAfter must be a duration like "10m", "90s", "2h" or "0"`);
+  if (block["oauth"] !== undefined) {
+    for (const [provider, entry] of Object.entries(objectAt(block["oauth"], "config.integrations.oauth"))) {
+      const where = `config.integrations.oauth.${provider}`;
+      if (!(FORGE_PROVIDERS as readonly string[]).includes(provider)) {
+        throw new Error(`${where}: an OAuth app is keyed by its provider — one of ${FORGE_PROVIDERS.join(", ")}`);
       }
-      out.review.settleAfter = settleAfter.trim();
+      const app = objectAt(entry, where);
+      onlyFields(app, ["clientId"], where);
+      const clientId = app["clientId"];
+      if (typeof clientId !== "string" || !/^\S+$/.test(clientId)) {
+        throw new Error(`${where}.clientId must be the OAuth app's client ID — one word, no spaces`);
+      }
+      out.oauth[provider as ForgeProviderKind] = { clientId };
     }
   }
   return out;
 }
 
-/** `remote.publish` out of the opaque policy document — `ask` when absent or unreadable. */
-export function publishModeOf(policy: unknown): PublishMode {
-  const remote = policy !== null && typeof policy === "object" ? (policy as Record<string, unknown>)["remote"] : undefined;
-  const mode = remote !== null && typeof remote === "object" ? (remote as Record<string, unknown>)["publish"] : undefined;
+/**
+ * `publish` out of an unparsed `functions.review_artifacts` block — for a reader holding a layer's raw
+ * document rather than the parsed configuration. `ask` when absent or unreadable.
+ */
+export function publishModeOf(reviewArtifacts: unknown): PublishMode {
+  const mode = reviewArtifacts !== null && typeof reviewArtifacts === "object" ? (reviewArtifacts as Record<string, unknown>)["publish"] : undefined;
   return (PUBLISH_MODES as readonly unknown[]).includes(mode) ? (mode as PublishMode) : DEFAULT_PUBLISH_MODE;
 }
 
@@ -452,7 +503,60 @@ export interface ForgeCheck {
   credential?: SecretOrigin;
   /** Set when the connection names a token and nothing in the chain supplies it. */
   credentialMissing?: string;
+  /**
+   * How the token in use got there: `oauth` when a sign-in through the browser stored it — and it is
+   * still the one the chain finds — `token` for one pasted, or put in a file by hand. Absent while no
+   * token resolves.
+   */
+  via?: "oauth" | "token";
 }
+
+// --- signing in to a forge through the browser (RFC 8628) -------------------------------------------
+
+/**
+ * A forge sign-in waiting on the person: the code they type, and the page they type it on.
+ *
+ * The device authorization grant, because it is the one OAuth flow a desktop app completes without a
+ * redirect it would have to listen for: the forge shows a page, the person types the code there, and
+ * main polls until the forge says yes, no, or too late.
+ */
+export interface ForgeSignInPending {
+  /** The connection's name in `integrations.forges`. */
+  connection: string;
+  provider: ForgeProviderKind;
+  host: string;
+  /** What the person types on the page — `WDJB-MJHT`. Shown as the forge sent it. */
+  userCode: string;
+  /** The page to type it on. Opened in the browser when the sign-in starts. */
+  verificationUri: string;
+  /** The same page with the code already in it, where the forge offers one (GitLab does). */
+  verificationUriComplete?: string;
+  /** Epoch ms after which the code is dead, and the sign-in ends as `expired`. */
+  expiresAt: number;
+  /** Epoch ms the sign-in started. */
+  startedAt: number;
+}
+
+/**
+ * What starting a forge sign-in came to. A refusal is an ANSWER, not a rejection — no OAuth app is
+ * configured, the forge refused the client id — said as one sentence, with what would fix it.
+ */
+export type ForgeSignInStart = { ok: true; pending: ForgeSignInPending } | { ok: false; reason: string; fix?: string };
+
+/**
+ * How a forge sign-in ended — the payload of the `forge:signInFinished` push.
+ *
+ * `code` says which way it failed: `denied` (the person refused on the forge's page), `expired`
+ * (nobody typed the code in time), `canceled` (Cancel in JaiRA, or the app closing), and `failed` for
+ * everything else, with the forge's own words in `reason`. `login` is who the stored token belongs
+ * to, when the check that follows a success could say.
+ */
+export type ForgeSignInOutcome =
+  | { ok: true; connection: string; login?: string }
+  | { ok: false; connection: string; code: "denied" | "expired" | "canceled" | "failed"; reason: string };
+
+/** What signing out of a forge came to: the token removed, or why it could not be. */
+export type ForgeSignOutOutcome = { ok: true } | { ok: false; reason: string };
 
 // --- the row a task keeps per request ---------------------------------------------------------------
 

@@ -40,7 +40,7 @@ The left column is on `--bg` with 12px by 14px padding and 16px between sections
 | Missing notice | `One state was found in no layer, so the run cannot start. The built-in layer is missing from this build.`, or `{n} states were` |
 | Buttons | `Re-check` · `Run (live LLM)` · `Run scripted` · `New task` · `Cancel` |
 | Button tooltips | `Replaces the model with canned replies — exercises everything except the provider` · `A new task, rather than another run on the last one` |
-| Readiness | `Nothing has been checked yet, so a live run may find no provider. The scripted run needs none.` · `Nothing here reported healthy, so a live run will probably fail to find a model — see Settings › Providers. The scripted run needs none, and is the better first test anyway.` · `A live run goes to whatever models.default resolves to. Reported healthy: {names}.` |
+| Readiness | `Nothing has been checked yet, so a live run may find no provider. The scripted run needs none.` · `Nothing here reported healthy, so a live run will probably fail to find a model — see Settings › Connections. The scripted run needs none, and is the better first test anyway.` · `A live run goes to whatever models.default resolves to. Reported healthy: {names}.` |
 | No project | `No project is open. A task belongs to a checkout, so open one from Settings before running.` |
 | Result | `Started — no run has settled yet.` · `PASS` · `FAIL` · `NO VERDICT` · `{outcome}` · `the greeting` · `the judgement` |
 | No verdict notice | `The run settled without publishing a verdict — look at the instance tree and the events beside it for where it stopped.` |

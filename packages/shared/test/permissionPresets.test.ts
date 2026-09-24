@@ -1,15 +1,15 @@
 /**
- * The composer's four permission presets — as the toolset FILES they became (decision 0007 §2).
+ * The composer's four permission presets — as the permission set FILES they became (decision 0007 §2).
  *
  * A preset used to be a FUNCTION of a tool, spent on the click: it wrote a mode per tool and then had
  * no further say, so what ran was the map. That half survives untouched — what runs is still the map.
- * What changed is where the four maps live: `$SYSTEM/toolsets/chat/{ask-first, read-only, auto,
+ * What changed is where the four maps live: `$SYSTEM/permission-sets/chat/{ask-first, read-only, auto,
  * full}.json`, data a person can read, override in a layer, and add to.
  *
  * So the functions are FROZEN HERE, exactly as they were the day they left the source, and the one
  * claim of this file is that the shipped files say what those functions wrote — for every tool a
  * conversation can be handed, and for the name no preset had ever heard of, which is what `other` is.
- * Which toolset a map IS — the old `presetOf` — is `matchToolset`, in `toolsetBuckets.test.ts`.
+ * Which permission set a map IS — the old `presetOf` — is `matchPermissionSet`, in `permissionSetBuckets.test.ts`.
  *
  * ## The workflow tools joined the `chat` bucket (decision 0005 step 6)
  *
@@ -23,16 +23,16 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isToolsetMode, READ_ONLY_PRESET_TOOLS, SMART_MODE, type ToolsetMode } from "../src/operationVocabulary";
+import { isPermissionSetMode, READ_ONLY_PRESET_TOOLS, SMART_MODE, type PermissionSetMode } from "../src/operationVocabulary";
 import { TOOL_SPEC_BY_NAME, TOOL_SPECS } from "../src/toolVocabulary";
-import { heldTools, offeredTools, parseToolset, toolImplementations, toolModes } from "../src/toolsets";
+import { heldTools, offeredTools, parsePermissionSet, toolImplementations, toolModes } from "../src/permissionSets";
 
-const TOOLSETS = join(dirname(fileURLToPath(import.meta.url)), "..", "builtin", "toolsets");
+const PERMISSION_SETS = join(dirname(fileURLToPath(import.meta.url)), "..", "builtin", "permission-sets");
 
-const shipped = (id: string): unknown => JSON.parse(readFileSync(join(TOOLSETS, `${id}.json`), "utf8"));
+const shipped = (id: string): unknown => JSON.parse(readFileSync(join(PERMISSION_SETS, `${id}.json`), "utf8"));
 
 /** FROZEN — `PERMISSION_PRESETS` as it stood at a1a0581, the last commit that had it. */
-const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: string) => ToolsetMode }> = [
+const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: string) => PermissionSetMode }> = [
   { id: "ask", file: "ask-first", modeFor: () => "ask" },
   { id: "read-only", file: "read-only", modeFor: (name) => (READ_ONLY_PRESET_TOOLS.includes(name) ? "allow" : "deny") },
   // The preset wrote the word `smart`; the word became the shipped FUNCTION of that name (decision 0007,
@@ -52,25 +52,25 @@ const PRESET_TOOLS = CONVERSATION_TOOLS.filter((name) => !WORKFLOW_TOOLS.include
 
 describe("the chat bucket is the four presets, written down", () => {
   it.each(FROZEN_PRESETS)("chat/$file writes EXACTLY the map the `$id` preset wrote", ({ file, modeFor }) => {
-    const { toolset, issues } = parseToolset(shipped(`chat/${file}`));
-    const control = parseToolset(shipped(`chat_control/${file}`)).toolset;
+    const { permissionSet, issues } = parsePermissionSet(shipped(`chat/${file}`));
+    const control = parsePermissionSet(shipped(`chat_control/${file}`)).permissionSet;
     expect(issues).toEqual([]);
     // The map the preset wrote for the tools it knew, and `chat_control`'s own answer for the rest.
-    expect(toolModes(toolset)).toEqual({
+    expect(toolModes(permissionSet)).toEqual({
       ...Object.fromEntries(PRESET_TOOLS.map((name) => [name, modeFor(name)])),
       ...toolModes(control),
     });
-    // Every line is HELD — a preset never unticked anything, and a toolset's line is its tick.
-    expect(heldTools(toolset).sort()).toEqual([...CONVERSATION_TOOLS].sort());
+    // Every line is HELD — a preset never unticked anything, and a permission set's line is its tick.
+    expect(heldTools(permissionSet).sort()).toEqual([...CONVERSATION_TOOLS].sort());
     // …with nobody's implementation chosen, because a preset never chose one.
-    expect(toolImplementations(toolset)).toEqual({});
+    expect(toolImplementations(permissionSet)).toEqual({});
     // "A name the preset has never heard of gets its strictest" is what `other` says.
-    expect(toolset.other).toEqual(modeFor("a tool nobody has heard of"));
+    expect(permissionSet.other).toEqual(modeFor("a tool nobody has heard of"));
   });
 
   it("read-only allows exactly the frozen list, and that list is still in the vocabulary", () => {
-    const { toolset } = parseToolset(shipped("chat/read-only"));
-    const allowed = Object.entries(toolModes(toolset))
+    const { permissionSet } = parsePermissionSet(shipped("chat/read-only"));
+    const allowed = Object.entries(toolModes(permissionSet))
       .filter(([name, mode]) => mode === "allow" && !WORKFLOW_TOOLS.includes(name))
       .map(([name]) => name);
     expect(allowed.sort()).toEqual([...READ_ONLY_PRESET_TOOLS].sort());
@@ -81,29 +81,29 @@ describe("the chat bucket is the four presets, written down", () => {
     // Plan mode is an ESCALATION — read-only until the agent presents a plan and a human approves the
     // exit — and the exit gate is registered by the engine for the states it runs, not by the chat
     // path. Shipped here it would be `read-only` under a name promising a door nobody has hung.
-    expect(readdirSync(join(TOOLSETS, "chat")).sort()).toEqual(["ask-first.json", "auto.json", "full.json", "read-only.json"]);
+    expect(readdirSync(join(PERMISSION_SETS, "chat")).sort()).toEqual(["ask-first.json", "auto.json", "full.json", "read-only.json"]);
   });
 });
 
 describe("chat_control has its OWN versions of the same names", () => {
   it("ships the same four names", () => {
-    expect(readdirSync(join(TOOLSETS, "chat_control")).sort()).toEqual(readdirSync(join(TOOLSETS, "chat")).sort());
+    expect(readdirSync(join(PERMISSION_SETS, "chat_control")).sort()).toEqual(readdirSync(join(PERMISSION_SETS, "chat")).sort());
   });
 
   it.each(["ask-first", "read-only", "auto", "full"])("chat_control/%s holds ONLY the task and workflow tools, and refuses everything else", (name) => {
-    const { toolset, issues } = parseToolset(shipped(`chat_control/${name}`));
+    const { permissionSet, issues } = parsePermissionSet(shipped(`chat_control/${name}`));
     // No warning either: the eight names are in the standard list, or each would be dropped as unknown.
     expect(issues).toEqual([]);
-    expect(Object.keys(toolset.entries).sort()).toEqual([...WORKFLOW_TOOLS].sort());
-    expect(toolset.other).toBe("deny");
+    expect(Object.keys(permissionSet.entries).sort()).toEqual([...WORKFLOW_TOOLS].sort());
+    expect(permissionSet.other).toBe("deny");
   });
 
   it("holds them and HANDS THEM OVER: they are named, and served since step 6", () => {
-    const { toolset } = parseToolset(shipped("chat_control/full"));
-    expect(heldTools(toolset).sort()).toEqual([...WORKFLOW_TOOLS].sort());
+    const { permissionSet } = parsePermissionSet(shipped("chat_control/full"));
+    expect(heldTools(permissionSet).sort()).toEqual([...WORKFLOW_TOOLS].sort());
     // What lowering writes into the engine's `tools` list, and what an agent plan calls held. It was
     // empty while the eight carried `unserved`; deleting that mark was the whole of serving them.
-    expect(offeredTools(toolset).sort()).toEqual([...WORKFLOW_TOOLS].sort());
+    expect(offeredTools(permissionSet).sort()).toEqual([...WORKFLOW_TOOLS].sort());
     for (const name of WORKFLOW_TOOLS) {
       expect(TOOL_SPEC_BY_NAME.get(name)).toMatchObject({ category: "tasks" });
       expect(TOOL_SPEC_BY_NAME.get(name)!.unserved).toBeUndefined();
@@ -111,7 +111,7 @@ describe("chat_control has its OWN versions of the same names", () => {
   });
 
   it("read-only may look and may not steer", () => {
-    expect(toolModes(parseToolset(shipped("chat_control/read-only")).toolset)).toEqual({
+    expect(toolModes(parsePermissionSet(shipped("chat_control/read-only")).permissionSet)).toEqual({
       list_workflows: "allow",
       list_tasks: "allow",
       start_task: "deny",
@@ -124,12 +124,12 @@ describe("chat_control has its OWN versions of the same names", () => {
   });
 });
 
-describe("every shipped toolset", () => {
-  it("only ever writes a mode a toolset takes — one of the three words, or a function", () => {
-    for (const bucket of readdirSync(TOOLSETS)) {
-      for (const file of readdirSync(join(TOOLSETS, bucket))) {
+describe("every shipped permission set", () => {
+  it("only ever writes a mode a permission set takes — one of the three words, or a function", () => {
+    for (const bucket of readdirSync(PERMISSION_SETS)) {
+      for (const file of readdirSync(join(PERMISSION_SETS, bucket))) {
         const map = shipped(`${bucket}/${file.replace(/\.json$/, "")}`) as Record<string, unknown>;
-        for (const [subject, mode] of Object.entries(map)) expect(isToolsetMode(mode), `${bucket}/${file}: ${subject}`).toBe(true);
+        for (const [subject, mode] of Object.entries(map)) expect(isPermissionSetMode(mode), `${bucket}/${file}: ${subject}`).toBe(true);
         // `other` is the LAST line, where a person reading the file looks for it.
         expect(Object.keys(map).at(-1), `${bucket}/${file}`).toBe("other");
       }

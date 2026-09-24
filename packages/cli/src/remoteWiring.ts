@@ -3,7 +3,7 @@
  * task to belong to.
  *
  *  - the five primitives (`remote_push`, `remote_open`, `remote_comment`, `remote_merge`,
- *    `remote_close`), with `remote.publish` asked AT THE TERMINAL when there is one and refused with
+ *    `remote_close`), with publishing (`functions.review_artifacts.publish`) asked AT THE TERMINAL when there is one and refused with
  *    a sentence when there is not;
  *  - `on_remote_event`, with a watcher that lives exactly as long as the run — a CLI run is a process
  *    that is alive while it waits, so it can hear the forge itself;
@@ -73,7 +73,7 @@ async function askAtTerminal(terminal: NonNullable<CliRemoteOptions["terminal"]>
   }
 }
 
-/** "Always for this project": `policy.remote.publish = "allow"` in the project's own settings. */
+/** "Always for this project": `functions.review_artifacts.publish = "allow"` in the project's own settings. */
 function grantProject(project: Project, log: (message: string) => void): void {
   try {
     const file = project.paths.settingsFile;
@@ -83,8 +83,8 @@ function grantProject(project: Project, log: (message: string) => void): void {
     } catch {
       // No settings file yet is an empty layer.
     }
-    const policy = (doc["policy"] ??= {}) as Record<string, unknown>;
-    policy["remote"] = { ...((policy["remote"] ?? {}) as object), publish: "allow" };
+    const functions = (doc["functions"] ??= {}) as Record<string, unknown>;
+    functions["review_artifacts"] = { ...((functions["review_artifacts"] ?? {}) as object), publish: "allow" };
     // Validated as it will be read — merged over the base — before anything is written.
     let base: unknown;
     try {
@@ -112,7 +112,7 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
   const target: WatchTarget = {
     key: "cli",
     handles: project.remotes,
-    settleAfter: config.integrations.review.settleAfter,
+    settleAfter: config.functions.review_artifacts.settleAfter,
     // One provider per host for the life of the run: it remembers what cost a request to learn.
     provider: (host) => {
       let provider = forges.get(host);
@@ -148,7 +148,7 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
     scratchDir: join(project.paths.systemDir, "remote-worktrees"),
     handles: project.remotes,
     integrations: config.integrations,
-    policy: config.policy,
+    publish: config.functions.review_artifacts.publish,
     secrets,
     exec,
     execEnv: config.execEnvironment,

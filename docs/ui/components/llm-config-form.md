@@ -2,10 +2,10 @@
 id: ui/components/llm-config-form
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-23
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/refuse-with-the-reason-and-the-fix]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects]
-surfaces: [ui/surfaces/settings-configuration, ui/surfaces/settings-executors]
+surfaces: [ui/surfaces/settings-models]
 reuses: [ui/components/settings-field]
 implemented_by: [packages/app/src/renderer/llmConfigForm.tsx, packages/app/src/renderer/schemaForm/widgets/LlmConfigWidget.tsx]
 verified_by: [packages/app/test/llmConfigForm.test.ts, packages/app/test/presetTabs.test.ts]
@@ -29,7 +29,7 @@ A bordered two-pane box: a grey rail at the left listing `Sampling`, `Reasoning`
 - **Rail.** A list of tabs beside the one panel they choose. `--panel-2` ground with a `--line` rule on its right, 6px padding, items 2px apart. Each item is the category's name at 550 in `--dim` over its summary at a small size in `--dim`, ellipsised. The chosen item takes a `--panel` ground and a `--line` outline, and its name turns `--text`.
 - **Detail.** 13px by 15px padding and 12px gaps: the category's title at 600, its hint in `--dim`, then [settings-field](settings-field.md) rows, each ending its hint with the key it writes and carrying a `SET HERE` tag when the value is stated.
 - **Unset.** An empty box means the setting is not stated and the provider's own default applies; number boxes show `—` and are at most 120px wide.
-- **Host's parts.** A host may draw the rail and the detail pane without the box, inside a box of its own that holds something else first; may put its own notes and actions at the foot of the detail pane; may keep the chosen category itself; and may switch the `SET HERE` tags off for a value that belongs to another layer. The presets on [Settings executors](../surfaces/settings-executors.md) do all four.
+- **Host's parts.** A host may draw the rail and the detail pane without the box, inside a box of its own that holds something else first; may put its own notes and actions at the foot of the detail pane; may keep the chosen category itself; and may switch the `SET HERE` tags off for a value that belongs to another layer. The presets on [Settings models](../surfaces/settings-models.md) do all four.
 - **Notice.** A `--tint-warn` block with `--warn` text, 7px by 9px, where a category cannot be used or holds keys it must not.
 
 ## Every state keeps the rail and changes the summaries and the detail pane

@@ -103,6 +103,7 @@ import {
   parseFakeRules,
   parseInteractionScript,
   policyCanEscalate,
+  projectPolicy,
   securityFloorOf,
   grantAlwaysGrantedTools,
   enabledAdapters,
@@ -169,7 +170,7 @@ export interface CliIo {
  * refuse, `--approve-functions` says the answer is yes without asking, and the default is to ask if
  * anybody is there. A run's approvals have no "yes to everything": `--approve deny` refuses them all
  * without asking, `--approve ask` insists on a terminal, and the way past a question for good is to
- * write the answer where the project keeps it — a policy rule or a toolset line.
+ * write the answer where the project keeps it — a policy rule or a permission set line.
  */
 interface ApprovalGate {
   /** `--non-interactive`: never prompt, even on a terminal. */
@@ -249,10 +250,10 @@ const USAGE = `usage:
   jaira workflow check [<description.md>] [--workflow <rootStateId>]... [--model <id>]
             [--json] [--fake <json|@file>] [--repair-turns <n>] [--project <dir>]
 
-  A run is held to the project's policy (.jaira/settings.json → policy) and each state's toolset, as
+  A run is held to the project's policy (.jaira/settings.json → policy) and each state's permission set, as
   in the app. A tool call or shell line the policy asks about is put to you at the terminal; with no
   terminal, --non-interactive or --approve deny it is refused, and the refusal names the policy rule
-  or toolset line that would let it run without asking. --approve ask insists on a terminal.
+  or permission set line that would let it run without asking. --approve ask insists on a terminal.
 `;
 
 /**
@@ -649,7 +650,7 @@ function assertCapabilities(
   approvals: CliApprovals,
 ): void {
   const issues = gateCapabilities(registry, bundle.states as never, {
-    policyNeedsApproval: policyCanEscalate(config.policy),
+    policyNeedsApproval: policyCanEscalate(projectPolicy(config)),
     unattended: approvals.unattended,
   });
   if (issues.length > 0) {
@@ -657,7 +658,7 @@ function assertCapabilities(
     throw new Error(
       `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
         "  run it at a terminal, where jaira asks, or pass --approve deny to refuse every approval it meets; " +
-        "or run this task in the JaiRA app, or set policy.builtins to false in .jaira/settings.json if this workspace is disposable",
+        "or run this task in the JaiRA app, or set functions.bash.builtins to false in .jaira/settings.json if this workspace is disposable",
     );
   }
 }
@@ -1864,7 +1865,7 @@ async function cmdTaskCancel(argv: string[], io: CliIo): Promise<number> {
  * merged.
  */
 /**
- * What a toolset line that names a FUNCTION needs in a CLI run (decision 0007, amended 2026-09-22) —
+ * What a permission set line that names a FUNCTION needs in a CLI run (decision 0007, amended 2026-09-22) —
  * the app's recipe with the terminal in place of the conversation: the approval prompt answered where
  * the run's approvals are (`approvals.prompt`), `smart` judging with this project's `smart` settings
  * through the run's `prompt`, and a function loaded the way this run loads its workflow — the same
@@ -1879,7 +1880,7 @@ function runPermissionFunctions(
   abortSignal?: AbortSignal,
 ): PermissionFunctionsOptions {
   registerApprovalPrompt(registry, approvals.prompt);
-  registerSmartFunction(registry, { prompt, config: () => config.smart });
+  registerSmartFunction(registry, { prompt, config: () => config.functions.smart });
   const run = permissionFunctionRunner({
     registry,
     prompt,

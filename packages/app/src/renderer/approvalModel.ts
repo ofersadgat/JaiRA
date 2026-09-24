@@ -9,7 +9,7 @@
  *    character is underlined when its owner's `matched` spans cover it — the underline is narrower
  *    than the tint.
  *  - {@link partRows}: one row per part — what was typed, what it is a request FOR, the verdict.
- *  - {@link reasonLines}: the toolset and the subject that asks, from `decidedBy`.
+ *  - {@link reasonLines}: the permission set and the subject that asks, from `decidedBy`.
  *  - {@link answerMenu} / {@link approvalAnswerOf}: the split buttons' menu — WHAT the answer covers, then
  *    HOW FAR it reaches — and the request a choice becomes.
  *
@@ -29,19 +29,19 @@
  * reach chosen after it applies to all of them — one answer, one reach.
  */
 import {
-  INLINE_TOOLSET,
+  INLINE_PERMISSION_SET,
   askingParts,
   chosenWidths,
   describeAddition,
   entriesToRemember,
   type ApprovalScope,
-  type ApprovalToolsetTarget,
+  type ApprovalPermissionSetTarget,
   type CommandApproval,
   type CommandPart,
   type CommandPartVerdict,
   type PendingApproval,
   type TextSpan,
-  type ToolsetAddition,
+  type PermissionSetAddition,
   type WritableLayer,
 } from "@jaira/shared/browser";
 
@@ -146,10 +146,10 @@ export const verdictLabel = (verdict: CommandPartVerdict): string => VERDICT_LAB
 
 const FALLBACK_ENTRIES: Record<string, string> = { bash: "any other command", other: "everything no line names" };
 
-/** Did the toolset's FALLBACK answer for a command — is there no line that names it? */
+/** Did the permission set's FALLBACK answer for a command — is there no line that names it? */
 function fellThrough(part: CommandPart): boolean {
   const entry = part.decidedBy.entry;
-  return part.kind === "command" && part.decidedBy.source === "toolset" && entry !== undefined && Object.hasOwn(FALLBACK_ENTRIES, entry);
+  return part.kind === "command" && part.decidedBy.source === "permissionSet" && entry !== undefined && Object.hasOwn(FALLBACK_ENTRIES, entry);
 }
 
 export function partRows(approval: CommandApproval): PartRow[] {
@@ -167,13 +167,13 @@ export function partRows(approval: CommandApproval): PartRow[] {
     // Opened out of something that is not itself a row (`bash -c '…'`, `$( … )`): say so in words.
     if (part.within === undefined && part.via !== undefined && part.via.length > 0) notes.push(`inside ${part.via.join(" › ")}`);
     const { source, reason, entry } = part.decidedBy;
-    // The SUBJECT, not the program: a toolset that holds `git commit` does have lines that name git.
+    // The SUBJECT, not the program: a permission set that holds `git commit` does have lines that name git.
     if (fellThrough(part)) notes.push(`no line names ${part.subject} — ${FALLBACK_ENTRIES[entry!]}`);
-    // Beside a toolset's entry the policy keeps the built-in's reason after a dash; it is why the ask matters.
-    if (source === "toolset" && reason.includes(" — ")) notes.push(reason.slice(reason.indexOf(" — ") + 3));
+    // Beside a permission set's entry the policy keeps the built-in's reason after a dash; it is why the ask matters.
+    if (source === "permissionSet" && reason.includes(" — ")) notes.push(reason.slice(reason.indexOf(" — ") + 3));
     // A function's answer is drawn as its name beside the verdict; one that could NOT answer says why
     // once, on the reason line under the rows (`reasonLines`).
-    else if (source !== "toolset" && source !== "default" && source !== "function") notes.push(reason);
+    else if (source !== "permissionSet" && source !== "default" && source !== "function") notes.push(reason);
     const by = source === "function" ? part.decidedBy.function : undefined;
     return {
       index,
@@ -191,26 +191,26 @@ export function partRows(approval: CommandApproval): PartRow[] {
 // --- the reason line ------------------------------------------------------------
 
 export type ReasonLine =
-  /** `Toolset <name>: <b>git commit</b> asks` — `toolset` absent when the map has no file. */
-  | { kind: "toolset"; toolset?: string; entries: string[] }
-  /** The toolset holds no line for these subjects, and that is why they ask. */
-  | { kind: "unheld"; toolset?: string; subjects: string[] }
+  /** `Permission set <name>: <b>git commit</b> asks` — `permission set` absent when the map has no file. */
+  | { kind: "permissionSet"; permissionSet?: string; entries: string[] }
+  /** The permission set holds no line for these subjects, and that is why they ask. */
+  | { kind: "unheld"; permissionSet?: string; subjects: string[] }
   /** A function a line names could not decide, so the person is asked — its own sentence. */
   | { kind: "function"; text: string }
   | { kind: "policy"; text: string };
 
-/** The toolset's name as a person reads it: `feature/implementation/writes-asking`. */
-export function toolsetNameOf(pending: PendingApproval): string | undefined {
-  if (pending.toolset?.id !== undefined) return pending.toolset.id;
-  const reference = pending.parts?.toolset;
-  return reference === undefined || reference === INLINE_TOOLSET ? undefined : reference;
+/** The permission set's name as a person reads it: `feature/implementation/writes-asking`. */
+export function permissionSetNameOf(pending: PendingApproval): string | undefined {
+  if (pending.permissionSet?.id !== undefined) return pending.permissionSet.id;
+  const reference = pending.parts?.permissionSet;
+  return reference === undefined || reference === INLINE_PERMISSION_SET ? undefined : reference;
 }
 
 export function reasonLines(pending: PendingApproval): ReasonLine[] {
   const asking = pending.parts !== undefined ? askingParts(pending.parts) : [];
   if (asking.length === 0) return pending.reason !== undefined ? [{ kind: "policy", text: pending.reason }] : [];
-  const toolset = toolsetNameOf(pending);
-  const named = toolset !== undefined ? { toolset } : {};
+  const permissionSet = permissionSetNameOf(pending);
+  const named = permissionSet !== undefined ? { permissionSet } : {};
   const entries: string[] = [];
   const unheld: string[] = [];
   const policy: string[] = [];
@@ -218,12 +218,12 @@ export function reasonLines(pending: PendingApproval): ReasonLine[] {
   const add = (list: string[], value: string): void => void (list.includes(value) ? undefined : list.push(value));
   for (const part of asking) {
     if (part.decidedBy.source === "function") add(failed, part.decidedBy.reason);
-    else if (part.decidedBy.source !== "toolset") add(policy, part.decidedBy.reason);
+    else if (part.decidedBy.source !== "permissionSet") add(policy, part.decidedBy.reason);
     else if (part.decidedBy.entry !== undefined) add(entries, part.decidedBy.entry);
     else add(unheld, part.subject);
   }
   return [
-    ...(entries.length > 0 ? [{ kind: "toolset" as const, ...named, entries }] : []),
+    ...(entries.length > 0 ? [{ kind: "permissionSet" as const, ...named, entries }] : []),
     ...(unheld.length > 0 ? [{ kind: "unheld" as const, ...named, subjects: unheld }] : []),
     ...failed.map((text) => ({ kind: "function" as const, text })),
     ...policy.map((text) => ({ kind: "policy" as const, text })),
@@ -241,7 +241,7 @@ export interface ApprovalRequestView {
   tool: string;
   subject: string;
   function?: string;
-  toolset?: string;
+  permissionSet?: string;
   state?: string;
   task?: string;
   cwd?: string;
@@ -263,7 +263,7 @@ export function approvalRequestView(raw: unknown): ApprovalRequestView {
     tool: stringOf(request["tool"]) ?? "?",
     subject,
     ...(stringOf(request["function"]) !== undefined ? { function: stringOf(request["function"])! } : {}),
-    ...(stringOf(request["toolset"]) !== undefined ? { toolset: stringOf(request["toolset"])! } : {}),
+    ...(stringOf(request["permissionSet"]) !== undefined ? { permissionSet: stringOf(request["permissionSet"])! } : {}),
     ...(stringOf(request["state"]) !== undefined ? { state: stringOf(request["state"])! } : {}),
     ...(stringOf(request["task"]) !== undefined ? { task: stringOf(request["task"])! } : {}),
     ...(stringOf(request["cwd"]) !== undefined ? { cwd: stringOf(request["cwd"])! } : {}),
@@ -354,24 +354,24 @@ export function widthsOf(approval: CommandApproval, chosen: ChosenWidths = {}): 
   return chosenWidths(approval, whatChoices(approval, chosen).map((choice) => choice.chosen));
 }
 
-/** What "add to the toolset" would write for this answer. */
-export function additionOf(approval: CommandApproval, decision: "allow" | "deny", chosen: ChosenWidths = {}): ToolsetAddition {
+/** What "add to the permission set" would write for this answer. */
+export function additionOf(approval: CommandApproval, decision: "allow" | "deny", chosen: ChosenWidths = {}): PermissionSetAddition {
   const widths = widthsOf(approval, chosen);
-  return entriesToRemember(approval, decision, (part) => part.widths.find((w) => widths.includes(w))) as ToolsetAddition;
+  return entriesToRemember(approval, decision, (part) => part.widths.find((w) => widths.includes(w))) as PermissionSetAddition;
 }
 
-/** `.jaira/toolsets/feature/implementation/x.json` → `.jaira/toolsets/…/x.json`: the ends are what identify it. */
+/** `.jaira/permission-sets/feature/implementation/x.json` → `.jaira/permission-sets/…/x.json`: the ends are what identify it. */
 export function shortFile(file: string): string {
-  const match = /^(.*?\/toolsets)\/(?:.+)\/([^/]+)$/.exec(file);
+  const match = /^(.*?\/permission-sets)\/(?:.+)\/([^/]+)$/.exec(file);
   return match === null ? file : `${match[1]}/…/${match[2]}`;
 }
 
 const LAYER_WORDS: Record<WritableLayer, string> = { project: "in this project", base: "for all projects" };
 
-function addHint(target: ApprovalToolsetTarget, written: string): HintPiece[] {
+function addHint(target: ApprovalPermissionSetTarget, written: string): HintPiece[] {
   const hint: HintPiece[] =
     target.follows !== undefined
-      ? [`creates ${shortFile(target.file)} with `, { code: written }, `, following ${target.follows.startsWith("$SYSTEM/") ? "the built-in toolset" : "the shared toolset"}`]
+      ? [`creates ${shortFile(target.file)} with `, { code: written }, `, following ${target.follows.startsWith("$SYSTEM/") ? "the built-in permission set" : "the shared permission set"}`]
       : ["writes ", { code: written }, ` to ${shortFile(target.file)}`];
   if (target.shadowed === true) hint.push(" — this project's own copy still wins here");
   return hint;
@@ -396,11 +396,11 @@ export function answerMenu(pending: PendingApproval, decision: "allow" | "deny",
 
   const reach: ReachItem[] = [once, run];
   const written = describeAddition(additionOf(approval, decision, chosen));
-  const name = pending.toolset?.id?.split("/").at(-1);
-  for (const target of pending.toolset?.targets ?? []) {
-    reach.push({ reach: `add:${target.layer}`, name: `Add to ${name ?? "the toolset"}, ${LAYER_WORDS[target.layer]}`, hint: addHint(target, written), isDefault: false });
+  const name = pending.permissionSet?.id?.split("/").at(-1);
+  for (const target of pending.permissionSet?.targets ?? []) {
+    reach.push({ reach: `add:${target.layer}`, name: `Add to ${name ?? "the permission set"}, ${LAYER_WORDS[target.layer]}`, hint: addHint(target, written), isDefault: false });
   }
-  if ((pending.toolset?.targets.length ?? 0) === 0 && pending.toolset?.unwritable !== undefined) notes.push(pending.toolset.unwritable);
+  if ((pending.permissionSet?.targets.length ?? 0) === 0 && pending.permissionSet?.unwritable !== undefined) notes.push(pending.permissionSet.unwritable);
   return { what, whatLabel: `${verb} what`, reach, notes };
 }
 

@@ -1,11 +1,11 @@
 /**
- * The composer's Permissions and Tools cards over toolsets (decision 0007 §5), server-rendered to one
+ * The composer's Permissions and Tools cards over permission sets (decision 0007 §5), server-rendered to one
  * static page — the real component over the real stylesheet, with no Electron in the way.
  *
  * `npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/composer-cards-static.mts <out.html> [light|dark]`
  *
  * One stage per state of the approved mockup (`docs/engineering/decisions/0007-assets/composer-cards.html`),
- * in its order. The `chat` and `chat_control` toolsets are the files that SHIP, read off disk; the
+ * in its order. The `chat` and `chat_control` permission sets are the files that SHIP, read off disk; the
  * `feature` buckets and the custom map are fixture. `--fragments <dir>` writes each stage's markup to
  * its own file instead, which is what the catalog mockups under `docs/ui/assets/` are cut from.
  */
@@ -14,66 +14,66 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TOOL_SPECS, bucketOf, lowerToolset, parseToolset, toolsetOfSettings, type ChatPlanView, type ChatSettings, type ToolsetChoice, type ToolsetDecl } from "@jaira/shared";
+import { TOOL_SPECS, bucketOf, lowerPermissionSet, parsePermissionSet, permissionSetOfSettings, type ChatPlanView, type ChatSettings, type PermissionSetChoice, type PermissionSetDecl } from "@jaira/shared";
 import { Composer, type ComposerOpen } from "../src/renderer/composer";
 
 const out = process.argv[2];
 if (out === undefined) throw new Error("usage: composer-cards-static.mts <out.html> [light|dark] | --fragments <dir>");
 
-const TOOLSETS = join(import.meta.dirname, "..", "..", "shared", "builtin", "toolsets");
-const shipped: ToolsetChoice[] = readdirSync(TOOLSETS).flatMap((bucket) =>
-  readdirSync(join(TOOLSETS, bucket)).map((file) => {
+const PERMISSION_SETS = join(import.meta.dirname, "..", "..", "shared", "builtin", "permission-sets");
+const shipped: PermissionSetChoice[] = readdirSync(PERMISSION_SETS).flatMap((bucket) =>
+  readdirSync(join(PERMISSION_SETS, bucket)).map((file) => {
     const name = file.replace(/\.json$/, "");
-    return { id: `${bucket}/${name}`, bucket, name, layer: "system" as const, decl: JSON.parse(readFileSync(join(TOOLSETS, bucket, file), "utf8")) as ToolsetDecl };
+    return { id: `${bucket}/${name}`, bucket, name, layer: "system" as const, decl: JSON.parse(readFileSync(join(PERMISSION_SETS, bucket, file), "utf8")) as PermissionSetDecl };
   }),
 );
-const project = (id: string, decl: ToolsetDecl): ToolsetChoice => {
+const project = (id: string, decl: PermissionSetDecl): PermissionSetChoice => {
   const cut = id.lastIndexOf("/");
   return { id, bucket: id.slice(0, cut), name: id.slice(cut + 1), layer: "project", decl };
 };
-const toolsets: ToolsetChoice[] = [
+const permissionSets: PermissionSetChoice[] = [
   ...shipped,
   project("feature/plan", { read_file: "allow", glob: "allow", grep: "allow", other: "deny" }),
   project("feature/review", { read_file: "allow", grep: "allow", "git diff": "allow", other: "deny" }),
   project("feature/implementation/writes-asking", { read_file: "allow", edit: "ask", write_file: "ask", bash: "ask", other: "deny" }),
   project("feature/implementation/reads-only", { read_file: "allow", glob: "allow", grep: "allow", other: "deny" }),
 ];
-const declOf = (id: string): ToolsetDecl => toolsets.find((t) => t.id === id)!.decl;
+const declOf = (id: string): PermissionSetDecl => permissionSets.find((t) => t.id === id)!.decl;
 
 const NATIVES: Record<string, string> = { read_file: "Read", glob: "Glob", grep: "Grep", edit: "Edit", write_file: "Write", bash: "Bash", web_fetch: "WebFetch", web_search: "WebSearch" };
 const tools = TOOL_SPECS.map((spec) => ({ name: spec.name, ...(NATIVES[spec.name] !== undefined ? { natives: { "claude-cli": NATIVES[spec.name]! } } : {}) }));
 const registered = tools.map((t) => t.name);
 
-/** A plan as main would build it: `toolset` is the person's override when `own`, else what the state lowered to. */
-function plan(toolset: ToolsetDecl, from: string, own: boolean): ChatPlanView {
-  // Inherited, a toolset arrives the way a loaded state holds it: the list and block it LOWERED to.
-  const lowered = lowerToolset(parseToolset(toolset).toolset);
+/** A plan as main would build it: `permission set` is the person's override when `own`, else what the state lowered to. */
+function plan(permissionSet: PermissionSetDecl, from: string, own: boolean): ChatPlanView {
+  // Inherited, a permission set arrives the way a loaded state holds it: the list and block it LOWERED to.
+  const lowered = lowerPermissionSet(parsePermissionSet(permissionSet).permissionSet);
   const settings: ChatSettings = {
     model: "claude-cli/claude-sonnet-5",
     reasoning: { effort: "high" },
-    ...(own ? { toolset } : { tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) }),
+    ...(own ? { permissionSet } : { tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) }),
   };
   const origin = own ? "override" : "inherited";
   return {
     settings,
-    origin: { model: "inherited", reasoning: "inherited", tools: origin, permissions: origin, implementations: "unset", toolset: own ? "override" : "unset" },
+    origin: { model: "inherited", reasoning: "inherited", tools: origin, permissions: origin, implementations: "unset", permissionSet: own ? "override" : "unset" },
     from,
     unresolved: [],
     live: "idle",
     effective: { model: "claude-cli/claude-sonnet-5", reasoning: "high", permissions: "" },
-    available: { routes: ["claude-cli"], tools, models: [], toolsets, bucket: bucketOf(toolsetOfSettings(settings).toolset, toolsets, registered) },
+    available: { routes: ["claude-cli"], tools, models: [], permissionSets, bucket: bucketOf(permissionSetOfSettings(settings).permissionSet, permissionSets, registered) },
   } as ChatPlanView;
 }
 
 const noop = (): undefined => undefined;
 const draw = (view: ChatPlanView, startOpen: ComposerOpen): string =>
   renderToStaticMarkup(
-    createElement(Composer, { plan: view, overrides: {}, onOverrides: noop, onSend: noop, placeholder: "Reply…", onSaveToolset: async () => undefined, startOpen }),
+    createElement(Composer, { plan: view, overrides: {}, onOverrides: noop, onSend: noop, placeholder: "Reply…", onSavePermissionSet: async () => undefined, startOpen }),
   );
 
 /** `chat/ask-first` with the commands a project might have named: what Execution is for. */
-const WITH_COMMANDS: ToolsetDecl = (() => {
-  const { other, ...lines } = declOf("chat/ask-first") as Record<string, ToolsetDecl[string]>;
+const WITH_COMMANDS: PermissionSetDecl = (() => {
+  const { other, ...lines } = declOf("chat/ask-first") as Record<string, PermissionSetDecl[string]>;
   return {
     ...lines,
     "git status": "allow",
@@ -91,13 +91,13 @@ const WITH_COMMANDS: ToolsetDecl = (() => {
 const STAGES: Array<{ name: string; caption: string; lift: number; html: string }> = [
   {
     name: "permissions-matched",
-    caption: "the Permissions card — the four rows are the toolsets of the chat bucket. The head names the bucket; the chip names the toolset the tools and modes match",
+    caption: "the Permissions card — the four rows are the permission sets of the chat bucket. The head names the bucket; the chip names the permission set the tools and modes match",
     lift: 250,
     html: draw(plan(declOf("chat/ask-first"), "chat/session", false), { card: "Permissions" }),
   },
   {
     name: "permissions-buckets",
-    caption: "the bucket picker open — the toolset hierarchy, each bucket with what it holds and the layer that defines it",
+    caption: "the bucket picker open — the permission set hierarchy, each bucket with what it holds and the layer that defines it",
     lift: 250,
     html: draw(plan(declOf("chat/ask-first"), "chat/session", false), { card: "Permissions", buckets: true }),
   },
@@ -109,13 +109,13 @@ const STAGES: Array<{ name: string; caption: string; lift: number; html: string 
   },
   {
     name: "permissions-custom",
-    caption: "a mode changed under Tools — it matches no toolset, so it reads custom, and + keeps it as a new toolset in this bucket",
+    caption: "a mode changed under Tools — it matches no permission set, so it reads custom, and + keeps it as a new permission set in this bucket",
     lift: 250,
     html: draw(plan({ ...declOf("chat/ask-first"), "git commit": "allow" }, "chat/session", true), { card: "Permissions", keep: true }),
   },
   {
     name: "tools-execution",
-    caption: "the Tools card — unchanged but for what Execution holds: the shell, the commands this toolset names grouped under their program, and script",
+    caption: "the Tools card — unchanged but for what Execution holds: the shell, the commands this permission set names grouped under their program, and script",
     lift: 700,
     html: draw(plan(WITH_COMMANDS, "chat/session", false), { card: "Tools", folds: ["execution", "program:git"] }),
   },

@@ -540,7 +540,7 @@ function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
           onOverrides={setOverrides}
           placeholder="Ask for a change, or a question about the code…"
           onSend={(message) => void surface.onNew(message, overrides)}
-          onSaveToolset={(request) => invoke("toolset:save", { ...request, ...(project !== undefined ? { project } : {}) })}
+          onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
           // With no project open this runs in JaiRA's own root, which has no "this project" to keep in.
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
           {...mentions}
@@ -1124,7 +1124,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           onStop={stop}
           placeholder={arming?.kind === "edit" ? "Say this instead…" : arming?.kind === "fork" ? "Start the new conversation with…" : "Reply…"}
           {...(plan === null && thread === null ? { disabled: "This conversation cannot be continued." } : {})}
-          onSaveToolset={(request) => invoke("toolset:save", { ...request, ...(project !== undefined ? { project } : {}) })}
+          onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
           {...mentions}
         />

@@ -348,7 +348,7 @@ describe("fileTree", () => {
     // that one directory is the whole rule, and what is left is exactly what a person authors.
     expect(inLayer).not.toContain("system");
     expect(inLayer).toContain("workflows");
-    // `settings.json` is live but is not edited here — Settings → Configuration knows the shape of
+    // `settings.json` is live but is not edited here — Settings → settings.json knows the shape of
     // what is in it. It is hidden by DEFAULT rather than structurally, so anyone who would rather
     // edit the document can put it back.
     expect(inLayer).not.toContain("settings.json");

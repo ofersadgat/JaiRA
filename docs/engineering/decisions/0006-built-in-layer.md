@@ -24,7 +24,7 @@ root cannot start a conversation. And every new built-in needs its own
 install step.
 
 0005 adds more of the same kind: two conversation states and the
-**toolset** each runs under ([0007](0007-toolsets.md)) — all things a
+**permission set** each runs under ([0007](0007-permissionSets.md)) — all things a
 person must be able to change, per machine and per project.
 
 Two layers already exist and already do the right thing: a bare id or a
@@ -49,7 +49,7 @@ created, and a project's own file of that name still wins.
 **C.** `paths.roots` becomes three: the project's `.jaira/`, the shared
 `~/.jaira/`, and **`$SYSTEM`** — a directory inside the installed app with
 the same shape as the other two (`workflows/`, `prompts/`, `functions/`,
-`toolsets/`). It is last, always, and configuration cannot
+`permission-sets/`). It is last, always, and configuration cannot
 move or remove it.
 
 ```text
@@ -80,17 +80,17 @@ $SYSTEM/workflows/chat/control.json      ← what ships
   one that is byte-identical to a version it once shipped; that offer was
   removed on 2026-09-22 once no such copy remained.)
 
-### Toolsets are fragments in the layers
+### Permission sets are fragments in the layers
 
-What an agent may do is a **toolset**, and what a toolset *is* — a map
-from a subject to a mode, in buckets — is [0007](0007-toolsets.md)'s
+What an agent may do is a **permission set**, and what a permission set *is* — a map
+from a subject to a mode, in buckets — is [0007](0007-permissionSets.md)'s
 decision. What this one decides is where they live: they are ordinary
-layered fragments, `toolsets/<bucket>/<name>.json`, and a state names one
+layered fragments, `permission-sets/<bucket>/<name>.json`, and a state names one
 with the reference form that already exists (WORKFLOWS.md §2.2):
 
 ```jsonc
 // $SYSTEM/workflows/chat/control.json
-"environment": { "kind": "prompt", "tools": "$/toolsets/chat_control/ask-first" }
+"environment": { "kind": "prompt", "tools": "$/permission-sets/chat_control/ask-first" }
 ```
 
 Drop a file at the same path in `~/.jaira/` or `.jaira/` and it wins — for
@@ -104,17 +104,17 @@ The layer picker gains a third segment, **Built in**, everywhere it
 appears. It is read-only: it shows what ships and offers "Override for all
 projects" and "Override here", which write the copy and switch to that
 layer. "Reset to built in" deletes an override; "Compare with what ships"
-diffs the two. The pane that edits toolsets is 0007's.
+diffs the two. The pane that edits permission sets is 0007's.
 
 ### What ships
 
 | Id | Is |
 | --- | --- |
-| `chat/session` | what the Chat view starts: a person began a conversation, and it may do anything — work in the project, start a workflow, neither. Toolset `chat/ask-first`. It takes `chat/agent`'s place in the Chat view |
-| `chat/control` | what a task gets when a person moves it and the move makes a dynamic workflow (0005 §3). It exists to steer work and nothing else: toolset `chat_control/ask-first`, which holds the task and workflow tools and nothing of the project |
+| `chat/session` | what the Chat view starts: a person began a conversation, and it may do anything — work in the project, start a workflow, neither. Permission set `chat/ask-first`. It takes `chat/agent`'s place in the Chat view |
+| `chat/control` | what a task gets when a person moves it and the move makes a dynamic workflow (0005 §3). It exists to steer work and nothing else: permission set `chat_control/ask-first`, which holds the task and workflow tools and nothing of the project |
 | `chat/assistant`, `chat/agent` | unchanged, so conversations already started as one keep running |
 | `debug/hello_world` | the self-test |
-| `toolsets/chat/*`, `toolsets/chat_control/*` | ask-first, read-only, auto and full, in each bucket (0007 §2) |
+| `permission-sets/chat/*`, `permission-sets/chat_control/*` | ask-first, read-only, auto and full, in each bucket (0007 §2) |
 
 ### What draws
 
@@ -145,11 +145,11 @@ person owns.
    across three layers.
 2. Move `chat/assistant`, `chat/agent` and `debug/hello_world` into it;
    delete the install steps; the identical-copy cleanup offer (since removed).
-3. `toolsets/` as referenced fragments; the linter resolving them; the
+3. `permission-sets/` as referenced fragments; the linter resolving them; the
    third segment of the layer picker.
 4. The editor bar, the Workflows pane's layer mark, the Tools chip.
 5. With 0005 step 6 and 0007 step 4: `chat/session`, `chat/control`, and
-   the toolsets they name. *Built 2026-09-21* — see below.
+   the permission sets they name. *Built 2026-09-21* — see below.
 
 ## Built
 
@@ -221,12 +221,12 @@ the pane that gave them something to show — see the note at the end of this fi
 - **Not changed:** the self-test still records its run in the shared root's own project, so a
   read-only shared root runs a conversation from an open checkout but not the self-test.
 
-**The third segment (2026-09-21), with [0007](0007-toolsets.md) step 6.** The Toolsets pane is the
+**The third segment (2026-09-21), with [0007](0007-permissionSets.md) step 6.** The Permission sets pane is the
 first Settings section holding a value the layer ships, so it is where "Settings shows the third
 layer" finally had something to show. What the build settled:
 
 - **The segment is a property of the SECTION, not of the layer.** `SECTIONS` in `App.tsx` carries
-  `builtIn`, and only Toolsets has it; the other layered sections read `settings.json`, which the
+  `builtIn`, and only Permission sets has it; the other layered sections read `settings.json`, which the
   built-in layer does not have, and would gain a segment that showed an empty file.
 - **It is not a `ConfigLayer`.** `configLayer` names a `settings.json` to write and is read as one
   of two everywhere else, so "showing what ships" is a separate boolean beside it and the pane is
@@ -238,21 +238,21 @@ layer" finally had something to show. What the build settled:
   other layered section replaces the whole switch with a sentence. `Built in` is still a choice
   worth making with nothing open.
 - **"Reset to built in" is the lower layer's name, not a constant.** A project's override of a
-  SHARED toolset resets to the shared one, so the button reads `Reset to shared` and the link beside
+  SHARED permission set resets to the shared one, so the button reads `Reset to shared` and the link beside
   it `Compare with the shared one`. It is offered only where a lower layer holds the file.
 - **The two overrides write and then MOVE.** `Override for all projects` / `Override here` write the
-  override and switch the pane to that layer, opened on the same toolset — the shipped one is read,
+  override and switch the pane to that layer, opened on the same permission set — the shipped one is read,
   and the copy is what can be changed.
 
 **Step 5 (2026-09-21).** `chat/session` and `chat/control` are files under
-`packages/shared/builtin/workflows/chat/`, each naming its toolset by the
-reference form this decision chose — `$/toolsets/chat/ask-first` and
-`$/toolsets/chat_control/ask-first`. The Chat view starts `chat/session`
+`packages/shared/builtin/workflows/chat/`, each naming its permission set by the
+reference form this decision chose — `$/permission-sets/chat/ask-first` and
+`$/permission-sets/chat_control/ask-first`. The Chat view starts `chat/session`
 (`CHAT_SESSION` in `chatWorkflow.ts`) and `CONNECT_CONVERSATION` is
 `chat/control`; `chat/agent` and `chat/assistant` stay, so a conversation
 already started as one keeps running. What the build settled:
 
-- **The toolset reference sits on `operation`, not `environment`.** A dynamic
+- **The permission set reference sits on `operation`, not `environment`.** A dynamic
   workflow's root is a state with an operation and children, and `environment`
   is the default for every child it starts ([0005](0005-connect.md) §3, "What
   step 4 settled") — so a control conversation whose tools were written there

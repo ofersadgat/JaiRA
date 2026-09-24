@@ -16,8 +16,8 @@
  * thing for the same reason, and the schema reference panel wants exactly these words.
  */
 import type { Scope } from "./scopes";
-import type { ToolsetChoice } from "./toolsetBuckets";
-import type { ToolsetDecl } from "./toolsets";
+import type { PermissionSetChoice } from "./permissionSetBuckets";
+import type { PermissionSetDecl } from "./permissionSets";
 
 /**
  * The simple fields — one authored key, one text box.
@@ -84,13 +84,13 @@ export const SIMPLE_FIELDS: readonly SimpleField[] = [
   { name: "functionRef", key: "function", alias: "functionRef", type: "string", label: "Function", group: "operation",
     kinds: ["function"],
     placeholder: "claude-code, codex-cli, choose_option, …" },
-  // A toolset — a map from a subject to a mode, or a reference to one (`"$/toolsets/chat/read-only"`,
-  // `toolsets.ts`, decision 0007). The state editor draws it as its own Tools field; this entry is
+  // A permission set — a map from a subject to a mode, or a reference to one (`"$/permission-sets/chat/read-only"`,
+  // `permissionSets.ts`, decision 0007). The state editor draws it as its own Tools field; this entry is
   // what shows a value that field cannot draw (a binding), read-only, and what claims `tools`
   // diagnostics for the block.
   { name: "tools", key: "tools", type: "list", label: "Tools", group: "operation",
-    placeholder: "a toolset map, in JSON",
-    hint: "a toolset: a map from a tool or a command to allow / ask / deny or { \"function\": … }, or a reference to one — `{}` drops the inherited ones" },
+    placeholder: "a permission set map, in JSON",
+    hint: "a permission set: a map from a tool or a command to allow / ask / deny or { \"function\": … }, or a reference to one — `{}` drops the inherited ones" },
   { name: "model", key: "model", type: "string", label: "Model", group: "model",
     kinds: ["prompt"], prominent: true,
     placeholder: "claude-sonnet-5, or claude-cli/sonnet to pin the route",
@@ -154,9 +154,9 @@ export const JSON_FIELDS: readonly JsonField[] = [
 export const CONVERSATION_MODES = ["full_history", "summary", "fresh", "selected_artifacts"] as const;
 
 /**
- * The three FIXED modes a toolset entry may say (DESIGN §5.1, decision 0007). The fourth kind of
+ * The three FIXED modes a permission set entry may say (DESIGN §5.1, decision 0007). The fourth kind of
  * answer is not a word: a {@link FunctionMode} names a function that decides each call — see
- * {@link ToolsetMode}. (`smart` was a fourth word until 2026-09-22; it is the shipped function of that
+ * {@link PermissionSetMode}. (`smart` was a fourth word until 2026-09-22; it is the shipped function of that
  * name now, `{ "function": "smart" }`.)
  */
 export const PERMISSION_MODES = ["allow", "deny", "ask"] as const;
@@ -206,8 +206,8 @@ export interface FunctionMode {
   function: string;
 }
 
-/** What a toolset entry may say: one of the {@link PERMISSION_MODES}, or a {@link FunctionMode}. */
-export type ToolsetMode = PermissionMode | FunctionMode;
+/** What a permission set entry may say: one of the {@link PERMISSION_MODES}, or a {@link FunctionMode}. */
+export type PermissionSetMode = PermissionMode | FunctionMode;
 
 /**
  * The permission function JaiRA SHIPS: an LLM call that judges the call it is handed, and — when it is
@@ -225,7 +225,7 @@ export const SMART_FUNCTION = "smart";
  */
 export const APPROVAL_PROMPT_FUNCTION = "approve_tool_call";
 
-/** `{ "function": "smart" }` — the mode the shipped `auto` toolsets give every line. */
+/** `{ "function": "smart" }` — the mode the shipped `auto` permission sets give every line. */
 export const SMART_MODE: FunctionMode = Object.freeze({ function: SMART_FUNCTION }) as FunctionMode;
 
 /** Is this mode a function rather than one of the fixed words? */
@@ -240,43 +240,43 @@ export function isFunctionMode(mode: unknown): mode is FunctionMode {
 }
 
 /** Is this a mode at all — a fixed word, or a function with a non-empty reference? */
-export function isToolsetMode(mode: unknown): mode is ToolsetMode {
+export function isPermissionSetMode(mode: unknown): mode is PermissionSetMode {
   if (typeof mode === "string") return (PERMISSION_MODES as readonly string[]).includes(mode);
   return isFunctionMode(mode) && mode.function.trim().length > 0;
 }
 
 /** The function a mode names, or `undefined` for a fixed mode. */
-export function modeFunction(mode: ToolsetMode | undefined): string | undefined {
+export function modeFunction(mode: PermissionSetMode | undefined): string | undefined {
   return isFunctionMode(mode) ? mode.function : undefined;
 }
 
 /**
- * The mode the UPSTREAM gate is handed for a toolset mode. A function decides per call, and the one
+ * The mode the UPSTREAM gate is handed for a permission set mode. A function decides per call, and the one
  * upstream mode that reaches a host with the call in hand and nothing decided is `ask` — the approver
  * JaiRA hands the engine runs the function before any person is asked (`withPermissionFunctions` in
  * `@jaira/runtime`).
  */
-export function gateModeOf(mode: ToolsetMode): PermissionMode {
+export function gateModeOf(mode: PermissionSetMode): PermissionMode {
   return isFunctionMode(mode) ? "ask" : mode;
 }
 
 /** Two modes say the same thing — the same word, or a function by the same reference. */
-export function sameMode(a: ToolsetMode | undefined, b: ToolsetMode | undefined): boolean {
+export function sameMode(a: PermissionSetMode | undefined, b: PermissionSetMode | undefined): boolean {
   if (isFunctionMode(a) || isFunctionMode(b)) return isFunctionMode(a) && isFunctionMode(b) && a.function === b.function;
   return a === b;
 }
 
 /** A mode as one short word for a summary line: the fixed word, or the function's reference. */
-export function modeWord(mode: ToolsetMode): string {
+export function modeWord(mode: PermissionSetMode): string {
   return isFunctionMode(mode) ? mode.function : mode;
 }
 
 /**
- * A `permissions` block in the shape the upstream engine takes — what a toolset LOWERS to.
+ * A `permissions` block in the shape the upstream engine takes — what a permission set LOWERS to.
  *
- * An author writes a toolset in `tools` (`toolsets.ts`, decision 0007) and, here, only `scopes`;
- * everything else in this block is written by lowering (`permissionsOfToolset`) and read back by
- * `toolsetOfEnvironment`. The engine still knows a `profile` and a `default`; nothing JaiRA writes
+ * An author writes a permission set in `tools` (`permissionSets.ts`, decision 0007) and, here, only `scopes`;
+ * everything else in this block is written by lowering (`permissionsOfPermissionSet`) and read back by
+ * `permissionSetOfEnvironment`. The engine still knows a `profile` and a `default`; nothing JaiRA writes
  * carries either, and the linter refuses an authored one.
  */
 export interface PermissionsDecl {
@@ -304,7 +304,7 @@ export interface PermissionsDecl {
    */
   scopes?: Scope[];
   /**
-   * WRITTEN BY LOWERING, never authored: a toolset's command subjects and `script`, with their modes
+   * WRITTEN BY LOWERING, never authored: a permission set's command subjects and `script`, with their modes
    * (`"git commit": "allow"`). A map-form state reaches the engine as a list and this block, and
    * these are the entries neither has a place for.
    *
@@ -326,15 +326,15 @@ export interface PermissionsDecl {
   functions?: Record<string, string>;
   /**
    * WRITTEN BY LOWERING, never authored, and only beside {@link subjects}: where those subjects came
-   * from — the reference the state named its toolset by (`$/toolsets/chat/ask-first`), or `inline`
+   * from — the reference the state named its permission set by (`$/permission-sets/chat/ask-first`), or `inline`
    * for a map written on the state (a `$ref` with siblings counts as written on the state: a sibling
    * is an entry no file holds). Written WITH `subjects` every time, so a child block that replaces
    * the one replaces the other, and an approval never names a parent's file for a child's map.
    *
-   * It is how an approval can say which toolset asked, and which file "add to the toolset" edits.
+   * It is how an approval can say which permission set asked, and which file "add to the permission set" edits.
    */
   source?: string;
-  /** WRITTEN BY LOWERING, never authored: a toolset entry's `implementation`, by tool. */
+  /** WRITTEN BY LOWERING, never authored: a permission set entry's `implementation`, by tool. */
   implementations?: Record<string, ToolImplementation>;
 }
 
@@ -352,9 +352,9 @@ export interface ToolChoice {
 /**
  * FROZEN — the tools the `read-only` preset let through, and so the tools `chat/read-only` allows.
  *
- * The composer's four presets were functions of a tool (`modeFor`); they are toolset FILES now
- * (`$SYSTEM/toolsets/chat/*.json`, decision 0007 §2), and "which preset is this" is `matchToolset` in
- * `toolsetBuckets.ts`. This list is what is left of them: exactly the tools `ToolSpec.readOnly` was
+ * The composer's four presets were functions of a tool (`modeFor`); they are permission set FILES now
+ * (`$SYSTEM/permission-sets/chat/*.json`, decision 0007 §2), and "which preset is this" is `matchPermissionSet` in
+ * `permissionSetBuckets.ts`. This list is what is left of them: exactly the tools `ToolSpec.readOnly` was
  * true for on the day that flag was removed, kept so a test can hold the shipped file to the map the
  * preset always wrote, and the runtime's tools to the facts it was derived from. Nothing reads it to
  * decide anything.
@@ -390,15 +390,15 @@ export interface ChatSettings {
    */
   implementations?: Record<string, ToolImplementation>;
   /**
-   * The same three things as ONE map — a toolset, subject → mode (`toolsets.ts`, decision 0007).
+   * The same three things as ONE map — a permission set, subject → mode (`permissionSets.ts`, decision 0007).
    *
    * When present it is the whole answer and `tools`, `permissions.tools` / `default` / `other` and
    * `implementations` are not read; `permissions.scopes` still is, because where a tool may act is
-   * not part of a toolset. This is what the composer WRITES — picking a toolset row, ticking a tool
+   * not part of a permission set. This is what the composer WRITES — picking a permission set row, ticking a tool
    * or changing a mode sends the whole map — and the three fields above are what a state's lowered
-   * block still arrives as; `toolsetOfSettings` reads either.
+   * block still arrives as; `permissionSetOfSettings` reads either.
    */
-  toolset?: ToolsetDecl;
+  permissionSet?: PermissionSetDecl;
 }
 
 /** Whose implementation runs — see {@link ChatSettings.implementations}. */
@@ -471,12 +471,12 @@ export interface ChatPlanView {
     tools: ToolChoice[];
     models: Array<{ id: string; input: string[]; output: string[] }>;
     /**
-     * Every toolset on this project's search path, references followed — what the Permissions card's
+     * Every permission set on this project's search path, references followed — what the Permissions card's
      * rows and its bucket picker are drawn from (decision 0007 §5). Absent from a plan built before
      * there were any, which a composer reads as "no buckets".
      */
-    toolsets?: ToolsetChoice[];
-    /** The bucket the card opens on — see `bucketOf` in `toolsetBuckets.ts`. */
+    permissionSets?: PermissionSetChoice[];
+    /** The bucket the card opens on — see `bucketOf` in `permissionSetBuckets.ts`. */
     bucket?: string;
   };
 }

@@ -1,5 +1,5 @@
 /**
- * Settings → Integrations, below the pixels (decision 0004 §1).
+ * Settings → Connections → Forges, below the pixels (decision 0004 §1).
  *
  * Three things the screen rests on and cannot show to be true by itself: that a connection's state
  * is what the HOST said about the token, that a settings write is refused by the parser a run will
@@ -98,9 +98,9 @@ describe("writing the integrations block", () => {
   it("starts a new project with NO integrations block, so the shared root's connections are not shadowed", () => {
     // `initProject` spells out the other defaults; a connection is a fact about a machine.
     expect(service.readConfig().project).not.toHaveProperty("integrations");
-    service.writeConfig({ layer: "base", config: { integrations: { review: { settleAfter: "45m" } } } });
-    const effective = service.readConfig().effective as { integrations: { review: { settleAfter: string } } };
-    expect(effective.integrations.review.settleAfter).toBe("45m");
+    service.writeConfig({ layer: "base", config: { integrations: { forges: { gitlab: { credential: "WORK_GITLAB" } } } } });
+    const effective = service.readConfig().effective as { integrations: { forges: { gitlab: { credential: string } } } };
+    expect(effective.integrations.forges.gitlab.credential).toBe("WORK_GITLAB");
   });
 
   it("refuses a token written where a token's name belongs", () => {
@@ -109,14 +109,18 @@ describe("writing the integrations block", () => {
     ).toThrow(/NAMES the token/);
   });
 
-  it("keeps the two defaults: how long to wait after a comment, and whether publishing asks", () => {
+  it("keeps the review gate's two defaults under functions: how long to wait after a comment, and whether publishing asks", () => {
     const view = service.writeConfig({
       layer: "project",
-      config: { integrations: { review: { settleAfter: "30m" } }, policy: { remote: { publish: "allow" } } },
+      config: { functions: { review_artifacts: { settleAfter: "30m", publish: "allow" } } },
     });
-    const effective = view.effective as { integrations: { review: { settleAfter: string } }; policy: { remote: { publish: string } } };
-    expect(effective.integrations.review.settleAfter).toBe("30m");
-    expect(effective.policy.remote.publish).toBe("allow");
+    const effective = view.effective as { functions: { review_artifacts: { settleAfter: string; publish: string } } };
+    expect(effective.functions.review_artifacts).toEqual({ settleAfter: "30m", publish: "allow" });
+  });
+
+  it("refuses the two defaults where they used to live, naming where they went", () => {
+    expect(() => service.writeConfig({ layer: "project", config: { integrations: { review: { settleAfter: "30m" } } } })).toThrow(/functions\.review_artifacts\.settleAfter/);
+    expect(() => service.writeConfig({ layer: "project", config: { policy: { remote: { publish: "allow" } } } })).toThrow(/functions\.review_artifacts\.publish/);
   });
 });
 

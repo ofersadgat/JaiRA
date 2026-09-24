@@ -1,5 +1,5 @@
 /**
- * A toolset line that names a FUNCTION (decision 0007, amended 2026-09-22) — through the REAL upstream
+ * A permission set line that names a FUNCTION (decision 0007, amended 2026-09-22) — through the REAL upstream
  * gate, because the seams are the point: the state's block reaches the policy only through `scopeOf`,
  * the approver is handed the call's input and nothing else, and a function is asked there before any
  * person is.
@@ -16,10 +16,10 @@ import {
   APPROVAL_PROMPT_FUNCTION,
   SMART_FUNCTION,
   approvalRequestKey,
-  lowerToolset,
-  parseToolset,
+  lowerPermissionSet,
+  parsePermissionSet,
   type PermissionFunctionRequest,
-  type ToolsetDecl,
+  type PermissionSetDecl,
 } from "@jaira/shared";
 import { ApprovalHub, type ApprovalRequest } from "../src/approval";
 import { InteractionHub, type HubRequest } from "../src/interaction";
@@ -38,7 +38,7 @@ import { newRegistry } from "../src/wiring";
 
 /** One tool, gated as the engine gates a composed tool: the state's lowered block, the policy's narrowing, the host's approver. */
 function gated(
-  decl: ToolsetDecl,
+  decl: PermissionSetDecl,
   tool: string,
   options: { run?: PermissionFunctionRunner; policy?: Parameters<typeof compilePolicy>[0] } = {},
 ) {
@@ -46,7 +46,7 @@ function gated(
   const decided: PermissionFunctionRequest[] = [];
   const hub = new ApprovalHub({ onRequest: (request) => void asked.push(request) });
   const policy = compilePolicy(options.policy ?? {}, { execEnv: { wsl: "test" }, grants: hub.grants("t1") });
-  const block = lowerToolset(parseToolset(decl).toolset, undefined, "$/toolsets/test/fn").permissions!;
+  const block = lowerPermissionSet(parsePermissionSet(decl).permissionSet, undefined, "$/permission-sets/test/fn").permissions!;
   const ran: unknown[] = [];
   const impl: Tool = {
     description: tool,
@@ -134,7 +134,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
     await call({ command: "git status && cargo check && tsc --noEmit", cwd: "/repo" });
     expect(asked).toEqual([]);
     expect(ran).toHaveLength(1);
-    // `git status` is the toolset's own line; the other two fall to `bash`, the function's.
+    // `git status` is the permission set's own line; the other two fall to `bash`, the function's.
     expect(decided.map((r) => [r.subject, r.part?.text, r.part?.program, r.part?.subcommand, r.part?.args])).toEqual([
       ["bash", "cargo check", "cargo", "check", []],
       ["bash", "tsc --noEmit", "tsc", undefined, []],

@@ -46,12 +46,14 @@ export * from "./fastForward";
 export * from "./hostRows";
 export * from "./toolVocabulary";
 export * from "./agentTools";
-export * from "./toolsets";
-export * from "./toolsetBuckets";
+export * from "./permissionSets";
+export * from "./permissionSetBuckets";
 export * from "./commandParts";
 export * from "./permissionFunctions";
-export * from "./toolsetEdit";
-export * from "./toolsetSettings";
+export * from "./permissionSetEdit";
+export * from "./permissionSetSettings";
 export * from "./scopes";
 export * from "./hiddenPaths";
 export * from "./refusal";
+// The prompt the shipped `smart` judge is told when no layer writes its own — Settings → Tools shows it.
+export { DEFAULT_SMART_PROMPT } from "./config";

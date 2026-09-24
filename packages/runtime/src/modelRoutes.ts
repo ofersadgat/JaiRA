@@ -23,7 +23,7 @@
  * `anthropic`/`openrouter`/`local`/`embedded` with lazy client construction, per-server caching and
  * managed-server supervision; this hands it its options and stays out of the way.
  */
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { keyForModel, ModelInfo } from "@declarative-ai/llm";
 import type { EmbeddedModelConfig, LocalServerConfig, ModelRouterOptions } from "@declarative-ai/llm";
 import { AGENT_DEFAULT_MODEL, AgentApiExecutor, type AgentQuery } from "@declarative-ai/agents-api";
@@ -44,13 +44,15 @@ import {
   type JairaAgentConfig,
   type JairaExecutorDefinition,
   type JairaModelConfig,
+  type EmbeddedWeightsReport,
   type JairaModelRoute,
   type ProbeResult,
   type SecretOrigin,
+  type WeightsFileCheck,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
 import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
-import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, withAgentToolset } from "./agentTools";
+import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, withAgentPermissionSet } from "./agentTools";
 import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
 import type { Exec } from "./exec";
@@ -222,16 +224,16 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     });
   const query = options.query;
 
-  // EVERY agent route is held to the toolset of each call it answers (decision 0007 §3): the
-  // executor's own declaration says which natives it has and what channel a toolset reaches it by,
-  // and `withAgentToolset` applies the plan where the route is finally known.
+  // EVERY agent route is held to the permission set of each call it answers (decision 0007 §3): the
+  // executor's own declaration says which natives it has and what channel a permission set reaches it by,
+  // and `withAgentPermissionSet` applies the plan where the route is finally known.
   if (adapters.includes("sdk")) {
-    bind(AGENT_SDK, withAgentToolset(CLAUDE_TOOLS, new AgentApiExecutor({ ...(query !== undefined ? { query } : {}) }), { label: AGENT_SDK }));
+    bind(AGENT_SDK, withAgentPermissionSet(CLAUDE_TOOLS, new AgentApiExecutor({ ...(query !== undefined ? { query } : {}) }), { label: AGENT_SDK }));
   }
   if (adapters.includes("cli")) {
     bind(
       AGENT_CLI,
-      withAgentToolset(
+      withAgentPermissionSet(
         CLAUDE_TOOLS,
         new AgentCliExecutor({
           spawn,
@@ -245,7 +247,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
   }
   if (adapters.includes("codex")) {
     // Codex's one channel is its sandbox, and the sandbox is fixed when the executor is built — so
-    // there is one executor per setting of the switch, and the toolset picks. `permissionMode: "plan"`
+    // there is one executor per setting of the switch, and the permission set picks. `permissionMode: "plan"`
     // is nothing but `--sandbox read-only` on this transport (`sandboxFor`), and an explicit mode
     // outranks everything else the executor would read.
     const codex = (readOnly: boolean): AgentCodexExecutor =>
@@ -261,7 +263,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     const reading = codex(true);
     bind(
       AGENT_CODEX,
-      withAgentToolset(CODEX_TOOLS, writing, {
+      withAgentPermissionSet(CODEX_TOOLS, writing, {
         label: AGENT_CODEX,
         switched: (switches) => (switches[CODEX_WRITE_SWITCH] === false ? reading : writing),
       }),
@@ -277,9 +279,9 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     // is its runtime half: there is no channel to route an approver through, so one must not be built.
     bind(
       spec.name ?? AGENT_GENERIC_CLI,
-      // It declares no tools and no channel, so a toolset that refuses anything is refused here —
+      // It declares no tools and no channel, so a permission set that refuses anything is refused here —
       // what the engine's own rule did for a narrowing profile, now that there is no profile.
-      withAgentToolset(
+      withAgentPermissionSet(
         GENERIC_CLI_TOOLS,
         new AgentCliExecutor({
           label: spec.name ?? AGENT_GENERIC_CLI,
@@ -450,8 +452,13 @@ export interface RouteProbeOptions {
   secrets?: SecretResolver;
   /** Injected so a test can answer a server without one. Defaults to the global `fetch`. */
   fetch?: (url: string, init: { signal: AbortSignal }) => Promise<{ ok: boolean; status: number }>;
-  /** Injected for the same reason. Defaults to `node:fs`'s `existsSync`. */
+  /**
+   * Injected for the same reason. Absent, a weights file is STAT'd (`node:fs`'s `statSync`), which
+   * says its size too; given, it is the whole of the check and no size is reported.
+   */
   exists?: (path: string) => boolean;
+  /** How a weights file is stat'd when `exists` is not injected. Defaults to `node:fs`'s `statSync`. */
+  stat?: (path: string) => { size: number; isFile(): boolean };
   /** Resolve a module id — the embedded route needs an optional package to be installed. */
   resolve?: (id: string) => string;
   /**
@@ -467,7 +474,73 @@ export interface RouteProbeOptions {
 const ROUTE_TIMEOUT_MS = 1_500;
 
 /** The package the `embedded` route loads weights with — optional, and absent in most installs. */
-const EMBEDDED_MODULE = "node-llama-cpp";
+export const EMBEDDED_MODULE = "node-llama-cpp";
+
+/** A split GGUF's part, by name: `…-00001-of-00003.gguf` is part 1 of 3. */
+const SPLIT_PART = /-(\d{5})-of-(\d{5})\.gguf$/i;
+
+/**
+ * Each weights entry, looked for on disk — the per-model rows the embedded route's probe is made of.
+ *
+ * A split model is named by its FIRST part (that is what the loader is handed); its other parts are
+ * looked for beside it, and a missing one is an `error` on a row that otherwise `exists`, because the
+ * loader fails on it just the same. Never throws: an unreadable file is a row that says so.
+ */
+export function checkWeightsFiles(
+  weights: Record<string, { modelPath: string }> | undefined,
+  options: Pick<RouteProbeOptions, "exists" | "stat"> = {},
+): WeightsFileCheck[] {
+  return Object.entries(weights ?? {}).map(([id, { modelPath }]) => {
+    if (options.exists !== undefined && options.stat === undefined) return { id, modelPath, exists: options.exists(modelPath) };
+    const stat = options.stat ?? statSync;
+    const first = statOf(modelPath, stat);
+    if (first.error !== undefined || first.size === undefined) {
+      return { id, modelPath, exists: false, ...(first.error !== undefined ? { error: first.error } : {}) };
+    }
+    const split = SPLIT_PART.exec(modelPath);
+    if (split === null) return { id, modelPath, exists: true, sizeBytes: first.size };
+    const part = Number(split[1]);
+    const parts = Number(split[2]);
+    if (part !== 1) return { id, modelPath, exists: true, parts, error: `this is part ${part} of ${parts} — name the first part, …-00001-of-${split[2]}.gguf` };
+    let sizeBytes = first.size;
+    for (let n = 2; n <= parts; n++) {
+      const path = modelPath.replace(SPLIT_PART, `-${String(n).padStart(5, "0")}-of-${split[2]}.gguf`);
+      const held = statOf(path, stat);
+      if (held.size === undefined) return { id, modelPath, exists: true, parts, error: `part ${n} of ${parts} is missing: ${path}` };
+      sizeBytes += held.size;
+    }
+    return { id, modelPath, exists: true, sizeBytes, parts };
+  });
+}
+
+/** One file's size, or why there is none. Not being there is no error — it is `exists: false`. */
+function statOf(path: string, stat: NonNullable<RouteProbeOptions["stat"]>): { size?: number; error?: string } {
+  try {
+    const held = stat(path);
+    return held.isFile() ? { size: held.size } : { error: "this is a folder, not a weights file" };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? {} : { error: (e as Error).message };
+  }
+}
+
+/** Whether the embedded route's loader resolves from here — the other half of its probe. */
+export function checkEmbeddedLoader(options: Pick<RouteProbeOptions, "resolve"> = {}): EmbeddedWeightsReport["loader"] {
+  try {
+    (options.resolve ?? defaultResolve)(EMBEDDED_MODULE);
+    return { module: EMBEDDED_MODULE, installed: true };
+  } catch (e) {
+    return { module: EMBEDDED_MODULE, installed: false, error: (e as Error).message.split("\n")[0]! };
+  }
+}
+
+/** Every weights entry and the loader, together — what `model:checkWeights` answers. */
+export function checkEmbeddedWeights(
+  weights: Record<string, { modelPath: string }> | undefined,
+  options: Pick<RouteProbeOptions, "exists" | "stat" | "resolve"> = {},
+): EmbeddedWeightsReport {
+  return { weights: checkWeightsFiles(weights, options), loader: checkEmbeddedLoader(options) };
+}
 
 async function probeOneRoute(
   key: string,
@@ -585,20 +658,19 @@ async function probeEmbeddedRoute(
       fix: 'name a GGUF: { "qwen2.5-7b": { "modelPath": "/models/qwen.gguf" } }',
     };
   }
-  const exists = options.exists ?? existsSync;
-  const absent = named.filter(([, w]) => !exists(w.modelPath));
-  if (absent.length === named.length) {
+  // The same rows `model:checkWeights` answers with, so the route's line and the per-model list
+  // cannot disagree about which file is there.
+  const rows = checkWeightsFiles(route?.weights, options);
+  const absent = rows.filter((row) => !row.exists);
+  if (absent.length === rows.length) {
     return {
       name: "embedded",
       status: "failed",
-      detail: `no weights file exists: ${absent.map(([id, w]) => `${id} → ${w.modelPath}`).join(", ")}`,
+      detail: `no weights file exists: ${absent.map((row) => `${row.id} → ${row.modelPath}`).join(", ")}`,
       fix: "correct the modelPath, or download the GGUF to that location",
     };
   }
-  const resolve = options.resolve ?? defaultResolve;
-  try {
-    resolve(EMBEDDED_MODULE);
-  } catch {
+  if (!checkEmbeddedLoader(options).installed) {
     return {
       name: "embedded",
       status: "failed",
@@ -606,15 +678,15 @@ async function probeEmbeddedRoute(
       fix: `install ${EMBEDDED_MODULE}, or serve the same weights through a local server instead`,
     };
   }
-  const usable = named.filter(([, w]) => exists(w.modelPath));
+  const usable = rows.filter((row) => row.exists);
   return {
     name: "embedded",
     status: "ok",
     detail:
       absent.length === 0
-        ? `${usable.length} model(s) ready: ${usable.map(([id]) => id).join(", ")}`
-        : `${usable.length} of ${named.length} ready — missing: ${absent.map(([id]) => id).join(", ")}`,
-    ...(absent.length === 0 ? {} : { fix: `correct the modelPath for ${absent.map(([id]) => id).join(", ")}` }),
+        ? `${usable.length} model(s) ready: ${usable.map((row) => row.id).join(", ")}`
+        : `${usable.length} of ${named.length} ready — missing: ${absent.map((row) => row.id).join(", ")}`,
+    ...(absent.length === 0 ? {} : { fix: `correct the modelPath for ${absent.map((row) => row.id).join(", ")}` }),
   };
 }
 

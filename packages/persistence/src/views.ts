@@ -10,7 +10,7 @@ import { createLogger } from "@declarative-ai/log";
 import { ANSWERED_EVENT, isTaskId, refusal, SUPPLIED_EVENT, type AnsweredEvent, type SuppliedEvent } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent, StateDef, WorkflowBundle } from "@declarative-ai/hw";
-import { loadWorkflowBundle } from "./toolsets";
+import { loadWorkflowBundle } from "./permissionSets";
 import type { BoardView, InputProvenance, InputSettledVia, InstanceAddress, InstanceNode, TaskDetail, TaskMeta, TaskOrigin, TaskSummary, TimelineEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import type { TaskRuntimeRow } from "./runtime";

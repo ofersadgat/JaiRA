@@ -84,7 +84,7 @@ describe("writing to what ships", () => {
     expect(() => service.deleteWorkflow({ stateId: "chat/hello", layer: "system", force: true })).toThrow(READ_ONLY);
     expect(() => service.writeFile({ layer: "system", path: "prompts/hello.md", text: "mine" })).toThrow(READ_ONLY);
     expect(() => service.createFile({ layer: "system", path: "prompts/new.md", kind: "file", text: "x" })).toThrow(READ_ONLY);
-    expect(() => service.createFile({ layer: "system", path: "toolsets/mine", kind: "directory" })).toThrow(READ_ONLY);
+    expect(() => service.createFile({ layer: "system", path: "permission-sets/mine", kind: "directory" })).toThrow(READ_ONLY);
     expect(() => service.renameFile({ layer: "system", path: "prompts/hello.md", to: "prompts/bye.md" })).toThrow(READ_ONLY);
     expect(() => service.deleteFile({ layer: "system", path: "prompts", force: true })).toThrow(READ_ONLY);
     await expect(service.runSync({ layer: "system", path: "workflows/workflow.md", direction: "states" })).rejects.toThrow(

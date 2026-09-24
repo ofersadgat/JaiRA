@@ -2,13 +2,13 @@
 id: engineering/units/model-routing
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
-implements: [product/bring-your-own-models-and-agents, ui/surfaces/settings-providers, ui/components/provider-row, ui/components/model-cascade, ux/patterns/checked-status-with-the-fix, ux/patterns/refuse-with-the-reason-and-the-fix]
+updated: 2026-09-23
+implements: [product/bring-your-own-models-and-agents, ui/surfaces/settings-connections, ui/components/provider-row, ui/components/model-cascade, ux/patterns/checked-status-with-the-fix, ux/patterns/refuse-with-the-reason-and-the-fix]
 layer: core
 owns_contracts: []
 requires: [engineering/units/executor-tree, engineering/units/secret-chain, engineering/units/agent-executors]
-implemented_by: [packages/runtime/src/modelRoutes.ts, packages/runtime/src/wiring.ts]
-verified_by: [packages/runtime/test/modelRoutes.test.ts]
+implemented_by: [packages/runtime/src/modelRoutes.ts, packages/runtime/src/localServers.ts, packages/runtime/src/wiring.ts]
+verified_by: [packages/runtime/test/modelRoutes.test.ts, packages/runtime/test/localServers.test.ts, packages/app/test/forgeSignIn.test.ts]
 siblings: [engineering/units/executor-tree, engineering/units/agent-executors, engineering/units/secret-chain, engineering/units/engine-wiring]
 ---
 
@@ -21,7 +21,9 @@ siblings: [engineering/units/executor-tree, engineering/units/agent-executors, e
 - `modelRouterOptions(models, secrets)`: the provider routes as upstream `ModelRouterOptions`, with keys resolved. A remote route's key is its named `credential`, else its conventional variable `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `OPENROUTER_API_KEY`, both looked up through the secret chain; a disabled route gets none. `local` takes `baseURL`, `headers`, `supportsStructuredOutputs`, `serve` and a named credential only; `embedded` becomes a resolver over its `weights`.
 - `usableRouteKeys(models, secrets)`: the routes a derived tree is built from. A remote route needs a key the chain can find, `local` needs a `baseURL`, and `embedded` needs one weights file that exists.
 - `agentPromptRoutes(agents, options)`: one prompt executor per enabled agent, keyed by its registry name, each wrapped in `normaliseAgentModel` so `""`, `default` and `<agent>/default` all reach the transport as `<agent>/default`. `agentPromptRouteNames` lists them with `claude-cli` first; `agentRouteVendors` says `claude-cli` and `claude-code` serve `anthropic`, `codex-cli` serves `openai`, and a generic CLI serves no vendor.
-- `probeModelRoutes(models, options)`: a no-cost check of every route in `MODEL_ROUTE_KEYS`, reported as `ProbeResult`. `knownModels()`: the upstream `ModelInfo` catalog as `{route}/{model}` ids with their input and output modalities, for the model picker.
+- `probeModelRoutes(models, options)`: a no-cost check of every route in `MODEL_ROUTE_KEYS`, reported as `ProbeResult`. The embedded route's line is decided from `checkWeightsFiles` (one row per model: stat'd, with its size, a split GGUF named by its first part and its parts summed) and `checkEmbeddedLoader` (does `node-llama-cpp` resolve), which `checkEmbeddedWeights` also answers IPC `model:checkWeights` with, so the list and the line cannot disagree.
+- `discoverLocalServers(options)` in `localServers.ts`: IPC `model:probeLocal`, on demand only. `GET {base}/models` at Ollama `:11434/v1`, LM Studio `:1234/v1`, llama.cpp `:8080/v1`, vLLM `:8000/v1` and Jan `:1337/v1` in parallel, 800 ms each; `up` only for an OpenAI `{data: [{id}]}` list, so another program on the port is not a server; `inUse` on the row the `local` route's `baseURL` names (`sameServerUrl`: case, trailing slash and `localhost`/`127.0.0.1`/`[::1]`/`0.0.0.0` do not matter), and that URL asked too as a `Configured` row when it is none of them.
+- `knownModels()`: the upstream `ModelInfo` catalog as `{route}/{model}` ids with their input and output modalities, for the model picker.
 - `defaultExecutorTree(config, bundle, opts)`: the resolved default tree, and the start-time refusal.
 
 It deliberately does not own:
@@ -67,13 +69,13 @@ It deliberately does not own:
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| A route names a credential nobody set | the route is not usable; a state naming `<route>/…` is refused at start with `'<model>' names the '<route>' route, which is not available here …` | store the secret, or drop the prefix | the run is refused with the fix; Providers shows the route failed |
-| A local server is down | the probe fails unless the route has `serve`, but `usableRouteKeys` counts it by `baseURL` alone | start the server | Providers shows it failed; a run starts and its first call fails |
+| A route names a credential nobody set | the route is not usable; a state naming `<route>/…` is refused at start with `'<model>' names the '<route>' route, which is not available here …` | store the secret, or drop the prefix | the run is refused with the fix; Connections shows the route failed |
+| A local server is down | the probe fails unless the route has `serve`, but `usableRouteKeys` counts it by `baseURL` alone | start the server | Connections shows it failed; a run starts and its first call fails |
 | Embedded weights exist and `node-llama-cpp` is not installed | the probe fails and the route still counts as usable | install the loader | a run starts and its first call fails |
 | An agent's binary is missing and a bare model names its family | named models are checked against every configured agent, while the run's tree holds only agents a probe passed, so the call goes to a usable provider of that family or fails at dispatch | install the binary, or add a provider key | the run starts and, with no provider key, its first prompt fails |
 | No probe has run yet in the app | `availableExecutors` is `undefined`, so every enabled agent is a route | none needed | a missing binary fails at the call |
 | Two availability refreshes overlap | a request during a pass gets one follow-up pass, coalesced, and never the stale answer | none needed | Settings updates when the follow-up lands |
-| A local server does not answer the probe in time | the fetch is aborted after `ROUTE_TIMEOUT_MS` and reported as `no answer in time` | Recheck | Providers shows it failed |
+| A local server does not answer the probe in time | the fetch is aborted after `ROUTE_TIMEOUT_MS` and reported as `no answer in time` | Recheck | Connections shows it failed |
 | The process dies mid-probe | nothing durable is written; the snapshot is rebuilt at the next start | none needed | none |
 | `models.routes.openai` is written in `settings.json` | the parser refuses the block, so the route takes only `OPENAI_API_KEY` and cannot be disabled or given a `baseURL` or credential | supply `OPENAI_API_KEY` through the chain and write no `openai` block | the settings are refused with `config.models.routes.openai names an unknown route` |
 

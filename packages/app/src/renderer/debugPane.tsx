@@ -79,7 +79,7 @@ function Readiness({ availability }: { availability: AvailabilitySnapshot }): JS
     return (
       <div className="notice warn">
         Nothing here reported healthy, so a live run will probably fail to find a model — see Settings ›
-        Providers. The scripted run needs none, and is the better first test anyway.
+        Connections. The scripted run needs none, and is the better first test anyway.
       </div>
     );
   }

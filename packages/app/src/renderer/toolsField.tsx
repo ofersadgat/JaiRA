@@ -1,6 +1,6 @@
 /**
- * The state editor's ONE Tools field (decision 0007 §6): a picker of the toolset the state starts
- * from, and beneath it the same rows Settings → Toolsets uses, for the lines the state writes over it.
+ * The state editor's ONE Tools field (decision 0007 §6): a picker of the permission set the state starts
+ * from, and beneath it the same rows Settings → Permission sets uses, for the lines the state writes over it.
  *
  * It replaces two fields that said one thing between them — a list of names in `tools`, and their
  * modes in `permissions` — for a state written the new way. A state still written the old way keeps
@@ -8,17 +8,17 @@
  *
  * A render function: what it shows arrives as `value`, and every change leaves as the whole form.
  * The picker is asked through the schema form like every other typed input — an `enum`, so a box
- * that completes against the toolsets this project can name.
+ * that completes against the permission sets this project can name.
  */
 import { createContext, useContext, useState, type JSX } from "react";
-import type { ToolChoice, ToolsetChoice } from "@jaira/shared/browser";
+import type { ToolChoice, PermissionSetChoice } from "@jaira/shared/browser";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
-import { ToolsetLines } from "./toolsetCard";
-import { linesOfToolset, pickOfReference, referenceOfLabel, toolsetOfLines, toolsetPicks, type ToolsFieldForm } from "./toolsFieldForm";
+import { PermissionSetLines } from "./permissionSetCard";
+import { linesOfPermissionSet, pickOfReference, referenceOfLabel, permissionSetOfLines, permissionSetPicks, type ToolsFieldForm } from "./toolsFieldForm";
 
 /**
- * What the field needs from outside the document: the toolsets this project can name, and the tools a
+ * What the field needs from outside the document: the permission sets this project can name, and the tools a
  * line can be written for.
  *
  * A context rather than a prop, because the field sits five components down from anything that can
@@ -26,16 +26,16 @@ import { linesOfToolset, pickOfReference, referenceOfLabel, toolsetOfLines, tool
  * picker then offers what the state already names, and "none".
  */
 export interface ToolsFieldData {
-  toolsets: readonly ToolsetChoice[];
+  permissionSets: readonly PermissionSetChoice[];
   tools: readonly ToolChoice[];
 }
-const ToolsFieldContext = createContext<ToolsFieldData>({ toolsets: [], tools: [] });
+const ToolsFieldContext = createContext<ToolsFieldData>({ permissionSets: [], tools: [] });
 export const ToolsFieldProvider = ToolsFieldContext.Provider;
 export const useToolsFieldData = (): ToolsFieldData => useContext(ToolsFieldContext);
 
 export function ToolsFieldControl({
   value,
-  toolsets,
+  permissionSets,
   tools,
   onChange,
   readOnly,
@@ -43,8 +43,8 @@ export function ToolsFieldControl({
   block,
 }: {
   value: ToolsFieldForm;
-  /** Every toolset this project can name — the winners, as the composer's Permissions card lists them. */
-  toolsets: readonly ToolsetChoice[];
+  /** Every permission set this project can name — the winners, as the composer's Permissions card lists them. */
+  permissionSets: readonly PermissionSetChoice[];
   /** Every tool a line can be written for. */
   tools: readonly ToolChoice[];
   onChange: (next: ToolsFieldForm) => void;
@@ -55,12 +55,12 @@ export function ToolsFieldControl({
   block?: string | undefined;
 }): JSX.Element | null {
   // What is in the box while it is NOT yet one of the rows: a datalist box is typed into a letter at
-  // a time, and a reference is only written once the text is a toolset somebody can name.
+  // a time, and a reference is only written once the text is a permission set somebody can name.
   const [typing, setTyping] = useState<string | null>(null);
   const held = value.reference.trim().length > 0 || Object.keys(value.lines).length > 0 || Object.keys(value.unread).length > 0;
   // A reading shows what the state says, and a state that says nothing about tools says nothing here.
   if (readOnly === true && !held) return null;
-  const picks = toolsetPicks(toolsets, value.reference);
+  const picks = permissionSetPicks(permissionSets, value.reference);
   const schema: Schema = {
     type: "object",
     required: ["tools"],
@@ -68,7 +68,7 @@ export function ToolsFieldControl({
       tools: {
         type: "string",
         title: "Tools",
-        description: "A toolset, and any lines this state writes over it.",
+        description: "A permission set, and any lines this state writes over it.",
         enum: picks.map((pick) => pick.label),
       },
     },
@@ -88,14 +88,14 @@ export function ToolsFieldControl({
         }}
         ctx={{ path: block ?? "environment", disabled: readOnly === true }}
       />
-      <ToolsetLines
-        toolset={toolsetOfLines(value.lines)}
+      <PermissionSetLines
+        permissionSet={permissionSetOfLines(value.lines)}
         tools={tools}
         readOnly={readOnly}
-        note={value.reference.trim().length > 0 ? "over the toolset, for this state" : "this state's own line"}
+        note={value.reference.trim().length > 0 ? "over the permission set, for this state" : "this state's own line"}
         addLabel="add a tool, a command or script"
         startAdding={startAdding}
-        onChange={(next) => onChange({ ...value, lines: linesOfToolset(next) })}
+        onChange={(next) => onChange({ ...value, lines: linesOfPermissionSet(next) })}
       />
       {unread.length > 0 ? (
         <p className="sub warn-text">

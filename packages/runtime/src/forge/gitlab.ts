@@ -53,7 +53,10 @@ export class GitLabProvider implements ForgeProvider {
     return this.options.http({
       method,
       url: `${this.api}${path}`,
-      headers: { "PRIVATE-TOKEN": this.options.token, Accept: "application/json", "User-Agent": "jaira" },
+      // `Authorization: Bearer`, not `PRIVATE-TOKEN`: GitLab takes a personal access token either way,
+      // but an OAuth token (a sign-in through the browser) ONLY this way — `PRIVATE-TOKEN` is looked up
+      // as a personal token and refused.
+      headers: { Authorization: `Bearer ${this.options.token}`, Accept: "application/json", "User-Agent": "jaira" },
       ...(body !== undefined ? { body: body as never } : {}),
     });
   }

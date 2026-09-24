@@ -226,7 +226,7 @@ describe("JAIRA_TOOLS — the gateable set", () => {
 
   it("names nothing that is not registered", () => {
     // The vocabulary no longer restates what a tool DOES (`readOnly` went with decision 0007 §1: a
-    // toolset says what a state may do, by name). What is left to drift is the NAME: one here with
+    // permission set says what a state may do, by name). What is left to drift is the NAME: one here with
     // nothing behind it is a permission somebody can grant and no tool can honour.
     const registry = registered();
     for (const declared of JAIRA_TOOLS) {

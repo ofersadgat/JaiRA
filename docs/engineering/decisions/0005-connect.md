@@ -168,7 +168,7 @@ A `chat/control` is never made from a conversation, and a `chat/session`
 never turns into one.
 
 - Both are **authored states**, shipped built in and overridable per
-  machine and per project: prompt, model and toolset are a person's to
+  machine and per project: prompt, model and permission set are a person's to
   edit. The dynamic document starts as one of them and grows
   children.
 - It is **an ordinary workflow document**: the same format, the same lint,
@@ -198,7 +198,7 @@ never turns into one.
   tasks stand in one dynamic workflow exactly as split tasks stand in a
   real one. A modification changes the document for all of them.
 
-**The workflow tools** — the `workflow` toolset, all of what `chat/control`
+**The workflow tools** — the `workflow` permission set, all of what `chat/control`
 holds and part of what `chat/session` does — are the host operations, not a
 second implementation of them:
 
@@ -213,7 +213,7 @@ second implementation of them:
 
 Each is named with a verb and what it acts on — `start_task`, not `start` — so a
 model reading the list knows what it does, and so the names cannot shadow a shell
-program a toolset names as a command subject (`start`, `move`, `stop`). Renamed
+program a permission set names as a command subject (`start`, `move`, `stop`). Renamed
 after step 6, 2026-09-21.
 
 The drag calls `connect` directly. A model is involved in a drop only when
@@ -312,10 +312,10 @@ person's backward move is a `task_move`, not a forged output.
 | `autopilot.askBelow` | `0.2` | below this, a fast-forward leaves the question to the person |
 
 Starting work from a conversation spends money on a model's say-so. What
-each workflow tool may do without asking is the conversation's **toolset**
-([0007](0007-toolsets.md)): `chat_control/ask-first` and `chat/ask-first`
+each workflow tool may do without asking is the conversation's **permission set**
+([0007](0007-permissionSets.md)): `chat_control/ask-first` and `chat/ask-first`
 ship asking, as a conversation does today; a project that wants `start_task` to
-go ahead overrides one file, or picks another toolset from the bucket.
+go ahead overrides one file, or picks another permission set from the bucket.
 
 ### What draws
 
@@ -384,7 +384,7 @@ conversation's. Per-item workflows: items share one document.
 5. **`connect`** and the board drop with its hover preview and Undo. Until
    6, a drop whose inputs do not all bind is refused with what is missing.
    **Built 2026-09-21** — see "What step 5 settled" below.
-6. **The conversations** (needs 0006): the `workflow` toolset over
+6. **The conversations** (needs 0006): the `workflow` permission set over
    `connect`; `chat/session` growing its first child; `chat/control` for a
    task that becomes a dynamic workflow. **Built 2026-09-21** — see
    "What step 6 settled" below.
@@ -663,7 +663,7 @@ of record is [task-channels](../contracts/task-channels.md) (`task:connect`,
 ## What step 6 settled
 
 Built in `@jaira/shared` (`workflowTools.ts`, the two state files and the four
-`chat` toolsets), `@jaira/runtime` (`workflowTools.ts`), the app
+`chat` permission sets), `@jaira/runtime` (`workflowTools.ts`), the app
 (`main/workflowHost.ts`, `AppService.workflowHostFor`, the transcript's rows and
 note, the Chat list) and `@jaira/persistence` (`connect.ts`, `load.ts`,
 `dynamicDocuments.ts`, `views.ts`), with no upstream change. The statement of
@@ -740,7 +740,7 @@ text above left open:
   while the AUTHORED `environment` block, which is what a dynamic root hands
   down to every child it starts, stays empty. That is the whole of step 4's
   last note, and it is asserted rather than assumed.
-- **`chat/session` took `chat/agent`'s place and the four `chat` toolsets grew
+- **`chat/session` took `chat/agent`'s place and the four `chat` permission sets grew
   eight lines.** A session holds the project's tools AND the workflow tools, so
   `chat/ask-first` — "asks before every tool a conversation holds" — had to hold
   them too. The rule the frozen-preset test now states is that a `chat/<name>`

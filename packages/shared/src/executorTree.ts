@@ -567,7 +567,7 @@ export function namedModelAnswer(
       answers: false,
       reason:
         `'${model}' names the '${prefix}' route, which is not available here — a provider route needs a ` +
-        `key (Settings → Providers, or models.routes.${prefix}.credential). Drop the prefix and write ` +
+        `key (Settings → Connections, or models.routes.${prefix}.credential). Drop the prefix and write ` +
         `'${model.slice(prefix.length + 1)}' to let it route to whatever this machine has; ${named}`,
     };
   }

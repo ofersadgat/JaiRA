@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExecServices, FunctionInputs } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
-import { parseToolset } from "@jaira/shared";
+import { parsePermissionSet } from "@jaira/shared";
 import { commandDecisionOf, compilePolicy } from "../src/policy";
 import { createGlobTool, createGrepTool } from "../src/searchTools";
 import { commandSubjects, compileClaudeScopeRules, scopeNarrowingFor } from "../src/tools";
@@ -146,7 +146,7 @@ describe("the places a shell command is about", () => {
  * anticipate every way a line can write.
  */
 describe("a path scope binds the parts of a line as it binds the tools", () => {
-  const compiled = (toolset?: Record<string, string>) =>
+  const compiled = (permissionSet?: Record<string, string>) =>
     compilePolicy(
       {},
       {
@@ -158,7 +158,7 @@ describe("a path scope binds the parts of a line as it binds the tools", () => {
           { path: "/work/docs/**", tools: { write_file: "deny" } },
           { url: "https://docs.example/**", default: "allow" },
         ],
-        ...(toolset !== undefined ? { toolset: parseToolset(toolset).toolset } : {}),
+        ...(permissionSet !== undefined ? { permissionSet: parsePermissionSet(permissionSet).permissionSet } : {}),
       },
     );
   const ask = (policy: ExecPolicy, command: string, cwd?: string) => {
@@ -190,7 +190,7 @@ describe("a path scope binds the parts of a line as it binds the tools", () => {
     expect(ask(compiled(), command, cwd)).toEqual({ mode, denied });
   });
 
-  it("asks where the toolset asks, inside the places the table allows", () => {
+  it("asks where the permission set asks, inside the places the table allows", () => {
     const policy = compiled({ bash: "allow", read_file: "allow", write_file: "ask", web_fetch: "allow" });
     expect(ask(policy, "cat src/a.ts").mode).toBe("allow");
     expect(ask(policy, "rm src/a.ts").mode).toBe("ask");

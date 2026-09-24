@@ -2,11 +2,11 @@
 id: engineering/contracts/settings-json
 type: engineering-contract
 status: shipped
-updated: 2026-09-22
+updated: 2026-09-23
 visibility: public
 kind: format
 owned_by: [engineering/units/project-config]
-consumers: ["@jaira/persistence project.ts loadLayeredConfig, openSharedProject and initProject", "@jaira/persistence workflowRefs.ts, workflows.ts and lifecycle.ts through workflows.path", "@jaira/app main service.ts config:read, config:write and every run it starts", "@jaira/runtime modelRoutes.ts, executors.ts, agents.ts and policy.ts", "@jaira/cli runs and task commands", "the renderer Settings panes, through config:read and config:write", "people editing settings.json by hand"]
+consumers: ["@jaira/persistence project.ts loadLayeredConfig, openSharedProject and initProject", "@jaira/persistence settingsMigration.ts migrateSettingsLayers, at every open", "@jaira/persistence workflowRefs.ts, workflows.ts and lifecycle.ts through workflows.path", "@jaira/app main service.ts config:read, config:write and every run it starts", "@jaira/runtime modelRoutes.ts, executors.ts, agents.ts and policy.ts", "@jaira/cli runs and task commands", "the renderer Settings panes, through config:read and config:write", "people editing settings.json by hand"]
 since: 2026-07-17
 siblings: [engineering/contracts/user-settings-json, engineering/contracts/secret-sources, engineering/contracts/jaira-layout, engineering/contracts/artifact-destination-template]
 ---
@@ -17,9 +17,9 @@ siblings: [engineering/contracts/user-settings-json, engineering/contracts/secre
 
 ## A caller reaches for settings.json when a choice should travel with the project, and never for a secret or a preference
 
-**Use when.** Configuring model routes and presets, the default executor tree, agent runtimes, the command policy, artifact placement, storage modes, the exec environment, the workflow search path or the Files tree's shared hidden list. Reading the configuration a run will use: parse the merged document with `parseConfig(mergeConfigDocuments(base, project))`, or read `Project.config`.
+**Use when.** Configuring model routes and presets, the default executor tree, agent runtimes, the defaults of the functions JaiRA ships, artifact placement, storage modes, the exec environment, the workflow search path or the Files tree's shared hidden list. Reading the configuration a run will use: parse the merged document with `parseConfig(mergeConfigDocuments(base, project))`, or read `Project.config`.
 
-**Do not use when.** Storing a credential value: name it in a `credential` field and store it through [secret-sources](secret-sources.md). Recording one person's layout, theme or reading preferences: [user-settings-json](user-settings-json.md). Deciding where the files live: [jaira-layout](jaira-layout.md).
+**Do not use when.** Storing a credential value: name it in a `credential` field and store it through [secret-sources](secret-sources.md). Recording one person's layout, theme or reading preferences: [user-settings-json](user-settings-json.md). Deciding where the files live: [jaira-layout](jaira-layout.md). Saying what a command may run: that is a line under the `bash` tool of a permission set ([tool-policy](../units/tool-policy.md)).
 
 ## The shape is one object per layer, merged before it is parsed
 
@@ -34,7 +34,7 @@ The shared layer is `<base>/settings.json`. The project layer is `<project>/.jai
 - `agents.genericCli` merges by entry `name`, an absent name counting as `generic-cli`: a project entry with a base entry's name merges into it in the base's position, and a new name is appended.
 - A layer that is not a plain object yields the other layer.
 
-### The top-level keys are thirteen blocks, and an unknown top-level key is ignored
+### The top-level keys are twelve blocks, an unknown top-level key is ignored, and `policy` and `smart` are refused
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -44,12 +44,14 @@ The shared layer is `<base>/settings.json`. The project layer is `<project>/.jai
 | `storage` | object | no | whether each concern's truth is a file, the database or both |
 | `memo` | object | no | `{enabled?: boolean}`, default `false`; parsed and read by nothing |
 | `execEnvironment` | `"windows"` or `{wsl: non-empty string}` | no, default `"windows"` | where commands, git and agents run; keys beside `wsl` are ignored |
-| `policy` | object | no, default `{}` | the command and tool policy, passed through without checking |
 | `agents` | object | no | the agent runtimes this project registers |
 | `workflows` | `{path?: string[]}` | no | the search path a bare workflow reference walks |
 | `files` | `{hidden?: string[]}` | no | the Files tree's shared hidden globs |
-| `smart` | `{model?: string, prompt?: string}` | no, default `{}` | the shipped `smart` permission function a toolset line names as `{ "function": "smart" }` ([decision 0007](../decisions/0007-toolsets.md), amended 2026-09-22): `model` is the route that judges a call (absent: the executor default), `prompt` what it is told (absent: `DEFAULT_SMART_PROMPT`); a non-string is refused as `config.smart.<key> must be a string`; edited in Settings → Configuration → smart |
+| `integrations` | `{forges?: object, oauth?: object}` | no | connections to forges, one per host ([decision 0004](../decisions/0004-remote-review.md)), and the OAuth apps a forge sign-in uses, see below; `integrations.review` is refused, naming `functions.review_artifacts.settleAfter`; left out of the file `initProject` writes, so the shared root's connections are not shadowed |
 | `autopilot` | `{askBelow?: number}` | no, default `{askBelow: 0.2}` | how sure a fast-forward's controlling conversation must be before its answer stands in for the person's ([decision 0005](../decisions/0005-connect.md) §6); `0`–`1`, `1` never answers for you and `0` always. It is no workflow's threshold and names no workflow input. Left out of the file `initProject` writes, because it is a person's setting and belongs in the shared root |
+| `functions` | object | no, every default | each shipped function's defaults, by the function's name; below. Left out of the file `initProject` writes, for the reason `autopilot` is |
+| `policy` | any | refused | throws `config.policy is dissolved: …`, naming where each of its parts went; a document still carrying it is migrated at open |
+| `smart` | any | refused | throws `config.smart has moved to functions.smart`; a document still carrying it is migrated at open |
 
 ### A route block's allowed fields follow from its key
 
@@ -115,7 +117,7 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `scopes` | array | no | where anything under the node may act; enforcement belongs to [tool-policy](../units/tool-policy.md) |
 | `scopes[i].path` | non-empty glob | exactly one of `path` and `url` | a filesystem place |
 | `scopes[i].url` | non-empty glob | exactly one of `path` and `url` | a network place |
-| `scopes[i].tools` | object of `allow`, `deny` or `ask` by tool name (a function is a toolset's, never a place's) | one of `tools` and `default` | per-tool modes in that place |
+| `scopes[i].tools` | object of `allow`, `deny` or `ask` by tool name (a function is a permission set's, never a place's) | one of `tools` and `default` | per-tool modes in that place |
 | `scopes[i].default` | `allow`, `deny` or `ask` | one of `tools` and `default` | the mode for a tool with no entry |
 
 ### Artifacts, storage, workflows and files each have fixed fields and defaults
@@ -131,20 +133,34 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `workflows.path` | non-empty array of non-empty strings | no | each entry starts with `$` or is absolute; absent means the layer roots' `workflows` and `functions` in order |
 | `files.hidden` | array of non-empty strings | no | glob rules, trimmed, order kept, last match wins; absent means the defaults and `[]` hides nothing |
 
-### The policy block is read by the runtime as JairaPolicy
+### The functions block holds each shipped function's defaults, strict about every field
 
-`parseConfig` requires only that `policy` is an object. `compilePolicy` in `@jaira/runtime` `policy.ts` reads these fields without checking them.
+`functions` is keyed by the name a workflow or a permission set calls the function by ([decision 0007](../decisions/0007-permissionSets.md), amended 2026-09-23). The parsed block always carries every default. An unknown function, an unknown field and a value of the wrong kind are refused, naming the field. Settings draws it through `CONFIG_SECTIONS` (`configSchema.ts`), one sub-form per function.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `policy.rules` | array of `{match, action, reason?}` | no | ordered command rules, first match wins, evaluated before the built-ins |
-| `policy.rules[i].match` | `{program?, subcommand?, flags?: string[], anyFlag?: string[], argIncludes?: string}` | yes | a matcher over the parsed command; every `flags` entry must be present, any `anyFlag` entry is enough |
-| `policy.rules[i].action` | `"allow"`, `"deny"` or `"require_approval"` | yes | the verdict |
-| `policy.rules[i].reason` | string | no | shown when the rule prompts or refuses |
-| `policy.default` | action | no, default `"allow"` | the verdict when no rule and no built-in matches |
-| `policy.builtins` | boolean | no | `false` turns off the built-in destructive-git denies and risky-command approvals |
-| `policy.tools` | object of `allow`, `deny`, `ask` or `smart` by tool name | no | modes for tools; command tools are `smart` unless named here |
-| `policy.toolDefault` | mode | no | the mode for a tool with no entry |
+| `functions.smart.model` | string | no | the model the shipped `smart` permission function judges a call with, written as a state's `model` is; empty or absent is the default executor's |
+| `functions.smart.prompt` | string | no | what the judge is told; empty or absent is `DEFAULT_SMART_PROMPT`. The call is appended as JSON |
+| `functions.review_artifacts.publish` | `"ask"`, `"allow"` or `"deny"` | no, default `"ask"` | whether a workflow may push and open a merge request from here: once per task, without asking, or never |
+| `functions.review_artifacts.settleAfter` | duration string (`"10m"`, `"90s"`, `"2h"`, `"0"`) | no, default `"10m"` | the quiet window after the last comment on the forge; a state's `remote.settle_after` overrides it |
+| `functions.bash.builtins` | boolean | no, default `true` | `false` turns off the built-in destructive-git and `rm -r .git` refusals and the push, install, publish, network and credentials-path questions, which otherwise stand above every permission set |
+
+A command rule has no place here. What a command may run is a line under the `bash` tool of a permission set (`"git push --force": "deny"`), and a line no permission set judges answers to the built-ins alone ([tool-policy](../units/tool-policy.md)).
+
+### The integrations block names forges, never holds a token, and refuses what it does not know
+
+`parseIntegrations` in `@jaira/shared` `forge.ts`. Every field present is checked, and an unknown one is refused by name. The built-in connections `gitlab` (`gitlab.com`, `GITLAB_TOKEN`) and `github` (`github.com`, `GITHUB_TOKEN`) are laid under what a layer writes, so a layer states only what it changes. What reads it is [forge-integrations](../units/forge-integrations.md).
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `integrations.forges.<name>` | object | no | one connection; `<name>` is letters, digits, `-` and `_`, because a host has dots |
+| `….provider` | `"gitlab"` or `"github"` | yes, unless a built-in supplies it | which provider's code talks to it |
+| `….host` | host as a git remote spells it | yes, unless a built-in supplies it | lower-cased, no scheme; two connections on one host are refused |
+| `….credential` | secret name | no | the token's NAME in the secret chain; absent, the connection cannot call the API |
+| `….enabled` | boolean | no, default on | `false` turns the connection off without deleting it |
+| `….apiUrl` | http(s) URL | no | where the API is when the host's convention does not say; a forge sign-in's web root is this without `/api/v4` or `/api/v3` |
+| `integrations.oauth.<provider>` | `{clientId}` | no, default none | the OAuth app a forge sign-in through the browser uses (RFC 8628's device flow); `<provider>` is `github` or `gitlab`, and any other key is refused |
+| `integrations.oauth.<provider>.clientId` | one word, no whitespace | yes in an entry | the app's client ID — only the id: a device flow is a public client, so there is no secret to name. On GitHub the app has "Enable Device Flow" ticked; on GitLab it is not confidential and allows `api`. Absent, gitlab.com and github.com sign in through JaiRA's own apps (`BUILTIN_OAUTH_APPS`, `oauthAppFor` in `forge.ts`), and any other host answers `ok: false` saying to set this field; a pasted token still works everywhere. An id named here serves every host of that provider, the public one included |
 
 ### An agent block names a runtime and refuses the other runtime's fields
 
@@ -183,17 +199,19 @@ A `credential` anywhere must be a non-empty string with no whitespace.
 | `config:write` is sent a document whose merge fails to parse | the parser's error is thrown and nothing is written | fix and resend |
 | `config:write` names the project layer with no open project | `Refusal` "no project was named, so there is no project config to write" or "project '<ref>' is not open" | name an open project |
 | `artifacts.destination` is not a valid template | the document saves and opens; `parseDestination` throws when a run is wired, see [artifact-placement](../units/artifact-placement.md) | fix the template and start again |
+| A layer still holds `policy`, `smart` or `integrations.review` when it is parsed | `parseConfig` throws, naming where each went; at an open the migration below has already moved them, so this is a layer written since, or one the migration could not read | move the value under `functions`, or reopen |
 
 ## A renamed or retyped field breaks every committed document, and the path is a named refusal
 
-- Nothing migrates a document at open. Renaming a field breaks every checkout that carries the old name until its documents are migrated.
+- One migration runs at open, before the configuration is read: `migrateSettingsLayers` (`@jaira/persistence` `settingsMigration.ts`), called by `openProject` for the shared root and the project and by `openSharedProject` for the shared root. Per layer it moves `smart` to `functions.smart`, `policy.remote.publish` and `integrations.review.settleAfter` to `functions.review_artifacts`, and `policy.builtins` to `functions.bash.builtins`; writes each `policy.rules` entry as a command line under the `bash` tool of every permission set that layer can name, the layer's own file in place and a lower layer's as an override; carries a stricter `policy.default` onto each `bash` line and a `policy.toolDefault` onto a set with no `other`; and deletes `policy` and `smart`. What a line cannot say exactly is reported, never widened into an allow. The report and a copy of every file changed in place are kept under the layer's `system/logs/settings-migration-<stamp>/`. A layer with none of the three is not touched. The tool-policy unit says what the move preserves and what it cannot.
+- Apart from that one, nothing migrates a document at open. Renaming a field breaks every checkout that carries the old name until its documents are migrated.
 - The deprecation path is to migrate the documents and then refuse the old name with the new place in the message, as `models.default` does. The old name is not kept readable.
 - Loosening a strict block to ignore unknown fields hides the misspelling it used to report. Tightening a lenient block refuses documents that open today.
 - Changing a merge rule changes the effective configuration of every project that has both layers.
 
 ## Several blocks ignore what they do not know, and some fields do less than their names say
 
-- An unknown key is ignored at the top level and inside `models`, `agents`, `artifacts`, `memo`, `workflows`, `files`, `execEnvironment`, `local.serve` and a `weights` entry. Only routes, executor nodes, steps, scopes, storage and the four agent blocks refuse one.
+- An unknown key is ignored at the top level and inside `models`, `agents`, `artifacts`, `memo`, `workflows`, `files`, `execEnvironment`, `local.serve` and a `weights` entry. Only routes, executor nodes, steps, scopes, storage, `integrations`, `functions` and the four agent blocks refuse one.
 - `MODEL_ROUTE_KEYS` lists `openai`, but `models.routes.openai` is refused as an unknown route by a message that lists `openai` as expected.
 - `vendor` on a provider or agent node is refused as not a setting, although the node types declare it.
 - `memo.enabled` is parsed and read by nothing.

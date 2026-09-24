@@ -9,7 +9,7 @@
  * ## Three rules that are not negotiable here
  *
  *  - **Publishing is a policy decision, not a side effect.** A push and a merge request leave the
- *    machine, so both pass {@link authorizePublish} first: `remote.publish` is `allow`, `deny`, or —
+ *    machine, so both pass {@link authorizePublish} first: `functions.review_artifacts.publish` is `allow`, `deny`, or —
  *    the default — asked ONCE per task through `confirm_action`, saying exactly what will be sent and
  *    as whom. A `remote` in a workflow file is a request, never the authorization.
  *  - **JaiRA never force-pushes.** Every push is a plain fast-forward of a branch only JaiRA writes;
@@ -45,12 +45,12 @@ import {
   connectionForHost,
   handleOfRow,
   parseRemoteUrl,
-  publishModeOf,
   remoteBranchName,
   type Changeset,
   type ForgeAnchor,
   type ForgeProvider,
   type JairaIntegrationsConfig,
+  type PublishMode,
   type RemoteHandle,
   type RemoteHandlePort,
   type RemoteHandleRow,
@@ -115,8 +115,8 @@ export interface RemoteOptions {
   scratchDir: string;
   handles: RemoteHandlePort;
   integrations: JairaIntegrationsConfig;
-  /** The project's policy document, read for `remote.publish`. */
-  policy: unknown;
+  /** `functions.review_artifacts.publish`: whether a workflow may publish from here. */
+  publish: PublishMode;
   secrets: SecretResolver;
   exec: Exec;
   execEnv?: ExecEnv;
@@ -126,7 +126,7 @@ export interface RemoteOptions {
    * rather than publishing on nobody's say-so.
    */
   confirmPublish?: (request: PublishRequest) => Promise<PublishAnswer>;
-  /** Make `always` durable: write `policy.remote.publish = "allow"` into the project's settings. */
+  /** Make `always` durable: write `functions.review_artifacts.publish = "allow"` into the project's settings. */
   grantProject?: () => void;
 }
 
@@ -236,7 +236,7 @@ export class RemotePrimitives {
     }
     const connection = connectionForHost(this.options.integrations, location.host);
     if (connection === undefined) {
-      throw new RemoteRefusal(`no connection is set up for ${location.host} — add one under Settings → Integrations`);
+      throw new RemoteRefusal(`no connection is set up for ${location.host} — add one under Settings → Connections → Forges`);
     }
     return handles.ensure({
       taskId,
@@ -251,21 +251,21 @@ export class RemotePrimitives {
   }
 
   /**
-   * `remote.publish`, asked at most once per task.
+   * `functions.review_artifacts.publish`, asked at most once per task.
    *
    * A task that has already pushed has already been answered — the row says so, and it says so after
    * a restart, which is what makes "once per task" true of a review that takes a week.
    */
   private async authorizePublish(row: RemoteHandleRow, dir: string, provider: ForgeProvider): Promise<void> {
-    const mode = publishModeOf(this.options.policy);
+    const mode = this.options.publish;
     if (mode === "allow") return;
     if (mode === "deny") {
-      throw new RemoteRefusal("this project's policy does not let a workflow publish (policy.remote.publish is deny) — nothing was pushed");
+      throw new RemoteRefusal("this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed");
     }
     if (this.granted || this.options.handles.forTask(this.options.taskId).some((r) => r.pushedHead !== undefined)) return;
     if (this.options.confirmPublish === undefined) {
       throw new RemoteRefusal(
-        "publishing needs a person's say-so and nobody can be asked here — grant it with policy.remote.publish: \"allow\", or run where the question can be answered",
+        "publishing needs a person's say-so and nobody can be asked here — grant it with functions.review_artifacts.publish: \"allow\", or run where the question can be answered",
       );
     }
     const identity = await this.git(dir).identity();

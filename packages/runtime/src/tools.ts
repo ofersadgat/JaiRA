@@ -34,19 +34,19 @@ import {
   replacementsOf,
   withAlwaysGranted,
   normalizePath,
-  permissionsOfToolset,
+  permissionsOfPermissionSet,
   resolveScope,
   resolveScopes,
   resolveUrlScope,
   scopeModeOf,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
-  toolsetOfEnvironment,
+  permissionSetOfEnvironment,
   type AgentToolDeclaration,
   type PermissionsDecl,
   type Scope,
   type ScopeOptions,
-  type Toolset,
+  type PermissionSet,
 } from "@jaira/shared";
 import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
@@ -87,7 +87,7 @@ function clamp(text: string, max: number): string {
  * A `bash` tool: run a command line in the workspace and return its output.
  *
  * `readOnly: false` is the UPSTREAM `Tool` field, and it is true of this tool. JaiRA's own vocabulary
- * no longer has such a flag (decision 0007): whether a state may run commands is whether its toolset
+ * no longer has such a flag (decision 0007): whether a state may run commands is whether its permission set
  * holds `bash`, and with what mode.
  */
 export function createBashTool(options: ToolOptions = {}): Tool {
@@ -296,21 +296,21 @@ export function gateTools(options: {
   approve?: Approver | undefined;
   /**
    * The operation's own `permissions` block, in the LOWERED shape a loaded state holds. Read back
-   * into a toolset with `names` as the list when no {@link toolset} is handed over — see there. Its
-   * `scopes` are read either way: where a tool may act is not part of a toolset.
+   * into a permission set with `names` as the list when no {@link permission set} is handed over — see there. Its
+   * `scopes` are read either way: where a tool may act is not part of a permission set.
    */
   authored?: PermissionsDecl | undefined;
   /**
-   * The toolset this turn runs under — the ONE map the modes are read from (decision 0007).
+   * The permission set this turn runs under — the ONE map the modes are read from (decision 0007).
    *
-   * When absent it is read back from `names` and `authored` (`toolsetOfEnvironment`): a listed tool
-   * takes `authored.tools[name]`, and a turn that declared no toolset lists only the always-granted
-   * tools with no mode, which resolve through the baseline. Only TOOL entries are read HERE. A toolset's command subjects and
+   * When absent it is read back from `names` and `authored` (`permissionSetOfEnvironment`): a listed tool
+   * takes `authored.tools[name]`, and a turn that declared no permission set lists only the always-granted
+   * tools with no mode, which resolve through the baseline. Only TOOL entries are read HERE. A permission set's command subjects and
    * `script` ride on the block handed to the gate and to each wrapped tool, where the policy's
    * narrowing reads them to judge a shell line part by part (decision 0007 §4) — which is also why
    * the shell's own mode reaches both as `ask`: see `gateToolModes`.
    */
-  toolset?: Toolset | undefined;
+  permissionSet?: PermissionSet | undefined;
   /** What a relative scope glob and a relative call path are resolved against. */
   workspaceRoot?: string | undefined;
   /**
@@ -322,14 +322,14 @@ export function gateTools(options: {
   scopeFloor?: readonly Scope[] | undefined;
 }): { tools: Record<string, Tool>; gate: ToolGate } {
   const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
-  const toolset = options.toolset ?? toolsetOfEnvironment(options.names, options.authored);
+  const permissionSet = options.permissionSet ?? permissionSetOfEnvironment(options.names, options.authored);
   // The block the upstream gate takes, written FROM the map. Absent when nothing was authored at all.
   const authored =
-    options.toolset === undefined && options.authored === undefined ? undefined : permissionsOfToolset(toolset, options.authored?.scopes);
+    options.permissionSet === undefined && options.authored === undefined ? undefined : permissionsOfPermissionSet(permissionSet, options.authored?.scopes);
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
   const placeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
-  // A shell line is taken apart and judged part by part against this turn's toolset (decision 0007
+  // A shell line is taken apart and judged part by part against this turn's permission set (decision 0007
   // §4). That judgement is the policy's, and it has to NARROW rather than only advise: an "allow for
   // this turn" remembered against the whole tool must not wave through the next line's asking parts.
   const lineNarrowing = commandNarrowingOf(options.policy);
@@ -350,7 +350,7 @@ export function gateTools(options: {
     ...(authored !== undefined ? { authored } : {}),
     ...(options.policy?.smart !== undefined ? { smart: options.policy.smart } : {}),
     // No profile tables (decision 0007 §1). What they existed for — an opinion about a name the gate
-    // has never registered — is the toolset's `other`, which rides on `authored`.
+    // has never registered — is the permission set's `other`, which rides on `authored`.
     ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
     ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
   });
@@ -364,7 +364,7 @@ export function gateTools(options: {
     // Read off the LOWERED block where there is one, so the wrapper and the gate resolve one mode:
     // the shell's entry is `ask` there, and a FUNCTION's line too — see `gateToolModes`.
     const lowered = authored?.tools !== undefined && Object.hasOwn(authored.tools, name) ? authored.tools[name] : undefined;
-    const own = Object.hasOwn(toolset.entries, name) ? toolset.entries[name]!.mode : undefined;
+    const own = Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name]!.mode : undefined;
     const authoredMode = lowered ?? (own !== undefined ? gateModeOf(own) : undefined);
     out[name] = withPermission(tool, {
       ledger,
@@ -372,7 +372,7 @@ export function gateTools(options: {
       toolName: name,
       approve,
       ...(authoredMode !== undefined ? { authoredMode } : {}),
-      // The block itself, so the narrowing sees the toolset's command subjects at the moment of decision.
+      // The block itself, so the narrowing sees the permission set's command subjects at the moment of decision.
       ...(authored !== undefined ? { authored } : {}),
       ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
       ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
@@ -390,7 +390,7 @@ export function gateTools(options: {
  * DERIVED from `TOOL_SPECS` rather than restated. It was a hand-written list of three, and being
  * hand-written is how it came to be a list of three: `glob`, `grep`, `edit` and the two web tools
  * were things an agent did that nothing here had a name for, so nothing here could gate them. One
- * table now, in `shared`, because the menu that draws these and the toolset that governs them need
+ * table now, in `shared`, because the menu that draws these and the permission set that governs them need
  * the same answer — and a second copy is a second thing to forget to update.
  *
  * `tools.test.ts` asserts this against what {@link registerTools} and its siblings actually build,
@@ -399,7 +399,7 @@ export function gateTools(options: {
  * honour.
  */
 export const JAIRA_TOOLS: readonly { name: string }[] = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true && spec.unserved !== true).map(
-  // `unserved`: a name a toolset may hold with nothing behind it YET (the workflow tools, decision
+  // `unserved`: a name a permission set may hold with nothing behind it YET (the workflow tools, decision
   // 0005 §3). Not gateable until something registers it — which is exactly what this list means.
   (spec) => ({ name: spec.name }),
 );
@@ -442,8 +442,8 @@ export const CLAUDE_NATIVE_READ_TOOLS: readonly string[] = ["read_file", "glob",
  * ```
  *
  * ⚠️ Turning this on means every one of those calls reaches JaiRA's gate, which is asked about a
- * native by its STANDARD name (`withAgentToolset`) — so `Read` answers to the state's `read_file`
- * entry, and a tool the toolset does not hold was removed before it could be asked about.
+ * native by its STANDARD name (`withAgentPermissionSet`) — so `Read` answers to the state's `read_file`
+ * entry, and a tool the permission set does not hold was removed before it could be asked about.
  */
 export function claudeAskSettings(tools: readonly string[]): Record<string, JsonValue> {
   return claudePermissionSettings({ ask: tools });

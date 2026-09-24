@@ -6971,7 +6971,7 @@ button.link.change-path {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
-/* The tint is the whole part; the underline is only the words that matched the toolset's line. */
+/* The tint is the whole part; the underline is only the words that matched the permission-set's line. */
 .part-m {
   box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--hue) 75%, transparent);
   font-weight: 600;
@@ -6986,7 +6986,7 @@ button.link.change-path {
 }
 
 /* One row per part, in the same colour: what was typed, what it is a request FOR, and what the
-   toolset says to it. */
+   permission-set says to it. */
 .approval-parts {
   margin: 8px 0 0;
   padding: 0;
@@ -14008,11 +14008,11 @@ fieldset.reading {
 }
 
 /* ============================================================================
-   Toolsets in the composer's two cards (decision 0007 §5; composer.tsx)
+   Permission sets in the composer's two cards (decision 0007 §5; composer.tsx)
 
    Both cards keep their look — every rule above is untouched. These are only what the cards GAINED:
    the bucket picker and the `+` in the Permissions head, and, under Execution, the commands a
-   toolset names grouped under their program, `script`, and the line that adds one.
+   permission-set names grouped under their program, `script`, and the line that adds one.
 
    Moved here from the decision's mockup sheet (docs/engineering/decisions/0005-assets/proposed.css),
    which the approved mockup was drawn with.
@@ -14066,7 +14066,7 @@ fieldset.reading {
   color: var(--tok-hint);
 }
 
-/* `+` — keep the map as a new toolset. Dim while it already is one. */
+/* `+` — keep the map as a new permission-set. Dim while it already is one. */
 .cx-set-add {
   padding: 0 7px;
   border: 0;
@@ -14122,7 +14122,7 @@ fieldset.reading {
   max-width: 300px;
 }
 
-/* Into the toolset: the last line of a group, and of Execution. */
+/* Into the permission-set: the last line of a group, and of Execution. */
 .cx-tool.set-add-line {
   background: none;
 }
@@ -14180,10 +14180,10 @@ fieldset.reading {
   transform: none;
 }
 
-/* ---- Settings → Toolsets, and a toolset anywhere on the page (decision 0007 §6) -------------------
+/* ---- Settings → Permission sets, and a permission-set anywhere on the page (decision 0007 §6) -------------------
    Moved over from the approved mockup's sheet (docs/engineering/decisions/0005-assets/proposed.css).
    The rows themselves are the composer's and are already styled above; these are the four things a
-   toolset standing STILL needs that one inside a popover does not. */
+   permission-set standing STILL needs that one inside a popover does not. */
 
 /* Set in the layer being edited — the accent, because it is the one a person can change here. */
 .cfg-status.here {
@@ -14194,7 +14194,7 @@ fieldset.reading {
   background: var(--accent);
 }
 
-/* A toolset's card outside a popover: the same panel, without being one. */
+/* A permission-set's card outside a popover: the same panel, without being one. */
 .set-card {
   max-width: 560px;
   padding: 10px 12px 11px;
@@ -14202,7 +14202,7 @@ fieldset.reading {
   border-radius: 12px;
   background: var(--panel);
 }
-/* A row that is READ, not pressed: a toolset lists what it holds, so the name is text and the minus
+/* A row that is READ, not pressed: a permission-set lists what it holds, so the name is text and the minus
    at its start is what takes the line out. The grant's metrics, without being a button. */
 .set-card span.cx-tool-grant,
 .set-config span.cx-tool-grant {
@@ -14210,7 +14210,7 @@ fieldset.reading {
   align-items: center;
   cursor: default;
 }
-/* Out of the toolset: a red minus, at the very start of the line. */
+/* Out of the permission-set: a red minus, at the very start of the line. */
 .set-minus {
   flex: none;
   display: inline-grid;
@@ -14264,7 +14264,7 @@ fieldset.reading {
 .set-config .llm-rail-item {
   padding: 5px 9px;
 }
-/* A bucket's name over its toolsets: a heading in the rail, not a tab. */
+/* A bucket's name over its permission-sets: a heading in the rail, not a tab. */
 .set-rail-label {
   display: flex;
   align-items: center;
@@ -15332,4 +15332,558 @@ fieldset.reading {
 }
 .set-field .cfg-label:not(.mono)::first-letter {
   text-transform: uppercase;
+}
+
+/* ==============================================================================================
+ * SETTINGS, REORGANISED (the person's rulings, 2026-09-23): the sidebar's two groups with an icon
+ * per page, the layer switch pinned to every page head's top-right corner, one row shape for every
+ * connection (what it is on the left, who it connects as on the right, as boxes), the local servers
+ * and weights a row finds, and the Functions table on Tools.
+ * ============================================================================================== */
+
+/* The switch never wraps under the lead: the lead wraps, the switch keeps the corner. */
+.set-head {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.set-head-aside {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* ---- the sidebar: "Just you" and "Project & shared", each page with its glyph ---- */
+.side-drawer .sections-groups {
+  overflow-y: auto;
+  padding: 2px 0 4px;
+}
+.side-drawer .sections-groups .sections {
+  overflow: visible;
+  padding: 0;
+}
+.sections-group + .sections-group {
+  margin-top: 10px;
+}
+.sections-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 5px;
+  font-size: calc(var(--size-app) * 9.5 / 12.5);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.sections-group-head small {
+  font-size: calc(var(--size-app) * 10 / 12.5);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.85;
+}
+.sections.icons > li:not(.parts) {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.sections-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--dim);
+}
+.sections.icons > li.sel .sections-icon {
+  color: var(--text);
+}
+.sections-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sections.icons > li.file .sections-label {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 0.95);
+  color: var(--dim);
+}
+.sections.icons > li.file.sel .sections-label {
+  color: var(--text);
+}
+.sections.icons .section-parts {
+  margin-left: 30px;
+}
+
+/* ---- Re-check, at the head of the section it is about ---- */
+.settings-recheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+}
+
+/* ---- one connection row: what it is | who it connects as | its switch and chevron ---- */
+.cfg-row.conn-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  column-gap: 14px;
+  row-gap: 8px;
+}
+.conn-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.conn-version {
+  margin-left: 30px;
+  align-self: flex-start;
+}
+.conn-boxes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.conn-boxes:empty {
+  display: none;
+}
+.conn-boxes > li {
+  width: 158px;
+  display: flex;
+}
+.conn-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 1px;
+}
+.conn-wide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.conn-wide.cfg-row-body {
+  margin-top: 0;
+}
+/* The boxes are smaller than the old grid's cards: a row stays one row tall beside them. */
+.conn-boxes .cfg-login-card,
+.conn-boxes .cfg-key-box {
+  flex: 1;
+  padding: 8px 10px 9px;
+  gap: 2px;
+  min-width: 0;
+}
+.conn-boxes .cfg-login-top {
+  margin-bottom: 2px;
+}
+.conn-boxes .cfg-login-mark {
+  width: 24px;
+  height: 24px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+}
+.conn-boxes .cfg-login-who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.conn-boxes .cfg-login-actions {
+  padding-top: 4px;
+}
+.conn-boxes .cfg-login-add {
+  min-height: 82px;
+  padding: 8px;
+  gap: 2px;
+}
+.conn-boxes .cfg-login-plus {
+  font-size: calc(var(--size-app) * 17 / 12.5);
+}
+.conn-boxes .cfg-login-add-title {
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.conn-boxes .cfg-login-add-sub {
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+/* A + box with two ways in — sign in with the forge, or paste a token: the first is the box's own
+   button, the second a link under it. */
+div.cfg-login-add {
+  cursor: default;
+}
+.cfg-login-add-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+.cfg-login-add-main:hover:not(:disabled) .cfg-login-add-title {
+  color: var(--accent);
+}
+button.link.cfg-login-add-sub {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--dim);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 2px;
+}
+/* A named key: the name in the data voice, and where it was found — or that it was not. */
+.cfg-key-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--panel);
+}
+.cfg-key-box.missing {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+  background: var(--tint-bad);
+}
+.cfg-key-box .cfg-login-facts {
+  flex-direction: column;
+}
+.cfg-login-mark.key {
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+.cfg-login-mark.key svg {
+  width: 13px;
+  height: 13px;
+}
+.cfg-login-tag.ok {
+  color: var(--ok);
+  background: var(--tint-ok);
+}
+.cfg-login-tag.bad {
+  color: var(--bad);
+  background: var(--tint-bad);
+}
+.conn-wide .cfg-key-entry {
+  margin-left: 30px;
+}
+
+/* ---- Local models: the servers the usual ports answered on, and the weights with their files ---- */
+.conn-probe,
+.conn-weights {
+  margin-left: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.conn-probe-head {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 5px 10px;
+  background: var(--panel-2);
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+}
+.conn-probe-row,
+.conn-weights-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
+}
+.conn-weights-row:first-child {
+  border-top: 0;
+}
+.conn-probe-row {
+  grid-template-columns: 8px minmax(90px, 130px) minmax(0, 1fr) auto;
+}
+.conn-probe-row.in-use {
+  background: var(--tint-ok);
+}
+.conn-probe-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rule);
+}
+.conn-probe-row.up .conn-probe-dot {
+  background: var(--ok);
+}
+.conn-probe-at {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+.conn-probe-row.up .conn-probe-at {
+  color: var(--text);
+}
+.conn-weights-row {
+  grid-template-columns: minmax(90px, 150px) minmax(0, 1fr) auto auto;
+}
+.conn-weights-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conn-weights > .cfg-hint {
+  padding: 6px 10px;
+  margin: 0;
+}
+
+/* ---- Tools → Functions: one row per function, one column per permission set ---- */
+.fx-wrap {
+  overflow-x: auto;
+}
+.fx-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.fx-table th,
+.fx-table td {
+  padding: 4px 7px;
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+  white-space: nowrap;
+}
+.fx-table thead th {
+  background: var(--panel-2);
+  color: var(--dim);
+  font-weight: 500;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  vertical-align: bottom;
+}
+.fx-table .fx-bucket {
+  display: block;
+  font-family: var(--font-data);
+  font-weight: 600;
+  color: var(--text);
+}
+.fx-table .fx-bucket-start {
+  border-left: 1px solid var(--line);
+}
+.fx-table th.fx-fn,
+.fx-table td.fx-defaults {
+  text-align: left;
+}
+.fx-table td.fx-defaults {
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+}
+.fx-table tr.fx-group th {
+  background: var(--panel-2);
+  color: var(--dim);
+  text-align: left;
+  font-size: calc(var(--size-app) * 9.5 / 12.5);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding-top: 7px;
+}
+.fx-fn-button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-weight: 500;
+}
+.fx-fn-button:hover .mono {
+  color: var(--accent);
+}
+.fx-row.sub .fx-fn-button {
+  padding-left: 16px;
+}
+.fx-what {
+  color: var(--dim);
+  font-weight: 400;
+}
+.fx-row.open > th,
+.fx-row.open > td {
+  background: var(--tint-accent);
+}
+.fx-cell {
+  min-width: 44px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  line-height: 1.6;
+  background: var(--panel-3);
+  color: var(--text);
+}
+.fx-cell.allow {
+  background: var(--tint-ok);
+  color: var(--ok);
+}
+.fx-cell.deny {
+  background: var(--tint-bad);
+  color: var(--bad);
+}
+.fx-cell.fn {
+  background: var(--tint-accent);
+  color: var(--accent);
+}
+.fx-cell.none {
+  background: transparent;
+  color: var(--rule);
+}
+.fx-cell.here {
+  box-shadow: inset 0 0 0 1.5px var(--warn);
+}
+.fx-cell:hover:not(.none) {
+  filter: brightness(0.96);
+}
+.fx-detail-row > td {
+  text-align: left;
+  white-space: normal;
+  padding: 0;
+}
+.fx-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 14px;
+  max-width: 740px;
+}
+.fx-detail-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.fx-default-prompt pre {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+}
+.fx-users {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fx-users li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.fx-list > li {
+  padding: 0;
+}
+.fx-list-head {
+  display: grid;
+  grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto auto 14px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  color: var(--text);
+}
+.fx-list-head:hover {
+  background: var(--fill-ghost-hover);
+}
+.fx-list-name {
+  font-weight: 500;
+}
+.fx-list-what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+.fx-list-defaults {
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+}
+.fx-avail {
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  padding: 0 7px;
+  border-radius: 999px;
+  line-height: 1.6;
+}
+.fx-avail.yes {
+  color: var(--ok);
+  background: var(--tint-ok);
+}
+.fx-avail.no {
+  color: var(--bad);
+  background: var(--tint-bad);
+}
+.fx-chev {
+  width: 14px;
+  height: 14px;
+  color: var(--dim);
+  transform: rotate(-90deg);
+  transition: transform 0.12s;
+}
+.fx-chev.open {
+  transform: none;
+}
+.fx-list-body {
+  border-top: 1px solid var(--line);
+}
+.fx-rules {
+  padding: 4px 16px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.conn-boxes .cfg-login-actions button {
+  padding: 1px 8px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+}
+.conn-boxes button.link.cfg-login-add-sub {
+  font-family: var(--font-app);
+}
+.set-group > .cfg-rows.fx-list > li {
+  padding: 0;
+}
+.set-page > .cfg-pane > .history {
+  display: contents;
+}
+.set-page > .cfg-pane > .history > .set-section:not(.wide) {
+  max-width: 740px;
+}
+
+/* Every row keeps the same column for its switch and chevron, so the boxes line up down a card —
+   "Another host" has neither, and holds the space anyway. */
+.cfg-row.conn-row > .conn-controls {
+  min-width: 52px;
+  justify-content: flex-end;
+}
+.conn-boxes .cfg-login-add button.ghost {
+  padding: 1px 8px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }

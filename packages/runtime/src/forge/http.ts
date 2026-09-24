@@ -17,6 +17,11 @@ export interface ForgeRequest {
   headers: Record<string, string>;
   /** Sent as JSON. */
   body?: JsonValue;
+  /**
+   * Sent as `application/x-www-form-urlencoded` instead — what OAuth's endpoints are specified to
+   * take (RFC 6749 §4.1.3, RFC 8628 §3.1). Never together with `body`.
+   */
+  form?: Record<string, string>;
 }
 
 export interface ForgeResponse {
@@ -50,8 +55,10 @@ export const fetchForgeHttp: ForgeHttp = async (request) => {
     headers: {
       ...request.headers,
       ...(request.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(request.form !== undefined ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
     },
     ...(request.body !== undefined ? { body: JSON.stringify(request.body) } : {}),
+    ...(request.form !== undefined ? { body: new URLSearchParams(request.form).toString() } : {}),
     signal: AbortSignal.timeout(FORGE_TIMEOUT_MS),
   });
   const headers: Record<string, string> = {};

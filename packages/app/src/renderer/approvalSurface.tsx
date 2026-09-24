@@ -80,7 +80,7 @@ function Hint({ hint }: { hint: readonly HintPiece[] }): JSX.Element {
 
 /**
  * Which function decided a part — a star and its name, before the verdict it gave. The same glyph the
- * toolset card gives a line that names a function, so the two read as one thing.
+ * permission set card gives a line that names a function, so the two read as one thing.
  */
 export function FunctionBy({ name }: { name: string }): JSX.Element {
   return (
@@ -93,14 +93,14 @@ export function FunctionBy({ name }: { name: string }): JSX.Element {
 function Reason({ line }: { line: ReasonLine }): JSX.Element {
   if (line.kind === "policy") return <p className="reason-note">Policy: {line.text}</p>;
   if (line.kind === "function") return <p className="reason-note">{line.text}</p>;
-  const who = line.toolset !== undefined ? (
+  const who = line.permissionSet !== undefined ? (
     <>
-      Toolset <span className="mono">{line.toolset}</span>
+      Permission set <span className="mono">{line.permissionSet}</span>
     </>
   ) : (
-    <>This state&rsquo;s toolset</>
+    <>This state&rsquo;s permission set</>
   );
-  const names = line.kind === "toolset" ? line.entries : line.subjects;
+  const names = line.kind === "permissionSet" ? line.entries : line.subjects;
   const listed = names.map((name, at) => (
     <span key={name}>
       {at > 0 ? (at === names.length - 1 ? " and " : ", ") : null}
@@ -110,7 +110,7 @@ function Reason({ line }: { line: ReasonLine }): JSX.Element {
   return (
     <p className="reason-note">
       {who}
-      {line.kind === "toolset" ? <>: {listed} {names.length === 1 ? "asks" : "ask"}</> : <> holds no line for {listed}, so {names.length === 1 ? "it asks" : "they ask"}</>}
+      {line.kind === "permissionSet" ? <>: {listed} {names.length === 1 ? "asks" : "ask"}</> : <> holds no line for {listed}, so {names.length === 1 ? "it asks" : "they ask"}</>}
     </p>
   );
 }

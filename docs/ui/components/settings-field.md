@@ -5,7 +5,7 @@ status: shipped
 updated: 2026-09-23
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/schema-driven-form, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects, product/agents-act-only-where-allowed, product/read-comfortably]
-surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/new-task-popover, ui/surfaces/gate-modal, ui/surfaces/context-panel]
+surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-connections, ui/surfaces/settings-models, ui/surfaces/settings-tools, ui/surfaces/settings-runs, ui/surfaces/settings-files, ui/surfaces/settings-data, ui/surfaces/new-task-popover, ui/surfaces/gate-modal, ui/surfaces/context-panel]
 reuses: [ui/components/switch, ui/components/preset-chips]
 implemented_by: [packages/app/src/renderer/controls.tsx]
 verified_by: [packages/app/test/schemaForm.test.ts]
@@ -19,7 +19,7 @@ A settings row with its statement on the left, a bold label with an optional blu
 
 ## A settings field states one setting, what it writes, and its value
 
-**Use when.** One setting or one typed value is shown with its control: every row of the Providers, Executors, Configuration and Files settings pages, and every member a [schema-form](schema-form.md) draws, so run inputs, New task inputs and gate forms share the same row. A level heading groups the rows one type of thing contributes, and a disclosure holds settings most projects never touch.
+**Use when.** One setting or one typed value is shown with its control: every row of the Connections, Models, Tools, Runs, Files and Data & history settings pages, and every member a [schema-form](schema-form.md) draws, so run inputs, New task inputs and gate forms share the same row. A level heading groups the rows one type of thing contributes, and a disclosure holds settings most projects never touch.
 
 **Do not use when.** A whole value is declared by a schema: draw it with [schema-form](schema-form.md), which uses these rows. A thing with a status and its own switch, such as a provider, is a [provider-row](provider-row.md). Text in a conversation, a gate's own heading, or the options of a question are not settings.
 
@@ -48,10 +48,10 @@ Everywhere else — run inputs, New task, a gate — a field keeps the shape bel
 | empty | Not a look of its own: an empty box shows its placeholder, `—` for a number, and means the value is inherited; drawn as `Artifact directory` in the success mockup. | |
 | loading | Cannot occur: a row draws from the values the pane already holds. | |
 | partial | Cannot occur: a row is drawn whole. | |
-| success | Settings rows in the Configuration pane: rows the project states carry `SET HERE`, an inherited row does not, and a preset row shows its chips over a mono box and a line of variables. | [success.html](../assets/settings-field/success.html) |
+| success | The Artifacts rows in the field's own shape: rows the project states carry `SET HERE`, an inherited row does not, and a preset row shows its chips over a mono box and a line of variables. | [success.html](../assets/settings-field/success.html) |
 | error | A touched value that fails its check, drawn in a gate's form: the box border turns `--bad` and the message sits under it. | [error.html](../assets/settings-field/error.html) |
 | stacked | In a box 380px wide or less, each row's control drops under its statement at full width. A row placed outside a list of rows keeps its two columns. | [stacked.html](../assets/settings-field/stacked.html) |
-| levels | Nested levels in the Executors pane, each heading over its own rows, indented behind a rule. | [levels.html](../assets/settings-field/levels.html) |
+| levels | Nested levels in the executor tree, each heading over its own rows, indented behind a rule. | [levels.html](../assets/settings-field/levels.html) |
 | folded | A closed disclosure over an open one: `▶` and the title alone, then the turned caret over its indented rows and button. | [disclosure.html](../assets/settings-field/disclosure.html) |
 | disabled | Not a look of its own: a layer that cannot be edited dims every control to 55% and takes no input, as the locked copy in the schema-form layered mockup shows. | |
 
@@ -77,7 +77,7 @@ Everywhere else — run inputs, New task, a gate — a field keeps the shape bel
 | Hint | `{hint}` then `{config key}`, such as `artifacts.inlineMaxBytes` |
 | Number placeholder | `—` |
 | Level | `{title}`, drawn uppercase, such as `Default call settings`, then `{hint}` |
-| Disclosure | `{title}` · `· {description}`, such as `The raw document` · `· everything, as it is stored`, `Add a preset` · `· a named set of call settings`, `Add an agent CLI` · `· any other coding-agent binary` |
+| Disclosure | `{title}` · `· {description}`, such as `How a call is dispatched` · `· the executor tree, and the layers around each level`, `Which of them a run may reach` · `· everything the workflow registers`, `Add an agent CLI` · `· any other coding-agent binary` |
 | New task workflow picker | `choose a workflow…` |
 
 ## The rows measure their own box rather than the window

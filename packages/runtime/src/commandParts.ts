@@ -1,5 +1,5 @@
 /**
- * What each part of a shell line is a request FOR, and what a toolset says about it
+ * What each part of a shell line is a request FOR, and what a permission set says about it
  * (decision 0007 §4).
  *
  * `command.ts` takes the line apart; this module names each piece's SUBJECT, and looks the subject
@@ -14,16 +14,16 @@ import {
   SCRIPT_SUBJECT,
   isAbsolutePath,
   isFunctionMode,
-  isToolsetMarkKey,
+  isPermissionSetMarkKey,
   shellSubjects,
   subjectKindOf,
   toolModes,
-  toolsetOfEnvironment,
+  permissionSetOfEnvironment,
   type CommandPartKind,
   type PermissionsDecl,
   type TextSpan,
-  type Toolset,
-  type ToolsetMode,
+  type PermissionSet,
+  type PermissionSetMode,
 } from "@jaira/shared";
 import type { CommandDialect, CommandWord, ParsedCommand, ShellRequest } from "./command";
 import {
@@ -240,60 +240,60 @@ export function classifyRequest(request: ShellRequest, dialect: CommandDialect):
   return classifyCommand(request.command, request.span, dialect);
 }
 
-// --- the toolset, as the shell reads it ---------------------------------------
+// --- the permission set, as the shell reads it ---------------------------------------
 
 /**
  * Every subject a shell part can answer to, with its mode: tools, commands, `script`, and `other`. A
  * mode may be a FUNCTION — the part is then put to it (see `policy.ts`, the `function` verdict).
  */
-export interface ShellToolset {
-  entries: Record<string, ToolsetMode>;
-  other?: ToolsetMode;
+export interface ShellPermissionSet {
+  entries: Record<string, PermissionSetMode>;
+  other?: PermissionSetMode;
 }
 
 /**
- * The map a shell line is judged against, from a {@link Toolset}. `undefined` when the toolset says
+ * The map a shell line is judged against, from a {@link Permission set}. `undefined` when the permission set says
  * nothing about the shell — no mode for `bash`, no command subject, no `script` — which is the same
- * test {@link shellToolsetOfBlock} applies to a lowered block, since lowering writes `subjects` from
+ * test {@link shellPermissionSetOfBlock} applies to a lowered block, since lowering writes `subjects` from
  * exactly these.
  */
-export function shellToolsetOf(toolset: Toolset): ShellToolset | undefined {
-  const subjects = shellSubjects(toolset);
+export function shellPermissionSetOf(permissionSet: PermissionSet): ShellPermissionSet | undefined {
+  const subjects = shellSubjects(permissionSet);
   if (Object.keys(subjects).length === 0) return undefined;
-  return { entries: { ...toolModes(toolset), ...subjects }, ...(toolset.other !== undefined ? { other: toolset.other } : {}) };
+  return { entries: { ...toolModes(permissionSet), ...subjects }, ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}) };
 }
 
 /** One map a line is judged against, and where it came from. */
-export interface JudgingToolset {
-  toolset: ShellToolset;
+export interface JudgingPermissionSet {
+  permissionSet: ShellPermissionSet;
   source?: string;
 }
 
 /**
  * The map a lowered block judges a line against, or `undefined` when the block carries no shell
- * subjects — a state that declared no toolset, or a map that holds no shell — and the command policy
+ * subjects — a state that declared no permission set, or a map that holds no shell — and the command policy
  * decides.
  *
  * The block is a conversation turn's, a state read straight off its file, or a RUN's (upstream
  * `literalPermissions` passes a host's keys through, declarative-ai 3f5e5cc and later). `subjects`
  * merges per key of `permissions`, so a child's own replaces its parent's.
  */
-export function shellToolsetOfBlock(block: PermissionsDecl | undefined): JudgingToolset | undefined {
+export function shellPermissionSetOfBlock(block: PermissionsDecl | undefined): JudgingPermissionSet | undefined {
   if (block?.subjects === undefined) return undefined;
   // The block read back into the one map — the gate's modes, the subjects' authored ones, and every
   // line a FUNCTION answers for, which lowering wrote as `ask` and named in `functions`.
-  const read = toolsetOfEnvironment(undefined, block);
-  const entries: Record<string, ToolsetMode> = {};
+  const read = permissionSetOfEnvironment(undefined, block);
+  const entries: Record<string, PermissionSetMode> = {};
   for (const [subject, entry] of Object.entries(read.entries)) if (entry.mode !== undefined) entries[subject] = entry.mode;
   return {
-    toolset: { entries, ...(read.other !== undefined ? { other: read.other } : {}) },
+    permissionSet: { entries, ...(read.other !== undefined ? { other: read.other } : {}) },
     ...(block.source !== undefined ? { source: block.source } : {}),
   };
 }
 
-export interface ToolsetAnswer {
+export interface PermissionSetAnswer {
   /** The entry's mode — a word, or a FUNCTION the part is to be put to. */
-  mode?: ToolsetMode;
+  mode?: PermissionSetMode;
   /** The entry that answered — `git commit`, `git`, `bash`, `write_file`, `script`, `other` — or none. */
   entry?: string;
   /** True when the entry NAMES this program (`git commit`, `rm`), as against a fallback. */
@@ -304,18 +304,18 @@ export interface ToolsetAnswer {
 
 interface CommandEntry {
   key: string;
-  mode: ToolsetMode;
+  mode: PermissionSetMode;
   program: string;
   subs: string[];
   flags: string[];
 }
 
 /** How strict a mode is, for picking between two equally specific entries: allow ▸ function ▸ ask ▸ deny. */
-const MODE_RANK = (mode: ToolsetMode): number => (isFunctionMode(mode) ? 1 : { allow: 0, ask: 2, deny: 3 }[mode]);
+const MODE_RANK = (mode: PermissionSetMode): number => (isFunctionMode(mode) ? 1 : { allow: 0, ask: 2, deny: 3 }[mode]);
 
-function commandEntriesOf(toolset: ShellToolset): CommandEntry[] {
+function commandEntriesOf(permissionSet: ShellPermissionSet): CommandEntry[] {
   const out: CommandEntry[] = [];
-  for (const [key, mode] of Object.entries(toolset.entries)) {
+  for (const [key, mode] of Object.entries(permissionSet.entries)) {
     if (subjectKindOf(key) !== "command") continue;
     const [program, ...rest] = key.split(/\s+/);
     out.push({ key, mode, program: program!.toLowerCase(), subs: rest.filter((w) => !isFlag(w)).map((w) => w.toLowerCase()), flags: rest.filter(isFlag) });
@@ -324,12 +324,12 @@ function commandEntriesOf(toolset: ShellToolset): CommandEntry[] {
 }
 
 /** The most specific command entry that matches: program, then its subcommand words as a prefix, then every flag it names. */
-function matchCommandEntry(toolset: ShellToolset, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
+function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
   const operands = operandsOf(command).filter((w) => w.dynamic !== true);
   // `git -C dir commit`: the value `-C` takes is not the subcommand.
   const subs = command.subcommand !== undefined ? operands.slice(operands.findIndex((w) => w.value.toLowerCase() === command.subcommand)) : [];
   let best: { entry: CommandEntry; words: CommandWord[]; score: number } | undefined;
-  for (const entry of commandEntriesOf(toolset)) {
+  for (const entry of commandEntriesOf(permissionSet)) {
     if (entry.program !== command.program) continue;
     if (!entry.subs.every((s, i) => subs[i]?.value.toLowerCase() === s)) continue;
     if (!entry.flags.every((f) => command.flags.includes(f))) continue;
@@ -344,28 +344,28 @@ function matchCommandEntry(toolset: ShellToolset, command: ParsedCommand): { ent
 }
 
 /**
- * What the toolset says about one part.
+ * What the permission set says about one part.
  *
  * Lookup order: the most specific command entry naming the program (`git commit`, then `git`; for a
  * utility or a script runner that is `rm`, `npm run`), then the part's own subject — the standard
  * tool, or `script` — and for a plain command the shell's entry (`bash`, "any other command"), then
  * `other`. With nothing at all the answer is `ask`: absent means not offered.
  */
-export function lookUp(toolset: ShellToolset, part: ClassifiedPart): ToolsetAnswer {
-  const own = (key: string): ToolsetMode | undefined => (Object.hasOwn(toolset.entries, key) ? toolset.entries[key] : undefined);
-  const answer = (mode: ToolsetMode, entry: string, specific: boolean, matched?: TextSpan[]): ToolsetAnswer => ({
+export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart): PermissionSetAnswer {
+  const own = (key: string): PermissionSetMode | undefined => (Object.hasOwn(permissionSet.entries, key) ? permissionSet.entries[key] : undefined);
+  const answer = (mode: PermissionSetMode, entry: string, specific: boolean, matched?: TextSpan[]): PermissionSetAnswer => ({
     mode,
     entry,
     specific,
     ...(matched !== undefined ? { matched } : {}),
   });
   if (part.command !== undefined && part.kind !== "unparsed" && part.unmodelled === undefined) {
-    const named = matchCommandEntry(toolset, part.command);
+    const named = matchCommandEntry(permissionSet, part.command);
     if (named !== undefined) return answer(named.entry.mode, named.entry.key, true, spanOfWords(named.words));
   }
   const subject = part.kind === "tool" || part.kind === "redirect" ? part.tool! : part.kind === "script" ? SCRIPT_SUBJECT : SHELL_SUBJECT;
   const direct = own(subject);
   if (direct !== undefined) return answer(direct, subject, false);
-  if (toolset.other !== undefined) return answer(toolset.other, OTHER_SUBJECT, false);
+  if (permissionSet.other !== undefined) return answer(permissionSet.other, OTHER_SUBJECT, false);
   return { mode: "ask", specific: false };
 }

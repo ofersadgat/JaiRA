@@ -197,7 +197,7 @@ export const WORKTREES_DIR_NAME = ".jaira-worktrees";
  * The built-in layer (`$SYSTEM`, decision 0006): what JaiRA ships, at the END of the search path.
  *
  * A directory with the same shape as the other two layer roots — `workflows/`, `prompts/`,
- * `functions/`, `toolsets/` — so a state, a prompt or a toolset moves between layers by being
+ * `functions/`, `permission-sets/` — so a state, a prompt or a permission set moves between layers by being
  * copied, with nothing to rewrite. Three properties make it a layer of its own rather than a third
  * copy of the shared root:
  *
@@ -219,7 +219,7 @@ export interface JairaBuiltInPaths {
   workflowsDir: string;
   functionsDir: string;
   promptsDir: string;
-  toolsetsDir: string;
+  permissionSetsDir: string;
 }
 
 /** The layer's directory name, in the source tree and beside a bundle. See {@link defaultBuiltInDir}. */
@@ -232,7 +232,7 @@ export function jairaBuiltInPaths(builtInDir: string = defaultBuiltInDir()): Jai
     workflowsDir: join(dir, "workflows"),
     functionsDir: join(dir, "functions"),
     promptsDir: join(dir, "prompts"),
-    toolsetsDir: join(dir, "toolsets"),
+    permissionSetsDir: join(dir, "permission-sets"),
   };
 }
 

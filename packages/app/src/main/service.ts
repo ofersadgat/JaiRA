@@ -148,7 +148,7 @@ import {
   taskSummaries,
   workflowRoots,
   bundleFor,
-  readToolsets,
+  readPermissionSets,
   projectRun,
   eventsOf,
   type DescriptionBoundary,
@@ -158,13 +158,13 @@ import {
   type TaskWorkspace,
   type WorkflowDigestOptions,
   type LayerSource,
-  addToToolset,
-  toolsetWriteTargets,
-  readToolsetLayers,
-  resetToolset,
-  toolsetLayers,
-  toolsetUsers,
-  writeToolset,
+  addToPermissionSet,
+  permissionSetWriteTargets,
+  readPermissionSetLayers,
+  resetPermissionSet,
+  permissionSetLayers,
+  permissionSetUsers,
+  writePermissionSet,
   policyAuditRow,
   recordHostRow,
 } from "@jaira/persistence";
@@ -207,6 +207,19 @@ import {
   RemoteWatcher,
   PollingSource,
   forgeForHost,
+  fetchForgeHttp,
+  deviceFlowEndpoints,
+  requestDeviceCode,
+  pollDeviceToken,
+  refreshDeviceToken,
+  oauthAppNeeded,
+  DeviceFlowError,
+  type DeviceFlowEndpoints,
+  type DeviceAuthorization,
+  type DeviceToken,
+  discoverLocalServers,
+  checkEmbeddedWeights,
+  type LocalFetch,
   type WatchTarget,
   type RemoteSettled,
   type RemoteProgress,
@@ -235,7 +248,7 @@ import {
   grantAlwaysGrantedTools,
   nativeNamesByRoute,
   planAgentTools,
-  withToolsetService,
+  withPermissionSetService,
   functionNamesOf,
   InteractionHub,
   UserEventHub,
@@ -262,6 +275,7 @@ import {
   NodeExec,
   parseFakeRules,
   policyCanEscalate,
+  projectPolicy,
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
@@ -322,9 +336,9 @@ import {
   isWritableLayer,
   chosenWidths,
   entriesToRemember,
-  type ApprovalToolset,
+  type ApprovalPermissionSet,
   type JairaPaths,
-  type ToolsetAddition,
+  type PermissionSetAddition,
   jairaBasePaths,
   jairaBuiltInPaths,
   baseAsProjectPaths,
@@ -342,10 +356,20 @@ import {
   JAIRA_DIR_NAME,
   SHARED_SESSION,
   FORGE_LABELS,
+  SECRET_SOURCE_LABELS,
   resultOfSettlement,
   REVIEW_NOTE_ARTIFACT,
   handleOfRow,
   type ForgeProvider,
+  type ForgeSignInMark,
+  type ForgeSignInOutcome,
+  type ForgeSignInPending,
+  type ForgeSignInStart,
+  type ForgeSignOutOutcome,
+  type JairaForgeConnection,
+  type EmbeddedWeightsReport,
+  type LocalServerDiscovery,
+  type SecretSource,
   type RemoteStatusView,
   validateComponentResult,
   APPROVAL_PROMPT_FUNCTION,
@@ -355,14 +379,14 @@ import {
   ALWAYS_GRANTED_TOOLS,
   bucketOf,
   declaresTools,
-  matchToolset,
-  parseToolset,
+  matchPermissionSet,
+  parsePermissionSet,
   TOOL_SPECS,
-  toolsetBucketProblem,
-  toolsetLabel,
-  toolsetNameProblem,
-  toolsetOfSettings,
-  type ToolsetChoice,
+  permissionSetBucketProblem,
+  permissionSetLabel,
+  permissionSetNameProblem,
+  permissionSetOfSettings,
+  type PermissionSetChoice,
   withAlwaysGranted,
   isTerminalStatus,
   ApprovalRequired,
@@ -370,6 +394,7 @@ import {
   type ModuleApproval,
   LEFT_EVENT,
   questionKeyOf,
+  oauthAppFor,
   isMoveQuestion,
   type TaskActivity,
   type NextMove,
@@ -532,11 +557,11 @@ import type {
   SyncDirection,
   WriteConfigRequest,
   WriteFileRequest,
-  SaveToolsetRequest,
-  WriteToolsetRequest,
-  WriteToolsetResult,
-  ResetToolsetRequest,
-  ToolsetsView,
+  SavePermissionSetRequest,
+  WritePermissionSetRequest,
+  WritePermissionSetResult,
+  ResetPermissionSetRequest,
+  PermissionSetsView,
   WriteWorkflowRequest,
   InstanceNode,
   ChatBranch,
@@ -631,6 +656,18 @@ export interface AppServiceOptions {
    * so checking a connection never leaves the process.
    */
   forgeHttp?: ForgeHttp;
+  /**
+   * The clock a forge sign-in polls by (RFC 8628 waits seconds between polls). Absent ⇒ real timers;
+   * a test passes one that advances at once, so a ten-minute sign-in runs in a tick.
+   */
+  forgeClock?: { now?: () => number; sleep?: (ms: number, signal?: AbortSignal) => Promise<void> };
+  /**
+   * Open a page in the person's browser — injected by the Electron main process (`shell.openExternal`),
+   * absent headless, where a forge sign-in still starts and the page it would open is in its answer.
+   */
+  openExternal?: (url: string) => void;
+  /** How `model:probeLocal` reaches a local server. Absent ⇒ the platform `fetch`; a test passes a fake. */
+  localFetch?: LocalFetch;
   /**
    * What answers {@link AppService.checkFile} — the TypeScript language service, wherever it runs.
    *
@@ -888,12 +925,12 @@ function pendingQuestionOf(request: QuestionRequest, project: string): PendingQu
 
 /** An approval as the renderer sees it (the hub's request, minus internals). */
 /**
- * The toolset behind an approval, as the answer menu needs it (decision 0007 §4): its name, and the
+ * The permission set behind an approval, as the answer menu needs it (decision 0007 §4): its name, and the
  * layers a remembered line could be written into. Read off the disk each time it is asked for, so a
  * file created since the question parked is what the menu describes.
  */
-function approvalToolsetOf(paths: JairaPaths, reference: string): ApprovalToolset {
-  const found = toolsetWriteTargets(paths, reference);
+function approvalPermissionSetOf(paths: JairaPaths, reference: string): ApprovalPermissionSet {
+  const found = permissionSetWriteTargets(paths, reference);
   return {
     ...(found.id !== undefined ? { id: found.id } : {}),
     targets: found.targets.map(({ layer, file, follows, shadowed }) => ({
@@ -913,7 +950,7 @@ function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: Ja
     ...(request.command !== undefined ? { command: request.command } : {}),
     ...(request.reason !== undefined ? { reason: request.reason } : {}),
     ...(request.parts !== undefined ? { parts: request.parts } : {}),
-    ...(request.parts?.toolset !== undefined && paths !== undefined ? { toolset: approvalToolsetOf(paths, request.parts.toolset) } : {}),
+    ...(request.parts?.permissionSet !== undefined && paths !== undefined ? { permissionSet: approvalPermissionSetOf(paths, request.parts.permissionSet) } : {}),
     input: request.input as Record<string, JsonValue>,
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
     project,
@@ -1306,7 +1343,7 @@ export class AppService {
     return [...this.sessions.values()].map((session) => ({
       key: session.key,
       handles: session.project.remotes,
-      settleAfter: session.project.config.integrations.review.settleAfter,
+      settleAfter: session.project.config.functions.review_artifacts.settleAfter,
       provider: (host: string) => this.forgeFor(session, host),
     }));
   }
@@ -1889,6 +1926,9 @@ export class AppService {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
     this.remoteWatcher?.dispose();
+    // A sign-in still polling ends as canceled; a renewal timer set for later is nobody's now.
+    for (const waiting of this.forgeSignIns.values()) waiting.controller.abort();
+    if (this.forgeRenewal !== undefined) clearTimeout(this.forgeRenewal);
     // Hand the log back, but only if it is still OURS. The sink is process-global, so a second
     // service constructed after this one has already replaced it — resetting unconditionally would
     // silence a service that is still running on behalf of the one shutting down.
@@ -3466,7 +3506,7 @@ export class AppService {
     // The RESOLVED states: a snapshot-loaded bundle carries no `source` (EXPRESSIONS.md §11), so
     // reading it would have gated a pinned run against `{}` — a check that always passes.
     const gateIssues = gateCapabilities(registry, started.bundle.states, {
-      policyNeedsApproval: policyCanEscalate(config.policy),
+      policyNeedsApproval: policyCanEscalate(projectPolicy(config)),
     });
     if (gateIssues.length > 0) {
       finishTaskRun(project, taskId, "failed", {
@@ -3530,7 +3570,7 @@ export class AppService {
 
     // The remote primitives (decision 0004 §2), for every run for the reason `on_user_event` is: they
     // cost five map entries, and a workflow that reaches for one should find it whatever else it is
-    // allowed. What they may DO is decided per call — `remote.publish` — and not by being registered.
+    // allowed. What they may DO is decided per call — `functions.review_artifacts.publish` — and not by being registered.
     const remotePrimitives = registerRemoteFunctions(registry, {
       taskId,
       ...(project.tasks.tryRead(taskId)?.title !== undefined ? { taskTitle: project.tasks.tryRead(taskId)!.title } : {}),
@@ -3541,7 +3581,7 @@ export class AppService {
       scratchDir: join(project.paths.systemDir, "remote-worktrees"),
       handles: project.remotes,
       integrations: config.integrations,
-      policy: config.policy,
+      publish: config.functions.review_artifacts.publish,
       secrets: this.secretResolver(open),
       exec,
       execEnv: config.execEnvironment,
@@ -3715,7 +3755,7 @@ export class AppService {
     for (const row of project.events.list(taskId)) {
       if (row.event.type === "instance.entered") instanceStates.set(row.event.instanceId, row.event.stateId);
     }
-    // A toolset line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
+    // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
     // amended 2026-09-22): the approval prompt and `smart` join this run's registry, and the approver
     // asks the functions first.
     const approve = this.approverWithFunctions(open, taskId, this.permissionFunctionsFor(open, taskId, registry, prompt, abort.signal), {
@@ -3994,7 +4034,7 @@ export class AppService {
       routes?: Record<string, JairaPromptNode>;
     };
     const tools = AppService.gateableTools();
-    const toolsets = readToolsets(open.project.paths);
+    const permissionSets = readPermissionSets(open.project.paths);
     return {
       ...plan,
       live,
@@ -4004,18 +4044,18 @@ export class AppService {
         plan,
         this.modelOfRecord(open, request.taskId, context.position),
         tools,
-        toolsets,
+        permissionSets,
       ),
-      available: this.availableFor(open, router, tools, toolsets, plan.settings),
+      available: this.availableFor(open, router, tools, permissionSets, plan.settings),
     };
   }
 
   /**
-   * Every tool a toolset can hold a line for, named once — the standard list, less what only an
+   * Every tool a permission set can hold a line for, named once — the standard list, less what only an
    * agent has.
    *
    * WIDER than `JAIRA_TOOLS` by the tools that are named and not yet served (`ToolSpec.unserved`, the
-   * workflow tools): the composer draws a line for each and a toolset may hold it, and nothing hands
+   * workflow tools): the composer draws a line for each and a permission set may hold it, and nothing hands
    * one to anybody — `offeredTools` and `planAgentTools` leave them out.
    *
    * Each carries what every agent route calls ITS OWN tool doing that job, read off the executors'
@@ -4034,16 +4074,16 @@ export class AppService {
     open: ProjectSession,
     router: { routes?: Record<string, JairaPromptNode> },
     tools: readonly ToolChoice[],
-    toolsets: readonly ToolsetChoice[],
+    permissionSets: readonly PermissionSetChoice[],
     settings: ChatSettings,
   ): ChatPlanView["available"] {
     return {
       // The buckets the Permissions card draws its rows from, and the one it opens on: the bucket
-      // holding a toolset this conversation's map exactly is, `chat` otherwise (decision 0007 §5).
-      toolsets: [...toolsets],
+      // holding a permission set this conversation's map exactly is, `chat` otherwise (decision 0007 §5).
+      permissionSets: [...permissionSets],
       bucket: bucketOf(
-        toolsetOfSettings(settings).toolset,
-        toolsets,
+        permissionSetOfSettings(settings).permissionSet,
+        permissionSets,
         tools.map((tool) => tool.name),
       ),
       // Provider routes AND agent routes, as peers. `claude-cli` and `anthropic` are two different
@@ -4093,12 +4133,12 @@ export class AppService {
       routes?: Record<string, JairaPromptNode>;
     };
     const tools = AppService.gateableTools();
-    const toolsets = readToolsets(open.project.paths);
+    const permissionSets = readPermissionSets(open.project.paths);
     return {
       ...plan,
       live: "idle",
-      effective: this.effectiveOf(open, router, plan, undefined, tools, toolsets),
-      available: this.availableFor(open, router, tools, toolsets, plan.settings),
+      effective: this.effectiveOf(open, router, plan, undefined, tools, permissionSets),
+      available: this.availableFor(open, router, tools, permissionSets, plan.settings),
     };
   }
 
@@ -4157,7 +4197,7 @@ export class AppService {
      */
     lastModel: string | undefined,
     tools: readonly ToolChoice[],
-    toolsets: readonly ToolsetChoice[],
+    permissionSets: readonly PermissionSetChoice[],
   ): ChatPlanView["effective"] {
     // What ANSWERED this conversation last. It beats everything below it: a state that named no
     // model, or named a route that picks its own, was still answered by something, and the record is
@@ -4181,9 +4221,9 @@ export class AppService {
       // No project-level default to read: a call with no `reasoning` gets the model's own. Naming
       // the decider beats printing a value we invented.
       reasoning: plan.settings.reasoning?.effort ?? "the model's default",
-      // The MAP, named as the toolset it exactly is — see `postureOf`. The map is what the executor
+      // The MAP, named as the permission set it exactly is — see `postureOf`. The map is what the executor
       // is handed, so it is the only honest thing to report.
-      permissions: postureOf(open.project.config, tools, toolsets, plan.settings),
+      permissions: postureOf(open.project.config, tools, permissionSets, plan.settings),
     };
   }
 
@@ -4464,7 +4504,7 @@ export class AppService {
     // The workflow tools (decision 0005 §3), bound to THIS conversation: a typed turn is how a
     // person steers work, and it is the path both `chat/session` and `chat/control` are held on.
     registerWorkflowTools(registry, this.workflowHostFor(open, request.taskId));
-    // A toolset line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
+    // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
     // amended 2026-09-22) — in a typed turn as in a run. The functions get a registry of their own:
     // this turn's holds tools, and a function is none.
     const functionRegistry = newRegistry();
@@ -4483,23 +4523,23 @@ export class AppService {
      * The message's own choice wins over the project's: it is the narrower, later statement.
      */
     //
-    // ONE map is read for all of it (decision 0007): the message's toolset, or the lowered list and
+    // ONE map is read for all of it (decision 0007): the message's permission set, or the lowered list and
     // `permissions` block a state's own declaration arrives as, read back into one.
-    const { toolset } = toolsetOfSettings(plan.settings);
-    const policy: ExecPolicy = compilePolicy(config.policy, {
+    const { permissionSet } = permissionSetOfSettings(plan.settings);
+    const policy: ExecPolicy = compilePolicy(projectPolicy(config), {
       execEnv: config.execEnvironment,
       ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       askAboveBytes: config.artifacts.askAboveBytes,
-      toolset,
+      permissionSet,
       grants: open.approvals.grants(request.taskId),
     });
     // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
     // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
-    // own, and what makes it answerable is the ask-rule `withAgentToolset` writes at the executor
+    // own, and what makes it answerable is the ask-rule `withAgentPermissionSet` writes at the executor
     // plus the gate below, asked about the native by its standard name. Wrapping it here as well
     // would build a tool nothing would ever call.
-    const wiring = planAgentTools(toolset);
+    const wiring = planAgentTools(permissionSet);
     const { tools, gate } = gateTools({
       registry,
       // `tools === undefined` means the message said nothing and the STATE's declaration stands, so
@@ -4510,10 +4550,10 @@ export class AppService {
       sessionId: sessionOf(context.position),
       policy,
       approve,
-      // The toolset, when the message declares one — the composer's map, or a state's lowered block
+      // The permission set, when the message declares one — the composer's map, or a state's lowered block
       // read back. `authored` goes either way, for its `scopes`: where a tool may act is not part of
-      // a toolset.
-      ...(declaresTools(plan.settings) ? { toolset } : {}),
+      // a permission set.
+      ...(declaresTools(plan.settings) ? { permissionSet } : {}),
       ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
       // What a relative scope glob and a relative call path resolve against — see `scopeNarrowingFor`.
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
@@ -4585,7 +4625,7 @@ export class AppService {
          *    command ran in whatever directory the app was launched from. The run's own root — read,
          *    never ensured (see above).
          */
-        services: withToolsetService(
+        services: withPermissionSetService(
           {
           tools,
           gate,
@@ -4598,10 +4638,10 @@ export class AppService {
           // "the provider is done", however long that took.
           abortSignal: abort.signal,
           } as ExecServices,
-          // The toolset ITSELF, for the agent executor that ends up answering: what it removes, keeps
+          // The permission set ITSELF, for the agent executor that ends up answering: what it removes, keeps
           // and asks about is its own declaration applied to this map (decision 0007 §3). Only when
           // the message declared tools — otherwise the state's declaration stands and says nothing.
-          declaresTools(plan.settings) ? toolset : undefined,
+          declaresTools(plan.settings) ? permissionSet : undefined,
         ),
       },
       {
@@ -5898,7 +5938,7 @@ export class AppService {
    *
    * This is reached from exactly two places: the gate hub's `onRequest` and the question hub's. The
    * approval hub's `onRequest` does not call it, and nothing here holds the approval hub, so a tool
-   * permission, a push, a merge or a `remote.publish` cannot get here at all. Then, of what does get
+   * permission, a push, a merge or a publish (`functions.review_artifacts.publish`) cannot get here at all. Then, of what does get
    * here, a gate whose component is not a QUESTION or a JUDGEMENT (`ANSWERABLE_COMPONENTS` —
    * `confirm_action` and `review_artifacts` are the two left out on purpose) is left to the person
    * without a model ever seeing it. And `answer_question` itself checks the component a third time.
@@ -6637,8 +6677,8 @@ export class AppService {
    * Answer a parked approval. `scope` is how long the answer applies — the reason
    * a user is not asked the same question on every tool call.
    *
-   * `addTo` is "add to the toolset" (decision 0007 §4): the asking parts, at the widths `remember`
-   * names, are written into the toolset file that asked, in that layer, BEFORE the request is
+   * `addTo` is "add to the permission set" (decision 0007 §4): the asking parts, at the widths `remember`
+   * names, are written into the permission set file that asked, in that layer, BEFORE the request is
    * answered — so a write that fails refuses the submit and the question stays where it was. The
    * answer then remembers the same widths for the run, because a started task reads its pinned
    * snapshot and would otherwise ask again until the next one.
@@ -6658,11 +6698,11 @@ export class AppService {
       const request = owner.approvals.list().find((r) => r.requestId === requestId);
       if (request === undefined) throw this.refusal("run", `no pending approval '${requestId}'`);
       this.writable(addTo);
-      if (request.parts === undefined) throw this.refusal("file", "this request is not a shell line, so there is no part of it to add to a toolset");
+      if (request.parts === undefined) throw this.refusal("file", "this request is not a shell line, so there is no part of it to add to a permission set");
       const widths = chosenWidths(request.parts, remember ?? []);
-      const entries: ToolsetAddition = entriesToRemember(request.parts, decision, (part) => part.widths.find((w) => widths.includes(w))) as ToolsetAddition;
+      const entries: PermissionSetAddition = entriesToRemember(request.parts, decision, (part) => part.widths.find((w) => widths.includes(w))) as PermissionSetAddition;
       try {
-        addToToolset(owner.project.paths, request.parts.toolset, addTo, entries);
+        addToPermissionSet(owner.project.paths, request.parts.permissionSet, addTo, entries);
       } catch (e) {
         throw this.refusal("file", (e as Error).message);
       }
@@ -6975,7 +7015,7 @@ export class AppService {
   }
 
   /**
-   * What a toolset line that names a FUNCTION needs in one run or one turn (decision 0007, amended
+   * What a permission set line that names a FUNCTION needs in one run or one turn (decision 0007, amended
    * 2026-09-22), put on `registry`: the approval prompt, parked on this project's gate hub for the
    * task — so it is durable and drawn in the task's conversation like any gate — and `smart`, judging
    * with this project's `smart` settings through `prompt`. What comes back runs a function the way this
@@ -6991,7 +7031,7 @@ export class AppService {
   ): PermissionFunctionRunner {
     const project = open.project;
     registerApprovalPrompt(registry, (component, inputs) => open.hub.ask(component, inputs, taskId));
-    registerSmartFunction(registry, { prompt, config: () => project.config.smart });
+    registerSmartFunction(registry, { prompt, config: () => project.config.functions.smart });
     const modules = userModules();
     return permissionFunctionRunner({
       registry,
@@ -7010,7 +7050,7 @@ export class AppService {
   }
 
   /**
-   * The approver a run or a turn hands the engine: the functions a toolset names asked first, then the
+   * The approver a run or a turn hands the engine: the functions a permission set names asked first, then the
    * person (`withPermissionFunctions`). Every answer a function gives is written to the command log.
    */
   private approverWithFunctions(
@@ -7136,14 +7176,26 @@ export class AppService {
    */
   writeSettings(patch: Partial<JairaSettings>): JairaSettings {
     const next: JairaSettings = { ...this.readSettings(), ...patch };
-    const file = jairaBasePaths(this.baseDir).userSettingsFile;
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    this.saveSettings(next);
     // The one setting with an effect outside this file: what the app keeps in its log. Re-installed
     // here rather than watched, so a change made in the Logs page governs the very next entry —
     // which is the only behaviour that makes turning a scope down while it floods you useful.
     if (patch.logging !== undefined) this.applyLogPolicy();
     return next;
+  }
+
+  private saveSettings(next: JairaSettings): void {
+    const file = jairaBasePaths(this.baseDir).userSettingsFile;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  }
+
+  /** Replace the forge sign-in marks — the one settings field main removes whole, so not a {@link writeSettings} patch. */
+  private saveForgeMarks(marks: Record<string, ForgeSignInMark>): void {
+    const next = this.readSettings();
+    if (Object.keys(marks).length > 0) next.forgeSignIns = marks;
+    else delete next.forgeSignIns;
+    this.saveSettings(next);
   }
 
   // --- configuration ---------------------------------------------------------
@@ -7302,8 +7354,12 @@ export class AppService {
   }
 
   private async computeAvailability(): Promise<AvailabilitySnapshot> {
+    // A signed-in forge token about to die is renewed FIRST, so the check below asks about the new
+    // one rather than reporting the old one refused. Nothing to renew costs a settings read.
+    await this.renewForgeTokens().catch(() => undefined);
     const config = this.effectiveConfig();
     const secrets = this.secretResolver();
+    const marks = this.readSettings().forgeSignIns ?? {};
     const [routes, executors, forges] = await Promise.all([
       probeModelRoutes(config.models, { secrets }),
       this.probeExecutors(),
@@ -7311,9 +7367,11 @@ export class AppService {
       // nothing here; one that does is asked who its token is, which is the whole of the check.
       checkForges(config.integrations, {
         secrets,
+        signedIn: (credential) => marks[credential]?.source,
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
       }),
     ]);
+    this.scheduleForgeRenewal(marks);
     // What the DEFAULT executor's tree resolves to, derived from both halves and only here: an
     // executor whose binary is missing is not a route, which is the difference between "it routes to
     // claude-cli" and "it routes to claude-cli and the run then fails to start it".
@@ -7475,6 +7533,298 @@ export class AppService {
     return info;
   }
 
+  // --- what is on this machine: local servers and weights -------------------
+
+  /**
+   * Ask the well-known local servers for their models, and say which one the `local` route uses.
+   *
+   * On demand — the page opening, Re-check — and never on a timer: five sockets with a short
+   * deadline each, all at once, so the page waits one deadline at most. `baseURL` compares with the
+   * field as typed, before it is saved.
+   */
+  probeLocalServers(request?: { baseURL?: string }): Promise<LocalServerDiscovery> {
+    const configured = request?.baseURL ?? this.effectiveConfig().models.routes?.local?.baseURL;
+    return discoverLocalServers({
+      ...(configured !== undefined ? { configured } : {}),
+      ...(this.options.localFetch !== undefined ? { fetch: this.options.localFetch } : {}),
+    });
+  }
+
+  /**
+   * The embedded route's weights, one row per model, and whether its loader resolves — the same rows
+   * the route's own probe is decided from, so the list and the route's line cannot disagree.
+   */
+  checkWeights(request?: { weights?: Record<string, { modelPath: string }> }): EmbeddedWeightsReport {
+    return checkEmbeddedWeights(request?.weights ?? this.effectiveConfig().models.routes?.embedded?.weights);
+  }
+
+  // --- forge sign-in through the browser (RFC 8628) -------------------------
+
+  /** Forge sign-ins waiting on the person, by connection — what Cancel aborts and `forge:signIns` lists. */
+  private readonly forgeSignIns = new Map<string, { pending: ForgeSignInPending; controller: AbortController }>();
+  /** Starts still waiting on the forge for a code, so a second press joins the first rather than racing it. */
+  private readonly forgeSignInStarts = new Map<string, Promise<ForgeSignInStart>>();
+
+  /**
+   * Start signing in to a forge connection through the browser.
+   *
+   * Answers with the code as soon as the forge hands one out, opens the page to type it on, and
+   * polls in the background; how it ends is the `forge:signInFinished` push. One at a time per
+   * connection: a second press while one waits answers with the one waiting, the same code.
+   */
+  signInForge(name: string): Promise<ForgeSignInStart> {
+    const waiting = this.forgeSignIns.get(name);
+    if (waiting !== undefined) return Promise.resolve({ ok: true, pending: waiting.pending });
+    const starting = this.forgeSignInStarts.get(name);
+    if (starting !== undefined) return starting;
+    const start = this.startForgeSignIn(name).finally(() => this.forgeSignInStarts.delete(name));
+    this.forgeSignInStarts.set(name, start);
+    return start;
+  }
+
+  private async startForgeSignIn(name: string): Promise<ForgeSignInStart> {
+    const config = this.effectiveConfig();
+    const connection = this.forgeConnection(name);
+    if (connection.enabled === false) return { ok: false, reason: `the ${name} connection is turned off`, fix: "turn it on, then sign in" };
+    const app = oauthAppFor(config.integrations, connection);
+    if (app === undefined) return { ok: false, ...oauthAppNeeded(connection.provider, connection.host) };
+    const endpoints = deviceFlowEndpoints(connection);
+    const clock = this.options.forgeClock ?? {};
+    let authorization: DeviceAuthorization;
+    try {
+      authorization = await requestDeviceCode(endpoints, app.clientId, { http: this.options.forgeHttp ?? fetchForgeHttp, ...(clock.now !== undefined ? { now: clock.now } : {}) });
+    } catch (e) {
+      this.log({ level: "warn", source: "config", message: `forge sign-in to ${connection.host} could not start: ${(e as Error).message}` });
+      return { ok: false, reason: (e as Error).message };
+    }
+    const pending: ForgeSignInPending = {
+      connection: name,
+      provider: connection.provider,
+      host: connection.host,
+      userCode: authorization.userCode,
+      verificationUri: authorization.verificationUri,
+      ...(authorization.verificationUriComplete !== undefined ? { verificationUriComplete: authorization.verificationUriComplete } : {}),
+      expiresAt: authorization.expiresAt,
+      startedAt: (clock.now ?? Date.now)(),
+    };
+    const controller = new AbortController();
+    this.forgeSignIns.set(name, { pending, controller });
+    // The page with the code already in it where the forge offers one: one less thing to type.
+    this.options.openExternal?.(pending.verificationUriComplete ?? pending.verificationUri);
+    void this.finishForgeSignIn(name, connection, endpoints, app.clientId, authorization, controller.signal);
+    return { ok: true, pending };
+  }
+
+  /** Poll to the end, store what came back, re-check, and say how it ended. Never throws. */
+  private async finishForgeSignIn(
+    name: string,
+    connection: JairaForgeConnection,
+    endpoints: DeviceFlowEndpoints,
+    clientId: string,
+    authorization: DeviceAuthorization,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const clock = this.options.forgeClock ?? {};
+    let outcome: ForgeSignInOutcome;
+    try {
+      const token = await pollDeviceToken(endpoints, clientId, authorization, {
+        http: this.options.forgeHttp ?? fetchForgeHttp,
+        signal,
+        ...(clock.now !== undefined ? { now: clock.now } : {}),
+        ...(clock.sleep !== undefined ? { sleep: clock.sleep } : {}),
+      });
+      this.storeForgeToken(name, connection, token);
+      this.forgeSignIns.delete(name);
+      // Awaited, so the push below arrives after the check that names the account.
+      const snapshot = this.closed ? undefined : await this.refreshAvailability().catch(() => undefined);
+      const login = snapshot?.forges?.find((check) => check.name === name)?.identity?.login;
+      outcome = { ok: true, connection: name, ...(login !== undefined ? { login } : {}) };
+      this.log({ level: "info", source: "config", message: `signed in to ${connection.host}${login !== undefined ? ` as @${login}` : ""} through the browser` });
+    } catch (e) {
+      const code = e instanceof DeviceFlowError ? e.code : "failed";
+      outcome = { ok: false, connection: name, code, reason: (e as Error).message };
+      if (code === "failed") this.log({ level: "warn", source: "config", message: `forge sign-in to ${connection.host} failed: ${(e as Error).message}` });
+    } finally {
+      this.forgeSignIns.delete(name);
+    }
+    this.publish({ type: "forge:signInFinished", outcome });
+  }
+
+  /** Give up on a forge sign-in still waiting. Nothing waiting is not an error. */
+  cancelForgeSignIn(name: string): void {
+    this.forgeSignIns.get(name)?.controller.abort();
+  }
+
+  /** The forge sign-ins waiting on the person now. */
+  pendingForgeSignIns(): ForgeSignInPending[] {
+    return [...this.forgeSignIns.values()].map((waiting) => waiting.pending);
+  }
+
+  /**
+   * Disconnect a forge connection: remove its token from where the chain finds it, with its OAuth
+   * mark and refresh token, and re-check.
+   *
+   * Where the chain finds it, rather than where a sign-in put it: what the person is disconnecting is
+   * the token in USE. One that comes from somewhere JaiRA does not write is refused with where it is.
+   * A token further down the chain may be found next — the re-check then says whose it is.
+   */
+  async signOutForge(name: string): Promise<ForgeSignOutOutcome> {
+    const connection = this.forgeConnection(name);
+    const credential = connection.credential;
+    if (credential === undefined) return { ok: false, reason: `the ${name} connection names no token, so there is nothing to remove` };
+    const mark = this.readSettings().forgeSignIns?.[credential];
+    const hit = this.secretResolver().describe(credential);
+    if (hit !== undefined) {
+      const target = targetOfSource(hit.source);
+      if (target === undefined) {
+        return {
+          ok: false,
+          reason: `the token comes from the ${SECRET_SOURCE_LABELS[hit.source]}${hit.file !== undefined ? ` (${hit.file})` : ""}, which JaiRA does not write — remove ${credential} there`,
+        };
+      }
+      this.writeSecret({ name: credential, value: "", target });
+    }
+    if (mark !== undefined) this.dropForgeMark(credential, mark);
+    await this.refreshAvailability().catch(() => undefined);
+    return { ok: true };
+  }
+
+  /** A connection by name from the effective configuration, refused when there is none. */
+  private forgeConnection(name: string): JairaForgeConnection {
+    const connection = this.effectiveConfig().integrations.forges[name];
+    if (connection === undefined) throw this.refusal("config", `unknown forge connection '${name}'`);
+    return connection;
+  }
+
+  /**
+   * Store a signed-in token exactly where a pasted one would go — under the connection's
+   * `credential`, keychain first — and mark it as the sign-in's.
+   *
+   * The shared root's `.env.local` when there is no keychain, not a project's: a sign-in is the
+   * person's, on this machine, whichever project is open. A connection that names no token yet gets
+   * the conventional name written into the layer that defines it, as a pasted token's would be.
+   */
+  private storeForgeToken(name: string, connection: JairaForgeConnection, token: DeviceToken): void {
+    const credential = connection.credential ?? this.nameForgeCredential(name);
+    const target: SecretTargetOf = this.options.keychain?.available() === true ? "keychain" : "base-env-local";
+    this.writeSecret({ name: credential, value: token.accessToken, target });
+    this.markForgeToken(credential, { provider: connection.provider, host: connection.host }, target, token);
+  }
+
+  /** Write (or rewrite) a token's mark, and its refresh token beside it in the same store. */
+  private markForgeToken(
+    credential: string,
+    forge: Pick<ForgeSignInMark, "provider" | "host">,
+    target: SecretTargetOf,
+    token: DeviceToken,
+  ): void {
+    const marks = { ...(this.readSettings().forgeSignIns ?? {}) };
+    const previous = marks[credential];
+    const refreshCredential = `${credential}_REFRESH`;
+    if (token.refreshToken !== undefined) this.writeSecret({ name: refreshCredential, value: token.refreshToken, target });
+    else if (previous?.refreshCredential !== undefined) this.removeSecretAt(previous.refreshCredential, previous.source);
+    marks[credential] = {
+      ...forge,
+      source: sourceOfTarget(target),
+      at: (this.options.forgeClock?.now ?? Date.now)(),
+      ...(token.expiresAt !== undefined ? { expiresAt: token.expiresAt } : {}),
+      ...(token.refreshToken !== undefined ? { refreshCredential } : {}),
+    };
+    this.saveForgeMarks(marks);
+  }
+
+  /** Forget a mark, and remove the refresh token it named. The access token is the caller's business. */
+  private dropForgeMark(credential: string, mark: ForgeSignInMark): void {
+    if (mark.refreshCredential !== undefined) this.removeSecretAt(mark.refreshCredential, mark.source);
+    const marks = { ...(this.readSettings().forgeSignIns ?? {}) };
+    delete marks[credential];
+    this.saveForgeMarks(marks);
+  }
+
+  private removeSecretAt(name: string, source: SecretSource): void {
+    const target = targetOfSource(source);
+    if (target === undefined) return;
+    try {
+      this.writeSecret({ name, value: "", target });
+    } catch (e) {
+      this.log({ level: "warn", source: "config", message: `could not remove ${name}: ${(e as Error).message}` });
+    }
+  }
+
+  /**
+   * A connection with no `credential` gets one — `<NAME>_TOKEN` — written into the layer that DEFINES
+   * it: a partial entry in the other layer would be a connection with no provider there.
+   */
+  private nameForgeCredential(name: string): string {
+    const credential = `${name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_TOKEN`;
+    const view = this.readConfig();
+    const defines = (doc: unknown): boolean =>
+      ((doc as { integrations?: { forges?: Record<string, unknown> } } | null)?.integrations?.forges?.[name]) !== undefined;
+    const layer = view.project !== null && defines(view.project) ? "project" : "base";
+    const doc = structuredClone(((layer === "base" ? view.base : view.project) ?? {}) as Record<string, unknown>);
+    const integrations = (doc["integrations"] ??= {}) as Record<string, unknown>;
+    const forges = (integrations["forges"] ??= {}) as Record<string, unknown>;
+    forges[name] = { ...((forges[name] ?? {}) as object), credential };
+    this.writeConfig({ layer, config: doc as JsonValue });
+    return credential;
+  }
+
+  /**
+   * Renew every signed-in forge token that dies within {@link RENEW_AHEAD_MS}, with its refresh token.
+   *
+   * Before each availability pass, and on the timer {@link scheduleForgeRenewal} sets, so a token that
+   * lives two hours (GitLab's) outlives them while the app is open, and one that died while it was
+   * closed is renewed at the next start. A renewal that fails is logged and left: the check then
+   * reports the token refused, and signing in again is the fix it names.
+   */
+  private async renewForgeTokens(): Promise<void> {
+    const marks = this.readSettings().forgeSignIns ?? {};
+    const now = (this.options.forgeClock?.now ?? Date.now)();
+    const due = Object.entries(marks).filter(
+      ([, mark]) => mark.refreshCredential !== undefined && mark.expiresAt !== undefined && mark.expiresAt - now < RENEW_AHEAD_MS,
+    );
+    if (due.length === 0) return;
+    const config = this.effectiveConfig();
+    const secrets = this.secretResolver();
+    for (const [credential, mark] of due) {
+      const app = oauthAppFor(config.integrations, mark);
+      const refresh = secrets.lookup(mark.refreshCredential!);
+      const target = targetOfSource(mark.source);
+      if (app === undefined || refresh === undefined || target === undefined) continue;
+      const connection = Object.values(config.integrations.forges).find((c) => c.provider === mark.provider && c.host === mark.host) ?? mark;
+      try {
+        const token = await refreshDeviceToken(deviceFlowEndpoints(connection), app.clientId, refresh.value, {
+          http: this.options.forgeHttp ?? fetchForgeHttp,
+          ...(this.options.forgeClock?.now !== undefined ? { now: this.options.forgeClock.now } : {}),
+        });
+        this.writeSecret({ name: credential, value: token.accessToken, target });
+        this.markForgeToken(credential, { provider: mark.provider, host: mark.host }, target, token);
+      } catch (e) {
+        this.log({ level: "warn", source: "config", message: `could not renew the ${mark.host} sign-in: ${(e as Error).message}` });
+      }
+    }
+  }
+
+  private forgeRenewal: ReturnType<typeof setTimeout> | undefined;
+
+  /** One timer, for the soonest renewal — re-armed by every availability pass, cleared at close. */
+  private scheduleForgeRenewal(marks: Record<string, ForgeSignInMark>): void {
+    if (this.forgeRenewal !== undefined) clearTimeout(this.forgeRenewal);
+    this.forgeRenewal = undefined;
+    // Only renewals still AHEAD: one already due was tried by the pass that got here, and if it failed
+    // (a revoked refresh token), a timer for it would re-run the whole availability pass on a loop.
+    const now = (this.options.forgeClock?.now ?? Date.now)();
+    const soonest = Math.min(
+      ...Object.values(marks)
+        .filter((mark) => mark.refreshCredential !== undefined && mark.expiresAt !== undefined && mark.expiresAt - RENEW_AHEAD_MS > now)
+        .map((mark) => mark.expiresAt! - RENEW_AHEAD_MS),
+    );
+    if (!Number.isFinite(soonest) || this.closed) return;
+    // `setTimeout` holds at most 2^31 − 1 ms; a later renewal is re-armed by a later pass.
+    this.forgeRenewal = setTimeout(() => this.kickAvailability(), Math.min(soonest - now, 2 ** 31 - 1));
+    this.forgeRenewal.unref?.();
+  }
+
   // --- secrets ---------------------------------------------------------------
 
   /** What the secret store can do here — the keychain needs Electron and an OS that provides one. */
@@ -7508,7 +7858,7 @@ export class AppService {
           { label: "commits as", value: request.commitsAs },
           ...(request.openedBy !== undefined ? [{ label: "request opened by", value: `${request.openedBy} (the ${forge.name} connection's token)` }] : []),
         ],
-        options: [{ value: "always", label: "Always for this project", description: "sets policy.remote.publish to allow in this project's settings" }],
+        options: [{ value: "always", label: "Always for this project", description: "sets functions.review_artifacts.publish to allow in this project's settings" }],
       },
       taskId,
     );
@@ -7520,7 +7870,7 @@ export class AppService {
   }
 
   /**
-   * "Always for this project": write `policy.remote.publish = "allow"` into the project's own layer.
+   * "Always for this project": write `functions.review_artifacts.publish = "allow"` into the project's own layer.
    *
    * The project layer and never the shared root — the person was asked about THIS project. A write
    * that fails is logged and swallowed: the push they just approved must not fail because a settings
@@ -7531,8 +7881,8 @@ export class AppService {
       const layer = open.kind === "shared" ? "base" : "project";
       const view = this.readConfig(open.key);
       const doc = structuredClone(((layer === "base" ? view.base : view.project) ?? {}) as Record<string, unknown>);
-      const policy = (doc["policy"] ??= {}) as Record<string, unknown>;
-      policy["remote"] = { ...((policy["remote"] ?? {}) as object), publish: "allow" };
+      const functions = (doc["functions"] ??= {}) as Record<string, unknown>;
+      functions["review_artifacts"] = { ...((functions["review_artifacts"] ?? {}) as object), publish: "allow" };
       this.writeConfig({ layer, project: open.key, config: doc as JsonValue });
     } catch (e) {
       this.log({ level: "warn", source: "runtime", message: `could not record the publish grant: ${(e as Error).message}`, project: open.key });
@@ -7547,6 +7897,16 @@ export class AppService {
    * committed `.env`, and it cannot set a variable in someone else's shell.
    */
   setSecret(request: SetSecretRequest): { name: string; target: SecretTargetOf } {
+    const written = this.writeSecret(request);
+    // A token pasted over one a forge sign-in stored — or the box cleared — is not that sign-in's any
+    // more: its mark goes, and the refresh token that renewed it with it.
+    const mark = this.readSettings().forgeSignIns?.[request.name];
+    if (mark !== undefined && mark.source === sourceOfTarget(request.target)) this.dropForgeMark(request.name, mark);
+    return written;
+  }
+
+  /** {@link setSecret}'s write, without the forge-mark bookkeeping — what a sign-in stores its token through. */
+  private writeSecret(request: SetSecretRequest): { name: string; target: SecretTargetOf } {
     // A provider holds the token it was built with; a new one must not keep answering as the old.
     this.forges.clear();
     if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(request.name)) {
@@ -8388,25 +8748,25 @@ export class AppService {
   }
 
   /**
-   * Keep a map as a NEW toolset in a bucket — the composer's `+` (decision 0007 §5).
+   * Keep a map as a NEW permission set in a bucket — the composer's `+` (decision 0007 §5).
    *
    * Everything is checked BEFORE the path is resolved, in the order a person would want to hear it:
    * the layer (what ships is read-only — the same sentence every write surface says), the bucket and
    * the name (one folder path, one file name, nothing a reference could not carry and nothing that
-   * climbs), the map (it must parse as a toolset with no error, so a file this writes is one the
+   * climbs), the map (it must parse as a permission set with no error, so a file this writes is one the
    * loader will take), and that the chosen layer does not already hold that id — `+` adds. The write
    * is {@link writeFile}'s, so containment, the invalidation and the sync note are its too.
    */
-  saveToolset(request: SaveToolsetRequest): ToolsetChoice {
+  savePermissionSet(request: SavePermissionSetRequest): PermissionSetChoice {
     this.writable(request.layer);
-    const problem = toolsetBucketProblem(request.bucket) ?? toolsetNameProblem(request.name);
+    const problem = permissionSetBucketProblem(request.bucket) ?? permissionSetNameProblem(request.name);
     if (problem !== undefined) throw this.refusal("file", problem);
-    const parsed = parseToolset(request.toolset);
+    const parsed = parsePermissionSet(request.permissionSet);
     const broken = parsed.issues.find((issue) => issue.severity === "error");
-    if (broken !== undefined) throw this.refusal("file", `that is not a toolset — ${broken.message}`);
+    if (broken !== undefined) throw this.refusal("file", `that is not a permission set — ${broken.message}`);
     // `writeFile` takes the FILES VIEW's address — relative to the checkout for a project, so the
     // layer's own prefix (`.jaira`, measured rather than assumed) goes in front; see `treeFile`.
-    const layered = `toolsets/${request.bucket}/${request.name}.json`;
+    const layered = `permission-sets/${request.bucket}/${request.name}.json`;
     const paths = request.layer === "project" ? this.requireProject(request.project).paths : undefined;
     const prefix = paths === undefined ? "" : relative(paths.projectDir, paths.jairaDir).split(sep).join("/");
     const path = prefix.length === 0 ? layered : `${prefix}/${layered}`;
@@ -8416,47 +8776,47 @@ export class AppService {
     this.writeFile({
       layer: request.layer,
       path,
-      text: `${JSON.stringify(request.toolset, null, 2)}\n`,
+      text: `${JSON.stringify(request.permissionSet, null, 2)}\n`,
       ...(request.project !== undefined ? { project: request.project } : {}),
     });
-    return { id: `${request.bucket}/${request.name}`, bucket: request.bucket, name: request.name, layer: request.layer, decl: request.toolset };
+    return { id: `${request.bucket}/${request.name}`, bucket: request.bucket, name: request.name, layer: request.layer, decl: request.permissionSet };
   }
 
   /**
-   * The layers Settings → Toolsets reads and writes: the named project's, or — with nothing open —
+   * The layers Settings → Permission sets reads and writes: the named project's, or — with nothing open —
    * the shared root standing as its own project, which has no `project` layer at all.
    *
    * Computed and never OPENED: `baseAsProjectPaths` is arithmetic on a directory name, where the
    * shared session would create a database for the sake of listing eight files.
    */
-  private toolsetPaths(project?: string): JairaPaths {
+  private permissionSetPaths(project?: string): JairaPaths {
     return project !== undefined || this.hasProject ? this.requireProject(project).paths : baseAsProjectPaths(this.baseDir);
   }
 
   /**
-   * Every toolset, layer by layer, with which states name each — what Settings → Toolsets draws.
+   * Every permission set, layer by layer, with which states name each — what Settings → Permission sets draws.
    *
-   * `usedBy: false` skips the scan of every state file, for a caller that wants the toolsets alone.
+   * `usedBy: false` skips the scan of every state file, for a caller that wants the permission sets alone.
    */
-  readToolsetSettings(request: { project?: string; usedBy?: boolean } = {}): ToolsetsView {
-    const paths = this.toolsetPaths(request.project);
+  readPermissionSetSettings(request: { project?: string; usedBy?: boolean } = {}): PermissionSetsView {
+    const paths = this.permissionSetPaths(request.project);
     return {
-      records: readToolsetLayers(paths),
-      usedBy: request.usedBy === false ? {} : toolsetUsers(paths),
+      records: readPermissionSetLayers(paths),
+      usedBy: request.usedBy === false ? {} : permissionSetUsers(paths),
       tools: AppService.gateableTools(),
-      layers: toolsetLayers(paths).map((layer) => layer.layer),
+      layers: permissionSetLayers(paths).map((layer) => layer.layer),
     };
   }
 
   /**
-   * Save a whole toolset into a layer (decision 0007 §6). What kind of write that is — an edit, an
-   * override that keeps following, a file that stops — is `writeToolset`'s to decide and to say.
+   * Save a whole permission set into a layer (decision 0007 §6). What kind of write that is — an edit, an
+   * override that keeps following, a file that stops — is `writePermissionSet`'s to decide and to say.
    */
-  writeToolsetSettings(request: WriteToolsetRequest): WriteToolsetResult {
+  writePermissionSetSettings(request: WritePermissionSetRequest): WritePermissionSetResult {
     this.writable(request.layer);
-    let written: { file: string; kind: WriteToolsetResult["kind"] };
+    let written: { file: string; kind: WritePermissionSetResult["kind"] };
     try {
-      written = writeToolset(this.toolsetPaths(request.project), request.id, request.layer, request.toolset);
+      written = writePermissionSet(this.permissionSetPaths(request.project), request.id, request.layer, request.permissionSet);
     } catch (e) {
       throw this.refusal("file", (e as Error).message);
     }
@@ -8464,12 +8824,12 @@ export class AppService {
     return written;
   }
 
-  /** "Reset to built in": delete a layer's override of a toolset, and nothing that is not one. */
-  resetToolsetSettings(request: ResetToolsetRequest): { file: string } {
+  /** "Reset to built in": delete a layer's override of a permission set, and nothing that is not one. */
+  resetPermissionSetSettings(request: ResetPermissionSetRequest): { file: string } {
     this.writable(request.layer);
     let removed: { file: string };
     try {
-      removed = resetToolset(this.toolsetPaths(request.project), request.id, request.layer);
+      removed = resetPermissionSet(this.permissionSetPaths(request.project), request.id, request.layer);
     } catch (e) {
       throw this.refusal("file", (e as Error).message);
     }
@@ -8710,13 +9070,13 @@ export class AppService {
    *
    * The registry is HALF the statement. It bounds what a provider-served loop can call; a DELEGATED
    * agent answering the same states runs its own loop with its own built-ins, which no registry
-   * reaches. The other half is authored on the workflow itself: the sync states' toolset is a MAP
-   * that holds `read_file`, `glob` and `grep` and answers `deny` for `other` (`SYNC_TOOLSET`) — and
-   * an agent gets its toolset map and nothing else (decision 0007 §3): claude loses the built-in of every tool not held, codex is left in its read-only sandbox,
+   * reaches. The other half is authored on the workflow itself: the sync states' permission set is a MAP
+   * that holds `read_file`, `glob` and `grep` and answers `deny` for `other` (`SYNC_PERMISSION_SET`) — and
+   * an agent gets its permission set map and nothing else (decision 0007 §3): claude loses the built-in of every tool not held, codex is left in its read-only sandbox,
    * and a transport that can enforce neither refuses the state.
    *
    * `glob` and `grep` are HELD for that reason. The states used to lean on the agent's OWN `Glob`
-   * and `Grep`, which a toolset that does not hold them now removes; ours are registered by
+   * and `Grep`, which a permission set that does not hold them now removes; ours are registered by
    * `startRun` for every run, scoped to the run's workspace — the workflows directory `read_file`
    * is scoped to.
    */
@@ -9788,6 +10148,21 @@ export class AppService {
 class NoConversationHere extends Error {}
 
 type SecretTargetOf = SetSecretRequest["target"];
+
+/** How long before a signed-in forge token dies it is renewed — past one availability pass's slack. */
+const RENEW_AHEAD_MS = 5 * 60_000;
+
+/** Where the chain FINDS a secret written to a target — the name a {@link ForgeSignInMark} keeps. */
+function sourceOfTarget(target: SecretTargetOf): SecretSource {
+  return target === "project-env-local" ? "project-jaira-env-local" : target;
+}
+
+/** The target that writes where the chain found a secret — `undefined` for a place JaiRA does not write. */
+function targetOfSource(source: SecretSource): SecretTargetOf | undefined {
+  if (source === "keychain" || source === "base-env-local") return source;
+  if (source === "project-jaira-env-local") return "project-env-local";
+  return undefined;
+}
 type JairaConfigOf = ReturnType<typeof parseConfig>;
 
 /** Read a JSON document, or null when the file is absent. A malformed one is still an error. */
@@ -10146,26 +10521,26 @@ function sessionOf(position: string): string {
  * The permission posture a call runs under, worded as the control that sets it.
  *
  * A LABEL IS A MATCH, NEVER A MEMORY (decision 0007 §5). The map is what reaches the executor, so
- * this names the toolset that map exactly IS — the same tools held, the same mode and implementation
+ * this names the permission set that map exactly IS — the same tools held, the same mode and implementation
  * on each, the same command subjects, the same `other` — in the bucket the conversation opens on, and
  * says `custom` when it is nobody's. A reader comparing the chip against the Tools card sees the same
  * fact twice, which is the point. The composer asks the same question again for whichever bucket the
- * person picks; both go through `matchToolset`.
+ * person picks; both go through `matchPermissionSet`.
  *
  * A call that declares no tools at all has no map to match. It names what decides instead — the
  * compiled baseline's default, which is where every tool falls — because `custom` there would claim
  * somebody had customised something.
  */
-function postureOf(config: JairaConfigOf, tools: readonly ToolChoice[], toolsets: readonly ToolsetChoice[], settings: ChatSettings): string {
-  const { toolset } = toolsetOfSettings(settings);
-  if (Object.keys(toolset.entries).length === 0) {
-    const { baseline } = compilePolicy(config.policy, { execEnv: config.execEnvironment });
-    const mode = toolset.other ?? baseline?.default ?? "ask";
+function postureOf(config: JairaConfigOf, tools: readonly ToolChoice[], permissionSets: readonly PermissionSetChoice[], settings: ChatSettings): string {
+  const { permissionSet } = permissionSetOfSettings(settings);
+  if (Object.keys(permissionSet.entries).length === 0) {
+    const { baseline } = compilePolicy(projectPolicy(config), { execEnv: config.execEnvironment });
+    const mode = permissionSet.other ?? baseline?.default ?? "ask";
     return `${typeof mode === "object" ? mode.function : mode === "smart" ? "auto" : mode} by default`;
   }
   const registered = tools.map((tool) => tool.name);
-  const match = matchToolset(toolset, toolsets, bucketOf(toolset, toolsets, registered), registered);
-  return match === undefined ? "custom" : toolsetLabel(match);
+  const match = matchPermissionSet(permissionSet, permissionSets, bucketOf(permissionSet, permissionSets, registered), registered);
+  return match === undefined ? "custom" : permissionSetLabel(match);
 }
 
 

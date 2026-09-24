@@ -444,10 +444,10 @@ function Stage({
       tool: stringAt(doc, "tool") ?? "Bash",
       ...(stringAt(doc, "command") !== undefined ? { command: stringAt(doc, "command")! } : {}),
       ...(stringAt(doc, "reason") !== undefined ? { reason: stringAt(doc, "reason")! } : {}),
-      // The parts and the toolset are the engine's own shapes, typed in whole: the gallery has no
+      // The parts and the permission set are the engine's own shapes, typed in whole: the gallery has no
       // policy behind it to take a line apart, and a sample is the place to see exactly what one carries.
       ...(isRecord(doc["parts"]) ? { parts: doc["parts"] as unknown as NonNullable<PendingApproval["parts"]> } : {}),
-      ...(isRecord(doc["toolset"]) ? { toolset: doc["toolset"] as unknown as NonNullable<PendingApproval["toolset"]> } : {}),
+      ...(isRecord(doc["permissionSet"]) ? { permissionSet: doc["permissionSet"] as unknown as NonNullable<PendingApproval["permissionSet"]> } : {}),
       input: (doc["input"] ?? {}) as Record<string, JsonValue>,
       project: GALLERY_PROJECT,
       at: 0,

@@ -29,11 +29,11 @@ import type { FunctionCapabilities } from "@declarative-ai/exec";
 import { parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
 import { baseAsProjectPaths, componentConfigIssues, parseJsonText, type JairaPaths } from "@jaira/shared";
 import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
-import type { LintIssue, StateToolsetIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry, WorkflowLayer, WritableLayer } from "@jaira/shared";
+import type { LintIssue, StatePermissionSetIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry, WorkflowLayer, WritableLayer } from "@jaira/shared";
 import type { Project } from "./project";
 import { checkLabel } from "./runLabel";
 import { isStateFile } from "./snapshots";
-import { loadWorkflowBundle } from "./toolsets";
+import { loadWorkflowBundle } from "./permissionSets";
 import { userModules, watchingForUnapproved, withheldApprovalsOf } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
 
@@ -355,14 +355,14 @@ function browseLayers(
     // calls nothing would be reported as needing the approval its neighbour needs.
     const modules = userModules();
     const watch = modules !== undefined ? watchingForUnapproved(modules) : undefined;
-    // What is wrong with a TOOLSET (decision 0007) — a mode that is not one, a reference cycle, a
+    // What is wrong with a PERMISSION_SET (decision 0007) — a mode that is not one, a reference cycle, a
     // tool nothing knows. Collected rather than thrown, so a bad entry is an issue against the
     // state that wrote it and the rest of the workflow still lints.
-    const toolsetIssues: StateToolsetIssue[] = [];
+    const permissionSetIssues: StatePermissionSetIssue[] = [];
     try {
       bundle = loadWorkflowBundle(effective, rootId, {
         ...(watch !== undefined ? { ...refOptions, symbols: watch.symbols } : refOptions),
-        onToolsetIssue: (issue) => toolsetIssues.push(issue),
+        onPermissionSetIssue: (issue) => permissionSetIssues.push(issue),
       });
     } catch (e) {
       // An unresolvable child reference or a malformed state: the closure is
@@ -408,11 +408,11 @@ function browseLayers(
     // never mounts it.
     // Scoped to this root's closure for the same reason as the component check below: the lowering
     // walks every file it is handed, and a state this root never mounts is not its fault.
-    const seenToolsetIssues = new Set<string>();
-    for (const issue of toolsetIssues) {
+    const seenPermissionSetIssues = new Set<string>();
+    for (const issue of permissionSetIssues) {
       const key = `${issue.stateId} ${issue.path} ${issue.message}`;
-      if (!states.includes(issue.stateId) || seenToolsetIssues.has(key)) continue;
-      seenToolsetIssues.add(key);
+      if (!states.includes(issue.stateId) || seenPermissionSetIssues.has(key)) continue;
+      seenPermissionSetIssues.add(key);
       issues.push({ stateId: issue.stateId, path: issue.path, message: issue.message, severity: issue.severity });
     }
     const inClosure = Object.fromEntries(states.map((id) => [id, effective[id]]));
@@ -475,7 +475,7 @@ function browseLayers(
     // A task pinned to a different hash is running older source — worth showing,
     // since execution reads the snapshot and never live `workflows/` (§5.3).
     const drifted = (tasks.pins.get(rootId) ?? []).filter((pin) => pin.snapshotHash !== hash).map((p) => p.taskId);
-    // A toolset line whose FUNCTION is an unapproved module still loads — lint reports the line — and
+    // A permission set line whose FUNCTION is an unapproved module still loads — lint reports the line — and
     // the file to approve is what that line is about, so it is said here as on a load that failed.
     const withheld = modules !== undefined && watch !== undefined ? withheldApprovalsOf(modules, watch.withheld()) : [];
     return { ...base, states, snapshotHash: hash, issues, driftedTasks: drifted, ...(withheld.length > 0 ? { needsApproval: withheld } : {}) };

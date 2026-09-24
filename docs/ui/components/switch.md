@@ -5,7 +5,7 @@ status: shipped
 updated: 2026-09-13
 realizes: [ux/patterns/schema-driven-form, ux/patterns/inherited-unless-set-here]
 serves: [product/bring-your-own-models-and-agents, product/read-comfortably, product/hand-work-to-agents, product/try-one-step-on-its-own]
-surfaces: [ui/surfaces/settings-providers, ui/surfaces/settings-executors, ui/surfaces/settings-configuration, ui/surfaces/settings-files, ui/surfaces/settings-appearance, ui/surfaces/new-task-popover, ui/surfaces/files-view, ui/surfaces/run-conversation, ui/surfaces/gate-modal]
+surfaces: [ui/surfaces/settings-connections, ui/surfaces/settings-models, ui/surfaces/settings-runs, ui/surfaces/settings-data, ui/surfaces/settings-files, ui/surfaces/settings-appearance, ui/surfaces/new-task-popover, ui/surfaces/files-view, ui/surfaces/run-conversation, ui/surfaces/gate-modal]
 reuses: []
 implemented_by: [packages/app/src/renderer/controls.tsx, packages/app/src/renderer/editorKnobs.tsx]
 verified_by: [packages/app/test/schemaForm.test.ts]

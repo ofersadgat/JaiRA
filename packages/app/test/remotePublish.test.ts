@@ -4,7 +4,7 @@
  * A workflow that pushes and opens a merge request, run the way the app runs one. What is being
  * pinned is the seam nothing in `@jaira/runtime` can see: that the question arrives as an ordinary
  * gate in the conversation saying what will be sent and as whom, that NOTHING leaves the machine
- * before it is answered, and that "always for this project" lands in the project's own settings.
+ * before it is answered, and that "always for this project" lands in the project's own settings (`functions.review_artifacts.publish`).
  *
  * `origin` reads as gitlab.com and pushes to a bare repository on disk; the forge is fixtures.
  */
@@ -148,8 +148,8 @@ describe("a workflow that publishes", () => {
     const gate = await until(() => service.pendingInteractions().find((p) => p.taskId === first), "the publish question");
     service.submitInteraction(gate.requestId, { confirmed: true, choice: "always" });
     await until(() => finished(first), "the first run to finish");
-    expect((service.readConfig().project as { policy?: unknown }).policy).toMatchObject({ remote: { publish: "allow" } });
-    expect(service.readConfig().base ?? {}).not.toHaveProperty("policy.remote");
+    expect((service.readConfig().project as { functions?: unknown }).functions).toMatchObject({ review_artifacts: { publish: "allow" } });
+    expect(service.readConfig().base ?? {}).not.toHaveProperty("functions.review_artifacts");
 
     const second = await start();
     await until(() => finished(second), "the second run to finish");

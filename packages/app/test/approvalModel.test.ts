@@ -8,11 +8,11 @@
  * spans off the end of the line.
  */
 import { describe, expect, it } from "vitest";
-import { parseToolset, type CommandApproval, type CommandPart, type PendingApproval } from "@jaira/shared";
+import { parsePermissionSet, type CommandApproval, type CommandPart, type PendingApproval } from "@jaira/shared";
 import { decideCommand } from "@jaira/runtime";
 // Not part of the runtime's public surface: the policy is normally handed a lowered block, and this
 // is the one step that turns an authored map into what `decideCommand` takes.
-import { shellToolsetOf } from "../../runtime/src/commandParts";
+import { shellPermissionSetOf } from "../../runtime/src/commandParts";
 import {
   additionOf,
   answerMenu,
@@ -27,14 +27,14 @@ import {
   type LineSegment,
 } from "../src/renderer/approvalModel";
 
-const TOOLSET = { bash: "ask", read_file: "allow", glob: "allow", write_file: "allow", script: "ask", "git commit": "ask", "git log": "allow", other: "deny" } as const;
+const PERMISSION_SET = { bash: "ask", read_file: "allow", glob: "allow", write_file: "allow", script: "ask", "git commit": "ask", "git log": "allow", other: "deny" } as const;
 
-function judge(line: string, toolset: Record<string, string> = TOOLSET, source = "$/toolsets/feature/implementation/writes-asking"): CommandApproval {
-  return decideCommand({}, line, "posix", { toolset: shellToolsetOf(parseToolset(toolset).toolset), toolsetSource: source }).parts;
+function judge(line: string, permissionSet: Record<string, string> = PERMISSION_SET, source = "$/permission-sets/feature/implementation/writes-asking"): CommandApproval {
+  return decideCommand({}, line, "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet(permissionSet).permissionSet), permissionSetSource: source }).parts;
 }
 
-function pendingOf(parts: CommandApproval, toolset?: PendingApproval["toolset"]): PendingApproval {
-  return { requestId: "a1", tool: "bash", command: parts.line, parts, ...(toolset !== undefined ? { toolset } : {}), input: { command: parts.line }, taskId: "t1", project: "p", at: 0 };
+function pendingOf(parts: CommandApproval, permissionSet?: PendingApproval["permissionSet"]): PendingApproval {
+  return { requestId: "a1", tool: "bash", command: parts.line, parts, ...(permissionSet !== undefined ? { permissionSet } : {}), input: { command: parts.line }, taskId: "t1", project: "p", at: 0 };
 }
 
 /** The segments as a string a person can read: `[0:rm_ foo.txt]` — brackets a part, `_…_` underlined. */
@@ -44,11 +44,11 @@ function sketch(segments: LineSegment[]): string {
     .join("");
 }
 
-const WRITABLE: NonNullable<PendingApproval["toolset"]> = {
+const WRITABLE: NonNullable<PendingApproval["permissionSet"]> = {
   id: "feature/implementation/writes-asking",
   targets: [
-    { layer: "project", file: ".jaira/toolsets/feature/implementation/writes-asking.json" },
-    { layer: "base", file: "~/.jaira/toolsets/feature/implementation/writes-asking.json", follows: "$SYSTEM/toolsets/feature/implementation/writes-asking" },
+    { layer: "project", file: ".jaira/permission-sets/feature/implementation/writes-asking.json" },
+    { layer: "base", file: "~/.jaira/permission-sets/feature/implementation/writes-asking.json", follows: "$SYSTEM/permission-sets/feature/implementation/writes-asking" },
   ],
 };
 
@@ -127,7 +127,7 @@ describe("one row per part", () => {
   });
 
   it("indents a part written inside another, and says in words what a part was opened out of when its host is no row", () => {
-    const rows = partRows(judge("find . -name '*.tmp' -exec rm {} \\;", { ...TOOLSET, write_file: "ask" }));
+    const rows = partRows(judge("find . -name '*.tmp' -exec rm {} \\;", { ...PERMISSION_SET, write_file: "ask" }));
     expect(rows.map((r) => [r.subject, r.depth, r.verdict])).toEqual([
       ["glob", 0, "allowed"],
       ["write_file", 1, "asks"],
@@ -137,23 +137,23 @@ describe("one row per part", () => {
     expect(partRows(judge("bash -c 'git commit -m x'"))[0]!.note).toBe("inside bash");
   });
 
-  it("shows why for a part no toolset decided", () => {
+  it("shows why for a part no permission set decided", () => {
     const approval = judge("git commit -m 'unterminated");
     expect(partRows(approval)).toMatchObject([{ subject: "bash", verdict: "asks", note: "command could not be parsed (unterminated quote)" }]);
   });
 });
 
 describe("the reason line", () => {
-  it("names the toolset and the subject that asks", () => {
-    expect(reasonLines(pendingOf(judge("rm foo.txt && git commit -m wip"), WRITABLE))).toEqual([{ kind: "toolset", toolset: "feature/implementation/writes-asking", entries: ["git commit"] }]);
+  it("names the permission set and the subject that asks", () => {
+    expect(reasonLines(pendingOf(judge("rm foo.txt && git commit -m wip"), WRITABLE))).toEqual([{ kind: "permissionSet", permissionSet: "feature/implementation/writes-asking", entries: ["git commit"] }]);
   });
 
   it("names each asking entry once, and a map with no file by no name", () => {
-    const pending = pendingOf(judge("git commit -m a && npm run build && git commit -m b", TOOLSET, "inline"));
-    expect(reasonLines(pending)).toEqual([{ kind: "toolset", entries: ["git commit", "script"] }]);
+    const pending = pendingOf(judge("git commit -m a && npm run build && git commit -m b", PERMISSION_SET, "inline"));
+    expect(reasonLines(pending)).toEqual([{ kind: "permissionSet", entries: ["git commit", "script"] }]);
   });
 
-  it("falls back to the policy's reason — for a part the toolset did not decide, and for a request with no parts", () => {
+  it("falls back to the policy's reason — for a part the permission set did not decide, and for a request with no parts", () => {
     expect(reasonLines(pendingOf(judge("git commit -m 'unterminated")))).toEqual([{ kind: "policy", text: "command could not be parsed (unterminated quote)" }]);
     expect(reasonLines({ requestId: "a", tool: "write_file", reason: "writes outside the worktree", input: {}, project: "p", at: 0 })).toEqual([
       { kind: "policy", text: "writes outside the worktree" },
@@ -177,8 +177,8 @@ describe("the answer menu", () => {
       ["add:base", "Add to writes-asking, for all projects", false],
     ]);
     // Exactly what will be written, and where.
-    expect(menu.reach[2]!.hint).toEqual(["writes ", { code: '"git commit": "allow"' }, " to .jaira/toolsets/…/writes-asking.json"]);
-    expect(menu.reach[3]!.hint).toEqual(["creates ~/.jaira/toolsets/…/writes-asking.json with ", { code: '"git commit": "allow"' }, ", following the built-in toolset"]);
+    expect(menu.reach[2]!.hint).toEqual(["writes ", { code: '"git commit": "allow"' }, " to .jaira/permission-sets/…/writes-asking.json"]);
+    expect(menu.reach[3]!.hint).toEqual(["creates ~/.jaira/permission-sets/…/writes-asking.json with ", { code: '"git commit": "allow"' }, ", following the built-in permission set"]);
   });
 
   it("writes what the person CHOSE: the program's width, and deny as deny", () => {
@@ -206,9 +206,9 @@ describe("the answer menu", () => {
     expect(widthsOf(approval, { "git commit | git": "git" })).toEqual(["git", "terraform plan", "script"]);
   });
 
-  it("says so, and offers only once and this run, when the toolset has no file", () => {
-    const unwritable = "This toolset is written on the state itself, so there is no toolset file to add a line to.";
-    const menu = answerMenu(pendingOf(judge("git commit -m wip", TOOLSET, "inline"), { targets: [], unwritable }), "allow");
+  it("says so, and offers only once and this run, when the permission set has no file", () => {
+    const unwritable = "This permission set is written on the state itself, so there is no permission set file to add a line to.";
+    const menu = answerMenu(pendingOf(judge("git commit -m wip", PERMISSION_SET, "inline"), { targets: [], unwritable }), "allow");
     expect(menu.reach.map((r) => r.reach)).toEqual(["once", "run"]);
     expect(menu.notes).toEqual([unwritable]);
   });
@@ -230,7 +230,7 @@ describe("the answer menu", () => {
   });
 
   it("shortens a nested bucket's path to its ends", () => {
-    expect(shortFile(".jaira/toolsets/chat/ask-first.json")).toBe(".jaira/toolsets/…/ask-first.json");
+    expect(shortFile(".jaira/permission-sets/chat/ask-first.json")).toBe(".jaira/permission-sets/…/ask-first.json");
     expect(shortFile("elsewhere.json")).toBe("elsewhere.json");
   });
 });

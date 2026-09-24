@@ -195,7 +195,8 @@ The rule is only worth having if it decides the awkward cases.
 | --- | --- | --- |
 | `JAIRA` | app | |
 | Files · Tasks · Chat · Logs · Debug · Settings | app | |
-| Providers · Executors · Configuration · History | app | |
+| Connections · Models · Tools · Runs · Data & history | app | |
+| `settings.json` in the Settings list | data | The one page named after the file it opens, so it is set as the file |
 | Awaiting you | app | The command beside it is data |
 | **All projects** | **app** | The one app crumb in an otherwise data-voiced address bar. It names a level, not a directory |
 | running · blocked · waiting for user | app | JaiRA's vocabulary for a condition, even though the condition belongs to data |
@@ -443,11 +444,19 @@ the project it is in.
 [toggle]  JAIRA
 ┌───────────────────────────────────────────┐    ← full height, over the column
 │ ‹  ⚙ SETTINGS                             │    ← the row IS the header
-│    Providers                              │
-│    Executors                              │
-│    Configuration                          │
+│    JUST YOU                 this machine  │
 │    Appearance                             │
-│    History                                │
+│    PROJECT & SHARED              layered  │
+│    Connections                            │
+│    Models                                 │
+│    Tools                                  │    ← the open page's sections,
+│       Permission sets                     │      indented under it (§6.6)
+│       Functions an agent calls            │
+│       Functions a workflow calls          │
+│    Runs                                   │
+│    Files                                  │
+│    Data & history                         │
+│    settings.json                          │
 │   ─────────────────────────────────────   │
 │    ≡ LOGS    ⌁ DEBUG    ☾ DARK            │    ← pinned to the bottom of the panel
 └───────────────────────────────────────────┘
@@ -626,13 +635,14 @@ argues for an idiom the app no longer uses.
 
 ## 6. Appearance — a new Settings section
 
-None of §3 is fixed. **Appearance is a setting**: a fifth entry in the `SECTIONS`
-array in `packages/app/src/renderer/App.tsx`, beside Providers, Executors,
-Configuration and History, where a person changes the two families and two sizes
-that the ten registers derive from.
+None of §3 is fixed. **Appearance is a setting**: an entry in the `SECTIONS`
+array in `packages/app/src/renderer/App.tsx` — beside Providers, Executors,
+Configuration and History when it landed; the pages it sits beside now are in
+§6.7 — where a person changes the two families and two sizes that the ten
+registers derive from.
 
 ```ts
-{ id: "appearance", label: "Appearance", layered: false }
+{ id: "appearance", label: "Appearance", group: "you", icon: "appearance", layered: false, purpose: "" }
 ```
 
 **`layered: false`, and no `needsProject`.** Fonts are a per-person display
@@ -1270,6 +1280,93 @@ defaults" button. The `SET HERE` tag stays only outside Settings. Run inputs, Ne
 and gates are untouched: the context is only provided around the Settings view.
 `shots/settings-tabs.mts` photographs every tab in both themes and drives the
 accordion and a row switch.
+
+### 6.7 The Settings pages, reorganised
+
+The person's rulings, 2026-09-23. The tabs had grown one per thing JaiRA was built
+out of — Providers, Integrations, Executors, Toolsets, Configuration, Files,
+Appearance, History — so a person looking for "the model a project uses" had two
+places to set it (Configuration → Default environment and the executor tree's
+router), and a person looking for "what an agent may do" had the project `policy`
+block on one tab and the toolsets on another. The pages are now one per QUESTION a
+person asks, in two groups in the sidebar (`SECTIONS` and `SETTINGS_GROUPS` in
+`App.tsx`):
+
+| Group | Page | Icon | What it answers |
+| --- | --- | --- | --- |
+| **Just you** · `this machine` | Appearance | a half-filled disc | How JaiRA looks on this machine (§6.5, §6.6). No layer switch. |
+| **Project & shared** · `layered` | Connections | a plug | What JaiRA can reach, and as whom. |
+| | Models | a cube | What answers a state that names nothing, and how. |
+| | Tools | a wrench | What an agent may do, and every function a run can call. |
+| | Runs | a play mark | How a run behaves while it is going. |
+| | Files | a folder | What the Files tree leaves out. |
+| | Data & history | stacked disks | Where runs keep what they produce, and how much there is. |
+| | `settings.json` | braces | Everything this layer's settings hold, as stored. |
+
+The layered pages run in the order a project is set up: connect a service, pick a
+model, decide what the tools may do, then adjust how runs behave. The icons are
+`SETTINGS_ICONS`, drawn in the icon set's own hand (24-unit strokes at 1.7);
+`settings.json` is drawn as the file it opens, in the data face. Every page's lead is
+the page's purpose followed by whose settings these are (`settingsLeadOf`).
+
+**The layer switch is always at the page head's top-right** ("the this
+project/shared/built in should always be on the top right"). `SettingsHeader` is
+now only the switch, in the head's aside; the lead wraps and the switch keeps the
+corner. Tools is the one page with the third, read-only segment `Built in`, because
+the permission sets are what JaiRA ships; with no project open it offers `Shared` and
+`Built in`, and every other page drops the switch and says in its lead that it edits
+`~/.jaira`. When the checks last ran, and `Re-check`, moved off the header to the
+head of the section they are about, Connections → Agents.
+
+Where every old tab went:
+
+| Was | Is |
+| --- | --- |
+| Providers | Connections → Agents, Model APIs, Local models |
+| Integrations | Connections → Forges; `review_artifacts`' publish and wait-after-a-comment are its defaults on Tools |
+| Executors → the default executor | Models → Routes (the route cards) and Models → Advanced (the tree, in a closed disclosure, no longer repeating the router's defaults, the routes or the function rules); the function rules are Tools → Functions a workflow calls |
+| Executors → Presets | Models → Presets |
+| Toolsets | Tools → Permission sets ("toolset" is now "permission set" everywhere; the directory is `permission-sets/`) |
+| Configuration → Default environment | Models → Defaults — the one way in |
+| Configuration → Safety policy | Gone: the project `policy` block is dissolved into the permission sets and `functions` (decision 0007, amended 2026-09-23) |
+| Configuration → smart | Tools → the `smart` row's defaults (`functions.smart`) |
+| Configuration → Where commands run, Memoization, Workflow lookup | Runs, beside Fast-forward |
+| Configuration → Artifacts | Data & history → Artifacts, beside Storage (which no tab drew before) |
+| Configuration → the raw document | its own `settings.json` page |
+| History | Data & history → Stored history and Pruning |
+| Conversation | Appearance → Conversation (§6.6) |
+
+**Connections: one row shape for everything that connects.** What it is and whether
+it works on the left (mark, status dot, the check's sentence and fix); who it
+connects as on the right, as a horizontal list of boxes ("a horizontal list of boxes
+on the right side") — an agent's logins, a forge's OAuth account, a stored key — ending
+in a dashed `+` box that adds one (`LoginCards`, `KeyBoxes`, `KeyEntry` in
+`providersPane.tsx`; `ForgeRows` in `integrationsPane.tsx`). Local server lists what
+the usual ports answered — Ollama 11434, LM Studio 1234, llama.cpp 8080, vLLM 8000, Jan
+1337 — with `Use` on one that answers and `in use` on the one the route points at
+(`LocalServers`); Embedded weights are rows with their file found or missing
+(`WeightsRows`). A forge offers `Sign in with GitHub` / `Sign in with GitLab` (the OAuth
+device flow, which needs `integrations.oauth.<provider>.clientId`) or `or paste a
+token`.
+
+**Tools: the permission sets, then the functions two ways round.** First the
+permission sets pane as it was. Then "Functions an agent calls": a function ×
+permission-set matrix, the reverse view — one row per tool an agent may call, one
+column per set this layer can see, the mode in each cell, a Defaults column — where a
+cell opens that set above (the person's ask: "keyed by the function/tool and show you
+which permission set has that tool and what it is set to"). Then "Functions a workflow
+calls": `smart`, the gates and the agents, each with its defaults and an `available` /
+`not reachable` pill read off the default executor's function rules, which are edited
+in a disclosure there (`functionsPane.tsx`). A function's defaults are the layered
+`functions` block — `functions.smart` (model, prompt; the shipped `DEFAULT_SMART_PROMPT`
+is shown in full until a layer writes its own), `functions.review_artifacts` (publish,
+settleAfter), `functions.bash` (builtins) — written through the same schema form as
+every other setting.
+
+The styles are the stylesheet's "SETTINGS, REORGANISED" section.
+`shots/settings-tabs.mts` photographs every page in both themes into
+`shots/out/settings/`; the per-page catalog docs are
+`docs/ui/surfaces/settings-*.md`.
 
 
 ## 7. Changes to existing code

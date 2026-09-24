@@ -1,17 +1,17 @@
 /**
  * One shell line, from the agent's call to the person's answer (decision 0007 §4) — through the
- * REAL upstream gate, because the seams are the point: the state's toolset reaches the policy only
+ * REAL upstream gate, because the seams are the point: the state's permission set reaches the policy only
  * through `scopeOf`, the approver and the approval are handed the same input and nothing else, and
  * what is remembered must be the asking parts and never the shell tool.
  */
 import { describe, expect, it } from "vitest";
 import { PermissionLedger, isPermissionDenied, withPermission } from "@declarative-ai/permissions";
 import type { ExecServices, FunctionInputs, Tool } from "@declarative-ai/exec";
-import { lowerToolset, parseToolset } from "@jaira/shared";
+import { lowerPermissionSet, parsePermissionSet } from "@jaira/shared";
 import { ApprovalHub, type ApprovalRequest } from "../src/approval";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 
-const TOOLSET = { bash: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", other: "deny" } as const;
+const PERMISSION_SET = { bash: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", other: "deny" } as const;
 
 function harness(source?: string) {
   const asked: ApprovalRequest[] = [];
@@ -19,8 +19,8 @@ function harness(source?: string) {
   const audit: PolicyAuditEntry[] = [];
   const policy = compilePolicy({}, { execEnv: { wsl: "test" }, grants: hub.grants("t1"), onDecision: (e) => audit.push(e) });
   // What a loaded state holds: the list and the lowered block, whichever form its author wrote.
-  // `source` is what lowering a STATE writes beside the subjects: the reference its toolset was named by.
-  const block = { ...lowerToolset(parseToolset(TOOLSET).toolset).permissions!, ...(source !== undefined ? { source } : {}) };
+  // `source` is what lowering a STATE writes beside the subjects: the reference its permission set was named by.
+  const block = { ...lowerPermissionSet(parsePermissionSet(PERMISSION_SET).permissionSet).permissions!, ...(source !== undefined ? { source } : {}) };
   const ran: string[] = [];
   const bash: Tool = {
     description: "shell",
@@ -59,7 +59,7 @@ describe("an approval for a shell line", () => {
     expect(asked).toEqual([]);
     expect(ran).toEqual([]);
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ tool: "bash", action: "deny", reason: "the toolset's 'git rm' is deny" });
+    expect(audit[0]).toMatchObject({ tool: "bash", action: "deny", reason: "the permission set's 'git rm' is deny" });
     expect(audit[0]!.parts!.parts.map((p) => p.verdict)).toEqual(["asks", "denied"]);
   });
 
@@ -71,7 +71,7 @@ describe("an approval for a shell line", () => {
     expect(asked).toHaveLength(1);
     const request = asked[0]!;
     // Every existing consumer's fields are where they were…
-    expect(request).toMatchObject({ tool: "bash", command: line, taskId: "t1", reason: "the toolset's 'git commit' is ask" });
+    expect(request).toMatchObject({ tool: "bash", command: line, taskId: "t1", reason: "the permission set's 'git commit' is ask" });
     // …and the parts are beside them.
     expect(request.parts).toMatchObject({ line, dialect: "posix", verdict: "asks" });
     expect(request.parts!.parts.map((p) => ({ text: p.text, subject: p.subject, verdict: p.verdict, entry: p.decidedBy.entry, widths: p.widths }))).toEqual([
@@ -100,7 +100,7 @@ describe("an approval for a shell line", () => {
     const third = run("git stash && make deploy");
     await Promise.resolve();
     expect(asked).toHaveLength(2);
-    expect(asked[1]!.parts!.parts.map((p) => `${p.subject} ${p.verdict} ${p.decidedBy.source}`)).toEqual(["git stash allowed remembered", "script asks toolset"]);
+    expect(asked[1]!.parts!.parts.map((p) => `${p.subject} ${p.verdict} ${p.decidedBy.source}`)).toEqual(["git stash allowed remembered", "script asks permissionSet"]);
     hub.decide(asked[1]!.requestId, "deny");
     expect(isPermissionDenied(await third)).toBe(true);
 
@@ -113,18 +113,18 @@ describe("an approval for a shell line", () => {
     expect(hub.grants("t1").list()).toEqual({});
   });
 
-  it("says WHICH toolset judged the line: the reference the state named it by, or `inline` for a map with no file", async () => {
-    const named = harness("$/toolsets/feature/implementation/writes-asking");
+  it("says WHICH permission set judged the line: the reference the state named it by, or `inline` for a map with no file", async () => {
+    const named = harness("$/permission-sets/feature/implementation/writes-asking");
     const first = named.run("git commit -m wip");
     await Promise.resolve();
-    expect(named.asked[0]!.parts!.toolset).toBe("$/toolsets/feature/implementation/writes-asking");
+    expect(named.asked[0]!.parts!.permissionSet).toBe("$/permission-sets/feature/implementation/writes-asking");
     named.hub.decide(named.asked[0]!.requestId, "deny");
     await first;
 
     const inline = harness();
     const second = inline.run("git commit -m wip");
     await Promise.resolve();
-    expect(inline.asked[0]!.parts!.toolset).toBe("inline");
+    expect(inline.asked[0]!.parts!.permissionSet).toBe("inline");
     inline.hub.decide(inline.asked[0]!.requestId, "deny");
     await second;
   });

@@ -2,7 +2,7 @@
 id: engineering/contracts/push-messages
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 visibility: internal
 kind: event
 owned_by: [engineering/units/ipc-bridge]
@@ -74,6 +74,7 @@ The pending shapes are [inbox-channels](inbox-channels.md).
 | `session:turn` | see [session-live-protocol](session-live-protocol.md) | yes | one delta of a call in flight |
 | `log:entry` `entry` | `{id, at, level, source, message, project, taskId, instanceId, jobId, detail}`, the last five optional | yes | every diagnostics entry the log policy keeps |
 | `frame:contextMenu` `menu` | `{x, y, selectionText, linkURL, srcURL, mediaType, isEditable, editFlags}` | yes | a right-click inside a sandboxed artifact frame, in window coordinates; `mediaType` is `none`, `image`, `audio`, `video`, `canvas`, `file` or `plugin`; `editFlags` is `{canCut, canCopy, canPaste, canSelectAll}` |
+| `forge:signInFinished` `outcome` | `ForgeSignInOutcome`: `{ok: true, connection, login?}` or `{ok: false, connection, code: "denied" \| "expired" \| "canceled" \| "failed", reason}` | yes | a sign-in `forge:signIn` started has ended; on success it is sent after the token is stored and the availability pass that checks it has landed, so `login` is the account that pass saw ([forge-integrations](../units/forge-integrations.md)). Published bare, machine-wide |
 
 ## No error reaches the publisher, and an undeliverable push is recorded and dropped
 

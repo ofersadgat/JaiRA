@@ -12,9 +12,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { lowerToolset, parseComponentConfig, parseToolset, type ApprovalToolset, type CommandApproval, type PendingApproval, type PendingInteraction, type ToolsetDecl } from "@jaira/shared";
+import { lowerPermissionSet, parseComponentConfig, parsePermissionSet, type ApprovalPermissionSet, type CommandApproval, type PendingApproval, type PendingInteraction, type PermissionSetDecl } from "@jaira/shared";
 import { commandDecisionOf, compilePolicy, decideCommand } from "../../runtime/src/policy";
-import { shellToolsetOf } from "../../runtime/src/commandParts";
+import { shellPermissionSetOf } from "../../runtime/src/commandParts";
 import { withPermissionFunctions, type PermissionFunctionRunner } from "../../runtime/src/permissionFunctions";
 import { ApprovalSurface } from "../src/renderer/approvalSurface";
 import { GateSurface } from "../src/renderer/components";
@@ -25,26 +25,26 @@ mkdirSync(outDir, { recursive: true });
 const CAPTURED = "2026-09-22";
 
 const WRITES_ASKING = { bash: "ask", read_file: "allow", glob: "allow", write_file: "allow", script: "ask", "git commit": "ask", "git log": "allow", other: "deny" };
-const WRITES_REF = "$/toolsets/feature/implementation/writes-asking";
-const WRITES: ApprovalToolset = {
+const WRITES_REF = "$/permission-sets/feature/implementation/writes-asking";
+const WRITES: ApprovalPermissionSet = {
   id: "feature/implementation/writes-asking",
   targets: [
-    { layer: "project", file: ".jaira/toolsets/feature/implementation/writes-asking.json" },
-    { layer: "base", file: "~/.jaira/toolsets/feature/implementation/writes-asking.json" },
+    { layer: "project", file: ".jaira/permission-sets/feature/implementation/writes-asking.json" },
+    { layer: "base", file: "~/.jaira/permission-sets/feature/implementation/writes-asking.json" },
   ],
 };
-const ASK_FIRST: ApprovalToolset = {
+const ASK_FIRST: ApprovalPermissionSet = {
   id: "chat/ask-first",
   targets: [
-    { layer: "project", file: ".jaira/toolsets/chat/ask-first.json", follows: "$SYSTEM/toolsets/chat/ask-first" },
-    { layer: "base", file: "~/.jaira/toolsets/chat/ask-first.json", follows: "$SYSTEM/toolsets/chat/ask-first" },
+    { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
+    { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
   ],
 };
-const INLINE: ApprovalToolset = { targets: [], unwritable: "This toolset is written on the state itself, so there is no toolset file to add a line to." };
+const INLINE: ApprovalPermissionSet = { targets: [], unwritable: "This permission set is written on the state itself, so there is no permission set file to add a line to." };
 
-function shell(line: string, toolset: Record<string, string>, source: string, where: ApprovalToolset | undefined): PendingApproval {
-  const decided = decideCommand({}, line, "posix", { toolset: shellToolsetOf(parseToolset(toolset).toolset), toolsetSource: source });
-  return { requestId: "apr", tool: "Bash", command: line, reason: decided.reason, parts: decided.parts, ...(where !== undefined ? { toolset: where } : {}), input: { command: line }, taskId: "t-1", project: "p", at: 0 };
+function shell(line: string, permissionSet: Record<string, string>, source: string, where: ApprovalPermissionSet | undefined): PendingApproval {
+  const decided = decideCommand({}, line, "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet(permissionSet).permissionSet), permissionSetSource: source });
+  return { requestId: "apr", tool: "Bash", command: line, reason: decided.reason, parts: decided.parts, ...(where !== undefined ? { permissionSet: where } : {}), input: { command: line }, taskId: "t-1", project: "p", at: 0 };
 }
 
 const surface = (pending: PendingApproval, initialMenu?: "allow" | "deny", error?: string): string =>
@@ -107,12 +107,12 @@ function page(state: string, body: string): string {
 const builder = { session: "builder", workflow: "feature/build", state: "implement", label: "Implement the cache" };
 
 /**
- * A shell line under a toolset whose lines name FUNCTIONS, decided the way a run decides it: the REAL
+ * A shell line under a permission set whose lines name FUNCTIONS, decided the way a run decides it: the REAL
  * narrowing takes it apart, and the REAL approver asks `run` about each part a function answers for,
  * before the approval this page draws — which is what the person then sees.
  */
-async function judged(line: string, toolset: ToolsetDecl, run: PermissionFunctionRunner): Promise<PendingApproval> {
-  const block = lowerToolset(parseToolset(toolset).toolset, undefined, "$/toolsets/chat/auto").permissions!;
+async function judged(line: string, permissionSet: PermissionSetDecl, run: PermissionFunctionRunner): Promise<PendingApproval> {
+  const block = lowerPermissionSet(parsePermissionSet(permissionSet).permissionSet, undefined, "$/permission-sets/chat/auto").permissions!;
   const input = { command: line };
   compilePolicy({}).scopeOf!({ name: "bash" }, input as never, block as never);
   let asked: CommandApproval | undefined;
@@ -124,10 +124,10 @@ async function judged(line: string, toolset: ToolsetDecl, run: PermissionFunctio
     { run },
   )({ tool: "bash", input: input as never, sessionId: "s" });
   const parts = asked ?? commandDecisionOf(input)!.parts;
-  return { requestId: "apr", tool: "Bash", command: line, reason: commandDecisionOf(input)!.reason, parts, toolset: ASK_FIRST, input, taskId: "t-1", project: "p", at: 0 };
+  return { requestId: "apr", tool: "Bash", command: line, reason: commandDecisionOf(input)!.reason, parts, permissionSet: ASK_FIRST, input, taskId: "t-1", project: "p", at: 0 };
 }
 
-const AUTO: ToolsetDecl = { read_file: { function: "smart" }, bash: { function: "smart" }, other: { function: "smart" } };
+const AUTO: PermissionSetDecl = { read_file: { function: "smart" }, bash: { function: "smart" }, other: { function: "smart" } };
 const smartSaid = (allowed: string[]): PermissionFunctionRunner => async (_reference, request) => (allowed.includes(request.part?.program ?? "") ? "allow" : "deny");
 const functionAsking = await judged("npm test && git push origin cache-probe", AUTO, smartSaid(["npm"]));
 const functionFailed = await judged("cargo check && tsc --noEmit", AUTO, async (_reference, request) => {
@@ -150,7 +150,7 @@ const unsure = promptGate("smart is unsure — publishing a package is public an
   cwd: "/repo",
   state: "feature/release/publish",
   task: "t-1",
-  toolset: "$/toolsets/chat/auto",
+  permissionSet: "$/permission-sets/chat/auto",
 });
 const writeAsked = promptGate("Allow this tool call?", {
   tool: "write_file",
@@ -159,13 +159,13 @@ const writeAsked = promptGate("Allow this tool call?", {
   input: { path: "deploy/production.env", content: "API_URL=https://api.internal" },
   state: "feature/build/implement",
   task: "t-1",
-  toolset: "$/toolsets/feature/judged",
+  permissionSet: "$/permission-sets/feature/judged",
 });
 const gate = (pending: PendingInteraction, settled?: string): string =>
   renderToStaticMarkup(h(GateSurface, { pending, onSubmit: () => undefined, ...(settled !== undefined ? { settled: { value: settled } } : {}) }));
 
 const twoRequests = shell("rm foo.txt && git commit -m wip", WRITES_ASKING, WRITES_REF, WRITES);
-const terraform = shell("terraform plan -out tf.plan", { bash: "ask", read_file: "allow", other: "deny" }, "$/toolsets/chat/ask-first", ASK_FIRST);
+const terraform = shell("terraform plan -out tf.plan", { bash: "ask", read_file: "allow", other: "deny" }, "$/permission-sets/chat/ask-first", ASK_FIRST);
 const hosts: PendingApproval = { requestId: "apr", tool: "write_file", reason: "writes outside the worktree", input: { path: "/etc/hosts", content: "127.0.0.1 registry.internal" }, taskId: "t-1", project: "p", at: 0 };
 
 const pages: Record<string, string> = {
@@ -189,21 +189,21 @@ const pages: Record<string, string> = {
   ].join("\n"),
 
   "answer-menu": [
-    sheet({ ...builder, at: "15:02:47", caption: "the arrow beside Allow: what the answer covers, then how far it reaches — once, this run, or a line written into the toolset", body: surface(twoRequests, "allow"), room: 250 }),
+    sheet({ ...builder, at: "15:02:47", caption: "the arrow beside Allow: what the answer covers, then how far it reaches — once, this run, or a line written into the permission set", body: surface(twoRequests, "allow"), room: 250 }),
     sheet({
       session: "operator",
       workflow: "ops/infra",
       state: "plan",
       label: "Plan the change",
       at: "16:40:02",
-      caption: "a program the toolset has no line for, under a built-in toolset: the write creates an override that keeps following it. Deny offers the same reaches",
+      caption: "a program the permission set has no line for, under a built-in permission set: the write creates an override that keeps following it. Deny offers the same reaches",
       body: surface(terraform, "deny"),
       room: 270,
     }),
     sheet({
       ...builder,
       at: "15:31:09",
-      caption: "several asking parts: one choice per distinct set of widths, in the part's colour; a toolset written on the state has no file, and the menu says so",
+      caption: "several asking parts: one choice per distinct set of widths, in the part's colour; a permission set written on the state has no file, and the menu says so",
       body: surface(shell("git commit -m wip && terraform plan && npm run build", WRITES_ASKING, "inline", INLINE), "allow"),
       room: 290,
     }),
@@ -245,7 +245,7 @@ const pages: Record<string, string> = {
     sheet({
       ...builder,
       at: "15:40:12",
-      caption: "ui/components/command-approval · function · the toolset hands the shell to the smart function: it allowed npm test, which says so and is not asked about; the push still asks, because a built-in ask is stricter than a function",
+      caption: "ui/components/command-approval · function · the permission set hands the shell to the smart function: it allowed npm test, which says so and is not asked about; the push still asks, because a built-in ask is stricter than a function",
       says: "Tests pass locally. Pushing the branch.",
       body: surface(functionAsking),
     }),
@@ -261,7 +261,7 @@ const pages: Record<string, string> = {
       state: "publish",
       label: "Publish the package",
       at: "16:02:55",
-      caption: "the approval PROMPT a function calls (approve_tool_call) — smart was unsure, so it asked: the part it is asking about, which toolset line and which function, and Allow or Deny, which is what the function returns",
+      caption: "the approval PROMPT a function calls (approve_tool_call) — smart was unsure, so it asked: the part it is asking about, which permission set line and which function, and Allow or Deny, which is what the function returns",
       body: gate(unsure),
     }),
     sheet({

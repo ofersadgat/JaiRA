@@ -8,7 +8,7 @@ import { createLogger } from "@declarative-ai/log";
 import { ApprovalRequired, approvalRefusalMessage, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
-import { loadPermissionFunction, loadWorkflowBundle, permissionFunctionRefsOf } from "./toolsets";
+import { loadPermissionFunction, loadWorkflowBundle, permissionFunctionRefsOf } from "./permissionSets";
 import { newTaskId, isStartableStatus, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } from "./documents";
@@ -348,7 +348,7 @@ export async function snapshotWithModules(
   project: Project,
   bundle: WorkflowBundle,
 ): Promise<{ hash: string; dir: string; bundle: WorkflowBundle }> {
-  // A toolset line's FUNCTION is not in the resolved states — lowering carries its NAME — so the
+  // A permission set line's FUNCTION is not in the resolved states — lowering carries its NAME — so the
   // modules it reaches are found by loading it the way a run will, and are held to the same approval
   // and the same freeze as a module a state calls (decision 0007, amended 2026-09-22).
   const entries = [...new Set([...moduleEntriesOf(bundle), ...permissionFunctionModulesOf(project, bundle)])].sort();
@@ -377,10 +377,10 @@ export async function snapshotWithModules(
 }
 
 /**
- * The module files the permission functions a bundle's toolsets name reach — each function loaded as
+ * The module files the permission functions a bundle's permission sets name reach — each function loaded as
  * the one state it runs as, with this project's options. A function that does not load reaches nothing
- * here: the load that pinned the bundle has already refused it (`lowerStateToolsets` checks every
- * function a toolset names).
+ * here: the load that pinned the bundle has already refused it (`lowerStatePermissionSets` checks every
+ * function a permission set names).
  */
 function permissionFunctionModulesOf(project: Project, bundle: WorkflowBundle): string[] {
   const references = permissionFunctionRefsOf(bundle);

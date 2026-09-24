@@ -793,7 +793,8 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "providers" | "executors" | "toolsets" | "integrations" | "files" | "appearance" | "config" | "history";
+/** The Settings pages — see `SECTIONS` in App.tsx for their groups and order. */
+export type SettingsSection = "appearance" | "connections" | "models" | "tools" | "runs" | "files" | "data" | "raw";
 
 const EMPTY: AppState = {
   at: null,
@@ -879,7 +880,7 @@ const EMPTY: AppState = {
   selectedProject: null,
   trail: [],
   trailState: null,
-  section: "providers",
+  section: "connections",
   configLayer: "project",
 };
 
@@ -3520,7 +3521,7 @@ export function useApp() {
         // Read what main already knows. It does NOT trigger a check: the checks ran at startup and
         // after the last write, so opening this section shows an answer immediately rather than a row
         // of "not checked" that fills in a second later — which is what the old on-open probe did.
-        if (section === "providers" || section === "executors" || section === "integrations") void refreshAvailability();
+        if (section === "connections" || section === "models") void refreshAvailability();
       },
       // Refused rather than silently accepted when there is nothing to write: the shell hides the
       // switch without a project, and an action that could still be reached another way should agree
@@ -3794,6 +3795,9 @@ export function useApp() {
        * It exists for the cases a startup check cannot cover: a local server started since, a key
        * just installed outside the app. Nothing depends on it being pressed.
        */
+      /** Read what main last observed again — after something main re-checked on its own. */
+      readAvailability: () => void refreshAvailability(),
+
       recheckAvailability: async () => {
         if (ref.current.rechecking) return;
         patch({ rechecking: true, error: null });

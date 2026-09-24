@@ -2,7 +2,7 @@
 id: engineering/contracts/user-settings-json
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 visibility: internal
 kind: format
 owned_by: [engineering/units/user-settings]
@@ -21,7 +21,7 @@ siblings: [engineering/contracts/settings-json, engineering/contracts/ipc-channe
 
 **Do not use when.** The value changes what a run does or should be shared with everyone on the project: [settings-json](settings-json.md). Holding a credential: [secret-sources](secret-sources.md).
 
-## The shape is ten fields, each read forgivingly with its own default
+## The shape is eleven fields, each read forgivingly with its own default
 
 ### The document lives at the shared root and holds these top-level fields
 
@@ -39,6 +39,7 @@ The file is `<base>/user-settings.json`, UTF-8 JSON written with two-space inden
 | `appearance` | object | no | typefaces, sizes and the editor palette, see below |
 | `filesHidden` | string array | no, default `[]` | personal Files tree globs applied after `files.hidden`, last match wins; trimmed, blanks and a lone `!` dropped, de-duplicated |
 | `conversation` | `{sequentialBatches: "stacked" or "band"}` | no, default `"stacked"` | whether a fan-out batch whose elements ran one after another is drawn down the page or as a band |
+| `forgeSignIns` | object keyed by secret name | no, absent when empty | the forge tokens a sign-in through the browser stored: `{provider: "github" \| "gitlab", host, source: SecretSource, at, expiresAt?, refreshCredential?}` — where the token was written, when, when it dies and the secret its refresh token is under. Written and removed by main only ([forge-integrations](../units/forge-integrations.md)); an entry missing `provider`, `host`, `source` or `at` is dropped on read. A check reports `via: "oauth"` only while the chain still finds the token at `source` |
 
 ### The layout block is six maps keyed by ids the renderer owns
 

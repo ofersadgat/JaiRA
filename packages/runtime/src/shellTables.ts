@@ -1,12 +1,12 @@
 /**
  * The shell's own tables (decision 0007 §4) — DATA, so each can grow without touching the parser
- * or the policy, and so a later task can layer them the way toolsets are layered.
+ * or the policy, and so a later task can layer them the way permission sets are layered.
  *
  *  - {@link EMBEDDERS}: programs whose arguments are themselves a command. The parser opens them,
  *    recursively. One it does not know is a command like any other, and what it embeds is not seen —
  *    which is what the `bash` entry and `other` are for.
  *  - {@link POSIX_UTILITIES} / {@link POWERSHELL_UTILITIES}: a file utility is the STANDARD TOOL on
- *    its path (`cat` → `read_file`), so a toolset's modes and a scope table apply to the shell exactly
+ *    its path (`cat` → `read_file`), so a permission set's modes and a scope table apply to the shell exactly
  *    as they do to the tools. This is the shell's native mapping, the counterpart of an executor's.
  *  - {@link NO_REQUEST}: `cd`, `echo`, `pwd`, `test`, `true` — no request at all.
  *  - {@link SCRIPT_INTERPRETERS} / {@link SCRIPT_RUNNERS}: running a file is the subject `script`.

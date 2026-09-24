@@ -2,7 +2,7 @@
  * One shell line, as the REQUESTS it is made of (decision 0007 §4).
  *
  * A `bash` call is not judged as a tool. It is taken apart — at separators, redirects, substitutions
- * and embedders — and each part is a request of its own, for a SUBJECT the toolset holds like any
+ * and embedders — and each part is a request of its own, for a SUBJECT the permission set holds like any
  * other: a standard tool on a path (`rm foo.txt` → `write_file`), `script`, or a command
  * (`git commit`). This module is the shape that judgement travels in: what the policy produces, what
  * an approval request carries, and what the renderer draws — the line in the colours of its parts,
@@ -35,20 +35,18 @@ export type CommandPartKind =
 /**
  * The answers a part can have. A line runs only if every part is `allowed`.
  *
- * `function` is a part whose toolset entry names a FUNCTION (`"bash": { "function": "smart" }`) and
+ * `function` is a part whose permission set entry names a FUNCTION (`"bash": { "function": "smart" }`) and
  * which has not been put to it yet — `decidedBy.function` says which. It is never what a person is
  * shown: the approver the host hands the engine calls the function for each such part before anybody
  * is asked, and the part is then `allowed` or `denied` by it, or `asks` when the function failed. It
- * ranks between `allowed` and `asks`: a built-in ask or a rule's ask is stricter than a function.
+ * ranks between `allowed` and `asks`: a built-in ask is stricter than a function.
  */
 export type CommandPartVerdict = "allowed" | "function" | "asks" | "denied";
 
 /** Which layer decided a part, strictest layer named. */
 export type CommandPartDecider =
-  /** A toolset entry — `entry` names it (`git commit`, `git`, `bash`, `write_file`, `other`). */
-  | "toolset"
-  /** An authored `policy.rules` rule in settings. */
-  | "rule"
+  /** A permission set entry — `entry` names it (`git commit`, `git`, `bash`, `write_file`, `other`). */
+  | "permissionSet"
   /** The built-in destructive floor (deny) or a built-in ask (push, install, network, credentials). */
   | "builtin"
   /** `.jaira/` is engine-owned. */
@@ -57,12 +55,12 @@ export type CommandPartDecider =
   | "scope"
   /** An answer a person gave earlier in this run, remembered at a width — `entry` is the width. */
   | "remembered"
-  /** Nothing matched: the policy's `default`. */
+  /** Nothing matched — no built-in, and no permission set judging the line: allowed. */
   | "default"
   /** The parser could not model it, or what runs is decided at run time (`$CMD args`). */
   | "parser"
   /**
-   * A permission FUNCTION the toolset entry names answered — `entry` is that entry, `function` its
+   * A permission FUNCTION the permission set entry names answered — `entry` is that entry, `function` its
    * reference. When the function could not answer, the part asks and the reason says why.
    */
   | "function";
@@ -94,7 +92,7 @@ export interface CommandPart {
   verdict: CommandPartVerdict;
   decidedBy: {
     source: CommandPartDecider;
-    /** The toolset entry (or remembered width) that decided, when one did. */
+    /** The permission set entry (or remembered width) that decided, when one did. */
     entry?: string;
     /**
      * The FUNCTION the entry names, when it names one — on a part still waiting for it (verdict
@@ -127,16 +125,16 @@ export interface CommandApproval {
   /** Why the line (or a payload inside it) could not be taken apart. */
   unparsed?: string;
   /**
-   * Which toolset judged the line, when one did: the REFERENCE the asking state names it by
-   * (`$/toolsets/feature/implementation/writes-asking`), or {@link INLINE_TOOLSET} when the map is
+   * Which permission set judged the line, when one did: the REFERENCE the asking state names it by
+   * (`$/permission-sets/feature/implementation/writes-asking`), or {@link INLINE_PERMISSION_SET} when the map is
    * written on the state itself (or on a message) and there is no file behind it. This is what the
-   * approval's reason line names, and what "add to the toolset" writes into.
+   * approval's reason line names, and what "add to the permission set" writes into.
    */
-  toolset?: string;
+  permissionSet?: string;
 }
 
-/** {@link CommandApproval.toolset} for a toolset with no file of its own. */
-export const INLINE_TOOLSET = "inline";
+/** {@link CommandApproval.permission set} for a permission set with no file of its own. */
+export const INLINE_PERMISSION_SET = "inline";
 
 /**
  * The widths to send as `remember`, one per asking part: the chosen one where `chosen` names one of
@@ -158,10 +156,10 @@ export function askingParts(approval: CommandApproval): CommandPart[] {
 }
 
 /**
- * The toolset entries that would stop these parts asking, each at a chosen width.
+ * The permission set entries that would stop these parts asking, each at a chosen width.
  *
  * `widthOf(part)` picks one of `part.widths` — by default the narrowest. This is what "add to the
- * toolset" writes (`"git commit": "allow"`), and what "for this run" remembers. A part that did not
+ * permission set" writes (`"git commit": "allow"`), and what "for this run" remembers. A part that did not
  * ask contributes nothing, and neither does a width the part does not offer: it is the asking PARTS
  * that are remembered, never the line.
  */

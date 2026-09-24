@@ -64,7 +64,7 @@ function writeConfig(config: Record<string, unknown>): void {
  * to run a policy-weak agent.
  */
 function neverEscalates(agent: Record<string, unknown>): Record<string, unknown> {
-  return { agents: { genericCli: [agent] }, policy: { builtins: false } };
+  return { agents: { genericCli: [agent] }, functions: { bash: { builtins: false } } };
 }
 
 beforeEach(() => {
@@ -124,7 +124,7 @@ describe("generic-cli agent through the CLI", () => {
     // approval is meaningless against it — refusing beats running it unguarded.
     writeConfig({
       agents: { genericCli: [{ command: process.execPath, args: [agentScript, "{prompt}"] }] },
-      policy: { rules: [{ match: { program: "git", subcommand: "push" }, action: "require_approval" }] },
+      // The built-ins are on: a push asks, so this project can escalate.
     });
 
     const res = await cli(["run", "--root", "solo", "--inputs", '{"instruction":"x"}']);

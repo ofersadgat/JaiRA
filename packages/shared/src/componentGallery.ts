@@ -356,7 +356,7 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
         properties: {
           to: str("to", "which git remote to push to; its host picks the connection. Absent ⇒ the project's only remote"),
           target: str("target", "the branch the request asks to merge into. Absent ⇒ the task's base branch"),
-          settle_after: str("settle_after", "the quiet window after a comment — 10m, 2h, 0. Absent ⇒ Settings → Integrations"),
+          settle_after: str("settle_after", "the quiet window after a comment — 10m, 2h, 0. Absent ⇒ Settings → Tools → review_artifacts"),
           draft: bool("draft", "open the request as a draft"),
           title: str("title", "what the request is called. Absent ⇒ the task's title"),
           description: str("description", "what the request says. Absent ⇒ the prompt and what is in the set"),
@@ -406,7 +406,7 @@ registerSchema({
       command: str("command", "the command line, when the tool takes one"),
       reason: str("reason", "why policy escalated it"),
       parts: { type: "object", title: "parts", description: "a shell line as the requests it is made of: `CommandApproval`, exactly as the policy produces it (decision 0007 §4)" },
-      toolset: { type: "object", title: "toolset", description: "the toolset that asked and the layers a line could be written into: `ApprovalToolset`" },
+      permissionSet: { type: "object", title: "permissionSet", description: "the permission set that asked and the layers a line could be written into: `ApprovalPermissionSet`" },
       input: { type: "object", title: "input", description: "the call's arguments, shown when there is no command line" },
     },
     required: ["tool"],
@@ -910,7 +910,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       {
         id: "remote",
         title: "Before anything leaves the machine",
-        note: "`details` says what EXACTLY is being confirmed, and `options` adds other ways of saying yes. This is the question `remote.publish` asks once per task (decision 0004): the confirm button is the filled one because it has alternatives beside it, and `Always for this project` answers `confirmed: true, choice: \"always\"`.",
+        note: "`details` says what EXACTLY is being confirmed, and `options` adds other ways of saying yes. This is the question publishing (`functions.review_artifacts.publish`) asks once per task (decision 0004): the confirm button is the filled one because it has alternatives beside it, and `Always for this project` answers `confirmed: true, choice: \"always\"`.",
         sample: {
           prompt: "Push this review to GitLab and open a merge request?",
           confirmLabel: "Push and open",
@@ -1015,7 +1015,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       {
         id: "basic",
         title: "One part of a shell line",
-        note: "`smart` was unsure about `git push`, so it asked. The line is drawn whole with the part being asked about tinted; the rows under it say what the function is deciding and for which toolset line.",
+        note: "`smart` was unsure about `git push`, so it asked. The line is drawn whole with the part being asked about tinted; the rows under it say what the function is deciding and for which permission set line.",
         sample: { prompt: "smart is unsure — allow this?" },
         inputs: {
           request: {
@@ -1037,7 +1037,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             cwd: "/repo",
             state: "feature/implementation/build",
             task: "t-qfr49rm80m",
-            toolset: "$/toolsets/chat/auto",
+            permissionSet: "$/permission-sets/chat/auto",
           },
         },
       },
@@ -1054,7 +1054,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             input: { path: "deploy/production.env", content: "API_URL=https://api.internal" },
             state: "feature/implementation/build",
             task: "t-qfr49rm80m",
-            toolset: "$/toolsets/chat/auto",
+            permissionSet: "$/permission-sets/chat/auto",
           },
         },
       },
@@ -1088,7 +1088,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       {
         id: "basic",
         title: "One line, two requests",
-        note: "Each part is tinted in its own hue and only the words that matched the toolset's line are underlined. The arrow beside Allow asks what the answer covers, then how far it reaches — once, this run, or a line written into the toolset.",
+        note: "Each part is tinted in its own hue and only the words that matched the permission set's line are underlined. The arrow beside Allow asks what the answer covers, then how far it reaches — once, this run, or a line written into the permission set.",
         sample: {
           tool: "Bash",
           command: "rm foo.txt && git commit -m wip",
@@ -1096,7 +1096,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             line: "rm foo.txt && git commit -m wip",
             dialect: "posix",
             verdict: "asks",
-            toolset: "$/toolsets/feature/implementation/writes-asking",
+            permissionSet: "$/permission-sets/feature/implementation/writes-asking",
             parts: [
               {
                 span: { start: 0, end: 10 },
@@ -1106,7 +1106,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
                 subject: "write_file",
                 paths: ["foo.txt"],
                 verdict: "allowed",
-                decidedBy: { source: "toolset", entry: "write_file", reason: "the toolset's 'write_file' is allow" },
+                decidedBy: { source: "permissionSet", entry: "write_file", reason: "the permission set's 'write_file' is allow" },
                 widths: ["rm"],
               },
               {
@@ -1116,16 +1116,16 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
                 kind: "command",
                 subject: "git commit",
                 verdict: "asks",
-                decidedBy: { source: "toolset", entry: "git commit", reason: "the toolset's 'git commit' is ask" },
+                decidedBy: { source: "permissionSet", entry: "git commit", reason: "the permission set's 'git commit' is ask" },
                 widths: ["git commit", "git"],
               },
             ],
           },
-          toolset: {
+          permissionSet: {
             id: "feature/implementation/writes-asking",
             targets: [
-              { layer: "project", file: ".jaira/toolsets/feature/implementation/writes-asking.json" },
-              { layer: "base", file: "~/.jaira/toolsets/feature/implementation/writes-asking.json" },
+              { layer: "project", file: ".jaira/permission-sets/feature/implementation/writes-asking.json" },
+              { layer: "base", file: "~/.jaira/permission-sets/feature/implementation/writes-asking.json" },
             ],
           },
           input: { command: "rm foo.txt && git commit -m wip" },
@@ -1134,7 +1134,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       {
         id: "function",
         title: "Parts a function decided",
-        note: "The toolset gives `bash` to the `smart` function, which allowed `npm test`; `git push` still asks, because the built-in ask on a push is stricter than a function. A part a function decided says which function and what it answered — and it is not asked about again.",
+        note: "The permission set gives `bash` to the `smart` function, which allowed `npm test`; `git push` still asks, because the built-in ask on a push is stricter than a function. A part a function decided says which function and what it answered — and it is not asked about again.",
         sample: {
           tool: "Bash",
           command: "npm test && git push origin feature/probe",
@@ -1142,7 +1142,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             line: "npm test && git push origin feature/probe",
             dialect: "posix",
             verdict: "asks",
-            toolset: "$/toolsets/chat/auto",
+            permissionSet: "$/permission-sets/chat/auto",
             parts: [
               {
                 span: { start: 0, end: 8 },

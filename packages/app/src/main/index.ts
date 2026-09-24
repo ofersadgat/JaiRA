@@ -248,6 +248,11 @@ const service = new AppService({
   // The two capabilities the service cannot have itself: a file manager and a directory dialog are
   // both Electron's, and the service stays Electron-free so it remains testable headlessly.
   reveal: (file: string) => shell.showItemInFolder(file),
+  // A forge sign-in's page (the device flow's verification URL). Only http(s): the URL came from the
+  // forge's answer, and nothing a remote server says should get to launch another scheme's handler.
+  openExternal: (url: string) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(() => undefined);
+  },
   chooseDirectory: async ({ title, buttonLabel }) => {
     // Modal to the window when there is one, so the dialog cannot end up behind it.
     const result = await (window && !window.isDestroyed()
@@ -480,10 +485,10 @@ const handlers: Record<IpcChannel, Handler> = {
   "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>
     service.reviewSyncChangeset(request)) as Handler,
   "file:write": ((request: Parameters<typeof service.writeFile>[0]) => service.writeFile(request)) as Handler,
-  "toolset:save": ((request: Parameters<typeof service.saveToolset>[0]) => service.saveToolset(request)) as Handler,
-  "toolsets:read": ((request: Parameters<typeof service.readToolsetSettings>[0]) => service.readToolsetSettings(request)) as Handler,
-  "toolsets:write": ((request: Parameters<typeof service.writeToolsetSettings>[0]) => service.writeToolsetSettings(request)) as Handler,
-  "toolsets:reset": ((request: Parameters<typeof service.resetToolsetSettings>[0]) => service.resetToolsetSettings(request)) as Handler,
+  "permissionSet:save": ((request: Parameters<typeof service.savePermissionSet>[0]) => service.savePermissionSet(request)) as Handler,
+  "permissionSets:read": ((request: Parameters<typeof service.readPermissionSetSettings>[0]) => service.readPermissionSetSettings(request)) as Handler,
+  "permissionSets:write": ((request: Parameters<typeof service.writePermissionSetSettings>[0]) => service.writePermissionSetSettings(request)) as Handler,
+  "permissionSets:reset": ((request: Parameters<typeof service.resetPermissionSetSettings>[0]) => service.resetPermissionSetSettings(request)) as Handler,
   "file:create": ((request: Parameters<typeof service.createFile>[0]) => service.createFile(request)) as Handler,
   "file:rename": ((request: Parameters<typeof service.renameFile>[0]) => service.renameFile(request)) as Handler,
   "file:delete": ((request: Parameters<typeof service.deleteFile>[0]) => service.deleteFile(request)) as Handler,
@@ -502,10 +507,16 @@ const handlers: Record<IpcChannel, Handler> = {
   "executor:list": (() => service.listExecutors()) as Handler,
   "executor:probe": ((request: { name?: string } | undefined) => service.probeExecutors(request?.name)) as Handler,
   "model:probe": (() => service.probeModelRoutes()) as Handler,
+  "model:probeLocal": ((request: { baseURL?: string } | undefined) => service.probeLocalServers(request ?? {})) as Handler,
+  "model:checkWeights": ((request: { weights?: Record<string, { modelPath: string }> } | undefined) => service.checkWeights(request ?? {})) as Handler,
   "availability:read": (() => service.readAvailability()) as Handler,
   "executor:signIn": ((request: { name: string }) => service.signInExecutor(request.name)) as Handler,
   "executor:cancelSignIn": ((request: { name: string }) => service.cancelSignIn(request.name)) as Handler,
   "executor:signOut": ((request: { name: string }) => service.signOutExecutor(request.name)) as Handler,
+  "forge:signIn": ((request: { connection: string }) => service.signInForge(request.connection)) as Handler,
+  "forge:cancelSignIn": ((request: { connection: string }) => service.cancelForgeSignIn(request.connection)) as Handler,
+  "forge:signIns": (() => service.pendingForgeSignIns()) as Handler,
+  "forge:signOut": ((request: { connection: string }) => service.signOutForge(request.connection)) as Handler,
   "availability:refresh": ((request: { recheck?: boolean } | undefined) => service.refreshAvailability(request ?? {})) as Handler,
   "secret:capabilities": (() => service.secretCapabilities()) as Handler,
   "secret:set": ((request: Parameters<typeof service.setSecret>[0]) => service.setSecret(request)) as Handler,

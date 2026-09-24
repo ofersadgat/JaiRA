@@ -694,8 +694,8 @@ function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>)
  *
  * Drawn in the command approval's own look (its line, its part row) because it IS the approval, put
  * by a function rather than by the policy: the line is shown whole with the one part being asked
- * about tinted, the row says which toolset line and which function asked, and the answer is the word
- * the function returns. No reach and no "add to the toolset": what a function remembers is its own
+ * about tinted, the row says which permission set line and which function asked, and the answer is the word
+ * the function returns. No reach and no "add to the permission set": what a function remembers is its own
  * business, and this answers this call and no other.
  */
 function ApproveToolCall({ inputs, onSubmit, settled }: ComponentProps<ApproveToolCallConfig>): JSX.Element {
@@ -740,9 +740,9 @@ function ApproveToolCall({ inputs, onSubmit, settled }: ComponentProps<ApproveTo
         <pre className="artifact">{JSON.stringify(view.input, null, 2)}</pre>
       )}
       <p className="reason-note">
-        {view.toolset !== undefined && view.toolset !== "inline" ? (
+        {view.permissionSet !== undefined && view.permissionSet !== "inline" ? (
           <>
-            Toolset <span className="mono">{view.toolset}</span>:{" "}
+            Permission set <span className="mono">{view.permissionSet}</span>:{" "}
           </>
         ) : null}
         <b>{view.subject}</b> is decided by the function <b className="mono">{view.function ?? "?"}</b>, which asks you

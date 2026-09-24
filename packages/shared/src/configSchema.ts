@@ -13,10 +13,12 @@
  * signature-driven renderer that draws the executor steps draws these. One declaration, read by the
  * form and by anyone reading the config.
  *
- * The policy block is deliberately NOT here: it is an ordered rule list over command matchers, which
- * a flat property walk cannot express, and it gets its own editor.
+ * What a command may run is NOT here: that is each permission set's `bash` line and its command lines, edited
+ * in Settings → Permission sets. What is here is each shipped function's defaults, under `functions`.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import { DEFAULT_SMART_PROMPT } from "./config";
+import { DEFAULT_PUBLISH_MODE, DEFAULT_SETTLE_AFTER, PUBLISH_MODES } from "./forge";
 
 /** A JSON Schema node, the same shape the executor steps use. */
 export type ConfigSchema = Record<string, JsonValue>;
@@ -171,25 +173,70 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
     },
   },
   {
-    key: "smart",
-    title: "smart",
-    hint: "The permission function JaiRA ships: the model that judges a tool call, and what it is told.",
+    key: "functions",
+    title: "Functions",
+    hint: "The defaults of the functions JaiRA ships — each function's settings, in one place.",
     schema: {
-      $type: "smart",
+      $type: "functions",
       type: "object",
       properties: {
-        model: {
-          type: "string",
-          title: "model",
+        smart: {
+          type: "object",
+          title: "smart",
           description:
-            "Which model judges each call a toolset hands to { \"function\": \"smart\" }, written as a state's model is — claude-haiku-4, or claude-cli/haiku to insist on a route. Empty uses whatever this machine's default executor answers with. A fast, cheap model is the point: it runs once per call.",
+            "The permission function a permission set line names as { \"function\": \"smart\" }: one model call judges each tool call allow, deny or unsure, and unsure asks you through the approval prompt.",
+          properties: {
+            model: {
+              type: "string",
+              title: "model",
+              description:
+                "Which model judges each call, written as a state's model is — claude-haiku-4, or claude-cli/haiku to insist on a route. Empty uses whatever this machine's default executor answers with. A fast, cheap model is the point: it runs once per call.",
+            },
+            prompt: {
+              type: "string",
+              title: "prompt",
+              contentMediaType: "text/markdown",
+              default: DEFAULT_SMART_PROMPT,
+              description:
+                "What the judge is told. The call it judges — the tool, the part of a shell line, the state, the task — is added below this, as JSON. Empty uses the prompt JaiRA ships.",
+            },
+          },
         },
-        prompt: {
-          type: "string",
-          title: "prompt",
-          contentMediaType: "text/markdown",
+        review_artifacts: {
+          type: "object",
+          title: "review_artifacts",
           description:
-            "What the judge is told. It answers allow, deny or unsure, and unsure asks you through the approval prompt. The call it judges — the tool, the part of a shell line, the state, the task — is added below this, as JSON. Empty uses the prompt JaiRA ships.",
+            "The review gate, when a workflow also opens its review on a forge (a state's remote block): what it may send there, and how long it waits for more comments.",
+          properties: {
+            publish: {
+              type: "string",
+              enum: [...PUBLISH_MODES],
+              title: "publish",
+              default: DEFAULT_PUBLISH_MODE,
+              description: `Whether a workflow may push a branch and open a merge request from here without asking. ask — once per task, saying exactly what will be sent and as whom; allow — without asking; deny — never. A remote in a workflow file is a request, never the authorization. Default ${DEFAULT_PUBLISH_MODE}.`,
+            },
+            settleAfter: {
+              type: "string",
+              title: "wait after a comment",
+              default: DEFAULT_SETTLE_AFTER,
+              description: `How long a review stays open after the last comment on the forge before it goes back with everything said — a duration like 10m, 90s or 2h, and 0 settles on the first comment. A decision, a merge or a close never waits. A state's own remote.settle_after overrides it. Default ${DEFAULT_SETTLE_AFTER}.`,
+            },
+          },
+        },
+        bash: {
+          type: "object",
+          title: "bash",
+          description:
+            "The shell tool. What a line may run is each permission set's bash line and the command lines under it (git push, npm install); this is what stands above every permission set.",
+          properties: {
+            builtins: {
+              type: "boolean",
+              title: "built-in refusals",
+              default: true,
+              description:
+                "JaiRA's own floor, above every permission set: destructive git (a force push, a hard reset, a rebase) and removing .git are refused; a push, an install, a package publish, a network program or a credentials path asks. Turn it off only for a disposable workspace.",
+            },
+          },
         },
       },
     },

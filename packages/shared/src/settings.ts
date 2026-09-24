@@ -24,6 +24,8 @@
  * `paths.ts` is Node-only; it is re-exported from there, where the layout lives.
  */
 import type { LogLevel, LogOverride, LogPolicy } from "./view";
+import type { SecretSource } from "./executors";
+import { FORGE_PROVIDERS, type ForgeProviderKind } from "./forge";
 
 export const SETTINGS_FILE_NAME = "settings.json";
 
@@ -229,6 +231,35 @@ export interface JairaSettings {
    * checkout: it lives beside them, in this file.
    */
   conversation: ConversationLook;
+  /**
+   * The forge tokens a sign-in through the browser stored, by secret NAME — see {@link ForgeSignInMark}.
+   *
+   * Here because it is a fact about this machine's secret store, and this is the one file that is
+   * this machine's: the token itself is in the keychain (or the shared `.env.local`), which holds
+   * values and nothing about them. Absent when there are none, which is almost everybody.
+   */
+  forgeSignIns?: Record<string, ForgeSignInMark>;
+}
+
+/**
+ * A forge token that came from OAuth rather than from a paste — what Settings tags the box with,
+ * and what renewing it needs.
+ *
+ * `source` is where it was WRITTEN, and the tag holds only while the secret chain still finds the
+ * token there: a token pasted over it in the same place drops the mark, and one put somewhere the
+ * chain reads first is simply a different token, so the check says `token` without anyone having to
+ * clean up.
+ */
+export interface ForgeSignInMark {
+  provider: ForgeProviderKind;
+  host: string;
+  source: SecretSource;
+  /** Epoch ms of the sign-in. */
+  at: number;
+  /** Epoch ms the access token dies, when the forge said (GitLab's live two hours). */
+  expiresAt?: number;
+  /** The secret the refresh token is under, beside the access token and in the same store. */
+  refreshCredential?: string;
 }
 
 /**
@@ -767,7 +798,31 @@ export function parseSettings(raw: unknown): JairaSettings {
       : [],
     conversation: parseConversationLook(doc["conversation"]),
     ...(typeof baseDir === "string" && baseDir.length > 0 ? { baseDir } : {}),
+    ...withForgeSignIns(doc["forgeSignIns"]),
   };
+}
+
+/**
+ * The marks, each kept only whole: a mark missing where its token went cannot say whether the chain
+ * still finds it there, and a wrong "OAuth" tag is worse than a plain "token" one.
+ */
+function withForgeSignIns(raw: unknown): { forgeSignIns?: Record<string, ForgeSignInMark> } {
+  const out: Record<string, ForgeSignInMark> = {};
+  for (const [name, entry] of Object.entries(objectOf(raw))) {
+    const mark = objectOf(entry);
+    const { provider, host, source, at, expiresAt, refreshCredential } = mark;
+    if (!(FORGE_PROVIDERS as readonly unknown[]).includes(provider)) continue;
+    if (typeof host !== "string" || typeof source !== "string" || typeof at !== "number") continue;
+    out[name] = {
+      provider: provider as ForgeProviderKind,
+      host,
+      source: source as SecretSource,
+      at,
+      ...(typeof expiresAt === "number" ? { expiresAt } : {}),
+      ...(typeof refreshCredential === "string" && refreshCredential.length > 0 ? { refreshCredential } : {}),
+    };
+  }
+  return Object.keys(out).length > 0 ? { forgeSignIns: out } : {};
 }
 
 /** Per field, keeping whatever is readable — the forgiveness every other section of this file has. */

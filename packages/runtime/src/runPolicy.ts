@@ -2,7 +2,7 @@
  * A RUN's policy, built one way for every host that starts one (DESIGN §10.1, decision 0007).
  *
  * The app's `startRun` and the `jaira` CLI both start workflow runs, and what governs a run — the
- * project's command policy, the executor's scope floor, the size above which a produced payload asks,
+ * built-in floor (`functions.bash.builtins`), the executor's scope floor, the size above which a produced payload asks,
  * the per-run memory of answered parts, the audit — must not depend on which of them started it. It
  * did: the CLI handed `executeWorkflow` no policy at all, so a CLI run judged no line, bounded no
  * place and audited nothing. So the one recipe lives here and both hosts call it; what differs
@@ -12,11 +12,11 @@
 import type { JsonValue } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig, Scope } from "@jaira/shared";
-import { compilePolicy, type CommandGrants, type JairaPolicy, type PolicyAuditEntry } from "./policy";
+import { compilePolicy, projectPolicy, type CommandGrants, type PolicyAuditEntry } from "./policy";
 import { claudePermissionSettings, compileClaudeScopeRules } from "./tools";
 
 /** The parts of a project's configuration a run's policy is compiled from. */
-export type RunPolicyConfig = Pick<JairaConfig, "policy" | "execEnvironment" | "executors" | "artifacts">;
+export type RunPolicyConfig = Pick<JairaConfig, "functions" | "execEnvironment" | "executors" | "artifacts">;
 
 /**
  * The scope floor an executor declares — §7's "the screen that configures an executor bounds it".
@@ -61,15 +61,15 @@ export interface RunPolicyOptions {
 }
 
 /**
- * The project's policy for one run: authored rules, the built-ins, the executor's scope floor on
+ * The project's policy for one run: the built-ins, the executor's scope floor on
  * `scopeOf`, the artifact size above which a payload asks, and the run's remembered answers.
  *
- * No toolset is passed: the engine hands each state's own lowered block to the gate and the narrowing
- * at the moment of decision, so a run's policy stays the project's (see `CompilePolicyOptions.toolset`).
+ * No permission set is passed: the engine hands each state's own lowered block to the gate and the narrowing
+ * at the moment of decision, so a run's policy is the built-ins and the floor (see `CompilePolicyOptions.permission set`).
  */
 export function compileRunPolicy(config: RunPolicyConfig, options: RunPolicyOptions = {}): ExecPolicy {
   const floor = scopeFloorOf(config);
-  return compilePolicy(config.policy as JairaPolicy, {
+  return compilePolicy(projectPolicy(config), {
     execEnv: config.execEnvironment,
     ...(options.onDecision !== undefined ? { onDecision: options.onDecision } : {}),
     // Absent ⇒ no narrowing, and nothing pays for the feature.

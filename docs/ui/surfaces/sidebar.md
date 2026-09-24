@@ -2,7 +2,7 @@
 id: ui/surfaces/sidebar
 type: ui-surface
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 kind: panel
 realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/drill-in-and-back-out, ux/patterns/verbs-on-the-thing-itself, ux/patterns/filter-in-place, ux/patterns/the-window-remembers-its-arrangement]
 serves: [product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/keep-track-of-everything, product/chat-with-agents, product/author-processes-without-memorising-the-format, product/read-comfortably]
@@ -52,7 +52,7 @@ Files, Chat and All conversations carry quiet verbs at the row's far end, 20px g
 
 - **Ground.** Opaque `--panel-2` with the `--lift` shadow, from under the title row to the bottom of the window. The foot's Settings row is not drawn while it is open.
 - **Header.** The Settings row lifted to the top with `‹` left of its glyph, lit while Settings is the room.
-- **Sections.** `Providers`, `Executors`, `Configuration`, `Files`, `Appearance`, `Conversation` and `History`, the last only while a project is open. The section on screen takes `--fill-ghost-selected`, `--text` and weight 600, and only while Settings is the room.
+- **Pages.** Two groups, each an uppercase heading with a `--dim` note at its right: `Just you` · `this machine` holding `Appearance`, and `Project & shared` · `layered` holding `Connections`, `Models`, `Tools`, `Runs`, `Files`, `Data & history` and `settings.json`, the last in the data face. Each page is a line glyph and its name. The page on screen takes `--fill-ghost-selected`, `--text` and weight 600, and only while Settings is the room; its own sections are listed indented under it, the one being read lit as the page scrolls. The [settings view](settings-view.md) describes the pages.
 - **Rest.** Pinned to the sheet's foot under a `--line` rule: `≡ Logs`, `⌁ Debug`, `▤ Components`, then `☾ Dark` in light or `☀ Light` in dark. The one on screen is lit.
 
 ## The rail keeps every room one click away in 46px

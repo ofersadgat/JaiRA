@@ -205,10 +205,10 @@ describe("the two conversations", () => {
     const control = service.readWorkflow({ stateId: "chat/control", layer: "system" });
     const authored = JSON.parse(control.text) as Record<string, unknown>;
     expect(authored["environment"]).toBeUndefined();
-    expect((authored["operation"] as Record<string, unknown>)["tools"]).toBe("$/toolsets/chat_control/ask-first");
+    expect((authored["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/chat_control/ask-first");
     const session = JSON.parse(service.readWorkflow({ stateId: "chat/session", layer: "system" }).text) as Record<string, unknown>;
     expect(session["environment"]).toBeUndefined();
-    expect((session["operation"] as Record<string, unknown>)["tools"]).toBe("$/toolsets/chat/ask-first");
+    expect((session["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/chat/ask-first");
   });
 
   it("denies a project tool in a control conversation rather than offering it, per tool and by `other`", async () => {
@@ -217,7 +217,7 @@ describe("the two conversations", () => {
     // Two separate refusals, and both matter. The tool is not OFFERED — a delegated agent's deny
     // floor is built from this list, so a tool that is not on it is never handed over at all…
     for (const name of ["bash", "read_file", "write_file", "edit"]) expect(plan?.settings.tools, name).not.toContain(name);
-    // …and a native the agent has anyway answers to `other`, which this toolset denies outright.
+    // …and a native the agent has anyway answers to `other`, which this permission set denies outright.
     expect(plan?.settings.permissions?.other).toBe("deny");
     expect(plan?.settings.permissions?.tools?.["bash"]).toBeUndefined();
     // The eight it DOES hold are all it holds.

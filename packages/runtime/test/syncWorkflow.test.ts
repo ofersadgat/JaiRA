@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { loadBundle } from "@declarative-ai/hw";
-import { isLoweredToolset, TOOLSET_MARKERS } from "@jaira/shared";
+import { isLoweredPermissionSet, PERMISSION_SET_MARKERS } from "@jaira/shared";
 import {
   SYNC_DOCUMENT_ID,
   SYNC_STATES_ID,
@@ -79,11 +79,11 @@ describe("syncWorkflowFiles", () => {
     expect(JSON.stringify(compiled)).toContain("assessment");
   });
 
-  it("authors the read-only contract as the toolset, on every state, and hands the engine no profile", () => {
+  it("authors the read-only contract as the permission set, on every state, and hands the engine no profile", () => {
     // "A sync must not touch disk" lived in a comment beside the tool registry, and the registry is
     // only half the statement: a delegated agent answering these states runs its own loop with its
     // own built-ins, and a real run used `Bash` and `Glob` under nothing but its transport's
-    // defaults. It is authored as the TOOLSET now (decision 0007): three readers held and
+    // defaults. It is authored as the PERMISSION_SET now (decision 0007): three readers held and
     // pre-approved, nothing that changes anything held, `other` refused — and NO profile,
     // which is no longer a concept and which nothing JaiRA generates may hand the engine.
     for (const direction of [SYNC_DOCUMENT_ID, SYNC_STATES_ID]) {
@@ -96,9 +96,9 @@ describe("syncWorkflowFiles", () => {
         expect(env?.tools, id).toEqual(["read_file", "glob", "grep"]);
         expect(env?.permissions?.profile, id).toBeUndefined();
         expect(env?.permissions?.other, id).toBe("deny");
-        expect(env?.permissions?.tools, id).toEqual({ read_file: "allow", glob: "allow", grep: "allow", ...TOOLSET_MARKERS });
+        expect(env?.permissions?.tools, id).toEqual({ read_file: "allow", glob: "allow", grep: "allow", ...PERMISSION_SET_MARKERS });
         // A MAP, not the legacy reading of a list: what it does not hold, a delegated agent loses.
-        expect(isLoweredToolset(env?.permissions as never), id).toBe(true);
+        expect(isLoweredPermissionSet(env?.permissions as never), id).toBe(true);
       }
     }
   });

@@ -7,10 +7,10 @@
  * line taken apart into the REQUESTS it is made of, each with its subject, its verdict and what
  * decided it — and answered once, for this run, or not at all. When nobody can be asked, every ask is
  * refused, and the refusal says why nobody was asked and what would let the call run: the flag that
- * asks at a terminal, and the setting or toolset line that allows it without asking. There is
+ * asks at a terminal, and the setting or permission set line that allows it without asking. There is
  * deliberately no answer that allows everything: a built-in ask (a push, an install, a credential
- * path) is a question somebody should see, so the way past it is to write the answer down where the
- * project keeps its policy.
+ * path) is a question somebody should see, so the way past it is to write the answer down in the
+ * permission set that asked.
  *
  * Both are an {@link ApprovalHub} — the app's own seam — so the request a person sees here carries the
  * same `parts`, and "for this run" remembers the same widths in the same `CommandGrants`.
@@ -28,7 +28,7 @@ import {
   type PermissionFunctionsOptions,
   type RunPolicyConfig,
 } from "@jaira/runtime";
-import { askingParts, INLINE_TOOLSET, type CommandApproval, type CommandPart, type PermissionFunctionRequest } from "@jaira/shared";
+import { askingParts, INLINE_PERMISSION_SET, type CommandApproval, type CommandPart, type PermissionFunctionRequest } from "@jaira/shared";
 
 /** How a run answers an ask: at the terminal, or with a refusal. */
 export type ApproveMode = "ask" | "deny";
@@ -70,7 +70,7 @@ export interface CliApprovals {
 
 /**
  * The policy and the approver one CLI run is governed by — the SAME recipe the app's `startRun` uses
- * (`compileRunPolicy`): the project's rules and built-ins, the executor's scope floor, the artifact size
+ * (`compileRunPolicy`): the built-ins, the executor's scope floor, the artifact size
  * above which a payload asks, the part answers remembered for the run, and, where the run has a task
  * to file it under, the `command_log` audit. Only who answers an ask differs: here, `approvals`.
  */
@@ -80,7 +80,7 @@ export function governRun(
   where: {
     workspaceRoot?: string;
     audit?: { project: Project; taskId: string };
-    /** What decides a toolset line that names a FUNCTION — asked before the person, as in the app. */
+    /** What decides a permission set line that names a FUNCTION — asked before the person, as in the app. */
     functions?: PermissionFunctionsOptions;
   } = {},
 ): { policy: ExecPolicy; approve: Approver } {
@@ -269,7 +269,7 @@ export function renderApproval(request: ApprovalRequest): string {
     lines.push(`    ${row.map((cell, column) => (column === row.length - 1 ? cell : cell.padEnd(width(column)))).join("  ")}`.trimEnd());
   }
   if (parts.unparsed !== undefined) lines.push(`    could not be read: ${parts.unparsed}`);
-  if (parts.toolset !== undefined) lines.push(`    toolset: ${parts.toolset === INLINE_TOOLSET ? "the one written on the state" : parts.toolset}`);
+  if (parts.permissionSet !== undefined) lines.push(`    permission set: ${parts.permissionSet === INLINE_PERMISSION_SET ? "the one written on the state" : parts.permissionSet}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -314,16 +314,14 @@ function partColumns(part: CommandPart, index: number): string[] {
 function deciderOf(part: CommandPart): string {
   const { source, entry, reason } = part.decidedBy;
   switch (source) {
-    case "toolset":
-      return entry !== undefined ? `toolset "${entry}"${reason.includes(" — ") ? ` — ${reason.slice(reason.indexOf(" — ") + 3)}` : ""}` : `toolset: ${reason}`;
+    case "permissionSet":
+      return entry !== undefined ? `permission set "${entry}"${reason.includes(" — ") ? ` — ${reason.slice(reason.indexOf(" — ") + 3)}` : ""}` : `permission set: ${reason}`;
     case "remembered":
       return `answered earlier this run${entry !== undefined ? ` (${entry})` : ""}`;
     case "builtin":
       return `built-in: ${reason}`;
-    case "rule":
-      return `policy rule: ${reason}`;
     case "default":
-      return `policy default: ${reason}`;
+      return reason;
     case "function":
       return `function ${part.decidedBy.function ?? "?"}: ${reason}`;
     default:
@@ -349,10 +347,11 @@ const HOW_TO_BE_ASKED: Record<Unasked, string> = {
 
 /**
  * Why a call was refused without asking anybody, and what would let it run: the flag that asks, and
- * per asking part the setting or toolset line that answers it for good. What to write depends on what
- * asked — a toolset's entry is answered in the toolset, because a policy rule cannot loosen a toolset
- * (the stricter of the two is kept); a built-in ask or the policy's default is answered by a
- * `policy.rules` entry, or by naming the program in the toolset, which replaces them.
+ * per asking part the permission set line that answers it for good. A permission set's entry is answered in the
+ * permission set; a built-in ask is answered by naming the command in the permission set, which replaces it. A line
+ * no permission set judges — `run_command`'s, or a state's that declares no permission set — answers to the
+ * built-ins alone, and only turning them off (`functions.bash.builtins`) takes one of their questions
+ * away.
  */
 export function unattendedRefusal(request: ApprovalRequest, unasked: Unasked): string {
   const how = `nobody was asked: ${HOW_TO_BE_ASKED[unasked]}`;
@@ -364,40 +363,26 @@ function allowAdvice(request: ApprovalRequest): string[] {
   const parts = request.parts;
   if (parts === undefined) {
     if (request.command !== undefined) return [];
-    return [`a "${request.tool}": "allow" line in the state's toolset, or "policy": { "tools": { "${request.tool}": "allow" } } in .jaira/settings.json`];
+    return [`a "${request.tool}": "allow" line in the state's permission set`];
   }
-  // A toolset line is advice only where a toolset judged the line. `run_command` has none in reach —
-  // its line answers to the policy alone — and neither has a state that declares no toolset.
-  const toolset = parts.toolset === undefined ? undefined : parts.toolset === INLINE_TOOLSET ? "the toolset written on the state" : `the toolset ${parts.toolset}`;
+  // A permission set line is advice only where a permission set judged the line. `run_command` has none in reach —
+  // its line answers to the built-ins alone — and neither has a state that declares no permission set.
+  const permissionSet = parts.permissionSet === undefined ? undefined : parts.permissionSet === INLINE_PERMISSION_SET ? "the permission set written on the state" : `the permission set ${parts.permissionSet}`;
   const out: string[] = [];
   for (const part of askingParts(parts)) {
     const width = part.widths[0];
     const { source } = part.decidedBy;
     let advice: string | undefined;
     if (source === "parser" || width === undefined) advice = `nothing lets "${part.text}" run unasked: a line the parser cannot read always asks`;
-    else if (source === "toolset") advice = `a "${width}": "allow" line in ${toolset ?? "the state's toolset"}`;
-    else if (source === "builtin" || source === "default")
-      advice = `a policy.rules entry ${JSON.stringify({ match: matcherOf(part), action: "allow" })} in .jaira/settings.json${toolset !== undefined ? `, or a "${width}": "allow" line in ${toolset}` : ""}`;
-    else if (source === "rule") advice = `a change to the policy.rules entry in .jaira/settings.json that asks about "${width}"`;
+    else if (source === "permissionSet") advice = `a "${width}": "allow" line in ${permissionSet ?? "the state's permission set"}`;
+    else if (source === "builtin")
+      advice =
+        permissionSet !== undefined
+          ? `a "${width}": "allow" line in ${permissionSet}`
+          : `nothing short of turning the built-ins off lets "${width}" run unasked here, since this line answers to them alone — "functions": { "bash": { "builtins": false } } in .jaira/settings.json, for a disposable workspace only`;
     else if (source === "scope") advice = `a scope that allows ${part.paths?.join(", ") ?? part.url ?? "the place"} for ${part.subject}`;
     if (advice !== undefined && !out.includes(advice)) out.push(advice);
   }
   if (parts.parts.length === 0 && parts.unparsed !== undefined) out.push("nothing lets it run unasked: a line the parser cannot read always asks");
   return out;
-}
-
-/**
- * A `policy.rules` matcher for one part. A command's widths are its subject and its program
- * (`git push`, `git`); any other part — a file utility judged as `read_file`, a fetch as `web_fetch` —
- * is matched by the program it runs, the first word its rule matched.
- */
-function matcherOf(part: CommandPart): { program: string; subcommand?: string } {
-  if (part.kind === "command") {
-    const program = part.widths.at(-1) ?? part.subject.split(" ")[0]!;
-    const words = (part.widths[0] ?? "").split(" ");
-    return words.length > 1 && words[0] === program ? { program, subcommand: words[1]! } : { program };
-  }
-  const first = part.matched[0];
-  const matched = first !== undefined ? part.text.slice(first.start - part.span.start, first.end - part.span.start) : part.text;
-  return { program: (matched.trim().split(/\s+/)[0] || part.text.trim().split(/\s+/)[0]) ?? part.subject };
 }

@@ -1,5 +1,5 @@
 /**
- * A toolset line's FUNCTION, as a project holds one (decision 0007, amended 2026-09-22): resolved along
+ * A permission set line's FUNCTION, as a project holds one (decision 0007, amended 2026-09-22): resolved along
  * the same path as any callee, held to the SAME module approval as any user function, and run the way
  * a host runs it — so a `.ts` judge, a prompt document that is an LLM call somebody configured, and an
  * expression document that asks the person are all one kind of thing.
@@ -45,7 +45,7 @@ const JUDGE = `export const judge = {
 };
 `;
 
-/** A state whose toolset hands every shell command nothing else names to `reference`. */
+/** A state whose permission set hands every shell command nothing else names to `reference`. */
 const guarded = (reference: string): Record<string, unknown> => ({
   label: "Guarded",
   environment: { tools: { read_file: "allow", bash: { function: reference }, other: "deny" } },
@@ -112,7 +112,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("a `.ts` function a toolset names goes through the module approval like any other", () => {
+describe("a `.ts` function a permission set names goes through the module approval like any other", () => {
   it("refuses to start the task until the file is approved — naming the file and the call, as a question", async () => {
     const p = await open();
     createTask(p, { title: "t", workflow: "guarded", id: "t-1" });
@@ -143,7 +143,7 @@ describe("a `.ts` function a toolset names goes through the module approval like
     createTask(p, { title: "t", workflow: "guarded", id: "t-1" });
     const started = await beginTaskRun(p, "t-1");
     expect(permissionFunctionRefsOf(started.bundle)).toEqual(["judge.decide"]);
-    // The module a toolset line reaches is in the digest, as a module a state calls would be.
+    // The module a permission set line reaches is in the digest, as a module a state calls would be.
     expect(started.bundle.moduleDigest).toBeTruthy();
     const run = runnerFor(p);
     expect(await run("judge.decide", request("git"))).toBe("allow");

@@ -12,6 +12,7 @@ import {
   type ForgeProvider,
   type JairaForgeConnection,
   type JairaIntegrationsConfig,
+  type SecretSource,
 } from "@jaira/shared";
 import type { SecretResolver } from "../secrets";
 import { GitHubProvider } from "./github";
@@ -19,6 +20,7 @@ import { GitLabProvider } from "./gitlab";
 import { ForgeError, fetchForgeHttp, type ForgeHttp } from "./http";
 
 export * from "./http";
+export * from "./deviceFlow";
 export { GitLabProvider } from "./gitlab";
 export { GitHubProvider, GITHUB_READ_QUERY, GITHUB_REPLY_MUTATION, GITHUB_RESOLVE_MUTATION } from "./github";
 
@@ -27,6 +29,12 @@ export interface ForgeOptions {
   /** The transport. Injected by every test; the platform `fetch` otherwise. */
   http?: ForgeHttp;
   now?: () => number;
+  /**
+   * Where a sign-in through the browser WROTE the token under a secret name, if one did — what makes
+   * a check say `via: "oauth"`. Only while the chain still finds that name there: a token found
+   * anywhere else is some other token, and is `token`.
+   */
+  signedIn?: (credential: string) => SecretSource | undefined;
 }
 
 /** The provider for a connection, given the token's value. The only place a provider is constructed. */
@@ -59,11 +67,11 @@ export class NoForgeConnection extends Error {
 export function forgeForHost(integrations: JairaIntegrationsConfig, host: string, options: ForgeOptions): ForgeProvider {
   const found = connectionForHost(integrations, host);
   if (found === undefined) {
-    throw new NoForgeConnection(`no connection is set up for ${host} — add one under Settings → Integrations`);
+    throw new NoForgeConnection(`no connection is set up for ${host} — add one under Settings → Connections → Forges`);
   }
   const { name, connection } = found;
   if (connection.credential === undefined) {
-    throw new NoForgeConnection(`the ${name} connection names no token — store one under Settings → Integrations`);
+    throw new NoForgeConnection(`the ${name} connection names no token — store one under Settings → Connections → Forges`);
   }
   const hit = options.secrets.lookup(connection.credential);
   if (hit === undefined) {
@@ -96,6 +104,7 @@ export async function checkForge(name: string, connection: JairaForgeConnection,
     };
   }
   const credential = { source: hit.source, ...(hit.file !== undefined ? { file: hit.file } : {}) };
+  const via = options.signedIn?.(connection.credential) === hit.source ? ("oauth" as const) : ("token" as const);
   try {
     const identity = await forgeProvider(connection, hit.value, options).whoami();
     // A classic GitHub token says what it may do. One that can sign in and cannot touch a repository
@@ -108,16 +117,19 @@ export async function checkForge(name: string, connection: JairaForgeConnection,
         fix: TOKEN_NEEDS.github,
         identity,
         credential,
+        via,
       };
     }
-    return { ...base, status: "ok", detail: `signed in as @${identity.login}`, identity, credential };
+    return { ...base, status: "ok", detail: `signed in as @${identity.login}`, identity, credential, via };
   } catch (error) {
     if (error instanceof ForgeError && (error.status === 401 || error.status === 403)) {
-      return { ...base, status: "failed", detail: `the token was refused (${error.status})`, fix: TOKEN_NEEDS[connection.provider], credential };
+      // A token from a sign-in is not replaced by hand — the sign-in that made it is done again.
+      const fix = via === "oauth" ? "sign in again" : TOKEN_NEEDS[connection.provider];
+      return { ...base, status: "failed", detail: `the token was refused (${error.status})`, fix, credential, via };
     }
     const label = FORGE_LABELS[connection.provider].name;
     const why = error instanceof ForgeError ? `${label} answered ${error.status}` : (error as Error).message;
-    return { ...base, status: "failed", detail: `could not reach ${connection.host} — ${why}`, fix: "check the host and the network, then re-check", credential };
+    return { ...base, status: "failed", detail: `could not reach ${connection.host} — ${why}`, fix: "check the host and the network, then re-check", credential, via };
   }
 }
 

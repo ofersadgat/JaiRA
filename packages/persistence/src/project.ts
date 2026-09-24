@@ -25,6 +25,8 @@ import {
   type JairaPaths,
 } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
+import { migrateSettingsLayers } from "./settingsMigration";
+import { renamePermissionSetLayers } from "./permissionSetRename";
 import { applyStorage, isFileBacked, type ShadowReport } from "./shadow";
 import { journalFiles, replayJournal } from "./journalFile";
 import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
@@ -193,8 +195,10 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     // `autopilot` is left out for the same reason and a stronger one: how sure a conversation has to
     // be before it answers FOR YOU is a fact about you, not about a checkout, and a project that
     // spelled the default out would silently override the answer you gave once in the shared root.
-    // `smart` likewise: which model judges your tool calls, and what it is told, is set once for you.
-    const { integrations: _machineWide, autopilot: _yours, smart: _alsoYours, ...starter } = defaultConfig();
+    // `functions` likewise: which model judges your tool calls, whether a workflow may publish, and
+    // whether the built-in refusals stand are set once, in the shared root, and a project states only
+    // what it changes.
+    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, ...starter } = defaultConfig();
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");
@@ -263,6 +267,9 @@ export function initBase(baseDir?: string): JairaBasePaths {
 export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string; builtInDir?: string }): Project {
   const base = initBase(opts?.baseDir);
   const paths = baseAsProjectPaths(base.baseDir, opts?.builtInDir);
+  // The directory first: the settings migration reads the permission sets it writes into.
+  renamePermissionSetLayers(paths);
+  migrateSettingsLayers(paths);
   const doc = existsSync(paths.settingsFile) ? readJsonFile(paths.settingsFile) : undefined;
   return openAt(paths, doc === undefined ? defaultConfig() : parseConfig(doc), "shared", opts);
 }
@@ -305,6 +312,11 @@ export function openProject(
     throw refusal(log, `${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
   }
   initBase(paths.base.baseDir);
+  // Before the configuration is read: a layer still carrying the `policy` block is refused by the
+  // parser, so it is moved first — once, and never again (decision 0007, amended 2026-09-23).
+  // The directory first: the settings migration reads the permission sets it writes into.
+  renamePermissionSetLayers(paths);
+  migrateSettingsLayers(paths);
   return openAt(paths, loadLayeredConfig(paths), "project", opts);
 }
 

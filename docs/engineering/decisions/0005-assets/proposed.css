@@ -315,7 +315,7 @@
   width: 12px;
   height: 12px;
 }
-/* A shell line taken apart: what each part is a request FOR, and what the toolset says to it. */
+/* A shell line taken apart: what each part is a request FOR, and what the permission-set says to it. */
 .approval-parts {
   margin: 8px 0 0;
   padding: 0;
@@ -380,7 +380,7 @@
   background: color-mix(in srgb, var(--hue) 13%, transparent);
   color: var(--text);
 }
-/* The tint is the whole part; the underline is only the words that matched the toolset's line. */
+/* The tint is the whole part; the underline is only the words that matched the permission-set's line. */
 .part-m {
   box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--hue) 75%, transparent);
   font-weight: 600;
@@ -459,7 +459,7 @@
   margin-left: 18px;
 }
 
-/* Settings → Toolsets: the rail is the bucket hierarchy. */
+/* Settings → Permission sets: the rail is the bucket hierarchy. */
 .llm-config.set-config {
   grid-template-columns: 212px minmax(0, 1fr);
 }

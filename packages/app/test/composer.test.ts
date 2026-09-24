@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { declOfToolset, lowerToolset, parseToolset, type ChatPlanView, type ChatSettings, type Toolset, type ToolsetChoice, type ToolsetDecl } from "@jaira/shared/browser";
+import { declOfPermissionSet, lowerPermissionSet, parsePermissionSet, type ChatPlanView, type ChatSettings, type PermissionSet, type PermissionSetChoice, type PermissionSetDecl } from "@jaira/shared/browser";
 import { Composer } from "../src/renderer/composer";
 import {
   commandGroupsOf,
@@ -27,7 +27,7 @@ import {
   withSectionMode,
   withSubject,
   withToolHeld,
-} from "../src/renderer/composerToolset";
+} from "../src/renderer/composerPermissionSet";
 
 const plan = (): ChatPlanView =>
   ({
@@ -51,19 +51,19 @@ const draw = (props: Partial<Parameters<typeof Composer>[0]>): string =>
   );
 
 /**
- * The two cards over toolsets (decision 0007 §5).
+ * The two cards over permission sets (decision 0007 §5).
  *
  * Drawn the same way — the real component, to static markup, with the card it is about drawn open
  * from the first render (`startOpen`) — and, for everything a click DOES, asserted on the pure
- * functions the clicks call (`composerToolset.ts`), because there is no DOM harness here.
+ * functions the clicks call (`composerPermissionSet.ts`), because there is no DOM harness here.
  */
-const choice = (id: string, decl: ToolsetDecl, layer: ToolsetChoice["layer"] = "system"): ToolsetChoice => {
+const choice = (id: string, decl: PermissionSetDecl, layer: PermissionSetChoice["layer"] = "system"): PermissionSetChoice => {
   const cut = id.lastIndexOf("/");
   return { id, bucket: id.slice(0, cut), name: id.slice(cut + 1), layer, decl };
 };
-const ASK_FIRST: ToolsetDecl = { read_file: "ask", write_file: "ask", bash: "ask", other: "ask" };
-const READ_ONLY: ToolsetDecl = { read_file: "allow", write_file: "deny", bash: "deny", other: "deny" };
-const TOOLSETS: ToolsetChoice[] = [
+const ASK_FIRST: PermissionSetDecl = { read_file: "ask", write_file: "ask", bash: "ask", other: "ask" };
+const READ_ONLY: PermissionSetDecl = { read_file: "allow", write_file: "deny", bash: "deny", other: "deny" };
+const PERMISSION_SETS: PermissionSetChoice[] = [
   choice("chat/ask-first", ASK_FIRST),
   choice("chat/read-only", READ_ONLY),
   choice("chat_control/ask-first", { start_task: "ask", move_task: "ask", other: "deny" }),
@@ -71,25 +71,25 @@ const TOOLSETS: ToolsetChoice[] = [
 ];
 const TOOLS = ["read_file", "write_file", "bash", "start_task", "move_task"].map((name) => ({ name }));
 
-/** A plan whose toolset is the person's own choice (`toolset`), or what a state declared (its lowered list and block). */
-const toolsetPlan = (settings: ChatSettings, bucket?: string): ChatPlanView =>
+/** A plan whose permission set is the person's own choice (`permission set`), or what a state declared (its lowered list and block). */
+const permissionSetPlan = (settings: ChatSettings, bucket?: string): ChatPlanView =>
   ({
     ...plan(),
     settings,
-    origin: { model: "unset", reasoning: "unset", tools: "inherited", permissions: "inherited", implementations: "unset", toolset: settings.toolset !== undefined ? "override" : "unset" },
+    origin: { model: "unset", reasoning: "unset", tools: "inherited", permissions: "inherited", implementations: "unset", permissionSet: settings.permissionSet !== undefined ? "override" : "unset" },
     from: "chat/session",
     effective: { reasoning: "medium", permissions: "ask by default" },
-    available: { routes: [], tools: TOOLS, models: [], toolsets: TOOLSETS, ...(bucket !== undefined ? { bucket } : {}) },
+    available: { routes: [], tools: TOOLS, models: [], permissionSets: PERMISSION_SETS, ...(bucket !== undefined ? { bucket } : {}) },
   }) as unknown as ChatPlanView;
 
 /** The chip's word: the text of the Permissions chip button. */
 const chipOf = (html: string): string => /title="Permissions: ([^"]*)"/.exec(html)?.[1] ?? "";
 const rowsOf = (html: string): string[] => [...html.matchAll(/<span class="cx-opt-name ellip">([^<]*)<\/span><span class="cx-opt-hint ellip">/g)].map((m) => m[1]!);
-const of = (decl: ToolsetDecl): Toolset => parseToolset(decl).toolset;
+const of = (decl: PermissionSetDecl): PermissionSet => parsePermissionSet(decl).permissionSet;
 
-describe("the Permissions card holds the toolsets of one bucket", () => {
-  it("names the toolset the map EXACTLY is, ticks its row, and keeps + dim", () => {
-    const html = draw({ plan: toolsetPlan({ toolset: READ_ONLY }), onSaveToolset: async () => undefined, startOpen: { card: "Permissions" } });
+describe("the Permissions card holds the permission sets of one bucket", () => {
+  it("names the permission set the map EXACTLY is, ticks its row, and keeps + dim", () => {
+    const html = draw({ plan: permissionSetPlan({ permissionSet: READ_ONLY }), onSavePermissionSet: async () => undefined, startOpen: { card: "Permissions" } });
     expect(chipOf(html)).toBe("read-only");
     expect(rowsOf(html)).toEqual(["ask first", "read-only"]);
     // One tick, on the matching row.
@@ -102,41 +102,41 @@ describe("the Permissions card holds the toolsets of one bucket", () => {
   });
 
   it("matches a state's OWN declaration too — the lowered list and block it arrives as", () => {
-    const lowered = lowerToolset(parseToolset({ read_file: "ask", write_file: "ask", bash: "ask", other: "ask" }).toolset);
-    const html = draw({ plan: toolsetPlan({ tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) }) });
+    const lowered = lowerPermissionSet(parsePermissionSet({ read_file: "ask", write_file: "ask", bash: "ask", other: "ask" }).permissionSet);
+    const html = draw({ plan: permissionSetPlan({ tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) }) });
     expect(chipOf(html)).toBe("ask first");
   });
 
   it("reads CUSTOM the moment one line differs, ticks nothing, and lights +", () => {
     const html = draw({
-      plan: toolsetPlan({ toolset: { ...READ_ONLY, bash: "ask" } }),
-      onSaveToolset: async () => undefined,
+      plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }),
+      onSavePermissionSet: async () => undefined,
       startOpen: { card: "Permissions" },
     });
     expect(chipOf(html)).toBe("custom");
     expect(html).not.toContain("cx-opt-tick");
     expect(html).toContain('class="cx-set-add ready"');
-    expect(html).toContain("match no toolset in chat");
+    expect(html).toContain("match no permission set in chat");
   });
 
   it("keeps + dim where the host gave it nowhere to write", () => {
-    const html = draw({ plan: toolsetPlan({ toolset: { ...READ_ONLY, bash: "ask" } }), startOpen: { card: "Permissions" } });
+    const html = draw({ plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }), startOpen: { card: "Permissions" } });
     expect(html).toMatch(/class="cx-set-add"[^>]*disabled=""/);
   });
 
   it("asks for a name and where, through the schema form, when + is open", () => {
     const html = draw({
-      plan: toolsetPlan({ toolset: { ...READ_ONLY, bash: "ask" } }),
-      onSaveToolset: async () => undefined,
+      plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }),
+      onSavePermissionSet: async () => undefined,
       startOpen: { card: "Permissions", keep: true },
     });
-    expect(html).toContain("Keep these tools and modes as a toolset in <b>chat</b>");
+    expect(html).toContain("Keep these tools and modes as a permission set in <b>chat</b>");
     expect(html).toContain("in this project");
     expect(html).toContain(">Add</button>");
     // With no project open there is only one place to keep it.
     const baseOnly = draw({
-      plan: toolsetPlan({ toolset: { ...READ_ONLY, bash: "ask" } }),
-      onSaveToolset: async () => undefined,
+      plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }),
+      onSavePermissionSet: async () => undefined,
       saveLayers: ["base"],
       startOpen: { card: "Permissions", keep: true },
     });
@@ -145,17 +145,17 @@ describe("the Permissions card holds the toolsets of one bucket", () => {
   });
 
   it("opens on the plan's bucket, whose rows are ITS versions of the same names", () => {
-    const control = { start_task: "ask", move_task: "ask", other: "deny" } as ToolsetDecl;
-    const html = draw({ plan: toolsetPlan({ toolset: control }, "chat_control"), startOpen: { card: "Permissions" } });
+    const control = { start_task: "ask", move_task: "ask", other: "deny" } as PermissionSetDecl;
+    const html = draw({ plan: permissionSetPlan({ permissionSet: control }, "chat_control"), startOpen: { card: "Permissions" } });
     expect(chipOf(html)).toBe("ask first");
     expect(rowsOf(html)).toEqual(["ask first"]);
     expect(html).toContain("ask before starting, moving or answering anything");
     // The same map read in the chat bucket is nobody's: a label belongs to a bucket.
-    expect(chipOf(draw({ plan: toolsetPlan({ toolset: control }, "chat") }))).toBe("custom");
+    expect(chipOf(draw({ plan: permissionSetPlan({ permissionSet: control }, "chat") }))).toBe("custom");
   });
 
   it("draws the hierarchy in the picker: each bucket, what it holds, the layer that defines it, nested ones indented", () => {
-    const html = draw({ plan: toolsetPlan({ toolset: ASK_FIRST }), startOpen: { card: "Permissions", buckets: true } });
+    const html = draw({ plan: permissionSetPlan({ permissionSet: ASK_FIRST }), startOpen: { card: "Permissions", buckets: true } });
     const picker = html.slice(html.indexOf('class="cx-submenu"'), html.indexOf('<span class="cx-origin'));
     expect([...picker.matchAll(/padding-left:(\d+)px[^]*?cx-opt-name ellip">([a-z_]+) <span class="cx-src">([^<]*)</g)].map((m) => [m[2], m[1], m[3]])).toEqual([
       ["chat", "7", "built in"],
@@ -164,25 +164,25 @@ describe("the Permissions card holds the toolsets of one bucket", () => {
       ["implementation", "23", "this project"],
     ]);
     expect(picker).toContain("ask first · read-only");
-    expect(picker).toContain("0 toolsets, and 1 bucket inside");
+    expect(picker).toContain("0 permission sets, and 1 bucket inside");
   });
 
   it("falls back to what main worded when the call declares no tools — there is no map to match", () => {
-    expect(chipOf(draw({ plan: toolsetPlan({}) }))).toBe("ask by default");
+    expect(chipOf(draw({ plan: permissionSetPlan({}) }))).toBe("ask by default");
   });
 });
 
 describe("the Tools card", () => {
-  const WITH_COMMANDS: ToolsetDecl = { ...ASK_FIRST, "git status": "allow", "git commit": "ask", git: "deny", "npm test": "ask", script: "ask" };
+  const WITH_COMMANDS: PermissionSetDecl = { ...ASK_FIRST, "git status": "allow", "git commit": "ask", git: "deny", "npm test": "ask", script: "ask" };
 
   it("counts the tools the map holds, as it always did", () => {
-    expect(draw({ plan: toolsetPlan({ toolset: WITH_COMMANDS }) })).toContain('title="Tools: 3 tools"');
-    expect(draw({ plan: toolsetPlan({ toolset: { bash: "ask", other: "ask" } }) })).toContain('title="Tools: bash"');
-    expect(draw({ plan: toolsetPlan({}) })).toContain('title="Tools: no tools"');
+    expect(draw({ plan: permissionSetPlan({ permissionSet: WITH_COMMANDS }) })).toContain('title="Tools: 3 tools"');
+    expect(draw({ plan: permissionSetPlan({ permissionSet: { bash: "ask", other: "ask" } }) })).toContain('title="Tools: bash"');
+    expect(draw({ plan: permissionSetPlan({}) })).toContain('title="Tools: no tools"');
   });
 
   it("lists under Execution the shell, the commands grouped under their program, script, and the line that adds one", () => {
-    const html = draw({ plan: toolsetPlan({ toolset: WITH_COMMANDS }), startOpen: { card: "Tools", folds: ["execution", "program:git"] } });
+    const html = draw({ plan: permissionSetPlan({ permissionSet: WITH_COMMANDS }), startOpen: { card: "Tools", folds: ["execution", "program:git"] } });
     expect(html).toContain("the shell — and the mode for any command not named below");
     // `git` is a fold that opens onto its subcommands; `npm` is one still shut.
     expect(html).toMatch(/cx-cat cx-sub open[^]*?<span class="mono">git<\/span>[^]*?2 subcommands named; any other git is refused/);
@@ -201,7 +201,7 @@ describe("the Tools card", () => {
 
   it("has a Tasks & workflows section, whose tools are drawn like any other now that they are served", () => {
     const tasks = [...TOOLS];
-    const html = draw({ plan: toolsetPlan({ toolset: { start_task: "ask", other: "deny" } }), startOpen: { card: "Tools", folds: ["tasks"] } });
+    const html = draw({ plan: permissionSetPlan({ permissionSet: { start_task: "ask", other: "deny" } }), startOpen: { card: "Tools", folds: ["tasks"] } });
     expect(tasks.some((t) => t.name === "start_task")).toBe(true);
     expect(html).toContain("Tasks &amp; workflows");
     // The hint alone — the "· not served yet" suffix went with the `unserved` mark (decision 0005
@@ -234,7 +234,7 @@ describe("what a click on the Tools card does to the map", () => {
 
   it("setting a group's mode writes the BARE program and leaves its subcommands saying what they said", () => {
     const next = withSubject(BASE, "git", "deny");
-    expect(declOfToolset(next)).toEqual({ read_file: "allow", bash: "ask", "git status": "allow", "git commit": "ask", git: "deny", other: "deny" });
+    expect(declOfPermissionSet(next)).toEqual({ read_file: "allow", bash: "ask", "git status": "allow", "git commit": "ask", git: "deny", other: "deny" });
   });
 
   it("reads what was typed as the subject it names — the program implied inside a group, and forgiven when repeated", () => {
@@ -246,31 +246,31 @@ describe("what a click on the Tools card does to the map", () => {
   });
 
   it("adds a command at the mode that already answers for it, so adding changes nothing until it is set", () => {
-    expect(declOfToolset(withCommand(BASE, "git push"))["git push"]).toBe("ask"); // the shell's line
-    expect(declOfToolset(withCommand(withSubject(BASE, "git", "deny"), "git push"))["git push"]).toBe("deny"); // the group's own
+    expect(declOfPermissionSet(withCommand(BASE, "git push"))["git push"]).toBe("ask"); // the shell's line
+    expect(declOfPermissionSet(withCommand(withSubject(BASE, "git", "deny"), "git push"))["git push"]).toBe("deny"); // the group's own
     expect(withCommand(BASE, "git status")).toBe(BASE); // already a line
   });
 
   it("unticking a tool REMOVES its line, and ticking it again puts back the mode the row was showing", () => {
     const without = withToolHeld(BASE, {}, "bash", false);
-    expect(declOfToolset(without)).not.toHaveProperty("bash");
+    expect(declOfPermissionSet(without)).not.toHaveProperty("bash");
     // The row still shows a mode — kept beside the map, never in it.
     const parked = { bash: { mode: "deny" as const } };
     expect(toolModeOf(without, parked, "bash")).toBe("deny");
-    expect(declOfToolset(withToolHeld(without, parked, "bash", true))["bash"]).toBe("deny");
-    expect(declOfToolset(withToolHeld(without, {}, "bash", true))["bash"]).toBe("ask");
+    expect(declOfPermissionSet(withToolHeld(without, parked, "bash", true))["bash"]).toBe("deny");
+    expect(declOfPermissionSet(withToolHeld(without, {}, "bash", true))["bash"]).toBe("ask");
   });
 
   it("a section's mode is derived from its lines — Execution's include the commands and script — and setting it writes them all", () => {
     expect(sectionModeOf(BASE, {}, "execution")).toBeUndefined(); // ask, allow, ask — `custom`
     expect(sectionCountOf(BASE, "execution")).toBe(3);
-    const { toolset, parked } = withSectionMode(BASE, {}, "execution", "deny");
-    expect(declOfToolset(toolset)).toEqual({ read_file: "allow", bash: "deny", "git status": "deny", "git commit": "deny", other: "deny" });
-    expect(sectionModeOf(toolset, parked, "execution")).toBe("deny");
+    const { permissionSet, parked } = withSectionMode(BASE, {}, "execution", "deny");
+    expect(declOfPermissionSet(permissionSet)).toEqual({ read_file: "allow", bash: "deny", "git status": "deny", "git commit": "deny", other: "deny" });
+    expect(sectionModeOf(permissionSet, parked, "execution")).toBe("deny");
     // A tool the map does not hold takes the mode beside the map, and is still not offered.
     const files = withSectionMode(BASE, {}, "files", "ask");
-    expect(declOfToolset(files.toolset)["read_file"]).toBe("ask");
-    expect(declOfToolset(files.toolset)).not.toHaveProperty("write_file");
+    expect(declOfPermissionSet(files.permissionSet)["read_file"]).toBe("ask");
+    expect(declOfPermissionSet(files.permissionSet)).not.toHaveProperty("write_file");
     expect(files.parked["write_file"]).toEqual({ mode: "ask" });
   });
 });

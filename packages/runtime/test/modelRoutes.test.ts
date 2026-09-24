@@ -22,6 +22,8 @@ import {
 import {
   agentPromptRouteNames,
   agentPromptRoutes,
+  checkEmbeddedWeights,
+  checkWeightsFiles,
   normaliseAgentModel,
   modelRouterOptions,
   probeModelRoutes,
@@ -399,6 +401,54 @@ describe("probeModelRoutes — what can actually be reached", () => {
     );
 
     expect(find(results, "local").status).toBe("disabled");
+  });
+});
+
+describe("the embedded route's weights, one row per model", () => {
+  const disk = (files: Record<string, string>): string => {
+    const dir = mkdtempSync(join(tmpdir(), "jaira-weights-"));
+    for (const [name, bytes] of Object.entries(files)) writeFileSync(join(dir, name), bytes);
+    return dir;
+  };
+
+  it("stats each file: there with its size, or not there", () => {
+    const dir = disk({ "qwen.gguf": "12345" });
+    expect(
+      checkWeightsFiles({ qwen: { modelPath: join(dir, "qwen.gguf") }, gone: { modelPath: join(dir, "gone.gguf") }, folder: { modelPath: dir } }),
+    ).toEqual([
+      { id: "qwen", modelPath: join(dir, "qwen.gguf"), exists: true, sizeBytes: 5 },
+      { id: "gone", modelPath: join(dir, "gone.gguf"), exists: false },
+      { id: "folder", modelPath: dir, exists: false, error: "this is a folder, not a weights file" },
+    ]);
+  });
+
+  it("names a split model by its first part, sums the parts, and says which part is missing", () => {
+    const whole = disk({ "big-00001-of-00002.gguf": "aaa", "big-00002-of-00002.gguf": "bbbb" });
+    expect(checkWeightsFiles({ big: { modelPath: join(whole, "big-00001-of-00002.gguf") } })).toEqual([
+      { id: "big", modelPath: join(whole, "big-00001-of-00002.gguf"), exists: true, sizeBytes: 7, parts: 2 },
+    ]);
+    const short = disk({ "big-00001-of-00003.gguf": "a", "big-00002-of-00003.gguf": "b" });
+    expect(checkWeightsFiles({ big: { modelPath: join(short, "big-00001-of-00003.gguf") } })[0]).toMatchObject({
+      exists: true,
+      parts: 3,
+      error: `part 3 of 3 is missing: ${join(short, "big-00003-of-00003.gguf")}`,
+    });
+    expect(checkWeightsFiles({ big: { modelPath: join(whole, "big-00002-of-00002.gguf") } })[0]).toMatchObject({
+      exists: true,
+      error: "this is part 2 of 2 — name the first part, …-00001-of-00002.gguf",
+    });
+  });
+
+  it("says whether the loader resolves, and the route's own probe agrees with the rows", async () => {
+    const dir = disk({ "qwen.gguf": "x" });
+    const weights = { qwen: { modelPath: join(dir, "qwen.gguf") }, gone: { modelPath: join(dir, "gone.gguf") } };
+    const missing = () => {
+      throw new Error("Cannot find module 'node-llama-cpp'\nRequire stack: …");
+    };
+    expect(checkEmbeddedWeights(weights, { resolve: missing }).loader).toEqual({ module: "node-llama-cpp", installed: false, error: "Cannot find module 'node-llama-cpp'" });
+    expect(checkEmbeddedWeights(weights, { resolve: () => "/node_modules/node-llama-cpp/index.js" }).loader).toEqual({ module: "node-llama-cpp", installed: true });
+    const [route] = await probeModelRoutes({ routes: { embedded: { weights } } }, { secrets: secretsWith({}), resolve: () => "ok" }).then((all) => all.filter((r) => r.name === "embedded"));
+    expect(route).toMatchObject({ status: "ok", detail: "1 of 2 ready — missing: gone" });
   });
 });
 

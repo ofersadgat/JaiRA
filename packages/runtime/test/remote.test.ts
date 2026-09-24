@@ -49,7 +49,7 @@ function functions(setup: Setup = {}) {
     scratchDir: join(rig.root, "scratch"),
     handles,
     integrations: parseIntegrations(undefined),
-    policy: {},
+    publish: "ask",
     secrets: new SecretResolver({ env: { GITLAB_TOKEN: "good" } }),
     exec: new NodeExec(),
     http: replay.http,
@@ -90,7 +90,7 @@ describe("registration", () => {
 
 describe("remote.publish", () => {
   it("refuses under `deny`, and nothing leaves the machine", async () => {
-    const { call } = functions({ policy: { remote: { publish: "deny" } }, answer: "once" });
+    const { call } = functions({ publish: "deny", answer: "once" });
     expect((await call("remote_push")).error).toMatch(/policy does not let a workflow publish/);
     expect(branches()).toEqual(["main"]);
     expect(asked).toEqual([]);
@@ -143,14 +143,14 @@ describe("remote.publish", () => {
   });
 
   it("does not ask at all under `allow`", async () => {
-    expect((await functions({ policy: { remote: { publish: "allow" } } }).call("remote_push")).error).toBeUndefined();
+    expect((await functions({ publish: "allow" }).call("remote_push")).error).toBeUndefined();
     expect(asked).toEqual([]);
     expect(branches()).toEqual([REVIEW, "main"]);
   });
 });
 
 describe("remote_push", () => {
-  const allow = { policy: { remote: { publish: "allow" } } };
+  const allow = { publish: "allow" } as const;
 
   it("commits the worktree as the local git identity and pushes it to the task's own branch", async () => {
     const { value } = await functions(allow).call("remote_push");
@@ -249,7 +249,7 @@ describe("remote_push", () => {
 });
 
 describe("remote_open", () => {
-  const allow = { policy: { remote: { publish: "allow" } } };
+  const allow = { publish: "allow" } as const;
 
   it("needs a pushed branch first", async () => {
     expect((await functions(allow).call("remote_open")).error).toMatch(/nothing has been pushed to jaira\/t-1\/review yet/);
@@ -283,7 +283,7 @@ describe("remote_open", () => {
 });
 
 describe("the request afterwards", () => {
-  const allow = { policy: { remote: { publish: "allow" } } };
+  const allow = { publish: "allow" } as const;
   /** A request that exists — the recorded one, adopted by value the way a sub-task would. */
   const byValue = {
     provider: "gitlab",

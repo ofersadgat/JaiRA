@@ -285,7 +285,7 @@ export function registerAgentRuntimes(
     replacesNative: claudeReplacements(),
     ...options.sdk,
   };
-  // And the other half of decision 0007 §3: a function call is held to its state's toolset exactly as
+  // And the other half of decision 0007 §3: a function call is held to its state's permission set exactly as
   // the same agent's prompt route is. Claude by the route's own wrapper, around the executor its
   // function entry builds per call (`wrapExecutor`) — the deny list, the translated gate, and an ask
   // rule for a built-in an entry keeps with `implementation: "native"`. Codex by its sandbox and the
@@ -352,7 +352,7 @@ export function registerAgentRuntimes(
           });
     registry.functions.set(
       AGENT_CODEX,
-      // Held by its one channel: where the toolset leaves the writing switch off, the call's
+      // Held by its one channel: where the permission set leaves the writing switch off, the call's
       // `permissionMode` is `plan`, which this adapter runs as `--sandbox read-only`.
       runtimeFunction(
         observeAgentRun(AGENT_CODEX, held(codex.run as never, CODEX_TOOLS, AGENT_CODEX), options.onOutcome, options.codexCommand),

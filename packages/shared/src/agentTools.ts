@@ -12,24 +12,24 @@
  * runtime: the service hands it the names, in this shape.
  */
 
-/** How a toolset can reach one agent at all. */
+/** How a permission set can reach one agent at all. */
 export type AgentToolChannel =
   /** Per tool: a deny list up front, and a permission callback for what is kept (claude). */
   | "tools"
   /** Only coarse switches — a sandbox mode — and nothing per tool (codex). */
   | "switches"
-  /** Nothing. A toolset that refuses anything cannot be held to, so such a call is refused. */
+  /** Nothing. A permission set that refuses anything cannot be held to, so such a call is refused. */
   | "none";
 
 export interface AgentToolDeclaration {
-  /** How a toolset reaches this agent — see {@link AgentToolChannel}. */
+  /** How a permission set reaches this agent — see {@link AgentToolChannel}. */
   channel: AgentToolChannel;
   /**
    * The agent's OWN tools, by the name IT calls them, and the standard tool each one is.
    *
    * Several natives may be one standard tool (`Edit`, `MultiEdit` and `NotebookEdit` are all `edit`).
    * `null` says the agent has the tool and no standard tool does that job: it is never removed for
-   * want of an entry, and answers to the toolset's `other`.
+   * want of an entry, and answers to the permission set's `other`.
    *
    * A native NOT listed here is one this declaration has not modelled. Nothing is done about it up
    * front, and a call by it that reaches the permission callback answers to `other` as well.
@@ -38,7 +38,7 @@ export interface AgentToolDeclaration {
   /**
    * For a `switches` transport: each switch, and the standard subjects turning it ON unlocks.
    *
-   * A switch is left OFF unless the toolset holds one of its subjects with a mode that is not `deny`
+   * A switch is left OFF unless the permission set holds one of its subjects with a mode that is not `deny`
    * — codex's `workspace-write` sandbox is on for `write_file`, `edit` or `bash`, and off otherwise.
    */
   switches?: Readonly<Record<string, readonly string[]>>;

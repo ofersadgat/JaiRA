@@ -47,9 +47,16 @@ export interface ExecutorTreeProps {
   agents: string[];
   /** Write a new overlay. The caller persists it; this only ever produces one via `pin`. */
   onOverlay: (next: JairaOperationNode) => void;
+  /**
+   * Drawn under Settings → Models → Advanced, where the page already draws the top router's defaults
+   * and routes as sections of their own, and Settings → Tools draws the function rules as its
+   * "available" column — so the tree shows the structure and the layers around it, and none of those
+   * three twice. A nested router still shows its own.
+   */
+  split?: boolean;
 }
 
-export function ExecutorTree({ resolved, overlay, locked, agents, onOverlay }: ExecutorTreeProps): JSX.Element {
+export function ExecutorTree({ resolved, overlay, locked, agents, onOverlay, split = false }: ExecutorTreeProps): JSX.Element {
   // The built-ins JaiRA itself registers, plus every agent runtime this project configures — an agent
   // is reachable as a FUNCTION too, under the same registry name a model prefix uses.
   const knownFunctions = [
@@ -58,7 +65,7 @@ export function ExecutorTree({ resolved, overlay, locked, agents, onOverlay }: E
   ];
   const set = (path: string, value: unknown): void => onOverlay(pin(overlay, path, value));
   const pinned = (path: string): boolean => isPinned(overlay, path);
-  const ctx = { locked, set, pinned };
+  const ctx = { locked, set, pinned, split };
 
   return (
     <div className="cfg-stack">
@@ -82,6 +89,30 @@ interface Ctx {
   locked: boolean;
   set: (path: string, value: unknown) => void;
   pinned: (path: string) => boolean;
+  split?: boolean;
+}
+
+/**
+ * The top router's routes as a list of their own — Settings → Models → Routes. The same cards the
+ * tree draws, over the same overlay: configuring one pins only what changed.
+ */
+export function ExecutorRoutes({ resolved, overlay, locked, onOverlay }: Omit<ExecutorTreeProps, "agents" | "split">): JSX.Element {
+  const ctx: Ctx = { locked, set: (path, value) => onOverlay(pin(overlay, path, value)), pinned: (path) => isPinned(overlay, path) };
+  const router = resolved.prompt;
+  const routes = router !== undefined && (router.kind === undefined || router.kind === "router") ? Object.entries((router as JairaRouterNode).routes ?? {}) : [];
+  return (
+    <div className="cfg-stack">
+      {routes.length === 0 ? (
+        <p className="cfg-hint warn-text">
+          Nothing can answer a prompt here yet — no provider key, no local server, and no agent that runs. Set one up under
+          Connections and a route appears.
+        </p>
+      ) : null}
+      {routes.map(([prefix, child]) => (
+        <RouteCard key={prefix} prefix={prefix} node={child} path={`prompt.routes.${prefix}`} ctx={ctx} />
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -133,6 +164,9 @@ function FunctionNode({
 
   return (
     <div className="cfg-stack">
+      {ctx.split === true ? (
+        <p className="cfg-hint">Which functions this executor may reach is Settings → Tools → Functions, the available column.</p>
+      ) : (
       <Field
         label="Rules"
         param="function.rules"
@@ -142,6 +176,7 @@ function FunctionNode({
       >
         <RuleList rules={rules} known={known} disabled={ctx.locked} onChange={setRules} />
       </Field>
+      )}
       <StepStack path="function" steps={node.steps} label="Around every function call" ctx={ctx} />
     </div>
   );
@@ -159,7 +194,7 @@ function FunctionNode({
  * agent under whatever name its config gives it. Offering only the known ones would make the
  * common case easy and the real case impossible.
  */
-function RuleList({
+export function RuleList({
   rules,
   known,
   disabled,
@@ -294,10 +329,13 @@ function PromptNode({ node, path, ctx }: { node: JairaPromptNode; path: string; 
 /** Dispatch on the model id's prefix — the routes, and what fills a state's config before that. */
 function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; ctx: Ctx }): JSX.Element {
   const routes = Object.entries(node.routes ?? {});
+  const top = ctx.split === true && path === "prompt";
   return (
     <div className="cfg-stack">
       <NodeBanner kind="router" />
+      {top ? <p className="cfg-hint">Its defaults and its routes are the Defaults and Routes sections above.</p> : null}
 
+      {top ? null : (
       <Level
         title="Default call settings"
         depth={2}
@@ -307,7 +345,7 @@ function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; 
           <Field
             label="Default model"
             param={`${path}.defaults.model`}
-            hint="A bare id routes to whatever serves that family below; prefix it to insist on one route. Empty leaves the choice to the state. The same block as Settings → Default environment."
+            hint="A bare id routes to whatever serves that family below; prefix it to insist on one route. Empty leaves the choice to the state. The same block as Settings → Models → Defaults."
             toggle={toggleOf(ctx, `${path}.defaults.model`, node.defaults?.["model"])}
           >
             <TextInput
@@ -329,7 +367,9 @@ function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; 
           }}
         />
       </Level>
+      )}
 
+      {top ? null : (
       <Level
         title={`Routes (${routes.length})`}
         depth={2}
@@ -339,7 +379,7 @@ function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; 
           {routes.length === 0 ? (
             <p className="cfg-hint warn-text">
               Nothing can answer a prompt here yet — no provider key, no local server, and no agent that
-              runs. Set one up under Providers and a route appears.
+              runs. Set one up under Connections and a route appears.
             </p>
           ) : null}
           {routes.map(([prefix, child]) => (
@@ -347,6 +387,7 @@ function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; 
           ))}
         </div>
       </Level>
+      )}
 
       <StepStack path={path} steps={node.steps} label="Around every routed call" ctx={ctx} />
     </div>

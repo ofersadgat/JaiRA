@@ -1,5 +1,5 @@
 /**
- * A toolset line that is a FUNCTION (decision 0007, amended 2026-09-22): `"bash": { "function": "smart" }`.
+ * A permission set line that is a FUNCTION (decision 0007, amended 2026-09-22): `"bash": { "function": "smart" }`.
  *
  * Four pieces, and they are one argument:
  *
@@ -253,7 +253,7 @@ export function withPermissionFunctions(approve: Approver, options: PermissionFu
         input,
         ...(cwd !== undefined ? { cwd } : {}),
         ...where(req),
-        ...(call.toolset !== undefined ? { toolset: call.toolset } : {}),
+        ...(call.permissionSet !== undefined ? { permissionSet: call.permissionSet } : {}),
       };
       const { answer, failure } = await ask(call.function, request);
       if (answer !== undefined) return ONCE(answer);
@@ -264,7 +264,7 @@ export function withPermissionFunctions(approve: Approver, options: PermissionFu
     // A shell line, taken apart by the narrowing a moment ago.
     const decided = commandDecisionOf(req.input);
     if (decided === undefined) return approve(req);
-    // The gate asks the host about EVERY line a toolset judges — `ask` is what the shell lowers to, so
+    // The gate asks the host about EVERY line a permission set judges — `ask` is what the shell lowers to, so
     // that no line runs unread. What the parts came to is the answer, and a person is asked only when
     // one of them asks.
     if (decided.action === "allow") return ONCE("allow");
@@ -285,7 +285,7 @@ export function withPermissionFunctions(approve: Approver, options: PermissionFu
         part: requestPartOf(part),
         ...(cwd !== undefined ? { cwd } : {}),
         ...where(req),
-        ...(decided.parts.toolset !== undefined ? { toolset: decided.parts.toolset } : {}),
+        ...(decided.parts.permissionSet !== undefined ? { permissionSet: decided.parts.permissionSet } : {}),
       };
       const { answer, failure } = await ask(reference, request);
       changed = true;
@@ -425,7 +425,7 @@ export function smartVerdictOf(value: unknown): { verdict: "allow" | "deny" | "u
 export interface SmartFunctionOptions {
   /** What answers the judge's call — the run's default executor. */
   prompt: Executor<ExecServices, WorkflowMetrics>;
-  /** `smart.model` and `smart.prompt`, from Settings → Configuration. Read at every call. */
+  /** `functions.smart.model` and `.prompt`, from Settings → Tools → smart. Read at every call. */
   config: () => JairaSmartConfig;
 }
 

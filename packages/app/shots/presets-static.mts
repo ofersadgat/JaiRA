@@ -1,5 +1,5 @@
 /**
- * Settings → Executors → Presets, server-rendered to one static page — the real component over the
+ * Settings → Models → Presets, server-rendered to one static page — the real component over the
  * real stylesheet, in each state it can be in, with no Electron in the way.
  *
  * `npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/presets-static.mts <out.html> [light|dark]`

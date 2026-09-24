@@ -1,8 +1,9 @@
 /**
- * Integrations — the connections to remote systems, and the defaults of what runs over them
- * (decision 0004 §1).
+ * The forge rows of Settings → Connections — the connections to remote systems (decision 0004 §1).
+ * What runs over them (publishing, the wait after a comment) is a default of the function that does
+ * it, on Settings → Tools.
  *
- * The Providers screen's rows, unchanged, because a connection is the same kind of thing a provider
+ * The provider rows' shape, because a connection is the same kind of thing a provider
  * is: something configured once, reached with a named secret, and either working or not. So it gets
  * the same four states and the same rule — the state is OBSERVED, never assumed. A connection is
  * checked the way a route is, by asking the host who the token belongs to.
@@ -17,14 +18,11 @@
 import { useState, type JSX } from "react";
 import {
   BUILTIN_FORGES,
-  DEFAULT_PUBLISH_MODE,
-  DEFAULT_SETTLE_AFTER,
   FORGE_LABELS,
   FORGE_PROVIDERS,
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
   parseIntegrations,
-  publishModeOf,
   type ConfigLayer,
   type ConfigView,
   type ForgeCheck,
@@ -64,6 +62,19 @@ export interface IntegrationsPaneProps {
     target: SecretTarget;
     layer: ConfigLayer;
   }) => void;
+  /**
+   * Signing in with the forge itself (OAuth device flow), beside pasting a token. Absent ⇒ tokens only.
+   * `pending` holds the code the person types at the forge while a sign-in waits on the browser.
+   */
+  oauth?: {
+    signingIn: ReadonlySet<string>;
+    pending: ReadonlyMap<string, string>;
+    errors: ReadonlyMap<string, string>;
+    viaOAuth: ReadonlySet<string>;
+    onSignIn: (connection: string) => void;
+    onCancel: (connection: string) => void;
+    onDisconnect: (connection: string) => void;
+  };
 }
 
 /** What a connection's row should say, from its configuration and what the check observed. */
@@ -132,85 +143,34 @@ const NEW_SCHEMA: Schema = {
   required: ["name", "provider", "host", "credential"],
 };
 
-const REVIEW_SCHEMA: Schema = {
-  type: "object",
-  properties: {
-    settleAfter: {
-      type: "string",
-      title: "wait after a comment",
-      examples: ["10m", "30m", "1h", "0"],
-      description: `How long a review stays open after the last comment on the forge before it goes back with everything said — a duration like 10m, 90s or 2h, and 0 settles on the first comment. A decision, a merge or a close never waits. A state's own remote block overrides this. Default ${DEFAULT_SETTLE_AFTER}.`,
-    },
-  },
-};
-
-const PUBLISH_SCHEMA: Schema = {
-  type: "object",
-  properties: {
-    publish: {
-      type: "string",
-      title: "publishing",
-      enum: ["ask", "allow", "deny"],
-      description: `Whether a workflow may push a branch and open a merge request from here without asking. ask — once per task, saying exactly what will be sent and as whom; allow — without asking; deny — never. A remote in a workflow file is a request, never the authorization. Default ${DEFAULT_PUBLISH_MODE}.`,
-    },
-  },
-};
-
-export function IntegrationsPane(props: IntegrationsPaneProps): JSX.Element {
+/** The forges, as the card of Connections → Forges: one row per connection, then "Another host". */
+export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
   const { config, layer, busy, editable, checks, onSave } = props;
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
 
   const doc = (layer === "base" ? config.base : config.project) as Record<string, unknown> | null;
   const effective = config.effective as Record<string, unknown>;
-  const integrations = (effective["integrations"] ?? {}) as { forges?: Record<string, JairaForgeConnection>; review?: Record<string, unknown> };
+  const integrations = (effective["integrations"] ?? {}) as { forges?: Record<string, JairaForgeConnection> };
   const forges = integrations.forges ?? {};
   const locked = busy || !editable;
   const { set, stated } = layerWriter(doc, layer, onSave);
-  const policy = (effective["policy"] ?? {}) as Record<string, unknown>;
 
   return (
-    <div className="cfg-pane">
-      <SettingsSection
-        id="forges"
-        title="Forges"
-        info="Where a review can also be opened as a merge request. A project's git remote picks the connection by host."
-      >
-        <ul className="cfg-rows">
-          {Object.entries(forges).map(([name, connection]) => (
-            <ForgeRow
-              key={`${layer}:${name}`}
-              name={name}
-              connection={connection}
-              check={checks.find((c) => c.name === name)}
-              locked={locked}
-              set={set}
-              stated={stated}
-              {...props}
-            />
-          ))}
-          <AddHost forges={forges} locked={locked} set={set} />
-        </ul>
-      </SettingsSection>
-
-      <SettingsSection id="remote-review" title="Remote review">
-        <SchemaForm
-          schema={REVIEW_SCHEMA}
-          value={integrations.review}
-          onChange={(next) => set("integrations.review", next)}
-          // `setAt` writes each field at its own path: `value` is the MERGED block, and handing a
-          // rebuilt one back would pin every inherited sibling into this layer with the one edit.
-          ctx={{ path: "integrations.review", disabled: locked, isSet: stated, setAt: set }}
+    <ul className="cfg-rows">
+      {Object.entries(forges).map(([name, connection]) => (
+        <ForgeRow
+          key={`${layer}:${name}`}
+          {...props}
+          name={name}
+          connection={connection}
+          check={checks.find((c) => c.name === name)}
+          locked={locked}
+          set={set}
+          stated={stated}
         />
-        <SchemaForm
-          schema={PUBLISH_SCHEMA}
-          // The policy document is sparse, so the default is filled in here for the same reason the
-          // parsed config fills the others in: a field that is not set should say what it inherits.
-          value={{ publish: publishModeOf(policy) }}
-          onChange={(next) => set("policy.remote", next)}
-          ctx={{ path: "policy.remote", disabled: locked, isSet: stated, setAt: set }}
-        />
-      </SettingsSection>
-    </div>
+      ))}
+      <AddHost forges={forges} locked={locked} set={set} />
+    </ul>
   );
 }
 
@@ -225,6 +185,7 @@ function ForgeRow({
   secrets,
   config,
   onSaveToken,
+  oauth,
 }: IntegrationsPaneProps & {
   name: string;
   connection: JairaForgeConnection;
@@ -234,21 +195,107 @@ function ForgeRow({
   stated: (path: string) => boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
+  const [tokenOpen, setTokenOpen] = useState(false);
   const path = `integrations.forges.${name}`;
   const builtin = BUILTIN_FORGES[name] !== undefined;
   const enabled = connection.enabled !== false;
   const state = forgeState(enabled, check);
-  const title = `${FORGE_LABELS[connection.provider].name} · ${connection.host}`;
+  const label = FORGE_LABELS[connection.provider].name;
+  const title = `${label} · ${connection.host}`;
+  const tokenName = connection.credential ?? `${name.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}_TOKEN`;
+  const identity = state === "available" ? check?.identity : undefined;
+  const signingIn = oauth?.signingIn.has(name) === true;
+  const viaOAuth = oauth?.viaOAuth.has(name) === true;
 
   return (
-    <li className={`cfg-row ${state}`}>
-      <div className="cfg-row-head">
-        <span className="cfg-mark">
-          <BrandIcon name={connection.provider} className="cfg-mark-svg" />
-          <StatusDot state={state} />
-        </span>
-        <span className="cfg-row-title">{title}</span>
-        <span className="grow" />
+    <li className={`cfg-row conn-row ${state}`}>
+      <div className="conn-main">
+        <div className="cfg-row-head">
+          <span className="cfg-mark">
+            <BrandIcon name={connection.provider} className="cfg-mark-svg" />
+            <StatusDot state={state} />
+          </span>
+          <span className="cfg-row-title">{title}</span>
+        </div>
+        <p className="cfg-say">
+          <span className="cfg-say-state">{stateWord(state)}</span>
+          {check && state !== "off" && check.detail ? <> — {check.detail}</> : null}
+          {check && state !== "off" && check.fix ? <span className="cfg-fix">→ {check.fix}</span> : null}
+        </p>
+      </div>
+
+      {/* Who this connection acts as — the account the token belongs to, however it was stored — and
+          the + box: sign in with the forge, or paste a token. The same boxes an agent's logins use. */}
+      <ul className="conn-boxes" aria-label={`${title}: who it connects as`}>
+        {identity !== undefined ? (
+          <li className="cfg-login-card active">
+            <div className="cfg-login-top">
+              <span className="cfg-login-mark">{identity.login.charAt(0).toUpperCase()}</span>
+              <span className="cfg-login-tag accent">{viaOAuth ? "OAuth" : "token"}</span>
+            </div>
+            <div className="cfg-login-who">{identity.login}</div>
+            <div className="cfg-login-facts">
+              {identity.scopes !== undefined && identity.scopes.length > 0 ? <span>{identity.scopes.join(", ")}</span> : null}
+              {check?.credential ? <span>{tokenName} · {SECRET_SOURCE_LABELS[check.credential.source]}</span> : null}
+            </div>
+            {oauth !== undefined ? (
+              <div className="cfg-login-actions">
+                <button type="button" className="ghost" disabled={locked} onClick={() => oauth.onDisconnect(name)}>
+                  Disconnect
+                </button>
+              </div>
+            ) : null}
+          </li>
+        ) : check?.credentialMissing !== undefined && connection.credential !== undefined ? (
+          <li className="cfg-key-box missing">
+            <span className="cfg-login-mark key" aria-hidden="true">
+              <Icon name="lock" />
+            </span>
+            <span className="cfg-login-who">{tokenName}</span>
+            <span className="cfg-login-facts">
+              <span>not found anywhere</span>
+            </span>
+          </li>
+        ) : null}
+        {tokenOpen ? null : (
+          <li className="cfg-login-tile">
+            {signingIn ? (
+              <div className="cfg-login-add waiting" role="status">
+                <span className="cfg-login-spin" aria-hidden="true" />
+                <span className="cfg-login-add-title">Finish in your browser</span>
+                {oauth?.pending.get(name) !== undefined ? (
+                  <span className="cfg-login-add-sub">
+                    Enter <code>{oauth.pending.get(name)}</code>
+                  </span>
+                ) : null}
+                <button type="button" className="ghost" onClick={() => oauth?.onCancel(name)}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="cfg-login-add">
+                {oauth !== undefined && connection.provider !== undefined ? (
+                  <button type="button" className="cfg-login-add-main" disabled={locked} onClick={() => oauth.onSignIn(name)}>
+                    <span className="cfg-login-plus" aria-hidden="true">
+                      +
+                    </span>
+                    <span className="cfg-login-add-title">{identity !== undefined ? "Switch account" : `Sign in with ${label}`}</span>
+                  </button>
+                ) : (
+                  <span className="cfg-login-plus" aria-hidden="true">
+                    +
+                  </span>
+                )}
+                <button type="button" className="link cfg-login-add-sub" disabled={locked} onClick={() => setTokenOpen(true)}>
+                  {oauth !== undefined ? "or paste a token" : check?.credential ? "Replace the token" : "Add a token"}
+                </button>
+              </div>
+            )}
+          </li>
+        )}
+      </ul>
+
+      <div className="conn-controls">
         <Switch
           on={enabled}
           disabled={locked}
@@ -269,14 +316,26 @@ function ForgeRow({
         </button>
       </div>
 
-      <p className="cfg-say">
-        <span className="cfg-say-state">{stateWord(state)}</span>
-        {check && state !== "off" && check.detail ? <> — {check.detail}</> : null}
-        {check && state !== "off" && check.fix ? <span className="cfg-fix">→ {check.fix}</span> : null}
-      </p>
+      {oauth?.errors.get(name) !== undefined ? <p className="sub warn-text conn-wide">{oauth.errors.get(name)}</p> : null}
+
+      {tokenOpen ? (
+        <div className="conn-wide">
+          <TokenEntry
+            connection={name}
+            named={connection.credential}
+            name={tokenName}
+            layer={layer}
+            busy={locked}
+            secrets={secrets}
+            hasProject={config !== null && config.projectFile.length > 0}
+            onSave={onSaveToken}
+            onClose={() => setTokenOpen(false)}
+          />
+        </div>
+      ) : null}
 
       {open ? (
-        <div className="cfg-row-body">
+        <div className="cfg-row-body conn-wide">
           <SchemaForm
             schema={builtin ? BUILTIN_SCHEMA : CUSTOM_SCHEMA}
             value={connection}
@@ -298,105 +357,81 @@ function ForgeRow({
           )}
         </div>
       ) : null}
-
-      <TokenBlock
-        connection={name}
-        named={connection.credential}
-        check={check}
-        layer={layer}
-        busy={locked}
-        secrets={secrets}
-        hasProject={config !== null && config.projectFile.length > 0}
-        onSave={onSaveToken}
-      />
     </li>
   );
 }
 
 /**
- * Where a connection's token comes from, and how to store one.
- *
- * The Providers screen's key block, for the same reason it exists there: the NAME is configuration
- * and lives in the form above; the VALUE is a secret and lives in the chain. The box is a password
- * field that is cleared the moment it is sent, and nothing here can read a stored token back.
+ * Store a connection's token: the value goes straight to main, into the secret chain, and is never
+ * held in a form, in renderer state, or in `settings.json` — which holds its name. The box is a
+ * password field cleared the moment it is sent, and nothing here can read a stored token back.
  */
-function TokenBlock({
+function TokenEntry({
   connection,
   named,
-  check,
+  name,
   layer,
   busy,
   secrets,
   hasProject,
   onSave,
+  onClose,
 }: {
   connection: string;
   named: string | undefined;
-  check: ForgeCheck | undefined;
+  name: string;
   layer: ConfigLayer;
   busy: boolean;
   secrets: SecretCapabilities;
   hasProject: boolean;
   onSave: IntegrationsPaneProps["onSaveToken"];
+  onClose: () => void;
 }): JSX.Element {
   const targets: SecretTarget[] = [
     ...(secrets.keychain ? (["keychain"] as SecretTarget[]) : []),
     ...(hasProject ? (["project-env-local"] as SecretTarget[]) : []),
     "base-env-local",
   ];
-  const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [target, setTarget] = useState<SecretTarget>(targets[0] ?? "base-env-local");
-  // A connection that names nothing yet is filed under a name made from its own.
-  const name = named ?? `${connection.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}_TOKEN`;
 
   return (
-    <div className="cfg-credential">
+    <div className="cfg-key-entry">
       <span className="cfg-hint">
-        Token <code>{name}</code>
-        {check?.credential ? ` — found in ${SECRET_SOURCE_LABELS[check.credential.source]}` : null}
-        {check?.credentialMissing ? " — not found anywhere" : null}
+        Filed under <code>{name}</code>.
       </span>
-      {open ? (
-        <div className="cfg-key-entry">
-          <input
-            type="password"
-            className="cfg-input mono"
-            value={value}
-            autoComplete="off"
-            placeholder={`the value of ${name} — empty clears it`}
-            onChange={(e) => setValue(e.target.value)}
-          />
-          <SelectInput value={target} options={targets.map((t) => [SECRET_TARGET_LABELS[t], t])} onChange={(v) => setTarget(v as SecretTarget)} />
-          <div className="pane-actions">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                onSave({ connection, ...(named !== undefined ? { named } : {}), name, value, target, layer });
-                setValue("");
-                setOpen(false);
-              }}
-            >
-              Store the token
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => {
-                setOpen(false);
-                setValue("");
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button type="button" className="ghost" disabled={busy} onClick={() => setOpen(true)}>
-          {check?.credential ? "Replace the token" : "Add a token"}
+      <input
+        type="password"
+        className="cfg-input mono"
+        value={value}
+        autoComplete="off"
+        placeholder={`the value of ${name} — empty clears it`}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <SelectInput value={target} options={targets.map((t) => [SECRET_TARGET_LABELS[t], t])} onChange={(v) => setTarget(v as SecretTarget)} />
+      <div className="pane-actions">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            onSave({ connection, ...(named !== undefined ? { named } : {}), name, value, target, layer });
+            setValue("");
+            onClose();
+          }}
+        >
+          Store the token
         </button>
-      )}
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            setValue("");
+            onClose();
+          }}
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -433,20 +468,35 @@ function AddHost({
   };
 
   return (
-    <li className="cfg-row unconfigured">
-      <div className="cfg-row-head">
-        <span className="cfg-mark">
-          <BrandIcon name="+" className="cfg-mark-svg" />
-          <StatusDot state="unconfigured" />
-        </span>
-        <span className="cfg-row-title">Another host</span>
-        <span className="grow" />
+    <li className="cfg-row conn-row unconfigured">
+      <div className="conn-main">
+        <div className="cfg-row-head">
+          <span className="cfg-mark">
+            <BrandIcon name="+" className="cfg-mark-svg" />
+            <StatusDot state="unconfigured" />
+          </span>
+          <span className="cfg-row-title">Another host</span>
+        </div>
+        <p className="cfg-say">
+          <span className="cfg-say-state">not set up</span> — a self-hosted GitLab or GitHub Enterprise
+        </p>
       </div>
-      <p className="cfg-say">
-        <span className="cfg-say-state">not set up</span> — a self-hosted GitLab or GitHub Enterprise
-      </p>
+      <ul className="conn-boxes">
+        {open ? null : (
+          <li className="cfg-login-tile">
+            <button type="button" className="cfg-login-add" disabled={locked} onClick={() => setOpen(true)}>
+              <span className="cfg-login-plus" aria-hidden="true">
+                +
+              </span>
+              <span className="cfg-login-add-title">Add a host</span>
+              <span className="cfg-login-add-sub">host, kind and a token</span>
+            </button>
+          </li>
+        )}
+      </ul>
+      <div className="conn-controls" />
       {open ? (
-        <div className="cfg-row-body">
+        <div className="cfg-row-body conn-wide">
           <SchemaForm schema={NEW_SCHEMA} value={draft} onChange={(next) => setDraft((next ?? {}) as Record<string, unknown>)} ctx={{ path: "", disabled: locked, hidePaths: true }} />
           {problem ? <p className="sub warn-text">{problem}</p> : null}
           <div className="pane-actions">
@@ -465,14 +515,7 @@ function AddHost({
             </button>
           </div>
         </div>
-      ) : (
-        <div className="cfg-credential">
-          <span className="cfg-hint">Host, kind and a token</span>
-          <button type="button" className="ghost" disabled={locked} onClick={() => setOpen(true)}>
-            Add a host
-          </button>
-        </div>
-      )}
+      ) : null}
     </li>
   );
 }

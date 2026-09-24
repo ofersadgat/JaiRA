@@ -11,7 +11,16 @@ import type { Scope } from "./scopes";
 import { PERMISSION_MODES, type PermissionMode } from "./operationVocabulary";
 import type { JsonValue } from "@declarative-ai/json";
 import type { CredentialUse } from "./executors";
-import { defaultIntegrations, parseIntegrations, type JairaIntegrationsConfig } from "./forge";
+import {
+  DEFAULT_PUBLISH_MODE,
+  DEFAULT_SETTLE_AFTER,
+  PUBLISH_MODES,
+  defaultIntegrations,
+  parseDuration,
+  parseIntegrations,
+  type JairaIntegrationsConfig,
+  type PublishMode,
+} from "./forge";
 import { EXECUTOR_STEPS, type JairaExecutorSteps } from "./executorStack";
 import { parseFunctionRule, type JairaOperationNode, type JairaPromptNode } from "./executorTree";
 
@@ -289,13 +298,6 @@ export interface JairaConfig {
   /** Durable memoization of model calls — off unless asked for. */
   memo: JairaMemoConfig;
   execEnvironment: JairaExecEnvironment;
-  /**
-   * The project's safety policy (DESIGN §10.1). Kept as opaque JSON here and
-   * compiled by `@jaira/runtime`'s `compilePolicy`: `shared` must stay free of the
-   * permission model so the renderer's bundle does not pull it in. An empty policy
-   * means "built-in rules only" (SPEC §11.2/§11.3), which is the safe default.
-   */
-  policy: Record<string, JsonValue>;
   /** Agent runtimes beyond the built-in Claude adapters (DESIGN §8.1). */
   agents: JairaAgentConfig;
   /** Where workflow references are looked up (EXPRESSIONS.md §4). */
@@ -306,15 +308,51 @@ export interface JairaConfig {
   integrations: JairaIntegrationsConfig;
   /** What a fast-forward answers for you, and what it leaves to you (decision 0005 §6). */
   autopilot: JairaAutopilotConfig;
-  /** The shipped `smart` permission function: which model judges a tool call, and what it is told. */
-  smart: JairaSmartConfig;
+  /** Each shipped function's defaults, by the function's name — one place per function (decision 0007, amended 2026-09-23). */
+  functions: JairaFunctionsConfig;
 }
 
 /**
- * The shipped `smart` permission function (decision 0007, amended 2026-09-22) — Settings →
- * Configuration → "smart". A toolset line that says `{ "function": "smart" }` hands each call to it:
- * one model call judges it `allow`, `deny` or `unsure`, and `unsure` puts it to the person through
- * the approval prompt. Both fields layer like every other setting (the project over `~/.jaira`).
+ * The defaults of the functions JaiRA ships, each under the name a workflow or a permission set calls it by.
+ *
+ * One block per function, so a function's settings live in one place and nowhere else: what the
+ * `smart` judge runs on, what `review_artifacts` may do on a forge, and whether the `bash` tool keeps
+ * JaiRA's built-in refusals. It replaces the project `policy` block, whose command rules now belong to
+ * the `bash` line of each permission set, and the top-level `smart` block. Every field layers like any other
+ * setting (the project over `~/.jaira`), and the parsed block always carries every default.
+ */
+export interface JairaFunctionsConfig {
+  smart: JairaSmartConfig;
+  review_artifacts: JairaReviewArtifactsConfig;
+  bash: JairaBashConfig;
+}
+
+/**
+ * `review_artifacts` when the review lives on a forge too (decision 0004): whether a workflow may
+ * publish from here, and how long a review stays open after the last comment there.
+ */
+export interface JairaReviewArtifactsConfig {
+  /** `ask` once per task, `allow` without asking, `deny` never. A remote in a workflow is a request, never the authorization. */
+  publish: PublishMode;
+  /** The quiet window after a comment on the forge, as a duration (`"10m"`); `"0"` settles on the first. A state's `remote.settle_after` overrides it. */
+  settleAfter: string;
+}
+
+/** The `bash` tool's own defaults. What a line may run is each permission set's `bash` line and its command lines. */
+export interface JairaBashConfig {
+  /**
+   * JaiRA's built-in refusals and questions (SPEC §11.2/§11.3): destructive git and `rm -r .git` are
+   * refused, a push, an install, a package publish, a network program and a credentials path ask.
+   * They stand above every permission set. `false` turns them off — for a disposable workspace, and tests.
+   */
+  builtins: boolean;
+}
+
+/**
+ * The shipped `smart` permission function (decision 0007, amended 2026-09-22) — `functions.smart`. A
+ * permission set line that says `{ "function": "smart" }` hands each call to it: one model call judges it
+ * `allow`, `deny` or `unsure`, and `unsure` puts it to the person through the approval prompt. Both
+ * fields layer like every other setting (the project over `~/.jaira`).
  */
 export interface JairaSmartConfig {
   /**
@@ -330,7 +368,7 @@ export interface JairaSmartConfig {
 }
 
 /**
- * What the `smart` function tells its model when no `smart.prompt` is set. The call being judged is
+ * What the `smart` function tells its model when no `functions.smart.prompt` is set. The call being judged is
  * appended below it, as JSON — the tool, the subject, the part of a shell line, the state, the task.
  */
 export const DEFAULT_SMART_PROMPT = [
@@ -565,34 +603,93 @@ export function defaultConfig(): JairaConfig {
     },
     storage: defaultStorage(),
     execEnvironment: "windows",
-    policy: {},
     agents: {},
     executors: {},
     workflows: {},
     files: {},
     integrations: defaultIntegrations(),
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
-    smart: {},
+    functions: defaultFunctions(),
   };
 }
 
+/** Every function default, as a `functions` block that states nothing means. */
+export function defaultFunctions(): JairaFunctionsConfig {
+  return {
+    smart: {},
+    review_artifacts: { publish: DEFAULT_PUBLISH_MODE, settleAfter: DEFAULT_SETTLE_AFTER },
+    bash: { builtins: true },
+  };
+}
+
+/** The functions the `functions` block has a place for — each a function JaiRA ships. */
+export const CONFIGURED_FUNCTIONS = ["smart", "review_artifacts", "bash"] as const;
+
 /**
- * Parse the `smart` block. Strict: a model or a prompt that is not a string is a judge running on
- * something other than what the person configured, and it would say nothing about it.
+ * Parse the `functions` block.
+ *
+ * Strict about what is present, like every block here: a judge running on a model nobody chose, a
+ * publish mode that silently reads as `ask`, or a `builtins` that is the string `"false"` is a function
+ * doing something other than what the person configured, and none of them would say so.
  */
-function parseSmart(raw: unknown): JairaSmartConfig {
-  if (raw === undefined) return {};
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.smart must be an object");
-  const record = raw as Record<string, unknown>;
-  const out: JairaSmartConfig = {};
-  for (const key of ["model", "prompt"] as const) {
-    const value = record[key];
-    if (value === undefined || value === "") continue;
-    if (typeof value !== "string") throw new Error(`config.smart.${key} must be a string`);
-    out[key] = value;
+function parseFunctions(raw: unknown): JairaFunctionsConfig {
+  const out = defaultFunctions();
+  if (raw === undefined) return out;
+  const block = plainObject(raw, "config.functions");
+  allowedFields(block, [...CONFIGURED_FUNCTIONS], "config.functions");
+
+  if (block["smart"] !== undefined) {
+    const smart = plainObject(block["smart"], "config.functions.smart");
+    allowedFields(smart, ["model", "prompt"], "config.functions.smart");
+    for (const key of ["model", "prompt"] as const) {
+      const value = smart[key];
+      if (value === undefined || value === "") continue;
+      if (typeof value !== "string") throw new Error(`config.functions.smart.${key} must be a string`);
+      out.smart[key] = value;
+    }
+  }
+
+  if (block["review_artifacts"] !== undefined) {
+    const where = "config.functions.review_artifacts";
+    const review = plainObject(block["review_artifacts"], where);
+    allowedFields(review, ["publish", "settleAfter"], where);
+    const publish = review["publish"];
+    if (publish !== undefined) {
+      if (!(PUBLISH_MODES as readonly unknown[]).includes(publish)) throw new Error(`${where}.publish must be one of ${PUBLISH_MODES.join(", ")}`);
+      out.review_artifacts.publish = publish as PublishMode;
+    }
+    const settleAfter = review["settleAfter"];
+    if (settleAfter !== undefined) {
+      if (typeof settleAfter !== "string" || parseDuration(settleAfter) === undefined) {
+        throw new Error(`${where}.settleAfter must be a duration like "10m", "90s", "2h" or "0"`);
+      }
+      out.review_artifacts.settleAfter = settleAfter.trim();
+    }
+  }
+
+  if (block["bash"] !== undefined) {
+    const bash = plainObject(block["bash"], "config.functions.bash");
+    allowedFields(bash, ["builtins"], "config.functions.bash");
+    if (bash["builtins"] !== undefined) {
+      if (typeof bash["builtins"] !== "boolean") throw new Error("config.functions.bash.builtins must be true or false");
+      out.bash.builtins = bash["builtins"];
+    }
   }
   return out;
 }
+
+/**
+ * Top-level keys that have moved, and where to. Refused by name rather than ignored: a document that
+ * still carries one was relying on it, and every checkout's documents are migrated when it opens
+ * (`@jaira/persistence` `migrateSettingsLayers`), so meeting one here means a layer the migration could
+ * not rewrite.
+ */
+const MOVED_KEYS: Record<string, string> = {
+  policy:
+    "config.policy is dissolved: a command rule is a line under the bash tool of each permission set, policy.builtins is " +
+    "functions.bash.builtins and policy.remote.publish is functions.review_artifacts.publish",
+  smart: "config.smart has moved to functions.smart",
+};
 
 /**
  * Parse the autopilot block. Strict, like every other block here: a threshold that does not parse
@@ -877,7 +974,7 @@ function genericCliName(entry: unknown): string {
  * Three rules, each chosen because the other reading is worse:
  *
  *  - **Objects merge key by key.** A project that sets only `models.default` must not lose the base's
- *    `agents` and `policy`, which is what a wholesale replace would do — and the reason to keep a
+ *    `agents` and `functions`, which is what a wholesale replace would do — and the reason to keep a
  *    shared root at all is that most projects override one or two things.
  *  - **Arrays replace.** Concatenating `workflows.path` would make the effective search order depend
  *    on a file the author is not reading, and a project could then never REMOVE a base entry.
@@ -1079,26 +1176,24 @@ export function parseConfig(raw: unknown): JairaConfig {
   }
   const cfg = raw as Record<string, unknown>;
 
-  const models = parseModels(cfg["models"]);
-
-  const rawPolicy = cfg["policy"];
-  if (rawPolicy !== undefined && (rawPolicy === null || typeof rawPolicy !== "object" || Array.isArray(rawPolicy))) {
-    throw new Error("config.policy must be an object");
+  for (const [key, moved] of Object.entries(MOVED_KEYS)) {
+    if (cfg[key] !== undefined) throw new Error(moved);
   }
+
+  const models = parseModels(cfg["models"]);
   return {
     models,
     memo: parseMemo(cfg["memo"]),
     artifacts: parseArtifacts(cfg["artifacts"]),
     storage: parseStorage(cfg["storage"]),
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
-    policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},
     agents: parseAgents(cfg["agents"]),
     executors: parseExecutorDefinitions(cfg["executors"]),
     workflows: parseWorkflows(cfg["workflows"]),
     files: parseFiles(cfg["files"]),
     integrations: parseIntegrations(cfg["integrations"]),
     autopilot: parseAutopilot(cfg["autopilot"]),
-    smart: parseSmart(cfg["smart"]),
+    functions: parseFunctions(cfg["functions"]),
   };
 }
 

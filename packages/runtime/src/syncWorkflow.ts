@@ -28,7 +28,7 @@
  * a model that revises it under the same authoring rules the proposal was written under.
  */
 import { createLogger } from "@declarative-ai/log";
-import { lowerToolset, parseToolset, refusal } from "@jaira/shared";
+import { lowerPermissionSet, parsePermissionSet, refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/exec";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -309,14 +309,14 @@ The implementation as it stands:
 {{.inputs.implementation}}`;
 
 /**
- * What a sync state may do — a toolset MAP (decision 0007): three readers, and nothing else.
+ * What a sync state may do — a permission set MAP (decision 0007): three readers, and nothing else.
  *
  * `edit`, `write_file` and `bash` are ABSENT rather than `deny`. In a map, present means offered —
  * the engine would resolve a denied tool against a registry that deliberately does not hold it — and
  * absent is the stronger statement anyway: a map is the whole grant, so a delegated agent loses the
  * built-in of every tool not held, and `other: "deny"` answers for whatever turns up by another name.
  */
-export const SYNC_TOOLSET = { read_file: "allow", glob: "allow", grep: "allow", other: "deny" } as const;
+export const SYNC_PERMISSION_SET = { read_file: "allow", glob: "allow", grep: "allow", other: "deny" } as const;
 
 export interface SyncWorkflowOptions {
   /** Model for every state. Absent ⇒ the project's `models.default`, as with the check. */
@@ -326,7 +326,7 @@ export interface SyncWorkflowOptions {
    *
    * Off by default. ⚠️ Largely MOOT since decision 0007 §3: these states hold `read_file`, `glob`
    * and `grep` as JaiRA's own tools, which displace the agent's `Read`, `Glob` and `Grep`, and its
-   * web readers are removed because the toolset does not hold them — so there is no native reader
+   * web readers are removed because the permission set does not hold them — so there is no native reader
    * left to ask about. Kept because the rule it writes is harmless and a caller may still pass it.
    */
   askNativeReads?: boolean;
@@ -351,8 +351,8 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   // A tool set also turns the prompt states into a bounded tool LOOP, which is what makes the same
   // wiring work whether a provider model or a delegated agent is answering.
   //
-  // "Must not touch disk" is AUTHORED, not just narrated, and it is authored as the TOOLSET (decision
-  // 0007): {@link SYNC_TOOLSET} holds `read_file`, `glob` and `grep` — JaiRA's own, each `allow`, so a
+  // "Must not touch disk" is AUTHORED, not just narrated, and it is authored as the PERMISSION_SET (decision
+  // 0007): {@link SYNC_PERMISSION_SET} holds `read_file`, `glob` and `grep` — JaiRA's own, each `allow`, so a
   // read costs no human click — and answers `deny` for every other name. An agent gets that and
   // nothing else: the provider path wraps the held tools, claude loses the built-in of every tool
   // not held (its own `Read`, `Glob` and `Grep` are displaced by ours, `Bash`, `Edit` and `Write` are
@@ -362,11 +362,11 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   //
   // A MAP, lowered here because these files go to `loadBundle` directly and the engine takes a list
   // and a block. Lowered by the same function the loader uses, so the block carries the marks that
-  // tell a run a toolset was declared — a bare list would read as a state that declared none, and
+  // tell a run a permission set was declared — a bare list would read as a state that declared none, and
   // leave claude every built-in it has.
   const environment = {
     kind: "prompt",
-    ...lowerToolset(parseToolset(SYNC_TOOLSET).toolset),
+    ...lowerPermissionSet(parsePermissionSet(SYNC_PERMISSION_SET).permissionSet),
     ...(options.askNativeReads === true ? { providerOptions: claudeAskSettings(CLAUDE_NATIVE_READ_TOOLS) } : {}),
     ...(model !== undefined ? { model } : {}),
   };

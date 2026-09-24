@@ -6,7 +6,7 @@ updated: 2026-09-22
 visibility: public
 kind: api
 owned_by: [engineering/units/host-tools]
-consumers: ["workflow authors, through a state's environment.tools (a toolset, or the older list with permissions.tools) and permissions.scopes", "toolset files, toolsets/<bucket>/<name>.json under each layer root, whose tool subjects are these names", "@jaira/shared toolsets.ts, which tells a tool subject from a command subject by this table", "@declarative-ai/hw, which resolves environment.tools against registry.tools", "delegated agents, which receive the tools over the upstream MCP bridge", "@jaira/runtime tools.ts gateTools and planAgentTools, and policy.ts compilePolicy", "@jaira/shared toolVocabulary.ts TOOL_SPECS, whose pathArgs and urlArgs name these arguments", "@jaira/app renderer composer tools menu, through chat:plan available.tools", "@jaira/cli buildRunEnvironment"]
+consumers: ["workflow authors, through a state's environment.tools (a permission set, or the older list with permissions.tools) and permissions.scopes", "permission set files, permission-sets/<bucket>/<name>.json under each layer root, whose tool subjects are these names", "@jaira/shared permissionSets.ts, which tells a tool subject from a command subject by this table", "@declarative-ai/hw, which resolves environment.tools against registry.tools", "delegated agents, which receive the tools over the upstream MCP bridge", "@jaira/runtime tools.ts gateTools and planAgentTools, and policy.ts compilePolicy", "@jaira/shared toolVocabulary.ts TOOL_SPECS, whose pathArgs and urlArgs name these arguments", "@jaira/app renderer composer tools menu, through chat:plan available.tools", "@jaira/cli buildRunEnvironment"]
 siblings: [engineering/contracts/artifact-destination-template, engineering/contracts/exec-observer, engineering/contracts/settings-json]
 ---
 
@@ -16,26 +16,26 @@ The tools JaiRA registers on `registry.tools` for a model to call, and the `run_
 
 ## A state grants these tools to reach the workspace, a shell or the web under JaiRA's policy
 
-**Use when.** Giving a prompt or agent state governed access to files, search, a shell or the network by offering tools in `environment.tools`, as a toolset (a map from a tool name to `allow`, `ask`, `deny` or a function such as `{ "function": "smart" }`, or a reference such as `$/toolsets/chat/read-only`) or as the older list with modes in `permissions.tools`; narrowing where they act with scope tables; running one command as a state with `function: "run_command"`; reading a tool result in a prompt or a transcript.
+**Use when.** Giving a prompt or agent state governed access to files, search, a shell or the network by offering tools in `environment.tools`, as a permission set (a map from a tool name to `allow`, `ask`, `deny` or a function such as `{ "function": "smart" }`, or a reference such as `$/permission-sets/chat/read-only`) or as the older list with modes in `permissions.tools`; narrowing where they act with scope tables; running one command as a state with `function: "run_command"`; reading a tool result in a prompt or a transcript.
 
-**Do not use when.** Expecting an agent to keep a built-in the toolset does not hold. Under a toolset map on a claude transport a held tool is served by JaiRA's implementation and displaces the built-in, a `native` choice leaves the built-in running under an ask rule, and the built-in of every standard tool the map does not hold is removed. The older list is the legacy reading and keeps the built-ins it does not mention: see [tool-policy](../units/tool-policy.md). Deciding where an artifact's bytes go: [artifact-destination-template](artifact-destination-template.md).
+**Do not use when.** Expecting an agent to keep a built-in the permission set does not hold. Under a permission set map on a claude transport a held tool is served by JaiRA's implementation and displaces the built-in, a `native` choice leaves the built-in running under an ask rule, and the built-in of every standard tool the map does not hold is removed. The older list is the legacy reading and keeps the built-ins it does not mention: see [tool-policy](../units/tool-policy.md). Deciding where an artifact's bytes go: [artifact-destination-template](artifact-destination-template.md).
 
 ## The shape is eighteen names, each with its arguments and the result it returns
 
-### A toolset's subjects are these names, plus three kinds that are not tools
+### A permission set's subjects are these names, plus three kinds that are not tools
 
 | Subject | Example | What it is | Enforced |
 | --- | --- | --- | --- |
 | a tool name from the table below | `read_file` | offered with that mode; absent means not offered | yes |
 | `other` | `"other": "deny"` | everything no entry names, which is where a tool nothing here registers answers | yes, as `permissions.other` |
-| a command | `git commit`, `git` | a program and its subcommand, or every command of a program | no: carried as `permissions.subjects` until a shell line is taken apart into requests ([0007](../decisions/0007-toolsets.md) §4) |
+| a command | `git commit`, `git` | a program and its subcommand, or every command of a program | no: carried as `permissions.subjects` until a shell line is taken apart into requests ([0007](../decisions/0007-permissionSets.md) §4) |
 | `script` | `"script": "ask"` | running a file | no: carried the same way |
 
 A single lowercase word that is not a tool name reads as a program (`git`, `terraform`). A word that looks like a tool name and is not in the table (`reed_file`, `Glob`, `mcp__x__y`) is a lint warning: nothing is offered under it and a call by that name answers to `other`. An entry may be `{ "mode", "implementation" }`, where `implementation` is `app` or `native`.
 
 ### Every name has a registration and a place argument, and an agent executor says which of its built-ins it is
 
-The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered. JaiRA's vocabulary no longer restates it and nothing in JaiRA decides by it: what a state may do is what its toolset says, by name. The last column is what the claude executor declares in `CLAUDE_TOOLS` (`packages/runtime/src/agentTools.ts`); `TOOL_SPECS` holds no agent's names.
+The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered. JaiRA's vocabulary no longer restates it and nothing in JaiRA decides by it: what a state may do is what its permission set says, by name. The last column is what the claude executor declares in `CLAUDE_TOOLS` (`packages/runtime/src/agentTools.ts`); `TOOL_SPECS` holds no agent's names.
 
 | Name | readOnly | Registered by | Argument a scope judges | Claude built-ins that are this tool |
 | --- | --- | --- | --- | --- |
@@ -211,7 +211,7 @@ outside it.
 
 ## A rename breaks every stored workflow, and no deprecation path exists
 
-- Renaming a tool breaks authored `environment.tools` in both forms, every toolset file that names it (where the old name becomes an unknown-tool warning and the tool stops being offered), `permissions.tools`, scope `tools` maps, the composer's stored `implementations`, the executors' declarations in `agentTools.ts`, the frozen `LEGACY_NON_READ_ONLY_TOOLS` and `READ_ONLY_PRESET_TOOLS` lists, and the parity asserted in `tools.test.ts`. Names resolve exactly and have no aliases.
+- Renaming a tool breaks authored `environment.tools` in both forms, every permission set file that names it (where the old name becomes an unknown-tool warning and the tool stops being offered), `permissions.tools`, scope `tools` maps, the composer's stored `implementations`, the executors' declarations in `agentTools.ts`, the frozen `LEGACY_NON_READ_ONLY_TOOLS` and `READ_ONLY_PRESET_TOOLS` lists, and the parity asserted in `tools.test.ts`. Names resolve exactly and have no aliases.
 - Renaming an argument breaks `pathArgs` and `urlArgs`, after which a scope silently says nothing about the call, and the key lists `compilePolicy` reads a command, a path or a payload from.
 - Changing `show_artifact`'s result breaks the renderer's reading of the `{path, mediaType, bytes, uri}` envelope.
 

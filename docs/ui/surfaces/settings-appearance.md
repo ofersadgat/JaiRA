@@ -8,12 +8,12 @@ realizes: [ux/patterns/preview-beside-the-setting, ux/patterns/pick-from-what-ex
 serves: [product/read-comfortably, product/read-what-work-produced]
 components: [ui/components/size-stepper, ui/components/switch, ui/components/status-pill, ui/components/file-types-pane]
 mockups: [ui/assets/settings-appearance/face-menu.html]
-siblings: [ui/surfaces/settings-view, ui/surfaces/settings-files]
+siblings: [ui/surfaces/settings-view, ui/surfaces/settings-connections]
 ---
 
 # Settings appearance
 
-The Appearance page of the Settings room: how JaiRA looks on this machine, for every project. It is built from the settings page shape the person picked from t3code (2026-09-23): a title and one sentence saying whose settings these are, then sections, each a quiet sentence-case heading over one bordered card of rows. It is reachable with no project open and has no layer header.
+The Appearance page of the Settings room, alone in its `Just you` group: how JaiRA looks on this machine, for every project. It is built from the settings page shape the person picked from t3code (2026-09-23): a title and one sentence saying whose settings these are, then sections, each a quiet sentence-case heading over one bordered card of rows. It is reachable with no project open and has no layer switch.
 
 ## The page is six sections, each listed under the tab in the sidebar
 
@@ -58,5 +58,5 @@ Nothing is saved by a button and nothing is left unsaved.
 
 ## A person arrives from the Settings panel with or without a project, and leaves by choosing another section
 
-- The sidebar's Settings panel lists `Appearance` whether or not a project is open. The light/dark switch in the panel's foot flips what is on screen and makes the other one an explicit choice.
-- Choosing another section, `‹`, or another room leaves. Every choice is already applied and written.
+- The sidebar's Settings panel lists `Appearance` under `Just you` whether or not a project is open. The light/dark switch in the panel's foot flips what is on screen and makes the other one an explicit choice.
+- Choosing another page, `‹`, or another room leaves. Every choice is already applied and written.

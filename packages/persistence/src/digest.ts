@@ -26,7 +26,7 @@ import { refusal } from "@jaira/shared";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadedState, WorkflowBundle } from "@declarative-ai/hw";
-import { loadWorkflowBundle } from "./toolsets";
+import { loadWorkflowBundle } from "./permissionSets";
 import { isUnder } from "./descriptions";
 import type { Project } from "./project";
 import { browseSource, projectSource, readWorkflowsTolerantly, type LayerSource } from "./workflows";

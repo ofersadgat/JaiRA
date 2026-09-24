@@ -5,7 +5,7 @@ status: shipped
 updated: 2026-09-13
 realizes: [ux/patterns/schema-driven-form]
 serves: []
-surfaces: [ui/surfaces/settings-configuration, ui/surfaces/settings-appearance, ui/surfaces/settings-executors, ui/surfaces/new-task-popover, ui/surfaces/context-panel, ui/surfaces/run-conversation]
+surfaces: [ui/surfaces/settings-data, ui/surfaces/settings-appearance, ui/surfaces/settings-models, ui/surfaces/new-task-popover, ui/surfaces/context-panel, ui/surfaces/run-conversation]
 reuses: []
 implemented_by: [packages/app/src/renderer/controls.tsx, packages/app/src/renderer/schemaForm/SchemaForm.tsx, packages/app/src/renderer/configPane.tsx, packages/app/src/renderer/editorKnobs.tsx]
 verified_by: [packages/app/test/schemaForm.test.ts, packages/app/test/schemaFormModel.test.ts]

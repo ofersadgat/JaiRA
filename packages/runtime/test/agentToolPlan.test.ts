@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ALWAYS_GRANTED_TOOLS,
-  parseToolset,
+  parsePermissionSet,
   replacementsOf,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
@@ -16,17 +16,17 @@ import {
   withAlwaysGranted,
 } from "@jaira/shared";
 import { AGENT_TOOLS, agentToolsOf, nativeNamesByRoute } from "../src/agents";
-import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, planAgentTools, refusalsOf, viewOfToolset } from "../src/agentTools";
+import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, planAgentTools, refusalsOf, viewOfPermissionSet } from "../src/agentTools";
 import { claudePermissionSettings, claudeReplacements } from "../src/tools";
 
-/** A toolset MAP holding these tools — the form whose absences REMOVE (decision 0007 §3). */
+/** A permission set MAP holding these tools — the form whose absences REMOVE (decision 0007 §3). */
 const mapOf = (tools: readonly string[], implementations: Record<string, "app" | "native"> = {}) =>
-  parseToolset(Object.fromEntries(tools.map((name) => [name, { mode: "ask", ...(implementations[name] !== undefined ? { implementation: implementations[name] } : {}) }]))).toolset;
+  parsePermissionSet(Object.fromEntries(tools.map((name) => [name, { mode: "ask", ...(implementations[name] !== undefined ? { implementation: implementations[name] } : {}) }]))).permissionSet;
 
 describe("planAgentTools", () => {
   it("denies the built-in of a tool a MAP does not hold", () => {
     // The leak. Undeclared used to mean "the agent keeps its own", which is the opposite of what
-    // leaving a tool out of a toolset looks like it means.
+    // leaving a tool out of a permission set looks like it means.
     const plan = planAgentTools(mapOf([]));
     expect(plan.denyNatives).toContain("Read");
     expect(plan.denyNatives).toContain("Bash");
@@ -108,11 +108,11 @@ describe("alwaysGranted", () => {
     expect(TOOL_SPEC_BY_NAME.get("show_artifact")?.alwaysGranted).toBe(true);
   });
 
-  it("is injected by a toolset that never mentions it", () => {
+  it("is injected by a permission set that never mentions it", () => {
     expect(planAgentTools(mapOf(["bash", "read_file", "write_file"])).inject).toContain("show_artifact");
   });
 
-  it("is injected by a toolset that holds nothing — the conversation with no tools is the one that draws", () => {
+  it("is injected by a permission set that holds nothing — the conversation with no tools is the one that draws", () => {
     expect(planAgentTools(mapOf([])).inject).toContain("show_artifact");
   });
 
@@ -191,12 +191,12 @@ describe("the executors' declarations", () => {
 });
 
 describe("a native with no standard tool answers to `other`", () => {
-  const toolset = (map: Record<string, unknown>) => parseToolset(map).toolset;
+  const permissionSet = (map: Record<string, unknown>) => parsePermissionSet(map).permissionSet;
 
   it("is NOT removed up front for want of an entry", () => {
     // `Task`, `Agent`, `SlashCommand`: nothing in the vocabulary does that job, and absence from the
-    // toolset is what removes a STANDARD tool's native — never one of these.
-    const plan = planAgentTools(toolset({ read_file: "allow" }));
+    // permission set is what removes a STANDARD tool's native — never one of these.
+    const plan = planAgentTools(permissionSet({ read_file: "allow" }));
     for (const native of unmappedNatives(CLAUDE_TOOLS)) {
       expect(plan.denyNatives).not.toContain(native);
       expect(plan.askNatives).not.toContain(native);
@@ -204,24 +204,24 @@ describe("a native with no standard tool answers to `other`", () => {
   });
 
   it("is refused as configuration when `other` is `deny` — a deny needs no person", () => {
-    const plan = planAgentTools(toolset({ read_file: "allow", other: "deny" }));
+    const plan = planAgentTools(permissionSet({ read_file: "allow", other: "deny" }));
     expect(plan.denyNatives).toEqual(expect.arrayContaining(["Task", "Agent", "SlashCommand"]));
   });
 
   it("is forced to the callback when `other` was WRITTEN as `ask`, so `other` decides the call", () => {
-    const plan = planAgentTools(toolset({ read_file: "allow", other: "ask" }));
+    const plan = planAgentTools(permissionSet({ read_file: "allow", other: "ask" }));
     expect(plan.askNatives).toEqual(expect.arrayContaining(["Task", "Agent", "SlashCommand"]));
     expect(plan.denyNatives).not.toContain("Task");
     // An `allow` needs neither: the agent's own flow runs it, and the callback says yes if asked.
-    expect(planAgentTools(toolset({ other: "allow" })).askNatives).toEqual([]);
+    expect(planAgentTools(permissionSet({ other: "allow" })).askNatives).toEqual([]);
   });
 });
 
 describe("the implementation choice, per tool", () => {
-  const toolset = (map: Record<string, unknown>) => parseToolset(map).toolset;
+  const permissionSet = (map: Record<string, unknown>) => parsePermissionSet(map).permissionSet;
 
   it("injects ours by default and keeps the built-in where the entry says `native`", () => {
-    const plan = planAgentTools(toolset({ read_file: "allow", grep: { mode: "ask", implementation: "native" }, other: "deny" }));
+    const plan = planAgentTools(permissionSet({ read_file: "allow", grep: { mode: "ask", implementation: "native" }, other: "deny" }));
     expect(plan.inject).toEqual(["read_file", "show_artifact"]);
     expect(plan.displaced).toEqual(["Read"]);
     // Kept, and forced through the permission callback so the entry's `ask` still decides.
@@ -230,49 +230,49 @@ describe("the implementation choice, per tool", () => {
   });
 
   it("delivers a `deny` beside `native` as a removal, not as a question", () => {
-    const plan = planAgentTools(toolset({ bash: { mode: "deny", implementation: "native" } }));
+    const plan = planAgentTools(permissionSet({ bash: { mode: "deny", implementation: "native" } }));
     expect(plan.askNatives).not.toContain("Bash");
     expect(plan.denyNatives).toContain("Bash");
   });
 
-  it("never grants outside the toolset: whatever is not held is not injected, kept or asked about", () => {
+  it("never grants outside the permission set: whatever is not held is not injected, kept or asked about", () => {
     const held = ["read_file", "glob"];
-    const plan = planAgentTools(toolset({ read_file: "allow", glob: { mode: "allow", implementation: "native" } }));
+    const plan = planAgentTools(permissionSet({ read_file: "allow", glob: { mode: "allow", implementation: "native" } }));
     expect(plan.inject.filter((name) => !ALWAYS_GRANTED_TOOLS.includes(name))).toEqual(["read_file"]);
     for (const native of plan.askNatives) expect(held).toContain(CLAUDE_TOOLS.natives[native]);
     for (const spec of TOOL_SPECS) {
       if (held.includes(spec.name) || spec.alwaysGranted === true) continue;
       for (const [native, standard] of Object.entries(CLAUDE_TOOLS.natives)) {
-        if (standard === spec.name) expect(plan.denyNatives, `${native} is ${spec.name}, which the toolset does not hold`).toContain(native);
+        if (standard === spec.name) expect(plan.denyNatives, `${native} is ${spec.name}, which the permission set does not hold`).toContain(native);
       }
     }
   });
 });
 
-describe("a coarse transport's switch is derived from the toolset", () => {
-  const toolset = (map: Record<string, unknown>) => parseToolset(map).toolset;
+describe("a coarse transport's switch is derived from the permission set", () => {
+  const permissionSet = (map: Record<string, unknown>) => parsePermissionSet(map).permissionSet;
   const on = (grant: Parameters<typeof planAgentTools>[0]) => planAgentTools(grant, CODEX_TOOLS).switches[CODEX_WRITE_SWITCH];
 
-  it("leaves codex's writing sandbox OFF unless the toolset KEEPS a writer of codex's own", () => {
-    expect(on(toolset({ read_file: "allow", glob: "allow", other: "deny" }))).toBe(false);
+  it("leaves codex's writing sandbox OFF unless the permission set KEEPS a writer of codex's own", () => {
+    expect(on(permissionSet({ read_file: "allow", glob: "allow", other: "deny" }))).toBe(false);
     // Held with OUR implementation: ours is served over the bridge and the native is displaced — shut.
-    expect(on(toolset({ read_file: "allow", edit: "ask" }))).toBe(false);
+    expect(on(permissionSet({ read_file: "allow", edit: "ask" }))).toBe(false);
     // A line a FUNCTION decides is held like any other: ours serves it, the function judging each call.
-    expect(on(toolset({ bash: { function: "smart" } }))).toBe(false);
-    expect(on(toolset({ write_file: "allow" }))).toBe(false);
+    expect(on(permissionSet({ bash: { function: "smart" } }))).toBe(false);
+    expect(on(permissionSet({ write_file: "allow" }))).toBe(false);
     // Kept: codex's own `apply_patch` or `shell` does the job, and only the sandbox lets it.
-    expect(on(toolset({ read_file: "allow", edit: { mode: "ask", implementation: "native" } }))).toBe(true);
-    expect(on(toolset({ bash: { function: "smart", implementation: "native" } }))).toBe(true);
+    expect(on(permissionSet({ read_file: "allow", edit: { mode: "ask", implementation: "native" } }))).toBe(true);
+    expect(on(permissionSet({ bash: { function: "smart", implementation: "native" } }))).toBe(true);
     // Held and refused is not held, whoever's code it names.
-    expect(on(toolset({ read_file: "allow", bash: "deny", write_file: "deny" }))).toBe(false);
-    expect(on(toolset({ bash: { mode: "deny", implementation: "native" } }))).toBe(false);
+    expect(on(permissionSet({ read_file: "allow", bash: "deny", write_file: "deny" }))).toBe(false);
+    expect(on(permissionSet({ bash: { mode: "deny", implementation: "native" } }))).toBe(false);
   });
 });
 
 describe("what a transport that enforces nothing cannot run", () => {
-  it("is a toolset that REFUSES something — named, so the refusal can say what", () => {
-    const refusing = parseToolset({ read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", other: "deny" }).toolset;
-    expect(refusalsOf(viewOfToolset(refusing))).toEqual(["edit", "write_file", "bash", "other"]);
-    expect(refusalsOf(viewOfToolset(parseToolset({ read_file: "ask", bash: "ask" }).toolset))).toEqual([]);
+  it("is a permission set that REFUSES something — named, so the refusal can say what", () => {
+    const refusing = parsePermissionSet({ read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", other: "deny" }).permissionSet;
+    expect(refusalsOf(viewOfPermissionSet(refusing))).toEqual(["edit", "write_file", "bash", "other"]);
+    expect(refusalsOf(viewOfPermissionSet(parsePermissionSet({ read_file: "ask", bash: "ask" }).permissionSet))).toEqual([]);
   });
 });

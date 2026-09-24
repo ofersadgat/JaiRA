@@ -78,7 +78,7 @@ file changes when you move it between the two.
 
 **Behind both sits a third layer you never write: what JaiRA ships** (`$SYSTEM`,
 [decision 0006](docs/engineering/decisions/0006-built-in-layer.md)). It has the
-same shape — `workflows/`, `prompts/`, `functions/`, `toolsets/` — and it is
+same shape — `workflows/`, `prompts/`, `functions/`, `permission-sets/` — and it is
 always searched last, whatever `workflows.path` says:
 
 ```text
@@ -290,7 +290,7 @@ as `environment` inheritance (§5.2). Key order is ignored:
 
 A **fragment** — a file holding reusable blocks rather than a state — lives
 outside `workflows/`, conventionally `$/lib/`, `$/prompts/`, `$/types/`, and
-`$/toolsets/<bucket>/` for a toolset (§5.1). That
+`$/permission-sets/<bucket>/` for a permission set (§5.1). That
 keeps it out of directory inference (§6) and out of the workflow browser's root
 derivation, so nothing there can be mistaken for a state that runs.
 
@@ -574,7 +574,7 @@ string.
 | `claude-code` | Delegated agent, in-process SDK | `policyEnforcement: "callback"` |
 | `claude-cli` | Delegated agent, `claude` subprocess | `policyEnforcement: "callback"` via the MCP bridge |
 | `codex-cli` | Delegated agent, `codex exec` subprocess | `policyEnforcement: "config"` — see below |
-| `generic-cli` | Non-Claude agent CLI | Registered only for what `config.agents.genericCli` declares, under the name it declares; **`policyEnforcement: "none"`**, so §5.1 refuses it whenever the policy can escalate to a human — which `policy.builtins: false` alone does not settle |
+| `generic-cli` | Non-Claude agent CLI | Registered only for what `config.agents.genericCli` declares, under the name it declares; **`policyEnforcement: "none"`**, so §5.1 refuses it whenever the policy can escalate to a human — which it can exactly while `functions.bash.builtins` is on |
 | `run_command` | Run one command, no agent | Takes `config.command`; gates itself against the project policy |
 
 A UI gate's answer is validated twice — in the main process against the
@@ -603,8 +603,8 @@ everything else to `workspace-write`. Project settings:
 "agents": { "codex": { "command": "codex", "sandbox": "read-only" } }
 ```
 
-**A codex state may hold tools, and runs held to its toolset as a claude state
-does.** What codex is handed (§5.1): the tools of ours the toolset holds, over the
+**A codex state may hold tools, and runs held to its permission set as a claude state
+does.** What codex is handed (§5.1): the tools of ours the permission set holds, over the
 bridge, each call gated; and a sandbox that is `read-only` unless an entry keeps
 codex's own writer (`"bash": { "mode": "ask", "implementation": "native" }` keeps
 its `shell`, `edit` its `apply_patch`). A kept codex writer answers to the sandbox,
@@ -788,7 +788,7 @@ the same rule.
   (`"impl": { "from": "main" }`). Separate from `session` on purpose: many sessions
   may share one workspace, and one session may cross several. It cannot be
   computed (`$expr`), because a bundle is fixed when its instance is created.
-- **`tools`** — what the operation may do, as a **toolset**: a map from a
+- **`tools`** — what the operation may do, as a **permission set**: a map from a
   *subject* to a *mode* (decision 0007). **Offering a tool here is what puts an
   agent's commands under the policy at all.**
 
@@ -817,24 +817,24 @@ the same rule.
     to the entry's mode; `"app"`, the default, injects JaiRA's.
   - **A state usually names one** rather than writing it out — a bare string in an
     object position is a reference (§2.2):
-    `"tools": "$/toolsets/chat/read-only"`. It may start from one and say more,
+    `"tools": "$/permission-sets/chat/read-only"`. It may start from one and say more,
     sibling keys overriding per subject:
-    `{ "$ref": "$/toolsets/chat/read-only", "write_file": "ask" }`. A toolset
+    `{ "$ref": "$/permission-sets/chat/read-only", "write_file": "ask" }`. A permission set
     *file* starts from another the same way. A reference cycle is a lint error
     naming the cycle.
-  - **A toolset may sit inside a block brought in by reference** —
+  - **A permission set may sit inside a block brought in by reference** —
     `"environment": "$/lib/agent-env"`, an `operation` or a child mount's
     `environment` written the same way, or one that starts from another. It
     means exactly what it would written on the state, and is pinned with the
-    task the same way; a toolset reference written inside that block resolves
+    task the same way; a permission set reference written inside that block resolves
     from the block's own file. The loaded state shows the lowered `tools` list
     and `permissions` beside the reference, where the engine's `$ref` merge lets
     them replace the block's map.
-  - **Toolsets live in buckets**: `toolsets/<bucket>/<name>.json` under each layer
-    root, so the project's `.jaira/toolsets/chat/read-only.json` overrides the
+  - **Permission sets live in buckets**: `permission-sets/<bucket>/<name>.json` under each layer
+    root, so the project's `.jaira/permission-sets/chat/read-only.json` overrides the
     shared root's file of the same path. A bucket is a folder — a place with its
     own versions of the same names — and may nest
-    (`toolsets/feature/implementation/build.json`).
+    (`permission-sets/feature/implementation/build.json`).
   - An override replaces the **entry** whole: `"write_file": "allow"` over
     `{ "mode": "ask", "implementation": "native" }` leaves no implementation
     behind.
@@ -846,12 +846,12 @@ the same rule.
   (`reed_file`, `Glob`) is a **warning** — nothing is offered under it, and a call
   by that name answers to `other`.
 
-  **An agent gets its toolset MAP and nothing else.** Each agent executor declares
+  **An agent gets its permission set MAP and nothing else.** Each agent executor declares
   its own tools and which standard tool each one is — claude's `Read` is
   `read_file`; `Edit`, `MultiEdit` and `NotebookEdit` are all `edit` — and on a
   delegated agent, per standard tool:
 
-  | The toolset… | What the agent gets |
+  | The permission set… | What the agent gets |
   | --- | --- |
   | does not hold the tool | its built-in is **removed** (claude: `--disallowedTools`; codex: the sandbox switch left off) |
   | holds it (the default, `"app"`) | JaiRA's implementation, served over the bridge, every call decided by the entry; the built-in is removed so the model cannot reach past it (codex: its writing sandbox stays shut) |
@@ -863,7 +863,7 @@ the same rule.
   own `Glob`, `Grep`, `Bash`, `Edit`, `Write` or web tools. A state that searches
   holds `glob` and `grep`; JaiRA serves both.
 
-  ⚠️ **A state that declares no toolset at all has said nothing about tools** —
+  ⚠️ **A state that declares no permission set at all has said nothing about tools** —
   which is not the same as `"tools": {}`. Nothing in its `environment` chain names
   one, so its agent is handed over as the executor built it: claude keeps its own
   tools, each under the permission callback, and codex keeps its configured
@@ -874,12 +874,12 @@ the same rule.
   rewritten as a map (decision 0007); the linter refuses it as an **error**, and a
   run will not start under it.
 
-  | Transport | How a toolset reaches it |
+  | Transport | How a permission set reaches it |
   | --- | --- |
   | provider route | the held tools are the only tools there are, each permission-wrapped |
   | `claude-code` / `claude-cli` | the deny list up front, an ask rule for a kept built-in, and the permission callback underneath |
   | `codex-cli` | the held tools of ours over its MCP bridge, each call put to the gate at the bridge before it runs; and its sandbox, `workspace-write` only where an entry keeps codex's own `shell` or `apply_patch` (`"implementation": "native"`, not `deny`), `read-only` otherwise |
-  | `generic-cli` | nothing — so a toolset that **denies** anything is **refused** there, naming what it denies |
+  | `generic-cli` | nothing — so a permission set that **denies** anything is **refused** there, naming what it denies |
 
   **One shell line is several requests.** A `bash` call is not judged as a tool.
   The line is taken apart — at `&&`, `||`, `;`, `&`, `|`, newlines, `( … )`,
@@ -920,7 +920,7 @@ the same rule.
   and refuses everything else: `bash`'s mode is the answer for a command nothing
   else names, not a switch on the tool. (It reaches the engine as `ask`, with the
   mode you wrote carried in `permissions.subjects` — no line runs before the host
-  has read it: the line is taken apart, and one every part of which the toolset
+  has read it: the line is taken apart, and one every part of which the permission set
   allows runs without anybody being asked, in a run as in a conversation.)
 
   **A line may name a FUNCTION instead of a mode** — on a tool, a command,
@@ -949,7 +949,7 @@ the same rule.
     (the call's input), and for a shell line `line` and `part` — the ONE part being
     judged, with `text`, `kind`, `subject`, `span`, `program`, `subcommand`,
     `args`, `flags`, `paths`, `url`, `via` — plus `cwd`, `state`, `task` and
-    `toolset`.
+    `permission set`.
   - It returns **`"allow"` or `"deny"`**, nothing else. Anything else, a failure,
     or a function that does not load, has not decided: that part is put to the
     person, with the reason.
@@ -970,30 +970,31 @@ the same rule.
     run.
   - **`smart`** is the function JaiRA ships: one model call judges the request
     `allow`, `deny` or `unsure`, and `unsure` calls the approval prompt. Its model
-    and what it is told are **Settings → Configuration → smart** (`smart.model`,
-    `smart.prompt` in `settings.json`); a file named `smart` on the path replaces
-    it outright. The shipped `auto` toolsets give every line `{ "function": "smart" }`.
+    and what it is told are `functions.smart.model` and `functions.smart.prompt` in
+    `settings.json` (Settings → Tools → Functions a workflow calls); a file named `smart` on the path replaces
+    it outright. The shipped `auto` permission sets give every line `{ "function": "smart" }`.
 
   `"bash": "deny"` with no command and no `script` entry that allows, asks or
   names a function leaves nothing for the shell to run, so the shell is **withheld**: the
   agent gets no shell at all, not even its own, and codex's writing sandbox stays
   off. Reading a file goes through `read_file`, `glob` and `grep`.
 
-  **How it composes with `policy` in settings.** Per part: `.jaira/` is denied;
-  then the first matching `policy.rules` rule, else the built-in destructive floor
-  (`git reset --hard`, a force push, `rm -r .git` — denied), else a built-in ask
-  (push, merge, install, publish, deploy, network, a credentials path), else
-  `policy.default`. The toolset's answer is then folded in as the **stricter of
-  the two** — with one exception: an entry that **names the program**
-  (`"git push": "allow"`, `"npm": "allow"`) replaces a built-in *ask* or the
-  default, because naming it is the decision those stand in for. `"bash": "allow"`
-  does not: "any other command" says nothing about pushing. Nothing in a toolset
-  lifts the destructive floor, and nothing in one loosens an authored rule — a
-  state may tighten the project's statement, never widen it. A line the parser
+  **How it composes with JaiRA's built-ins.** There is no project rule list: what
+  a command may run is a line in the permission set. Per part: `.jaira/` is denied; then
+  the built-in destructive floor (`git reset --hard`, a force push, `rm -r .git` —
+  denied), else a built-in ask (push, merge, install, publish, deploy, network, a
+  credentials path), else nothing, which allows. The permission set's answer is then
+  folded in as the **stricter of the two** — with one exception: an entry that
+  **names the program** (`"git push": "allow"`, `"npm": "allow"`) replaces a
+  built-in *ask*, because naming it is the decision the ask stands in for.
+  `"bash": "allow"` does not: "any other command" says nothing about pushing.
+  Nothing in a permission set lifts the destructive floor; `functions.bash.builtins:
+  false` in `settings.json` turns the built-ins off, for a disposable workspace,
+  and is the only thing a project says above its permission sets. A line the parser
   cannot model (an unterminated quote, `$CMD …`, `git $(…) …`, a `case`, an
-  encoded PowerShell command) asks whatever the toolset allows.
+  encoded PowerShell command) asks whatever the permission set allows.
 
-  **A run reads the toolset as a conversation turn does.** The engine hands the
+  **A run reads the permission set as a conversation turn does.** The engine hands the
   agent executor the state's resolved block, so `"implementation": "native"` keeps
   the agent's built-in in a run too (ours is not injected beside it), and a written
   `"other": "ask"` (or a function) forces `Task`, `Agent` and `SlashCommand` to the
@@ -1003,29 +1004,29 @@ the same rule.
   built-in there too, under an ask rule; `"function": "codex-cli"` is served its
   held tools and runs read-only unless an entry keeps a writer of codex's own,
   whatever `permissionMode` the call passes; and a generic CLI function refuses a
-  toolset that denies anything. (A function state is not given `show_artifact`,
+  permission set that denies anything. (A function state is not given `show_artifact`,
   which every *prompt* state holds.)
 
-  **A child that writes a toolset writes the whole of it.** Its map says which
+  **A child that writes a permission set writes the whole of it.** Its map says which
   tools it holds and whose code serves each; a parent's `"implementation":
   "native"` does not carry into a child whose own line says nothing of the kind.
-  To start from the parent's toolset and say more, name it: `{ "$ref": "…",
+  To start from the parent's permission set and say more, name it: `{ "$ref": "…",
   "grep": "ask" }`. Only `other` still comes down from a parent when the child
   writes none.
 
-  `run_command` is a host function with no state toolset in reach: its line
+  `run_command` is a host function with no state permission set in reach: its line
   answers to `policy` alone. A line it is refused fails the state with
   `command refused:`, the policy's reason, and — when nobody was asked — why, and
   what would allow it.
 
-  ⚠️ **Across layers a toolset replaces the offered TOOLS, and only those.** It
+  ⚠️ **Across layers a permission set replaces the offered TOOLS, and only those.** It
   reaches the engine as a list and a `permissions` block, and the block merges per
-  key (§5.2) — so a child that writes its own toolset without an `other` still
+  key (§5.2) — so a child that writes its own permission set without an `other` still
   inherits its parent's, and a mode the parent gave a tool the child no longer
   offers rides along, inert. So does an implementation choice: a child that holds
   a tool its parent marked `"native"` keeps the built-in, unless the child chooses
   an implementation for some tool itself (`{ "mode": "ask", "implementation":
-  "app" }`), which replaces the parent's choices whole. Say `other` in a toolset that means to stand alone. The shell is the
+  "app" }`), which replaces the parent's choices whole. Say `other` in a permission set that means to stand alone. The shell is the
   exception that needs no care: a child's own shell entries replace its parent's
   whole, so its lines are judged by its own map.
 - **`conversation.mode`** — `full_history` | `summary` | `fresh` |
@@ -1035,12 +1036,12 @@ the same rule.
   lint surface warns — and it reads the *effective* mode, so an inherited one is
   caught too.
 - **`permissions`** — **where** tools may act (`scopes`), and nothing else. A
-  tool's mode is an entry of the toolset in `tools`: `permissions.tools`,
+  tool's mode is an entry of the permission set in `tools`: `permissions.tools`,
   `default`, `other` and `profile` are the old form, and the linter refuses each
-  as an **error** (`default` is the toolset's `other`; `"profile": "read-only"` is
-  a toolset whose writers and `other` are `deny`).
+  as an **error** (`default` is the permission set's `other`; `"profile": "read-only"` is
+  a permission set whose writers and `other` are `deny`).
 
-  The sync workflow is the worked example: its states' toolset is the map
+  The sync workflow is the worked example: its states' permission set is the map
   `{ "read_file": "allow", "glob": "allow", "grep": "allow", "other": "deny" }` —
   the readers so a clipped digest can be re-read and the tree searched, everything
   else absent so "returns text for a person to accept and must not touch disk" is
@@ -1053,7 +1054,7 @@ the same rule.
   or, for a run started by `jaira`, the terminal (below).
 
   **A run started by `jaira` is held exactly as an app run is** — the project's
-  `policy`, its scopes, the `command_log` audit, and each state's toolset, handed
+  `policy`, its scopes, the `command_log` audit, and each state's permission set, handed
   to claude and codex the same. What answers an `ask` is the terminal: with stdin
   and stdout both a terminal, the CLI shows the request as the app does — the line
   with its parts numbered under it, the words each rule matched marked `^`, and a
@@ -1065,16 +1066,16 @@ the same rule.
   ```text
   command refused: pushes publish work; nobody was asked: this jaira run has no
   terminal (stdin and stdout must both be one); run it at a terminal to be asked.
-  To let it run without asking, write a policy.rules entry
-  {"match":{"program":"git","subcommand":"push"},"action":"allow"} in .jaira/settings.json
+  To let it run without asking, write a "git push": "allow" line in the permission set
+  $/permission-sets/feature/build
   ```
 
-  Where a toolset judged the part, the refusal names the toolset line instead
-  (`"git push": "allow"`), because a policy rule cannot loosen a toolset.
-  `--approve ask` insists on a terminal and is a usage error without one. There is
-  no flag that allows everything: a built-in ask is a question somebody should
-  see, so an unattended way past it is written down where the project keeps its
-  policy.
+  Where no permission set judges the line (`run_command`, or a state with no permission set),
+  the built-ins alone answer it, and the refusal says that only
+  `functions.bash.builtins: false` would let it run unasked. `--approve ask`
+  insists on a terminal and is a usage error without one. There is no flag that
+  allows everything: a built-in ask is a question somebody should see, so an
+  unattended way past it is written down in the permission set that asked.
 - **`configRef`** — the name of a preset in `config.models.presets`, merged
   UNDER this operation's own fields and OVER the project defaults. It is for the
   settings a model call has and a state should not have to repeat —
@@ -1117,7 +1118,7 @@ state and both ways out — never at the first call, four layers down.
 | `args` | **deep merge** per key |
 | `input` | merged per slot name; within a slot, per field |
 | `input.<slot>.schema`, `input.<slot>.binding`, `output.…` | **replaced whole** |
-| `tools`, `conversation.artifacts` | **replaced** — `"tools": []` (or `{}`) is how you drop an inherited tool. A toolset replaces the offered tools; its modes and `other` travel as `permissions`, below |
+| `tools`, `conversation.artifacts` | **replaced** — `"tools": []` (or `{}`) is how you drop an inherited tool. A permission set replaces the offered tools; its modes and `other` travel as `permissions`, below |
 | `conversation` | merged per field |
 | `permissions` | merged, with `permissions.tools` merged per tool name |
 
@@ -2591,9 +2592,9 @@ two agents were involved.
 
 Three things worth knowing before running it:
 
-- **A toolset on the codex mount holds it as it holds claude.** Codex is served the
+- **A permission set on the codex mount holds it as it holds claude.** Codex is served the
   held tools over JaiRA's bridge, each call gated, and its writing sandbox stays
-  shut unless an entry keeps codex's own writer (§4.2, §5.1). With no toolset it
+  shut unless an entry keeps codex's own writer (§4.2, §5.1). With no permission set it
   reviews with its own built-ins under its configured sandbox.
 - **Give the reviewers separate conversations, which is the default.** Naming one
   `session` for both would put two agents in one transcript; here each mount gets
@@ -2761,9 +2762,8 @@ Every one of these fails **silently or misleadingly**:
     that declares no `tools` at all leaves its agent as the executor built it.
     There is no `profile` to write; a map that must not write does not hold
     `edit`, `write_file` or `bash`, and says `"other": "deny"`.
-15. A `generic-cli` state is refused outright while the policy can escalate to a
-    human — which `policy.builtins: false` alone does not settle: a `default` or a
-    rule of `require_approval` keeps it escalating.
+15. A `generic-cli` state is refused outright while the project's policy can
+    escalate to a human, which it can exactly while `functions.bash.builtins` is on.
 16. Inside a `schema`, `$ref` is always **JSON Schema's** — ours is the bare-string
     form. Inside `args`, only `{"$ref": …}` works, because nothing types that
     position.

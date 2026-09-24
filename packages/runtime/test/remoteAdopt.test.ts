@@ -34,7 +34,7 @@ beforeEach(async () => {
     scratchDir: join(rig.root, "scratch"),
     handles,
     integrations: parseIntegrations(undefined),
-    policy: { remote: { publish: "allow" } },
+    publish: "allow",
     secrets: new SecretResolver({ env: { GITLAB_TOKEN: "good" } }),
     exec: new NodeExec(),
     http: replayForge().http,

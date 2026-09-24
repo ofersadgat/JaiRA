@@ -14,8 +14,6 @@
     "format": "claude"
   },
   "execEnvironment": "windows",
-  "policy": {},
-  "agents": {},
   "executors": {},
   "workflows": {}
 }

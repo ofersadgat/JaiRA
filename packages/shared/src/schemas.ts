@@ -343,7 +343,7 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
       properties: {
         scopes: { type: "array", items: { type: "object" }, description: "where each tool may act — a path or URL pattern and the modes under it" },
       },
-      description: "where tools may act (`scopes`, §5.1); a tool's mode is an entry of the toolset in `tools`",
+      description: "where tools may act (`scopes`, §5.1); a tool's mode is an entry of the permission set in `tools`",
     }),
     reasoning: leaf({
       type: "object",
@@ -358,12 +358,12 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
 }
 
 /**
- * `tools` — a toolset (decision 0007 §1; WORKFLOWS.md §5.1).
+ * `tools` — a permission set (decision 0007 §1; WORKFLOWS.md §5.1).
  *
- * A toolset is a map from a SUBJECT to a mode: a standard tool (`read_file`), a command
+ * A permission set is a map from a SUBJECT to a mode: a standard tool (`read_file`), a command
  * (`git commit`, `git`), `script`, or `other`. The subject is not constrained here — a command is
  * free text — so what the schema checks is the VALUE, and the linter checks the subject
- * (`lowerStateToolsets`). A bare string is a reference to a toolset file, which the format already
+ * (`lowerStatePermissionSets`). A bare string is a reference to a permission set file, which the format already
  * admits in an object position (§2.2); `$ref` beside the subjects starts from one and says more.
  */
 export function toolsSchema(): SchemaDoc {
@@ -405,14 +405,14 @@ export function toolsSchema(): SchemaDoc {
   };
   return {
     description:
-      "what the agent may do (§5.1) — a toolset: a map from a tool, a command, `script` or `other` to a mode, or a reference to one (\"$/toolsets/chat/read-only\"). `{}` drops the inherited ones",
+      "what the agent may do (§5.1) — a permission set: a map from a tool, a command, `script` or `other` to a mode, or a reference to one (\"$/permission-sets/chat/read-only\"). `{}` drops the inherited ones",
     anyOf: [
-      { type: "string", description: "a reference to a toolset file — $/toolsets/<bucket>/<name>" },
+      { type: "string", description: "a reference to a permission set file — $/permission-sets/<bucket>/<name>" },
       {
         type: "object",
         description: "subject → mode. Present means offered with that mode; absent means not offered; `other` is everything no entry names",
         properties: {
-          $ref: { type: "string", description: "start from this toolset; the entries beside it override, per subject" },
+          $ref: { type: "string", description: "start from this permission set; the entries beside it override, per subject" },
           other: { ...mode, description: "everything no entry names" },
           script: { ...entry, description: "running a file — ./x.sh, npm run <name>, make <target>" },
         },

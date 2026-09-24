@@ -1,19 +1,19 @@
 /**
  * What a claude or codex agent is handed under one effective block, MEASURED (decision 0007).
  *
- * The measurement goes through the real chain (engine → `withAgentToolset` → the upstream executor →
+ * The measurement goes through the real chain (engine → `withAgentPermissionSet` → the upstream executor →
  * the spawn options, with a fake query standing in for the binary), so these tests pin what a
- * toolset does to an agent without restating any rule of the chain.
+ * permission set does to an agent without restating any rule of the chain.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { lowerToolset, parseToolset, type PermissionsDecl } from "@jaira/shared";
+import { lowerPermissionSet, parsePermissionSet, type PermissionsDecl } from "@jaira/shared";
 import { handedToClaude, handedToCodex, type HandedEnvironment } from "../src/agentHanded";
 
 vi.setConfig({ testTimeout: 60_000 });
 
-const map = (decl: Record<string, unknown>): HandedEnvironment => lowerToolset(parseToolset(decl).toolset);
+const map = (decl: Record<string, unknown>): HandedEnvironment => lowerPermissionSet(parsePermissionSet(decl).permissionSet);
 
 describe("handedToClaude", () => {
   it("a MAP is the whole grant: what it does not hold is not reachable, and `deny` is not a way in", async () => {
@@ -25,7 +25,7 @@ describe("handedToClaude", () => {
     expect(handed.other).toBe("deny");
   });
 
-  it("a state that declares NO toolset is handed on untouched: claude keeps everything it has, under the gate", async () => {
+  it("a state that declares NO permission set is handed on untouched: claude keeps everything it has, under the gate", async () => {
     const handed = await handedToClaude({});
     expect(handed.served).toEqual(["show_artifact"]);
     for (const native of ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebFetch", "WebSearch", "Task"]) expect(handed.removed).not.toContain(native);
@@ -103,7 +103,7 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
   });
 });
 
-describe("a shell the toolset denies, MEASURED in a run", () => {
+describe("a shell the permission set denies, MEASURED in a run", () => {
   it("hands claude NO shell for `\"bash\": \"deny\"` — not ours, not its own", async () => {
     const handed = await handedToClaude(map({ read_file: "allow", bash: "deny", other: "deny" }));
     expect(handed.served).not.toContain("bash");
@@ -113,8 +113,8 @@ describe("a shell the toolset denies, MEASURED in a run", () => {
   });
 
   it("hands the SHIPPED `chat/read-only` no shell", async () => {
-    const decl = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/toolsets/chat/read-only.json", import.meta.url)), "utf8")) as unknown;
-    const handed = await handedToClaude(lowerToolset(parseToolset(decl).toolset));
+    const decl = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as unknown;
+    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet(decl).permissionSet));
     expect(handed.removed).toContain("Bash");
     expect(handed.tools["bash"]).toEqual({ reachable: false, via: [] });
   });
@@ -174,7 +174,7 @@ describe("what a RUN reads off the state's block, MEASURED", () => {
 });
 
 /**
- * Codex is served the tools its toolset holds over its MCP bridge, and — having no permission callback
+ * Codex is served the tools its permission set holds over its MCP bridge, and — having no permission callback
  * — every call is put to the gate AT the bridge, before the tool runs. Measured through upstream's
  * real codex transport (its refusals, argv and bridge), with a double for the binary and the listener.
  */
@@ -187,7 +187,7 @@ describe("handedToCodex — a held tool reaches codex through the MCP bridge, an
     // Codex approves our tools on its side and waits for the bridge's handshake — the gate is ours.
     expect(handed.bridge).toContain('mcp_servers.dai={url="<url>",required=true');
     expect(handed.bridge).toContain('"write_file"={approval_mode="approve"}');
-    // What decides a call is the toolset's entry, through the gate at the bridge — `ask` reaches a person.
+    // What decides a call is the permission set's entry, through the gate at the bridge — `ask` reaches a person.
     expect(handed.tools).toMatchObject({ read_file: "allow", write_file: "ask" });
     // A shell line is taken apart and each part judged by the map, as claude's is: the program is named,
     // `cat` is `read_file`, `rm` is `write_file` (ask), and `./build.sh` is `script`, which falls to `other`.
@@ -205,7 +205,7 @@ describe("handedToCodex — a held tool reaches codex through the MCP bridge, an
   });
 });
 
-describe("handedToCodex — codex's sandbox opens only for a writer of its own the toolset keeps", () => {
+describe("handedToCodex — codex's sandbox opens only for a writer of its own the permission set keeps", () => {
   it.each(["route", "function"] as const)("%s: read-only unless an entry keeps codex's own shell or apply_patch; a state that declares none keeps the configured sandbox", async (via) => {
     expect((await handedToCodex(map({ other: "deny" }), { via })).sandbox).toBe("read-only");
     expect((await handedToCodex(map({ bash: "deny", other: "deny" }), { via })).sandbox).toBe("read-only");
@@ -260,13 +260,13 @@ describe("handedToClaude — a function call is handed exactly what the route is
     expect(handed.tools["grep"]).toEqual({ reachable: true, via: ["Grep"], decision: "ask" });
   });
 
-  it("hands a state that declares no toolset on untouched, as the route does", async () => {
+  it("hands a state that declares no permission set on untouched, as the route does", async () => {
     expect(sansArtifact(await handedToClaude({}, { via: "function" }))).toEqual(sansArtifact(await handedToClaude({})));
   });
 });
 
 /**
- * A child that writes a toolset has written the whole statement of what it holds and whose code serves
+ * A child that writes a permission set has written the whole statement of what it holds and whose code serves
  * it (decision 0007 §1). Lowering writes `implementations` on every map, empty where it chose none, so
  * the engine's per-key merge of `permissions` replaces a parent's choice instead of carrying it down.
  */
