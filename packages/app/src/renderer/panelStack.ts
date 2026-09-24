@@ -245,3 +245,40 @@ export function widthKeyOf(kind: PanelKind): string {
       return "panel.task";
   }
 }
+
+/**
+ * Where a change to the SHOWN stack lands, now that a pinned stack is the window's rather than a
+ * room's (the person's ruling, 2026-09-24: "a pinned context panel should be immune from any stack
+ * switches … stack push/pop/etc still work normally").
+ *
+ * - Nothing pinned: the change is the room's — unless it PINS, when the result becomes the window's
+ *   pinned stack and the room keeps its own, which goes on following the room underneath.
+ * - Pinned: the change is the pinned stack's. Waving the offer away remembers which one; unpinning,
+ *   taking the offer or closing hands the result to the room and ends the pin.
+ *
+ * `shown` is what the frame drew: the pinned stack with the room's root as its offer, or the room's.
+ */
+export function routeChange(
+  pinned: PanelStack | null,
+  shown: PanelStack,
+  moved: PanelStack,
+): { pinned: PanelStack | null; room?: PanelStack; dismissed?: string | null } {
+  if (moved === shown) return { pinned };
+  if (pinned === null) {
+    if (moved.pinned) return { pinned: { ...moved, offer: null }, dismissed: null };
+    return { pinned: null, room: moved };
+  }
+  if (!moved.pinned) return { pinned: null, room: { ...moved, offer: null }, dismissed: null };
+  return {
+    pinned: { ...moved, offer: null },
+    ...(moved.offer === null && shown.offer !== null ? { dismissed: shown.offer.key } : {}),
+  };
+}
+
+/** What the frame draws: the pinned stack, offering the room's root when it stands elsewhere; else the room's. */
+export function shownStack(pinned: PanelStack | null, room: PanelStack, dismissed: string | null): PanelStack {
+  if (pinned === null) return room;
+  const root = room.entries[0];
+  const offer = root !== undefined && root.key !== pinned.entries[0]?.key && root.key !== dismissed ? root : null;
+  return { ...pinned, pinned: true, offer };
+}

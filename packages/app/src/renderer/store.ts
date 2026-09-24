@@ -3554,10 +3554,14 @@ export function useApp() {
        * A column knows a child's id but not which file supplied it, so the pair has to be looked up
        * before the document can be read. Drilling and selecting stay one action: the tree highlights
        * the file this resolves to, so it always says where you are.
+       *
+       * `run: false` opens the FILE and no run of it — what ⇤ from the side panel asks for (the panel
+       * rulings, 2026-09-24): the configuration was the point, and a run opened on the path would put
+       * its conversation in the main view instead.
        */
-      selectState: (stateId: string | null) => {
+      selectState: (stateId: string | null, options?: { run?: boolean }) => {
         patch({ stateId, inspect: "path", doc: null, dir: null, sync: clearedSync(ref.current.sync) });
-        void refreshState(stateId).then((view) => focusStateRun(view));
+        void refreshState(stateId).then((view) => focusStateRun(options?.run === false ? null : view));
         if (stateId === null) return void refreshDoc(null, null);
         void locateState(stateId).then((at) => refreshDoc(at?.layer ?? null, at?.path ?? null));
       },
@@ -4046,13 +4050,22 @@ export function useApp() {
        * Returns the result rather than swallowing it: a refusal carries the states that reference
        * this one, and the caller is the only thing that can decide whether to ask and retry.
        */
-      moveWorkflow: async (request: {
+      moveWorkflow: async ({
+        draft,
+        ...request
+      }: {
         stateId: string;
         layer: WorkflowLayer;
         to: string;
         toLayer: WorkflowLayer;
         copy?: boolean;
         force?: boolean;
+        /**
+         * An unsaved edit for the COPY, read once the copy exists — what editing a built-in hands
+         * over (copy-on-edit, the panel rulings of 2026-09-24). A function, so keystrokes made while
+         * the copy is being written are in it too.
+         */
+        draft?: (() => string) | undefined;
       }): Promise<WorkflowMutationResult | null> => {
         patch({ busy: true, error: null });
         try {
@@ -4067,6 +4080,7 @@ export function useApp() {
             // pointed at it would show "select a state" for something that just moved.
             await refreshTree();
             const at = await locateState(result.stateId, result.layer);
+            if (draft !== undefined && at !== null) patch({ drafts: { ...ref.current.drafts, [docKey(at.layer, at.path)]: draft() } });
             // The draft follows it too. Renaming a state is usually part of the same piece of work
             // as editing it, so this is one action, not a reason to lose the other half of it.
             if (from !== null) {

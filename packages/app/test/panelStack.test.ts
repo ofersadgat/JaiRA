@@ -8,7 +8,9 @@ import {
   popTo,
   push,
   reconcile,
+  routeChange,
   selectStep,
+  shownStack,
   setTab,
   type PanelEntry,
   type PanelStack,
@@ -122,5 +124,52 @@ describe("tab labels", () => {
   });
   it("labels nothing when even the open tab's label does not fit", () => {
     expect(labelPlan(tabs, 4, 178 + 50)).toEqual([false, false, false, false, false]);
+  });
+});
+
+describe("the pinned panel is the window's", () => {
+  const room = on(EMPTY_STACK, task("t1"));
+
+  it("pinning takes the stack out of the room; the room keeps following its own", () => {
+    const routed = routeChange(null, room, pin(push(room, config("x")), true));
+    expect(routed.pinned?.entries.map((e) => e.key)).toEqual(["task:t1", "config:x"]);
+    expect(routed.room).toBeUndefined();
+  });
+
+  it("is immune to the room: the room moving on only OFFERS its new root", () => {
+    const pinned = pin(room, true);
+    const moved = on(room, task("t2"));
+    const shown = shownStack(pinned, moved, null);
+    expect(shown.entries.map((e) => e.key)).toEqual(["task:t1"]);
+    expect(shown.offer?.key).toBe("task:t2");
+    // Standing on the pinned task itself offers nothing.
+    expect(shownStack(pinned, room, null).offer).toBeNull();
+  });
+
+  it("pushes, pops and tabs on the pinned stack as on any stack", () => {
+    const pinned = pin(room, true);
+    const shown = shownStack(pinned, room, null);
+    const routed = routeChange(pinned, shown, push(shown, config("x")));
+    expect(routed.pinned?.entries.map((e) => e.key)).toEqual(["task:t1", "config:x"]);
+    expect(routed.room).toBeUndefined();
+  });
+
+  it("remembers an offer waved away, so it is not offered again", () => {
+    const pinned = pin(room, true);
+    const shown = shownStack(pinned, on(room, task("t2")), null);
+    const routed = routeChange(pinned, shown, { ...shown, offer: null });
+    expect(routed.dismissed).toBe("task:t2");
+    expect(shownStack(routed.pinned, on(room, task("t2")), "task:t2").offer).toBeNull();
+  });
+
+  it("unpinning, or taking the offer, hands the column back to the room", () => {
+    const pinned = pin(room, true);
+    const shown = shownStack(pinned, on(room, task("t2")), null);
+    const taken = routeChange(pinned, shown, acceptOffer(shown));
+    expect(taken.pinned).toBeNull();
+    expect(taken.room?.entries.map((e) => e.key)).toEqual(["task:t2"]);
+    const unpinned = routeChange(pinned, shown, pin(shown, false));
+    expect(unpinned.pinned).toBeNull();
+    expect(unpinned.room?.entries.map((e) => e.key)).toEqual(["task:t1"]);
   });
 });

@@ -1847,10 +1847,11 @@ export function FilePanel({
           </button>
         ) : null}
         {shut ? null : Edit ? (
-          // What ships is read, never written (decision 0006): the same surface, mounted as the
-          // READING of its type — which every editor already knows how to be, because it is what the
-          // panel beside a finished run asks of them. No Save is drawn, so none can be refused.
-          <Edit {...(isWritableLayer(doc.layer) ? props : viewProps)} />
+          // What ships is never written in place (decision 0006). Any other shipped file is mounted as
+          // the READING of its type — which every editor already knows how to be. A shipped STATE is
+          // mounted live: its editor copies it into Shared on the first change (copy-on-edit, the
+          // panel rulings of 2026-09-24), so an edit is never refused and never lost.
+          <Edit {...(isWritableLayer(doc.layer) || doc.stateId !== undefined ? props : viewProps)} />
         ) : (
           // Reached only by a type that is not text — an image, the database, an archive. Naming the
           // type is the useful part: "no editor" alone reads as a missing feature rather than as a

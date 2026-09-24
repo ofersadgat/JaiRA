@@ -41,6 +41,7 @@ import {
   StepCard,
   StepsView,
   checksCountOf,
+  pathOf,
   useEffectiveRead,
 } from "./panelViews";
 import { RunPanel, type RunSurface } from "./runPanel";
@@ -50,6 +51,7 @@ import { StatePanel } from "./statePanel";
 import { stoppedAction } from "./taskAction";
 import { TaskName } from "./taskName";
 import { nodeAt, type TrailStep } from "./trail";
+import { useTaskRun } from "./taskRun";
 import type { ArtifactSurface } from "./transcriptView";
 import type { PinnedValue } from "./valuePanel";
 
@@ -78,6 +80,8 @@ export interface PanelHost {
   onStack: (next: (stack: PanelStack) => PanelStack) => void;
   /** The gate the selected task is parked on, when its conversation is the place to answer it. */
   gate?: HostedGate | undefined;
+  /** The gate ANY task is parked on — what a panel holding its own run hosts. */
+  gateOf: (taskId: string) => HostedGate | undefined;
 
   /* Tasks */
   select: (taskId: string, project?: string) => void;
@@ -99,7 +103,7 @@ export interface PanelHost {
 
   /* States */
   /** A state's view and run surface, when the store holds them. */
-  stateOf: (stateId: string) => { view: StateView | null; run?: RunSurface | undefined } | undefined;
+  stateOf: (stateId: string, project?: string | null) => { view: StateView | null; run?: RunSurface | undefined } | undefined;
   /** Whether the Files editor has this state's file open. */
   inEditor: (stateId: string) => boolean;
   /** ⇤ — open a state in the Files view. */
@@ -124,16 +128,29 @@ export interface PanelHost {
 /** A tab with its icon filled in from the shared table. */
 const tab = (id: string, label: string, extra: Omit<PanelTabSpec, "id" | "label" | "icon"> = {}): PanelTabSpec => ({ id, label, icon: TAB_ICONS[id] ?? "note", ...extra });
 
-/** What a task entry says when the store is holding a different task — the one case a pinned stack meets. */
-function NotSelected({ host, taskId, project }: { host: PanelHost; taskId: string; project?: string | undefined }): JSX.Element {
-  return (
-    <div className="pv-empty-act">
-      <p className="empty">Another task is selected, so this one&apos;s conversation is not loaded.</p>
-      <button type="button" onClick={() => host.select(taskId, project)}>
-        Load it
-      </button>
-    </div>
-  );
+/**
+ * An entry about a task the store is NOT holding — a pinned panel after the selection moved on. It
+ * loads the task's run itself (`taskRun.ts`) and draws the entry's body over a host that is about
+ * THAT task: its tree, its conversation, its gate. Nothing about the selection reaches it, which is
+ * what "immune from any stack switches" means for its content.
+ */
+function OwnRun({ host, entry, taskId, project }: { host: PanelHost; entry: PanelEntry; taskId: string; project: string | undefined }): JSX.Element {
+  const run = useTaskRun(taskId, project, host.context);
+  if (run.failed !== null) return <p className="empty">Could not read this task: {run.failed}</p>;
+  if (run.detail === null) return <p className="empty">Reading the task…</p>;
+  const own: PanelHost = {
+    ...host,
+    detail: run.detail,
+    detailOf: (id) => (id === taskId ? run.detail : host.detailOf(id)),
+    project,
+    context: run.context,
+    gate: host.gateOf(taskId),
+    // The main view is not showing this task, so there is no conversation there to go to or give back.
+    goTo: undefined,
+    viewed: undefined,
+    giveBack: undefined,
+  };
+  return <>{faceOf(own, entry).body}</>;
 }
 
 /** The head's line for a task: its status, its name, and what identifies it. */
@@ -337,10 +354,19 @@ function countSteps(nodes: readonly InstanceNode[]): number {
 }
 
 /** The face of any entry. */
-export function faceOf(host: PanelHost, entry: PanelEntry): PanelFace {
+export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): PanelFace {
   const detail = "taskId" in entry && entry.taskId !== undefined ? host.detailOf(entry.taskId) : null;
   /** Whether that task's run is the one loaded — what a conversation drawn here reads from. */
   const loaded = detail !== null && host.detail?.taskId === detail.taskId;
+  /** A task-shaped entry whose run is not the loaded one draws its body over its own (see {@link OwnRun}). */
+  const ownRun =
+    (entry.kind === "task" || entry.kind === "convo" || entry.kind === "subagent" || entry.kind === "rerun") && host.detail?.taskId !== entry.taskId
+      ? <OwnRun host={host} entry={entry} taskId={entry.taskId} project={entry.project ?? host.project} />
+      : undefined;
+  if (ownRun !== undefined && !headOnly) {
+    const face = faceOf({ ...host, detail: detail, detailOf: host.detailOf }, entry, true);
+    return { ...face, body: ownRun, scroll: face.scroll };
+  }
   switch (entry.kind) {
     case "task": {
       const head = taskHeadOf(detail, entry.taskId);
@@ -349,7 +375,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry): PanelFace {
         if (detail === null) return <p className="empty">Reading the task…</p>;
         switch (entry.tab) {
           case "conversation":
-            return loaded ? <TaskConversation host={host} detail={detail} project={project} /> : <NotSelected host={host} taskId={entry.taskId} project={entry.project} />;
+            return loaded ? <TaskConversation host={host} detail={detail} project={project} /> : <p className="empty">Reading the task…</p>;
           case "steps":
             return stepsBody(host, detail, entry, false);
           case "changes":
@@ -421,7 +447,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry): PanelFace {
     }
 
     case "state": {
-      const found = host.stateOf(entry.stateId);
+      const found = host.stateOf(entry.stateId, entry.project);
       const view = found?.view ?? null;
       const editing = host.inEditor(entry.stateId);
       const name = entry.stateId.split("/").pop() ?? entry.stateId;
@@ -488,7 +514,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry): PanelFace {
         verbs: [{ icon: "adopt", label: "Show this conversation in the main view", onClick: () => host.adoptSubagent(entry.taskId, entry.project, entry.step) }],
         body:
           !loaded ? (
-            <NotSelected host={host} taskId={entry.taskId} project={entry.project} />
+            <p className="empty">Reading the task…</p>
           ) : (
             <div className="pv-convo">
               <SidechainConversation
@@ -513,14 +539,40 @@ export function faceOf(host: PanelHost, entry: PanelEntry): PanelFace {
     }
 
     case "rerun": {
-      const run = detail === null ? undefined : host.rerunSurface(detail);
+      const surface = detail === null ? undefined : host.rerunSurface(detail);
+      // Every state the task entered, as a place a copy can start — its entry's journal position.
+      const starts =
+        detail === null
+          ? []
+          : (host.context.conversation?.turns ?? []).flatMap((turn) => {
+              if (turn.kind !== "entered" || turn.instanceId === undefined) return [];
+              const node = nodeAt(detail.instances, turn.instanceId);
+              // The root has nothing before it: starting there is starting from the beginning.
+              if (node === undefined || node.parentInstanceId === undefined) return [];
+              return [{ seq: turn.seq, label: pathOf(detail.instances, node).slice(1).join(" › ") }];
+            });
+      const run =
+        surface === undefined || detail === null
+          ? undefined
+          : {
+              ...surface,
+              starts,
+              ...(host.context.onFork !== undefined
+                ? {
+                    onFork: (seq: number) => {
+                      host.context.onFork?.(detail.taskId, seq);
+                      host.onStack((was) => ({ ...was, entries: was.entries.slice(0, 1), motion: "pop" }));
+                    },
+                  }
+                : {}),
+            };
       return {
         title: "Re-run with changes",
         titleText: "Re-run with changes",
         sub: detail !== null ? <>a new task from {detail.workflow}, its inputs as this one had them</> : undefined,
         body:
           detail === null ? (
-            <NotSelected host={host} taskId={entry.taskId} project={entry.project} />
+            <p className="empty">Reading the task…</p>
           ) : (
             <RerunForm run={run!} onCancel={() => host.onStack(pop)} />
           ),

@@ -785,6 +785,8 @@ export function WorkflowEditor({
         hasProject: boolean;
         /** Copy this shipped file up into a layer a person owns, and open the copy. */
         onOverride: (toLayer: WritableLayer) => void;
+        /** Copy-on-edit: the first change copies the file into Shared with the change as its draft. */
+        onEditCopy?: ((text: () => string) => void) | undefined;
       }
     | undefined;
 }): JSX.Element {
@@ -816,9 +818,23 @@ export function WorkflowEditor({
   // beside a finished run throws, for a different reason. `AppService.writable` would refuse the
   // write anyway; this is the editor not offering it.
   const shipped = !isWritableLayer(source.layer);
-  const readOnly = useReadOnly() || shipped;
+  /**
+   * COPY-ON-EDIT (the person's ruling, 2026-09-24): a shipped state is edited where it is shown, and
+   * the first change is a copy into Shared carrying that change — so the form is live, not a reading.
+   * Not when Shared already has a copy: that copy is the one that loads, and editing the built-in
+   * would write a second one over it. The bar says to open the copy instead.
+   */
+  const copyOnEdit = shipped && layerActions?.onEditCopy !== undefined && source.builtIn?.layers.includes("base") !== true;
+  const readOnly = useReadOnly() || (shipped && !copyOnEdit);
+  /** The newest text while the copy is being written, and whether it has been asked for. */
+  const copying = useRef<{ file: string; text: string } | null>(null);
+  /** Redraws the form while the copy is being written — the text lives in the ref above. */
+  const [, redraw] = useState(0);
   const onDisk = source.text || "{}";
-  const held = onDraft
+  const inFlight = copying.current !== null && copying.current.file === source.file ? copying.current.text : null;
+  const held = inFlight !== null
+    ? inFlight
+    : onDraft
     ? (draft ?? null)
     : localDraft !== null && localDraft.file === source.file
       ? localDraft.text
@@ -828,6 +844,14 @@ export function WorkflowEditor({
 
   /** Write the document. A draft equal to the file is not a draft — see `drafts.ts`. */
   const setText = (next: string): void => {
+    if (copyOnEdit) {
+      // The copy is asked for once; every keystroke until it opens lands in what it will carry.
+      const started = copying.current !== null && copying.current.file === source.file;
+      copying.current = { file: source.file, text: next };
+      if (!started) layerActions?.onEditCopy?.(() => copying.current?.text ?? next);
+      redraw((n) => n + 1);
+      return;
+    }
     const value = next === onDisk ? null : next;
     if (onDraft) onDraft(value);
     else setLocalDraft(value === null ? null : { file: source.file, text: value });
@@ -1114,7 +1138,7 @@ export function WorkflowEditor({
             file is read-only and overridable, a file that overrides one can be compared with it, and
             a shared file says — as it always has — that every project sees an edit to it. */}
         <LayerBar
-          model={layerBarOf(source, layerActions?.hasProject === true)}
+          model={layerBarOf(source, layerActions?.hasProject === true, copyOnEdit)}
           busy={busy}
           comparing={comparing}
           onAction={onLayerAction}
@@ -1515,7 +1539,7 @@ export function WorkflowEditor({
           Absent altogether in a reading — not disabled. A greyed-out Save at the foot of a panel
           describing a run that finished last week is an offer about a document nobody is editing,
           and it takes a row of the column to make it. */}
-      {readOnly ? null : (
+      {readOnly || shipped ? null : (
       <EditorActions
         // A file that is not on disk yet has a pending change whether or not anything was typed:
         // its existence. Without the second clause the panel offers "saving creates it" beside a

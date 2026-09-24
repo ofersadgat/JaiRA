@@ -41,6 +41,7 @@ import type {
   PendingQuestion,
   ProjectSummary,
   ProjectTask,
+  StateView,
   TaskDetail,
   PermissionSetsView as PermissionSetsData,
   WorkflowLayer,
@@ -120,8 +121,8 @@ import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf, settledMarkOf 
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView } from "./runViews";
 import { SidePanel } from "./sidePanel";
-import { faceOf, type PanelHost } from "./panelFaces";
-import { EMPTY_STACK, push, reconcile, topOf, widthKeyOf, type PanelEntry, type PanelStack } from "./panelStack";
+import { faceOf, type HostedGate, type PanelHost } from "./panelFaces";
+import { EMPTY_STACK, push, reconcile, routeChange, selectStep, shownStack, topOf, widthKeyOf, type PanelEntry, type PanelStack } from "./panelStack";
 import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
 import { primaryAct } from "./taskAction";
@@ -975,16 +976,35 @@ export default function App(): JSX.Element {
    * Per room, so going to Settings and back finds each panel where it was left.
    */
   const [stacks, setStacks] = useState<Record<PanelRoom, PanelStack>>(EMPTY_STACKS);
+  /** Where a letterhead's pick goes — set below, once the panel's host exists. */
+  const pickStepRef = useRef<(instanceId: string) => void>(() => undefined);
   const room: PanelRoom | null = view === "files" || view === "tasks" || view === "chat" || view === "debug" ? view : null;
   const roomRef = useRef(room);
   roomRef.current = room;
+  /**
+   * The PINNED stack — one for the whole window, not one per room (the person's ruling, 2026-09-24:
+   * "a pinned context panel should be immune from any stack switches"). While it is set it is the
+   * panel in every room that has one; each room keeps reconciling its own stack underneath, and a room
+   * standing on something else offers it on the offer bar. Pushes, pops and tabs work on it as on any
+   * stack. Unpinning — or taking the offer, or closing — hands the column back to the room.
+   */
+  const [pinnedStack, setPinnedStack] = useState<PanelStack | null>(null);
+  /** The offer the person waved away, so it is not offered again until the room moves on. */
+  const [dismissedOffer, setDismissedOffer] = useState<string | null>(null);
+  const stacksRef = useRef(stacks);
+  stacksRef.current = stacks;
+  const pinnedRef = useRef<PanelStack | null>(null);
+  /** The stack the frame is drawing — the pinned one with its offer, or the room's. See below. */
+  const shownRef = useRef<PanelStack>(EMPTY_STACK);
   const onStack = useCallback((next: (stack: PanelStack) => PanelStack): void => {
     const at = roomRef.current;
-    if (at === null) return;
-    setStacks((was) => {
-      const moved = next(was[at]);
-      return moved === was[at] ? was : { ...was, [at]: moved };
-    });
+    const shown = pinnedRef.current !== null ? shownRef.current : at === null ? EMPTY_STACK : stacksRef.current[at];
+    if (pinnedRef.current === null && at === null) return;
+    // See `routeChange`: whose stack a change lands on, pinned or not.
+    const routed = routeChange(pinnedRef.current, shown, next(shown));
+    if (routed.pinned !== pinnedRef.current) setPinnedStack(routed.pinned);
+    if (routed.dismissed !== undefined) setDismissedOffer(routed.dismissed);
+    if (routed.room !== undefined && at !== null) setStacks((was) => ({ ...was, [at]: routed.room! }));
   }, []);
   /**
    * The values somebody asked to HOLD — the Held tab of a conversation's context. Across rooms: a
@@ -1316,12 +1336,9 @@ export default function App(): JSX.Element {
    * appearing first as "this file does not parse" — see {@link AppState.workflowForms}, where
    * `undefined` is "not asked yet" and `null` is the file, read and refused.
    */
-  const workflowRunSurface: RunSurface | undefined = ((): RunSurface | undefined => {
-    const stateId = state.taskWorkflow;
-    if (stateId === null) return undefined;
+  const runSurfaceOf = (stateId: string, project: string | null, runInstance: string | null): RunSurface | undefined => {
     const fields = state.workflowForms[stateId];
     if (fields === undefined) return undefined;
-    const project = state.taskWorkflowProject;
     const summary = state.projects.find((p) => p.project === project);
     /**
      * What this panel's boxes hold.
@@ -1332,7 +1349,7 @@ export default function App(): JSX.Element {
      * still wins, because the reason to look at those values beside the Run button is usually to
      * change one of them and go again.
      */
-    const run = state.taskWorkflowRun === null ? null : nodeAt(detail?.instances ?? [], state.taskWorkflowRun);
+    const run = runInstance === null ? null : nodeAt(detail?.instances ?? [], runInstance);
     const called = run?.inputs;
     // How each value was settled (decision 0005 §4) — said only while the boxes still hold what the
     // run was called with. Once something is typed over them the form is a question about the NEXT
@@ -1361,7 +1378,9 @@ export default function App(): JSX.Element {
       onRun: (title, inputs) => void actions.runState(stateId, title, inputs, project ?? undefined),
       onSelectTask: actions.select,
     };
-  })();
+  };
+  const workflowRunSurface: RunSurface | undefined =
+    state.taskWorkflow === null ? undefined : runSurfaceOf(state.taskWorkflow, state.taskWorkflowProject, state.taskWorkflowRun);
 
   /**
    * Running a task AGAIN — the one place that decides what "again" MEANS for it.
@@ -1446,6 +1465,7 @@ export default function App(): JSX.Element {
     ...(runHere !== undefined ? { runHere } : {}),
     ...(runOnScreen !== undefined ? { runOnScreen } : {}),
     onRunHere,
+    onPickStep: (instanceId: string) => pickStepRef.current(instanceId),
     // The questions MOVES parked in task conversations (decision 0005, the rulings of 2026-09-22):
     // each is drawn where its move asked it, and answering it takes the move.
     moveQuestions: pending.filter((p) => p.moves === true),
@@ -1501,6 +1521,8 @@ export default function App(): JSX.Element {
       // The override IS a copy up a layer (decision 0006): same id, so it shadows what ships, and
       // `moveWorkflow` follows the file — the editor lands on the copy, which is the one that loads.
       onOverride: (stateId, toLayer) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer, copy: true }),
+      // Copy-on-edit: the first change to a shipped state IS the copy into Shared, with the change in it.
+      onEditCopy: (stateId, text) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer: "base", copy: true, draft: text }),
     },
     schemaChoice: state.schemaChoice,
     onSchemaChoice: actions.setSchemaChoice,
@@ -1653,10 +1675,13 @@ export default function App(): JSX.Element {
     setAdoptAfter(null);
   }, [adoptAfter, state.selected, state.trail.length, detail, actions]);
 
-  const panelStack = room === null ? EMPTY_STACK : stacks[room];
+  const roomStack = room === null ? EMPTY_STACK : stacks[room];
+  const panelStack: PanelStack = room === null ? EMPTY_STACK : shownStack(pinnedStack, roomStack, dismissedOffer);
+  pinnedRef.current = pinnedStack;
+  shownRef.current = panelStack;
   const panelTop = topOf(panelStack);
   // A re-run with changes needs its workflow's form, which is read on demand like the New-task form's.
-  const rerunOf = panelTop?.kind === "rerun" && detail?.taskId === panelTop.taskId ? detail.workflow : null;
+  const rerunOf = panelTop?.kind === "rerun" ? (detail?.taskId === panelTop.taskId ? detail.workflow : null) : null;
   useEffect(() => {
     if (rerunOf !== null && state.workflowForms[rerunOf] === undefined) actions.pickWorkflow(rerunOf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1667,7 +1692,8 @@ export default function App(): JSX.Element {
    * an entry left under a pushed card. Fetched once per task and dropped when nothing shows it.
    */
   const [heldDetails, setHeldDetails] = useState<Record<string, TaskDetail>>({});
-  const shownTasks = [...new Set(Object.values(stacks).flatMap((one) => one.entries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [`${entry.taskId}\u0000${entry.project ?? ""}`] : []))))]
+  const everyEntry = [...Object.values(stacks), ...(pinnedStack !== null ? [pinnedStack] : [])].flatMap((one) => one.entries);
+  const shownTasks = [...new Set(everyEntry.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [`${entry.taskId}\u0000${entry.project ?? ""}`] : [])))]
     .filter((key) => key.split("\u0000")[0] !== detail?.taskId)
     .sort();
   const shownSig = shownTasks.join("|");
@@ -1691,28 +1717,61 @@ export default function App(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownSig]);
 
+  /**
+   * A state a panel shows that the store is not holding — the open file's and the board column's are
+   * held there; a pinned state is still shown after both have moved on. Read by its own id, and its
+   * run form asked for the way a column's is.
+   */
+  const [heldStates, setHeldStates] = useState<Record<string, StateView>>({});
+  const shownStates = [...new Set(everyEntry.flatMap((entry) => (entry.kind === "state" ? [`${entry.stateId}\u0000${entry.project ?? ""}`] : [])))]
+    .filter((key) => {
+      const stateId = key.split("\u0000")[0];
+      return stateId !== state.taskWorkflow && !(state.doc?.stateId === stateId && state.stateId === stateId);
+    })
+    .sort();
+  const shownStatesSig = shownStates.join("|");
+  useEffect(() => {
+    let live = true;
+    for (const key of shownStates) {
+      const [stateId, project] = key.split("\u0000") as [string, string];
+      if (state.workflowForms[stateId] === undefined) actions.pickWorkflow(stateId);
+      if (heldStates[key] !== undefined) continue;
+      void invoke("state:view", { stateId, ...(project !== "" ? { project } : {}) })
+        .then((found) => live && setHeldStates((was) => ({ ...was, [key]: found })))
+        .catch(() => undefined);
+    }
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownStatesSig]);
+
+  /** The gate a task is parked on, wherever its panel is — not only the selected one's. */
+  const gateOf = (taskId: string): HostedGate | undefined => {
+    const asking = pending.find((p) => (p.about === taskId || p.taskId === taskId) && p.moves !== true);
+    if (asking === undefined) return undefined;
+    return {
+      pending: asking,
+      onGate: (value: unknown) => actions.answer(asking.requestId, value),
+      services: reviewerServices,
+      editor: {
+        drafts: state.drafts,
+        onDraft: actions.setDraft,
+        validateSchema: actions.validateSchema,
+        wrapJson: look.editors.json.wrap,
+        onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
+      },
+    };
+  };
+
   const panelHost: PanelHost = {
     detail,
     detailOf: (taskId) => (detail?.taskId === taskId ? detail : (heldDetails[taskId] ?? null)),
     project: selectedProject,
     context: surfaces,
     onStack,
-    ...(inlineGate !== null
-      ? {
-          gate: {
-            pending: inlineGate,
-            onGate: (value: unknown) => actions.answer(inlineGate.requestId, value),
-            services: reviewerServices,
-            editor: {
-              drafts: state.drafts,
-              onDraft: actions.setDraft,
-              validateSchema: actions.validateSchema,
-              wrapJson: look.editors.json.wrap,
-              onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
-            },
-          },
-        }
-      : {}),
+    ...(detail !== null && gateOf(detail.taskId) !== undefined ? { gate: gateOf(detail.taskId) } : {}),
+    gateOf,
     select: (taskId, project) => actions.select(taskId, project),
     startAgain,
     cancel: (taskId) => actions.cancelTask(taskId, selectedProject),
@@ -1763,17 +1822,19 @@ export default function App(): JSX.Element {
         },
       };
     },
-    stateOf: (stateId) => {
+    stateOf: (stateId, project) => {
       if (state.doc?.stateId === stateId && state.stateId === stateId) return { view: state.state, run: runSurface };
       if (state.taskWorkflow === stateId) return { view: state.taskState, run: workflowRunSurface };
-      return undefined;
+      const held = heldStates[`${stateId}\u0000${project ?? ""}`];
+      return held === undefined ? undefined : { view: held, run: runSurfaceOf(stateId, project ?? null, null) };
     },
     inEditor: (stateId) => view === "files" && state.doc?.stateId === stateId,
-    // ⇤ for a configuration: the Files view, where it is edited. A built-in is copied to Shared the
-    // moment it is changed there (the editor's own banner, decision 0006).
+    // ⇤ for a configuration: the Files view, where it is edited — the STATE, off whatever run was on
+    // the path (the person's ruling, 2026-09-24): a run left on the trail would keep its conversation
+    // in the main view and the file behind it. A built-in is copied to Shared the moment it is edited.
     openInFiles: (stateId) => {
       actions.setView("files");
-      actions.selectState(stateId);
+      actions.selectState(stateId, { run: false });
     },
     onRevealIssue: (path) => setReveal((last) => ({ path, nonce: (last?.nonce ?? 0) + 1 })),
     config: {
@@ -1814,6 +1875,22 @@ export default function App(): JSX.Element {
     ),
   };
   const panelFace = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(panelHost, entry);
+  /**
+   * A letterhead picked in either conversation: its step's card, on the panel's Steps — when the step
+   * is one of the panel's task's. A pick in a conversation the panel is not about (the main view's,
+   * beside a panel pinned on another task) has no card to show there.
+   */
+  pickStepRef.current = (instanceId: string): void => {
+    onStack((was) => {
+      const holder = [...was.entries].reverse().find((entry) => entry.kind === "task" || entry.kind === "convo");
+      if (holder === undefined || !("taskId" in holder)) return was;
+      const owner = panelHost.detailOf(holder.taskId);
+      if (owner !== null && nodeAt(owner.instances, instanceId) === undefined) return was;
+      return selectStep(was, instanceId);
+    });
+    const at = roomRef.current;
+    if (at !== null) actions.setFold(PANEL_FOLD[at], true);
+  };
 
   /**
    * The column: a splitter and the panel, or the 48px rail when it is folded, or nothing when the

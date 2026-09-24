@@ -191,6 +191,37 @@ describe("the state editor on the three kinds of file", () => {
       } as unknown as Parameters<typeof WorkflowEditor>[0]),
     );
 
+  it("with copy-on-edit, draws a built-in as a live form whose first change copies it to Shared", () => {
+    const html = renderToStaticMarkup(
+      createElement(WorkflowEditor, {
+        source: source({ builtIn: { layers: ["system"] } }),
+        tree: null,
+        executors: [],
+        busy: false,
+        onSave: () => undefined,
+        layerActions: { hasProject: true, onOverride: () => undefined, onEditCopy: () => undefined },
+      } as unknown as Parameters<typeof WorkflowEditor>[0]),
+    );
+    expect(html).toContain("an edit copies it to Shared");
+    expect(html).not.toContain("built in · read-only");
+    // Live: no inert fieldset around the form.
+    expect(html).not.toContain(`class="reading"`);
+  });
+
+  it("stays read-only when Shared already has a copy — that copy is the one that runs", () => {
+    const html = renderToStaticMarkup(
+      createElement(WorkflowEditor, {
+        source: source({ builtIn: { layers: ["system", "base"] } }),
+        tree: null,
+        executors: [],
+        busy: false,
+        onSave: () => undefined,
+        layerActions: { hasProject: true, onOverride: () => undefined, onEditCopy: () => undefined },
+      } as unknown as Parameters<typeof WorkflowEditor>[0]),
+    );
+    expect(html).toContain("built in · read-only");
+  });
+
   it("draws a built-in as read-only, with the two overrides and no Save", () => {
     const html = editor(source({ builtIn: { layers: ["system"] } }));
     expect(html).toContain("built in · read-only");

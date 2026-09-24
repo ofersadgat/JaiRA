@@ -83,6 +83,11 @@ async function main(): Promise<void> {
     await pause(1500);
     await app.shot("8-convo-context");
 
+    // A letterhead's name in the main conversation → that step's card in the panel's Steps.
+    await app.evaluate(`[...document.querySelectorAll(".run-convo .lh-name.pickable")].at(0)?.click()`);
+    await pause(900);
+    await app.shot("8b-letterhead-pick");
+
     // ⇥ back, pin, and select another card: it waits on the offer bar.
     await click(app, '.sp-verbs [aria-label="Give the conversation back to the panel"]');
     await pause(1200);
@@ -91,10 +96,16 @@ async function main(): Promise<void> {
     await app.clickText("add dark mode");
     await pause(900);
     await app.shot("9-pinned-offer");
-    await click(app, '.sp-controls [aria-pressed="true"]');
+    await pause(1500);
+    await app.shot("9b-pinned-own-run");
 
-    await pause(300);
-    await app.shot("9b-pinned-after-load");
+    // Pinned is the WINDOW's: another room shows the same panel.
+    await app.clickText("Files");
+    await pause(900);
+    await app.shot("9c-pinned-in-files");
+    await click(app, '.sp-controls [aria-pressed="true"]');
+    await app.clickText("Tasks");
+    await pause(600);
 
     // A column → its state: Run (the form over its history) · Checks · Configuration.
     await app.evaluate(`[...document.querySelectorAll("section.column")].at(-1)?.click()`);
@@ -109,6 +120,25 @@ async function main(): Promise<void> {
     await click(app, '.sp-verbs [aria-label="Open in the Files view"]');
     await pause(1800);
     await app.shot("12-files-state");
+
+    // Copy-on-edit: a built-in state, edited where it is shown, becomes a copy in Shared.
+    try {
+      // The BUILT IN section's rows — the last of each name in the tree.
+      const row = (name: string): string =>
+        `(() => { const items = [...document.querySelectorAll(".tree-item")]; const hit = items.filter((e) => (e.textContent ?? "").trim().replace(/^[^a-zA-Z0-9_.]+/, "").replace(/[+]$/, "") === ${JSON.stringify(name)}).at(-1); if (!hit) return items.map((e) => e.textContent.trim()).slice(0, 60).join("|"); hit.click(); return "ok"; })()`;
+      for (const name of ["workflows", "chat", "agent.json"]) {
+        const said = await app.evaluate<string>(row(name));
+        if (said !== "ok") throw new Error(`no row ${name}: ${said}`);
+        await pause(600);
+      }
+      await pause(900);
+      await app.shot("13-builtin");
+      await app.evaluate(`(() => { const el = document.querySelector(".pane.editor input"); if (!el) return false; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(el, el.value + " (mine)"); el.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await pause(2500);
+      await app.shot("14-builtin-copied");
+    } catch (e) {
+      console.log(`  (built-in scene skipped: ${(e as Error).message})`);
+    }
 
     const complaints = app.complaints.filter((line) => !line.includes("Autofill"));
     if (complaints.length > 0) console.log(`complaints:\n${complaints.join("\n")}`);

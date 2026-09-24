@@ -52,16 +52,26 @@ export interface LayerBarModel {
 export function layerBarOf(
   source: { layer: WorkflowLayer; builtIn?: BuiltInStanding | undefined },
   hasProject: boolean,
+  /** The editor copies on the first edit — see `WorkflowEditor`'s copy-on-edit. */
+  copyOnEdit = false,
 ): LayerBarModel | null {
   const standing = source.builtIn;
   if (source.layer === "system") {
     const has = (layer: WorkflowLayer): boolean => standing?.layers.includes(layer) === true;
     return {
-      chip: {
-        text: "built in · read-only",
-        tone: "plain",
-        title: "This file ships with JaiRA and cannot be edited. Override it to change what runs.",
-      },
+      chip: copyOnEdit
+        ? {
+            text: "built in · an edit copies it to Shared",
+            tone: "plain",
+            title: "This file ships with JaiRA. The first change you make copies it into ~/.jaira with the change in it, and the copy is what runs.",
+          }
+        : {
+            text: "built in · read-only",
+            tone: "plain",
+            title: has("base")
+              ? "Shared already has a copy of this state, and it is the one that runs — edit that."
+              : "This file ships with JaiRA and cannot be edited. Override it to change what runs.",
+          },
       actions: [
         {
           id: "override-base",

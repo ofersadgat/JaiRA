@@ -356,6 +356,8 @@ export interface FileSurfaceContext {
    */
   runOnScreen?: ReadonlySet<string> | undefined;
   onRunHere?: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
+  /** A letterhead's name was clicked: show that step's card in the side panel. */
+  onPickStep?: ((instanceId: string) => void) | undefined;
   /**
    * The gate parked on the selected task, for the middle column's conversation to host.
    *
@@ -452,6 +454,12 @@ export interface FileSurfaceContext {
     | {
         hasProject: boolean;
         onOverride: (stateId: string, toLayer: WritableLayer) => void;
+        /**
+         * EDIT a shipped state: copy it into Shared (`~/.jaira`), open the copy, and carry the edit
+         * over as its unsaved draft (the person's ruling, 2026-09-24). `text` is read once the copy
+         * exists.
+         */
+        onEditCopy?: ((stateId: string, text: () => string) => void) | undefined;
       }
     | undefined;
   /**

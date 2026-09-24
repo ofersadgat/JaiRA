@@ -52,7 +52,7 @@ import { addressSegment, segmentKey, type ContextReading, type InstanceNode, typ
  * and the sheet: only the sheet asks, to say on each state's header what that state ADDED.
  */
 export const PieceReadingContext = createContext<((piece: SessionPiece) => ContextReading | undefined) | undefined>(undefined);
-import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
+import { StateBlock, StateHeader, headerToneOf, surfaceKindOf, PickStepContext } from "./stateSurface";
 import {
   forksOf,
   pathFrom,
@@ -359,6 +359,7 @@ function Piece({
   const kind = surfaceKindOf(node);
   const sig = signatureOf(node);
   const tone = headerToneOf(node, kind, asking !== undefined && asking === node.instanceId);
+  const pick = useContext(PickStepContext);
   return (
     <StateBlock
       open={open}
@@ -376,6 +377,7 @@ function Piece({
           {...(added !== undefined ? { added } : {})}
           {...(kind === "conversation" ? { status: node.status } : {})}
           onToggle={onToggle}
+          {...(pick !== null ? { onPick: () => pick(node.instanceId) } : {})}
         />
       }
     >

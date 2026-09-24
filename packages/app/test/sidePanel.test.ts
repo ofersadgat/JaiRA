@@ -96,6 +96,7 @@ const host = (patch: Partial<PanelHost> = {}): PanelHost =>
   ({
     detail: null,
     detailOf: () => null,
+    gateOf: () => undefined,
     project: undefined,
     context: {} as PanelHost["context"],
     onStack: () => undefined,
@@ -153,5 +154,40 @@ describe("the conversation's context", () => {
   it("beside a plain chat has no Steps either", () => {
     const tabs = faceOf(host(), { kind: "chat", key: "chat:c1", taskId: "c1", tab: "produced" }).tabs!.map((tab) => tab.id);
     expect(tabs).toEqual(["produced", "changes", "held"]);
+  });
+});
+
+describe("a letterhead is a way to its step's card", () => {
+  it("makes the name pickable, apart from the fold", async () => {
+    const { StateHeader } = await import("../src/renderer/stateSurface");
+    const html = renderToStaticMarkup(createElement(StateHeader, { open: true, name: "critique", onToggle: () => undefined, onPick: () => undefined }));
+    expect(html).toContain("lh-name mono pickable");
+    expect(html).toContain("Show this step");
+    const plain = renderToStaticMarkup(createElement(StateHeader, { open: true, name: "critique", onToggle: () => undefined }));
+    expect(plain).not.toContain("pickable");
+  });
+});
+
+describe("a re-run with changes", () => {
+  it("offers to start from the beginning or before any state the task entered", async () => {
+    const { RerunForm } = await import("../src/renderer/panelViews");
+    const html = renderToStaticMarkup(
+      createElement(RerunForm, {
+        run: {
+          workflow: "feature/plan",
+          fields: [],
+          values: {},
+          busy: false,
+          onChange: () => undefined,
+          onRun: () => undefined,
+          starts: [{ seq: 7, label: "plan › critique" }],
+          onFork: () => undefined,
+        },
+        onCancel: () => undefined,
+      }),
+    );
+    expect(html).toContain("Start from");
+    expect(html).toContain("the beginning");
+    expect(html).toContain("before plan › critique");
   });
 });

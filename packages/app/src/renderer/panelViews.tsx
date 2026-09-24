@@ -20,8 +20,12 @@ import { nodeAt } from "./trail";
 import { RunInputsForm, useRunCheck } from "./runPanel";
 import { createBlocker, runInputsOf, type RunField, type RunValues } from "./runForm";
 import { useTouched } from "./schemaForm/check";
+import { SelectInput } from "./controls";
 import { ValueView } from "./valueView";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
+
+/** How long a pick's own jump through the conversation takes to settle — see `StepsView`. */
+const SETTLE_MS = 1200;
 
 /** How tall one row of the Steps index is — `.rail.run-index`'s `--rail-cap`. */
 export const STEP_ROW = 30;
@@ -180,6 +184,35 @@ export function StepsView({
 }): JSX.Element {
   const box = useRef<HTMLDivElement | null>(null);
   const [rows, setRows] = useState(12);
+  /**
+   * The card is about the step you PICKED, and it goes when the step being viewed moves on (the
+   * person's ruling, 2026-09-24): scroll the conversation to another sheet, or let the live step
+   * advance, and the card closes — picking a step again opens that one's. The move the pick itself
+   * causes (the conversation going to the step) is not a move away: `base` is the step being viewed
+   * when the pick was made, and reaching the picked step becomes the new base.
+   */
+  const base = useRef<string | undefined>(current);
+  /**
+   * Until when the conversation is still travelling to the pick. The jump is a smooth scroll that
+   * lands the step at the TOP, and "current" is read at the centre — so it passes other sheets on the
+   * way and may settle on the one below. What it settles on becomes the base.
+   */
+  const settling = useRef(0);
+  useEffect(() => {
+    base.current = current;
+    settling.current = Date.now() + SETTLE_MS;
+    // Only on a new pick: the current step at that moment is where "moving on" is measured from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+  useEffect(() => {
+    if (step === undefined || current === undefined) return;
+    if (current === step || Date.now() < settling.current) {
+      base.current = current;
+      return;
+    }
+    if (current !== base.current) onStep(undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
   useLayoutEffect(() => {
     const el = box.current;
     if (el === null) return;
@@ -744,6 +777,13 @@ export interface RerunSurface {
   busy: boolean;
   onChange: (values: RunValues) => void;
   onRun: (inputs: Record<string, JsonValue>) => void;
+  /**
+   * Where a copy may START — the beginning, or before any state the task entered (the person's
+   * ruling, 2026-09-24). A step is a FORK at that state's entry: everything before it is kept, so the
+   * inputs are the ones it ran with and the form is a reading of them.
+   */
+  starts?: readonly { seq: number; label: string }[] | undefined;
+  onFork?: ((seq: number) => void) | undefined;
 }
 
 /**
@@ -753,16 +793,33 @@ export interface RerunSurface {
 export function RerunForm({ run, onCancel }: { run: RerunSurface; onCancel: () => void }): JSX.Element {
   const check = useRunCheck(run.fields, run.values);
   const { touched, touch } = useTouched(`rerun:${run.workflow}`);
-  const blocked = createBlocker({ workflow: run.workflow, fields: run.fields, check, busy: run.busy });
+  const [from, setFrom] = useState("");
+  const forking = from !== "" && run.onFork !== undefined;
+  const blocked = forking ? (run.busy ? "busy" : null) : createBlocker({ workflow: run.workflow, fields: run.fields, check, busy: run.busy });
+  const startLabel = run.starts?.find((one) => String(one.seq) === from)?.label;
   return (
     <form
       className="new-task-form"
       onSubmit={(e) => {
         e.preventDefault();
-        if (blocked === null) run.onRun(runInputsOf(run.fields ?? [], run.values));
+        if (blocked !== null) return;
+        if (forking) run.onFork?.(Number(from));
+        else run.onRun(runInputsOf(run.fields ?? [], run.values));
       }}
     >
-      {run.fields === undefined ? (
+      {run.starts !== undefined && run.starts.length > 0 && run.onFork !== undefined ? (
+        <label className="field">
+          <span>Start from</span>
+          <SelectInput
+            value={from}
+            options={[["the beginning", ""], ...run.starts.map((one): [string, string] => [`before ${one.label}`, String(one.seq)])]}
+            onChange={setFrom}
+          />
+        </label>
+      ) : null}
+      {forking ? (
+        <div className="sub">Everything before {startLabel} is kept, so the copy runs with the inputs this task had.</div>
+      ) : run.fields === undefined ? (
         <div className="sub">reading its inputs…</div>
       ) : run.fields === null ? (
         <div className="notice bad">That workflow&apos;s file does not parse, so its inputs cannot be read.</div>
@@ -772,8 +829,8 @@ export function RerunForm({ run, onCancel }: { run: RerunSurface; onCancel: () =
         <RunInputsForm fields={run.fields} values={run.values} check={check} touched={touched} touch={touch} onChange={run.onChange} />
       )}
       <div className="pane-actions">
-        <button type="submit" className="primary" disabled={blocked !== null} title={blocked ?? `starts a new ${run.workflow}`}>
-          Start the copy
+        <button type="submit" className="primary" disabled={blocked !== null} title={blocked ?? (forking ? `a copy that starts before ${startLabel}` : `starts a new ${run.workflow}`)}>
+          {forking ? "Start the copy there" : "Start the copy"}
         </button>
         <button type="button" className="ghost" onClick={onCancel}>
           Cancel

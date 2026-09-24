@@ -46,7 +46,7 @@ import { sessionKey } from "./sessionCache";
 import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, type TrailStep } from "./trail";
 import { AnsweredForYou, Paper, Pulse, Transcript, durationOf, useElapsed, type CallSurface } from "./transcriptView";
-import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
+import { PickStepContext, advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
@@ -55,7 +55,7 @@ import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
 import { invoke, subscribe } from "./store";
-import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
+import { useTaskRun } from "./taskRun";
 
 // Moved to `trail.ts`, which is where the tree queries live now — it also seeds a walk, and that
 // has to work for a composite, which has no session row to look one up by. Re-exported because this
@@ -1152,7 +1152,7 @@ export function RunConversation({
     );
   }
 
-  return (
+  const drawn = (
     <div className="run-convo-wrap">
       <div
         className="run-convo scroll"
@@ -1225,6 +1225,7 @@ export function RunConversation({
       />
     </div>
   );
+  return context.onPickStep === undefined ? drawn : <PickStepContext.Provider value={context.onPickStep}>{drawn}</PickStepContext.Provider>;
 }
 
 /** A rewind that is armed and not yet confirmed — what the strip asks about. See `RunConversation`. */
@@ -1293,100 +1294,8 @@ export function CutStrip({ armed, onConfirm, onCancel }: { armed: ArmedRewind; o
  * no scroller of its own and no composer — under the line that adopted it.
  */
 export function AdoptedHistory({ taskId, context }: { taskId: string; context: FileSurfaceProps["context"] }): JSX.Element {
-  const [detail, setDetail] = useState<TaskDetail | null>(null);
-  const [conversation, setConversation] = useState<ConversationView | null>(null);
-  const [history, setHistory] = useState<SessionRef[]>([]);
-  const [records, setRecords] = useState<Record<string, OperationRecordView>>({});
-  const [sessions, setSessions] = useState<FileSurfaceProps["context"]["sessions"]>({});
-  const [failed, setFailed] = useState<string | null>(null);
-  const [liveTurn, setLiveTurn] = useState<FileSurfaceProps["context"]["liveTurn"]>(null);
-  const project = context.project;
-
-  useEffect(() => {
-    let mounted = true;
-    const at = project !== undefined ? { project } : {};
-    const load = async (): Promise<void> => {
-      try {
-        const [d, c, h, snap] = await Promise.all([
-          invoke("task:detail", { taskId, ...at }),
-          invoke("task:conversation", { taskId, ...at }),
-          invoke("session:history", { taskId, ...at }),
-          invoke("session:live", { taskId, ...at }).catch(() => null),
-        ]);
-        const rows = await invoke("run:records", { taskId, ...at }).catch(() => [] as OperationRecordView[]);
-        if (!mounted) return;
-        setDetail(d);
-        setConversation(c);
-        setHistory(h);
-        setRecords(Object.fromEntries(rows.map((row) => [row.recordId, row])));
-        setLiveTurn((current) => (tailIsAhead(current, snap) ? current : liveTurnOfSnapshot(snap)));
-        setFailed(null);
-      } catch (e) {
-        if (mounted) setFailed((e as Error).message);
-      }
-    };
-    void load();
-    const off = subscribe((message) => {
-      if (!("taskId" in message) || message.taskId !== taskId) return;
-      if (message.type === "session:turn") {
-        setLiveTurn((current) => (alreadyFolded(current, message) ? current : foldLiveTurn(current, message)));
-        return;
-      }
-      if (message.type === "engine:event") {
-        const type = (message.event as { type?: string } | undefined)?.type;
-        if (type === "operation.completed" || type === "operation.failed") setLiveTurn(null);
-        void load();
-        return;
-      }
-      if (message.type === "run:finished") void load();
-    });
-    return () => {
-      mounted = false;
-      off();
-    };
-  }, [taskId, project]);
-
-  const loadSessions = useCallback(
-    (wanted: ReadonlyArray<{ instanceId: string }>) => {
-      void (async () => {
-        const missing = wanted.filter((one) => sessions[sessionKey(one)] === undefined);
-        if (missing.length === 0) return;
-        const loaded = await Promise.all(
-          missing.map(async (one) => {
-            try {
-              return [sessionKey(one), await invoke("session:view", { taskId, instanceId: one.instanceId, ...(project !== undefined ? { project } : {}) })] as const;
-            } catch {
-              return null;
-            }
-          }),
-        );
-        setSessions((prev) => {
-          const next = { ...prev };
-          for (const entry of loaded) if (entry !== null) next[entry[0]] = entry[1];
-          return next;
-        });
-      })();
-    },
-    [taskId, project, sessions],
-  );
-
-  const nested: FileSurfaceProps["context"] = useMemo(
-    () => ({
-      ...context,
-      detail,
-      conversation,
-      sessions,
-      onLoadSessions: loadSessions,
-      onLoadSession: (instanceId: string) => loadSessions([{ instanceId }]),
-      sessionHistory: history,
-      records,
-      session: null,
-      sessionInstance: null,
-      liveTurn,
-    }),
-    [context, detail, conversation, sessions, loadSessions, history, records, liveTurn],
-  );
-
+  // Its own run, loaded by its own id — see `taskRun.ts`.
+  const { detail, failed, context: nested } = useTaskRun(taskId, context.project, context);
   if (failed !== null) return <p className="empty">Could not read what this task did: {failed}</p>;
   if (detail === null) return <p className="empty">Loading…</p>;
   return <RunConversation parent={detail.instances[0]} detail={detail} context={nested} nested />;

@@ -42,7 +42,7 @@
  * plain block container has no axis to answer it on, so the rule stopped in the middle of the sheet
  * and read as an underline instead of the head of a page.
  */
-import type { JSX, ReactNode } from "react";
+import { createContext, type JSX, type ReactNode } from "react";
 import { formatTokens, type InstanceNode } from "@jaira/shared/browser";
 import { Icon, type PATHS } from "./icons";
 
@@ -186,6 +186,15 @@ export function failureWordOf(node: InstanceNode): string {
  * gone and what you need instead is what is behind it ("max severity significant · 4 findings"). A
  * header that kept the label when folded would answer a question the reader has stopped asking.
  */
+/**
+ * Pick a step from its letterhead — what shows its card in the side panel's Steps (the panel rulings,
+ * 2026-09-24: a step is selected "from the list, or from a letterhead in either conversation").
+ *
+ * A context rather than a prop, because a letterhead is drawn five components down from the
+ * conversation that knows where a pick goes, through bands and sheets that have no business with it.
+ */
+export const PickStepContext = createContext<((instanceId: string) => void) | null>(null);
+
 export function StateHeader({
   open,
   kind,
@@ -197,7 +206,13 @@ export function StateHeader({
   added,
   status,
   onToggle,
+  onPick,
 }: {
+  /**
+   * Pick this step — its NAME becomes the way to its card. The rest of the header still folds, which
+   * is what a header is for; the name is the one part that says which step this is.
+   */
+  onPick?: (() => void) | undefined;
   open: boolean;
   /** Tokens this state added to its conversation — drawn at the right, before the time, open or folded. */
   added?: number | undefined;
@@ -234,7 +249,21 @@ export function StateHeader({
       {glyph !== undefined ? <Icon name={glyph} className="lh-ico" /> : null}
       {glyph === undefined && status !== undefined ? <span className={`lh-dot ts-dot-${status}`} /> : null}
       {word !== undefined ? <span className="lh-kind">{word}</span> : null}
-      <span className="lh-name mono">{name}</span>
+      {onPick !== undefined ? (
+        <span
+          className="lh-name mono pickable"
+          role="link"
+          title="Show this step's card"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPick();
+          }}
+        >
+          {name}
+        </span>
+      ) : (
+        <span className="lh-name mono">{name}</span>
+      )}
       {open
         ? label !== undefined && label.length > 0
           ? <span className="lh-label ellip">{label}</span>
