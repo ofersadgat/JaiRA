@@ -1471,6 +1471,8 @@ export interface ChatThreadView {
   forks?: ChatFork[];
   /** Where this conversation was forked from, when it is a fork — see {@link TaskOrigin}. */
   origin?: TaskOrigin;
+  /** What this conversation has cost so far (USD), summed from its journal; absent when nothing was priced. */
+  costUsd?: number;
 }
 
 /**

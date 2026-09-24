@@ -20,7 +20,7 @@
  */
 import { useContext, useMemo, useState, type JSX } from "react";
 import { accountFor, useLimits } from "./limitsStore";
-import { AccountAllowance } from "./usageMeters";
+import { AccountAllowance, KeyUsage } from "./usageMeters";
 import {
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
@@ -721,6 +721,8 @@ function KeyBoxes({
             {probe?.credential ? <span>in {SECRET_SOURCE_LABELS[probe.credential.source]}</span> : null}
             {probe?.credentialMissing ? <span>not found anywhere</span> : null}
           </span>
+          {/* What the key has spent — a credit's dollars used, or the last seven days. Never what is left. */}
+          {probe?.credentialMissing ? null : <KeyUsage route={spec.id} />}
         </li>
       ) : null}
       {open ? null : (

@@ -17,6 +17,8 @@ import {
   toneOfContext,
   toneOfPercent,
   usedPercentFor,
+  creditPercent,
+  formatUsd,
   type LimitReading,
   type ModelAvailability,
 } from "../src/index";
@@ -67,7 +69,16 @@ describe("spent, and until when", () => {
   });
 
   it("tones a percent ink at rest, amber from 80, red at 100", () => {
-    expect([toneOfPercent(62), toneOfPercent(86), toneOfPercent(100), toneOfPercent(null)]).toEqual(["accent", "warn", "bad", "none"]);
+    // Amber from 75, red from 90 (the person's cut-offs, 2026-09-24) — red is a warning; spent is 100.
+    expect([toneOfPercent(62), toneOfPercent(74.9), toneOfPercent(75), toneOfPercent(89), toneOfPercent(90), toneOfPercent(100), toneOfPercent(null)]).toEqual([
+      "accent",
+      "accent",
+      "warn",
+      "warn",
+      "bad",
+      "bad",
+      "none",
+    ]);
   });
 });
 
@@ -112,5 +123,18 @@ describe("a preset that picks the candidate with the most left", () => {
     expect(chooseMostLeft(["claude-opus-5-5", "gpt-5.6-terra"], available, (m) => (m.startsWith("gpt") ? null : 0))).toMatchObject({ model: "gpt-5.6-terra" });
     // No readings at all: exactly first-available.
     expect(chooseMostLeft(["claude-opus-5-5", "gpt-5.6-terra"], available, () => null)).toMatchObject({ model: "claude-opus-5-5" });
+  });
+});
+
+describe("money", () => {
+  it("writes dollars with cents, always", () => {
+    expect([formatUsd(11.6), formatUsd(0.04), formatUsd(1204), formatUsd(0)]).toEqual(["$11.60", "$0.04", "$1,204.00", "$0.00"]);
+  });
+
+  it("says what share of a credit is used, and nothing without a credit to share", () => {
+    expect(creditPercent({ usedUsd: 11.6, totalUsd: 20, source: "account" })).toBeCloseTo(58);
+    expect(creditPercent({ usedUsd: 25, totalUsd: 20, source: "key" })).toBe(100);
+    expect(creditPercent({ usedUsd: 1, totalUsd: 0, source: "key" })).toBeNull();
+    expect(creditPercent(undefined)).toBeNull();
   });
 });

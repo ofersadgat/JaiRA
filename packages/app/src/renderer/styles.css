@@ -16376,5 +16376,34 @@ button.link.cfg-login-add-sub {
 .um-rs { font: 400 10.5px/1.3 var(--font-data); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .um-rs.is-spent { color: var(--bad); font-weight: 500; }
 .um-cpop { left: auto; right: -12px; bottom: calc(100% + 8px); width: 330px; }
-/* The route column carries each account's bar and number now, so it is a little wider. */
-.cx-cascade > .cx-col:first-child { width: 188px; }
+/* The route column carries each account's bar and figure now — dollars for a key — so it is wider. */
+.cx-cascade > .cx-col:first-child { width: 204px; }
+
+/* Money (usage-readings contract, "API keys"): a ring with a $ in it, and a dollar figure. A credit
+   is ink at rest like any figure the person reads; a key whose provider reports no balance is grey,
+   because its figure is a cost and not a warning. */
+.um-dring { flex: none; display: block; width: 18px; height: 18px; }
+.um-dring .um-ring-track, .um-dring .um-ring-fill { stroke-width: 2.2; }
+.um-dollar { font: 700 9.5px/1 var(--font-app); fill: var(--um-c); }
+.um-none .um-dollar { fill: var(--dim); }
+/* The app's buttons are inline-flex, which would put a gap inside "$11.60"; a figure is one run of text. */
+.um-num.um-money { display: inline-block; }
+.um-num.um-withring, .um-c-ringbtn.um-withring { display: inline-flex; align-items: center; gap: 5px; }
+.um-num.um-money.um-t-accent, .um-c-ringbtn.um-money.um-t-accent { color: var(--text); }
+.um-num.um-money.um-t-none, .um-c-ringbtn.um-money.um-t-none { color: var(--dim); }
+.um-money-val { white-space: nowrap; }
+/* A money account in "Your other accounts": its dollars are wider than a percent, and a key's week is words. */
+.um-other.um-other-money { grid-template-columns: 14px minmax(0, 1fr) 40px auto; }
+.um-other.um-other-wide { grid-template-columns: 14px minmax(0, 1fr) auto; }
+.um-other.um-other-wide .um-other-n { grid-column: auto; white-space: nowrap; }
+/* An API key's box on Connections: what it spent, and what that is. */
+.um-k-line { padding-left: 32px; gap: 4px; }
+.um-k-line .um-c-ringbtn { margin-left: -5px; }
+.um-k-when { font-size: calc(var(--size-app) * 10.5 / 12.5); color: var(--dim); white-space: nowrap; }
+/* The setting's preview: the composer's chip and figure, three times. */
+.um-preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 12px; }
+.um-preview-cell { display: grid; gap: 6px; min-width: 0; }
+.um-preview-n { font-size: calc(var(--size-app) * 11.5 / 12.5); color: var(--dim); }
+.um-preview .cx { margin: 0; }
+.um-preview .cx-chip .ellip { max-width: 96px; }
+@media (max-width: 760px) { .um-preview { grid-template-columns: 1fr; } }

@@ -145,6 +145,7 @@ import {
   unfoldedOf,
 } from "./uiState";
 import { Icon } from "./icons";
+import { publishUsageFigures } from "./limitsStore";
 import { History, NewTask } from "./widgets";
 import { invoke, subscribe, useApp, type SettingsSection, type View } from "./store";
 
@@ -510,6 +511,8 @@ export default function App(): JSX.Element {
   const ui = state.settings.ui;
   /** How the app looks here — the effective `appearance` block of the address (`appearanceLayer.ts`). */
   const look = useMemo(() => lookOf(state.config), [state.config]);
+  // How an account's usage is drawn, for every figure the setting governs — see `limitsStore.ts`.
+  useEffect(() => publishUsageFigures(look.conversation.usageFigures), [look.conversation.usageFigures]);
   /**
    * The Just you view's reading: what the personal layer states, or every row. Session-scoped, and
    * "What you changed" whenever a window opens — the reason to look at your own layer is usually to

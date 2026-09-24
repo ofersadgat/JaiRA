@@ -1151,7 +1151,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           {...(plan === null && thread === null ? { disabled: "This conversation cannot be continued." } : {})}
           onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
-          usage={{ context: lastContext, onCompact }}
+          usage={{ context: lastContext, onCompact, cost: thread?.costUsd }}
           {...mentions}
         />
       </div>

@@ -70,3 +70,41 @@ export function claudeUsageCommands(configured: string | undefined, resolve?: (i
 export function refreshCodexLimits(): Promise<LimitReading | undefined> {
   return readCodexLimits({ route: "codex-cli" });
 }
+
+/** An OpenRouter credit, as read. */
+export interface OpenRouterCredit {
+  usedUsd: number;
+  totalUsd: number;
+  /** `account`: the whole account's credit (`/credits`). `key`: this key's own spending limit (`/key`). */
+  source: "account" | "key";
+}
+
+const OPENROUTER = "https://openrouter.ai/api/v1";
+
+/**
+ * How much of an OpenRouter credit is used — the one provider that says (checked 2026-09-24).
+ *
+ * The account's credit (`GET /credits`: `total_credits`, `total_usage`) answers only a MANAGEMENT key;
+ * an ordinary key is refused there and can read its own spending limit instead (`GET /key`: `limit`,
+ * `limit_remaining`). A key with no limit, on an account whose credit it cannot read, has no credit to
+ * draw against — `undefined`, and the account is drawn as spend alone.
+ */
+export async function readOpenRouterCredit(key: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<OpenRouterCredit | undefined> {
+  const get = async (path: string): Promise<Record<string, unknown> | undefined> => {
+    const res = await fetchImpl(`${OPENROUTER}${path}`, { headers: { authorization: `Bearer ${key}` }, ...(signal !== undefined ? { signal } : {}) });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as { data?: unknown };
+    return body.data !== null && typeof body.data === "object" ? (body.data as Record<string, unknown>) : undefined;
+  };
+  const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const credits = await get("/credits").catch(() => undefined);
+  const total = num(credits?.["total_credits"]);
+  const used = num(credits?.["total_usage"]);
+  if (total !== undefined && used !== undefined && total > 0) return { usedUsd: used, totalUsd: total, source: "account" };
+  const own = await get("/key").catch(() => undefined);
+  const limit = num(own?.["limit"]);
+  if (limit === undefined || limit <= 0) return undefined;
+  const remaining = num(own?.["limit_remaining"]);
+  const usedOfLimit = remaining !== undefined ? limit - remaining : num(own?.["usage"]);
+  return usedOfLimit === undefined ? undefined : { usedUsd: Math.max(0, usedOfLimit), totalUsd: limit, source: "key" };
+}

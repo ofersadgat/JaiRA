@@ -448,7 +448,7 @@ let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
-import { accountOfRoute, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
+import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITING } from "./session";
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
 import { arrivedAt, fastForwardView, labelOfTarget, leftKeyOf, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
@@ -1157,6 +1157,14 @@ export class AppService {
       },
       probes: () => [...this.lastProbes.values()],
       routes: () => [...this.availability.routes.map((r) => r.name), ...this.availability.executors.map((e) => e.name)],
+      // Resolved through the same chain a call uses, so the credit is read with the key that spends it.
+      openRouterKey: () => {
+        try {
+          return modelRouterOptions(this.effectiveConfig().models, this.secretResolver()).openRouterApiKey;
+        } catch {
+          return undefined;
+        }
+      },
     });
     this.waiting = new WaitingQueue(basePaths.waitingFile, {
       sendMessage: (item) => this.sendWaitingMessage(item),
@@ -1166,7 +1174,9 @@ export class AppService {
       // At the reset, ask again before sending: a reading that knows a later reset beats the old one.
       stillSpentUntil: async (account) => {
         const state = await this.limits.board.refresh(account, { olderThanMs: 60_000 });
-        return isSpent(state.reading) ? spentUntil(state.reading) : null;
+        // Still spent with no reset to name (a credit, which comes back when somebody adds some):
+        // look again in half an hour rather than sending into a refusal.
+        return isSpent(state.reading) ? (spentUntil(state.reading) ?? new Date(Date.now() + 30 * 60_000).toISOString()) : null;
       },
       changed: (items) => this.publish({ type: "waiting:changed", items }),
     });
@@ -3891,7 +3901,7 @@ export class AppService {
     const recorder = project.events.recorder(taskId);
     let seq = 0;
     /** A call this run made was refused because the account ran out — see the run's end. */
-    let usageRefusal: { account: string; until: string | null; reason: string } | undefined;
+    let usageRefusal: UsageRefusal | undefined;
     // A run starting again is the answer to anything waiting to start it.
     this.waiting.dropWhere((item) => item.kind === "run" && item.taskId === taskId);
     // A run STARTING is the first thing anyone looking for it wants to see, and nothing said it. The
@@ -3964,6 +3974,7 @@ export class AppService {
               if (event.type === "operation.failed") {
                 const refused = usageRefusalOf((event as { failure?: unknown }).failure);
                 if (refused !== undefined) usageRefusal = refused;
+                if (refused?.credit === true) this.limits.creditRefused(refused.account);
               }
               this.publishFor(open, {
                 type: "engine:event",
@@ -4037,8 +4048,10 @@ export class AppService {
             account: usageRefusal.account,
             until: usageRefusal.until,
             state: "refused",
-            retry: open.project.config.limits.retryOnReset,
+            // An empty balance has no reset to try again at: it goes when somebody resumes it.
+            retry: usageRefusal.credit === true ? false : open.project.config.limits.retryOnReset,
             reason: usageRefusal.reason,
+            ...(usageRefusal.credit === true ? { credit: true as const } : {}),
           });
         }
         this.settleWaiters(open, taskId);
@@ -4897,6 +4910,26 @@ export class AppService {
       });
       return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index, waiting };
     }
+    // Refused because the key's balance is empty: kept as refused, with no "Try again at …" — there
+    // is no reset — and the account marked, so the composer turns red until a call goes through.
+    const creditAccount = result.failureRoute !== undefined ? accountOfRoute(result.failureRoute) : heldAccount;
+    if (result.failureCode === CREDIT_EXHAUSTED_CODE && request.branchAt === undefined && creditAccount !== undefined) {
+      this.limits.creditRefused(creditAccount);
+      const waiting = this.waiting.add({
+        kind: "message",
+        project: open.key,
+        taskId: request.taskId,
+        instanceId: request.instanceId,
+        message: request.message,
+        account: creditAccount,
+        until: null,
+        state: "refused",
+        retry: false,
+        credit: true,
+        ...(result.failure !== undefined ? { reason: result.failure } : {}),
+      });
+      return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index, waiting };
+    }
     return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index };
   }
 
@@ -5329,6 +5362,8 @@ export class AppService {
       }
       if (left.length > 0) forks.push({ turn: begin, left });
     }
+    // What the conversation has cost, summed from its journal — the figure an API key's composer shows.
+    const costUsd = runCostUsd(project, request.taskId);
     return {
       taskId: request.taskId,
       instanceId: host,
@@ -5336,6 +5371,7 @@ export class AppService {
       points,
       ...(forks.length > 0 ? { forks } : {}),
       ...(origin !== undefined ? { origin } : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
     };
   }
 
@@ -11040,8 +11076,19 @@ function sameSchema(slot: JsonValue, declared: JsonValue): boolean {
  * A failure that says the account ran out (`usage_limit`, upstream `UsageLimitError`): which account, when
  * it resets, and the refusal's words. `undefined` for any other failure.
  */
-function usageRefusalOf(failure: unknown): { account: string; until: string | null; reason: string } | undefined {
-  const f = failure as { code?: unknown; reason?: unknown; retryAfterMs?: unknown; detail?: { resetsAt?: unknown; limits?: { route?: unknown } } } | undefined;
+interface UsageRefusal {
+  account: string;
+  until: string | null;
+  reason: string;
+  /** The key's balance is empty — no reset to wait for. */
+  credit?: true;
+}
+
+function usageRefusalOf(failure: unknown): UsageRefusal | undefined {
+  const f = failure as { code?: unknown; reason?: unknown; retryAfterMs?: unknown; detail?: { resetsAt?: unknown; route?: unknown; limits?: { route?: unknown } } } | undefined;
+  if (f?.code === CREDIT_EXHAUSTED_CODE && typeof f.detail?.route === "string") {
+    return { account: accountOfRoute(f.detail.route), until: null, reason: typeof f.reason === "string" ? f.reason : "the key's balance is empty", credit: true };
+  }
   if (f?.code !== USAGE_LIMIT_CODE) return undefined;
   const resetsAt = typeof f.detail?.resetsAt === "string" ? f.detail.resetsAt : undefined;
   const until = resetsAt ?? (typeof f.retryAfterMs === "number" ? new Date(Date.now() + f.retryAfterMs).toISOString() : null);

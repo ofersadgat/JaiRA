@@ -97,6 +97,10 @@ describe("parsing the appearance block of a settings layer", () => {
       renderers: { "text/markdown:view": { read: "source" } },
     });
     expect(parsed.conversation.sequentialBatches).toBe("band");
+    // Unstated: the number alone.
+    expect(parsed.conversation.usageFigures).toBe("number");
+    expect(parseAppearanceConfig({ conversation: { usageFigures: "ring" } }).conversation.usageFigures).toBe("ring");
+    expect(() => parseAppearanceConfig({ conversation: { usageFigures: "dial" } })).toThrow(/usageFigures/);
     expect(parsed.editors.json.wrap).toBe(true);
     expect(parsed.editors.code).toEqual(defaultAppearanceConfig().editors.code);
     expect(parsed.renderers["text/markdown:view"]).toEqual({ read: "source", write: null, off: [], theme: { read: null, write: null } });

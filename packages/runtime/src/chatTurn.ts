@@ -133,6 +133,8 @@ export interface ChatTurnResult {
   failureCode?: string;
   /** How long until the call could work, when the failure said (a usage limit's reset). */
   retryAfterMs?: number;
+  /** The route the failing call went out on, when the failure said (a refusal for an empty balance). */
+  failureRoute?: string;
 }
 
 /**
@@ -239,6 +241,7 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
       failure: failure.reason,
       ...(failure.code !== undefined ? { failureCode: failure.code } : {}),
       ...(failure.retryAfterMs !== undefined ? { retryAfterMs: failure.retryAfterMs } : {}),
+      ...(routeOfFailure(failure) !== undefined ? { failureRoute: routeOfFailure(failure)! } : {}),
     };
   }
 
@@ -253,4 +256,10 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
 /** A cancel reads as cancelled rather than failed — the person stopped it, nothing went wrong. */
 function outcomeOf(failure: { classification?: string }): TerminationOutcome {
   return failure.classification === "canceled" ? "canceled" : "error";
+}
+
+/** The route a failure names in its detail (upstream puts it there on a refusal for an empty balance). */
+function routeOfFailure(failure: { detail?: unknown }): string | undefined {
+  const detail = failure.detail as { route?: unknown } | undefined;
+  return typeof detail?.route === "string" ? detail.route : undefined;
 }

@@ -851,6 +851,8 @@ export function Composer({
         context: ContextReading | null | undefined;
         /** Send the agent's own `/compact`. Absent where the agent cannot compact on request. */
         onCompact?: ((focus?: string) => void) | undefined;
+        /** What this conversation has cost (USD) — the figure after the chip for an API key whose provider reports no balance. */
+        cost?: number | undefined;
       }
     | undefined;
   /** What the message would run under right now — inherited, with any overrides already folded in. */
@@ -1165,7 +1167,7 @@ export function Composer({
             </Chip>
             {/* The account's allowance: the percent of its tightest window used, beside the model
                 whose account it is. Clicking it opens the account. */}
-            <AllowanceNumber route={route} model={effective.model} startOpen={startOpen?.usage === "account"} />
+            <AllowanceNumber route={route} model={effective.model} cost={usage?.cost} startOpen={startOpen?.usage === "account"} />
 
             <Chip
               icon="think"

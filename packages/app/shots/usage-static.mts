@@ -5,7 +5,8 @@
  * `npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/usage-static.mts <out.html> [light|dark]`
  *
  * The board is seeded with example accounts (claude at 62% of its 5-hour window, 33% of the week;
- * codex at 2% and 33%), so every stage draws what a person would see with those readings.
+ * codex at 2% and 33%; an OpenRouter key with $11.60 of a $20 credit used; an Anthropic key that spent
+ * $6.80 in the last seven days), so every stage draws what a person would see with those readings.
  */
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,8 +16,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatPlanView, ContextReading, LimitAccountView, WaitingItem } from "@jaira/shared";
 import type { TranscriptEntry } from "../src/renderer/transcript";
 import { Composer, type ComposerOpen } from "../src/renderer/composer";
-import { publishLimits } from "../src/renderer/limitsStore";
-import { ContextDetail, WaitingLine, WaitingMessage } from "../src/renderer/usageMeters";
+import { publishLimits, publishUsageFigures } from "../src/renderer/limitsStore";
+import { ContextDetail, KeyUsage, UsageFiguresPreview, WaitingLine, WaitingMessage } from "../src/renderer/usageMeters";
+import type { UsageFigures } from "@jaira/shared";
 import { Paper, Transcript } from "../src/renderer/transcriptView";
 import { StateHeader } from "../src/renderer/stateSurface";
 import { LoginCards } from "../src/renderer/providersPane";
@@ -31,6 +33,7 @@ const account = (key: string, brand: string, who: string, plan: string, five: nu
   brand,
   who,
   plan,
+  kind: "subscription" as const,
   reading: {
     route: brand,
     plan,
@@ -49,11 +52,49 @@ const account = (key: string, brand: string, who: string, plan: string, five: nu
   refreshing: false,
   refreshable: true,
 });
-const seed = (claudeFive: number, claudeWeek = 33, codexWeek = 33): void =>
-  publishLimits({
-    accounts: [account("claude", "claude-cli", "ofer.sadgat@gmail.com", "max", claudeFive, claudeWeek, 71), account("codex", "codex-cli", "ChatGPT", "plus", 2, codexWeek)],
-    routeAccounts: { "claude-cli": "claude", "claude-code": "claude", "codex-cli": "codex", anthropic: "anthropic" },
+/** An API key: a credit (OpenRouter) with `used` of $20 spent, or spend alone (Anthropic). */
+const key = (route: string, extra: Partial<LimitAccountView>): LimitAccountView => ({
+  key: route,
+  routes: [route],
+  brand: route,
+  who: `${route.toUpperCase()}_API_KEY`,
+  plan: null,
+  reading: null,
+  updatedAt: new Date(Date.now() - 120_000).toISOString(),
+  lastSentAt: null,
+  refreshing: false,
+  refreshable: route === "openrouter",
+  kind: "spend",
+  spent7d: 6.8,
+  ...extra,
+});
+const credit = (used: number): LimitAccountView =>
+  key("openrouter", {
+    kind: "credit",
+    credit: { usedUsd: used, totalUsd: 20, source: "account" },
+    spent7d: 4.1,
+    reading: {
+      route: "openrouter",
+      plan: null,
+      windows: [{ id: "credit", label: "Credit", minutes: null, usedPercent: (used / 20) * 100, resetsAt: null, ...(used >= 20 ? { status: "exhausted" as const } : {}) }],
+      status: used >= 20 ? "exhausted" : "ok",
+      source: "query",
+      at: new Date().toISOString(),
+      complete: true,
+    },
   });
+const seed = (claudeFive: number, claudeWeek = 33, codexWeek = 33, money: { used?: number; refused?: boolean; figures?: UsageFigures } = {}): void => {
+  publishUsageFigures(money.figures ?? "number");
+  publishLimits({
+    accounts: [
+      account("claude", "claude-cli", "ofer.sadgat@gmail.com", "max", claudeFive, claudeWeek, 71),
+      account("codex", "codex-cli", "ChatGPT", "plus", 2, codexWeek),
+      credit(money.used ?? 11.6),
+      key("anthropic", money.refused === true ? { creditRefusedAt: new Date().toISOString() } : {}),
+    ],
+    routeAccounts: { "claude-cli": "claude", "claude-code": "claude", "codex-cli": "codex", anthropic: "anthropic", openrouter: "openrouter" },
+  });
+};
 
 const CONTEXT: ContextReading = {
   used: 76210,
@@ -78,7 +119,7 @@ const plan = (model: string): ChatPlanView =>
     live: "idle",
     effective: { model, reasoning: "high", permissions: "ask first" },
     available: {
-      routes: ["anthropic", "claude-cli", "codex-cli"],
+      routes: ["anthropic", "openrouter", "claude-cli", "codex-cli"],
       tools: [],
       models: [
         { id: "claude-cli/claude-opus-5", route: "claude-cli" },
@@ -91,9 +132,9 @@ const plan = (model: string): ChatPlanView =>
   }) as unknown as ChatPlanView;
 
 const noop = (): undefined => undefined;
-const composer = (startOpen: ComposerOpen, context: ContextReading | undefined = CONTEXT, text = ""): ReactElement =>
+const composer = (startOpen: ComposerOpen, context: ContextReading | undefined = CONTEXT, text = "", model = "claude-cli/claude-sonnet-5", cost?: number): ReactElement =>
   createElement(Composer, {
-    plan: plan("claude-cli/claude-sonnet-5"),
+    plan: plan(model),
     overrides: {},
     onOverrides: noop,
     onSend: noop,
@@ -101,7 +142,7 @@ const composer = (startOpen: ComposerOpen, context: ContextReading | undefined =
     value: text,
     onValue: noop,
     startOpen,
-    usage: { context, onCompact: noop },
+    usage: { context, onCompact: noop, ...(cost !== undefined ? { cost } : {}) },
   });
 
 const turns: TranscriptEntry[] = [
@@ -165,6 +206,24 @@ const cards = (): ReactElement =>
     ),
   );
 
+const keyBoxes = (): ReactElement =>
+  createElement(
+    "ul",
+    { className: "conn-boxes" },
+    ...["openrouter", "anthropic"].map((route) =>
+      createElement(
+        "li",
+        { key: route, className: "cfg-key-box" },
+        createElement("span", { className: "cfg-login-who" }, `${route.toUpperCase()}_API_KEY`),
+        createElement("span", { className: "cfg-login-facts" }, createElement("span", null, "in the keychain")),
+        createElement(KeyUsage, { route }),
+      ),
+    ),
+  );
+
+const previews = (): ReactElement =>
+  createElement("div", { style: { display: "grid", gap: 8 } }, ...(["off", "number", "ring", "both"] as const).map((mode) => createElement(UsageFiguresPreview, { key: mode, mode })));
+
 type Stage = { name: string; caption: string; lift: number; width?: number; draw: () => ReactElement; seed?: () => void };
 const STAGES: Stage[] = [
   { name: "composer-rest", caption: "the composer: the account's 62% after the model chip, the conversation's ring before the paperclip", lift: 0, draw: () => composer({}), seed: () => seed(62) },
@@ -178,7 +237,19 @@ const STAGES: Stage[] = [
   { name: "waiting", caption: "a message waiting for the reset; a refused one with Try again at …", lift: 0, draw: () => createElement("div", { className: "um-waiting-host" }, createElement(WaitingMessage, { item: waiting({}) }), createElement(WaitingLine, { item: waiting({ id: "w2", state: "refused" }) })), seed: () => seed(100) },
   { name: "run-waiting", caption: "a run refused mid-turn", lift: 0, draw: () => createElement("div", { className: "cx-doing um-waiting-run" }, createElement(WaitingLine, { item: waiting({ kind: "run", state: "refused" }), run: true, onStop: noop })), seed: () => seed(100) },
   { name: "headers", caption: "each state's header: what it added, at the right before the time — open or folded, no cost", lift: 0, draw: headers, seed: () => seed(62) },
-  { name: "cards", caption: "Settings → Connections: the weekly ring and when the week resets (codex's week used up)", lift: 0, draw: cards, seed: () => seed(62, 33, 100) },
+  { name: "cards", caption: "Settings → Connections: the weekly figure and when the week resets (codex's week used up)", lift: 0, draw: cards, seed: () => seed(62, 33, 100) },
+  // API keys: money, not windows.
+  { name: "credit-composer", caption: "an OpenRouter key: what the credit has SPENT, coloured by its share (58%: ink)", lift: 0, draw: () => composer({}, CONTEXT, "", "openrouter/anthropic/claude-sonnet-5", 1.2), seed: () => seed(62) },
+  { name: "credit-warn", caption: "$16.00 of $20 (80%): amber from 75%", lift: 0, draw: () => composer({}, CONTEXT, "", "openrouter/anthropic/claude-sonnet-5", 1.2), seed: () => seed(62, 33, 33, { used: 16 }) },
+  { name: "credit-spent", caption: "the credit used up: the line over the box, and messages wait", lift: 0, draw: () => composer({}, CONTEXT, "Now split inboxOrder", "openrouter/anthropic/claude-sonnet-5", 6.1), seed: () => seed(62, 33, 33, { used: 20 }) },
+  { name: "credit-popover", caption: "the figure opened: this conversation, then the credit used — never what is left", lift: 330, draw: () => composer({ usage: "account" }, CONTEXT, "", "openrouter/anthropic/claude-sonnet-5", 1.2), seed: () => seed(62) },
+  { name: "spend-composer", caption: "an Anthropic key: this conversation's cost, grey", lift: 0, draw: () => composer({}, CONTEXT, "", "anthropic/claude-sonnet-5", 1.2), seed: () => seed(62) },
+  { name: "spend-refused", caption: "refused for an empty balance: red, and the line says so", lift: 0, draw: () => composer({}, CONTEXT, "", "anthropic/claude-sonnet-5", 1.2), seed: () => seed(62, 33, 33, { refused: true }) },
+  { name: "spend-popover", caption: "the figure opened: the conversation's share of the key's last seven days", lift: 330, draw: () => composer({ usage: "account" }, CONTEXT, "", "anthropic/claude-sonnet-5", 1.2), seed: () => seed(62) },
+  { name: "both", caption: "Usage figures: Both — the ring (with a $ for money) beside the figure", lift: 0, draw: () => composer({}, CONTEXT, "", "openrouter/anthropic/claude-sonnet-5", 1.2), seed: () => seed(62, 33, 33, { figures: "both" }) },
+  { name: "money-menu", caption: "the model menu: a credit's dollars beside its bar, a spend key's week in grey", lift: 290, draw: () => composer({ card: "Model" }, CONTEXT, "", "anthropic/claude-sonnet-5", 1.2), seed: () => seed(62) },
+  { name: "key-boxes", caption: "Settings → Connections: an API key's box — what it spent", lift: 0, draw: keyBoxes, seed: () => seed(62) },
+  { name: "preview", caption: "Appearance → Conversation → Usage figures: the preview, in each mode", lift: 0, draw: previews, seed: () => seed(62) },
 ];
 
 const css = pathToFileURL(join(import.meta.dirname, "..", "src", "renderer", "styles.css")).href;

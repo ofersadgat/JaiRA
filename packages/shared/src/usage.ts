@@ -30,6 +30,28 @@ export function routeOfModel(model: string | undefined | null): string | undefin
   return cut > 0 ? model.slice(0, cut) : undefined;
 }
 
+/** The routes that spend an API KEY — money, not a subscription's windows. `local` and `embedded` cost nothing. */
+export const MONEY_ROUTES: readonly string[] = ["anthropic", "openai", "openrouter"];
+
+/**
+ * Which of the three ways an account is drawn (usage-readings contract, "API keys"):
+ *
+ *  - `subscription` — claude and codex logins: the percent of the tightest window.
+ *  - `credit` — an API key whose provider says how much credit there is (OpenRouter): what is
+ *    SPENT, in dollars, coloured by how much of the credit that is.
+ *  - `spend` — an API key whose provider does not (Anthropic, OpenAI): what THIS CONVERSATION cost,
+ *    grey, with its share of what the key spent through JaiRA in the last seven days.
+ */
+export type UsageCase = "subscription" | "credit" | "spend";
+
+/** An account's credit, when its provider reports it. */
+export interface CreditFigures {
+  usedUsd: number;
+  totalUsd: number;
+  /** `account`: the account's whole credit. `key`: a spending limit set on this key. */
+  source: "account" | "key";
+}
+
 /** One account as main shows it: the board's state, who it is, and whether it can be refreshed. */
 export interface LimitAccountView {
   /** The board's key (`claude`, `codex`, a route name). */
@@ -51,6 +73,17 @@ export interface LimitAccountView {
   refreshable: boolean;
   /** Why the last refresh learned nothing, when it did not (an older claude, a signed-out login). */
   unavailable?: string;
+  /** How it is drawn — see {@link UsageCase}. */
+  kind: UsageCase;
+  /** The credit, for a `credit` account. */
+  credit?: CreditFigures;
+  /** What JaiRA's own calls on this key cost in the last seven days (USD), for a money account. */
+  spent7d?: number;
+  /**
+   * When a call on it was last REFUSED for an empty balance (ISO-8601) — the only way an account whose
+   * provider reports no balance is known to be out. Cleared by the next call that goes through.
+   */
+  creditRefusedAt?: string;
 }
 
 /** Every account the board knows, and which account each route spends. */
@@ -86,10 +119,29 @@ export interface WaitingItem {
   createdAt: string;
   /** The refusal's own words, for a refused item. */
   reason?: string;
+  /**
+   * Refused because the account's CREDIT ran out: there is no reset to try again at, so there is no
+   * "Try again at …" — it goes when somebody sends it again, after adding credit.
+   */
+  credit?: true;
 }
 
 /** The failure code a usage-limit refusal carries (upstream `USAGE_LIMIT_CODE`). */
 export const USAGE_LIMIT_CODE = "usage_limit";
+
+/** The failure code a refusal for an empty prepaid balance carries (upstream `CREDIT_EXHAUSTED_CODE`). */
+export const CREDIT_EXHAUSTED_CODE = "credit_exhausted";
+
+/** The share of the credit used, 0–100; `null` without a credit. */
+export function creditPercent(credit: CreditFigures | undefined): number | null {
+  if (credit === undefined || !(credit.totalUsd > 0)) return null;
+  return Math.max(0, Math.min(100, (credit.usedUsd / credit.totalUsd) * 100));
+}
+
+/** Money for a person: `$11.60`, `$0.04`, `$1,204.00` — always with cents. */
+export function formatUsd(usd: number): string {
+  return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 /** Is this account out of allowance right now (and not drawing extra usage)? */
 export function isSpent(reading: LimitReading | null | undefined, nowMs: number = Date.now()): boolean {
@@ -115,10 +167,14 @@ export function usedPercentFor(reading: LimitReading | null | undefined, model?:
   return windowStatus(w) === "exhausted" ? 100 : w.usedPercent;
 }
 
-/** The tone a percent is drawn in: ink at rest, amber from 80, red at 100. */
+/**
+ * The tone an ACCOUNT's percent is drawn in: ink at rest, amber from 75, red from 90 (the person's
+ * cut-offs, 2026-09-24). Red is a warning, not a verdict — messages wait only once nothing is left
+ * ({@link isSpent}). The conversation's context has its own, {@link toneOfContext}.
+ */
 export function toneOfPercent(percent: number | null | undefined): "accent" | "warn" | "bad" | "none" {
   if (percent === null || percent === undefined) return "none";
-  return percent >= 100 ? "bad" : percent >= 80 ? "warn" : "accent";
+  return percent >= 90 ? "bad" : percent >= 75 ? "warn" : "accent";
 }
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

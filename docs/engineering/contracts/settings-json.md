@@ -237,6 +237,7 @@ A command rule has no place here. What a command may run is a line under the `ba
 | `appearance.smoothing` | boolean | no, default `false` | grayscale antialiasing |
 | `appearance.editorTheme` | non-empty string | no, default `"monokai-light"` | the editors' palette, or `"app"`; an id the renderer does not know draws the default |
 | `appearance.conversation.sequentialBatches` | `"stacked"` or `"band"` | no, default `"stacked"` | how a batch whose elements ran in turn is laid out |
+| `appearance.conversation.usageFigures` | `"off"`, `"number"`, `"ring"` or `"both"` | no, default `"number"` | how an account's usage is drawn after the model chip and on the Connections cards (usage-readings contract) |
 | `appearance.editors.<kind>.<knob>` | boolean, a tab size in `TAB_SIZES`, or a line height within `LINE_HEIGHT` | no, the surface's default | `<kind>` is `code`, `markdown`, `json` or `diff`; only the knobs `EDITOR_KNOBS[kind]` lists |
 | `appearance.renderers.<key>` | `{read?, write?, off?, theme?: {read?, write?}}` | no | `<key>` is `<mime>:<kind>` or `family:<family>:<kind>`; `read` and `write` a renderer id or `null`, `off` a list of ids. A line that says nothing is dropped |
 

@@ -226,14 +226,24 @@ export interface ForgeSignInMark {
 export type SequentialBatchLayout = "stacked" | "band";
 export const SEQUENTIAL_BATCH_LAYOUTS: readonly SequentialBatchLayout[] = ["stacked", "band"];
 
+/**
+ * How an account's usage is drawn after the model chip and on the Connections cards: the figure
+ * itself (`"number"`: 62%, $11.60), the ring that draws the same share, `"both"`, or nothing at all
+ * (`"off"`). A ring beside the percent it draws says one thing twice, which is why this is a choice
+ * rather than both at once. The conversation's own ring — how full the context is — is not this.
+ */
+export type UsageFigures = "off" | "number" | "ring" | "both";
+export const USAGE_FIGURES: readonly UsageFigures[] = ["off", "number", "ring", "both"];
+
 /** The conversation's reading preferences — `appearance.conversation` (`./appearanceConfig`). */
 export interface ConversationLook {
   sequentialBatches: SequentialBatchLayout;
+  usageFigures: UsageFigures;
 }
 
-/** Stacked: a batch reads as the sequence it was, until somebody asks otherwise. */
+/** Stacked: a batch reads as the sequence it was, until somebody asks otherwise. The number alone. */
 export function defaultConversationLook(): ConversationLook {
-  return { sequentialBatches: "stacked" };
+  return { sequentialBatches: "stacked", usageFigures: "number" };
 }
 
 /**

@@ -34,6 +34,7 @@ import {
   SIZE_LIMITS,
   TAB_SIZES,
   THEME_MODES,
+  USAGE_FIGURES,
   defaultAppearance,
   defaultConversationLook,
   defaultEditors,
@@ -48,6 +49,7 @@ import {
   type RendererChoices,
   type SequentialBatchLayout,
   type ThemeMode,
+  type UsageFigures,
 } from "./settings";
 
 /**
@@ -157,9 +159,12 @@ function parseConversation(raw: unknown, where: string): ConversationLook {
   const out = defaultConversationLook();
   if (raw === undefined) return out;
   const spec = plain(raw, where);
-  onlyFields(spec, ["sequentialBatches"], where);
+  onlyFields(spec, ["sequentialBatches", "usageFigures"], where);
   if (spec["sequentialBatches"] !== undefined) {
     out.sequentialBatches = oneOf<SequentialBatchLayout>(spec["sequentialBatches"], SEQUENTIAL_BATCH_LAYOUTS, `${where}.sequentialBatches`);
+  }
+  if (spec["usageFigures"] !== undefined) {
+    out.usageFigures = oneOf<UsageFigures>(spec["usageFigures"], USAGE_FIGURES, `${where}.usageFigures`);
   }
   return out;
 }

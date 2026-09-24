@@ -44,6 +44,7 @@ import {
   type RendererChoices,
   type RendererEdit,
   type SequentialBatchLayout,
+  type UsageFigures,
   type ThemeMode,
 } from "@jaira/shared/browser";
 import { FileTypesPane } from "./fileTypesPane";
@@ -65,6 +66,7 @@ import { Pill } from "./pill";
 import { Column, Tile } from "./board";
 import { PALETTE_CARDS, ThemeMini } from "./paletteCards";
 import { Segmented, SettingsRow, SettingsSection, type RowLayer } from "./settingsLayout";
+import { UsageFiguresPreview } from "./usageMeters";
 
 /**
  * Faces worth offering by name.
@@ -417,6 +419,13 @@ const BUCKET_CHOICES: ReadonlyArray<readonly [string, BucketStyle]> = [
   ["Line", "line"],
 ];
 
+const USAGE_CHOICES: ReadonlyArray<readonly [string, UsageFigures]> = [
+  ["Off", "off"],
+  ["Number", "number"],
+  ["Ring", "ring"],
+  ["Both", "both"],
+];
+
 const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
   ["One after another", "stacked"],
   ["Side by side", "band"],
@@ -451,6 +460,8 @@ function lookWords(value: unknown, path: string): string {
       return value === null || value === undefined ? own : value === "line" ? "a line" : "a box";
     case "conversation.sequentialBatches":
       return BATCH_CHOICES.find(([, layout]) => layout === value)?.[0].toLowerCase() ?? shortValue(value, path);
+    case "conversation.usageFigures":
+      return USAGE_CHOICES.find(([, figures]) => figures === value)?.[0].toLowerCase() ?? shortValue(value, path);
     case "appFamily":
     case "dataFamily":
       return Array.isArray(value) && value.length > 0 ? value.join(", ") : "JaiRA's own face";
@@ -602,6 +613,25 @@ export function AppearancePane({
         />
         <SettingsRow name="Preview" description="Two elements of one batch, as a run's conversation will draw them." full>
           <ConversationPreview layout={conversation.sequentialBatches} />
+        </SettingsRow>
+        <SettingsRow
+          name="Usage figures"
+          description="How much of an account is used, after the model chip and in Connections: as a number, a ring, both, or not at all."
+          info="A subscription shows the percent of its tightest window; an API key whose provider reports its credit, what is spent; any other key, what the conversation cost. The ring draws the same share, so either one alone says it. The conversation's own ring, at the composer's right, is not this setting."
+          layer={layer("conversation.usageFigures")}
+          reset={conversation.usageFigures !== "number" ? { label: "Back to the number", onReset: () => onConversation({ usageFigures: "number" }), disabled: busy } : undefined}
+          control={
+            <Segmented
+              label="Usage figures"
+              value={conversation.usageFigures}
+              options={USAGE_CHOICES}
+              disabled={busy}
+              onChange={(usageFigures) => onConversation({ usageFigures })}
+            />
+          }
+        />
+        <SettingsRow name="Preview" description="The composer on a subscription, on a key whose provider reports its credit, and on a key whose provider does not." full>
+          <UsageFiguresPreview mode={conversation.usageFigures} />
         </SettingsRow>
       </SettingsSection>
 

@@ -10,7 +10,7 @@
  * has gone stale by itself. With nothing watching, nothing is fetched.
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { LimitAccountView, LimitsView, WaitingItem } from "@jaira/shared/browser";
+import type { LimitAccountView, LimitsView, UsageFigures, WaitingItem } from "@jaira/shared/browser";
 import { accountOfRoute } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 
@@ -68,6 +68,23 @@ export function useLimits(): LimitsView {
 export function useWaiting(): WaitingItem[] {
   useEffect(start, []);
   return useSyncExternalStore(subscribe, () => waiting, () => waiting);
+}
+
+/**
+ * How an account's figure is drawn — `appearance.conversation.usageFigures`, the reader's own setting.
+ * Published by the app shell whenever the look changes, and read by every figure it governs (after the
+ * model chip, the sign-in and key cards), so none of them needs the look threaded down to it.
+ */
+let figures: UsageFigures = "number";
+
+export function publishUsageFigures(next: UsageFigures): void {
+  if (next === figures) return;
+  figures = next;
+  notify();
+}
+
+export function useUsageFigures(): UsageFigures {
+  return useSyncExternalStore(subscribe, () => figures, () => figures);
 }
 
 /** The account a route spends, from a view. */

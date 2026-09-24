@@ -8,10 +8,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ContextReading, LimitAccountView, LimitReading, WaitingItem } from "@jaira/shared";
-import { publishLimits, publishWaiting } from "../src/renderer/limitsStore";
+import { publishLimits, publishUsageFigures, publishWaiting } from "../src/renderer/limitsStore";
 import {
   AccountAllowance,
   AllowanceNumber,
+  KeyUsage,
+  UsageFiguresPreview,
   CompactionLine,
   ContextDetail,
   ContextMeter,
@@ -51,6 +53,7 @@ const claude = (five: number, week: number, extra: Partial<LimitReading> = {}): 
   lastSentAt: null,
   refreshing: false,
   refreshable: true,
+  kind: "subscription",
 });
 
 const board = (...accounts: LimitAccountView[]): void =>
@@ -74,6 +77,7 @@ const CONTEXT: ContextReading = {
 afterEach(() => {
   board();
   publishWaiting([]);
+  publishUsageFigures("number");
 });
 
 describe("the composer's ring", () => {
@@ -239,5 +243,133 @@ describe("the model menu", () => {
     expect(opus).toContain(">71%<");
     expect(opus).not.toContain("Opus weekly");
     expect(draw(ModelWindow, { route: "claude-cli", model: "claude-cli/claude-sonnet-5" })).toBe("");
+  });
+});
+
+const money = (key: string, extra: Partial<LimitAccountView>): LimitAccountView => ({
+  key,
+  routes: [key],
+  brand: key,
+  who: `${key.toUpperCase()}_API_KEY`,
+  plan: null,
+  reading: null,
+  updatedAt: null,
+  lastSentAt: null,
+  refreshing: false,
+  refreshable: false,
+  kind: "spend",
+  spent7d: 6.8,
+  ...extra,
+});
+const credit = (used: number): LimitAccountView =>
+  money("openrouter", {
+    kind: "credit",
+    credit: { usedUsd: used, totalUsd: 20, source: "account" },
+    reading: {
+      route: "openrouter",
+      plan: null,
+      windows: [{ id: "credit", label: "Credit", minutes: null, usedPercent: (used / 20) * 100, resetsAt: null, ...(used >= 20 ? { status: "exhausted" as const } : {}) }],
+      status: used >= 20 ? "exhausted" : "ok",
+      source: "query",
+      at: new Date().toISOString(),
+    },
+    updatedAt: new Date().toISOString(),
+  });
+const moneyBoard = (...accounts: LimitAccountView[]): void =>
+  publishLimits({ accounts, routeAccounts: { "claude-cli": "claude", openrouter: "openrouter", anthropic: "anthropic" } });
+
+describe("an API key's figure", () => {
+  it("is what a credit has SPENT, coloured by the share: ink, amber from 75%, red from 90% — never what is left", () => {
+    moneyBoard(credit(11.6));
+    const rest = draw(AllowanceNumber, { route: "openrouter" });
+    expect(rest).toContain(">$11.60<");
+    expect(rest).toContain("um-t-accent");
+    expect(rest).not.toContain("left");
+    moneyBoard(credit(16));
+    expect(draw(AllowanceNumber, { route: "openrouter" })).toContain("um-t-warn");
+    moneyBoard(credit(18.6));
+    expect(draw(AllowanceNumber, { route: "openrouter" })).toContain("um-t-bad");
+  });
+
+  it("is this conversation's cost for a key whose provider reports no balance, grey — red once refused", () => {
+    moneyBoard(money("anthropic", {}));
+    const rest = draw(AllowanceNumber, { route: "anthropic", cost: 1.2 });
+    expect(rest).toContain(">$1.20<");
+    expect(rest).toContain("um-t-none");
+    moneyBoard(money("anthropic", { creditRefusedAt: new Date().toISOString() }));
+    expect(draw(AllowanceNumber, { route: "anthropic", cost: 1.2 })).toContain("um-t-bad");
+    expect(draw(SpentNotice, { route: "anthropic" })).toContain("the balance is empty");
+  });
+
+  it("opens on the conversation, then the credit used or the key's week", () => {
+    moneyBoard(credit(11.6), money("anthropic", {}));
+    const credited = draw(AllowanceNumber, { route: "openrouter", cost: 1.2, startOpen: true });
+    expect(credited).toContain("This conversation");
+    expect(credited).toContain("Credit used");
+    expect(credited).not.toContain("left");
+    expect(credited).toContain("$6.80 in the last 7 days"); // the other account, anthropic
+    const spend = draw(AllowanceNumber, { route: "anthropic", cost: 1.2, startOpen: true });
+    expect(spend).toContain("18% of the $6.80 spent on this key in the last 7 days");
+    expect(spend).toContain("doesn&#x27;t report the balance");
+  });
+
+  it("holds messages once the credit is used up, and says so", () => {
+    moneyBoard(credit(20));
+    expect(draw(SpentNotice, { route: "openrouter" })).toContain("credit is used up");
+  });
+});
+
+describe("the usage figures setting", () => {
+  it("draws the number, the ring (with a $ for money), both, or nothing", () => {
+    board(claude(62, 33));
+    publishUsageFigures("ring");
+    const ring = draw(AllowanceNumber, { route: "claude-cli", model: "claude-cli/claude-sonnet-5" });
+    expect(ring).toContain("um-ring");
+    expect(ring).not.toContain(">62%<");
+    publishUsageFigures("both");
+    const both = draw(AllowanceNumber, { route: "claude-cli", model: "claude-cli/claude-sonnet-5" });
+    expect(both).toContain("um-ring");
+    expect(both).toContain(">62%<");
+    publishUsageFigures("off");
+    expect(draw(AllowanceNumber, { route: "claude-cli", model: "claude-cli/claude-sonnet-5" })).toBe("");
+    moneyBoard(credit(11.6));
+    publishUsageFigures("ring");
+    expect(draw(AllowanceNumber, { route: "openrouter" })).toContain("um-dollar");
+  });
+
+  it("governs the sign-in card too: the number alone by default, no ring", () => {
+    const html = draw(AccountAllowance, { account: claude(62, 33), plan: "Max plan" });
+    expect(html).toContain(">33%<");
+    expect(html).not.toContain("um-ring");
+  });
+
+  it("previews each case in the mode being chosen", () => {
+    const number = draw(UsageFiguresPreview, { mode: "number" });
+    expect(number).toContain("62%");
+    expect(number).toContain("$11.60");
+    expect(number).toContain("$1.20");
+    expect(draw(UsageFiguresPreview, { mode: "off" })).not.toContain("um-num");
+    expect(draw(UsageFiguresPreview, { mode: "ring" })).toContain("um-dollar");
+  });
+});
+
+describe("an API key on Connections and in the model menu", () => {
+  it("shows what the key spent — a credit used, or the last seven days — never what is left", () => {
+    moneyBoard(credit(11.6), money("anthropic", {}));
+    const box = draw(KeyUsage, { route: "openrouter" });
+    expect(box).toContain("$11.60");
+    expect(box).toContain("credit used");
+    const week = draw(KeyUsage, { route: "anthropic" });
+    expect(week).toContain("$6.80");
+    expect(week).toContain("no balance reported");
+    expect(draw(RouteLeft, { route: "openrouter" })).toContain("$11.60");
+    expect(draw(RouteLeft, { route: "anthropic" })).toContain("$6.80");
+  });
+
+  it("offers no Try again for a refusal on an empty balance — there is no reset", () => {
+    const item: WaitingItem = { id: "w", kind: "message", project: "p", taskId: "t", account: "anthropic", until: null, state: "refused", retry: false, credit: true, createdAt: new Date().toISOString() };
+    const html = draw(WaitingLine, { item });
+    expect(html).toContain("balance is empty");
+    expect(html).not.toContain("checkbox");
   });
 });

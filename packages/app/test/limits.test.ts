@@ -189,3 +189,63 @@ describe("a message sent while the account is known to be spent", () => {
     expect(service.listWaiting({ taskId })).toHaveLength(0);
   });
 });
+
+describe("money accounts", () => {
+  const DAY = 86_400_000;
+  const make = (file: string, clock: { t: number }, extra: object = {}) =>
+    new LimitsService({ file, publish: () => undefined, claudeCommand: () => undefined, probes: () => [], routes: () => ["anthropic", "openrouter", "claude-cli", "local"], refresh: false, now: () => clock.t, ...extra });
+
+  it("keeps what each call on a key cost for a ROLLING seven days, and remembers it", () => {
+    const file = join(dir, "money.json");
+    const clock = { t: Date.parse("2026-09-20T10:00:00.000Z") };
+    const service = make(file, clock);
+    service.spent("anthropic", 1.2);
+    clock.t += 6 * DAY;
+    service.spent("anthropic", 0.5);
+    expect(service.view().accounts.find((a) => a.key === "anthropic")?.spent7d).toBeCloseTo(1.7);
+    service.close();
+    clock.t += 1.5 * DAY; // the first call is now more than seven days old
+    const again = make(file, clock);
+    expect(again.view().accounts.find((a) => a.key === "anthropic")?.spent7d).toBeCloseTo(0.5);
+    again.close();
+  });
+
+  it("draws an API key as spend, a subscription as one, and a free route not at all", () => {
+    const service = make(join(dir, "k.json"), { t: Date.now() });
+    const kinds = Object.fromEntries(service.view().accounts.map((a) => [a.key, a.kind]));
+    expect(kinds).toMatchObject({ anthropic: "spend", openrouter: "spend", claude: "subscription" });
+    expect(kinds["local"]).toBeUndefined();
+    service.close();
+  });
+
+  it("marks an account whose call was refused for an empty balance, until a call goes through", () => {
+    const service = make(join(dir, "r.json"), { t: Date.now() });
+    service.creditRefused("anthropic");
+    expect(service.view().accounts.find((a) => a.key === "anthropic")?.creditRefusedAt).toBeDefined();
+    service.spent("anthropic", 0.01);
+    expect(service.view().accounts.find((a) => a.key === "anthropic")?.creditRefusedAt).toBeUndefined();
+    service.close();
+  });
+
+  it("reads OpenRouter's credit into a credit, and a used-up credit is spent", async () => {
+    const real = globalThis.fetch;
+    let used = 11.6;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ data: { total_credits: 20, total_usage: used } }), { status: 200 })) as typeof fetch;
+    try {
+      const service = make(join(dir, "o.json"), { t: Date.now() }, { refresh: true, openRouterKey: () => "k" });
+      await service.refresh("openrouter");
+      let openrouter = service.view().accounts.find((a) => a.key === "openrouter")!;
+      expect(openrouter.kind).toBe("credit");
+      expect(openrouter.credit).toEqual({ usedUsd: 11.6, totalUsd: 20, source: "account" });
+      expect(openrouter.reading?.windows[0]?.usedPercent).toBeCloseTo(58);
+      expect(openrouter.refreshable).toBe(true);
+      used = 20;
+      await service.refresh("openrouter");
+      openrouter = service.view().accounts.find((a) => a.key === "openrouter")!;
+      expect(openrouter.reading?.status).toBe("exhausted");
+      service.close();
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});

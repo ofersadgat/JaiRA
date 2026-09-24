@@ -1195,6 +1195,8 @@ export function RunConversation({
         instanceId={parent?.instanceId}
         // How full the selected conversation is: the reading on its last answer.
         contextReading={parent?.instanceId !== undefined ? [...(sessions[String(parent.instanceId)]?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context : undefined}
+        // What the selected conversation has cost: every call it made, from the rows the panel already holds.
+        conversationCost={parent?.instanceId !== undefined ? costOfConversation(sessionHistory, String(parent.instanceId)) : undefined}
         project={context.project}
         running={detail.status === "running"}
         detail={detail}
@@ -1452,8 +1454,11 @@ function ChatComposer({
   onRewindConfirm,
   onArmCancel,
   contextReading,
+  conversationCost,
 }: {
   taskId: string;
+  /** What the conversation being continued has cost — the figure for an API key with no reported balance. */
+  conversationCost?: number | undefined;
   instanceId: string | undefined;
   /** How full the conversation being continued is — the composer's ring. */
   contextReading?: ContextReading | undefined;
@@ -1616,7 +1621,7 @@ function ChatComposer({
       {error !== null ? <p className="cx-error">{error}</p> : null}
       <Composer
         plan={plan ?? null}
-        usage={{ context: contextReading, onCompact }}
+        usage={{ context: contextReading, onCompact, cost: conversationCost }}
         // A run in flight is busy whatever the box says: the button is the only handle on it, and a
         // disabled composer over a running workflow used to be a panel with no way to stop it.
         busy={busy || running === true}
@@ -2328,4 +2333,11 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
       )}
     </div>
   );
+}
+
+/** What one conversation has cost: the priced calls its instance made, summed; `undefined` when none was priced. */
+function costOfConversation(rows: readonly SessionRef[], instanceId: string): number | undefined {
+  let total: number | undefined;
+  for (const row of rows) if (String(row.instanceId) === instanceId && row.costUsd !== undefined) total = (total ?? 0) + row.costUsd;
+  return total;
 }
