@@ -520,7 +520,7 @@ describe("starting a run with nothing open", () => {
   it("numbers the title from the runs this workflow has already had", () => {
     const task = (workflow: string): TaskSummary =>
       ({ taskId: `#${workflow}`, title: workflow, workflow, status: "completed", updatedAt: 1 }) as TaskSummary;
-    const tasks = [task("feature/plan"), task("feature/plan"), task("chat/agent")];
+    const tasks = [task("feature/plan"), task("feature/plan"), task("chat/session")];
     // What `createTask` generates: the same count the Run button's title uses, so a task made from
     // either surface reads the same on the board.
     expect(runTitle("feature/plan", runHistoryOf("feature/plan", tasks, null).startedHere.length)).toBe(

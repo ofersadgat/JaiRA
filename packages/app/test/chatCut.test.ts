@@ -15,7 +15,7 @@ import { initProject } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
-import { CHAT_ASSISTANT, titleOf } from "../src/renderer/chatWorkflow";
+import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
 let dir: string;
 let service: AppService;
@@ -50,7 +50,7 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 const REPLY = (text: string): Array<{ output: string }> => [{ output: text }];
 
 async function started(message: string): Promise<string> {
-  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_ASSISTANT, inputs: { message } });
+  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_SESSION, inputs: { message } });
   await service.startTask({ taskId, fake: REPLY("first answer") });
   await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
   return taskId;

@@ -133,7 +133,7 @@ const chosen = ((): ChatPlanView => {
   return { ...view, settings: { ...view.settings, reasoning: { effort: "xhigh" } }, origin: { ...view.origin, reasoning: "override" }, effective: { ...view.effective, reasoning: "xhigh" } };
 })();
 const undeclared = ((): ChatPlanView => {
-  const view = plan({}, "chat/assistant", false);
+  const view = plan({}, "chat/session", false);
   return { ...view, settings: { model: "claude-cli/claude-sonnet-5" }, origin: { ...view.origin, tools: "unset", permissions: "unset", reasoning: "unset" }, effective: { ...view.effective, reasoning: "the model's default", permissions: "ask by default" } };
 })();
 

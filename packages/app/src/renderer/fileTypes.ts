@@ -460,6 +460,11 @@ export interface FileSurfaceContext {
          * exists.
          */
         onEditCopy?: ((stateId: string, text: () => string) => void) | undefined;
+        /**
+         * The same for a shipped file that is NOT a state: copy it unchanged into Shared and open the
+         * copy, moving the draft typed on the shipped file across with it.
+         */
+        onEditFileCopy?: ((path: string, original: string) => void) | undefined;
       }
     | undefined;
   /**

@@ -93,11 +93,20 @@ name's line, and tabs.
 **Files editor.** A slot's default is its binding box's placeholder. A file opens on Form, including
 composites.
 
-**Copy-on-edit for built-in states.**
-- A shipped state is mounted live.
-- Its first change copies it into Shared (`~/.jaira`) and opens the copy. Every keystroke up to then
-  becomes the copy's unsaved draft (`moveWorkflow`'s `draft`).
-- It stays read-only when Shared already has a copy, because that copy is the one that runs.
+**Copy-on-edit for everything that ships.** Nothing shipped is written in place, and every shipped file
+is edited where it is shown.
+- **States.** A shipped state is mounted live. Its first change copies it into Shared (`~/.jaira`) and
+  opens the copy. Every keystroke up to then becomes the copy's unsaved draft (`moveWorkflow`'s
+  `draft`).
+- **Any other shipped file** (a prompt, a permission set, the README) is mounted live in its own editor
+  (`FilePanel`'s `shippedProps`). Its first draft writes the untouched file into Shared at the same
+  path and opens that copy, and the draft moves over to it (`editBuiltInFile`).
+- **Where the copy exists already.** A shipped file whose Shared copy exists stays a reading, because
+  that copy is the one in use.
+  - `file:read` now reports which layers hold any shipped file (`fileStanding`), not only states.
+  - The tree marks such a file overridden, as it marks a state.
+- **Labels.** The address bar says "built in · an edit copies it to Shared", and the tree's Built in
+  root says "edits copy to Shared".
 
 **⇤ from a state** opens the file and no run of it (`selectState(id, { run: false })`).
 

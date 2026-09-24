@@ -56,7 +56,7 @@ const tree: FileTree = {
         dir("project", ".jaira", [
           dir("project", ".jaira/workflows", [
             dir("project", ".jaira/workflows/chat", [
-              state("project", ".jaira/workflows/chat/agent.json", "chat/agent", { overridesBuiltIn: true }),
+              state("project", ".jaira/workflows/chat/session.json", "chat/session", { overridesBuiltIn: true }),
             ]),
             state("project", ".jaira/workflows/feature.json", "feature"),
           ]),
@@ -73,8 +73,8 @@ const tree: FileTree = {
         { path: "README.md", name: "README.md", kind: "other", mime: "text/markdown", layer: "system" },
         dir("system", "workflows", [
           dir("system", "workflows/chat", [
-            state("system", "workflows/chat/agent.json", "chat/agent", { shadowed: true }),
-            state("system", "workflows/chat/assistant.json", "chat/assistant"),
+            state("system", "workflows/chat/session.json", "chat/session", { shadowed: true }),
+            state("system", "workflows/chat/control.json", "chat/control"),
           ]),
           dir("system", "workflows/debug", [
             dir("system", "workflows/debug/hello_world", []),
@@ -92,7 +92,7 @@ const never = async (): Promise<null> => null;
 const treeHtml = renderToStaticMarkup(
   createElement(FileTreePanel, {
     tree,
-    selected: { layer: "system", path: "workflows/chat/assistant.json" },
+    selected: { layer: "system", path: "workflows/chat/control.json" },
     expanded: new Set([
       "project:.jaira",
       "project:.jaira/workflows",
@@ -171,13 +171,13 @@ writeFileSync(
     caption("the Files tree: a checkout, then what ships — read-only, with the old-copies offer") +
     stage(`<nav class="sidebar"><div class="side-drawer">${treeHtml}</div></nav>`, 300) +
     caption("the editor on a built-in") +
-    stage(editor({ stateId: "chat/assistant", layer: "system", file: "C:/Program Files/JaiRA/resources/builtin/workflows/chat/assistant.json", text: shipped("chat/assistant"), exists: true, builtIn: { layers: ["system"] } }), 760, 330) +
+    stage(editor({ stateId: "chat/control", layer: "system", file: "C:/Program Files/JaiRA/resources/builtin/workflows/chat/control.json", text: shipped("chat/control"), exists: true, builtIn: { layers: ["system"] } }), 760, 330) +
     caption("the editor on a built-in this project already overrides, with nothing to override FOR all projects either") +
-    stage(editor({ stateId: "chat/agent", layer: "system", file: "x", text: shipped("chat/agent"), exists: true, builtIn: { layers: ["project", "base", "system"] } }), 760, 60) +
+    stage(editor({ stateId: "chat/session", layer: "system", file: "x", text: shipped("chat/session"), exists: true, builtIn: { layers: ["project", "base", "system"] } }), 760, 60) +
     caption("the editor on a project file that overrides a built-in") +
-    stage(editor({ stateId: "chat/agent", layer: "project", file: "C:/w/atlas/.jaira/workflows/chat/agent.json", text: shipped("chat/agent"), exists: true, builtIn: { layers: ["project", "system"] } }), 760, 60) +
+    stage(editor({ stateId: "chat/session", layer: "project", file: "C:/w/atlas/.jaira/workflows/chat/session.json", text: shipped("chat/session"), exists: true, builtIn: { layers: ["project", "system"] } }), 760, 60) +
     caption("the editor on a shared copy of a shipped id") +
-    stage(editor({ stateId: "chat/assistant", layer: "base", file: "C:/Users/me/.jaira/workflows/chat/assistant.json", text: shipped("chat/assistant"), exists: true, builtIn: { layers: ["base", "system"] } }), 760, 60) +
+    stage(editor({ stateId: "chat/control", layer: "base", file: "C:/Users/me/.jaira/workflows/chat/control.json", text: shipped("chat/control"), exists: true, builtIn: { layers: ["base", "system"] } }), 760, 60) +
     caption("the editor on an ordinary shared file") +
     stage(editor({ stateId: "review/step", layer: "base", file: "C:/Users/me/.jaira/workflows/review/step.json", text: "{}", exists: true }), 760, 60) +
     caption("the Debug pane") +

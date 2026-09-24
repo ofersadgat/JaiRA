@@ -4772,7 +4772,7 @@ export class AppService {
       // `tools === undefined` means the message said nothing and the STATE's declaration stands, so
       // the plan is not what runs and its injections must not be wrapped. The always-granted set is
       // the exception, and has to be: a conversation with no tools at all is exactly the one that
-      // reaches for a mockup, and `chat/assistant.json` declares none.
+      // reaches for a mockup, and a state with no `tools` key declares none.
       names: declaresTools(plan.settings) ? wiring.inject : [...ALWAYS_GRANTED_TOOLS],
       sessionId: sessionOf(context.position),
       policy,
@@ -8369,6 +8369,36 @@ export class AppService {
    * `existsSync` on the ordinary path. The project layer is asked only where there is a project to
    * ask: a shared or shipped file read with nothing open has no third layer to report.
    */
+  /**
+   * How any OTHER file stands against what ships — a prompt, a permission set, the README. The same
+   * answer {@link builtInStanding} gives for a state, asked by path: which layers hold a file at this
+   * path under their root. Only for a file read from the built-in layer or from Shared (a project's
+   * copy lives under `.jaira/`, and is asked for the shipped file only), and `undefined` for a file
+   * JaiRA does not ship. What copy-on-edit reads: a built-in file whose Shared copy already exists
+   * is not copied again (the person's ruling, 2026-09-24).
+   */
+  private fileStanding(path: string, layer: WorkflowLayer, project?: string): BuiltInStanding | undefined {
+    if (layer === "project") return undefined;
+    let shipped: string;
+    try {
+      shipped = this.treeFile(path, "system");
+    } catch {
+      return undefined;
+    }
+    if (!existsSync(shipped)) return undefined;
+    const layers: WorkflowLayer[] = [];
+    if (project !== undefined && project !== SHARED_SESSION && this.sessionOf(project) !== undefined) {
+      try {
+        if (existsSync(this.treeFile(`.jaira/${path}`, "project", project))) layers.push("project");
+      } catch {
+        /* no project layer to ask */
+      }
+    }
+    if (existsSync(this.treeFile(path, "base"))) layers.push("base");
+    layers.push("system");
+    return { layers };
+  }
+
   private builtInStanding(stateId: string, project?: string): BuiltInStanding | undefined {
     const shipped = this.workflowFile(stateId, "system");
     if (!existsSync(shipped)) return undefined;
@@ -8634,7 +8664,11 @@ export class AppService {
     const state = this.stateIdOf(named);
     // Which layers hold this state — what the editor's top bar says about a built-in and about a
     // file that overrides one (decision 0006).
-    const builtIn = exists && state !== null ? this.builtInStanding(state.stateId, request.project) : undefined;
+    const builtIn = !exists
+      ? undefined
+      : state !== null
+        ? this.builtInStanding(state.stateId, request.project)
+        : this.fileStanding(request.path, request.layer, request.project);
     return {
       layer: request.layer,
       // Echoed back, so the document the panel holds knows which project it is in — the tree's

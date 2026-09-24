@@ -514,7 +514,7 @@ export function builtInItems(
   const id = node.stateId;
   if (id === undefined) return look;
   return [
-    { label: "Open", note: "read-only", onSelect: () => act.onOpen(id, root.layer) },
+    { label: "Open", note: "an edit copies it", onSelect: () => act.onOpen(id, root.layer) },
     { label: "Edit a copy in Shared", note: "~/.jaira", separator: true, onSelect: () => act.onOverride(id, "base") },
     { label: "Override here", note: ".jaira", disabled: !act.hasProject, onSelect: () => act.onOverride(id, "project") },
     { label: "Copy state id", separator: true, onSelect: () => act.onCopy(id) },
@@ -1178,8 +1178,8 @@ export function FileTreePanel({
                   +
                 </button>
                 ) : (
-                  <span className="chip" title="What ships with JaiRA. Read it here; change it by overriding it.">
-                    read-only
+                  <span className="chip" title="What ships with JaiRA. It is never changed in place: editing a file here copies it into Shared (~/.jaira), and the copy is what is used.">
+                    edits copy to Shared
                   </span>
                 )}
               </li>
@@ -1661,10 +1661,32 @@ export function FileAddressBar({
       {toggleable && context.onRunMode !== undefined ? (
         <RunModeToggle mode={context.runMode ?? "board"} onMode={context.onRunMode} />
       ) : undefined}
+      {/* A shipped file that is not a state has no editor bar of its own to say what an edit does —
+          the state editor's layer bar says it for states — so the address says it (copy-on-edit, the
+          panel rulings of 2026-09-24). */}
+      {doc.layer === "system" && doc.stateId === undefined ? (
+        doc.builtIn?.layers.includes("base") === true ? (
+          <span className="chip chip-warn" title="Shared already has its own copy of this file, and that copy is the one in use.">
+            built in · Shared has its copy
+          </span>
+        ) : (
+          <span className="chip" title="This file ships with JaiRA. The first change you make copies it into ~/.jaira with the change in it, and the copy is what is used.">
+            built in · an edit copies it to Shared
+          </span>
+        )
+      ) : null}
       {facts}
     </DocBar>
   );
 }
+
+/**
+ * When copy-on-edit last asked to copy each shipped file, by path. Module state rather than a hook,
+ * because {@link FilePanel} returns early before its hooks would run; the window is how long a copy
+ * takes to open, after which the file shown is the copy and nothing here is asked again.
+ */
+const COPY_ASKED = new Map<string, number>();
+const COPY_WINDOW_MS = 5000;
 
 /**
  * The open file: what it IS above, what it SAYS below.
@@ -1779,6 +1801,31 @@ export function FilePanel({
   // the palette is keyed per view — so a viewer built from `props` would be drawn in the editor's
   // colours. See `FileSurfaceContext.view`.
   const viewProps = { ...props, context: { ...context, view: "read" as const } };
+  /**
+   * A shipped file that is not a state, mounted LIVE for copy-on-edit: its first draft asks the shell
+   * to copy the file into Shared, and the draft moves to the copy (`editBuiltInFile`). The draft is
+   * still written under the shipped file's own key, so the editor shows every keystroke while the
+   * copy is being made. `undefined` — a reading — when Shared already has its copy, or when this
+   * host cannot copy.
+   */
+  const copyFile = context.builtInActions?.onEditFileCopy;
+  const shippedProps: typeof props | undefined =
+    doc !== null && doc.layer === "system" && doc.stateId === undefined && copyFile !== undefined && doc.builtIn?.layers.includes("base") !== true
+      ? {
+          ...props,
+          context: {
+            ...context,
+            onDraft: (key: string, text: string | null) => {
+              context.onDraft?.(key, text);
+              // Once per copy: every keystroke until the copy opens is a draft here, and the draft is
+              // what moves across — see `COPY_ASKED`.
+              if (text === null || Date.now() - (COPY_ASKED.get(doc.path) ?? 0) < COPY_WINDOW_MS) return;
+              COPY_ASKED.set(doc.path, Date.now());
+              copyFile(doc.path, doc.text);
+            },
+          },
+        }
+      : undefined;
   // With no viewer the editor IS the panel, so there is nothing to fold it away from and nothing to
   // grow into: a file type with no viewer is always at `full`, whatever was remembered.
   const at: HalfMode = View === null ? "full" : half;
@@ -1847,11 +1894,12 @@ export function FilePanel({
           </button>
         ) : null}
         {shut ? null : Edit ? (
-          // What ships is never written in place (decision 0006). Any other shipped file is mounted as
-          // the READING of its type — which every editor already knows how to be. A shipped STATE is
-          // mounted live: its editor copies it into Shared on the first change (copy-on-edit, the
-          // panel rulings of 2026-09-24), so an edit is never refused and never lost.
-          <Edit {...(isWritableLayer(doc.layer) || doc.stateId !== undefined ? props : viewProps)} />
+          // What ships is never written in place (decision 0006), and it is edited all the same:
+          // COPY-ON-EDIT (the panel rulings, 2026-09-24). A shipped STATE's editor copies it into
+          // Shared on its first change; any other shipped file is mounted live with its first draft
+          // turned into the same copy (`shippedProps`). Only a file Shared already has a copy of —
+          // the copy is what is read — is mounted as the READING of its type.
+          <Edit {...(isWritableLayer(doc.layer) || doc.stateId !== undefined ? props : (shippedProps ?? viewProps))} />
         ) : (
           // Reached only by a type that is not text — an image, the database, an archive. Naming the
           // type is the useful part: "no editor" alone reads as a missing feature rather than as a

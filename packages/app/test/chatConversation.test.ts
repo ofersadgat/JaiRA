@@ -20,7 +20,7 @@ import { initProject } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
-import { CHAT_AGENT, CHAT_ASSISTANT, titleOf } from "../src/renderer/chatWorkflow";
+import { CHAT_CONTROL, CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
 let dir: string;
 let service: AppService;
@@ -56,7 +56,7 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 const REPLY = (text: string): Array<{ output: string }> => [{ output: text }];
 
 /** Start a conversation the way the view does: create the task with the message, then run it. */
-async function started(message: string, workflow = CHAT_ASSISTANT): Promise<string> {
+async function started(message: string, workflow = CHAT_SESSION): Promise<string> {
   const { taskId } = service.createTask({ title: titleOf(message), workflow, inputs: { message } });
   await service.startTask({ taskId, fake: REPLY("first answer") });
   await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
@@ -74,7 +74,7 @@ describe("a conversation started from the Chat view", () => {
   it("is an ordinary task whose FIRST message is the run", async () => {
     const taskId = await started("What is in this repository?");
     const [task] = service.listTasks().filter((t) => t.taskId === taskId);
-    expect(task?.workflow).toBe(CHAT_ASSISTANT);
+    expect(task?.workflow).toBe(CHAT_SESSION);
     expect(task?.status).toBe("completed");
     // The message is the prompt, so it is in the transcript as the user's own first turn rather
     // than as an input nobody can read.
@@ -123,7 +123,7 @@ describe("a conversation started from the Chat view", () => {
   });
 
   it("answers null for a task that never ran, rather than throwing at being asked", () => {
-    const { taskId } = service.createTask({ title: "unsent", workflow: CHAT_AGENT, inputs: { message: "hi" } });
+    const { taskId } = service.createTask({ title: "unsent", workflow: CHAT_SESSION, inputs: { message: "hi" } });
     expect(service.chatThread({ taskId })).toBeNull();
   });
 });
@@ -135,10 +135,12 @@ describe("a conversation started from the Chat view", () => {
  */
 describe("the settings of a conversation that has not started yet", () => {
   it("reads them off the state file — what the first message would inherit, and from where", () => {
-    const plan = service.chatStartPlan({ stateId: CHAT_AGENT });
-    expect(plan.from).toBe(CHAT_AGENT);
+    const plan = service.chatStartPlan({ stateId: CHAT_SESSION });
+    expect(plan.from).toBe(CHAT_SESSION);
     // The file's permission set, as the lowered list and block a loaded state holds.
-    expect(plan.settings.tools).toEqual(["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search"]);
+    for (const name of ["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search", "start_task"]) {
+      expect(plan.settings.tools, name).toContain(name);
+    }
     expect(plan.origin.tools).toBe("inherited");
     expect(plan.settings.permissions).toMatchObject({ tools: { read_file: "ask", bash: "ask" }, other: "ask", subjects: { bash: "ask" } });
     // Nothing is in flight before anything has started, and the machine's offer is still an offer.
@@ -147,7 +149,7 @@ describe("the settings of a conversation that has not started yet", () => {
   });
 
   it("folds a pick over the file, and says it was a pick", () => {
-    const plan = service.chatStartPlan({ stateId: CHAT_AGENT, overrides: { model: "anthropic/claude-sonnet-5", tools: [] } });
+    const plan = service.chatStartPlan({ stateId: CHAT_SESSION, overrides: { model: "anthropic/claude-sonnet-5", tools: [] } });
     expect(plan.settings.model).toBe("anthropic/claude-sonnet-5");
     expect(plan.origin.model).toBe("override");
     // `[]` is a real answer — "no tools" — and it must survive as one rather than reading as absent.
@@ -162,7 +164,7 @@ describe("the settings of a conversation that has not started yet", () => {
   });
 
   it("runs the first message under what was picked, pinned as the run's own snapshot", async () => {
-    const { taskId } = service.createTask({ title: "picked", workflow: CHAT_AGENT, inputs: { message: "hi" } });
+    const { taskId } = service.createTask({ title: "picked", workflow: CHAT_SESSION, inputs: { message: "hi" } });
     await service.startTask({ taskId, overrides: { tools: [], model: "fake/model" }, fake: REPLY("answered") });
     await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the run to finish");
     // Read back through the plan the composer would show for the NEXT message: the settings a reply
@@ -174,11 +176,11 @@ describe("the settings of a conversation that has not started yet", () => {
     // And the authored file is untouched — a pick for one conversation is not an edit of what a
     // conversation IS. The SHIPPED file, since nothing installs a copy (decision 0006) — and no copy
     // appeared because of the pick.
-    const state = JSON.parse(service.readWorkflow({ stateId: CHAT_AGENT, layer: "system" }).text) as {
-      environment: { tools: Record<string, string> };
+    const state = JSON.parse(service.readWorkflow({ stateId: CHAT_SESSION, layer: "system" }).text) as {
+      operation: { tools: string };
     };
-    expect(service.readWorkflow({ stateId: CHAT_AGENT, layer: "project" }).exists).toBe(false);
-    expect(state.environment.tools).toMatchObject({ bash: "ask", read_file: "ask", write_file: "ask", other: "ask" });
+    expect(service.readWorkflow({ stateId: CHAT_SESSION, layer: "project" }).exists).toBe(false);
+    expect(state.operation.tools).toBe("$/permission-sets/chat/ask-first");
   });
 });
 
@@ -332,7 +334,7 @@ describe("stopping a turn", () => {
     // The first message of a conversation is the run, so this is the other half of the same story —
     // and the worse half: with nothing recorded before it, a thread that cannot find the turn has
     // nothing at all to show, and the view reads as a conversation that was never had.
-    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_ASSISTANT, inputs: { message: "one" } });
+    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_SESSION, inputs: { message: "one" } });
     await service.startTask({ taskId, fake: [{ error: "stopped" }] });
     await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to end");
 
@@ -423,10 +425,10 @@ describe("finding files to mention", () => {
  */
 describe("every project's conversations", () => {
   it("returns the chat tasks, stamped with the project holding them", () => {
-    const chat = service.createTask({ title: "a thread", workflow: CHAT_AGENT, inputs: { message: "hi" } });
+    const chat = service.createTask({ title: "a thread", workflow: CHAT_SESSION, inputs: { message: "hi" } });
     service.createTask({ title: "a run", workflow: "feature/plan", inputs: { issue: "x" } });
 
-    const all = service.listAllTasks({ workflows: [CHAT_AGENT, CHAT_ASSISTANT] });
+    const all = service.listAllTasks({ workflows: [CHAT_SESSION, CHAT_CONTROL] });
     expect(all.map((t) => t.taskId)).toEqual([chat.taskId]);
     // The stamp, which is what makes the row openable — `openConversation` reads the thread out of
     // the database this names, rather than out of whichever project happens to be focused.
@@ -434,7 +436,7 @@ describe("every project's conversations", () => {
   });
 
   it("asked for nothing in particular, answers with everything", () => {
-    service.createTask({ title: "a thread", workflow: CHAT_AGENT, inputs: { message: "hi" } });
+    service.createTask({ title: "a thread", workflow: CHAT_SESSION, inputs: { message: "hi" } });
     service.createTask({ title: "a run", workflow: "feature/plan", inputs: { issue: "x" } });
     expect(service.listAllTasks({}).length).toBe(2);
   });

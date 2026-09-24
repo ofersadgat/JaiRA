@@ -992,7 +992,10 @@ export interface FileSource {
   exists: boolean;
   /** The state this file defines, when it is under `workflows/` and named like one. */
   stateId?: string;
-  /** How that state stands against what ships — see {@link BuiltInStanding}. */
+  /**
+   * How that state — or, for a file JaiRA ships that is not a state, that path — stands against what
+   * ships. See {@link BuiltInStanding}.
+   */
   builtIn?: BuiltInStanding;
 }
 

@@ -115,7 +115,7 @@ tree and the state editor still offer the two overrides for a state file.*
 | --- | --- |
 | `chat/session` | what the Chat view starts: a person began a conversation, and it may do anything — work in the project, start a workflow, neither. Permission set `chat/ask-first`. It takes `chat/agent`'s place in the Chat view |
 | `chat/control` | what a task gets when a person moves it and the move makes a dynamic workflow (0005 §3). It exists to steer work and nothing else: permission set `chat_control/ask-first`, which holds the task and workflow tools and nothing of the project |
-| `chat/assistant`, `chat/agent` | unchanged, so conversations already started as one keep running |
+| `chat/assistant`, `chat/agent` | unchanged, so conversations already started as one keep running. **Removed 2026-09-24** (the person's ruling): neither ships any more, and a task created from one no longer resolves or lists as a conversation |
 | `debug/hello_world` | the self-test |
 | `permission-sets/chat/*`, `permission-sets/chat_control/*` | ask-first, read-only, auto and full, in each bucket (0007 §2) |
 | `settings.json` | added 2026-09-23 (Settings round 5): the configuration layer under the shared root's — the presets `simple`, `coder` and `planner`, each a candidate list chosen from when a session starts, and `functions.smart.model: "simple"` |

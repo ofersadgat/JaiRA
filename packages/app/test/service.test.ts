@@ -418,7 +418,7 @@ describe("sessions — one process, several projects", () => {
       expect(service.listAllTasks({ workflows: ["feature/plan"] }).map((t) => t.taskId)).toEqual(
         expect.arrayContaining([here, there]),
       );
-      expect(service.listAllTasks({ workflows: ["chat/agent"] })).toEqual([]);
+      expect(service.listAllTasks({ workflows: ["chat/session"] })).toEqual([]);
     } finally {
       await service.close();
       rmSync(other, { recursive: true, force: true });

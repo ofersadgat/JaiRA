@@ -33,7 +33,7 @@ import type { PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { kept } from "../src/renderer/chatPane";
-import { CHAT_ASSISTANT, titleOf } from "../src/renderer/chatWorkflow";
+import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
 let dir: string;
 let service: AppService;
@@ -70,7 +70,7 @@ const STOPPED = [{ error: "stopped" }];
 
 /** Start a conversation the way the view does: create the task with the message, then run it. */
 async function started(message: string): Promise<string> {
-  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_ASSISTANT, inputs: { message } });
+  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_SESSION, inputs: { message } });
   await service.startTask({ taskId, fake: REPLY("first answer") });
   await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
   return taskId;
@@ -136,7 +136,7 @@ describe("1. a turn that was stopped", () => {
   it("keeps the OPENING message, where there is nothing else on screen to keep", async () => {
     // The worst version: the first message IS the run, so a thread that cannot find the stopped turn
     // has nothing at all to show, and the view reads as a conversation nobody ever had.
-    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_ASSISTANT, inputs: { message: "one" } });
+    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_SESSION, inputs: { message: "one" } });
     await service.startTask({ taskId, fake: STOPPED });
     await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to end");
 
@@ -175,7 +175,7 @@ describe("1b. what a stopped turn had already SAID", () => {
     const store = new SqliteSessionStore(project.db, { taskId });
     const branch = thread.session.sessionId;
     const recorder = project.events.recorder(taskId);
-    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_ASSISTANT };
+    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_SESSION };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
     const ref = store.append({
@@ -287,7 +287,7 @@ describe("2. a turn whose process died", () => {
     // Exactly what a kill -9 mid-turn leaves behind: the journal says a turn started under the chat
     // child, the record store holds its claimed position, and there is no terminal event for either.
     const recorder = project.events.recorder(taskId);
-    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_ASSISTANT };
+    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_SESSION };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
     new SqliteSessionStore(project.db, { taskId }).append({
@@ -320,7 +320,7 @@ describe("3. re-running a task somebody has talked to", () => {
     // conversation beside the first — every hand-typed turn still in the database and nothing in any
     // view leading back to it. Reachable: a stopped opening message leaves the task startable, and
     // you can go on talking to it for another twenty messages.
-    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_ASSISTANT, inputs: { message: "one" } });
+    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_SESSION, inputs: { message: "one" } });
     await service.startTask({ taskId, fake: STOPPED });
     await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to end");
     const thread = service.chatThread({ taskId })!;
@@ -340,7 +340,7 @@ describe("3. re-running a task somebody has talked to", () => {
     // one-journal model has no "in place" left: restarting the same task would grow a second tree
     // where its machine lives. The spoken-to distinction stopped mattering the day it stopped
     // being what decided.
-    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_ASSISTANT, inputs: { message: "one" } });
+    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_SESSION, inputs: { message: "one" } });
     await service.startTask({ taskId, fake: STOPPED });
     await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to end");
 

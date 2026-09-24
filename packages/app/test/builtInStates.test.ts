@@ -6,10 +6,13 @@
  *  1. The Chat view's states and the self-test resolve with NOTHING installed — an empty project over
  *     an empty shared root, and an empty shared root with no project at all — and running one writes
  *     no state file anywhere.
- *  2. The state editor does not edit what ships: it says "built in · read-only", offers the two
- *     overrides and no Save; a person's file of a shipped id says "overrides built in".
- *  3. The Files tree ends with a read-only "Built in" root, marks which rows are overridden and which
- *     override, and its menus offer reading and overriding only.
+ *  2. What ships is never WRITTEN: the state editor offers no Save on it, and — copy-on-edit, the
+ *     panel rulings of 2026-09-24 — its first change is a copy into Shared; with Shared already
+ *     holding its copy it says "built in · read-only". Every shipped file, state or not, reports
+ *     which layers hold it, which is what copy-on-edit reads; a person's file of a shipped id says
+ *     "overrides built in".
+ *  3. The Files tree ends with a "Built in" root, marks which rows are overridden and which override,
+ *     and its menus offer reading and overriding.
  *
  * Unlike `builtInLayer.test.ts`, which registers a fixture layer, this file runs against the REAL
  * `packages/shared/builtin/` — what it asserts is about the files that ship. The shared root is a
@@ -26,7 +29,7 @@ import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type P
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { layerBarOf } from "../src/renderer/builtIn";
-import { CHAT_AGENT, CHAT_STATES, titleOf } from "../src/renderer/chatWorkflow";
+import { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, titleOf } from "../src/renderer/chatWorkflow";
 import { debugFileStatus } from "../src/renderer/debugPane";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "../src/renderer/debugWorkflow";
 import { builtInItems } from "../src/renderer/files";
@@ -91,7 +94,7 @@ describe("starting with nothing installed", () => {
 
   it("starts a conversation in an empty project over an empty shared root, and writes no state file", async () => {
     const message = "What is in this repository?";
-    const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_AGENT, inputs: { message } });
+    const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_SESSION, inputs: { message } });
     await service.startTask({ taskId, fake: [{ output: "an answer" }] });
     await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
 
@@ -110,7 +113,7 @@ describe("starting with nothing installed", () => {
     try {
       const { taskId } = bare.createTask({
         title: "hello",
-        workflow: CHAT_AGENT,
+        workflow: CHAT_SESSION,
         inputs: { message: "hello" },
         project: SHARED_SESSION,
       });
@@ -132,8 +135,8 @@ describe("starting with nothing installed", () => {
   });
 
   it("lets a copy in the shared root win, as an override of any built-in does", () => {
-    installInShared(CHAT_AGENT, JSON.stringify({ label: "Mine" }));
-    const entry = service.browseWorkflows().files.find((f) => f.stateId === CHAT_AGENT && f.shadowed !== true);
+    installInShared(CHAT_SESSION, JSON.stringify({ label: "Mine" }));
+    const entry = service.browseWorkflows().files.find((f) => f.stateId === CHAT_SESSION && f.shadowed !== true);
     expect(entry?.layer).toBe("base");
     expect(entry?.label).toBe("Mine");
   });
@@ -147,19 +150,19 @@ describe("starting with nothing installed", () => {
 
 describe("how a file stands against what ships", () => {
   it("says which layers hold a shipped state, in search order", () => {
-    expect(service.readWorkflow({ stateId: CHAT_AGENT, layer: "system" }).builtIn).toEqual({ layers: ["system"] });
-    installInShared(CHAT_AGENT, shippedText(CHAT_AGENT));
-    const project = join(dir, ".jaira", "workflows", `${CHAT_AGENT}.json`);
+    expect(service.readWorkflow({ stateId: CHAT_SESSION, layer: "system" }).builtIn).toEqual({ layers: ["system"] });
+    installInShared(CHAT_SESSION, shippedText(CHAT_SESSION));
+    const project = join(dir, ".jaira", "workflows", `${CHAT_SESSION}.json`);
     mkdirSync(dirname(project), { recursive: true });
     writeFileSync(project, JSON.stringify({ label: "Here" }), "utf8");
 
-    expect(service.readWorkflow({ stateId: CHAT_AGENT, layer: "system" }).builtIn).toEqual({
+    expect(service.readWorkflow({ stateId: CHAT_SESSION, layer: "system" }).builtIn).toEqual({
       layers: ["project", "base", "system"],
     });
-    expect(service.readFile({ layer: "base", path: `workflows/${CHAT_AGENT}.json` }).builtIn).toEqual({
+    expect(service.readFile({ layer: "base", path: `workflows/${CHAT_SESSION}.json` }).builtIn).toEqual({
       layers: ["project", "base", "system"],
     });
-    expect(service.readFile({ layer: "project", path: `.jaira/workflows/${CHAT_AGENT}.json` }).builtIn).toEqual({
+    expect(service.readFile({ layer: "project", path: `.jaira/workflows/${CHAT_SESSION}.json` }).builtIn).toEqual({
       layers: ["project", "base", "system"],
     });
   });
@@ -172,10 +175,10 @@ describe("how a file stands against what ships", () => {
 
 describe("the state editor on the three kinds of file", () => {
   const source = (patch: Partial<WorkflowSource>): WorkflowSource => ({
-    stateId: CHAT_AGENT,
+    stateId: CHAT_SESSION,
     layer: "system",
-    file: "$SYSTEM/workflows/chat/agent.json",
-    text: shippedText(CHAT_AGENT),
+    file: "$SYSTEM/workflows/chat/session.json",
+    text: shippedText(CHAT_SESSION),
     exists: true,
     ...patch,
   });
@@ -267,9 +270,19 @@ describe("the state editor on the three kinds of file", () => {
     expect(layerBarOf({ layer: "project" }, true)).toBeNull();
   });
 
+  it("says which layers hold ANY shipped file, not only a state — what copy-on-edit reads", () => {
+    expect(service.readFile({ layer: "system", path: "README.md" }).builtIn).toEqual({ layers: ["system"] });
+    service.writeFile({ layer: "base", path: "README.md", text: "mine" });
+    expect(service.readFile({ layer: "system", path: "README.md" }).builtIn).toEqual({ layers: ["base", "system"] });
+    expect(service.readFile({ layer: "base", path: "README.md" }).builtIn).toEqual({ layers: ["base", "system"] });
+    // A file JaiRA does not ship stands against nothing.
+    service.writeFile({ layer: "base", path: "notes/mine.md", text: "x" });
+    expect(service.readFile({ layer: "base", path: "notes/mine.md" }).builtIn).toBeUndefined();
+  });
+
   it("refuses the save the editor no longer offers", () => {
-    expect(() => service.writeWorkflow({ stateId: CHAT_AGENT, layer: "system", text: "{}" })).toThrow(/read-only/);
-    expect(shippedText(CHAT_AGENT)).toContain("Working conversation");
+    expect(() => service.writeWorkflow({ stateId: CHAT_SESSION, layer: "system", text: "{}" })).toThrow(/read-only/);
+    expect(shippedText(CHAT_SESSION)).toContain("\"label\": \"Session\"");
   });
 });
 
@@ -290,9 +303,17 @@ describe("the tree's third root", () => {
     expect(shipped.label).toBe("Built in");
     expect(shipped.dir).toBe(jairaBuiltInPaths().dir);
     expect(shipped.project).toBeUndefined();
-    const node = find(shipped.nodes, CHAT_AGENT);
+    const node = find(shipped.nodes, CHAT_SESSION);
     expect(node?.layer).toBe("system");
     expect(node?.shadowed).toBeUndefined();
+  });
+
+  it("marks a shipped FILE a person has a copy of as overridden, as it marks a state", () => {
+    const readme = (roots: FileRoot[]): FileNode | undefined => roots.find((root) => root.layer === "system")?.nodes.find((node) => node.path === "README.md");
+    expect(readme(service.filesTree({ project: dir }).roots)?.shadowed).toBeUndefined();
+    service.writeFile({ layer: "base", path: "README.md", text: "mine" });
+    expect(readme(service.filesTree({ project: dir }).roots)?.shadowed).toBe(true);
+    expect(readme(service.filesTree({ project: SHARED_SESSION }).roots)?.shadowed).toBe(true);
   });
 
   it("closes the shared root's tree, and an empty window's, with it too", () => {
@@ -309,34 +330,34 @@ describe("the tree's third root", () => {
   });
 
   it("marks which layer supplied a state: the shipped row overridden, the person's row overriding", () => {
-    const file = join(dir, ".jaira", "workflows", `${CHAT_AGENT}.json`);
+    const file = join(dir, ".jaira", "workflows", `${CHAT_SESSION}.json`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify({ label: "Here" }), "utf8");
 
     const tree = service.filesTree({ project: dir });
-    expect(find(tree.roots[0]!.nodes, CHAT_AGENT)).toMatchObject({ layer: "project", overridesBuiltIn: true });
-    expect(find(tree.roots[1]!.nodes, CHAT_AGENT)).toMatchObject({ layer: "system", shadowed: true });
+    expect(find(tree.roots[0]!.nodes, CHAT_SESSION)).toMatchObject({ layer: "project", overridesBuiltIn: true });
+    expect(find(tree.roots[1]!.nodes, CHAT_SESSION)).toMatchObject({ layer: "system", shadowed: true });
     // A shipped state nobody overrode is marked as neither.
-    const untouched = find(tree.roots[1]!.nodes, "chat/assistant")!;
+    const untouched = find(tree.roots[1]!.nodes, CHAT_CONTROL)!;
     expect(untouched.shadowed).toBeUndefined();
     expect(untouched.overridesBuiltIn).toBeUndefined();
 
     // The same from the shared root's side.
-    installInShared("chat/assistant", JSON.stringify({ label: "Shared" }));
+    installInShared(CHAT_CONTROL, JSON.stringify({ label: "Shared" }));
     const shared = service.filesTree({ project: SHARED_SESSION });
-    expect(find(shared.roots[0]!.nodes, "chat/assistant")).toMatchObject({ layer: "base", overridesBuiltIn: true });
-    expect(find(shared.roots[1]!.nodes, "chat/assistant")).toMatchObject({ shadowed: true });
+    expect(find(shared.roots[0]!.nodes, CHAT_CONTROL)).toMatchObject({ layer: "base", overridesBuiltIn: true });
+    expect(find(shared.roots[1]!.nodes, CHAT_CONTROL)).toMatchObject({ shadowed: true });
   });
 
   it("offers reading and overriding on that root, and nothing that writes to it", () => {
     const root: FileRoot = { layer: "system", label: "Built in", dir: "/app/builtin", prefix: "", exists: true, nodes: [] };
     const state: FileNode = {
-      path: "workflows/chat/agent.json",
-      name: "agent.json",
+      path: "workflows/chat/session.json",
+      name: "session.json",
       kind: "workflow",
       mime: "application/vnd.jaira.workflow+json",
       layer: "system",
-      stateId: CHAT_AGENT,
+      stateId: CHAT_SESSION,
     };
     const calls: string[] = [];
     const act = {
@@ -357,9 +378,9 @@ describe("the tree's third root", () => {
     ]);
     for (const item of items.slice(0, 3)) item.onSelect();
     expect(calls).toEqual([
-      `open ${CHAT_AGENT} system`,
-      `override ${CHAT_AGENT} -> base`,
-      `override ${CHAT_AGENT} -> project`,
+      `open ${CHAT_SESSION} system`,
+      `override ${CHAT_SESSION} -> base`,
+      `override ${CHAT_SESSION} -> project`,
     ]);
     // With nothing open there is no "here" to override in.
     expect(builtInItems(state, root, { ...act, hasProject: false }).find((i) => i.label === "Override here")?.disabled).toBe(true);
@@ -369,14 +390,14 @@ describe("the tree's third root", () => {
   });
 
   it("copies a shipped state up a layer, which is the override, and then reads it as one", () => {
-    const moved = service.moveWorkflow({ stateId: CHAT_AGENT, layer: "system", to: CHAT_AGENT, toLayer: "project", copy: true });
+    const moved = service.moveWorkflow({ stateId: CHAT_SESSION, layer: "system", to: CHAT_SESSION, toLayer: "project", copy: true });
     expect(moved).toMatchObject({ applied: true, layer: "project" });
-    const copy = service.readWorkflow({ stateId: CHAT_AGENT, layer: "project" });
-    expect(copy.text).toBe(shippedText(CHAT_AGENT));
+    const copy = service.readWorkflow({ stateId: CHAT_SESSION, layer: "project" });
+    expect(copy.text).toBe(shippedText(CHAT_SESSION));
     expect(copy.builtIn?.layers).toEqual(["project", "system"]);
     // A second override of the same layer is refused rather than clobbering the first.
     expect(() =>
-      service.moveWorkflow({ stateId: CHAT_AGENT, layer: "system", to: CHAT_AGENT, toLayer: "project", copy: true }),
+      service.moveWorkflow({ stateId: CHAT_SESSION, layer: "system", to: CHAT_SESSION, toLayer: "project", copy: true }),
     ).toThrow(/already exists/);
   });
 });

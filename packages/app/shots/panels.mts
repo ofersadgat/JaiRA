@@ -140,6 +140,23 @@ async function main(): Promise<void> {
       console.log(`  (built-in scene skipped: ${(e as Error).message})`);
     }
 
+    // Copy-on-edit for a shipped file that is not a state: opening it copies nothing; typing does.
+    try {
+      const said = await app.evaluate<string>(`(() => { const items = [...document.querySelectorAll(".tree-item")]; const hit = items.filter((e) => (e.textContent ?? "").trim().replace(/^[^a-zA-Z0-9_.]+/, "") === "README.md").at(-1); if (!hit) return "none"; hit.click(); return "ok"; })()`);
+      if (said !== "ok") throw new Error("no built-in README.md");
+      await pause(2500);
+      const before = await app.evaluate<boolean>(`window.jaira.invoke("file:read", { layer: "base", path: "README.md" }).then((d) => d.exists)`);
+      console.log(`  README copied on open: ${before}`);
+      await app.shot("15-builtin-readme");
+      await app.evaluate(`(() => { const el = document.querySelector(".pane.editor textarea, .pane.editor [contenteditable=true], .file-edit textarea, [contenteditable=true]"); if (!el) return "no editor"; el.focus(); document.execCommand("insertText", false, "Mine. "); return "typed"; })()`);
+      await pause(3000);
+      const after = await app.evaluate<boolean>(`window.jaira.invoke("file:read", { layer: "base", path: "README.md" }).then((d) => d.exists)`);
+      console.log(`  README copied after typing: ${after}`);
+      await app.shot("16-builtin-readme-copied");
+    } catch (e) {
+      console.log(`  (README scene skipped: ${(e as Error).message})`);
+    }
+
     const complaints = app.complaints.filter((line) => !line.includes("Autofill"));
     if (complaints.length > 0) console.log(`complaints:\n${complaints.join("\n")}`);
   } finally {

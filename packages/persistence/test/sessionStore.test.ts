@@ -858,11 +858,11 @@ describe("stateSessions — a run the process died inside", () => {
    */
   it("lists a call that SETTLED and then lost its event, on a run the engine died in", () => {
     crashedTask("error", "failed");
-    started(1, "chat/agent", 20);
+    started(1, "chat/session", 20);
     record("#i1:0", "completed");
 
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "success" },
+      { instanceId: 1, stateId: "chat/session", sessionId: "#i1", seq: 0, at: 20, outcome: "success" },
     ]);
   });
 
@@ -879,13 +879,13 @@ describe("stateSessions — a run the process died inside", () => {
    */
   it("recovers the call somebody STOPPED, on a run whose outcome is canceled", () => {
     crashedTask("canceled", "canceled");
-    started(1, "chat/agent", 20);
+    started(1, "chat/session", 20);
     // Cancellation settles the row rather than leaving it open, so the EXISTS arm of the task filter
     // does not catch this one either — the outcome is the only thing that admits it.
     record("#i1:0", "failed");
 
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "interrupted" },
+      { instanceId: 1, stateId: "chat/session", sessionId: "#i1", seq: 0, at: 20, outcome: "interrupted" },
     ]);
   });
 

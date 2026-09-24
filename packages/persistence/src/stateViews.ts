@@ -233,10 +233,15 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
       .map((dir) => ({ dir, layer: (dir === project.paths.builtIn.dir ? "system" : "base") as WorkflowLayer, prefix: "" })),
   ];
   const shipped = shippedIds(browser);
+  // Where a person's copy of a shipped FILE would be, nearest first — see `shadowedFile`.
+  const overrideDirs = [project.paths.roots[0], ...layerRoots.filter((root) => root.layer === "base").map((root) => root.dir)].filter(
+    (dir): dir is string => dir !== undefined && dir !== project.paths.builtIn.dir,
+  );
   const roots = layerRoots.map(({ dir, layer, prefix }) => {
     const nodes = walkDir(dir, dir, layer, rules, prefix, layer === "project" ? project.paths.projectDir : undefined);
     const mark = (list: FileNode[]): void => {
       for (const node of list) {
+        if (layer === "system" && shadowedFile(node, overrideDirs)) node.shadowed = true;
         if (node.stateId !== undefined) {
           const key = `${layer}:${node.stateId}`;
           if (shadowed.has(key)) node.shadowed = true;
@@ -495,9 +500,20 @@ export function baseFileTree(baseDir: string, browser?: WorkflowBrowser, hidden?
   return {
     roots: [
       { layer: "base", label: "~/.jaira", dir: baseDir, prefix: "", exists: existsSync(baseDir), nodes },
-      builtInRoot(browser, hidden),
+      builtInRoot(browser, hidden, baseDir),
     ],
   };
+}
+
+/**
+ * Whether a shipped FILE that is not a state has a person's copy at the same path in a nearer layer —
+ * a prompt, a permission set, the README copied into Shared by copy-on-edit (the panel rulings,
+ * 2026-09-24). States are marked from the browser, which knows how their ids resolve; a file is
+ * found by its path. Directories are never marked: a folder is not a thing that is read.
+ */
+function shadowedFile(node: FileNode, overrideDirs: readonly string[]): boolean {
+  if (node.stateId !== undefined || node.kind === "directory") return false;
+  return overrideDirs.some((dir) => existsSync(join(dir, node.path)));
 }
 
 /**
@@ -511,15 +527,17 @@ export function baseFileTree(baseDir: string, browser?: WorkflowBrowser, hidden?
  * An absent directory (a build that copied nothing) is an empty root rather than a missing one, for
  * the reason the shared root is: it is a layer of the search path whether or not anything is in it.
  */
-export function builtInRoot(browser?: WorkflowBrowser, hidden?: HiddenRules): FileRoot {
+export function builtInRoot(browser?: WorkflowBrowser, hidden?: HiddenRules, baseDir?: string): FileRoot {
   const dir = jairaBuiltInPaths().dir;
   const nodes = walkDir(dir, dir, "system", hidden ?? defaultRules(), "");
+  const overrideDirs = baseDir === undefined ? [] : [baseDir];
   const files = (browser?.files ?? []).filter((f) => f.layer === "system");
   const shadowed = new Set(files.filter((f) => f.shadowed === true).map((f) => f.stateId));
   const errors = new Map(files.filter((f) => f.error !== undefined).map((f) => [f.stateId, f.error!]));
   const lint = lintByStateId(browser);
   const mark = (list: FileNode[]): void => {
     for (const node of list) {
+      if (shadowedFile(node, overrideDirs)) node.shadowed = true;
       if (node.stateId !== undefined) {
         if (shadowed.has(node.stateId)) node.shadowed = true;
         const error = errors.get(node.stateId);

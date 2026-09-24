@@ -3100,15 +3100,13 @@ export function useApp() {
         // shared one (`runTargetOf`'s rule for base-layer workflows).
         const project = ref.current.at ?? SHARED_SESSION;
         try {
-          // Nothing is installed first (decision 0006): `chat/agent` ships in the built-in layer, the
+          // Nothing is installed first (decision 0006): `chat/session` ships in the built-in layer, the
           // last of every project's search path, so it resolves on an empty window, under a
           // repointed shared root and under a read-only one alike. A copy of it in `~/.jaira` or in
           // the project still wins, which is what an override is.
           const summary = await invoke("task:create", {
             title: titleOf(text),
-            // Always the working conversation — see `chatWorkflow.ts` on why the view stopped asking.
-            // `chat/assistant` still ships beside it: it is what conversations already started as one
-            // continue to run under.
+            // Always the session — see `chatWorkflow.ts` on why the view never asks.
             workflow: CHAT_SESSION,
             inputs: { message: text },
             project,
@@ -4578,6 +4576,34 @@ export function useApp() {
        * goes through `file:write`, which does not, because a half-written markdown prompt must be
        * saveable and a half-written state file must not break every workflow in the layer.
        */
+      /**
+       * COPY-ON-EDIT for a shipped file that is not a state (the person's ruling, 2026-09-24): the
+       * first change to a prompt, a permission set or the README copies the file, unchanged, into
+       * Shared at the same path, and opens the copy — carrying the edit across as its unsaved draft.
+       * The draft is read when the copy exists, so every keystroke made meanwhile is in it.
+       *
+       * Refused when Shared already has a file there: that copy is the one that is read, and writing
+       * the built-in over it would throw it away. It is opened instead, and the edit stays where it
+       * was typed.
+       */
+      editBuiltInFile: async (path: string, original: string) => {
+        patch({ busy: true, error: null });
+        try {
+          const shared = await invoke("file:read", { layer: "base", path });
+          if (shared.exists) {
+            patch({ busy: false, error: `Shared already has its own ${path} — that copy is the one in use, so it is opened instead.` });
+          } else {
+            await invoke("file:write", { layer: "base", path, text: original });
+            patch({ busy: false });
+            await refreshTree();
+            patch({ drafts: movedDraft(ref.current.drafts, docKey("system", path), docKey("base", path)) });
+          }
+          actionsRef.current.openPath("base", path);
+        } catch (e) {
+          fail(e);
+        }
+      },
+
       saveDoc: async (text: string) => {
         const doc = ref.current.doc;
         if (doc === null) return;

@@ -23,25 +23,16 @@
  * for the state machine to do after the first turn, and a conversation that ran the machine again
  * per message would be fifty runs of a workflow rather than one conversation.
  *
- * ## Two states, and only one of them is offered
+ * ## One state the view starts, and it never asks which
  *
- * The difference between them is whether the conversation can TOUCH ANYTHING:
+ * The Chat view starts every new conversation as {@link CHAT_SESSION}, holding the project's tools
+ * and the workflow tools, every call asking first. There is no "plain" conversation to pick instead:
+ * asking would be a permission question in the shape of an identity question, put before the person
+ * had typed the thing that would answer it — and the answer costs nothing either way, because a
+ * granted tool that is never invoked is indistinguishable from an absent one. The composer can still
+ * strip the tools off any single message.
  *
- *  - {@link CHAT_ASSISTANT} declares no tools. It is a conversation with a model: it reads what you
- *    paste and writes what it says, and cannot run a command or open a file on its own.
- *  - {@link CHAT_AGENT} declares a permission set of the file, shell and web tools, each `ask`, and `other`
- *    `ask`, so the same conversation works in the project — the reading, editing, command-running
- *    loop, with each call gated by the project policy exactly as a workflow's would be, and every one
- *    of them stopping to ask until somebody says otherwise.
- *
- * The Chat view starts every new conversation as the AGENT one. Asking first was asking a permission
- * question in the shape of an identity question, before the person had typed the thing that would
- * answer it — and the answer costs nothing either way, because a granted tool that is never invoked
- * is indistinguishable from an absent one. `chat/assistant` still ships and is readable: it is what
- * conversations already started as one continue to run, and the composer can still strip the tools
- * off any single message.
- *
- * Neither names a `model`. A state that pinned one would be a conversation that ignores the machine
+ * Neither state names a `model`. A state that pinned one would be a conversation that ignores the machine
  * it is running on — and on a machine set up with an agent CLI and no API key, one of the two would
  * simply not run.
  *
@@ -52,16 +43,10 @@
  * position chain and the edit-and-resend below all address a PROMPT op's session. A prompt state
  * whose route is an agent CLI is the same agent, in a conversation this app can continue.
  */
-/** The plain conversation: a model, and nothing of this machine. */
-export const CHAT_ASSISTANT = "chat/assistant";
-/** The working conversation: the same thread, with the project's tools under the project's policy. */
-export const CHAT_AGENT = "chat/agent";
-
 /**
  * What the Chat view STARTS (decisions 0005 §3, 0006): a person began a conversation, and it may work
  * in the project, start a workflow, or only talk — the project's tools and the workflow tools, under
- * `chat/ask-first`. It took `chat/agent`'s place; the two older states still ship, so a conversation
- * started as one keeps running as one.
+ * `chat/ask-first`.
  */
 export const CHAT_SESSION = "chat/session";
 /**
@@ -73,8 +58,8 @@ export const CHAT_CONTROL = "chat/control";
 /** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): a conversation with children. */
 export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
 
-/** Every state a Chat-view conversation can be, plain first. All ship in the built-in layer. */
-export const CHAT_STATES = [CHAT_ASSISTANT, CHAT_AGENT, CHAT_SESSION, CHAT_CONTROL] as const;
+/** Every state a Chat-view conversation can be. Both ship in the built-in layer. */
+export const CHAT_STATES = [CHAT_SESSION, CHAT_CONTROL] as const;
 
 /** Which conversation a task is: the workflow it was created from, or `null` for a task that is not one. */
 export type ChatKind = (typeof CHAT_STATES)[number];

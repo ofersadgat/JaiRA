@@ -43,8 +43,8 @@ from source (tsx, vitest).
 
 | Id | Is |
 | --- | --- |
-| `chat/agent` | what the Chat view starts: a conversation that works in the project, every tool call asking first |
-| `chat/assistant` | a conversation with a model and no tools; kept so conversations started as one keep running |
+| `chat/session` | what the Chat view starts: a conversation that works in the project and can start workflows, every tool call asking first |
+| `chat/control` | the conversation a task gets when a person moves it and the move makes a dynamic workflow: only the task and workflow tools |
 | `debug/hello_world`, `/say`, `/check` | the Debug view's self-test. Its scripted replies are in `packages/app/src/renderer/debugWorkflow.ts` and match these prompts by text |
 | `permission-sets/chat/{ask-first, read-only, auto, full}` | the composer's four permission presets, written down: every tool a conversation can be handed, a mode on each, and `other`. `packages/shared/test/permissionPresets.test.ts` holds them to the maps the presets wrote |
 | `permission-sets/chat_control/{ask-first, read-only, auto, full}` | its own versions of the same names: only the task and workflow tools (decision 0005 §3), and `other: "deny"`. Those tools are named in `toolVocabulary.ts` and marked `unserved` until they are built |

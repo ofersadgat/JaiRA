@@ -1523,6 +1523,7 @@ export default function App(): JSX.Element {
       onOverride: (stateId, toLayer) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer, copy: true }),
       // Copy-on-edit: the first change to a shipped state IS the copy into Shared, with the change in it.
       onEditCopy: (stateId, text) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer: "base", copy: true, draft: text }),
+      onEditFileCopy: (path, original) => void actions.editBuiltInFile(path, original),
     },
     schemaChoice: state.schemaChoice,
     onSchemaChoice: actions.setSchemaChoice,
