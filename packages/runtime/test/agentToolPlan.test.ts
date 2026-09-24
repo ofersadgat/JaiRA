@@ -93,7 +93,7 @@ describe("planAgentTools", () => {
 /**
  * The tool a declared list does not get to leave out.
  *
- * A conversation asked for a mockup could not produce one: `chat/agent` declares `bash`, `read_file`
+ * A conversation asked for a mockup could not produce one: the old `chat/agent` declared `bash`, `read_file`
  * and `write_file`, so `show_artifact` was never handed over, `write_file` was refused by the
  * `.jaira/**` rule, and 29,000 characters of HTML went into the answer instead. The rule that fixes
  * it is narrow on purpose — a tool qualifies only by adding no reach, which today is exactly one.

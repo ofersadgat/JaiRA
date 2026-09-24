@@ -174,7 +174,7 @@ describe("tools on a continued turn", () => {
   });
 
   it("reach a conversation that declared none at all", () => {
-    // `chat/assistant.json` has no `tools` key, which is what made the tool list's omission bite
+    // A state with no `tools` key, the plain conversation JaiRA once shipped, is where the omission bit
     // hardest: the plainest conversation is the one most likely to be asked for a picture.
     const bare = chatPlanFor([speaking({ environment: {} })]);
     expect(bare.settings.tools).toBeUndefined();
