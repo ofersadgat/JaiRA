@@ -43,7 +43,7 @@
  * and read as an underline instead of the head of a page.
  */
 import type { JSX, ReactNode } from "react";
-import type { InstanceNode } from "@jaira/shared/browser";
+import { formatTokens, type InstanceNode } from "@jaira/shared/browser";
 import { Icon, type PATHS } from "./icons";
 
 /**
@@ -194,10 +194,13 @@ export function StateHeader({
   label,
   summary,
   meta,
+  added,
   status,
   onToggle,
 }: {
   open: boolean;
+  /** Tokens this state added to its conversation — drawn at the right, before the time, open or folded. */
+  added?: number | undefined;
   /** Absent ⇒ a plain state header with no kind word — see {@link SurfaceKind}. */
   kind?: SurfaceKind | undefined;
   tone?: HeaderTone;
@@ -239,7 +242,16 @@ export function StateHeader({
         : summary !== undefined && summary.length > 0
           ? <span className="lh-sum ellip">{summary}</span>
           : null}
-      {meta !== undefined && meta.length > 0 ? <span className="lh-meta">{meta}</span> : null}
+      {(meta !== undefined && meta.length > 0) || added !== undefined ? (
+        <span className="lh-meta">
+          {added !== undefined ? (
+            <span className="lh-added" title={`this state added ${formatTokens(added)} tokens to the conversation`}>
+              +{formatTokens(added, true)}
+            </span>
+          ) : null}
+          {meta}
+        </span>
+      ) : null}
     </button>
   );
 }

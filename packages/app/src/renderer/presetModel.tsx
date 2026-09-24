@@ -4,10 +4,9 @@
  * Drawn first in the open preset's sections, before the call settings, because it is the one thing
  * that makes `coder` coder. What it shows is the rule and the candidates the rule picks from:
  *
- *  - **The rule**, as a segmented control with its one option pressed — "The first available". One
- *    option in a segmented control is a little odd on its own; it is drawn that way anyway because it
- *    says what the setting IS — a choice of rule — and is where the second rule (the most rate limit
- *    left, once there are usage readings) will go, without the section changing shape when it does.
+ *  - **The rule**, as a segmented control — "The first available" (the first candidate that can run
+ *    here) or "The most left" (the candidate whose account has the most allowance left, read off the
+ *    limits board — docs/engineering/contracts/usage-readings.md).
  *  - **The candidates**, through the schema form's own list editor (one row per model id, in order,
  *    moved with ↑ ↓), each row saying which route would serve it on this machine, whether it can run
  *    now, and — on the first that can — that it is the one picked now.
@@ -18,6 +17,8 @@
  */
 import type { JSX } from "react";
 import {
+  accountOfRoute,
+  remainingPercent,
   modelAvailabilityIn,
   parsePresetModel,
   presetModelSummary,
@@ -27,6 +28,7 @@ import {
   type PresetModel,
 } from "@jaira/shared/browser";
 import { Field } from "./controls";
+import { useLimits } from "./limitsStore";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 import { Segmented } from "./settingsLayout";
@@ -96,10 +98,19 @@ export function presetModelProblem(value: unknown): string | undefined {
 export function presetModelLine(value: unknown): string {
   if (value === undefined) return presetModelSummary(undefined);
   const ids = candidatesInDraft(value).filter((id) => id.trim().length > 0);
-  return ids.length === 0 ? "no model yet" : presetModelSummary(typeof value === "string" ? value : { candidates: ids, choose: "first-available" });
+  return ids.length === 0 ? "no model yet" : presetModelSummary(typeof value === "string" ? value : { candidates: ids, choose: ruleOf(value) });
 }
 
-const RULES: ReadonlyArray<readonly [string, "first-available"]> = [["The first available", "first-available"]];
+type Rule = "first-available" | "most-left";
+const RULES: ReadonlyArray<readonly [string, Rule]> = [
+  ["The first available", "first-available"],
+  ["The most left", "most-left"],
+];
+
+/** The rule a draft states; a bare id or a list with none is `first-available`. */
+function ruleOf(value: unknown): Rule {
+  return value !== null && typeof value === "object" && (value as { choose?: unknown }).choose === "most-left" ? "most-left" : "first-available";
+}
 
 /** The candidate list's schema — a list of model ids, the picker's models and the presets offered as suggestions. */
 function candidatesSchema(suggestions: readonly string[]): Schema {
@@ -128,7 +139,23 @@ export function PresetModelSection({
 }): JSX.Element {
   const candidates = candidatesInDraft(value);
   const statuses = candidates.map((id) => (id.trim().length === 0 ? undefined : lookup(id.trim())));
-  const picked = statuses.findIndex((status) => status?.state === "available");
+  const rule = ruleOf(value);
+  const limits = useLimits();
+  // What each candidate's account has left, on the route it would run on — the board's figure.
+  const lefts = candidates.map((id, k) => {
+    const route = statuses[k]?.route;
+    if (route === undefined) return null;
+    const reading = limits.accounts.find((a) => a.key === accountOfRoute(route))?.reading ?? null;
+    return reading === null ? null : remainingPercent(reading, id.trim());
+  });
+  const scoreOf = (k: number): number => {
+    const left = lefts[k];
+    return left === null || left === undefined ? -1 : left <= 0 ? -2 : left;
+  };
+  const picked =
+    rule === "most-left"
+      ? statuses.reduce<number>((best, status, k) => (status?.state !== "available" ? best : best === -1 || scoreOf(k) > scoreOf(best) ? k : best), -1)
+      : statuses.findIndex((status) => status?.state === "available");
   // A row still being typed is not a mistake yet — Save waits for it, and says nothing until then.
   const typing = candidates.some((id) => id.trim().length === 0);
   const problem = typing ? undefined : presetModelProblem(value);
@@ -144,15 +171,28 @@ export function PresetModelSection({
         wide
       >
         <div className="preset-rule">
-          <Segmented value="first-available" options={RULES} label="How a candidate is chosen" disabled={disabled} onChange={() => undefined} />
-          <span className="cfg-hint">The first model in this list that can run here answers.</span>
+          <Segmented
+            value={rule}
+            options={RULES}
+            label="How a candidate is chosen"
+            disabled={disabled}
+            onChange={(next) => {
+              const ids = candidates.filter((id) => id.length > 0);
+              if (ids.length > 0) onChange({ candidates: candidates, choose: next });
+            }}
+          />
+          <span className="cfg-hint">
+            {rule === "most-left"
+              ? "The model whose account has the most usage left answers — ties go to the one higher in this list."
+              : "The first model in this list that can run here answers."}
+          </span>
         </div>
         <SchemaForm
           schema={candidatesSchema(suggestions)}
           value={candidates}
           onChange={(next) => {
             const ids = Array.isArray(next) ? next.map((id) => (typeof id === "string" ? id : "")) : [];
-            onChange(ids.length === 0 ? undefined : { candidates: ids, choose: "first-available" });
+            onChange(ids.length === 0 ? undefined : { candidates: ids, choose: rule });
           }}
           ctx={{
             path: "model.candidates",
@@ -160,7 +200,7 @@ export function PresetModelSection({
             addLabel: () => "+ another model",
             itemNote: (_path, _item, index) => {
               const status = statuses[index];
-              return status === undefined ? null : <CandidateNote status={status} picked={index === picked} />;
+              return status === undefined ? null : <CandidateNote status={status} picked={index === picked} left={rule === "most-left" ? lefts[index] ?? null : undefined} />;
             },
           }}
         />
@@ -170,7 +210,7 @@ export function PresetModelSection({
 }
 
 /** Under one candidate: the route it would go through, whether it can run, and whether it is the one picked. */
-function CandidateNote({ status, picked }: { status: CandidateStatus; picked: boolean }): JSX.Element {
+function CandidateNote({ status, picked, left }: { status: CandidateStatus; picked: boolean; left?: number | null | undefined }): JSX.Element {
   return (
     <div className="preset-candidate">
       {status.route !== undefined ? (
@@ -195,6 +235,7 @@ function CandidateNote({ status, picked }: { status: CandidateStatus; picked: bo
           not available — {status.why}
         </span>
       )}
+      {left !== undefined ? <span className="cx-src">{left === null ? "usage left not known" : `${Math.round(left)}% left`}</span> : null}
       {picked ? <span className="cfg-status here">picked now</span> : null}
     </div>
   );

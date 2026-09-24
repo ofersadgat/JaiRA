@@ -74,6 +74,7 @@ No default model: `executors.default.prompt.defaults.model` stays unset.
 | `files` | `{hidden?: string[]}` | no | the Files tree's shared hidden globs |
 | `integrations` | `{forges?: object, oauth?: object}` | no | connections to forges, one per host ([decision 0004](../decisions/0004-remote-review.md)), and the OAuth apps a forge sign-in uses, see below; `integrations.review` is refused, naming `functions.review_artifacts.settleAfter`; left out of the file `initProject` writes, so the shared root's connections are not shadowed |
 | `autopilot` | `{askBelow?: number}` | no, default `{askBelow: 0.2}` | how sure a fast-forward's controlling conversation must be before its answer stands in for the person's ([decision 0005](../decisions/0005-connect.md) §6); `0`–`1`, `1` never answers for you and `0` always. It is no workflow's threshold and names no workflow input. Left out of the file `initProject` writes, because it is a person's setting and belongs in the shared root |
+| `limits` | `{retryOnReset?: boolean}` | no, default `{retryOnReset: true}` | whether "Try again at …" starts checked on a message or a run the provider refused because the account ran out ([usage-readings](usage-readings.md)); a message sent while the account is KNOWN to be spent always waits for the reset. Left out of the file `initProject` writes, for the reason `autopilot` is |
 | `functions` | object | no, every default | each shipped function's defaults, by the function's name; below. Left out of the file `initProject` writes, for the reason `autopilot` is |
 | `mcp` | `{servers?: object}` | no, default `{servers: {}}` | the MCP servers every agent run is handed, by the name their tools are called under; below ([mcp-servers](../units/mcp-servers.md)) |
 | `appearance` | object | no, every default | how the app looks — mode, palette, board options, typography, the conversation's layout, the editors and the renderer choices; below. Usually stated in the personal layer, and left out of the file `initProject` writes |
@@ -269,6 +270,7 @@ A `credential` anywhere must be a non-empty string with no whitespace.
 
 | Condition | Response | Caller does |
 | --- | --- | --- |
+| `limits.retryOnReset` is not true or false, or `limits` is not an object | `parseConfig` throws `config.limits.retryOnReset must be true or false` or `config.limits must be an object` | fix the field |
 | `autopilot.askBelow` is not a number from 0 to 1, or `autopilot` is not an object | `parseConfig` throws `config.autopilot.askBelow must be a number between 0 and 1` or `config.autopilot must be an object` | fix the field |
 | A field in a checked block has the wrong type, a refused name or a value outside its vocabulary | `parseConfig` throws `Error("config.<path> …")` naming the field and, for a moved or misplaced field, where it belongs | fix the field |
 | Either layer is not valid JSON | `readJsonFile` or `JSON.parse` throws | repair the file |

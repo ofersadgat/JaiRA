@@ -37,7 +37,7 @@ import {
 } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import {
-  chooseFirstAvailable,
+  chooseFirstAvailable, chooseMostLeft,
   keptCandidate,
   resolveModelField,
   presetModelOf,
@@ -56,6 +56,12 @@ export interface PresetModelOptions {
    * its choice. Absent ⇒ only this executor's own memory of what it chose.
    */
   recorded?: (at: { id: string; seq: number }) => string | undefined;
+  /**
+   * How much allowance is LEFT (0–100) on the account a candidate would spend, on the route it would
+   * run on — the limits board's answer, for a `most-left` preset. `null` when nothing is known.
+   * Absent ⇒ `most-left` has no figures and chooses as `first-available` does.
+   */
+  left?: (model: string, route: string) => number | null;
 }
 
 /** What one call's config comes to: the config to run with, or why it cannot run. */
@@ -116,7 +122,10 @@ export function resolvePresetCall(
   const candidates = model.candidates;
   const standing = keep?.(candidates);
   if (standing !== undefined) return { config: { ...merged, model: standing } };
-  const choice = chooseFirstAvailable(candidates, options.available, source.preset);
+  const choice =
+    model.choose === "most-left"
+      ? chooseMostLeft(candidates, options.available, options.left ?? (() => null), source.preset)
+      : chooseFirstAvailable(candidates, options.available, source.preset);
   if ("refused" in choice) return { refused: choice.refused };
   return { config: { ...merged, model: choice.model }, chose: { candidates: [...candidates], model: choice.model } };
 }

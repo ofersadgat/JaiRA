@@ -33,6 +33,7 @@ import type { TaskConnectRequest, TaskConnectResult, TaskConnectUndoRequest, Tas
 import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAdoptRequest, TaskAdoptResult, TaskOutputRef } from "./adopt";
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
+import type { LimitsView, WaitingItem } from "./usage";
 import type { CommandApproval } from "./commandParts";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
@@ -1725,7 +1726,19 @@ export interface IpcContract {
        */
       branchAt?: string;
     };
-    response: { instanceId: string; index: number; sessionRef?: string; failure?: string; steered?: boolean };
+    response: {
+      instanceId: string;
+      index: number;
+      sessionRef?: string;
+      failure?: string;
+      steered?: boolean;
+      /**
+       * The message is WAITING rather than answered: the account had no allowance left, so it was held
+       * until the reset (`state: "waiting"`), or the provider refused it for that reason
+       * (`state: "refused"`, tried again at the reset while `retry` is on). See `waiting:list`.
+       */
+      waiting?: WaitingItem;
+    };
   };
   /**
    * Stop the turn this conversation is taking, if it is taking one.
@@ -1955,6 +1968,25 @@ export interface IpcContract {
    * observed: pressing it is how someone says they signed an agent in again, which no check can see.
    */
   "availability:refresh": { request: { recheck?: boolean } | void; response: AvailabilitySnapshot };
+  /**
+   * What the limits board knows about every account's allowance, and which account each route spends
+   * (usage-readings contract). Machine-wide, like availability. Changes arrive as `limits:changed`.
+   */
+  "limits:read": { request: void; response: LimitsView };
+  /** Ask an account for its windows now — what a person pressing Refresh wants. Answers when the refresh lands. */
+  "limits:refresh": { request: { account: string }; response: LimitsView };
+  /**
+   * A meter came on screen, or went away. While at least one watches, the board refreshes a reading
+   * that is too old by itself (rule 2); with nobody watching, nothing is fetched.
+   */
+  "limits:watch": { request: { watching: boolean }; response: void };
+  /** The messages and runs waiting for an account's allowance, optionally for one task. */
+  "waiting:list": { request: { project?: string; taskId?: string } | void; response: WaitingItem[] };
+  /**
+   * Act on one: `sendNow` (Send now anyway — try it straight away, spent or not), `drop` (delete it;
+   * a waiting message's only cancel), `retry` (the "Try again at …" box, on or off).
+   */
+  "waiting:act": { request: { id: string; action: "sendNow" | "drop" | "retry"; retry?: boolean }; response: WaitingItem[] };
   /** Check a document against a registered schema — see {@link ValidateSchemaRequest}. */
   "schema:validate": { request: ValidateSchemaRequest; response: ValidateSchemaResult };
   /** Check values against the schemas a form is drawn from — see {@link SchemaCheckRequest}. */
@@ -2242,6 +2274,11 @@ export const IPC_CHANNELS = [
   "forge:signIns",
   "forge:signOut",
   "availability:refresh",
+  "limits:read",
+  "limits:refresh",
+  "limits:watch",
+  "waiting:list",
+  "waiting:act",
   "secret:capabilities",
   "secret:set",
 ] as const satisfies readonly IpcChannel[];
@@ -2542,7 +2579,11 @@ export type PushMessage =
    * success it is sent AFTER the token is stored and the availability pass that checks it has landed,
    * so a page that re-reads availability on hearing it sees the account.
    */
-  | { type: "forge:signInFinished"; outcome: ForgeSignInOutcome };
+  | { type: "forge:signInFinished"; outcome: ForgeSignInOutcome }
+  /** The limits board changed — a reading arrived, a refresh started or ended. Machine-wide. */
+  | { type: "limits:changed"; view: LimitsView }
+  /** The waiting messages and runs changed — one was added, sent, dropped or rescheduled. Machine-wide. */
+  | { type: "waiting:changed"; items: WaitingItem[] }
 
 /** What {@link IpcContract}'s `shell:saveFile` is handed. */
 export interface SaveFileRequest {

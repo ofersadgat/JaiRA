@@ -193,6 +193,14 @@ export interface JairaBasePaths {
   taskRowsDir: string;
   artifactRowsDir: string;
   syncFile: string;
+  /**
+   * What the limits board last knew about each account's allowance — machine-wide, because an account
+   * does not change when the project does, so a restart, the CLI and the app all start from the last
+   * thing any of them learned (usage-readings contract).
+   */
+  limitsFile: string;
+  /** Messages and runs waiting for an account's allowance to reset, so a restart still sends them. */
+  waitingFile: string;
 }
 
 
@@ -411,6 +419,8 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     taskRowsDir: join(system, "taskRows"),
     artifactRowsDir: join(system, "artifactRows"),
     syncFile: join(system, "sync.json"),
+    limitsFile: join(system, "limits.json"),
+    waitingFile: join(system, "waiting.json"),
   };
 }
 

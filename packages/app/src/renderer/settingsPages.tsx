@@ -30,6 +30,9 @@ export function RunsPane({ config, layer, busy, editable, onSave }: PageProps): 
       {/* `autopilot` (decision 0005 §6): one number, and its description is the whole explanation —
           the threshold a fast-forward's answers are held to. */}
       <ConfigBlockSection writer={writer} block="autopilot" />
+      {/* When usage runs out: whether "Try again at …" starts checked on a message or a run the
+          provider refused because the account ran out (usage-readings contract). */}
+      <ConfigBlockSection writer={writer} block="limits" />
       <ConfigBlockSection writer={writer} block="workflows" />
     </div>
   );

@@ -55,6 +55,8 @@ import { DayChip, LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface
 import { ValueView } from "./valueView";
 import { Icon, Spinner } from "./icons";
 import { invoke } from "./store";
+import { useWaiting } from "./limitsStore";
+import { WaitingLine, WaitingMessage } from "./usageMeters";
 
 /** What the Chat view needs from the shell. Assembled in `App.tsx`, like every other pane's. */
 export interface ChatSurface {
@@ -737,7 +739,17 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       ...(project !== undefined ? { project } : {}),
       ...(at !== undefined ? { branchAt: at } : {}),
     })
-      .then((result) => setError(result.failure ?? null))
+      .then((result) => {
+        // WAITING for the allowance: held until the reset (drawn from the waiting list below, not as
+        // a pending turn), or refused for it — then the refusal's own line, with "Try again at …",
+        // says so instead of an error.
+        if (result.waiting !== undefined) {
+          if (result.waiting.state === "waiting") setSent((was) => was.filter((m, k) => k !== was.lastIndexOf(message)));
+          setError(null);
+          return;
+        }
+        setError(result.failure ?? null);
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => {
         setSending((n) => Math.max(0, n - 1));
@@ -768,6 +780,13 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   }, [thread]);
 
   const running = surface.detail?.status === "running";
+  /** This conversation's messages waiting for the allowance — held, or refused and set to try again. */
+  const waitingHere = useWaiting().filter((item) => item.kind === "message" && item.taskId === taskId);
+  /** How full the conversation is: the reading on its last answer. */
+  const lastContext = useMemo(() => [...(thread?.session.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context, [thread]);
+  /** Compact now — the agent's own `/compact`, which only a claude agent takes. */
+  const model = plan?.effective.model ?? "";
+  const onCompact = /^claude-(cli|code)\//.test(model) ? (focus?: string) => send(focus !== undefined ? `/compact ${focus}` : "/compact") : undefined;
 
   /**
    * Stop whatever is actually going, which is two different things.
@@ -1071,6 +1090,12 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           not depend on how much has happened. */}
       {status !== null ? <LiveStatusBar status={status} {...(away ? { onJump: jump } : {})} /> : null}
 
+      {waitingHere.length > 0 ? (
+        <div className="um-waiting-host">
+          {waitingHere.map((item) => (item.state === "waiting" ? <WaitingMessage key={item.id} item={item} /> : <WaitingLine key={item.id} item={item} />))}
+        </div>
+      ) : null}
+
       <div className="chat-foot">
         {arming !== null ? (
           // Said plainly, above the box, because it changes what pressing Enter MEANS: the message
@@ -1126,6 +1151,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           {...(plan === null && thread === null ? { disabled: "This conversation cannot be continued." } : {})}
           onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
+          usage={{ context: lastContext, onCompact }}
           {...mentions}
         />
       </div>

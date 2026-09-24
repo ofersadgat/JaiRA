@@ -26,7 +26,7 @@ import type { WorkIconName } from "./transcript";
  * compile if it cannot draw one of them. A view is allowed to know about the model. Not the reverse.
  */
 export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs" | "comment" | "choice" | "files" | "form"
-  | "sigma" | "clock" | "fold" | "unfold"
+  | "sigma" | "clock" | "fold" | "unfold" | "logout" | "refresh"
   | "folder" | "script"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
@@ -96,6 +96,10 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // one — the rule is the sheet, and the arrows are what happens to what is on it.
   fold: ["m8 4 4 4 4-4", "M4 12h16", "m8 20 4-4 4 4"],
   unfold: ["m8 8 4-4 4 4", "M4 12h16", "m8 16 4 4 4-4"],
+  /** Leaving: a door frame and an arrow out of it — signing an account out. */
+  logout: ["M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3", "M10 16l-4-4 4-4", "M6 12h10"],
+  /** Going round again: ask for the numbers now rather than waiting. */
+  refresh: ["M20 12a8 8 0 1 1-2.4-5.7", "M20 4v5h-5"],
 
   // The gate components (decision 0002), one glyph each. Every one of them sits beside the
   // component's NAME — see the module note on why a glyph alone is a guess.

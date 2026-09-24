@@ -19,6 +19,8 @@
  * pill says which: ready, not working, not set up, turned off.
  */
 import { useContext, useMemo, useState, type JSX } from "react";
+import { accountFor, useLimits } from "./limitsStore";
+import { AccountAllowance } from "./usageMeters";
 import {
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
@@ -188,6 +190,7 @@ export function LoginCards({
       {accounts.map((account, i) => (
         <LoginCard
           key={`${account.label}:${i}`}
+          agent={agent}
           account={account}
           binary={binary}
           tagged={several && account.active}
@@ -235,6 +238,7 @@ export function LoginCards({
 }
 
 function LoginCard({
+  agent,
   account,
   binary,
   tagged,
@@ -244,6 +248,8 @@ function LoginCard({
   onCancel,
   onSignOut,
 }: {
+  /** The agent this login is for — whose account's allowance the card's ring reads. */
+  agent: string;
   account: AgentAccount;
   binary: string;
   tagged: boolean;
@@ -257,20 +263,34 @@ function LoginCard({
   // Asked once, in place, rather than in a dialog.
   const [confirming, setConfirming] = useState(false);
   const refused = account.refused !== undefined;
+  // The allowance is the ACCOUNT's, and the account is whoever is signed in now — so only the login in
+  // use carries the ring (usage-readings contract: design 2, the weekly window).
+  const limits = useLimits();
+  const allowance = account.active ? accountFor(limits, agent) : undefined;
   return (
-    <li className={`cfg-login-card${tagged ? " active" : ""}${refused ? " refused" : ""}`}>
-      <div className="cfg-login-top">
-        <span className="cfg-login-mark" aria-hidden="true">
+    <li className={`cfg-login-card um-c${tagged ? " active" : ""}${refused ? " refused" : ""}`}>
+      <div className="um-c-top">
+        <span className="cfg-login-mark um-c-mark" aria-hidden="true">
           {account.label.charAt(0).toUpperCase()}
         </span>
+        <span className="cfg-login-who" title={account.label}>
+          {account.label}
+        </span>
         {refused ? <span className="cfg-login-tag warn">refused</span> : tagged ? <span className="cfg-login-tag accent">in use</span> : null}
+        {signingIn || confirming ? null : (
+          <button
+            type="button"
+            className="ghost um-c-out"
+            title={`Log out — signs ${binary} out on this computer`}
+            aria-label="Log out"
+            onClick={() => setConfirming(true)}
+            disabled={busy}
+          >
+            <Icon name="logout" />
+          </button>
+        )}
       </div>
-      <div className="cfg-login-who">{account.label}</div>
-      <div className="cfg-login-facts">
-        {loginFacts(account).map((fact) => (
-          <span key={fact}>{fact}</span>
-        ))}
-      </div>
+      <AccountAllowance account={allowance} plan={loginFacts(account).join(" · ")} />
       {refused ? <div className="cfg-login-note">The last run&apos;s call was refused: {account.refused}</div> : null}
       {confirming ? (
         <div className="cfg-login-confirm">
@@ -310,25 +330,19 @@ function LoginCard({
               Sign in again
             </button>
           ) : null}
-          {signingIn ? null : (
-            <button className="ghost" onClick={() => setConfirming(true)} disabled={busy}>
-              Log out
-            </button>
-          )}
         </div>
       )}
     </li>
   );
 }
 
-/** The login's plan, method and organization, in the agent's own words — each only when it adds to the label. */
+/**
+ * The login's plan, in the agent's own word. Only the plan: how it signed in ("via claude.ai") and a
+ * personal organization named after its owner say nothing a person needs on the card (the person's
+ * ruling, 2026-09-23), and the card is a fixed width.
+ */
 function loginFacts(account: AgentAccount): string[] {
-  return [
-    ...(account.plan !== undefined ? [`${account.plan.charAt(0).toUpperCase()}${account.plan.slice(1)} plan`] : []),
-    ...(account.method !== undefined && account.method !== account.label ? [`via ${account.method}`] : []),
-    // A personal organization is named after its owner ("a@b.dev's Organization") and says nothing the label did not.
-    ...(account.organization !== undefined && !account.organization.includes(account.label) ? [account.organization] : []),
-  ];
+  return account.plan !== undefined ? [`${account.plan.charAt(0).toUpperCase()}${account.plan.slice(1)} plan`] : [];
 }
 
 /** This layer's own block for a provider, and the merged one — values and placeholders respectively. */

@@ -108,6 +108,8 @@ import {
 import { BrandIcon, Icon } from "./icons";
 import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow, useAway } from "./permissionSetRows";
 import { SchemaForm } from "./schemaForm/SchemaForm";
+import { AllowanceNumber, ContextMeter, ModelWindow, RouteLeft, SpentNotice, useSpent } from "./usageMeters";
+import type { ContextReading } from "@jaira/shared/browser";
 import type { Schema } from "./schemaForm/types";
 
 /**
@@ -467,6 +469,8 @@ function RouteCascade({
               <span className="cx-opt-text">
                 <span className="cx-opt-name ellip">{r}</span>
               </span>
+              {/* The account behind this route: how much of its tightest window is used. */}
+              <RouteLeft route={r} />
               <span className="cx-more">›</span>
             </button>
           ))}
@@ -521,6 +525,7 @@ function RouteCascade({
                 <span className="cx-opt-text">
                   <span className="cx-opt-name ellip">{tierOf(m.id).leaf}</span>
                 </span>
+                <ModelWindow route={route} model={m.id} />
               </button>
             ))
           )}
@@ -803,7 +808,9 @@ function Chip({
  * its markup. It sets where the state STARTS and nothing else; every control still works.
  */
 export interface ComposerOpen {
-  card?: "Thinking" | "Permissions" | "Tools";
+  card?: "Model" | "Thinking" | "Permissions" | "Tools";
+  /** The usage popovers: the conversation's context (the ring), or the account (the number by the model). */
+  usage?: "context" | "account";
   /** The Permissions head's bucket picker. */
   buckets?: boolean;
   /** The Permissions head's `+` form. */
@@ -829,9 +836,23 @@ export function Composer({
   onSavePermissionSet,
   saveLayers,
   startOpen,
+  usage,
 }: {
   /** What is drawn open from the first render — for a still picture. See {@link ComposerOpen}. */
   startOpen?: ComposerOpen | undefined;
+  /**
+   * How full the conversation is — the ring at the right edge — and how to compact it. Absent for a
+   * composer with no conversation behind it (the box that STARTS one has nothing to measure yet).
+   * The account's allowance, after the model chip, needs nothing from the host: it is read off the
+   * limits board by the model's route.
+   */
+  usage?:
+    | {
+        context: ContextReading | null | undefined;
+        /** Send the agent's own `/compact`. Absent where the agent cannot compact on request. */
+        onCompact?: ((focus?: string) => void) | undefined;
+      }
+    | undefined;
   /** What the message would run under right now — inherited, with any overrides already folded in. */
   plan: ChatPlanView | null;
   /** A turn is in flight — what turns the button into a stop. */
@@ -939,6 +960,10 @@ export function Composer({
   const cliRoute = ROUTE_BORROWS[routeOf(effective.model ?? "")] !== undefined ? routeOf(effective.model ?? "") : undefined;
   // What the box edits: the override if there is one, else the resolved value it would replace.
   const current = settings.model ?? effective.model ?? "";
+  // The route the message would go out on — whose account's allowance the number beside the model
+  // reads, and whether a message sent now waits for a reset (usage-readings contract).
+  const route = routeOf(effective.model ?? "") || undefined;
+  const spent = useSpent(route);
 
   /** Whether Enter does anything right now — see {@link joinable} for the two hosts that say no. */
   const canSend = disabled === undefined && (busy !== true || joinable === true);
@@ -1082,6 +1107,7 @@ export function Composer({
       {/* A padded RING rather than a border, so focus brightens it without the contents shifting. */}
       <div className="cx-frame">
         <div className="cx-shell">
+          {disabled === undefined ? <SpentNotice route={route} /> : null}
           {files.length > 0 ? (
             <div className="cx-files">
               {files.map((file, i) => (
@@ -1124,6 +1150,7 @@ export function Composer({
             <Chip
               brand={routeOf(effective.model ?? "")}
               label="Model"
+              startOpen={startOpen?.card === "Model"}
               value={effective.model ?? "no model configured"}
               origin={origin.model}
               from={plan?.from}
@@ -1136,6 +1163,9 @@ export function Composer({
                 onPick={(model) => set({ model })}
               />
             </Chip>
+            {/* The account's allowance: the percent of its tightest window used, beside the model
+                whose account it is. Clicking it opens the account. */}
+            <AllowanceNumber route={route} model={effective.model} startOpen={startOpen?.usage === "account"} />
 
             <Chip
               icon="think"
@@ -1416,6 +1446,10 @@ export function Composer({
               </span>
             ) : null}
 
+            {/* How full the conversation is — the conversation's, where the number above is the
+                account's. */}
+            {usage !== undefined ? <ContextMeter context={usage.context} route={route} busy={busy} onCompact={usage.onCompact} startOpen={startOpen?.usage === "context"} /> : null}
+
             {/* The paperclip, next to the send button rather than in the row of settings: what goes
                 WITH the message belongs beside the message, and the chips above are about how it
                 runs. Hidden where there is no picker to open — a composer with nothing behind it. */}
@@ -1452,16 +1486,19 @@ export function Composer({
                 className="cx-send"
                 aria-label="Send"
                 title={
-                  busy === true
-                    ? "Enter to send — this joins the turn in flight"
-                    : "Enter to send, Shift+Enter for a new line"
+                  spent
+                    ? "Enter to send — it waits until the limit resets"
+                    : busy === true
+                      ? "Enter to send — this joins the turn in flight"
+                      : "Enter to send, Shift+Enter for a new line"
                 }
                 // Attachments alone are a message. A dropped file with no covering note is a
                 // perfectly ordinary thing to send, and the button used to refuse what Enter allowed.
                 disabled={(draft.trim() === "" && files.length === 0) || !canSend}
                 onClick={send}
               >
-                <Icon name="send" />
+                {/* A clock while the account has nothing left: Send still sends, and the message waits. */}
+                <Icon name={spent ? "clock" : "send"} />
               </button>
             )}
           </div>

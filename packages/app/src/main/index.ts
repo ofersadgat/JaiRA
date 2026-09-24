@@ -522,6 +522,11 @@ const handlers: Record<IpcChannel, Handler> = {
   "forge:signIns": (() => service.pendingForgeSignIns()) as Handler,
   "forge:signOut": ((request: { connection: string }) => service.signOutForge(request.connection)) as Handler,
   "availability:refresh": ((request: { recheck?: boolean } | undefined) => service.refreshAvailability(request ?? {})) as Handler,
+  "limits:read": (() => service.readLimits()) as Handler,
+  "limits:refresh": ((request: { account: string }) => service.refreshLimits(request.account)) as Handler,
+  "limits:watch": ((request: { watching: boolean }) => service.watchLimits(request.watching)) as Handler,
+  "waiting:list": ((request: { project?: string; taskId?: string } | undefined) => service.listWaiting(request ?? {})) as Handler,
+  "waiting:act": ((request: Parameters<typeof service.actOnWaiting>[0]) => service.actOnWaiting(request)) as Handler,
   "secret:capabilities": (() => service.secretCapabilities()) as Handler,
   "secret:set": ((request: Parameters<typeof service.setSecret>[0]) => service.setSecret(request)) as Handler,
 };

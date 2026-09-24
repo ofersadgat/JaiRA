@@ -23,6 +23,7 @@ import {
   type InlineFamily,
   type JsonValue,
   type Operation,
+  type PositionLimits,
   type ResolvedValue,
   type SessionStore,
 } from "@declarative-ai/exec";
@@ -380,6 +381,12 @@ export interface WorkflowRunConfig {
 export interface SessionStores {
   sessions: SessionStore<JsonValue>;
   records: RecordStore;
+  /**
+   * The account-wide limits board and how a route maps to the account it spends — handed to the
+   * session layer, which gives every call below a reporter (`ctx.usage`) that feeds the board. The
+   * app has one board per process; a run with none reports nothing, which is an ordinary run.
+   */
+  limits?: PositionLimits;
 }
 
 /**
@@ -417,7 +424,7 @@ export function withSessionLayers(
   // claims a seat in a conversation. What remains of the old filter is a retention question
   // (§10.5), answered by the pruning surface.
   return withSessionPosition(
-    { sessions: stores.sessions },
+    { sessions: stores.sessions, ...(stores.limits ?? {}) },
     withRecord({ records: stores.records }, executor),
   ) as Executor<ExecServices, WorkflowMetrics>;
 }

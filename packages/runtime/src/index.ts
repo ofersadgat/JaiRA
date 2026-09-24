@@ -69,3 +69,5 @@ export * from "./changesetGate";
 export * from "./userEvents";
 // A workflow's own TypeScript functions, as ordinary registry entries (SPEC §7.5).
 export * from "./userFunctions";
+// Refreshing an account's allowance without spending a turn (usage readings).
+export * from "./limitsRefresh";

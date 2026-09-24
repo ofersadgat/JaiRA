@@ -346,6 +346,11 @@ These are [app-shell](../units/app-shell.md).
 | `forge:signOut` | `{connection: string}` | `ForgeSignOutOutcome`: the token removed from where the chain finds it, with its OAuth mark and refresh token, then a re-check; `{ok: false, reason}` naming the place when it is one JaiRA does not write |
 | `availability:read` | `void` | `AvailabilitySnapshot`, as last observed |
 | `availability:refresh` | `void` | `AvailabilitySnapshot` from a pass that starts after the call |
+| `limits:read` | `void` | `LimitsView`: every account the limits board knows (`LimitAccountView`: the reading, when it arrived, who is signed in, the plan, whether a refresh is offered, and why the last refresh learned nothing) and which account each route spends ([usage-readings](usage-readings.md)). Changes arrive as `limits:changed` |
+| `limits:refresh` | `{account: string}` | `LimitsView` after that account's refresh lands — claude asked with `get_usage` on a process started for nothing else, codex read from its newest session file; one that learns nothing leaves the reading as it was |
+| `limits:watch` | `{watching: boolean}` | `void`; a meter came on screen or went away. While at least one watches, the board refreshes a reading older than 30 minutes, or whose reset has passed, by itself — never an account asked within the last 30 minutes |
+| `waiting:list` | `{project?, taskId?}` or `void` | `WaitingItem[]`: messages and runs waiting for an account's allowance, oldest first — `waiting` (sent while the account had none left, sent by itself at `until`) or `refused` (tried again at `until` only while `retry` is on) |
+| `waiting:act` | `{id, action: "sendNow" \| "drop" \| "retry", retry?}` | `WaitingItem[]` after the act: Send now anyway sends it straight away, `drop` deletes it (a waiting message's only cancel), `retry` sets the "Try again at …" box |
 | `secret:capabilities` | `void` | `{keychain: boolean; keychainReason?: string}` |
 | `secret:set` | `{name: string; value: string; target: "keychain" \| "project-env-local" \| "base-env-local"; project?}`; an empty `value` removes | `{name: string; target}` |
 

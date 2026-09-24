@@ -210,6 +210,15 @@ export class LiveTurnFlusher {
 /** Live entries kept per position — the renderer's own bound, mirrored. */
 const LIVE_ENTRY_LIMIT = 500;
 
+/** A usage reading riding the stream as an event entry (`{kind: "event", event: {type: "context"|"limits", reading}}`). */
+function usageEventOf(entry: JsonValue): { type: "context" | "limits"; reading: JsonValue } | undefined {
+  const e = entry as { kind?: unknown; event?: { type?: unknown; reading?: unknown } } | null;
+  if (e === null || typeof e !== "object" || e.kind !== "event") return undefined;
+  const type = e.event?.type;
+  if (type !== "context" && type !== "limits") return undefined;
+  return { type, reading: (e.event?.reading ?? null) as JsonValue };
+}
+
 interface LiveLog extends LiveTurnSnapshot {
   entries: JsonValue[];
   sidechains: Record<string, JsonValue[]>;
@@ -266,6 +275,23 @@ export class LiveTurnLog {
         };
     entry.n = n;
     let enriched: JsonValue | undefined;
+    // The two usage readings are not conversation rows. A CONTEXT reading belongs ON the turn it
+    // follows — the last answer, where the record keeps it (`MessageEntry.context`) — and a LIMITS
+    // reading belongs to the limits board, which the session layer already told.
+    const reading = delta.entry !== undefined ? usageEventOf(delta.entry) : undefined;
+    if (reading !== undefined) {
+      if (reading.type === "context") {
+        for (let k = entry.entries.length - 1; k >= 0; k--) {
+          const e = entry.entries[k] as { kind?: string; role?: string } | undefined;
+          if (e?.kind === "message" && e.role === "assistant") {
+            entry.entries[k] = { ...(entry.entries[k] as object), context: reading.reading } as JsonValue;
+            break;
+          }
+        }
+      }
+      this.byTask.set(taskId, entry);
+      return { n };
+    }
     if (delta.entry !== undefined) {
       const incoming = delta.entry as { kind?: string; role?: string; parentToolUseId?: string };
       const sniffed = providerSessionIdOf(delta.entry);

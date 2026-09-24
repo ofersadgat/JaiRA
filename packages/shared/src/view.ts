@@ -4,7 +4,7 @@
  * it only ever sees these (DESIGN §2, "the renderer never touches the engine
  * directly"), so every one of them must survive an IPC round-trip as JSON.
  */
-import type { JsonValue } from "@declarative-ai/json";
+import type { ContextReading, JsonValue } from "@declarative-ai/json";
 import type { TaskStatus } from "./task";
 import type { InputProvenance } from "./adopt";
 import type { FastForwardView, SettledByView } from "./fastForward";
@@ -1321,6 +1321,11 @@ export interface SessionTurn {
   startedAt?: number;
   /** How long the model spent thinking before it began answering — the "thought for 12 s" number. */
   thoughtMs?: number;
+  /**
+   * How full the conversation was AFTER this turn — on a call's last answer, read from the response
+   * (usage-readings contract). The record keeps it on the entry, so scrolling back shows it as it was.
+   */
+  context?: ContextReading;
 }
 
 /**

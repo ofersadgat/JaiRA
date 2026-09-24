@@ -357,11 +357,13 @@ describe("the Model section", () => {
     expect(tabsOf(html, "Sections")[0]).toEqual(["Model first available: opus · gpt-5.6-terra", true, "0"]);
   });
 
-  it("shows the one rule pressed, then each candidate with its route, whether it can run, and the one picked now", () => {
+  it("shows the rule pressed, then each candidate with its route, whether it can run, and the one picked now", () => {
     const html = renderToStaticMarkup(
       createElement(PresetModelSection, { value: coder.model, onChange: () => undefined, disabled: false, lookup, suggestions: ["claude-opus-5-5", "gpt-5.6-terra"] }),
     );
-    expect(html).toMatch(/<div class="set-seg" role="group" aria-label="How a candidate is chosen"><button[^>]*aria-pressed="true"[^>]*>The first available<\/button><\/div>/);
+    expect(html).toMatch(
+      /<div class="set-seg" role="group" aria-label="How a candidate is chosen"><button[^>]*aria-pressed="true"[^>]*>The first available<\/button><button[^>]*aria-pressed="false"[^>]*>The most left<\/button><\/div>/,
+    );
     // One row per candidate, through the schema form's list editor — in order, movable.
     expect(html.match(/class="cfg-list-row"/g)).toHaveLength(2);
     expect(html).toContain('value="claude-opus-5-5"');
@@ -388,7 +390,7 @@ describe("the Model section", () => {
 
   it("will not save a candidate list the parser would refuse, and says why once nothing is still being typed", () => {
     const bad = { candidates: ["gpt-5"], choose: "most-budget-left" };
-    expect(presetModelProblem(bad)).toBe('model.choose must be "first-available"');
+    expect(presetModelProblem(bad)).toBe('model.choose must be "first-available" or "most-left"');
     const html = draw({ preset: "coder" }, { tabs: presetTabsOf({ coder }, { coder }), lookup, drafts: { coder: { ...coder, model: bad } } });
     expect(html).toMatch(/<button[^>]*class="primary"[^>]*disabled=""[^>]*>Save/);
   });

@@ -173,6 +173,23 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
     },
   },
   {
+    key: "limits",
+    title: "When usage runs out",
+    hint: "What a message or a run does when an account has no usage left.",
+    schema: {
+      $type: "limits",
+      type: "object",
+      properties: {
+        retryOnReset: {
+          type: "boolean",
+          title: "try again when the limit resets",
+          description:
+            "Whether \"Try again at …\" starts checked on a message or a run the provider refused because the account ran out. Checked, it is tried again when the window resets; each one can still be changed where it is shown. A message sent while the account is already known to be out always waits for the reset.",
+        },
+      },
+    },
+  },
+  {
     key: "functions",
     title: "Functions",
     hint: "The defaults of the functions JaiRA ships — each function's settings, in one place.",

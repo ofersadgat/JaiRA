@@ -322,7 +322,8 @@ describe("building the entry list", () => {
     });
     // Named as well as it can be, the whole payload behind the row — a gap in an hour-long run is
     // worse than an unfamiliar name.
-    expect(entries[0]).toMatchObject({ kind: "event", text: "context compacted", detail: { type: "system" } });
+    // A compaction is not a row of work any more: it is a line of its own (usage readings).
+    expect(entries[0]).toMatchObject({ kind: "compaction", trigger: "auto" });
     expect(entries[1]).toMatchObject({ kind: "event", text: "warming up" });
   });
 
@@ -466,7 +467,7 @@ describe("stored provider events", () => {
       providerEvents: [{ index: 1, event: { type: "system", subtype: "compact_boundary" } }],
     } as never;
     const entries = entriesOf(view);
-    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual(["message", "context compacted", "message"]);
+    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual(["message", "compaction", "message"]);
   });
 });
 
@@ -654,7 +655,7 @@ describe("weaving the agent's native session lines into the conversation", () =>
     expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual([
       "session started",
       "tool",
-      "context compacted",
+      "compaction",
       "message",
       "system: rate_limit",
     ]);

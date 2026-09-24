@@ -446,6 +446,9 @@ let installed: LogSink | undefined;
  */
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
+import { LimitsService } from "./limits";
+import { WaitingQueue } from "./waiting";
+import { accountOfRoute, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITING } from "./session";
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
 import { arrivedAt, fastForwardView, labelOfTarget, leftKeyOf, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
@@ -1141,6 +1144,32 @@ export class AppService {
 
   constructor(private readonly options: AppServiceOptions = {}) {
     this.baseDir = jairaBasePaths(options.baseDir ?? settingsBaseDir()).baseDir;
+    const basePaths = jairaBasePaths(this.baseDir);
+    this.limits = new LimitsService({
+      file: basePaths.limitsFile,
+      publish: (message) => this.publish(message),
+      claudeCommand: () => {
+        try {
+          return this.effectiveConfig().agents.claudeCli?.command;
+        } catch {
+          return undefined;
+        }
+      },
+      probes: () => [...this.lastProbes.values()],
+      routes: () => [...this.availability.routes.map((r) => r.name), ...this.availability.executors.map((e) => e.name)],
+    });
+    this.waiting = new WaitingQueue(basePaths.waitingFile, {
+      sendMessage: (item) => this.sendWaitingMessage(item),
+      resumeRun: async (item) => {
+        await this.resumeTask({ taskId: item.taskId, project: item.project } as StartRunRequest);
+      },
+      // At the reset, ask again before sending: a reading that knows a later reset beats the old one.
+      stillSpentUntil: async (account) => {
+        const state = await this.limits.board.refresh(account, { olderThanMs: 60_000 });
+        return isSpent(state.reading) ? spentUntil(state.reading) : null;
+      },
+      changed: (items) => this.publish({ type: "waiting:changed", items }),
+    });
     // Before anything reads how the app looks — the window's frame is painted from it before there is
     // a window, and with no project open, so this cannot wait for an open to run it. Moves the look
     // out of `user-settings.json` into `personal-settings.json`, once; a no-op ever after.
@@ -1549,6 +1578,19 @@ export class AppService {
    */
   private readonly signInRefusals = new Map<string, string>();
 
+  /**
+   * The limits board — how much of each account's allowance is spent, machine-wide
+   * (usage-readings contract). Fed by every call made through the session layers; watched by the
+   * renderer's meters; remembered in `~/.jaira/system/limits.json`.
+   */
+  readonly limits: LimitsService;
+
+  /**
+   * Messages and runs waiting for an account's allowance to reset — held because the account had
+   * none left, or refused and set to try again. Remembered in `~/.jaira/system/waiting.json`.
+   */
+  readonly waiting: WaitingQueue;
+
   /** Hears every agent call — handed to both places agents are registered (functions and routes). */
   private readonly onAgentOutcome: AgentOutcomeObserver = (agent, error) => {
     if (isSignInRefused(error)) {
@@ -1947,6 +1989,8 @@ export class AppService {
   async close(): Promise<void> {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
+    this.limits.close();
+    this.waiting.close();
     this.remoteWatcher?.dispose();
     // A sign-in still polling ends as canceled; a renewal timer set for later is nobody's now.
     for (const waiting of this.forgeSignIns.values()) waiting.controller.abort();
@@ -3791,7 +3835,9 @@ export class AppService {
     // process exited. Scoped to this run, so a stored transcript can be found from the task that made
     // it (`stateSessions` is the other half of that join).
     // A run's calls are made with the WORKFLOW's words — a state's prompt, rendered — never with what somebody typed.
-    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }, "workflow") });
+    // The limits board rides with the stores: every call below reports what it sends and every limit
+    // reading it hears (`SessionStores.limits`).
+    const session = { ...sessionServicesFor({ inner: sessionStoreFor(project, { taskId }, "workflow") }), limits: this.limits.position };
     // A delegated agent's record is its stream, and its stream is not its whole story: the agent's
     // own session file holds the context injections, `toolUseResult` records and line threading that
     // never ride the wire — and the file is the agent's, prunable on its schedule. Captured into the
@@ -3844,6 +3890,10 @@ export class AppService {
 
     const recorder = project.events.recorder(taskId);
     let seq = 0;
+    /** A call this run made was refused because the account ran out — see the run's end. */
+    let usageRefusal: { account: string; until: string | null; reason: string } | undefined;
+    // A run starting again is the answer to anything waiting to start it.
+    this.waiting.dropWhere((item) => item.kind === "run" && item.taskId === taskId);
     // A run STARTING is the first thing anyone looking for it wants to see, and nothing said it. The
     // logs held failures and process spawns, so a run that was merely slow looked identical to a
     // button that did nothing.
@@ -3911,6 +3961,10 @@ export class AppService {
               if (event.type === "operation.completed" || event.type === "operation.failed") {
                 open.liveTurns.clear(taskId);
               }
+              if (event.type === "operation.failed") {
+                const refused = usageRefusalOf((event as { failure?: unknown }).failure);
+                if (refused !== undefined) usageRefusal = refused;
+              }
               this.publishFor(open, {
                 type: "engine:event",
                 taskId,
@@ -3972,6 +4026,21 @@ export class AppService {
               : {}),
         });
         this.publishFor(open, { type: "run:finished", taskId, status });
+        // Refused mid-turn because the account ran out: the run keeps its place (a resume retries the
+        // failed state) and waits for the reset — tried again then while its box is checked, which
+        // starts the way the `limits.retryOnReset` setting says.
+        if (status === "failed" && usageRefusal !== undefined) {
+          this.waiting.add({
+            kind: "run",
+            project: open.key,
+            taskId,
+            account: usageRefusal.account,
+            until: usageRefusal.until,
+            state: "refused",
+            retry: open.project.config.limits.retryOnReset,
+            reason: usageRefusal.reason,
+          });
+        }
         this.settleWaiters(open, taskId);
         // A task adopted while it was still running (decision 0005 §2) owes its parent the END of
         // its mirror row, outputs and all — written before the parent is released to read it.
@@ -4398,8 +4467,8 @@ export class AppService {
   async sendChatMessage(
     request: typeof AppService.chatSend,
     /** Who wrote the message, when the person did not: the app, sending it on their behalf. Never an IPC field. */
-    origin: { by?: "host" } = {},
-  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean }> {
+    origin: { by?: "host"; now?: boolean } = {},
+  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     const open = this.session(request.project);
     // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
@@ -4430,8 +4499,8 @@ export class AppService {
     request: typeof AppService.chatSend,
     /** The typed turn ahead of this one, if there is one — resolves when it has landed. */
     settledAhead?: Promise<void>,
-    origin: { by?: "host" } = {},
-  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean }> {
+    origin: { by?: "host"; now?: boolean } = {},
+  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
     const project = open.project;
     let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
 
@@ -4488,6 +4557,30 @@ export class AppService {
     // exactly as it answered the state.
     const plan = chatPlanFor(context.path, request.overrides ?? {});
 
+    // The account this message spends, when its model says (a preset decides later and cannot be
+    // held here). Known to be SPENT ⇒ the message waits for the reset instead of being refused —
+    // deterministic, from the reading, never a guess. "Send now anyway" and the reset itself send
+    // with `now`, which skips this.
+    const heldRoute = this.chatRouteOf(open, plan, context.bundle);
+    const heldAccount = heldRoute !== undefined ? accountOfRoute(heldRoute) : undefined;
+    if (heldAccount !== undefined && origin.now !== true && request.branchAt === undefined) {
+      const reading = this.limits.board.state(heldAccount).reading;
+      if (isSpent(reading)) {
+        const waiting = this.waiting.add({
+          kind: "message",
+          project: open.key,
+          taskId: request.taskId,
+          instanceId: request.instanceId,
+          message: request.message,
+          account: heldAccount,
+          until: spentUntil(reading),
+          state: "waiting",
+          retry: true,
+        });
+        return { instanceId: context.hostInstanceId, index: context.index, waiting };
+      }
+    }
+
     const config = project.config;
     const secrets = this.secretResolver(open);
     const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
@@ -4522,7 +4615,7 @@ export class AppService {
       recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
     // A message the app wrote for the person is marked so on the record's entry — see `MessageAuthor`.
     const liveStore = sessionStoreFor(project, { taskId: request.taskId }, origin.by);
-    const stores = sessionServicesFor({ inner: liveStore });
+    const stores = { ...sessionServicesFor({ inner: liveStore }), limits: this.limits.position };
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
     stores.records = withNativeCapture(stores.records, {
@@ -4784,7 +4877,80 @@ export class AppService {
     // and only the task LIST on `tasks` — so the plural left the reply invisible: the box cleared,
     // the turn ran, and the panel above stayed byte-identical until something unrelated invalidated.
     this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
+    // Refused because the account ran out: the message is kept with "Try again at …", which starts the
+    // way the `limits.retryOnReset` setting says.
+    if (result.failureCode === USAGE_LIMIT_CODE && request.branchAt === undefined) {
+      const account = heldAccount ?? "claude";
+      const until =
+        result.retryAfterMs !== undefined ? new Date(Date.now() + result.retryAfterMs).toISOString() : spentUntil(this.limits.board.state(account).reading);
+      const waiting = this.waiting.add({
+        kind: "message",
+        project: open.key,
+        taskId: request.taskId,
+        instanceId: request.instanceId,
+        message: request.message,
+        account,
+        until,
+        state: "refused",
+        retry: project.config.limits.retryOnReset,
+        ...(result.failure !== undefined ? { reason: result.failure } : {}),
+      });
+      return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index, waiting };
+    }
     return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index };
+  }
+
+  /**
+   * The route a message on this plan would go out on, when that can be said before sending: the
+   * model it names, else the router's pinned default, else its unnamed route. A preset (`coder`) names
+   * no route — it chooses one when the session starts — so it answers `undefined`.
+   */
+  private chatRouteOf(open: ProjectSession, plan: ReturnType<typeof chatPlanFor>, bundle: WorkflowBundle | undefined): string | undefined {
+    const named = routeOfModel(plan.settings.model);
+    if (named !== undefined || plan.settings.model !== undefined) return named;
+    try {
+      const router = this.defaultTree(open.project.config, bundle ?? { rootId: "", states: {} }, false, this.secretResolver(open), false).prompt as {
+        defaults?: Record<string, JsonValue>;
+        routes?: Record<string, JairaPromptNode>;
+      };
+      const pinned = router.defaults?.["model"];
+      if (typeof pinned === "string") return routeOfModel(pinned);
+      return unnamedRouteOf(router.routes);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** A waiting message's time has come (or "Send now anyway" was pressed): send it as typed. */
+  private async sendWaitingMessage(item: WaitingItem): Promise<void> {
+    if (item.instanceId === undefined || item.message === undefined) return;
+    await this.sendChatMessage({ taskId: item.taskId, instanceId: item.instanceId, message: item.message, project: item.project }, { now: true });
+  }
+
+  /** What the limits board knows — see `limits:read`. */
+  readLimits(): LimitsView {
+    return this.limits.view();
+  }
+
+  /** A person pressed Refresh on an account. */
+  refreshLimits(account: string): Promise<LimitsView> {
+    return this.limits.refresh(account);
+  }
+
+  /** A meter came on screen, or went away. */
+  watchLimits(watching: boolean): void {
+    this.limits.watch(watching);
+  }
+
+  /** The waiting messages and runs — see `waiting:list`. */
+  listWaiting(filter: { project?: string; taskId?: string } = {}): WaitingItem[] {
+    const project = filter.project !== undefined ? this.session(filter.project).key : undefined;
+    return this.waiting.list({ ...(project !== undefined ? { project } : {}), ...(filter.taskId !== undefined ? { taskId: filter.taskId } : {}) });
+  }
+
+  /** Send now anyway, delete, or the "Try again at …" box — see `waiting:act`. */
+  actOnWaiting(request: { id: string; action: "sendNow" | "drop" | "retry"; retry?: boolean }): Promise<WaitingItem[]> {
+    return this.waiting.act(request.id, request.action, request.retry);
   }
 
   /**
@@ -10294,6 +10460,11 @@ export class AppService {
             presets: {
               presets,
               available: this.modelAvailabilityFor(config, opts.secrets ?? this.secretResolver()),
+              // What each candidate's account has left — the limits board, for a `most-left` preset.
+              left: (model: string, route: string) => {
+                const reading = this.limits.board.state(accountOfRoute(route)).reading;
+                return reading === null ? null : remainingPercent(reading, model);
+              },
               ...(opts.recorded !== undefined ? { recorded: opts.recorded } : {}),
             },
           }
@@ -10512,7 +10683,7 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
   if (!Array.isArray(entries)) return [];
   const turns: SessionTurn[] = [];
   for (const raw of entries) {
-    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: unknown; timing?: unknown; by?: unknown } | null;
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: unknown; timing?: unknown; by?: unknown; context?: unknown } | null;
     if (entry === null || typeof entry !== "object") continue;
     // Events are not turns, and a subagent's turns belong to the call that spawned it.
     if (entry.kind !== "message" || entry.sidechain !== undefined) continue;
@@ -10525,9 +10696,17 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
       ...(typeof timing.at === "number" ? { at: timing.at } : {}),
       ...(typeof timing.startedAt === "number" ? { startedAt: timing.startedAt } : {}),
       ...(typeof timing.thoughtMs === "number" ? { thoughtMs: timing.thoughtMs } : {}),
+      // How full the conversation was after this turn — on the entry, where the call put it.
+      ...(isContextReading(entry.context) ? { context: entry.context } : {}),
     });
   }
   return turns;
+}
+
+/** A stored context reading, read defensively: a record written by another version may hold anything. */
+function isContextReading(value: unknown): value is ContextReading {
+  const v = value as { used?: unknown; window?: unknown; model?: unknown } | null;
+  return v !== null && typeof v === "object" && typeof v.used === "number" && (v.window === null || typeof v.window === "number") && typeof v.model === "string";
 }
 
 /**
@@ -10855,4 +11034,17 @@ function sameSchema(slot: JsonValue, declared: JsonValue): boolean {
     );
   };
   return JSON.stringify(canon(slot)) === JSON.stringify(canon(declared));
+}
+
+/**
+ * A failure that says the account ran out (`usage_limit`, upstream `UsageLimitError`): which account, when
+ * it resets, and the refusal's words. `undefined` for any other failure.
+ */
+function usageRefusalOf(failure: unknown): { account: string; until: string | null; reason: string } | undefined {
+  const f = failure as { code?: unknown; reason?: unknown; retryAfterMs?: unknown; detail?: { resetsAt?: unknown; limits?: { route?: unknown } } } | undefined;
+  if (f?.code !== USAGE_LIMIT_CODE) return undefined;
+  const resetsAt = typeof f.detail?.resetsAt === "string" ? f.detail.resetsAt : undefined;
+  const until = resetsAt ?? (typeof f.retryAfterMs === "number" ? new Date(Date.now() + f.retryAfterMs).toISOString() : null);
+  const route = typeof f.detail?.limits?.route === "string" ? f.detail.limits.route : "claude-cli";
+  return { account: accountOfRoute(route), until, reason: typeof f.reason === "string" ? f.reason : "the account has no usage left" };
 }

@@ -62,6 +62,8 @@ The shared root has no `.jaira/` inside it, and the built-in layer is not a root
 | `system/taskRows/<taskId>.jsonl`, `system/artifactRows/<taskId>.jsonl` | JSONL | when `storage.tasks` or `storage.artifacts` is file-backed | runtime rows and the artifact map: [storage-files](storage-files.md) |
 | `system/artifacts/<taskId>/` | directory | no | where `$CENTRAL` and `$CENTRAL_FLAT` put artifact bytes, through `$SYSTEM/$ARTIFACT_DIR` with `artifacts.dir` defaulting to `artifacts`: [artifact-destination-template](artifact-destination-template.md) |
 | `system/sync.json` | JSON file | no | the last agreed state of each description: [sync-record](sync-record.md) |
+| `system/limits.json` | JSON file | shared root only | `{version: 1, accounts: {<account>: LimitState}}`: what the limits board last knew about each account's allowance, so a restart starts from it ([usage-readings](usage-readings.md)) |
+| `system/waiting.json` | JSON file | shared root only | `{version: 1, items: WaitingItem[]}`: messages and runs waiting for an account's allowance, re-armed at start |
 | `system/logs/jaira-<utc date>.log` | JSONL | no | the app's diagnostics, one entry per line and one file per UTC day, written under the shared root only |
 | `system/machine.key` | text file | shared root, once approvals are used | the approval HMAC key as `dpapi:<base64>` or `plain:<hex>`, written with mode `0600` |
 

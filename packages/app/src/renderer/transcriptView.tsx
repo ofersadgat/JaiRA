@@ -58,6 +58,8 @@ import { choicesOfQuestions, workflowOutcomeOf, workflowToolOf, type AgentQuesti
 import { answersOfAnsweredText, answersOfValue, ChoiceList, ChoiceSteps, type Answer } from "./choices";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
+import { CompactionLine, TurnContext } from "./usageMeters";
+import type { ContextReading } from "@jaira/shared/browser";
 import { familyIcon, Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { typeKeyOf, useMessageTypes } from "./messageTypes";
@@ -1014,10 +1016,13 @@ function Message({
   onEdit,
   scope,
   doomed = false,
+  contextBefore,
 }: {
   entry: MessageEntry;
   onEdit?: EditMessage | undefined;
   scope?: string | undefined;
+  /** The reading on the answer before this one — what "+46% since the reply before" is measured from. */
+  contextBefore?: ContextReading | undefined;
   /** Past an armed cut: drawn faded, because it is what a rewind would delete. */
   doomed?: boolean;
 }): JSX.Element {
@@ -1337,6 +1342,8 @@ function Message({
         </>
       ) : null}
       <span className="grow" />
+      {/* How full the conversation was after this turn — read off the turn's own entry. */}
+      {entry.context !== undefined ? <TurnContext context={entry.context} before={contextBefore} /> : null}
       <span className="ts-clock" title={fullClockOf(entry.at)}>
         {stampOf(entry.at)}
       </span>
@@ -1700,6 +1707,10 @@ export function Transcript({
       ? 0
       : shown.filter((entry) => entry.kind === "message" && entry.turn !== undefined && entry.turn >= doomedFrom).length;
   let doomed = false;
+  // The context readings as the conversation goes: the last one seen, and whether a compaction was
+  // drawn since — a reading that DROPS with none between gets a line of its own anyway.
+  let lastContext: ContextReading | undefined;
+  let compactedSince = false;
   return (
     <div className="ts">
       {blocks.map((block, i) => {
@@ -1736,19 +1747,44 @@ export function Transcript({
               </div>
             </Fragment>
           );
-        if (block.kind === "message")
+        if (block.kind === "compaction") {
+          compactedSince = true;
           return (
             <Fragment key={i}>
               {before}
               {cutLine}
+              <CompactionLine trigger={block.trigger} before={block.before} after={block.after} durationMs={block.durationMs} window={lastContext?.window} />
+            </Fragment>
+          );
+        }
+        if (block.kind === "message") {
+          const prior = lastContext;
+          const context = block.context;
+          // A reading far below the one before, with no compaction drawn between: the context got
+          // smaller and nothing said why (codex reports no compaction of its own).
+          const dropped =
+            context !== undefined && prior !== undefined && !compactedSince && prior.used > 0 && context.used < prior.used * 0.6 ? (
+              <CompactionLine derived before={prior.used} after={context.used} window={context.window ?? prior.window} />
+            ) : null;
+          if (context !== undefined) {
+            lastContext = context;
+            compactedSince = false;
+          }
+          return (
+            <Fragment key={i}>
+              {before}
+              {cutLine}
+              {dropped}
               <Message
                 entry={block}
                 {...(onEdit !== undefined ? { onEdit } : {})}
                 {...(scope !== undefined ? { scope } : {})}
                 doomed={doomed}
+                {...(context !== undefined && prior !== undefined ? { contextBefore: prior } : {})}
               />
             </Fragment>
           );
+        }
         return (
           <div key={i} className={`ts-msg ts-msg-assistant ts-live${doomed ? " ts-doomed" : ""}`}>
             {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it, and

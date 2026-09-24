@@ -10,14 +10,15 @@
  * So `model` is one of two things:
  *
  *  - **a model id** — `"claude-sonnet-5"`, `"claude-cli/opus"` — used as a state's own `model` is;
- *  - **candidates and a rule** — `{ "candidates": [...], "choose": "first-available" }` — the first
- *    candidate this machine can reach answers.
+ *  - **candidates and a rule** — `{ "candidates": [...], "choose": … }` — one of the candidates this
+ *    machine can reach answers, picked by the rule:
+ *    - `first-available` — the first in the list;
+ *    - `most-left` — the one whose account has the most allowance left in the window its next call
+ *      would hit first, read off the limits board (`docs/engineering/contracts/usage-readings.md`).
+ *      No reading ranks after a figure and before an account known to be spent; among equals the
+ *      list's order decides — so with no readings at all it IS `first-available`.
  *
- * `first-available` is the only rule, and deliberately the only one. The one the person wants next —
- * the candidate with the most rate limit left — needs the usage readings
- * (`docs/engineering/contracts/usage-readings.md`), which do not exist yet. It is NAMES.md §6's
- * `$any` / `$pick` in miniature: a list and a way to pick from it, with the one pick that needs no
- * readings.
+ * It is NAMES.md §6's `$any` / `$pick` in miniature: a list and a way to pick from it.
  *
  * ## When the choice is made, and how long it holds
  *
@@ -40,8 +41,8 @@
 import type { AvailabilitySnapshot, ProbeResult } from "./executors";
 import { isRoutePrefixed, servingRoutes, vendorOfModel, type JairaPromptNode } from "./executorTree";
 
-/** The rules a candidate list may be chosen from by — only one, for now. See the module comment. */
-export const PRESET_CHOICES = ["first-available"] as const;
+/** The rules a candidate list may be chosen from by. See the module comment. */
+export const PRESET_CHOICES = ["first-available", "most-left"] as const;
 export type PresetChoice = (typeof PRESET_CHOICES)[number];
 
 /** A candidate list: the ids to try, in order, and how one is picked. */
@@ -260,6 +261,39 @@ export function chooseFirstAvailable(
 }
 
 /**
+ * `most-left`: of the candidates this machine can run, the one with the most allowance LEFT (0–100)
+ * in the window its next call would hit first.
+ *
+ * `left` answers `null` when nothing is known about the candidate's account. Allowance left ranks
+ * first, then not knowing, then an account known to be spent — a number beats a guess, and a guess
+ * beats a known refusal. Among equals the list's order decides, so with no readings at all this
+ * chooses exactly what `first-available` does. Every candidate spent is not a refusal here: the call
+ * goes out, is refused for the limit, and waits for the reset like any other refused message.
+ */
+export function chooseMostLeft(
+  candidates: readonly string[],
+  availability: (model: string) => ModelAvailability,
+  left: (model: string, route: string) => number | null,
+  preset?: string,
+): PresetChoiceOutcome {
+  let best: { model: string; route: string; index: number; score: number } | undefined;
+  const unavailable: Array<{ model: string; why: string }> = [];
+  for (const [index, model] of candidates.entries()) {
+    const answer = availability(model);
+    if (!answer.available) {
+      unavailable.push({ model, why: answer.why });
+      continue;
+    }
+    const figure = left(model, answer.route);
+    // Allowance left beats not knowing, and not knowing beats knowing there is none.
+    const score = figure === null ? -1 : figure <= 0 ? -2 : figure;
+    if (best === undefined || score > best.score) best = { model, route: answer.route, index, score };
+  }
+  if (best !== undefined) return { model: best.model, route: best.route, index: best.index };
+  return chooseFirstAvailable(candidates, availability, preset);
+}
+
+/**
  * Which candidate a RECORDED model is, if any — how a resumed session keeps the model it started on.
  *
  * The record holds what the transport REPORTED, under the route it ran on: `claude-cli/claude-opus-5-5`,
@@ -295,5 +329,5 @@ export function shortModelName(id: string): string {
 export function presetModelSummary(model: PresetModel | undefined): string {
   if (model === undefined) return "not set";
   if (typeof model === "string") return model;
-  return `first available: ${model.candidates.map(shortModelName).join(" · ")}`;
+  return `${model.choose === "most-left" ? "most left" : "first available"}: ${model.candidates.map(shortModelName).join(" · ")}`;
 }

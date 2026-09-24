@@ -126,6 +126,13 @@ export interface ChatTurnResult {
   sessionRef?: string;
   /** Why it did not, worded for someone reading the transcript rather than a stack trace. */
   failure?: string;
+  /**
+   * The failing party's own code, when it gave one — what a caller acts on without reading prose
+   * (`usage_limit`: the account had nothing left, and it comes back at `retryAfterMs` from now).
+   */
+  failureCode?: string;
+  /** How long until the call could work, when the failure said (a usage limit's reset). */
+  retryAfterMs?: number;
 }
 
 /**
@@ -227,7 +234,12 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
     // provider handle, so the agent started a fresh session instead of resuming. One field.
     emit({ type: "operation.failed", ...where, op: "prompt", failure, metrics: result.metrics });
     emit({ type: "instance.terminated", ...where, outcome: outcomeOf(failure), failure });
-    return { ...(sessionRef !== undefined ? { sessionRef } : {}), failure: failure.reason };
+    return {
+      ...(sessionRef !== undefined ? { sessionRef } : {}),
+      failure: failure.reason,
+      ...(failure.code !== undefined ? { failureCode: failure.code } : {}),
+      ...(failure.retryAfterMs !== undefined ? { retryAfterMs: failure.retryAfterMs } : {}),
+    };
   }
 
   emit({ type: "operation.completed", ...where, op: "prompt", metrics: result.metrics });

@@ -203,7 +203,9 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     //
     // `appearance` likewise, and it is the plainest case: how the app looks is set once, for you, in
     // `personal-settings.json` or the shared root, and a project states a look only to change it.
-    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, appearance: _yourLook, ...starter } = defaultConfig();
+    //
+    // `limits` likewise: whether a refused message tries again when the allowance resets is yours.
+    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, appearance: _yourLook, limits: _yourLimits, ...starter } = defaultConfig();
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");

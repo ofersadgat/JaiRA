@@ -15719,7 +15719,7 @@ fieldset.reading {
   display: none;
 }
 .conn-boxes > li {
-  width: 158px;
+  width: 200px;
   display: flex;
 }
 .conn-controls {
@@ -16164,3 +16164,217 @@ button.link.cfg-login-add-sub {
   padding: 1px 8px;
   font-size: calc(var(--size-app) * 11 / 12.5);
 }
+
+/*
+ * ── Usage readings (docs/engineering/contracts/usage-readings.md, "What the screens show") ────────
+ *
+ * How full a conversation's context is, and how much of an account's allowance is spent. Everything
+ * here is `um-`, drawn from `usageMeters.tsx`. A tone is a class (`um-accent`, `um-warn`, `um-bad`,
+ * `um-none`) that sets `--um-c`, so a ring, a bar and a number share one colour rule: ink at rest,
+ * amber from 80%, red at 100%.
+ */
+.um-accent { --um-c: var(--accent); }
+.um-warn { --um-c: var(--warn); }
+.um-bad { --um-c: var(--bad); }
+.um-none { --um-c: var(--rule); }
+.um-t-accent { color: var(--text); }
+.um-t-warn { color: var(--warn); }
+.um-t-bad { color: var(--bad); }
+.um-t-none { color: var(--dim); }
+:root { --um-teal: #2f9e8f; }
+
+/* A ring: the track, and an arc as far round as the figure. Empty and dashed with no figure. */
+.um-ring { flex: none; display: block; }
+.um-ring-sm { width: 12px; height: 12px; }
+.um-ring-md { width: 16px; height: 16px; }
+.um-ring-lg { width: 22px; height: 22px; }
+.um-ring-track { fill: none; stroke: color-mix(in srgb, var(--dim) 28%, transparent); stroke-width: 2.6; }
+.um-ring-track.is-empty { stroke-dasharray: 2.2 2.2; stroke: var(--dim); opacity: 0.6; stroke-width: 1.6; }
+.um-ring-fill { fill: none; stroke: var(--um-c); stroke-width: 2.6; stroke-linecap: round; }
+.um-ring-sm .um-ring-track, .um-ring-sm .um-ring-fill { stroke-width: 3.2; }
+
+.um-bar { display: block; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--dim) 16%, transparent); overflow: hidden; min-width: 0; }
+.um-bar > i { display: block; height: 100%; border-radius: 3px; background: var(--um-c); }
+
+/* The composer's ring, at the right edge. */
+.um-wrap { flex: none; }
+.um-meter {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 5px; border-radius: 13px;
+  border: 0; background: transparent; color: var(--dim); box-shadow: none;
+  font: 500 calc(var(--size-data) * 10.5 / 12) / 1 var(--font-data); font-variant-numeric: tabular-nums;
+  cursor: pointer; white-space: nowrap;
+}
+.um-meter:hover, .um-meter.on { background: var(--fill-ghost-hover); color: var(--text); }
+.um-meter.on { background: var(--fill-ghost-selected); }
+.um-meter:focus-visible, .um-num:focus-visible, .um-c-ringbtn:focus-visible, .um-turn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.um-meter-text { display: inline-flex; align-items: center; gap: 5px; }
+
+/* The account's number, right after the model chip. */
+.um-numwrap { flex: none; margin-left: -2px; }
+.um-num {
+  border: 0; background: none; box-shadow: none; padding: 2px 5px; border-radius: 6px;
+  font: 500 calc(var(--size-data) * 11 / 12) / 1 var(--font-data); font-variant-numeric: tabular-nums;
+  cursor: pointer; white-space: nowrap;
+}
+.um-num:hover, .um-num.on { background: var(--fill-ghost-hover); }
+.um-num.um-t-accent { color: var(--dim); }
+
+/* The popovers: the chip's own card, laid out in sections. */
+.um-pop { padding: 0; min-width: 0; }
+.um-pop-context { left: auto; right: -40px; width: 380px; max-width: min(380px, 86vw); }
+.um-acctpop { width: 370px; max-width: min(370px, 86vw); }
+.um-pop .cx-pop-head { padding: 10px 14px 4px; }
+.um-sec { padding: 10px 14px 12px; display: grid; gap: 8px; position: relative; }
+.um-sec + .um-sec { border-top: 1px solid var(--line); }
+.um-sec-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.um-sec-icon { width: 13px; height: 13px; display: inline-flex; flex: none; color: var(--text); }
+.um-sec-icon svg { width: 13px; height: 13px; }
+.um-sec-title { font-weight: 600; font-size: calc(var(--size-app) * 12.5 / 12.5); min-width: 0; }
+.um-sec-sub { margin-left: auto; font-size: calc(var(--size-app) * 11.5 / 12.5); color: var(--dim); white-space: nowrap; }
+.um-big { display: flex; align-items: baseline; gap: 8px; }
+.um-big-n { font: 600 22px/1 var(--font-data); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.um-big-of { font-size: calc(var(--size-app) * 12 / 12.5); color: var(--dim); font-variant-numeric: tabular-nums; }
+.um-stack { display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--dim) 16%, transparent); gap: 1px; }
+.um-stack > i { display: block; height: 100%; }
+.um-stack-tick { position: relative; overflow: visible; }
+.um-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--dim); }
+.um-note { margin: 0; font-size: calc(var(--size-app) * 11.5 / 12.5); color: var(--dim); }
+.um-note-warn { color: var(--warn); }
+.um-autoline { display: flex; align-items: center; gap: 8px; font-size: calc(var(--size-app) * 11.5 / 12.5); color: var(--dim); min-height: 26px; }
+.um-split { display: inline-flex; align-items: stretch; }
+.um-compact-btn { display: inline-flex; align-items: center; gap: 5px; font-size: calc(var(--size-app) * 12 / 12.5); padding: 3px 8px; }
+.um-split .um-compact-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.um-split-more { font-size: 10px; padding: 3px 6px; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid var(--line); }
+.um-focus { display: grid; gap: 6px; }
+.um-focus-text { width: 100%; box-sizing: border-box; font: calc(var(--size-app) * 12 / 12.5) / 1.45 var(--font-app); color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; resize: vertical; }
+.um-focus-foot { display: flex; align-items: center; gap: 8px; }
+
+/* The breakdown: one row per category; hovering one opens what it is made of beside the card. */
+.um-cats-host { position: relative; }
+.um-cats { display: grid; gap: 1px; margin: 0 -6px; }
+.um-cat {
+  display: grid; grid-template-columns: 8px minmax(0, 1fr) 46px 40px 10px; align-items: center; gap: 8px;
+  padding: 4px 6px; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--text);
+  font: calc(var(--size-app) * 12 / 12.5) / 1.3 var(--font-app); text-align: left; cursor: default;
+}
+.um-cat:hover, .um-cat.on { background: var(--fill-ghost-selected); }
+.um-cat > b { width: 8px; height: 8px; border-radius: 2px; }
+.um-cat-n { font: 500 11px/1 var(--font-data); text-align: right; font-variant-numeric: tabular-nums; }
+.um-cat-pct { font-size: 11px; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+.um-cat-more { color: var(--dim); }
+.um-fly {
+  position: absolute; right: calc(100% + 22px); bottom: -12px; width: 290px; z-index: 31;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(18, 21, 48, 0.12); padding: 10px 12px 12px; display: grid; gap: 4px;
+}
+.um-fly-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.um-fly-title { font-weight: 600; font-size: calc(var(--size-app) * 12.5 / 12.5); }
+.um-fly-sub { font-size: 11px; color: var(--dim); }
+.um-fly-group { font: 600 10px/1 var(--font-data); letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); margin-top: 7px; }
+.um-fly-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 36px 36px; align-items: center; gap: 7px; font-size: calc(var(--size-app) * 12 / 12.5); min-height: 20px; }
+.um-fly-row.is-dim { color: var(--dim); }
+.um-fly-rsub { font-size: 10.5px; color: var(--dim); }
+.um-fly-bar { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--dim) 14%, transparent); overflow: hidden; }
+.um-fly-bar > i { display: block; height: 100%; background: var(--p2); }
+
+/* The account: one row per window, when each resets, the reading's age. */
+.um-rows { display: grid; gap: 7px; }
+.um-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(48px, 0.8fr) 38px auto; align-items: center; gap: 9px; font-size: calc(var(--size-app) * 12 / 12.5); }
+.um-row.is-passed { opacity: 0.6; }
+.um-row-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.um-row-sub { font-size: 11px; color: var(--dim); }
+.um-row-val { font: 500 11.5px/1 var(--font-data); font-variant-numeric: tabular-nums; text-align: right; }
+.um-row-reset { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.um-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-height: 24px; }
+.um-age { font-size: 11px; color: var(--dim); }
+.um-refresh { display: inline-flex; align-items: center; gap: 5px; font-size: calc(var(--size-app) * 11.5 / 12.5); padding: 2px 7px; }
+.um-refreshing { display: inline-flex; align-items: center; gap: 6px; font-size: calc(var(--size-app) * 11.5 / 12.5); color: var(--dim); }
+.um-spin { width: 10px; height: 10px; border-radius: 50%; border: 1.6px solid color-mix(in srgb, var(--dim) 30%, transparent); border-top-color: var(--accent); animation: um-spin 0.9s linear infinite; }
+@keyframes um-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .um-spin { animation: none; } }
+.um-extra { display: grid; gap: 2px; padding: 7px 9px; border-radius: 7px; background: var(--tint-accent); font-size: calc(var(--size-app) * 12 / 12.5); }
+.um-others { display: grid; gap: 2px; margin: 0 -6px; }
+.um-other { display: grid; grid-template-columns: 14px minmax(0, 1fr) 40px 34px; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; color: var(--text); font-size: calc(var(--size-app) * 12 / 12.5); }
+.um-other.is-dim { color: var(--dim); }
+.um-other .um-bar { height: 5px; }
+.um-other-n { grid-column: 3 / 5; font-size: 11px; text-align: right; }
+
+/* Over the composer while the account has nothing left. */
+.um-limitline { display: flex; align-items: center; gap: 8px; margin: 8px 8px 0; padding: 6px 10px; border-radius: 8px; background: var(--tint-bad); font-size: calc(var(--size-app) * 12.5 / 12.5); }
+.um-limitline > svg { color: var(--bad); flex: none; }
+.um-limitline b { font-weight: 600; }
+
+/* An answer's rail: how full the conversation was after it, the breakdown on hover. */
+.um-turn {
+  position: relative; display: inline-flex; align-items: center; gap: 4px;
+  font: 500 calc(var(--size-data) * 10.5 / 12) / 1 var(--font-data); font-variant-numeric: tabular-nums;
+  color: var(--dim); padding: 3px 4px; border-radius: 5px; white-space: nowrap; cursor: default;
+}
+.um-turn.um-warn .um-turn-n { color: var(--warn); }
+.um-turn:hover { background: var(--fill-ghost-hover); }
+.um-tip {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: 280px;
+  display: none; gap: 7px; padding: 10px 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 6px 18px rgba(18, 21, 48, 0.14);
+  font: calc(var(--size-app) * 12 / 12.5) / 1.4 var(--font-app); color: var(--text); white-space: normal; text-align: left;
+}
+.um-turn:hover .um-tip, .um-turn:focus-visible .um-tip { display: grid; }
+.um-tip-head b { font-family: var(--font-data); }
+.um-tip-row { color: var(--dim); font-size: 11.5px; }
+.um-tip-row.mono { font-family: var(--font-data); font-size: 10.5px; }
+
+/* A compaction, as a line of its own. */
+.um-compact {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 6px 0; padding: 6px 10px; font-size: calc(var(--size-app) * 12 / 12.5); color: var(--dim);
+  border-top: 1px dashed var(--rule); border-bottom: 1px dashed var(--rule);
+}
+.um-compact > svg { flex: none; }
+.um-compact b { font-family: var(--font-data); font-weight: 500; color: var(--text); font-size: 11.5px; }
+.um-compact-sub { font-size: 11.5px; }
+
+/* A state header's number: what the state added, at the right before the time. */
+.lh-added { margin-right: 10px; font-family: var(--font-data); color: var(--dim); }
+
+/* Waiting for the allowance: the message as it will be, faded, and the line under it. */
+.um-waiting-host { display: grid; gap: 6px; padding: 0 16px 6px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.um-waiting-msg .ts-rail { opacity: 1; }
+.um-bubble-wait { opacity: 0.7; border-style: dashed !important; }
+.um-under { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; margin-top: 6px; font-size: calc(var(--size-app) * 12.5 / 12.5); }
+.um-under-why { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+.um-under-why b { font-weight: 600; color: var(--text); }
+.um-under-run { justify-content: flex-start; margin: 4px 0; }
+.um-waiting-run { display: grid; gap: 4px; }
+.um-check { display: inline-flex !important; flex-direction: row; align-items: center; gap: 7px; font-size: calc(var(--size-app) * 12.5 / 12.5); cursor: pointer; white-space: nowrap; }
+.um-check input { accent-color: var(--accent); margin: 0; width: 14px; height: 14px; }
+.um-check b { font-weight: 600; }
+.um-sm { font-size: calc(var(--size-app) * 12 / 12.5) !important; padding: 3px 9px !important; }
+
+/* The model menu: a route's account, a model's own window. */
+.um-route { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding-left: 6px; flex: none; }
+.um-route + .cx-more { margin-left: 4px; }
+.um-route .um-bar { width: 22px; height: 4px; }
+.um-route-n { font: 500 10.5px/1 var(--font-data); font-variant-numeric: tabular-nums; min-width: 28px; text-align: right; }
+.cx-col-last .um-modelmark { margin-left: auto; }
+
+/* A sign-in card at its fixed width: the icon, the email and Log out; the plan and the weekly ring;
+   the week's reset. */
+.um-c { position: relative; box-sizing: border-box; gap: 7px; padding: 10px 10px 10px 12px; }
+.um-c-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.um-c-top .cfg-login-who { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.um-c-mark { width: 24px !important; height: 24px !important; font-size: 11px !important; flex: none; }
+.um-c-out { flex: none; width: 24px; height: 24px; padding: 0 !important; display: inline-grid; place-items: center; font-size: 14px; color: var(--dim); margin: -2px -2px 0 0; }
+.um-c-line { display: flex; align-items: center; gap: 6px; min-height: 22px; padding-left: 32px; font-size: calc(var(--size-app) * 11 / 12.5); }
+.um-c-line2 { padding-left: 0; justify-content: flex-end; margin-top: -3px; min-height: 0; }
+.um-c-plan { color: var(--dim); white-space: nowrap; }
+.um-c-ringwrap { position: relative; margin-left: auto; }
+.um-c-ringbtn { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; box-shadow: none; padding: 2px 5px; border-radius: 11px; font: 500 10.5px/1 var(--font-data); font-variant-numeric: tabular-nums; cursor: pointer; }
+.um-c-ringbtn:hover, .um-c-ringbtn.on { background: var(--fill-ghost-selected); }
+.um-c-ringbtn.um-t-accent { color: var(--text); }
+.um-rs { font: 400 10.5px/1.3 var(--font-data); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.um-rs.is-spent { color: var(--bad); font-weight: 500; }
+.um-cpop { left: auto; right: -12px; bottom: calc(100% + 8px); width: 330px; }
+/* The route column carries each account's bar and number now, so it is a little wider. */
+.cx-cascade > .cx-col:first-child { width: 188px; }

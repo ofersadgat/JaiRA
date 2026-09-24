@@ -38,6 +38,7 @@ import {
   type TurnKind,
   type WritingTool,
 } from "@jaira/shared/browser";
+import { compactionOfEvent, type ContextReading } from "@jaira/shared/browser";
 
 // --- entries ------------------------------------------------------------------
 
@@ -76,6 +77,22 @@ export interface MessageEntry {
    * the same thing — main matches them by equality, never by shape.
    */
   output?: { value: JsonValue; schema?: JsonValue; name?: string };
+  /** How full the conversation was after this turn — the rail's badge (usage-readings contract). */
+  context?: ContextReading;
+}
+
+/**
+ * A compaction: the agent folded the conversation to make room. Drawn as a line of its own rather
+ * than a folded work row, because it changes what every turn after it is standing on. Claude reports
+ * one (`compact_boundary`: automatic or asked for, the tokens before and after, how long it took).
+ */
+export interface CompactionEntry {
+  kind: "compaction";
+  at?: number;
+  trigger?: string;
+  before?: number;
+  after?: number;
+  durationMs?: number;
 }
 
 /** One tool call and its result, paired. Collapsed to a line until asked. */
@@ -196,7 +213,7 @@ export interface WritingEntry {
   chars: number;
 }
 
-export type TranscriptEntry = MessageEntry | ToolEntry | EventEntry | LiveEntry | ThoughtEntry | WritingEntry;
+export type TranscriptEntry = MessageEntry | ToolEntry | EventEntry | LiveEntry | ThoughtEntry | WritingEntry | CompactionEntry;
 
 // --- work blocks --------------------------------------------------------------
 
@@ -218,7 +235,7 @@ export interface WorkBlock {
 }
 
 /** What the renderer walks: things that were said, and the work between them. */
-export type TranscriptBlock = MessageEntry | LiveEntry | WorkBlock;
+export type TranscriptBlock = MessageEntry | LiveEntry | WorkBlock | CompactionEntry;
 
 /**
  * Fold a flat entry list into messages and the work between them.
@@ -230,7 +247,7 @@ export type TranscriptBlock = MessageEntry | LiveEntry | WorkBlock;
 export function blocksOf(entries: readonly TranscriptEntry[]): TranscriptBlock[] {
   const out: TranscriptBlock[] = [];
   for (const entry of entries) {
-    if (entry.kind === "message" || entry.kind === "live") {
+    if (entry.kind === "message" || entry.kind === "live" || entry.kind === "compaction") {
       out.push(entry);
       continue;
     }
@@ -589,6 +606,7 @@ function messageOf(
       ...(turn.text !== undefined ? { text: turn.text } : {}),
       ...(index !== undefined ? { turn: index } : {}),
       ...(output !== undefined ? { output } : {}),
+      ...(turn.context !== undefined ? { context: turn.context } : {}),
     });
   }
   for (const part of parts) {
@@ -705,7 +723,18 @@ export function eventEntry(event: JsonValue): TranscriptEntry[] {
   const type = typeof payload["type"] === "string" ? (payload["type"] as string) : "provider event";
   const subtype = typeof payload["subtype"] === "string" ? (payload["subtype"] as string) : "";
   if (subtype === "init") return [{ kind: "event", tone: "plain", text: "session started", detail }];
-  if (subtype === "compact_boundary") return [{ kind: "event", tone: "plain", text: "context compacted", detail }];
+  if (subtype === "compact_boundary") {
+    const said = compactionOfEvent(payload);
+    return [
+      {
+        kind: "compaction",
+        ...(said?.trigger !== undefined ? { trigger: said.trigger } : {}),
+        ...(said?.before !== undefined ? { before: said.before } : {}),
+        ...(said?.after !== undefined ? { after: said.after } : {}),
+        ...(said?.durationMs !== undefined ? { durationMs: said.durationMs } : {}),
+      },
+    ];
+  }
   return [{ kind: "event", tone: "plain", text: subtype.length > 0 ? `${type}: ${subtype}` : type, detail }];
 }
 

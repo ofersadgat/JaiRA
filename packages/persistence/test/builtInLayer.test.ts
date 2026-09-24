@@ -463,11 +463,11 @@ describe("the built-in settings layer", () => {
     expect(Object.keys(presets).sort()).toEqual(["coder", "planner", "simple"]);
     expect(presets["simple"]!["model"]).toEqual({ candidates: ["claude-haiku-4-5", "gpt-5.6-luna"], choose: "first-available" });
     expect(presets["coder"]).toEqual({
-      model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "first-available" },
+      model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "most-left" },
       reasoning: { effort: "high" },
     });
     expect(presets["planner"]).toEqual({
-      model: { candidates: ["claude-fable-5-1", "gpt-5.6-sol"], choose: "first-available" },
+      model: { candidates: ["claude-fable-5-1", "gpt-5.6-sol"], choose: "most-left" },
       reasoning: { effort: "high" },
     });
     expect(project.config.functions.smart.model).toBe("simple");

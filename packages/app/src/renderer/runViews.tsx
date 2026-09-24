@@ -13,6 +13,9 @@
  * single card cannot be clicked into three different transcripts.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type ReactNode } from "react";
+import { actOnWaiting, useWaiting } from "./limitsStore";
+import { WaitingLine } from "./usageMeters";
+import type { ContextReading } from "@jaira/shared/browser";
 import type {
   ChatPlanView,
   ChatSettings,
@@ -48,7 +51,7 @@ import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
-import { SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
+import { PieceReadingContext, SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
 import { AskDialog, type AskSpec } from "./menu";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
@@ -746,6 +749,9 @@ export function RunConversation({
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
   const { conversation, liveTurn, sessions, sessionHistory, records, onLoadSessions, onOpenWorkflow, userEvents, onDeliverUserEvent, shutStates, onToggleShutState, onSetShutStates } = context;
+  /** How full each state's conversation was after its last turn — what its header's `+30k` is worked out from. */
+  const readingOf = (piece: SessionPiece): ContextReading | undefined =>
+    [...(sessions[sessionKey(recordAt(piece))]?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context;
   const openSidechain = onOpenSidechain ?? context.onWalkIntoSidechain;
   /**
    * The TASK's conversation, not the newest run's.
@@ -1116,6 +1122,7 @@ export function RunConversation({
   if (nested) {
     return (
       <div className="run-convo-nested">
+        <PieceReadingContext.Provider value={readingOf}>
         <SessionBandsView
           bands={bands}
           render={render}
@@ -1131,6 +1138,7 @@ export function RunConversation({
           adopted={adopted}
           moveQuestion={moveQuestion}
         />
+        </PieceReadingContext.Provider>
       </div>
     );
   }
@@ -1145,6 +1153,7 @@ export function RunConversation({
           trackSoon();
         }}
       >
+        <PieceReadingContext.Provider value={readingOf}>
         <SessionBandsView
           bands={bands}
           render={render}
@@ -1170,6 +1179,7 @@ export function RunConversation({
           adopted={adopted}
           moveQuestion={moveQuestion}
         />
+        </PieceReadingContext.Provider>
         {/* AFTER the bands, always. A wait is the present tense of a run — it is where the thing
             stopped — so it belongs at the bottom of what has happened rather than sorted into it by
             the clock it parked at. It is also outside `SessionBandsView` because it is not a band:
@@ -1183,6 +1193,8 @@ export function RunConversation({
       <ChatComposer
         taskId={detail.taskId}
         instanceId={parent?.instanceId}
+        // How full the selected conversation is: the reading on its last answer.
+        contextReading={parent?.instanceId !== undefined ? [...(sessions[String(parent.instanceId)]?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context : undefined}
         project={context.project}
         running={detail.status === "running"}
         detail={detail}
@@ -1439,9 +1451,12 @@ function ChatComposer({
   armed,
   onRewindConfirm,
   onArmCancel,
+  contextReading,
 }: {
   taskId: string;
   instanceId: string | undefined;
+  /** How full the conversation being continued is — the composer's ring. */
+  contextReading?: ContextReading | undefined;
   project?: string | undefined;
   /** A rewind armed above — the strip asks about it here, in place of whatever it was showing. */
   armed?: ArmedRewind | undefined;
@@ -1549,6 +1564,19 @@ function ChatComposer({
   // box carrying a sentence explaining itself, and a greyed box is a control that has to be read
   // before it can be dismissed. See {@link RunActivity} for what stands there instead.
   const disabled = instanceId === undefined ? "Select a run to continue its conversation." : undefined;
+  // A run refused because the account ran out waits for the reset — its line, with Try again at …,
+  // Send now anyway (resume now) and Stop the run (it stays stopped).
+  const waitingRun = useWaiting().filter((item) => item.kind === "run" && item.taskId === taskId);
+  const waitingLines =
+    waitingRun.length > 0 ? (
+      <div className="cx-doing um-waiting-run">
+        {waitingRun.map((item) => (
+          <WaitingLine key={item.id} item={item} run onStop={() => actOnWaiting(item.id, "drop")} />
+        ))}
+      </div>
+    ) : null;
+  const model = plan?.effective.model ?? "";
+  const onCompact = /^claude-(cli|code)\//.test(model) ? (focus?: string) => send(focus !== undefined ? `/compact ${focus}` : "/compact") : undefined;
 
   // The three-state `plan` is what makes this safe, and collapsing it is the way to get it wrong:
   // `undefined` is "not asked yet" and `null` is "asked, and there is no conversation here". Acting
@@ -1560,6 +1588,7 @@ function ChatComposer({
   if (plan === null && instanceId !== undefined) {
     return (
       <div className="cx-doing">
+        {waitingLines}
         {error !== null ? <p className="cx-error">{error}</p> : null}
         {cutStrip ?? (
           <RunActivity
@@ -1583,9 +1612,11 @@ function ChatComposer({
           <RunActivity detail={detail} onStop={stop} onSkip={skip} />
         </div>
       ) : null}
+      {waitingLines}
       {error !== null ? <p className="cx-error">{error}</p> : null}
       <Composer
         plan={plan ?? null}
+        usage={{ context: contextReading, onCompact }}
         // A run in flight is busy whatever the box says: the button is the only handle on it, and a
         // disabled composer over a running workflow used to be a panel with no way to stop it.
         busy={busy || running === true}

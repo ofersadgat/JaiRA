@@ -5,11 +5,11 @@
         "model": { "candidates": ["claude-haiku-4-5", "gpt-5.6-luna"], "choose": "first-available" }
       },
       "coder": {
-        "model": { "candidates": ["claude-opus-5-5", "gpt-5.6-terra"], "choose": "first-available" },
+        "model": { "candidates": ["claude-opus-5-5", "gpt-5.6-terra"], "choose": "most-left" },
         "reasoning": { "effort": "high" }
       },
       "planner": {
-        "model": { "candidates": ["claude-fable-5-1", "gpt-5.6-sol"], "choose": "first-available" },
+        "model": { "candidates": ["claude-fable-5-1", "gpt-5.6-sol"], "choose": "most-left" },
         "reasoning": { "effort": "high" }
       }
     }

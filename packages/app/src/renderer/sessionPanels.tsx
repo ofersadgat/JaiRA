@@ -39,12 +39,19 @@
  * a context and nothing about what any of them is; the state that started it is the other half, and
  * it is a place you can go.
  */
-import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { clockOf, durationOf, OutcomeNote } from "./transcriptView";
 import { signatureOf } from "./transcript";
-import { addressSegment, segmentKey, type InstanceNode, type MadeBatch, type MadeTask, type MoveQuestionView, type TaskOrigin } from "@jaira/shared/browser";
+import { addressSegment, segmentKey, type ContextReading, type InstanceNode, type MadeBatch, type MadeTask, type MoveQuestionView, type TaskOrigin } from "@jaira/shared/browser";
+
+/**
+ * How full a piece's conversation was after its last turn — the host's answer, from the session view
+ * it already holds for the piece. A context rather than a prop threaded through the bands, the band
+ * and the sheet: only the sheet asks, to say on each state's header what that state ADDED.
+ */
+export const PieceReadingContext = createContext<((piece: SessionPiece) => ContextReading | undefined) | undefined>(undefined);
 import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
 import {
   forksOf,
@@ -329,8 +336,11 @@ function Piece({
   onToggle,
   render,
   asking,
+  added,
 }: {
   piece: SessionPiece;
+  /** Tokens this state added to its conversation — the header's `+30k`. */
+  added?: number | undefined;
   open: boolean;
   onToggle: () => void;
   render: (piece: SessionPiece) => ReactNode;
@@ -363,6 +373,7 @@ function Piece({
           {...(sig.label !== undefined ? { label: sig.label } : {})}
           {...(summaryOf(piece) !== undefined ? { summary: summaryOf(piece)! } : {})}
           {...(metaOf(node) !== "" ? { meta: metaOf(node) } : {})}
+          {...(added !== undefined ? { added } : {})}
           {...(kind === "conversation" ? { status: node.status } : {})}
           onToggle={onToggle}
         />
@@ -411,7 +422,8 @@ function summaryOf(piece: SessionPiece): string | undefined {
   const parts: string[] = [];
   if (op?.status === "failed") parts.push(op.reason ?? "failed");
   else if (piece.node.status === "canceled") parts.push("canceled");
-  if (op?.costUsd !== undefined) parts.push(`$${op.costUsd.toFixed(2)}`);
+  // No cost: what a state spent is in its details. The header's number is the CONTEXT it added,
+  // on the right before the time, folded or open (usage-readings contract).
   return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
@@ -528,6 +540,19 @@ function Sheet({
    */
   const only = segment.pieces.length === 1 ? segment.pieces[0] : undefined;
   const solo = only !== undefined && surfaceKindOf(only.node) === "conversation";
+  // What each state ADDED to the conversation: the reading after its last turn, less the reading the
+  // state before it in this session ended on. The first state in a session added everything it holds.
+  const readingOf = useContext(PieceReadingContext);
+  const added = new Map<SessionPiece, number>();
+  if (readingOf !== undefined) {
+    let prior: ContextReading | undefined;
+    for (const piece of segment.pieces) {
+      const reading = readingOf(piece);
+      if (reading === undefined) continue;
+      added.set(piece, Math.max(0, reading.used - (prior?.used ?? 0)));
+      prior = reading;
+    }
+  }
   /**
    * A SURFACE has no gutter at all — it is the other half of the rule above.
    *
@@ -670,6 +695,7 @@ function Sheet({
                     open={!shut.has(keyOfPiece(piece, scope))}
                     onToggle={() => onToggle(keyOfPiece(piece, scope))}
                     render={render}
+                    {...(added.has(piece) ? { added: added.get(piece)! } : {})}
                     {...(asking !== undefined ? { asking } : {})}
                   />
                 )}

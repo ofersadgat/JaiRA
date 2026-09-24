@@ -316,6 +316,8 @@ export interface JairaConfig {
   integrations: JairaIntegrationsConfig;
   /** What a fast-forward answers for you, and what it leaves to you (decision 0005 §6). */
   autopilot: JairaAutopilotConfig;
+  /** What a message or a run does when an account's allowance runs out (usage readings). */
+  limits: JairaLimitsConfig;
   /** Each shipped function's defaults, by the function's name — one place per function (decision 0007, amended 2026-09-23). */
   functions: JairaFunctionsConfig;
   /** The MCP servers every agent run is handed, by the name their tools are called under (`./mcp`). */
@@ -416,6 +418,17 @@ export interface JairaAutopilotConfig {
 
 /** Very low on purpose — see {@link JairaAutopilotConfig.askBelow}. */
 export const DEFAULT_ASK_BELOW = 0.2;
+
+/** What happens when an account has no allowance left (usage-readings contract, "What the screens show"). */
+export interface JairaLimitsConfig {
+  /**
+   * Whether "Try again at …" starts CHECKED on a message or a run the provider refused because the
+   * allowance ran out. Checked, it is tried again when the window resets; each one can still be
+   * changed where it is shown. A message sent while the allowance is KNOWN to be spent always waits —
+   * this setting is about refusals nobody saw coming.
+   */
+  retryOnReset: boolean;
+}
 
 /**
  * The Files tree's own configuration.
@@ -627,6 +640,7 @@ export function defaultConfig(): JairaConfig {
     files: {},
     integrations: defaultIntegrations(),
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
+    limits: { retryOnReset: true },
     functions: defaultFunctions(),
     mcp: defaultMcp(),
     appearance: defaultAppearanceConfig(),
@@ -716,6 +730,17 @@ const MOVED_KEYS: Record<string, string> = {
  * is a fast-forward answering more than somebody meant it to, which is the one failure this setting
  * exists to prevent.
  */
+function parseLimits(raw: unknown): JairaLimitsConfig {
+  if (raw === undefined) return { retryOnReset: true };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.limits must be an object");
+  }
+  const retryOnReset = (raw as Record<string, unknown>)["retryOnReset"];
+  if (retryOnReset === undefined) return { retryOnReset: true };
+  if (typeof retryOnReset !== "boolean") throw new Error("config.limits.retryOnReset must be true or false");
+  return { retryOnReset };
+}
+
 function parseAutopilot(raw: unknown): JairaAutopilotConfig {
   if (raw === undefined) return { askBelow: DEFAULT_ASK_BELOW };
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
@@ -1264,6 +1289,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     files: parseFiles(cfg["files"]),
     integrations: parseIntegrations(cfg["integrations"]),
     autopilot: parseAutopilot(cfg["autopilot"]),
+    limits: parseLimits(cfg["limits"]),
     functions: parseFunctions(cfg["functions"]),
     mcp: parseMcp(cfg["mcp"]),
     appearance: parseAppearanceConfig(cfg["appearance"]),
