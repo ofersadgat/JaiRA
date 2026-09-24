@@ -2470,14 +2470,18 @@ button.side-twist:hover:not(:disabled) {
   margin: 0;
   padding: 8px 10px;
   overflow-x: auto;
-  white-space: pre;
+  /* NOT `pre` here — see `.line` below, which is where the whitespace is kept. */
+  white-space: normal;
 }
 /* Shiki emits one `<span class="line">` per line. They are blocks so that a line's own background —
    which some themes give to a diff's added and removed lines — spans the width rather than stopping
-   at the last character. */
+   at the last character. Shiki also puts a `\n` BETWEEN the spans, and under a `pre` parent each of
+   those drew as an empty line between two blocks: every block came out double-spaced. So the parent
+   collapses whitespace (the separators vanish) and each line keeps its own. */
 .code-shiki .shiki .line {
   display: block;
   min-height: 1.5em;
+  white-space: pre;
 }
 
 /* A document's YAML header, kept but out of the way — see `markdown.tsx`'s FRONT_MATTER. One dim
