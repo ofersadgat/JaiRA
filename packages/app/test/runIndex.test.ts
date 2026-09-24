@@ -167,3 +167,44 @@ describe("identity", () => {
     expect(keyOfNode(a)).toBe("2");
   });
 });
+
+/**
+ * The index FITTED to a box (`RunIndexFit`, `stepCompaction.ts`) — rendered, because what the fit
+ * changes is which rows are DRAWN: folds with their tile, `⋯` rows with dots on the rail, and every
+ * name on a folded line a way to the top of its state.
+ */
+describe("the index fitted to a box", () => {
+  const leaves = (names: string[]): InstanceNode[] => names.map((name) => node(name));
+  const run = (): InstanceNode[] => [
+    node("feature", [
+      node("plan", leaves(["goals", "context", "critique", "critique2", "critique3", "review"]), { childKey: "plan" }),
+      node("ux", leaves(["draft", "critique", "verify"]), { childKey: "ux" }),
+      node("build", [
+        node("pause", leaves(["draft", "test", "verify"]), { childKey: "pause" }),
+        node("resume", leaves(["draft", "test", "verify"]), { childKey: "resume" }),
+        node("cancel", leaves(["draft", "test"]), { childKey: "cancel" }),
+      ], { childKey: "build" }),
+    ]),
+  ];
+  const draw = async (capacity: number, convo: boolean): Promise<string> => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { RunIndex } = await import("../src/renderer/runIndex");
+    return renderToStaticMarkup(createElement(RunIndex, { instances: run(), heading: false, fit: { capacity, convo }, onGoTo: () => undefined }));
+  };
+
+  it("with no conversation, folds everything off the live path — each fold a tile saying how many steps", async () => {
+    const html = await draw(40, false);
+    expect(html).toContain("rail-mark rolled");
+    expect(html).toContain("6 steps");
+    // The live path stays open: the last step is drawn.
+    expect(html).toContain("cancel");
+  });
+
+  it("tight, elides with ⋯ rows whose innermost lane is dots, and names what they pass over as links", async () => {
+    const html = await draw(6, true);
+    expect(html).toContain("rail-gap-dots");
+    expect(html).toMatch(/⋯<\/span>\d+ steps/);
+    expect(html).toContain("go to the top of");
+  });
+});

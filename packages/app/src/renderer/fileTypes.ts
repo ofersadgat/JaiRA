@@ -350,7 +350,12 @@ export interface FileSurfaceContext {
    * the index marks it as the reader scrolls. Undefined when nothing is on screen yet.
    */
   runHere?: string | undefined;
-  onRunHere?: ((instance: string | undefined) => void) | undefined;
+  /**
+   * Every state with a sheet on screen in that conversation — what the Steps index's first fold
+   * reads: a state nobody can see is the first to fold (the panel rulings, 2026-09-24).
+   */
+  runOnScreen?: ReadonlySet<string> | undefined;
+  onRunHere?: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
   /**
    * The gate parked on the selected task, for the middle column's conversation to host.
    *
@@ -480,8 +485,6 @@ export interface FileSurfaceContext {
    * the editor falls back to its own state.
    */
   editorTab?: Record<string, EditorTab> | undefined;
-  /** What a file nothing is remembered about opens on — see `AppState.editorTabLast`. */
-  editorTabLast?: EditorTab | undefined;
   onEditorTab?: ((key: string, tab: EditorTab) => void) | undefined;
   /**
    * The description-vs-workflows machinery, for the one surface that shows it.

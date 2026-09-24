@@ -30,7 +30,8 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   | "folder" | "script"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
-  | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia", string[]> = {
+  | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
+  | "pin" | "adopt" | "play" | "stop" | "back" | "info", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -149,6 +150,14 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
     "M9 10.5a1.3 1.3 0 1 1-2.6 0 1.3 1.3 0 0 1 2.6 0Z",
     "m4 18 5-5 3.5 3.5L15 14l6 5",
   ],
+  // The side panel's own controls (the panel rulings, 2026-09-24). A pushpin for "keep this stack";
+  // ⇤ for "show this in the main view" — an arrow into a bar, the direction the thing moves.
+  pin: ["M9 4h6", "M10 4v5l-3 4h10l-3-4V4", "M12 13v7"],
+  adopt: ["M4 4v16", "M20 12H8", "m12 8-4 4 4 4"],
+  play: ["M7 5v14l11-7Z"],
+  stop: ["M7 7h10v10H7Z"],
+  back: ["m15 18-6-6 6-6"],
+  info: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 16v-4", "M12 8h.01"],
 };
 
 /**

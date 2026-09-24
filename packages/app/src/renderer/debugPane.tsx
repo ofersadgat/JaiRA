@@ -27,7 +27,7 @@
  *
  * Scripted passes and live fails ⇒ the provider. Scripted fails ⇒ JaiRA.
  */
-import { type JSX } from "react";
+import { type CSSProperties, type JSX, type ReactNode } from "react";
 import type {
   AvailabilitySnapshot,
   ConversationView,
@@ -37,7 +37,7 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared/browser";
 import { Badge } from "./board";
-import { Conversation, TaskPanel } from "./detail";
+import { Conversation } from "./detail";
 import { SELF_TEST_ROOT } from "./debugWorkflow";
 import { SessionPanel } from "./session";
 import type { DebugFile, DebugState } from "./store";
@@ -138,6 +138,10 @@ export interface DebugPaneProps {
   /** Open the copy that LOADS — the row knows which layer that is. */
   onOpenState: (stateId: string, layer: WorkflowLayer) => void;
   onShowSession: (instanceId: string | null) => void;
+  /** The shell's side panel column, and the classes and width variable its grid needs. */
+  panel?: ReactNode;
+  panelClass?: string;
+  panelStyle?: CSSProperties;
 }
 
 export function DebugPane({
@@ -157,6 +161,9 @@ export function DebugPane({
   onDismissError,
   onOpenState,
   onShowSession,
+  panel,
+  panelClass,
+  panelStyle,
 }: DebugPaneProps): JSX.Element {
   // The detail panel is only about the self-test when the selection still IS the self-test. Clicking
   // a card in Tasks moves the selection, and showing that task's tree under a "self-test" heading
@@ -172,7 +179,7 @@ export function DebugPane({
     // `view` is what makes this a two-column grid the height of the viewport — without it the
     // columns laid out as blocks and the middle one had no height to scroll INSIDE, so a pane
     // longer than the window simply ran off the bottom of it.
-    <div className="view debug-view">
+    <div className={`view debug-view${panelClass ?? ""}`} style={panelStyle}>
       <div className="col mid debug">
         <header className="debug-head">
           <h2>Workflow self-test</h2>
@@ -357,24 +364,10 @@ export function DebugPane({
             rather than about this installation, and it needed no self-test to answer. */}
       </div>
 
-      <aside className="col panel">
-        {mine !== null ? (
-          // The ordinary task panel, unmodified: instances, live events and the run's outputs. Reused
-          // rather than reimplemented, because a debug view that renders its own version of the
-          // screen it is meant to be testing tests the wrong screen.
-          <TaskPanel
-            detail={mine}
-            stream={stream}
-            onStart={() => onRun({})}
-            onCancel={onCancel}
-            // A state the run went through, opened as the copy that loads — the rows above know which
-            // layer that is; a state they do not list is one of the three that ship.
-            onOpenState={(stateId) => onOpenState(stateId, debug.files.find((f) => f.stateId === stateId)?.layer ?? "system")}
-          />
-        ) : (
-          <p className="empty">Run the self-test to see its task here.</p>
-        )}
-      </aside>
+      {/* The shell's side panel — the self-test's task, the same panel every room has. Reused
+          rather than reimplemented, because a debug view that renders its own version of the screen
+          it is meant to be testing tests the wrong screen. */}
+      {panel}
     </div>
   );
 }

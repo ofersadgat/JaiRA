@@ -313,17 +313,6 @@ export interface AppState {
   editorTab: Record<string, EditorTab>;
 
   /**
-   * The reading last CHOSEN, for a file nothing has been remembered about.
-   *
-   * Per file is the rule (see {@link editorTab}) and this is what it falls back to. Opening a child
-   * from the graph should land you in the graph — you were reading a picture and you asked for the
-   * next one — and the same holds for someone working through a directory on the JSON tab. Only an
-   * explicit click on a tab moves it, so it is a statement about how the person is working rather
-   * than a trail left by wherever they happened to navigate.
-   */
-  editorTabLast: EditorTab;
-
-  /**
    * What a state's run form holds, keyed by STATE ID — the whole form once anything in it has changed.
    *
    * Keyed by state id rather than by `layer:path` — the two layers hold two copies of one state, but
@@ -840,7 +829,6 @@ const EMPTY: AppState = {
   debug: { files: [], taskId: null, busy: false, error: null },
   drafts: {},
   editorTab: {},
-  editorTabLast: "form",
   runValues: {},
   workflows: [],
   workflowForms: {},
@@ -4441,7 +4429,7 @@ export function useApp() {
 
       /** Remember which tab a state file's editor is on, so returning to the file returns to it. */
       setEditorTab: (key: string, tab: EditorTab) =>
-        patch({ editorTab: { ...ref.current.editorTab, [key]: tab }, editorTabLast: tab }),
+        patch({ editorTab: { ...ref.current.editorTab, [key]: tab } }),
 
       /** Hold a state's run form, whole. See {@link AppState.runValues} on why it is not a per-box overlay. */
       setRunValues: (stateId: string, values: Record<string, JsonValue>) =>

@@ -38,18 +38,20 @@ export const PANE = {
    * nothing about the other. One id, because there is now one sidebar.
    */
   shellSidebar: "shell.sidebar",
-  filesInspector: "files.inspector",
   /** The Files view's horizontal divider — how tall the viewer opens above the editor. */
   filesViewer: "files.viewer",
-  tasksPanel: "tasks.panel",
   /**
-   * The Chat view's context panel, which exists only while something is pinned to it.
-   *
-   * Remembered anyway, and remembered separately from the Tasks panel: how wide you want a document
-   * held beside a conversation is not how wide you want a task's detail, and a pane that opened at
-   * whatever the other view was left at would be a pane you re-drag every time.
+   * The side panel's width, remembered per KIND of thing it is showing rather than per room (the
+   * panel rulings, 2026-09-24): how wide is comfortable is decided by the content — a configuration
+   * form wants the same room in Files as in Tasks, and a task's tabs want less. `panelStack.ts`'s
+   * `widthKeyOf` names which. The per-room widths these replace were never about the room either.
    */
-  chatPanel: "chat.panel",
+  panelTask: "panel.task",
+  panelState: "panel.state",
+  panelConfig: "panel.config",
+  panelPreview: "panel.preview",
+  /** How tall the Steps tab's index box is while a step's card is open under it. A height. */
+  panelSteps: "panel.steps",
   /** The field reference beside the JSON editor. */
   schemaReference: "schema.reference",
 } as const;
@@ -62,10 +64,13 @@ export const PANE = {
  */
 export const PANE_DEFAULTS: Record<string, number> = {
   [PANE.shellSidebar]: 250,
-  [PANE.filesInspector]: 300,
   [PANE.filesViewer]: 320,
-  [PANE.tasksPanel]: 360,
-  [PANE.chatPanel]: 420,
+  [PANE.panelTask]: 400,
+  [PANE.panelState]: 380,
+  // A form's rows — a name, a type, a binding, a switch — stop fitting beside each other below ~480.
+  [PANE.panelConfig]: 520,
+  [PANE.panelPreview]: 560,
+  [PANE.panelSteps]: 300,
   [PANE.schemaReference]: 300,
 };
 
@@ -86,14 +91,11 @@ export const SIDEBAR_RAIL = 46;
  */
 export const PANE_WIDE = 1200;
 
-/**
- * The narrowest a pinned SURFACE may be shown in, in px.
- *
- * A pinned value is a document and reads at any width; a pinned surface is a form, and its rows —
- * a name, a type, a binding, a switch — stop fitting beside each other somewhere below this. The
- * column grows to meet one rather than showing it folded over itself. See `statePanel.tsx`.
- */
-export const PANE_SURFACE = 480;
+/** The narrowest the side panel may be dragged: its head's name, three verbs and three controls. */
+export const PANEL_MIN = 300;
+
+/** The folded side panel: a rail of the root's tabs, each icon with its name under it. */
+export const PANEL_RAIL = 48;
 
 /** Disclosure ids — the folds worth reopening the app on. */
 export const FOLD = {
@@ -118,6 +120,15 @@ export const FOLD = {
   filesEditor: "files.editor",
   /** Whether the JSON editor is showing the schema's field reference. */
   schemaReference: "schema.reference",
+  /**
+   * Whether each room's side panel is UNFOLDED (open means a column, shut means the 48px rail). Per
+   * room, because the rooms differ in what the panel is for: beside a chat it starts folded — a
+   * thread is read on its own until you ask what it produced.
+   */
+  panelFiles: "panel.files",
+  panelTasks: "panel.tasks",
+  panelChat: "panel.chat",
+  panelDebug: "panel.debug",
 } as const;
 
 /**
@@ -131,6 +142,10 @@ export const FOLD_DEFAULTS: Record<string, boolean> = {
   [FOLD.shellSidebar]: true,
   [FOLD.filesEditor]: true,
   [FOLD.schemaReference]: false,
+  [FOLD.panelFiles]: true,
+  [FOLD.panelTasks]: true,
+  [FOLD.panelChat]: false,
+  [FOLD.panelDebug]: true,
 };
 
 /**

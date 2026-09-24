@@ -65,7 +65,9 @@ export function layerBarOf(
       actions: [
         {
           id: "override-base",
-          label: "Override for all projects",
+          // Editing a built-in is making a copy in Shared (the panel rulings, 2026-09-24): the verb
+          // says what the person wants, and the title says what it does.
+          label: "Edit a copy in Shared",
           title: has("base")
             ? "The shared root already has a copy of this state, and it is the one that loads"
             : "Copy this file into the shared root (~/.jaira) and open the copy",

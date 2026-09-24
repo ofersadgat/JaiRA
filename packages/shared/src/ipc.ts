@@ -1404,6 +1404,25 @@ export interface ReviewChangesRequest {
   fake?: JsonValue;
 }
 
+/**
+ * A task's worktree edits as a changeset, READ ONLY — what the side panel's Changes tab draws (the
+ * panel rulings, 2026-09-24). The same diff `changeset:review` walks through the gate, without
+ * starting a review: reading what an agent changed is not a decision about it.
+ */
+export interface TaskChangesRequest {
+  taskId: string;
+  /** The revision the diff is taken against. Default HEAD — the agent's uncommitted work. */
+  base?: string;
+  project?: ProjectRef;
+}
+
+export interface TaskChangesResult {
+  /** Absent when there is nothing to diff — see {@link reason}. */
+  changeset?: Changeset;
+  /** Why there is no changeset: no worktree, or none yet. Said in words, for the tab to show. */
+  reason?: string;
+}
+
 export interface ReviewChangesResult {
   /** The review run's own task, in JaiRA's project — where the round is recorded (§4.4, §5.3). */
   reviewTaskId: string;
@@ -2042,6 +2061,8 @@ export interface IpcContract {
   };
   /** Review a task's worktree edits as a changeset — see {@link ReviewChangesRequest}. */
   "changeset:review": { request: ReviewChangesRequest; response: ReviewChangesResult };
+  /** A task's worktree edits, read only — see {@link TaskChangesRequest}. */
+  "task:changes": { request: TaskChangesRequest; response: TaskChangesResult };
   /** Review a sync's proposed files through the same gate — see {@link ReviewSyncRequest}. */
   "changeset:reviewSync": { request: ReviewSyncRequest; response: ReviewChangesResult };
   /** Write any file under a layer root. Unparsed — see {@link WriteFileRequest}. */
@@ -2238,6 +2259,7 @@ export const IPC_CHANNELS = [
   "git:identity",
   "file:find",
   "changeset:review",
+  "task:changes",
   "changeset:reviewSync",
   "file:write",
   "permissionSet:save",

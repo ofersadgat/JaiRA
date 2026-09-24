@@ -50,6 +50,11 @@ export interface StickToBottom<T extends HTMLElement> {
   /** Back to the live edge, and pinned again. */
   jump: () => void;
   /**
+   * Whether it is following the live edge RIGHT NOW — the ref, not {@link away}, which lags a render.
+   * What a reader of the position asks: stuck to the bottom, the step being viewed is the live one.
+   */
+  following: () => boolean;
+  /**
    * Stop following, without moving anybody.
    *
    * For a scroll this panel is about to make on the reader's behalf — a bookmark landing somewhere up
@@ -120,5 +125,6 @@ export function useStickToBottom<T extends HTMLElement>(follow: DependencyList, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, reset);
 
-  return { ref, onScroll, away, jump, unpin };
+  const following = useCallback(() => pinned.current, []);
+  return { ref, onScroll, away, jump, unpin, following };
 }

@@ -64,6 +64,7 @@ Opening, closing and restoring are [project-sessions](../units/project-sessions.
 | `task:list` | `{project?}` or `void` | `TaskSummary[]` of one project |
 | `task:all` | `{workflows?: string[]}` or `void` | `ProjectTask[]`, every open session's tasks stamped with `project`, newest `updatedAt` first, narrowed to those workflow roots when given |
 | `task:detail` | `{taskId: string; project?}` | `TaskDetail`, with `resume` only for a startable task |
+| `task:changes` | `{taskId: string; base?: string; project?}` | `{changeset?: Changeset; reason?: string}` — the worktree's edits against `base` (HEAD), read only; `reason` says why there is none. The side panel's Changes tab ([0008](../decisions/0008-side-panels.md)) |
 | `task:conversation` | `{taskId: string; project?}` | `ConversationView` |
 | `task:system` | `void` | `TaskSummary[]` of the shared root, `[]` when it cannot open |
 

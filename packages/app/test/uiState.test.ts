@@ -70,11 +70,11 @@ describe("remembered pane sizes", () => {
   });
 
   it("returns what was stored, and leaves the other panes alone", () => {
-    const ui = withPane(withPane(emptyUiState(), PANE.shellSidebar, 310), PANE.tasksPanel, 420);
+    const ui = withPane(withPane(emptyUiState(), PANE.shellSidebar, 310), PANE.panelTask, 420);
     expect(paneOf(ui, PANE.shellSidebar)).toBe(310);
-    expect(paneOf(ui, PANE.tasksPanel)).toBe(420);
+    expect(paneOf(ui, PANE.panelTask)).toBe(420);
     // Dragging the sidebar has nothing to say about the width of the inspector.
-    expect(paneOf(ui, PANE.filesInspector)).toBe(PANE_DEFAULTS[PANE.filesInspector]);
+    expect(paneOf(ui, PANE.panelState)).toBe(PANE_DEFAULTS[PANE.panelState]);
   });
 
   it("answers for a pane it has never heard of rather than throwing", () => {

@@ -484,6 +484,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "git:identity": ((request: Parameters<typeof service.gitIdentity>[0]) => service.gitIdentity(request)) as Handler,
   "file:find": ((request: Parameters<typeof service.findFiles>[0]) => service.findFiles(request)) as Handler,
   "changeset:review": ((request: Parameters<typeof service.reviewChanges>[0]) => service.reviewChanges(request)) as Handler,
+  "task:changes": ((request: Parameters<typeof service.taskChanges>[0]) => service.taskChanges(request)) as Handler,
   "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>
     service.reviewSyncChangeset(request)) as Handler,
   "file:write": ((request: Parameters<typeof service.writeFile>[0]) => service.writeFile(request)) as Handler,

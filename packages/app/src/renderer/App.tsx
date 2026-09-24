@@ -41,6 +41,7 @@ import type {
   PendingQuestion,
   ProjectSummary,
   ProjectTask,
+  TaskDetail,
   PermissionSetsView as PermissionSetsData,
   WorkflowLayer,
 } from "@jaira/shared/browser";
@@ -81,16 +82,13 @@ import { PointerMenus } from "./pointerMenu";
 import { projectName } from "./projects";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
 import { MessageTypeContext, type MessageTypeStore } from "./messageTypes";
-import { ValueView } from "./valueView";
 import {
+  FactsButton,
   FileAddressBar,
   FileInspector,
   FilePanel,
   FileTreePanel,
   FolderInspector,
-  RunInspector,
-  StateInspector,
-  TaskInspector,
   newItems,
   standingRoot,
   type TreeDraft,
@@ -109,7 +107,6 @@ import "./fenceRender";
 import type { FileSurfaceContext } from "./fileTypes";
 import { LogsPanel } from "./logs";
 import { LayerPicker } from "./panes";
-import { ConfigPanel } from "./configPanel";
 import { DebugPane } from "./debugPane";
 import { GalleryPane } from "./galleryPane";
 import { ModelsPane, functionRulesOverlay } from "./modelsPane";
@@ -121,19 +118,24 @@ import { ConnectionsPage } from "./connectionsPane";
 import { ToolsFieldProvider, type ToolsFieldData } from "./toolsField";
 import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf, settledMarkOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
-import { RunModeToggle, RunView, TaskContext } from "./runViews";
+import { RunModeToggle, RunView } from "./runViews";
+import { SidePanel } from "./sidePanel";
+import { faceOf, type PanelHost } from "./panelFaces";
+import { EMPTY_STACK, push, reconcile, topOf, widthKeyOf, type PanelEntry, type PanelStack } from "./panelStack";
+import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
 import { primaryAct } from "./taskAction";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
 import { taskNameOf, taskNamePending } from "./taskName";
-import { nodeAt } from "./trail";
+import { nodeAt, type TrailStep } from "./trail";
 import {
   FOLD,
   HALVES,
   PANE,
-  PANE_SURFACE,
   PANE_WIDE,
+  PANEL_MIN,
+  PANEL_RAIL,
   OPENED,
   SHUT,
   SIDEBAR_RAIL,
@@ -144,67 +146,19 @@ import {
   shutOf,
   unfoldedOf,
 } from "./uiState";
-import { Icon } from "./icons";
 import { publishUsageFigures } from "./limitsStore";
-import { History, NewTask } from "./widgets";
+import { History, NewTask, NewTaskForm } from "./widgets";
 import { invoke, subscribe, useApp, type SettingsSection, type View } from "./store";
 
-/**
- * How wide each view lets its context panel be dragged while it is describing something.
- *
- * Not in `uiState.ts` with the defaults, because these are not defaults: they are the shell's own
- * bound on a gesture, and they are read twice each — once by the splitter that enforces them and
- * once by the column that has to obey them when the bound moves. See {@link PANE_WIDE} for what
- * replaces them while the panel is holding a document instead.
- */
-const PANE_CEILING = { files: 680, tasks: 760 };
-
-/**
- * A value held still, in the panel beside whatever is going on.
- *
- * The panel's other subjects — a file, a run, a task — are all things the ADDRESS names, and each is
- * chosen by the rule that the panel describes the end of the path. This one is chosen by hand: it is
- * there because somebody said "keep this where I can see it" about a document that would otherwise
- * be twenty turns up a transcript. So it OUTRANKS the rule while it is open, and closing it hands
- * the panel back — the same shape the task inspector already had.
- *
- * The header carries the name and the way out, and nothing else. Everything a value can do is in the
- * viewer's own `…`, including opening it here, which is where somebody who wants to save it will
- * already be looking.
- *
- * Except that the viewer INSIDE the panel has no panel: the provider is cleared here, so the value
- * that is already pinned is not offered the chance to pin itself. Its `…` still saves a file, which
- * is the item somebody reading a document in this column actually wants.
- */
-function PinnedPane({ pinned, onClose }: { pinned: PinnedValue; onClose: () => void }): JSX.Element {
-  return (
-    <div className="pinned-pane">
-      <div className="pinned-head">
-        <span className="pinned-title ellip" title={pinned.title}>
-          {pinned.title}
-        </span>
-        <button type="button" className="pinned-close" title="Close this and give the panel back" onClick={onClose}>
-          <Icon name="cross" />
-        </button>
-      </div>
-      <div className={pinned.node === undefined ? "pinned-body" : "pinned-body pinned-surface"}>
-        <ValuePanelContext.Provider value={null}>
-          {/* A surface when one was handed over — see {@link PinnedValue.node} — and the value viewer
-              otherwise, which is what everything but the graph's boxes pins. */}
-          {pinned.node ?? (
-            <ValueView
-              value={pinned.value}
-              {...(pinned.hint !== undefined ? { hint: pinned.hint } : {})}
-              {...(pinned.label !== undefined ? { label: pinned.label } : {})}
-              {...(pinned.serve !== undefined ? { serve: pinned.serve } : {})}
-              {...(pinned.onPrompt !== undefined ? { onPrompt: pinned.onPrompt } : {})}
-            />
-          )}
-        </ValuePanelContext.Provider>
-      </div>
-    </div>
-  );
-}
+/** The rooms that have a side panel, and the fold each remembers — see `uiState.ts`'s `FOLD`. */
+type PanelRoom = "files" | "tasks" | "chat" | "debug";
+const PANEL_FOLD: Record<PanelRoom, string> = {
+  files: FOLD.panelFiles,
+  tasks: FOLD.panelTasks,
+  chat: FOLD.panelChat,
+  debug: FOLD.panelDebug,
+};
+const EMPTY_STACKS: Record<PanelRoom, PanelStack> = { files: EMPTY_STACK, tasks: EMPTY_STACK, chat: EMPTY_STACK, debug: EMPTY_STACK };
 
 /**
  * The layer switch at a settings page's top-right corner — always there, on every page, whatever the
@@ -557,6 +511,16 @@ export default function App(): JSX.Element {
   const [runFocus, setRunFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
   /** The state the middle column's conversation is scrolled to — see `FileSurfaceContext.runHere`. */
   const [runHere, setRunHere] = useState<string | undefined>(undefined);
+  const [runOnScreen, setRunOnScreen] = useState<ReadonlySet<string> | undefined>(undefined);
+  /** Both at once, and only when something moved — a scroll reports on every frame. */
+  const onRunHere = useCallback((instance: string | undefined, onScreen?: ReadonlySet<string>): void => {
+    setRunHere(instance);
+    setRunOnScreen((was) => {
+      if (onScreen === undefined) return undefined;
+      if (was !== undefined && was.size === onScreen.size && [...onScreen].every((id) => was.has(id))) return was;
+      return onScreen;
+    });
+  }, []);
   /** What the permission sets pane last read — the Functions table below it draws the same records. */
   const [toolsData, setToolsData] = useState<PermissionSetsData | null>(null);
   /** A set a Functions cell asked the pane above to open. */
@@ -1003,15 +967,47 @@ export default function App(): JSX.Element {
   const [newMenu, setNewMenu] = useState<MenuAnchor | null>(null);
   const [newDraft, setNewDraft] = useState<TreeDraft | null>(null);
   /**
-   * What somebody has asked to keep in the side panel — see {@link PinnedPane}.
+   * The side panel's stack, one per room (the panel rulings, 2026-09-24; `panelStack.ts`).
    *
-   * Shell state rather than store state, and deliberately not remembered across restarts. It is a
-   * gesture about the next few minutes ("hold this while I read it"), not a preference: an app that
-   * reopened with a document pinned beside a conversation nobody is having any more would be
-   * restoring furniture rather than work.
+   * Shell state rather than store state, and not remembered across restarts: what the column is
+   * showing is decided by what the room stands on, and what was pushed on top of that is a gesture
+   * about the next few minutes. What IS remembered — widths per kind, the fold per room — is in `ui`.
+   * Per room, so going to Settings and back finds each panel where it was left.
    */
-  const [pinned, setPinned] = useState<PinnedValue | null>(null);
-  const valuePanel = useMemo(() => ({ open: (item: PinnedValue) => setPinned(item) }), []);
+  const [stacks, setStacks] = useState<Record<PanelRoom, PanelStack>>(EMPTY_STACKS);
+  const room: PanelRoom | null = view === "files" || view === "tasks" || view === "chat" || view === "debug" ? view : null;
+  const roomRef = useRef(room);
+  roomRef.current = room;
+  const onStack = useCallback((next: (stack: PanelStack) => PanelStack): void => {
+    const at = roomRef.current;
+    if (at === null) return;
+    setStacks((was) => {
+      const moved = next(was[at]);
+      return moved === was[at] ? was : { ...was, [at]: moved };
+    });
+  }, []);
+  /**
+   * The values somebody asked to HOLD — the Held tab of a conversation's context. Across rooms: a
+   * thing held is held, wherever you go to read it next.
+   */
+  const [held, setHeld] = useState<PinnedValue[]>([]);
+  const hold = useCallback((item: PinnedValue) => setHeld((was) => (was.some((one) => one.title === item.title) ? was : [...was, item])), []);
+  const unhold = useCallback((item: PinnedValue) => setHeld((was) => was.filter((one) => one.title !== item.title)), []);
+  /**
+   * "Open in context panel" from any value: the value is PUSHED, on top of what the panel was
+   * showing, so ‹ gives it back — and the panel unfolds, because asking to see a thing in a column
+   * folded to a rail is asking for the column.
+   */
+  const valuePanel = useMemo(
+    () => ({
+      open: (item: PinnedValue) => {
+        onStack((was) => push(was, { kind: "preview", key: `preview:${item.title}`, preview: item }));
+        const at = roomRef.current;
+        if (at !== null) actions.setFold(PANEL_FOLD[at], true);
+      },
+    }),
+    [onStack, actions],
+  );
 
   /**
    * Where a reader's "no, this message is markdown" is kept — see `messageTypes.ts`.
@@ -1035,28 +1031,6 @@ export default function App(): JSX.Element {
     [ui, actions],
   );
 
-  /**
-   * How wide a context panel actually is, given that its ceiling MOVES.
-   *
-   * A panel holding a document may be dragged out to {@link PANE_WIDE}; the same panel back to
-   * describing a file may not. Clamped at the point of use rather than by rewriting the stored
-   * number, so closing a pinned document snaps the column back to inspector width and opening one
-   * again restores the width it was dragged to. What is remembered is what somebody chose, not what
-   * happened to fit at the time.
-   */
-  /**
-   * How wide the context panel is, given what it is holding.
-   *
-   * A pinned SURFACE has a floor as well as a ceiling: a state's configuration is a form, and a form
-   * whose rows are a name, a type, a binding and a switch stops being a form somewhere around 460px.
-   * Opening one into a column dragged narrow for an inspector would show it broken — so the column
-   * grows to meet it, once, and stays wherever it is dragged afterwards.
-   */
-  const panelWidth = (id: string, ceiling: number): number => {
-    const held = pinned !== null;
-    const floor = pinned?.node === undefined ? 0 : PANE_SURFACE;
-    return Math.max(floor, Math.min(paneOf(ui, id), held ? PANE_WIDE : ceiling));
-  };
   /** "3 tasks", "1 task" — the count a group verb is labelled with. */
   const plural = (k: number): string => `${k} task${k === 1 ? "" : "s"}`;
 
@@ -1390,58 +1364,6 @@ export default function App(): JSX.Element {
   })();
 
   /**
-   * Put the configuration this run resolves against in the side panel.
-   *
-   * The project is the one HOLDING the run, not the focused one: a shared workflow's runs are
-   * recorded in JaiRA's own project, and reading the open checkout's settings beside one would
-   * describe a document that had nothing to do with it.
-   *
-   * `read` rather than the configuration itself, because the panel outlives the click — see
-   * `configPanel.tsx`. The Settings link is what makes this a reading rather than a dead end.
-   */
-  const openConfigPanel = (
-    stateId: string,
-    of?: { project?: string | null; taskId?: string; instanceId?: string },
-  ): void => {
-    const project = of?.project ?? state.selectedProject ?? state.at;
-    const taskId = of?.taskId;
-    const instanceId = of?.instanceId;
-    setPinned({
-      title: `${stateId.split("/").pop() ?? stateId} · configuration`,
-      node: (
-        <ConfigPanel
-          read={() =>
-            invoke("state:effective", {
-              stateId,
-              ...(taskId !== undefined ? { taskId } : {}),
-              ...(instanceId !== undefined ? { instanceId } : {}),
-              ...(project !== null ? { project } : {}),
-            })
-          }
-          // The form's completions want both of these — the tree for state references, the executor
-          // list for an operation's function. A reading is still the same form.
-          tree={state.tree}
-          executors={state.executors}
-          // And these are what let it show a state WHOLE: a prompt held in another file is the
-          // substance of the state, and a reader that cannot open it shows a path instead.
-          services={{
-            readFile: actions.readFile,
-            readState: actions.readState,
-            loadStateSlots: actions.stateSlots,
-            validateSchema: actions.validateSchema,
-            wrapJson: look.editors.json.wrap,
-            onWrapJson: actions.setWrapJson,
-          }}
-          onOpenState={(id) => {
-            actions.setView("files");
-            actions.selectState(id);
-          }}
-        />
-      ),
-    });
-  };
-
-  /**
    * Running a task AGAIN — the one place that decides what "again" MEANS for it.
    *
    * Three different acts wear one button: a stopped machine is resumed under its own id, a task that
@@ -1507,8 +1429,12 @@ export default function App(): JSX.Element {
     // The link in a session panel's gutter: describe the workflow that opened that conversation,
     // scoped to the run that opened it. In the project holding the selected task — a shared workflow
     // reached from a run of it is still that run's project's business.
-    onOpenWorkflow: (stateId: string, instanceId: string) =>
-      actions.inspectWorkflow(stateId, instanceId, state.selectedProject ?? undefined),
+    onOpenWorkflow: (stateId: string, instanceId: string) => {
+      actions.inspectWorkflow(stateId, instanceId, state.selectedProject ?? undefined);
+      onStack((was) =>
+        push(was, { kind: "state", key: `state:${state.selectedProject ?? ""}:${stateId}@${instanceId}`, stateId, project: state.selectedProject ?? state.at, tab: "run" }),
+      );
+    },
     onWalkTo: actions.walkTo,
     onOpenFile: actions.openPath,
     onOpenDir: actions.openDir,
@@ -1518,7 +1444,8 @@ export default function App(): JSX.Element {
     ...(runFocus !== undefined ? { runFocus } : {}),
     onRunFocus: setRunFocus,
     ...(runHere !== undefined ? { runHere } : {}),
-    onRunHere: setRunHere,
+    ...(runOnScreen !== undefined ? { runOnScreen } : {}),
+    onRunHere,
     // The questions MOVES parked in task conversations (decision 0005, the rulings of 2026-09-22):
     // each is drawn where its move asked it, and answering it takes the move.
     moveQuestions: pending.filter((p) => p.moves === true),
@@ -1604,7 +1531,6 @@ export default function App(): JSX.Element {
       reviewChangeset: actions.reviewSyncChangeset,
     },
     editorTab: state.editorTab,
-    editorTabLast: state.editorTabLast,
     onEditorTab: actions.setEditorTab,
     detectSchema: actions.detectSchema,
     wrapJson: look.editors.json.wrap,
@@ -1626,6 +1552,311 @@ export default function App(): JSX.Element {
       actions.openPath(at.layer, at.path);
     },
     revealAt,
+  };
+
+  /* ---------------------------------------------------------------------------------------------- */
+  /* The side panel                                                                                 */
+  /* ---------------------------------------------------------------------------------------------- */
+
+  /**
+   * Whether the main view is showing the selected task's CONVERSATION — the one fact that decides
+   * whether the panel beside it may show that conversation too. It may not (the person's ruling,
+   * 2026-09-24): the same conversation is never on screen twice, so the panel shows its CONTEXT.
+   *
+   * A walked-into run shows its conversation when the toggle says so, when the tail is a subagent's,
+   * or when there is no board to show instead — a run that declared no children and entered none is
+   * read as what it said whatever the toggle says (`RunView`).
+   */
+  const trailTail = state.trail.at(-1);
+  const trailNode = trailTail === undefined || detail === null ? undefined : nodeAt(detail.instances, trailTail.instanceId);
+  const trailHasBoard = (state.trailState?.children.length ?? state.state?.children.length ?? 0) > 0 || (trailNode?.children.length ?? 0) > 0;
+  const conversationInMain =
+    (view === "tasks" || view === "files") &&
+    trailTail !== undefined &&
+    detail !== null &&
+    (trailTail.sidechain !== undefined || runMode === "conversation" || !trailHasBoard);
+
+  /** A task as the panel's root, and the same task's context beside its conversation. */
+  const taskEntryOf = (taskId: string, project: string | undefined): PanelEntry => ({
+    kind: "task",
+    key: `task:${taskId}`,
+    taskId,
+    ...(project !== undefined ? { project } : {}),
+    tab: "conversation",
+  });
+  const convoEntryOf = (taskId: string, project: string | undefined): PanelEntry => ({
+    kind: "convo",
+    key: `convo:${taskId}`,
+    taskId,
+    ...(project !== undefined ? { project } : {}),
+    tab: "steps",
+  });
+  const selectedProject = state.selectedProject ?? undefined;
+  /**
+   * What each room's panel stands on — its RULE (the panel rulings, 2026-09-24). The stack's root is
+   * this; everything else in the stack was pushed by a link inside the panel.
+   *
+   *  - Files: a run on the trail — its context beside its conversation, or the task beside its board;
+   *    a state file — the state (Run · Checks; its configuration is the editor); a plain file or a
+   *    folder — nothing: the panel closes, and what there is to say is the ⓘ on the address.
+   *  - Tasks: the same for a run walked into; a column — its state; a card — its task.
+   *  - Chat: the conversation's context (folded until asked for).
+   *  - Debug: the self-test's task.
+   */
+  const ruleOf = (at: PanelRoom): PanelEntry | null => {
+    if (at === "chat") {
+      return chat.taskId === null ? null : { kind: "chat", key: `chat:${chat.taskId}`, taskId: chat.taskId, project: chatProject, tab: "produced" };
+    }
+    if (at === "debug") {
+      return detail !== null && detail.taskId === state.debug.taskId ? taskEntryOf(detail.taskId, selectedProject) : null;
+    }
+    if (trailTail !== undefined && detail !== null && (at === "files" || state.taskFocus !== null)) {
+      return conversationInMain ? convoEntryOf(detail.taskId, selectedProject) : taskEntryOf(detail.taskId, selectedProject);
+    }
+    if (at === "files") {
+      return state.stateId !== null && state.doc?.stateId !== undefined
+        ? { kind: "state", key: `state:${state.at ?? ""}:${state.stateId}`, stateId: state.stateId, project: state.at, tab: "run" }
+        : null;
+    }
+    if (state.taskWorkflow !== null && state.inspect !== "workflow") {
+      return { kind: "state", key: `state:${state.taskWorkflowProject ?? ""}:${state.taskWorkflow}`, stateId: state.taskWorkflow, project: state.taskWorkflowProject, tab: "run" };
+    }
+    return detail !== null ? taskEntryOf(detail.taskId, selectedProject) : null;
+  };
+  const rule = room === null ? null : ruleOf(room);
+  const ruleSig = rule === null ? "" : JSON.stringify(rule);
+  useEffect(() => {
+    if (room === null) return;
+    setStacks((was) => {
+      const next = reconcile(was[room], rule);
+      return next === was[room] ? was : { ...was, [room]: next };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, ruleSig]);
+  /**
+   * A question arriving takes the task's panel to its conversation — the one time the panel moves
+   * the reader by itself, because the alternative is a task that stopped for no visible reason.
+   */
+  const askingId = inlineGate?.requestId;
+  useEffect(() => {
+    if (askingId === undefined || room !== "tasks" || rule?.kind !== "task") return;
+    setStacks((was) => ({ ...was, tasks: reconcile(was.tasks, rule, { tab: "conversation" }) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askingId]);
+
+  /** A subagent adopted into the main view before its task's run was on the trail: walked into once it is. */
+  const [adoptAfter, setAdoptAfter] = useState<{ taskId: string; step: TrailStep } | null>(null);
+  useEffect(() => {
+    if (adoptAfter === null || state.selected !== adoptAfter.taskId || state.trail.length === 0 || detail === null) return;
+    const host = nodeAt(detail.instances, adoptAfter.step.instanceId);
+    if (host !== undefined) actions.walkIntoSidechain(host, adoptAfter.step.sidechain ?? "", adoptAfter.step.name ?? "");
+    setAdoptAfter(null);
+  }, [adoptAfter, state.selected, state.trail.length, detail, actions]);
+
+  const panelStack = room === null ? EMPTY_STACK : stacks[room];
+  const panelTop = topOf(panelStack);
+  // A re-run with changes needs its workflow's form, which is read on demand like the New-task form's.
+  const rerunOf = panelTop?.kind === "rerun" && detail?.taskId === panelTop.taskId ? detail.workflow : null;
+  useEffect(() => {
+    if (rerunOf !== null && state.workflowForms[rerunOf] === undefined) actions.pickWorkflow(rerunOf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rerunOf]);
+
+  /**
+   * The detail of a task a panel is still showing after the selection moved on — a pinned stack, or
+   * an entry left under a pushed card. Fetched once per task and dropped when nothing shows it.
+   */
+  const [heldDetails, setHeldDetails] = useState<Record<string, TaskDetail>>({});
+  const shownTasks = [...new Set(Object.values(stacks).flatMap((one) => one.entries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [`${entry.taskId}\u0000${entry.project ?? ""}`] : []))))]
+    .filter((key) => key.split("\u0000")[0] !== detail?.taskId)
+    .sort();
+  const shownSig = shownTasks.join("|");
+  useEffect(() => {
+    let live = true;
+    const wanted = new Set(shownTasks.map((key) => key.split("\u0000")[0]!));
+    setHeldDetails((was) => {
+      const kept = Object.fromEntries(Object.entries(was).filter(([taskId]) => wanted.has(taskId)));
+      return Object.keys(kept).length === Object.keys(was).length ? was : kept;
+    });
+    for (const key of shownTasks) {
+      const [taskId, project] = key.split("\u0000") as [string, string];
+      if (heldDetails[taskId] !== undefined) continue;
+      void invoke("task:detail", { taskId, ...(project !== "" ? { project } : {}) })
+        .then((found) => live && setHeldDetails((was) => ({ ...was, [taskId]: found })))
+        .catch(() => undefined);
+    }
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownSig]);
+
+  const panelHost: PanelHost = {
+    detail,
+    detailOf: (taskId) => (detail?.taskId === taskId ? detail : (heldDetails[taskId] ?? null)),
+    project: selectedProject,
+    context: surfaces,
+    onStack,
+    ...(inlineGate !== null
+      ? {
+          gate: {
+            pending: inlineGate,
+            onGate: (value: unknown) => actions.answer(inlineGate.requestId, value),
+            services: reviewerServices,
+            editor: {
+              drafts: state.drafts,
+              onDraft: actions.setDraft,
+              validateSchema: actions.validateSchema,
+              wrapJson: look.editors.json.wrap,
+              onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
+            },
+          },
+        }
+      : {}),
+    select: (taskId, project) => actions.select(taskId, project),
+    startAgain,
+    cancel: (taskId) => actions.cancelTask(taskId, selectedProject),
+    reviewChanges: (taskId) => actions.reviewChanges(taskId, selectedProject),
+    // ⇤: the conversation into the main view, which hands the panel to its context.
+    adoptTask: (taskId, project, workflow) => {
+      setRunMode("conversation");
+      if (state.trail.length > 0 && state.selected === taskId) return;
+      actions.setView("tasks");
+      actions.openTask(taskId, project ?? state.at ?? "", workflow);
+    },
+    ...(conversationInMain && detail !== null
+      ? {
+          // ⇥: back out of the main view — the board with the task selected, its conversation here.
+          giveBack: () => {
+            const taskId = detail.taskId;
+            actions.setView("tasks");
+            actions.walkBackTo(-1);
+            actions.select(taskId, selectedProject);
+          },
+          goTo: (node) => setRunFocus({ instance: node.instanceId, at: Date.now() }),
+          viewed: { current: runHere, onScreen: runOnScreen },
+        }
+      : {}),
+    adoptSubagent: (taskId, project, step) => {
+      const host = detail !== null && detail.taskId === taskId ? nodeAt(detail.instances, step.instanceId) : undefined;
+      if (host !== undefined && state.trail.length > 0 && state.selected === taskId) {
+        actions.walkIntoSidechain(host, step.sidechain ?? "", step.name ?? "");
+        return;
+      }
+      setAdoptAfter({ taskId, step });
+      actions.setView("tasks");
+      actions.openTask(taskId, project ?? state.at ?? "", detail?.workflow ?? step.stateId);
+    },
+    rerunSurface: (task): RerunSurface => {
+      const fields = state.workflowForms[task.workflow];
+      const key = `rerun:${task.taskId}`;
+      const called = task.instances[0]?.inputs ?? {};
+      return {
+        workflow: task.workflow,
+        fields,
+        values: state.runValues[key] ?? runValuesOf(fields ?? [], called),
+        busy: state.busy,
+        onChange: (values) => actions.setRunValues(key, values),
+        onRun: (inputs) => {
+          void actions.runState(task.workflow, `${task.title} · again`, inputs, selectedProject);
+          onStack((was) => ({ ...was, entries: was.entries.slice(0, 1), motion: "pop" }));
+        },
+      };
+    },
+    stateOf: (stateId) => {
+      if (state.doc?.stateId === stateId && state.stateId === stateId) return { view: state.state, run: runSurface };
+      if (state.taskWorkflow === stateId) return { view: state.taskState, run: workflowRunSurface };
+      return undefined;
+    },
+    inEditor: (stateId) => view === "files" && state.doc?.stateId === stateId,
+    // ⇤ for a configuration: the Files view, where it is edited. A built-in is copied to Shared the
+    // moment it is changed there (the editor's own banner, decision 0006).
+    openInFiles: (stateId) => {
+      actions.setView("files");
+      actions.selectState(stateId);
+    },
+    onRevealIssue: (path) => setReveal((last) => ({ path, nonce: (last?.nonce ?? 0) + 1 })),
+    config: {
+      tree: state.tree,
+      executors: state.executors,
+      busy: state.busy,
+      wrapJson: look.editors.json.wrap,
+      onWrapJson: actions.setWrapJson,
+      services: {
+        readFile: actions.readFile,
+        readState: actions.readState,
+        loadStateSlots: actions.stateSlots,
+        validateSchema: actions.validateSchema,
+        wrapJson: look.editors.json.wrap,
+        onWrapJson: actions.setWrapJson,
+      },
+    },
+    held,
+    hold,
+    unhold,
+    serveOf: (taskId, project) => ({
+      serve: (path: string) => invoke("artifact:serve", { taskId, path, ...(project !== undefined ? { project } : {}) }),
+    }),
+    stepsHeight: paneOf(ui, PANE.panelSteps),
+    setStepsHeight: (height) => actions.setPane(PANE.panelSteps, height),
+    newTask: (
+      <NewTaskForm
+        workflows={state.workflows}
+        forms={state.workflowForms}
+        values={state.runValues}
+        sources={state.inputSources}
+        busy={state.busy}
+        onPick={actions.pickWorkflow}
+        onChange={actions.setRunValues}
+        onCreate={(workflow, inputs, sources) => void actions.createTask(workflow, inputs, sources)}
+        onDone={() => onStack((was) => (topOf(was)?.kind === "newTask" ? (was.entries.length > 1 ? { ...was, entries: was.entries.slice(0, -1), motion: "pop" } : { ...EMPTY_STACK, motion: "replace" }) : was))}
+      />
+    ),
+  };
+  const panelFace = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(panelHost, entry);
+
+  /**
+   * The column: a splitter and the panel, or the 48px rail when it is folded, or nothing when the
+   * stack is empty. Its width is remembered per KIND of thing on top (`widthKeyOf`), and animates when
+   * that kind changes — a form wants more room than a task's tabs, and the column says so by moving.
+   */
+  const panelFoldKey = room === null ? null : PANEL_FOLD[room];
+  const panelOpen = panelFoldKey === null ? true : openOf(ui, panelFoldKey);
+  const panelWidthKey = panelTop === undefined ? PANE.panelTask : widthKeyOf(panelTop.kind);
+  const panelWidth = panelTop === undefined ? 0 : panelOpen ? Math.max(PANEL_MIN, Math.min(paneOf(ui, panelWidthKey), PANE_WIDE)) : PANEL_RAIL;
+  const [panelTween, setPanelTween] = useState(false);
+  useEffect(() => {
+    setPanelTween(true);
+    const timer = setTimeout(() => setPanelTween(false), 260);
+    return () => clearTimeout(timer);
+  }, [panelWidthKey, panelOpen, panelTop === undefined]);
+  const panelViewClass = panelTop === undefined ? " no-panel" : `${panelOpen ? " with-panel" : " with-rail"}${panelTween ? " pane-tween" : ""}`;
+  const panelViewStyle = { "--pane-right": `${panelWidth}px` } as CSSProperties;
+  const panelColumn: ReactNode =
+    panelTop === undefined ? null : (
+      <>
+        {panelOpen ? (
+          <Splitter
+            label="Resize the side panel"
+            value={paneOf(ui, panelWidthKey)}
+            reset={paneDefault(panelWidthKey)}
+            invert
+            min={PANEL_MIN}
+            max={PANE_WIDE}
+            onChange={(size) => actions.setPane(panelWidthKey, size)}
+          />
+        ) : (
+          <span className="sp-no-split" aria-hidden="true" />
+        )}
+        <aside className={`col ctx-panel${panelOpen ? "" : " folded"}`}>
+          <SidePanel stack={panelStack} onStack={onStack} face={panelFace} folded={!panelOpen} onFold={(folded) => panelFoldKey !== null && actions.setFold(panelFoldKey, !folded)} />
+        </aside>
+      </>
+    );
+  /** The New-task form is a panel root in the Tasks room; the button opens it there. */
+  const openNewTask = (): void => {
+    onStack((was) => push(was, { kind: "newTask", key: "newTask" }));
+    actions.setFold(PANEL_FOLD.tasks, true);
   };
 
   /**
@@ -1967,6 +2198,19 @@ export default function App(): JSX.Element {
               context={surfaces}
               onWalkBack={actions.walkBackTo}
               onInspect={actions.inspectState}
+              // What a plain file or a folder has to say, now that the panel closes for them: the
+              // facts the old inspector listed, behind an ⓘ on the address they are about.
+              facts={
+                state.stateId === null && (state.doc !== null || state.dir !== null) ? (
+                  <FactsButton>
+                    {state.dir !== null ? (
+                      <FolderInspector layer={state.dir.layer} path={state.dir.path} tree={state.tree} />
+                    ) : (
+                      <FileInspector doc={state.doc} />
+                    )}
+                  </FactsButton>
+                ) : undefined
+              }
             />
           ) : null}
           {/*
@@ -2009,18 +2253,7 @@ export default function App(): JSX.Element {
                   {/* Only the focused project can be created into: a task belongs to a checkout, and
                       JaiRA's own runs are started by JaiRA. */}
                   {(state.taskFocus ?? atProject) === state.at && state.at !== null ? (
-                    <NewTask
-                      workflows={state.workflows}
-                      // Both maps whole, keyed by state id: WHICH workflow is picked is the popover's
-                      // own state, so it is the popover that looks the two up.
-                      forms={state.workflowForms}
-                      values={state.runValues}
-                      sources={state.inputSources}
-                      busy={state.busy}
-                      onPick={actions.pickWorkflow}
-                      onChange={actions.setRunValues}
-                      onCreate={(workflow, inputs, sources) => void actions.createTask(workflow, inputs, sources)}
-                    />
+                    <NewTask onOpen={openNewTask} open={panelTop?.kind === "newTask"} />
                   ) : null}
                 </>
               }
@@ -2039,10 +2272,7 @@ export default function App(): JSX.Element {
 
         <div className="viewport">
           {view === "files" ? (
-            <div
-              className="view files-view"
-              style={{ "--pane-right": `${panelWidth(PANE.filesInspector, PANE_CEILING.files)}px` } as CSSProperties}
-            >
+            <div className={`view files-view${panelViewClass}`} style={panelViewStyle}>
               <FilePanel
                 doc={state.doc}
                 dir={state.dir}
@@ -2055,124 +2285,12 @@ export default function App(): JSX.Element {
                 onSave={actions.saveDoc}
               />
 
-              <Splitter
-                label="Resize the inspector"
-                value={paneOf(ui, PANE.filesInspector)}
-                reset={paneDefault(PANE.filesInspector)}
-                invert
-                min={220}
-                // A document pinned here wants room an inspector never did — see PANE_WIDE.
-                max={pinned !== null ? PANE_WIDE : PANE_CEILING.files}
-                onChange={(size) => actions.setPane(PANE.filesInspector, size)}
-              />
-
-              <aside className={`col panel${pinned !== null ? " holding" : ""}`}>
-                {/*
-                  The context panel describes the LAST ELEMENT OF THE ADDRESS BAR, always: the run
-                  the path ends on, or the open file when no run is on it. One rule, decided by the
-                  bar rather than by a mode, which is what stops the two from disagreeing — the panel
-                  used to keep describing a file while the path beside it stood on a run.
-
-                  Two things outrank the rule, and both are reached by asking for them rather than by
-                  navigating. The task is reached on the run's own panel: a run belongs to a task, but
-                  a task is not a level of the address and cannot be navigated to. A PINNED value is
-                  reached from a value's own `…` — see {@link PinnedPane} — and outranks even that,
-                  because it is the most recent thing anybody said about this column. Any change to
-                  the bar drops back to the rule; closing the pinned value hands the panel back.
-                */}
-                {pinned !== null ? (
-                  <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
-                ) : state.inspect === "workflow" ? (
-                  // The third thing reached by asking: the workflow a conversation on the left was
-                  // opened by, with that run's own values in its form. Same inspector the Tasks view
-                  // puts beside a board column, because it is the same question — what does the state
-                  // behind these words say — asked from where the words are.
-                  <StateInspector
-                    state={state.taskState}
-                    {...(workflowRunSurface !== undefined ? { run: workflowRunSurface } : {})}
-                    onBack={() => actions.selectWorkflow(null)}
-                    // The task is what decides WHICH copy: it pins the workflow, so the state that
-                    // ran is in its snapshot and the state on disk is whatever it has been edited
-                    // into since. See `state:effective`.
-                    onOpenConfig={() =>
-                      state.taskWorkflow !== null
-                        ? openConfigPanel(state.taskWorkflow, {
-                            project: state.taskWorkflowProject,
-                            ...(detail !== null ? { taskId: detail.taskId } : {}),
-                          })
-                        : undefined
-                    }
-                  />
-                ) : state.inspect === "task" ? (
-                  <TaskInspector
-                    stateId={state.inspectFrom}
-                    detail={detail}
-                    stream={state.stream}
-                    states={state.sessionHistory}
-                    showing={state.sessionInstance}
-                    onOpenState={actions.selectState}
-                    onOpenStateAt={actions.openStateAt}
-                    onBack={actions.inspectState}
-                    // In the project that HOLDS it. Clicking a shared workflow's run in the history
-                    // section selects a task in JaiRA's own project, and starting or cancelling it
-                    // against the open checkout would answer "unknown task".
-                    onStart={() => (detail ? startAgain(detail.taskId) : undefined)}
-                    onCancel={() =>
-                      detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
-                    }
-                  />
-                ) : state.trail.length > 0 ? (
-                  <RunInspector
-                    node={nodeAt(detail?.instances ?? [], state.trail.at(-1)!.instanceId) ?? null}
-                    stateId={state.trail.at(-1)!.stateId}
-                    detail={detail}
-                    stream={state.stream}
-                    states={state.sessionHistory}
-                    depth={state.trail.length}
-                    onBack={() => actions.walkBackTo(state.trail.length - 2)}
-                    onShowTask={actions.inspectTask}
-                    onStart={() => (detail ? startAgain(detail.taskId) : undefined)}
-                    onCancel={() =>
-                      detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
-                    }
-                    onOpenState={actions.selectState}
-                    // The state this run entered, out of the task's pinned snapshot — which is the
-                    // copy it actually executed, not whatever the file says now.
-                    onOpenConfig={() =>
-                      openConfigPanel(state.trail.at(-1)!.stateId, {
-                        ...(detail !== null ? { taskId: detail.taskId } : {}),
-                        // THIS pass, not the newest one of that state: a loop runs it several times
-                        // and the panel beside it is standing on one of them.
-                        instanceId: state.trail.at(-1)!.instanceId,
-                      })
-                    }
-                  />
-                ) : state.dir !== null ? (
-                  // A folder is the end of the address too, so it is what the panel describes.
-                  <FolderInspector layer={state.dir.layer} path={state.dir.path} tree={state.tree} />
-                ) : (
-                  <FileInspector
-                    doc={state.doc}
-                    state={state.state}
-                    run={runSurface}
-                    // No task, so no pin: this panel describes the open FILE, and the copy it means
-                    // is the one on disk. The focused project rather than the selected task's, for
-                    // the same reason.
-                    {...(state.stateId !== null
-                      ? { onOpenConfig: () => openConfigPanel(state.stateId!, { project: state.at }) }
-                      : {})}
-                    onRevealIssue={(path) => setReveal((last) => ({ path, nonce: (last?.nonce ?? 0) + 1 }))}
-                  />
-                )}
-              </aside>
+              {panelColumn}
             </div>
           ) : null}
 
           {view === "tasks" ? (
-            <div
-              className={`view tasks-view${state.taskFocus !== null ? " narrowed" : ""}`}
-              style={{ "--pane-right": `${panelWidth(PANE.tasksPanel, PANE_CEILING.tasks)}px` } as CSSProperties}
-            >
+            <div className={`view tasks-view${state.taskFocus !== null ? " narrowed" : ""}${panelViewClass}`} style={panelViewStyle}>
               {/*
                 A RUN is on the path, so the column shows that run — its executions as cards, or what
                 it said. The board is the level above it and the address still holds every step back
@@ -2301,78 +2419,7 @@ export default function App(): JSX.Element {
               </div>
               )}
 
-              <Splitter
-                label="Resize the task panel"
-                value={paneOf(ui, PANE.tasksPanel)}
-                reset={paneDefault(PANE.tasksPanel)}
-                invert
-                min={260}
-                max={pinned !== null ? PANE_WIDE : PANE_CEILING.tasks}
-                onChange={(size) => actions.setPane(PANE.tasksPanel, size)}
-              />
-
-              <aside className={`col panel${pinned !== null ? " holding" : ""}`}>
-                {/*
-                  What a click on a card gets you: that task's CONVERSATION. Clicking a card asks what
-                  the run said, and the panel used to answer with an instance tree and a list of event
-                  types — facts about the run, none of which is the run — so reading one meant leaving
-                  for the Files view to find the transcript. The detail is still here, behind the
-                  toggle in the header, which is the order they are wanted in.
-                */}
-                {pinned !== null ? (
-                  <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
-                ) : state.taskWorkflow !== null ? (
-                  // A COLUMN is what was last clicked, so the column is what the panel is about — the
-                  // same inspector the Files view puts beside a state, with the same sections in the
-                  // same order, because it is the same question asked from the other view. Selecting
-                  // a card takes it back; see `selectWorkflow`.
-                  <StateInspector
-                    state={state.taskState}
-                    {...(workflowRunSurface !== undefined ? { run: workflowRunSurface } : {})}
-                    // Only when it was reached by ASKING — the link in a conversation's gutter. A
-                    // column click has a card click as its way back, and an arrow there would offer
-                    // a second answer to a question the board already answers.
-                    {...(state.inspect === "workflow" ? { onBack: () => actions.selectWorkflow(null) } : {})}
-                    onOpenConfig={() =>
-                      state.taskWorkflow !== null
-                        ? openConfigPanel(state.taskWorkflow, {
-                            project: state.taskWorkflowProject,
-                            ...(detail !== null ? { taskId: detail.taskId } : {}),
-                          })
-                        : undefined
-                    }
-                  />
-                ) : detail ? (
-                  <TaskContext
-                    detail={detail}
-                    stream={state.stream}
-                    context={surfaces}
-                    onStart={() => startAgain(detail.taskId)}
-                    onCancel={() => actions.cancelTask(detail.taskId, state.selectedProject ?? undefined)}
-                    onReviewChanges={() => actions.reviewChanges(detail.taskId, state.selectedProject ?? undefined)}
-                    onOpenState={(stateId) => {
-                      actions.setView("files");
-                      actions.selectState(stateId);
-                    }}
-                    {...(inlineGate !== null
-                      ? {
-                          gate: inlineGate,
-                          onGate: (value: unknown) => actions.answer(inlineGate.requestId, value),
-                          gateServices: reviewerServices,
-                          gateEditor: {
-                            drafts: state.drafts,
-                            onDraft: actions.setDraft,
-                            validateSchema: actions.validateSchema,
-                            wrapJson: look.editors.json.wrap,
-                            onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
-                          },
-                        }
-                      : {})}
-                  />
-                ) : (
-                  <p className="empty">Select a task.</p>
-                )}
-              </aside>
+              {panelColumn}
             </div>
           ) : null}
 
@@ -2390,27 +2437,9 @@ export default function App(): JSX.Element {
               a thing taken out of the thread and held still. It exists while it holds something and
               not a moment longer.
             */
-            <div
-              className={`view chat-view${pinned !== null ? " with-panel" : ""}`}
-              style={{ "--pane-right": `${paneOf(ui, PANE.chatPanel)}px` } as CSSProperties}
-            >
+            <div className={`view chat-view${panelViewClass}`} style={panelViewStyle}>
               <ChatView surface={chat} />
-              {pinned !== null ? (
-                <>
-                  <Splitter
-                    label="Resize the context panel"
-                    value={paneOf(ui, PANE.chatPanel)}
-                    reset={paneDefault(PANE.chatPanel)}
-                    invert
-                    min={280}
-                    max={PANE_WIDE}
-                    onChange={(size) => actions.setPane(PANE.chatPanel, size)}
-                  />
-                  <aside className="col panel holding">
-                    <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
-                  </aside>
-                </>
-              ) : null}
+              {panelColumn}
             </div>
           ) : null}
 
@@ -2462,6 +2491,9 @@ export default function App(): JSX.Element {
               onDismissError={actions.debugDismissError}
               onOpenState={(stateId, layer) => void actions.openWorkflow(stateId, layer)}
               onShowSession={actions.showSession}
+              panel={panelColumn}
+              panelClass={panelViewClass}
+              panelStyle={panelViewStyle}
             />
           ) : null}
 

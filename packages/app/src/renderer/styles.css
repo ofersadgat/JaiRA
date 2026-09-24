@@ -5427,34 +5427,18 @@ span.issue-warn {
   min-width: 0;
 }
 
-/* --- new task popover ---
-   Creating a task is an act, not a state; three inputs parked in the chrome are three inputs in the
-   way of everything else. */
-.new-task-wrap {
-  position: relative;
-}
-.new-task-pop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 20;
-  width: 340px;
+/* --- the New-task form ---
+   A side-panel root now (the panel rulings, 2026-09-24), so it is a column of its own rather than a
+   popover floating over the address bar. */
+.new-task-form {
   display: grid;
-  gap: 8px;
-  padding: 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: var(--lift);
+  gap: 10px;
+  padding: 2px 2px 12px;
 }
-/* The picked workflow's own inputs, however many it declares. The popover holds the picker and the
-   button still; only the boxes between them scroll, so a workflow with nine inputs does not push the
-   Create button off the bottom of the window. */
+/* The picked workflow's own inputs, however many it declares. */
 .new-task-fields {
   display: grid;
   gap: 8px;
-  max-height: 46vh;
-  overflow-y: auto;
 }
 
 /* --- settings --- */
@@ -9157,58 +9141,6 @@ button.sf-caret:disabled {
    A header saying what is held and offering the way out, over the ordinary value viewer. The body
    scrolls on its own so the header stays put: the whole point of pinning something is that it does
    not move while the column beside it does. */
-/* The column itself, while it is holding one. `.panel` is a padded scroller for the inspectors,
-   which is the wrong shape entirely for something that manages its own height: the padding is a
-   margin around a document that asked for the whole column, and the outer scrollbar competes with
-   the inner one for the same gesture. */
-.panel.holding {
-  padding: 0;
-  overflow: hidden;
-}
-/* `pinned-pane` and not `pinned`, which is a name this stylesheet already had: `pane-actions pinned`
-   is the modifier that sticks an editor's Save/Revert row to the bottom of its pane. A bare `.pinned`
-   block here matched that row too and handed it `flex-direction: column; height: 100%` — so every
-   editor's action bar took the whole pane, the form under it collapsed to a three-pixel sliver, and
-   the Files view's Configuration half went blank in every file. A block class has to be a name
-   nothing else in the app is already using as an adjective. */
-.pinned-pane {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  height: 100%;
-}
-.pinned-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
-}
-.pinned-title {
-  flex: 1;
-  min-width: 0;
-  font-size: calc(var(--size-app) * 12 / 12.5);
-  font-weight: 600;
-}
-.pinned-close {
-  flex: none;
-  display: inline-flex;
-  padding: 3px;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: var(--dim);
-  cursor: pointer;
-}
-.pinned-close:hover {
-  background: var(--panel-2);
-  color: var(--text);
-}
-.pinned-close svg {
-  width: 14px;
-  height: 14px;
-}
 /* The value OWNS the column, which is the whole difference between this and every other thing the
    panel shows. Elsewhere the viewer is drawing an aside inside a transcript row, so its bounds are
    written to stop one payload becoming the whole screen; here it IS the screen, and a page rendered
@@ -16407,3 +16339,754 @@ button.link.cfg-login-add-sub {
 .um-preview .cx { margin: 0; }
 .um-preview .cx-chip .ellip { max-width: 96px; }
 @media (max-width: 760px) { .um-preview { grid-template-columns: 1fr; } }
+
+/* ============================================================================
+   The side panel (sidePanel.tsx, panelFaces.tsx, panelViews.tsx)
+
+   ONE panel per room, drawn from a stack (panelStack.ts): the room decides the root, a link inside the
+   panel pushes, and the back arrow pops. The person's rulings of 2026-09-24, rounds 1 to 8 of the
+   panel-views artifact.
+   ============================================================================ */
+
+/* The column in every room's grid: splitter, then the panel — or a zero-width slot and the 48px rail
+   when folded, or nothing at all when the stack is empty. The width tweens only when it changes for a
+   reason (a different kind of thing on top, a fold), never under a dragging splitter. */
+.view.no-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+.view.with-panel,
+.view.with-rail {
+  grid-template-columns: minmax(0, 1fr) auto var(--pane-right, 400px);
+}
+.view.pane-tween {
+  transition: grid-template-columns 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.sp-no-split {
+  width: 0;
+}
+.ctx-panel {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  overflow: hidden;
+}
+.sp {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+/* The head: glyph, name and its one line of facts, the verbs as icons, then pin, fold, close. */
+.sp-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 7px 8px 7px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.sp-glyph {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dim);
+  font-size: 15px;
+}
+.sp-titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sp-name-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.sp-name {
+  min-width: 0;
+  font: 600 calc(var(--size-app) * 1.08) / 1.3 var(--font-app);
+  color: var(--text);
+}
+.sp-kind {
+  flex: none;
+  font-size: calc(var(--size-app) * 0.92);
+  color: var(--dim);
+}
+.sp-sub {
+  min-width: 0;
+  font-size: calc(var(--size-app) * 0.92);
+  color: var(--dim);
+}
+.sp-sub-pushed {
+  flex: none;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.sp-trail {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: calc(var(--size-app) * 0.9);
+}
+.sp-trail-part {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+}
+.sp-trail-sep {
+  color: var(--tok-hint);
+}
+.sp-crumb {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  color: var(--dim);
+  cursor: pointer;
+}
+.sp-crumb:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.sp-verbs,
+.sp-controls {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.sp-controls {
+  padding-left: 6px;
+  margin-left: 2px;
+  border-left: 1px solid var(--line);
+}
+/* Every icon button in the panel: a 26px target, the glyph at 15. */
+.sp-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--control-radius-sm, 5px);
+  background: none;
+  box-shadow: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+.sp-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.sp-icon:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  color: var(--text);
+}
+.sp-icon.on {
+  color: var(--accent);
+  background: var(--tint-accent, var(--fill-ghost-selected));
+}
+.sp-icon.primary {
+  color: var(--on-accent, #fff);
+  background: var(--accent);
+}
+.sp-icon.primary:hover:not(:disabled) {
+  color: var(--on-accent, #fff);
+  background: var(--fill-accent-hover, var(--accent));
+}
+.sp-icon.danger:hover:not(:disabled) {
+  color: var(--bad);
+}
+.sp-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Pinned, and something else selected: it waits here, named, until asked for. */
+.sp-offer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  background: var(--tint-accent, var(--panel-2));
+  border-bottom: 1px solid var(--line);
+  font-size: calc(var(--size-app) * 0.95);
+}
+.sp-offer-glyph {
+  flex: none;
+  color: var(--accent);
+}
+.sp-guard {
+  flex: none;
+  padding: 6px 12px;
+  background: var(--tint-warn, var(--panel-2));
+  border-bottom: 1px solid var(--line);
+}
+
+/* The tabs: icon and count always, the label while it fits — the open tab's first, then from the
+   left (panelTabs.ts). The ruler is the strip drawn twice out of sight, to measure. */
+.sp-tabs {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+.sp-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 7px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  white-space: nowrap;
+  font: 500 calc(var(--size-app) * 0.98) / 1.2 var(--font-app);
+  color: var(--dim);
+  cursor: pointer;
+}
+.sp-tab:hover {
+  color: var(--text);
+}
+.sp-tab.on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.sp-tab-icon {
+  width: 15px;
+  height: 15px;
+}
+.sp-tab-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  font: 600 10px/16px var(--font-data);
+  text-align: center;
+  color: var(--dim);
+}
+.sp-tab-count.amber {
+  background: var(--tint-warn, var(--panel-2));
+  color: var(--warn);
+}
+.sp-tab-count.accent {
+  background: var(--tint-accent, var(--panel-2));
+  color: var(--accent);
+}
+.sp-tab-count.red {
+  background: var(--tint-bad, var(--panel-2));
+  color: var(--bad);
+}
+.sp-tabs-ruler {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  display: flex;
+  white-space: nowrap;
+}
+.sp-tab-pair {
+  display: inline-flex;
+}
+
+/* The body, keyed on what is on top so the motion plays exactly when that changes. `fill` bodies lay
+   themselves out to the column (Steps, a conversation, a document); the rest scroll here. */
+.sp-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sp-body.scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 12px 18px;
+  gap: 14px;
+}
+.sp-body.fill {
+  overflow: hidden;
+}
+.sp-motion-push {
+  animation: sp-in-right 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.sp-motion-pop {
+  animation: sp-in-left 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.sp-motion-replace {
+  animation: sp-fade 160ms ease-out;
+}
+.sp-motion-tab {
+  animation: sp-fade 120ms ease-out;
+}
+@keyframes sp-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+@keyframes sp-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+}
+@keyframes sp-fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-body,
+  .view.pane-tween {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Folded: B — 48px, the root's tabs as icons with the name under each, pin and unfold at the foot. */
+.ctx-panel.folded {
+  border-left-color: var(--rule);
+}
+.sp-rail {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  padding: 8px 0;
+  background: var(--panel-2);
+}
+.sp-rail-tabs,
+.sp-rail-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.sp-rail-glyph {
+  display: inline-flex;
+  padding: 4px 0 8px;
+  color: var(--dim);
+}
+.sp-rail-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 44px;
+  padding: 5px 0 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  box-shadow: none;
+  color: var(--text);
+  cursor: pointer;
+}
+.sp-rail-tab:hover {
+  background: var(--fill-ghost-hover);
+}
+.sp-rail-tab.on {
+  background: var(--fill-ghost-selected);
+  color: var(--accent);
+}
+.sp-rail-icon {
+  position: relative;
+  display: inline-flex;
+}
+.sp-rail-icon svg {
+  width: 17px;
+  height: 17px;
+}
+.sp-rail-badge {
+  position: absolute;
+  top: -5px;
+  right: -9px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--panel-3, var(--panel));
+  box-shadow: 0 0 0 1px var(--line);
+  font: 600 9px/14px var(--font-data);
+  color: var(--dim);
+  text-align: center;
+}
+.sp-rail-badge.amber {
+  color: var(--warn);
+}
+.sp-rail-badge.accent {
+  color: var(--accent);
+}
+.sp-rail-badge.red {
+  color: var(--bad);
+}
+.sp-rail-name {
+  max-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 9.5px/1.2 var(--font-app);
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+}
+
+/* --- inside the panel: the settings shape, at panel density --- */
+.pv-section {
+  gap: 6px;
+}
+.pv-section > .set-section-title {
+  min-height: 20px;
+  padding-inline: 4px;
+  font-size: calc(var(--size-app) * 0.98);
+}
+.pv-section .set-group {
+  border-radius: 9px;
+}
+.pv-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+}
+.set-group > .pv-row + .pv-row {
+  border-top: 1px solid var(--line);
+}
+.pv-row.clickable {
+  cursor: pointer;
+}
+.pv-row.clickable:hover {
+  background: var(--fill-ghost-hover);
+}
+.pv-row.sel {
+  background: var(--fill-ghost-selected);
+}
+.pv-row-name {
+  flex: none;
+  max-width: 48%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 0.95);
+}
+.pv-row-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: calc(var(--size-app) * 0.95);
+}
+.pv-row-value.mono {
+  font: calc(var(--size-data) * 11 / 12) var(--font-data);
+}
+.pv-none {
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 0.95);
+}
+.pv-bad {
+  color: var(--bad);
+}
+.pv-warn {
+  color: var(--warn);
+}
+.pv-held .pv-row-name {
+  flex: 1;
+  max-width: none;
+  color: var(--text);
+  text-align: left;
+}
+.pv-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pv-empty-act {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.pv-config,
+.pv-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pv-artifact-acts {
+  display: inline-flex;
+  gap: 1px;
+}
+
+/* A conversation in the panel lays itself out to the column, like the middle column's. */
+.pv-convo {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pv-convo > .inline-gate {
+  flex: none;
+  max-height: 55%;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  padding: 10px 12px;
+}
+/* A value in the panel is `pinned-body`'s full-bleed column (see above), under the frame's head. */
+.pv-preview {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The Steps tab: the index in a box that fits, a divider to drag, the step's card under it. */
+.pv-steps {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pv-blocked {
+  flex: none;
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+.pv-steps-box {
+  flex: none;
+  min-height: 128px;
+  overflow: hidden;
+  padding: 4px 8px 4px 10px;
+}
+.pv-steps-box.fill {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.pv-steps-split {
+  flex: none;
+  position: relative;
+  height: 9px;
+  margin: 0 10px;
+  cursor: row-resize;
+  touch-action: none;
+}
+.pv-steps-split::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+  background: var(--line);
+}
+.pv-steps-split::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 34px;
+  height: 5px;
+  margin-left: -17px;
+  border-radius: 3px;
+  background: var(--rule);
+}
+.pv-steps-split:hover::after {
+  background: var(--accent);
+}
+.pv-steps-card {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 12px 16px;
+}
+.pv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* One line: status, the step's name, and its path at the top right — where the Inputs heading had
+   room for it (the person's note: a heading row of its own was vertical space spent on nothing). */
+.pv-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.pv-card-name {
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+}
+.pv-card-path {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: calc(var(--size-data) * 10 / 12);
+  color: var(--dim);
+}
+
+/* --- the Steps index, fitted (stepCompaction.ts) --- */
+/* A placeholder's innermost lane is DOTS on the rail — always, wherever it stands. */
+.rail-cap path.rail-gap-dots {
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0 5;
+}
+.rail-seg.rail-seg-from-mid {
+  bottom: 0;
+}
+.rail-gap,
+.rail-crumbs-mark {
+  gap: 6px;
+}
+.rail-gap-go {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  font-family: var(--font-app);
+  color: var(--dim);
+  cursor: pointer;
+}
+.rail-gap-go:hover {
+  background: var(--fill-ghost-hover);
+  color: var(--text);
+}
+.rail-gap-glyph {
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+.rail-gap-names {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.rail-gap-name-wrap,
+.rail-crumb-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+}
+.rail-gap-name,
+.rail-crumb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 3px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  font-family: var(--font-data);
+  color: var(--dim);
+  cursor: pointer;
+}
+.rail-crumb {
+  color: var(--accent);
+}
+.rail-crumb.last {
+  font-weight: 650;
+}
+.rail-gap-name:hover:not(:disabled),
+.rail-crumb:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  color: var(--text);
+  text-decoration: underline;
+}
+.rail-gap-name:disabled,
+.rail-crumb:disabled {
+  cursor: default;
+  text-decoration: none;
+}
+.rail-crumb-sep {
+  color: var(--tok-hint);
+}
+.rail-crumbs {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.rail-row.rail-crumb-row {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-radius: 6px;
+}
+/* A folded state is a TILE (D) beside the stacked knot (B): an edge, like a closed folder. */
+.rail-mark.rolled .rail-mark-go {
+  background: var(--panel);
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 1px 2px rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+}
+
+/* --- the info button on the Files address: a plain file's or a folder's facts --- */
+.facts-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.facts-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+}
+.facts-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  width: 320px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--lift);
+}

@@ -364,7 +364,9 @@ export function SlotTable({
                 list={bindingListId}
                 // The empty box IS the answer where one exists, so it says so rather than showing an
                 // example of the other case and looking unfilled.
-                placeholder={produced(row) ? emptyBindingMeans! : bindingHint}
+                // A slot's DEFAULT is what an empty binding means (the panel rulings, 2026-09-24), so it
+                // is what the empty box says: `significant`, not an example of some other binding.
+                placeholder={produced(row) ? emptyBindingMeans! : row.default.length > 0 ? `default: ${row.default}` : bindingHint}
                 spellCheck={false}
                 disabled={row.structured === true}
                 title={

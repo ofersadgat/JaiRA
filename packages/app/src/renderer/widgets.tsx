@@ -56,7 +56,7 @@ import type { PruneReport } from "./store";
  * other choice the form makes. The pick is sent as a source, not as a value — the main process reads
  * it, and a task whose source is still running holds until it has.
  */
-export function NewTask({
+export function NewTaskForm({
   workflows,
   forms,
   values,
@@ -65,6 +65,7 @@ export function NewTask({
   onPick,
   onChange,
   onCreate,
+  onDone,
 }: {
   /** Every root that can be started here, in the order the picker lists them. */
   workflows: WorkflowEntry[];
@@ -87,8 +88,9 @@ export function NewTask({
   onPick: (stateId: string) => void;
   onChange: (stateId: string, values: RunValues) => void;
   onCreate: (workflow: string, inputs: Record<string, JsonValue>, sources: RunSources) => void;
+  /** Created, or cancelled: the panel it is in goes back to what it was showing. */
+  onDone: () => void;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
   const [workflow, setWorkflow] = useState("");
   /** Which slots take their value from a task, per workflow — the popover's own, like the pick itself. */
   const [taken, setTaken] = useState<Record<string, RunSources>>({});
@@ -125,21 +127,14 @@ export function NewTask({
   };
 
   return (
-    <div className="new-task-wrap">
-      <button onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        + New task
-      </button>
-      {open ? (
         <form
-          className="new-task-pop"
+          className="new-task-form"
           onSubmit={(e) => {
             e.preventDefault();
             if (blocked !== null) return;
             onCreate(workflow, runInputsOf(fields ?? [], form, from), from);
-            // The picked workflow stays. Creating one task from a workflow is the strongest available
-            // evidence about which workflow the next one comes from, and the boxes are held in the
-            // store per state id, so re-opening the form finds what was typed.
-            setOpen(false);
+            // The boxes are held in the store per state id, so starting another finds what was typed.
+            onDone();
           }}
         >
           <label className="field">
@@ -203,7 +198,7 @@ export function NewTask({
             >
               Create
             </button>
-            <button type="button" className="ghost" onClick={() => setOpen(false)}>
+            <button type="button" className="ghost" onClick={onDone}>
               Cancel
             </button>
             {/* Why it is off, in the place the Run form says it — and the count of boxes when it is
@@ -217,8 +212,19 @@ export function NewTask({
             ) : null}
           </div>
         </form>
-      ) : null}
-    </div>
+  );
+}
+
+/**
+ * The button that starts one — the form itself is a side-panel root now (the panel rulings,
+ * 2026-09-24): a popover had no room to say which of five errors it meant, and closed the moment you
+ * clicked into the board to check what a workflow's columns were.
+ */
+export function NewTask({ onOpen, open }: { onOpen: () => void; open: boolean }): JSX.Element {
+  return (
+    <button type="button" className={open ? "on" : undefined} aria-pressed={open} onClick={onOpen}>
+      + New task
+    </button>
   );
 }
 

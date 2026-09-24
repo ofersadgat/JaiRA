@@ -532,6 +532,8 @@ import type {
   ReadFileRequest,
   ReadUriRequest,
   ReviewChangesRequest,
+  TaskChangesRequest,
+  TaskChangesResult,
   ReviewChangesResult,
   ReviewSyncRequest,
   ArtifactSummary,
@@ -9745,6 +9747,21 @@ export class AppService {
    * from `interaction:requested` like any other component. Blocking the channel until a human
    * finishes reading a multi-file diff would hang the renderer that has to show it.
    */
+  async taskChanges(request: TaskChangesRequest): Promise<TaskChangesResult> {
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    if (session === undefined) return { reason: "no project is open" };
+    const worktree = session.project.runtime.get(request.taskId)?.worktreePath;
+    // Not a refusal: a task with no worktree is the common case, and the tab says so in words.
+    if (worktree === undefined) return { reason: "this task edits no worktree of its own" };
+    const git = gitFor(session.project, worktree);
+    const changeset = await worktreeChangeset(git, request.base ?? "HEAD", (path) => {
+      const file = withinWorkspace(worktree, path);
+      if (file === undefined || !existsSync(file)) return undefined;
+      return readFileSync(file, "utf8");
+    });
+    return changeset.changes.length === 0 ? { reason: `nothing changed since ${request.base ?? "HEAD"}` } : { changeset };
+  }
+
   async reviewChanges(request: ReviewChangesRequest): Promise<ReviewChangesResult> {
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
     if (session === undefined) throw this.refusal("review", "no project is open");

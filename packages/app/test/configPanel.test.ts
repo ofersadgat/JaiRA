@@ -21,7 +21,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { EffectiveState, InstanceNode, StateView } from "@jaira/shared/browser";
 import { ConfigReading } from "../src/renderer/configPanel";
-import { RunInspector, StateInspector } from "../src/renderer/files";
+import { StateChecks, StepCard } from "../src/renderer/panelViews";
 import { ReadOnlyContext } from "../src/renderer/reading";
 import { WorkflowEditor } from "../src/renderer/stateEditor";
 
@@ -70,21 +70,15 @@ const node = (patch: Partial<InstanceNode> = {}): InstanceNode => ({
   ...patch,
 });
 
-const drawRun = (props: Partial<Parameters<typeof RunInspector>[0]> = {}): string =>
+const drawStep = (): string =>
   renderToStaticMarkup(
-    createElement(RunInspector, {
+    createElement(StepCard, {
+      detail: { taskId: "t1", instances: [node()], runs: [] } as unknown as Parameters<typeof StepCard>[0]["detail"],
       node: node(),
-      stateId: "feature/plan/goals",
-      detail: null,
-      stream: [],
-      states: [],
-      depth: 1,
-      onBack: () => undefined,
-      onShowTask: () => undefined,
-      onStart: () => undefined,
-      onCancel: () => undefined,
-      onOpenState: () => undefined,
-      ...props,
+      sessions: [],
+      onClose: () => undefined,
+      onOpen: () => undefined,
+      onConfig: () => undefined,
     }),
   );
 
@@ -104,8 +98,8 @@ const stateView = (patch: Partial<StateView> = {}): StateView =>
     ...patch,
   }) as unknown as StateView;
 
-const drawState = (props: Partial<Parameters<typeof StateInspector>[0]> = {}): string =>
-  renderToStaticMarkup(createElement(StateInspector, { state: stateView(), ...props }));
+const drawState = (props: Partial<Parameters<typeof StateChecks>[0]> = {}): string =>
+  renderToStaticMarkup(createElement(StateChecks, { state: stateView(), ...props }));
 
 describe("the state's configuration in the side panel", () => {
   it("is the FILES VIEW's editor — the same form, over the same document", () => {
@@ -189,33 +183,30 @@ describe("the state's configuration in the side panel", () => {
   });
 });
 
-describe("the link on a run's panel", () => {
-  it("offers the configuration beside what the run was called with", () => {
-    expect(drawRun({ onOpenConfig: () => undefined })).toContain("the effective configuration");
-  });
-
-  it("omits it where there is no panel to open one in", () => {
-    // Optional rather than inert: a control that cannot do its one thing is worse than its absence.
-    expect(drawRun()).not.toContain("the effective configuration");
+describe("the link on a step's card", () => {
+  it("offers the configuration the step ran with, under how it ran", () => {
+    const html = drawStep();
+    expect(html).toContain("How it ran");
+    expect(html).toContain("as it ran");
   });
 });
 
-describe("the link on a workflow's panel", () => {
+describe("the link on a state's Checks", () => {
   it("offers the configuration in the section that names what it decides", () => {
     const html = drawState({ onOpenConfig: () => undefined });
     expect(html).toContain("Environment");
-    expect(html).toContain("the effective configuration");
+    expect(html).toContain("effective configuration");
   });
 
   it("offers it even where no executor is named — which is when it is most wanted", () => {
     // "inherited" is exactly the answer that sends somebody looking for what it was inherited from.
     const html = drawState({ onOpenConfig: () => undefined });
     expect(html).toContain("no executor named");
-    expect(html).toContain("the effective configuration");
+    expect(html).toContain("effective configuration");
   });
 
   it("omits it where there is no panel to open one in", () => {
-    expect(drawState()).not.toContain("the effective configuration");
+    expect(drawState()).not.toContain("effective configuration");
   });
 });
 

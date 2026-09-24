@@ -39,20 +39,18 @@ import type {
 import { Board, Column, Tile } from "./board";
 import { ApprovalSurface, GateSurface, QuestionSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
-import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
 import { ValueView } from "./valueView";
 import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
 import { STOPPED, stoppedAction } from "./taskAction";
-import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
-import { AnsweredForYou, Paper, Pulse, Transcript, clockOf, durationOf, useElapsed, type CallSurface } from "./transcriptView";
+import { instanceOf as instanceOfState, nodeAt, type TrailStep } from "./trail";
+import { AnsweredForYou, Paper, Pulse, Transcript, durationOf, useElapsed, type CallSurface } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
 import { PieceReadingContext, SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
-import { AskDialog, type AskSpec } from "./menu";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
@@ -65,7 +63,7 @@ import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./
 export { instanceOf } from "./trail";
 
 /** Whether this subtree holds a state that is asking right now — see {@link isAsking}. */
-function hasAsking(node: InstanceNode): boolean {
+export function hasAsking(node: InstanceNode): boolean {
   return isAsking(node) || node.children.some(hasAsking);
 }
 
@@ -98,7 +96,7 @@ function runningLeafOf(nodes: readonly InstanceNode[]): string | undefined {
   return undefined;
 }
 
-function askingInstanceOf(nodes: readonly InstanceNode[]): string | undefined {
+export function askingInstanceOf(nodes: readonly InstanceNode[]): string | undefined {
   for (const node of nodes) {
     if (isAsking(node)) return node.instanceId;
     const inside = askingInstanceOf(node.children);
@@ -740,7 +738,7 @@ export function RunConversation({
    * scroller, by instance id, for the Instances index to mark. The reverse of `focus`. Undefined
    * when no section has reached the top yet, and on unmount.
    */
-  onHere?: ((instance: string | undefined) => void) | undefined;
+  onHere?: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
   /**
    * Where "walk into this subagent conversation" goes, when this panel's host has somewhere for it.
    * Defaults to the trail (`context.onWalkIntoSidechain`); the task panel passes its own stack.
@@ -793,29 +791,40 @@ export function RunConversation({
   /**
    * Which state the reader is at, for the index beside this column — see {@link onHere}.
    *
-   * The LAST section whose top has passed the upper part of the scroller: a section is "where you
-   * are" once its heading has scrolled up into the top third, which is where a reader's eye is when
-   * they are reading it, rather than the moment its heading touches the top edge. The entered row
-   * and the letterhead both carry the instance id, which is what lets one query name both — the row
-   * is what a bookmark lands on, so the two agree about where a state starts. Measured against the
-   * viewport, as the board's spy is, so a restyle that positions an ancestor changes nothing here.
-   * Nothing past the line yet ⇒ the first section, so the index never marks nothing while something
-   * is on screen.
+   * The step being VIEWED (the panel rulings, 2026-09-24). Following the live edge, that is the live
+   * step — the last one — whatever the geometry says, because a conversation in progress is read at
+   * its end. Scrolled up, it is the sheet at the CENTRE of the scroller: the last section whose top
+   * has passed the middle line. The entered row and the letterhead both carry the instance id, which
+   * is what lets one query name both — the row is what a bookmark lands on, so the two agree about
+   * where a state starts. Measured against the viewport, as the board's spy is, so a restyle that
+   * positions an ancestor changes nothing here. Nothing past the line yet ⇒ the first section, so the
+   * index never marks nothing while something is on screen.
+   *
+   * With it goes every state with a sheet ON SCREEN — its marker inside the scroller's box, or the
+   * section the centre is in — which is what the Steps index folds last.
    */
   const track = useCallback((): void => {
     if (onHere === undefined) return;
     const el = follow.ref.current;
     if (el === null) return;
-    const line = el.getBoundingClientRect().top + el.clientHeight / 3;
+    const box = el.getBoundingClientRect();
+    const line = box.top + el.clientHeight / 2;
     let at: string | undefined;
     let first: string | undefined;
+    let last: string | undefined;
+    const onScreen = new Set<string>();
     for (const row of el.querySelectorAll<HTMLElement>("[data-entered], [data-instance]")) {
       const id = row.dataset["entered"] ?? row.dataset["instance"];
       if (id === undefined) continue;
       first ??= id;
-      if (row.getBoundingClientRect().top <= line) at = id;
+      last = id;
+      const top = row.getBoundingClientRect().top;
+      if (top <= line) at = id;
+      if (top >= box.top && top <= box.bottom) onScreen.add(id);
     }
-    onHere(at ?? first);
+    const viewed = follow.following() ? (last ?? at ?? first) : (at ?? first);
+    if (viewed !== undefined) onScreen.add(viewed);
+    onHere(viewed, onScreen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onHere]);
   // Coalesced to a frame: a scroll fires many times per paint, and the answer only changes per paint.
@@ -1897,7 +1906,7 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
           onDrop={context.onDeliverUserEvent}
         />
       ) : (
-        // The bookmark the task panel's Instances index sends — see `TaskContext.goTo`. This column
+        // The bookmark the side panel's Steps index sends — see `PanelHost.goTo`. This column
         // is the document when the toggle says Conversation, so it is the column that scrolls.
         <RunConversation
           parent={node}
@@ -1922,260 +1931,6 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
             : {})}
         />
       )}
-    </div>
-  );
-}
-
-/**
- * The Tasks view's context panel: a task, read as its conversation.
- *
- * Clicking a card is a question about what that task SAID, and the panel used to answer with a form
- * — an instance tree, a line of event types, a blob of JSON outputs. All three are facts about the
- * run and none of them is the run, so reading one meant clicking through into the Files view to find
- * the transcript that was there all along.
- *
- * The conversation is the default and the detail is behind a toggle, in that order, because the
- * detail is what you go looking for once the conversation has told you something is wrong.
- *
- * `parent` is the task's ROOT instance, so every session under it is flattened into the same set of
- * panels — see {@link RunConversation}. The Files view walks a trail and reads one level of it; here
- * there is no walk, and the whole task is the answer.
- */
-export function TaskContext({
-  detail,
-  stream,
-  context,
-  onStart,
-  onCancel,
-  onOpenState,
-  onReviewChanges,
-  gate,
-  onGate,
-  gateServices,
-  gateEditor,
-}: {
-  detail: TaskDetail;
-  stream: string[];
-  context: FileSurfaceProps["context"];
-  onStart: () => void;
-  onCancel: () => void;
-  onOpenState?: ((stateId: string) => void) | undefined;
-  onReviewChanges?: (() => void) | undefined;
-  /**
-   * A parked gate ABOUT this task, hosted here rather than in a modal — §8.1's default host: what a
-   * state asked is part of what happened in this conversation, and reading it here is where someone
-   * will look for it.
-   *
-   * Any component, not only the reviewer. The gate that survives a restart arrives the same way and
-   * is drawn the same way; `PendingInteraction.resumes` is the only thing that differs, and
-   * {@link GateSurface} is where it is said.
-   */
-  gate?: PendingInteraction | undefined;
-  onGate?: ((value: unknown) => void) | undefined;
-  gateServices?: Partial<ComponentServices> | undefined;
-  /** What `edit_artifact` and the artifact viewers need to be the app's editor. */
-  gateEditor?: EditorServices | undefined;
-}): JSX.Element {
-  const [mode, setMode] = useState<"conversation" | "detail">("conversation");
-  /**
-   * Where the Instances index last sent the reader.
-   *
-   * Held here rather than in the index because it has to outlive the mode: a bookmark pressed in
-   * Details flips this panel to Conversation, and the conversation that then MOUNTS is the thing
-   * that has to scroll. The alternative — doing nothing when the conversation is not on screen —
-   * makes every label in this panel inert, since the two readings share one column.
-   */
-  const [focus, setFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
-  /**
-   * WHICH conversation the bookmark is for.
-   *
-   * When the middle column is showing this task's conversation — the Tasks view's toggle says
-   * Conversation — that column is the document, and a label pressed in this panel's Details reading
-   * has to scroll IT: this panel keeping its own conversation beside the real one, and scrolling
-   * that, was a bookmark that visibly did nothing. The ask goes up to the shell (`onRunFocus`), and
-   * this panel stays on Details, which is where the person was reading. Otherwise — a board in the
-   * middle, or no shell at all — the conversation this panel can show is the only one, as before.
-   */
-  const goTo = (node: InstanceNode): void => {
-    const bookmark = { instance: node.instanceId, at: Date.now() };
-    if (context.runMode === "conversation" && context.onRunFocus !== undefined) {
-      context.onRunFocus(bookmark);
-      return;
-    }
-    setFocus(bookmark);
-    setMode("conversation");
-  };
-  /**
-   * The state the index marks as "here": where the middle column's conversation is scrolled to, when
-   * that column is the conversation (`runHere` follows its scroll), else the last bookmark pressed
-   * in this panel — the one thing this panel knows about its own conversation's position.
-   */
-  const here = context.runMode === "conversation" && context.onRunFocus !== undefined ? context.runHere : focus?.instance;
-  // The task's own root run. A task that has never run has none, and the conversation says so.
-  const root = detail.instances[0];
-  /**
-   * The subagent conversations walked into, as a LOCAL stack — this panel has no address bar, so
-   * the steps live here rather than on the trail. Same shape, same pruning rule: the steps are
-   * `TrailStep`s and `prunedTrail` is what keeps them honest against a task that re-ran. Reset on a
-   * selection change for the same reason the trail is — instance ids name one task's run only.
-   */
-  const [chain, setChain] = useState<TrailStep[]>([]);
-  useEffect(() => setChain([]), [detail.taskId]);
-  /**
-   * A question arriving takes the panel to where the question IS.
-   *
-   * The two readings share one column and Details returns before the gate is drawn, so a person who
-   * had left the panel on Details would have a task that had stopped, no visible reason, and the
-   * one thing that would explain it hidden behind a toggle. Nothing else in this panel moves the
-   * reader; this does, because the alternative is silence.
-   */
-  const asking = gate?.requestId;
-  useEffect(() => {
-    if (asking !== undefined) setMode("conversation");
-  }, [asking]);
-  /**
-   * Whether the conversation has a panel to put the question in.
-   *
-   * Asked of the same tree the panels are built from, with the same predicate the renderer uses, so
-   * the two cannot disagree about whether the gate was drawn — and the alternative to asking is a
-   * question that silently belongs to nobody.
-   */
-  const hosted = gate !== undefined && detail.instances.some((node) => hasAsking(node));
-  /**
-   * The index's two verbs — the same cut the conversation offers, from the Details reading.
-   *
-   * A row there is a state, and the journal position of its entry is in the conversation the shell
-   * already holds. No strip to arm in this reading, so the rewind asks through a dialog instead.
-   */
-  const [ask, setAsk] = useState<AskSpec | null>(null);
-  const seqOfEntry = (node: InstanceNode): number | undefined =>
-    context.conversation?.turns.find((turn) => turn.kind === "entered" && turn.instanceId === node.instanceId)?.seq;
-  const nameOfNode = (node: InstanceNode): string => node.childKey ?? node.stateId.split("/").pop() ?? node.stateId;
-  const indexCut =
-    context.onRewind !== undefined && context.onFork !== undefined
-      ? {
-          rewind: (node: InstanceNode) => {
-            const seq = seqOfEntry(node);
-            if (seq === undefined) return;
-            setAsk({
-              title: `Rewind to before ${nameOfNode(node)}?`,
-              note: "It and every state entered after it are deleted, and the run enters it again. Files edited in the worktree stay as they are. This cannot be undone.",
-              confirmLabel: "Rewind",
-              danger: true,
-              onConfirm: () => {
-                setAsk(null);
-                context.onRewind?.(detail.taskId, seq);
-              },
-            });
-          },
-          fork: (node: InstanceNode) => {
-            const seq = seqOfEntry(node);
-            if (seq !== undefined) context.onFork?.(detail.taskId, seq);
-          },
-        }
-      : undefined;
-  const hops = prunedTrail(chain, detail.instances, (id) => context.sessions[id]);
-  const pushHop = (node: InstanceNode, call: string, name: string): void =>
-    setChain([...hops, { instanceId: node.instanceId, stateId: node.stateId, sidechain: call, name }]);
-  const standing = hops[hops.length - 1];
-
-  if (mode === "detail") {
-    return (
-      <div className="detail">
-        <TaskHead
-          detail={detail}
-          onStart={onStart}
-          onCancel={onCancel}
-          {...(onOpenState ? { onOpenState } : {})}
-          {...(onReviewChanges ? { onReviewChanges } : {})}
-        >
-          <button className="ghost" onClick={() => setMode("conversation")}>
-            Conversation
-          </button>
-        </TaskHead>
-        <TaskDetailSections
-          detail={detail}
-          stream={stream}
-          onGoTo={goTo}
-          {...(hosted ? { asking: askingInstanceOf(detail.instances) } : {})}
-          {...(here !== undefined ? { here } : {})}
-          {...(indexCut !== undefined ? { onCut: indexCut } : {})}
-        />
-        {ask !== null ? <AskDialog spec={ask} onCancel={() => setAsk(null)} /> : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="detail task-context">
-      <TaskHead
-        detail={detail}
-        onStart={onStart}
-        onCancel={onCancel}
-        {...(onOpenState ? { onOpenState } : {})}
-        {...(onReviewChanges ? { onReviewChanges } : {})}
-      >
-        <button className="ghost" onClick={() => setMode("detail")}>
-          Details
-        </button>
-      </TaskHead>
-      {standing !== undefined ? (
-        <>
-          {/* The way back out: the panel's own little address, one crumb per doorway walked
-              through, with the conversation itself as the root. The same reading the address bar
-              gives the same walk in the middle column — smaller, because this panel is. */}
-          <div className="sc-crumbs">
-            <button type="button" className="sc-crumb" onClick={() => setChain([])}>
-              Conversation
-            </button>
-            {hops.map((hop, i) => (
-              <span key={`${hop.instanceId}:${hop.sidechain}`} className="sc-crumb-part">
-                <span className="crumb-sep">›</span>
-                {i === hops.length - 1 ? (
-                  <span className="sc-crumb last">{hop.name ?? hop.sidechain}</span>
-                ) : (
-                  <button type="button" className="sc-crumb" onClick={() => setChain(hops.slice(0, i + 1))}>
-                    {hop.name ?? hop.sidechain}
-                  </button>
-                )}
-              </span>
-            ))}
-          </div>
-          <SidechainConversation step={standing} context={context} onOpen={pushHop} />
-        </>
-      ) : (
-        <RunConversation
-          parent={root}
-          detail={detail}
-          context={context}
-          onOpenSidechain={pushHop}
-          {...(gate !== undefined && onGate !== undefined
-            ? {
-                asking: true,
-                gate,
-                onGate,
-                ...(gateServices !== undefined ? { gateServices } : {}),
-                ...(gateEditor !== undefined ? { gateEditor } : {}),
-              }
-            : {})}
-          {...(focus !== undefined ? { focus } : {})}
-        />
-      )}
-      {gate !== undefined && onGate !== undefined && !hosted ? (
-        // The FALLBACK, and only that. The question belongs in the panel of the state that raised it
-        // — `RunConversation` puts it there — and this is what happens when the tree has no such
-        // panel to put it in: a record still loading, or a gate parked by an instance the projection
-        // has not caught up with. A question with nowhere to go must not disappear, so it goes here,
-        // at the end, which is where it used to live for everything.
-        <section className="inline-gate" data-testid="inline-gate">
-          <GateSurface
-            pending={gate}
-            onSubmit={onGate}
-            services={gateServices}
-            {...(gateEditor !== undefined ? { editor: gateEditor } : {})}
-          />
-        </section>
-      ) : null}
     </div>
   );
 }

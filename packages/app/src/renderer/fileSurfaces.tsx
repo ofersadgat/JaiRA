@@ -726,7 +726,10 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
       {...(context.onDraft ? { onDraft: (text: string | null) => context.onDraft?.(key, text) } : {})}
       {...(context.onEditorTab
         ? {
-            tab: context.editorTab?.[key] ?? context.editorTabLast ?? "form",
+            // A file never opened before opens on the FORM — composites included, whose graph used
+            // to follow them from the last file (the panel rulings, 2026-09-24). A tab chosen on
+            // this file is still remembered for it.
+            tab: context.editorTab?.[key] ?? "form",
             onTab: (next: EditorTab) => context.onEditorTab?.(key, next),
           }
         : {})}

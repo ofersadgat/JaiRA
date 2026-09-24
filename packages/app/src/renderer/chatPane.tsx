@@ -34,7 +34,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
 import type {
-  ArtifactSummary,
   ChatPlanView,
   ChatSettings,
   ChatThreadView,
@@ -51,8 +50,7 @@ import { useStickToBottom } from "./stickToBottom";
 import { CHAT_SESSION, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, pointOf, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
-import { DayChip, LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface } from "./transcriptView";
-import { ValueView } from "./valueView";
+import { DayChip, LiveStatusBar, Paper, Transcript } from "./transcriptView";
 import { Icon, Spinner } from "./icons";
 import { invoke } from "./store";
 import { useWaiting } from "./limitsStore";
@@ -140,131 +138,6 @@ type Arming =
   | { kind: "edit"; at: string; was: string }
   | { kind: "rewind"; seq: number; from: number; was: string; side: "before" | "after" }
   | { kind: "fork"; seq: number; from: number; was: string; side: "before" | "after" };
-
-/**
- * What this conversation PRODUCED, collected in one place.
- *
- * A transcript answers "what happened", and it answers it in order — which is the wrong shape for
- * "where is the thing you made". An artifact written twenty turns ago is twenty turns up, indistinguishable
- * from the twenty tool calls around it, and a conversation that produced four documents shows them
- * four screens apart. This is the other reading of the same records: not when they were made, but
- * what there is.
- *
- * Closed until asked for, and absent entirely when nothing has been produced — a disclosure that
- * only ever says "0" is a permanent row of chrome charging rent for a fact nobody needed.
- *
- * The viewer is {@link ValueView}, with the same `serve` the transcript uses, so an interactive
- * mockup runs here exactly as it does beside the call that made it. One renderer, not two.
- */
-function ArtifactsPanel({
-  taskId,
-  project,
-  artifacts,
-  signal,
-}: {
-  taskId: string;
-  project: string | undefined;
-  artifacts: ArtifactSurface;
-  /** Changes when the conversation has moved on — what makes a newly produced artifact appear. */
-  signal: number;
-}): JSX.Element | null {
-  const [list, setList] = useState<ArtifactSummary[]>([]);
-  const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [doc, setDoc] = useState<{ path: string; mime: string; text: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // The LIST is refreshed whenever the conversation moves, whether or not the panel is open: the
-  // count in the header is the only thing that tells you there is something to open.
-  useEffect(() => {
-    let live = true;
-    void invoke("artifact:list", { taskId, ...(project !== undefined ? { project } : {}) })
-      .then((rows) => {
-        if (live) setList(rows);
-      })
-      .catch(() => {
-        if (live) setList([]);
-      });
-    return () => {
-      live = false;
-    };
-  }, [taskId, project, signal]);
-
-  // The CONTENT is fetched per artifact, on selection — see `ArtifactSummary` on why the list does
-  // not carry it.
-  useEffect(() => {
-    if (selected === null) {
-      setDoc(null);
-      return;
-    }
-    let live = true;
-    setError(null);
-    void invoke("uri:read", { uri: `artifact://${taskId}/${selected}`, ...(project !== undefined ? { project } : {}) })
-      .then((content) => {
-        if (live) setDoc({ path: selected, mime: content.mime, text: content.text });
-      })
-      .catch((e: Error) => {
-        if (live) {
-          setDoc(null);
-          setError(e.message);
-        }
-      });
-    return () => {
-      live = false;
-    };
-  }, [selected, taskId, project]);
-
-  if (list.length === 0) return null;
-
-  const shown = list.find((row) => row.path === selected);
-  return (
-    <div className={`chat-artifacts${open ? " open" : ""}`}>
-      <button type="button" className="chat-artifacts-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="ts-chev">
-          <Icon name="chevron" />
-        </span>
-        <span>Produced</span>
-        <span className="count">{list.length}</span>
-      </button>
-
-      {open ? (
-        <div className="chat-artifacts-body">
-          <div className="chat-artifacts-list">
-            {list.map((row) => (
-              <button
-                type="button"
-                key={row.path}
-                className={`chat-artifact-row${row.path === selected ? " sel" : ""}`}
-                onClick={() => setSelected(row.path === selected ? null : row.path)}
-              >
-                <span className="grow ellip" title={row.path}>
-                  {row.path}
-                </span>
-                {/* Said plainly rather than shown as an icon: that a page can RUN is the one property
-                    of an artifact worth knowing before opening it. */}
-                {row.interactive ? <span className="chip chat-artifact-live">runs</span> : null}
-                <span className="sub">{sizeOf(row.bytes)}</span>
-              </button>
-            ))}
-          </div>
-
-          {error !== null ? <p className="reason">{error}</p> : null}
-          {shown !== undefined && doc !== null ? (
-            <div className="chat-artifact-view">
-              <ValueView
-                // The ENVELOPE, not the bare text: it is what carries the media type and the
-                // interactive claim into `viewsFor`, which is the same value the transcript renders.
-                value={{ path: shown.path, mediaType: shown.mediaType, content: doc.text, ...(shown.interactive ? { interactive: true } : {}) }}
-                serve={artifacts.serve}
-                {...(artifacts.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {})}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 /**
  * The conversation list — the Chat row's drawer in the sidebar.
@@ -995,15 +868,8 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
 
   return (
     <div className="chat-thread">
-      <ArtifactsPanel
-        taskId={taskId}
-        project={project}
-        artifacts={artifacts}
-        // What this conversation has SAID is the cheapest proxy for "it may have produced something":
-        // a turn arrived, so the map may have moved. Cheaper than polling and honest enough — the
-        // list is metadata, and a refetch that finds nothing new costs one query.
-        signal={entries.length}
-      />
+      {/* What this conversation PRODUCED is the side panel's Produced tab now (the panel rulings,
+          2026-09-24) — a disclosure above the thread was pushed off by the thread it sat over. */}
       <div
         className="chat-scroll scroll"
         ref={scroller}

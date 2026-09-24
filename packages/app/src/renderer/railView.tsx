@@ -49,6 +49,7 @@ import {
   type RailRow,
   type RailStep,
 } from "./rail";
+import { hiddenExits, type DisplayItem, type VisibleRow } from "./stepCompaction";
 
 /** The trunk is the run itself and is not a state anybody named — drawn in the ordinary rule colour. */
 type Palette = ReadonlyMap<string, string>;
@@ -172,6 +173,69 @@ function RailGutter({
  * state's own hue in both cases: the colour is how a reader matches a row here to a panel in the
  * conversation, and an accent knot would spend it on saying something the chip beside it already says.
  */
+/**
+ * A placeholder's gutter — `⋯ N steps`. The lanes running through it are drawn straight, all but the
+ * innermost, which the hidden rows hung from: that one is a column of DOTS on the rail, so every
+ * placeholder reads the same way wherever it stands (the person's ruling, 2026-09-24).
+ */
+function RailGap({ lanes, centres, palette }: { lanes: readonly RailLane[]; centres: readonly number[]; palette: Palette }): JSX.Element {
+  const width = gutterWidth(centres, Math.max(lanes.length, 1));
+  const inner = lanes.length - 1;
+  return (
+    <div className="rail-gut" style={{ width: `${width}px` }}>
+      {lanes.slice(0, -1).map((lane, i) => (
+        <span key={lane.key} className="rail-seg" style={{ left: `${(centres[i] ?? 0) - 1}px`, background: laneColour(lane, i === 0, palette) }} data-lane={lane.key} data-name={lane.stateId} />
+      ))}
+      {inner >= 0 && (
+        <svg className="rail-cap" viewBox={`0 0 ${width} ${CAP}`} preserveAspectRatio="none" aria-hidden="true">
+          <path
+            className="rail-gap-dots"
+            d={`M${centres[inner] ?? 0} 2 L${centres[inner] ?? 0} ${CAP - 2}`}
+            stroke={laneColour(lanes[inner]!, inner === 0, palette)}
+          />
+        </svg>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The breadcrumb's gutter: the parents it folds, each a knot side by side at mid-height, their lanes
+ * running on down from there into the rows below — the address bar's crumbs, drawn as lanes.
+ */
+function RailCrumb({ lanes, centres, palette }: { lanes: readonly RailLane[]; centres: readonly number[]; palette: Palette }): JSX.Element {
+  const width = gutterWidth(centres, Math.max(lanes.length, 1));
+  return (
+    <div className="rail-gut" style={{ width: `${width}px` }}>
+      {lanes.map((lane, i) => (
+        <span
+          key={lane.key}
+          className="rail-seg rail-seg-from-mid"
+          style={{ left: `${(centres[i] ?? 0) - 1}px`, top: `${MID}px`, background: laneColour(lane, i === 0, palette) }}
+          data-lane={lane.key}
+          data-name={lane.stateId}
+        />
+      ))}
+      <svg className="rail-cap" viewBox={`0 0 ${width} ${CAP}`} preserveAspectRatio="none" aria-hidden="true">
+        {lanes.map((lane, i) => (
+          <circle
+            key={lane.key}
+            className="rail-knot"
+            cx={centres[i] ?? 0}
+            cy={MID}
+            r={i === lanes.length - 1 ? 4.5 : 3.2}
+            fill="var(--bg)"
+            stroke={laneColour(lane, i === 0, palette)}
+            strokeWidth={2}
+            data-lane={lane.key}
+            data-name={lane.stateId}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 function RailLobe({
   lane,
   depth,
@@ -243,12 +307,14 @@ function RailFork({
       )}
       <circle className="rail-knot" cx={cx} cy={MID} r={4.5} fill="var(--bg)" stroke={colour} strokeWidth={2} data-lane={lane.key} data-name={lane.stateId} />
       {folded && (
-        <path
-          className="rail-knot"
-          d={`M${cx - 2.2} ${MID} H${cx + 2.2} M${cx} ${MID - 2.2} V${MID + 2.2}`}
-          stroke={colour}
-          strokeWidth={1.6}
-        />
+        // A folded state's knot is a STACK — two more rings behind it, fading — which says "more than
+        // one in here" in the lane's own drawing (the person's pick, 2026-09-24; its row is the folded
+        // tile in `runIndex.tsx`). It used to be a plus sign inside the knot, which read as "add".
+        <>
+          <circle className="rail-knot rail-stack-ring" cx={cx + 6} cy={MID} r={4.5} fill="var(--bg)" stroke={colour} strokeWidth={1.5} opacity={0.4} />
+          <circle className="rail-knot rail-stack-ring" cx={cx + 3} cy={MID} r={4.5} fill="var(--bg)" stroke={colour} strokeWidth={1.5} opacity={0.7} />
+          <circle className="rail-knot" cx={cx} cy={MID} r={4.5} fill="var(--bg)" stroke={colour} strokeWidth={2} data-lane={lane.key} data-name={lane.stateId} />
+        </>
       )}
       {cut && <circle className="rail-halo cut" cx={cx} cy={MID} r={7.5} fill="none" stroke="var(--bad)" strokeWidth={1.5} />}
       {/* A circle you can actually hit. The knot is 9px across and is the only way back into a lane
@@ -278,8 +344,21 @@ export function RailedRows({
   foldable,
   onPick,
   onContext,
+  compact,
+  renderGap,
+  renderCrumb,
 }: {
   steps: readonly RailStep[];
+  /**
+   * Fit the rows to a height — see `stepCompaction.ts`. Handed the rows that would be drawn (folds
+   * applied), it answers what is drawn instead: rows, `⋯` placeholders and a breadcrumb. Absent ⇒
+   * every row, as before.
+   */
+  compact?: ((visible: readonly VisibleRow[]) => DisplayItem[]) | undefined;
+  /** What a placeholder row says. Required with {@link compact}. */
+  renderGap?: ((item: Extract<DisplayItem, { kind: "gap" }>) => ReactNode) | undefined;
+  /** What the breadcrumb row says. Required with {@link compact}. */
+  renderCrumb?: ((item: Extract<DisplayItem, { kind: "crumb" }>) => ReactNode) | undefined;
   /** What row `index` of `steps` draws. */
   renderStep: (index: number) => ReactNode;
   className?: string;
@@ -471,6 +550,25 @@ export function RailedRows({
     [onContext],
   );
 
+  /**
+   * The rows that would be drawn — a folded lane's contents and its orphaned join taken out — and,
+   * when the caller fits them to a height, what is drawn instead.
+   */
+  const visible = useMemo(() => {
+    const out: VisibleRow[] = [];
+    for (const [index, row] of rows.entries()) {
+      if (row.open.some((lane) => shut.has(lane.key))) continue;
+      if (row.exit !== undefined && shut.has(row.exit.lane.key) && row.enter === undefined) continue;
+      out.push({ row, index });
+    }
+    return out;
+  }, [rows, shut]);
+  const items = useMemo<DisplayItem[]>(
+    () => (compact === undefined ? visible.map((one) => ({ kind: "row", index: one.index })) : compact(visible)),
+    [compact, visible],
+  );
+  const elidedLanes = useMemo(() => hiddenExits(items, rows), [items, rows]);
+
   return (
     <div
       className={className === undefined ? "rail" : `rail ${className}`}
@@ -486,21 +584,30 @@ export function RailedRows({
         panel and skips those subtrees — which is what makes changing the geometry on hover cost the
         gutters and nothing else, in a view that is otherwise hundreds of transcripts deep.
       */}
-      {rows.map((row) => {
-        // A row inside a rolled-up lane is not drawn. Its own enter row survives, because `open`
-        // excludes the lane a row forks — which is exactly the row that has to stay as the handle.
-        if (row.open.some((lane) => shut.has(lane.key))) return null;
+      {items.map((item) => {
+        if (item.kind === "gap") {
+          return (
+            <div className="rail-row rail-turn rail-gap-row" key={item.key}>
+              <RailGap lanes={item.lanes} centres={centres} palette={palette} />
+              <div className="rail-content">{renderGap?.(item)}</div>
+            </div>
+          );
+        }
+        if (item.kind === "crumb") {
+          return (
+            <div className="rail-row rail-turn rail-crumb-row" key={`crumb:${item.lanes.map((lane) => lane.key).join("|")}`}>
+              <RailCrumb lanes={item.lanes} centres={centres} palette={palette} />
+              <div className="rail-content">{renderCrumb?.(item)}</div>
+            </div>
+          );
+        }
+        const row = rows[item.index]!;
         const rolled = row.enter !== undefined && shut.has(row.enter.lane.key) ? row.enter.lane : undefined;
         /*
-         * Nor is the join of a lane whose fork was rolled up: the bump already said it left and came
-         * back, and a join with no lane above it would come from nowhere.
-         *
-         * ⚠️ Only when the row does nothing ELSE. A join and the fork that follows it at the same
-         * depth are ONE row — see `push` in `rail.ts` — so on a folded lane whose sibling comes next,
-         * dropping the row takes that sibling's fork with it and keeping it draws a curve arriving
-         * out of blank space. Suppressing just the join is the only reading that leaves both true.
-         */
-        const orphan = row.exit !== undefined && shut.has(row.exit.lane.key);
+          A join whose lane was folded has nothing to join from — see the note on orphans above. The
+          same holds for a lane whose fork went into a `⋯` placeholder.
+        */
+        const orphan = row.exit !== undefined && (shut.has(row.exit.lane.key) || elidedLanes.has(row.exit.lane.key));
         if (orphan && row.enter === undefined) return null;
         const held = rolled === undefined ? 0 : (inside.get(rolled.key) ?? 0);
         const lobe = row.step === undefined ? undefined : mark?.(row.step);
@@ -512,9 +619,6 @@ export function RailedRows({
                 .filter((one) => one !== undefined && one.length > 0)
                 .join(" ")
             }
-            // Not the row index: a live run inserts rows, and an index key would make every row after
-            // the insertion a different row. A lane forks once and joins once, and a content row is
-            // its step — so this is both stable and unique.
             key={`${row.exit?.lane.key ?? ""}|${row.enter?.lane.key ?? ""}|${row.step ?? ""}`}
           >
             <RailGutter

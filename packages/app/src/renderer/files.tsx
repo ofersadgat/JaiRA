@@ -14,8 +14,8 @@
  * The tree shows BOTH layer roots, which is what removes the layer picker: which copy of a file you
  * are about to edit is its position on screen rather than a mode you have to remember being in.
  */
+import { Icon } from "./icons";
 import {
-  Fragment,
   useMemo,
   useRef,
   useState,
@@ -32,26 +32,19 @@ import type {
   FileTree,
   InstanceNode,
   MoveWorkflowRequest,
-  SessionRef,
   StateView,
-  TaskDetail,
   WorkflowLayer,
   WorkflowMutationResult,
 } from "@jaira/shared/browser";
 import { isTextMime, isWritableLayer } from "@jaira/shared/browser";
-import { Badge } from "./board";
-import { CrumbBar, alternatives, runCrumbs, shortRunName, type Crumb } from "./crumbs";
-import { TaskPanel } from "./detail";
+import { CrumbBar, alternatives, runCrumbs, type Crumb } from "./crumbs";
 import { editorPaint } from "./editorThemes";
 import { editorPick, pickPalette, viewerPick, type FileSurfaceContext } from "./fileTypes";
 import { AskDialog, ContextMenu, pointOf, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
-import { RunPanel, type RunSurface } from "./runPanel";
 import { RunModeToggle } from "./runViews";
-import { signatureOf } from "./transcript";
-import { durationOf } from "./transcriptView";
 import { Splitter } from "./splitter";
 import { taskNameOf, taskNamePending } from "./taskName";
-import { nodeAt, stepOf, type TrailStep } from "./trail";
+import type { TrailStep } from "./trail";
 import { HALVES, PANE, paneDefault, type HalfMode } from "./uiState";
 
 /**
@@ -522,7 +515,7 @@ export function builtInItems(
   if (id === undefined) return look;
   return [
     { label: "Open", note: "read-only", onSelect: () => act.onOpen(id, root.layer) },
-    { label: "Override for all projects", note: "~/.jaira", separator: true, onSelect: () => act.onOverride(id, "base") },
+    { label: "Edit a copy in Shared", note: "~/.jaira", separator: true, onSelect: () => act.onOverride(id, "base") },
     { label: "Override here", note: ".jaira", disabled: !act.hasProject, onSelect: () => act.onOverride(id, "project") },
     { label: "Copy state id", separator: true, onSelect: () => act.onCopy(id) },
     ...look,
@@ -1598,6 +1591,7 @@ export function FileAddressBar({
   context,
   onWalkBack,
   onInspect,
+  facts,
 }: {
   doc: FileSource | null;
   /** The directory open instead, when one is — exactly one of the two is ever set. */
@@ -1606,6 +1600,8 @@ export function FileAddressBar({
   /** Walk the address bar back to a crumb; `-1` is the file with no run open. */
   onWalkBack?: ((index: number) => void) | undefined;
   onInspect: () => void;
+  /** The ⓘ at the bar's right end — see {@link FactsButton}. */
+  facts?: React.ReactNode;
 }): JSX.Element | null {
   // Before the early return: a hook cannot be conditional, and "no file open" is a condition.
   const known = useMemo(() => stateIdsOf(context.tree), [context.tree]);
@@ -1642,7 +1638,11 @@ export function FileAddressBar({
 
   // A folder is an address like any other, so it gets the same bar.
   if (doc === null) {
-    return dir == null ? null : <DocBar input={barFor({ ...dir, isDir: true })} state={null} onInspect={onInspect} />;
+    return dir == null ? null : (
+      <DocBar input={barFor({ ...dir, isDir: true })} state={null} onInspect={onInspect}>
+        {facts}
+      </DocBar>
+    );
   }
 
   const trail = context.trail ?? [];
@@ -1661,6 +1661,7 @@ export function FileAddressBar({
       {toggleable && context.onRunMode !== undefined ? (
         <RunModeToggle mode={context.runMode ?? "board"} onMode={context.onRunMode} />
       ) : undefined}
+      {facts}
     </DocBar>
   );
 }
@@ -1861,265 +1862,10 @@ export function FilePanel({
   );
 }
 
-// --- the inspector -----------------------------------------------------------
-
 /**
- * What the right-hand column says about the selected state.
- *
- * Everything here answers a question you can only ask while looking at a state file: how to run it,
- * what running it has produced before, does it validate, what will it run on, where does control go
- * next, who depends on it, and whether the tasks currently inside it would even see an edit.
- *
- * Run comes FIRST, above validation, and that ordering is deliberate. The Files view is where a
- * state is written, and the thing anyone does next after writing one is try it; a button under four
- * sections of reference material is a button reached by scrolling past everything you already know.
- * The validation that would have gone first is not lost — it is the reason the button is disabled,
- * said on the button itself.
- */
-export function StateInspector({
-  state,
-  run,
-  onBack,
-  onOpenConfig,
-  onRevealIssue,
-}: {
-  state: StateView | null;
-  /**
-   * Starting a run from here, and the runs already started.
-   *
-   * Absent ⇒ no host that can create a task, and the two sections are omitted rather than shown
-   * inert. The same reason the sync panel is optional on a file surface: a control that cannot do
-   * its one thing is worse than its absence.
-   */
-  run?: RunSurface | undefined;
-  /**
-   * Leave this subject — the arrow beside the name.
-   *
-   * Present only where the panel was ASKED to describe a state rather than following the address:
-   * the link in a conversation's gutter takes the column off the run somebody was reading, and a
-   * column that cannot be given back is a one-way trip. Absent where the state IS what the view is
-   * standing on, which has nowhere to go back to.
-   */
-  onBack?: (() => void) | undefined;
-  /**
-   * Read the configuration a run here resolves against, in this column — see `configPanel.tsx`.
-   *
-   * Belongs in Environment, which is the part of this panel that is ALREADY about configuration: it
-   * names an executor, says whether that executor is available, and names a model — every one of
-   * which is decided somewhere else. This is that somewhere else, one click away instead of two
-   * views away.
-   *
-   * Offered even when no executor is named, and that is not an oversight: "inherited" is exactly the
-   * answer that sends somebody looking for what it was inherited FROM.
-   */
-  onOpenConfig?: (() => void) | undefined;
-  /**
-   * Show the control an issue is about, in the editor beside this panel.
-   *
-   * Absent ⇒ the issues render as text, which is what they were. Optional rather than required
-   * because this component is also rendered from places with no editor to reveal anything in, and a
-   * dead link is worse than a paragraph.
-   */
-  onRevealIssue?: ((path: string) => void) | undefined;
-}): JSX.Element {
-  if (state === null) return <p className="empty">Select a state.</p>;
-  return (
-    <div className="inspector">
-      <div className="insp-crumb">
-        {onBack !== undefined ? (
-          <button className="link back-arrow" onClick={onBack} title="back to what you were reading">
-            ←
-          </button>
-        ) : null}
-        <span className="state-id ellip" title={state.stateId}>
-          {state.stateId.split("/").pop()}
-        </span>
-        <span className="sub">· the state</span>
-      </div>
-
-      {run !== undefined ? <RunPanel state={state} run={run} /> : null}
-
-      {state.fileOnly ? (
-        // Everything below that depends on the project's reference graph is UNKNOWN here, not empty.
-        // Saying so is the difference between "nothing depends on this" and "nothing was checked" —
-        // and only one of those is safe to act on before renaming it.
-        <div className="notice">
-          Read from the file alone, with no project open. Lint results, dependants, drift and runs are
-          not known — open a project to see them.
-        </div>
-      ) : null}
-
-      <section>
-        <h3>
-          <span>Validation</span>
-          {state.issues.length > 0 ? <span className="count">{state.issues.length}</span> : null}
-        </h3>
-        {state.issues.length === 0 ? (
-          <div className="sub">{state.fileOnly ? "not checked" : "lints clean"}</div>
-        ) : (
-          state.issues.map((issue, i) => {
-            // A diagnostic with no path is about the FILE — "not valid JSON" — so there is no
-            // control to reveal and it stays plain text. Everything else is a position in the
-            // document, and the position is the useful half: reading `children.critique.inputs.issue`
-            // and then finding that row by eye is the work this button removes.
-            const reveal = onRevealIssue !== undefined && issue.path.length > 0;
-            const className = `notice ${issue.severity === "error" ? "bad" : "warn"}${reveal ? " clickable" : ""}`;
-            const body = (
-              <>
-                <b>{issue.path === "" ? "this file" : issue.path}</b> — {issue.message}
-              </>
-            );
-            return reveal ? (
-              <button
-                key={i}
-                type="button"
-                className={className}
-                title="show the control this is about"
-                onClick={() => onRevealIssue(issue.path)}
-              >
-                {body}
-              </button>
-            ) : (
-              <div key={i} className={className}>
-                {body}
-              </div>
-            );
-          })
-        )}
-      </section>
-
-      <section>
-        <h3>Environment</h3>
-        {state.environment.executor === undefined ? (
-          <div className="sub">no executor named — inherited or not a function operation</div>
-        ) : (
-          <dl className="kv">
-            <dt>executor</dt>
-            <dd>
-              <code>{state.environment.executor}</code>{" "}
-              <span className={`chip ${state.environment.available ? "chip-ok" : "chip-bad"}`}>
-                {state.environment.available ? "available" : "not available"}
-              </span>
-            </dd>
-            {state.environment.from !== undefined ? (
-              <>
-                <dt>from</dt>
-                <dd>
-                  <code>{state.environment.from}</code>
-                </dd>
-              </>
-            ) : null}
-            {state.operation?.model !== undefined ? (
-              <>
-                <dt>model</dt>
-                <dd>
-                  <code>{state.operation.model}</code>
-                </dd>
-              </>
-            ) : null}
-          </dl>
-        )}
-        {/* Under both readings above, because it is what both of them rest on — the executor this
-            names and the model beside it are decided by the document behind this link. */}
-        {onOpenConfig !== undefined ? (
-          <div className="pane-actions">
-            <button className="link" onClick={onOpenConfig} title="read what a run here resolves against">
-              the effective configuration
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      {state.transitions.length > 0 ? (
-        <section>
-          {/* Here rather than beside the columns: transitions are not what orders the board, and a
-              backward jump drawn among the columns would read as layout instead of control flow. */}
-          <h3>
-            <span>Transitions</span>
-            <span className="count">{state.transitions.length}</span>
-          </h3>
-          <div className="transitions">
-            {state.transitions.map((t, i) => (
-              <div key={i} className="trans-row">
-                <span className="when">{t.when}</span>
-                <span className="arrow">→</span>
-                <span className="to">
-                  {t.to.split("/").pop()}
-                  {t.loops ? " ↺" : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {state.children.length > 0 ? (
-        <section>
-          <h3>
-            <span>Children</span>
-            <span className="count">in run order</span>
-          </h3>
-          <ol className="children">
-            {state.children.map((child) => (
-              <li key={child.key}>
-                <span className="ellip">{child.key}</span>
-                {child.hasChildren ? <span className="chip">composite</span> : null}
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
-
-      {state.references.length > 0 ? (
-        <section>
-          <h3>References</h3>
-          <ul className="refs">
-            {state.references.map((ref) => (
-              <li key={ref.ref}>
-                <Badge status={ref.resolved ? "completed" : "failed"} />
-                <code className="grow ellip">{ref.ref}</code>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {state.referencedBy.length > 0 ? (
-        <section>
-          <h3>Referenced by</h3>
-          <ul className="refs">
-            {state.referencedBy.map((id) => (
-              <li key={id}>
-                <span className="glyph">❏</span>
-                <code className="grow ellip">{id}</code>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {state.driftedTasks.length > 0 ? (
-        <section>
-          {/* Execution reads the pinned snapshot (DESIGN §5.3), so an edit here does not reach a
-              running task. That is only actionable next to the edit. */}
-          <h3>Snapshot drift</h3>
-          <div className="notice warn">
-            {state.driftedTasks.length} task(s) here are pinned to an older snapshot and will not see
-            an edit until they are re-run.
-          </div>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * The right-hand column for whatever is open.
- *
- * A state gets {@link StateInspector} — validation, environment, transitions, who depends on it.
- * Everything else gets the short version, because for a prompt or a skill there is genuinely less to
- * say: where it is, what it is, and how big. Saying that little honestly is better than borrowing
- * the state inspector's headings and leaving them all empty.
+ * What there is to say about a plain file or a folder — where it is, what it is, how big — behind
+ * the ⓘ on the address ({@link FactsButton}). A state says more, and says it in the side panel; these
+ * used to take the whole column to say four facts.
  */
 export function FolderInspector({
   layer,
@@ -2168,37 +1914,8 @@ export function FolderInspector({
   );
 }
 
-export function FileInspector({
-  doc,
-  state,
-  run,
-  onOpenConfig,
-  onRevealIssue,
-}: {
-  doc: FileSource | null;
-  state: StateView | null;
-  /**
-   * Passed through to {@link StateInspector}, and only reachable there.
-   *
-   * A prompt has no declared inputs and nothing to start, so the Run section does not appear for one
-   * — which is the whole of "which files get a Run section": the ones that are states.
-   */
-  run?: RunSurface | undefined;
-  /**
-   * Passed through to {@link StateInspector} too — the same Environment section, so the same link.
-   *
-   * A state's executor is decided by the configuration whichever door you came in through, and a
-   * panel that offered the way to it only when it had been reached from a conversation would be the
-   * same section answering the same question differently depending on where you had been.
-   */
-  onOpenConfig?: (() => void) | undefined;
-  /** Passed through to {@link StateInspector} — the only half of this panel with issues to reveal. */
-  onRevealIssue?: ((path: string) => void) | undefined;
-}): JSX.Element {
+export function FileInspector({ doc }: { doc: FileSource | null }): JSX.Element {
   if (doc === null) return <p className="empty">Select a file.</p>;
-  if (state !== null && doc.stateId !== undefined) {
-    return <StateInspector state={state} run={run} onOpenConfig={onOpenConfig} onRevealIssue={onRevealIssue} />;
-  }
   return (
     <div className="inspector">
       <div className="insp-crumb">
@@ -2231,358 +1948,28 @@ export function FileInspector({
 }
 
 /** `12,345` — thousands separated, because these are read at a glance and compared. */
-const count = (n: number): string => n.toLocaleString();
-
-/** `2.4 s`, `1 m 12 s`. */
-function duration(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const seconds = Math.round(ms / 1000);
-  return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
-}
 
 /**
- * What the run consumed, summed across every call it made.
- *
- * Here because a cost with nothing beside it is a number you can only believe or disbelieve. Tokens
- * are what make it checkable: `$0.21` next to 40k cached input tokens is an agent session doing
- * ordinary work, and next to 300 tokens it is a bug — and those two used to look identical.
- *
- * `costSource` is shown whenever it is anything other than the provider's own figure, because that
- * is the difference between a charge and an estimate. JaiRA computes neither: it records what the
- * executor reported, and this says which kind of number that was.
+ * The ⓘ at the right of the Files address: a plain file's or a folder's facts, in a popover (the
+ * panel rulings, 2026-09-24). The side panel closes for these — there is nothing to DO with a
+ * prompt's size and path, and a column that says four facts pushes the file it describes into less
+ * of the window.
  */
-function TaskMetrics({ states }: { states: SessionRef[] }): JSX.Element | null {
-  const sum = (pick: (m: NonNullable<SessionRef["metrics"]>) => number | undefined): number | undefined => {
-    let total: number | undefined;
-    for (const row of states) {
-      const value = row.metrics === undefined ? undefined : pick(row.metrics);
-      if (value !== undefined) total = (total ?? 0) + value;
-    }
-    return total;
-  };
-  const cost = states.reduce<number | undefined>(
-    (acc, row) => (row.costUsd === undefined ? acc : (acc ?? 0) + row.costUsd),
-    undefined,
-  );
-  const started = states.reduce<number | undefined>((acc, row) => (acc === undefined ? row.at : Math.min(acc, row.at)), undefined);
-  const input = sum((m) => m.inputTokens);
-  const output = sum((m) => m.outputTokens);
-  const cached = sum((m) => m.cacheReadTokens);
-  const written = sum((m) => m.cacheWriteTokens);
-  const reasoning = sum((m) => m.reasoningTokens);
-  const spent = sum((m) => m.durationMs);
-  // Worst-of, because a total is only as trustworthy as its least trustworthy part.
-  const sources = new Set(states.map((row) => row.metrics?.costSource).filter((s) => s !== undefined));
-  const source = sources.has("unknown") ? "unknown" : sources.has("table") ? "table" : sources.has("provider") ? "provider" : undefined;
-  if (started === undefined && cost === undefined && input === undefined) return null;
-
+export function FactsButton({ children }: { children: React.ReactNode }): JSX.Element {
+  const [open, setOpen] = useState(false);
   return (
-    <section>
-      <h3>
-        <span>Metrics</span>
-        <span className="count">{states.length} calls</span>
-      </h3>
-      <dl className="kv metrics">
-        {started !== undefined ? (
-          <>
-            <dt>started</dt>
-            <dd title={new Date(started).toISOString()}>{new Date(started).toLocaleString()}</dd>
-          </>
-        ) : null}
-        {spent !== undefined ? (
-          <>
-            <dt>in calls</dt>
-            <dd>{duration(spent)}</dd>
-          </>
-        ) : null}
-        {cost !== undefined ? (
-          <>
-            <dt>cost</dt>
-            <dd>
-              ${cost.toFixed(4)}
-              {/* Only when it is NOT the provider's own charge. A silent estimate is the one that
-                  gets quoted back as a fact. */}
-              {source !== undefined && source !== "provider" ? (
-                <span className="chip chip-warn" title="not the provider's own charge">
-                  {source === "table" ? "price table" : "unknown"}
-                </span>
-              ) : null}
-            </dd>
-          </>
-        ) : null}
-        {input !== undefined ? (
-          <>
-            <dt>in</dt>
-            <dd title="total billed input, including cache reads and writes">{count(input)}</dd>
-          </>
-        ) : null}
-        {output !== undefined ? (
-          <>
-            <dt>out</dt>
-            <dd>
-              {count(output)}
-              {reasoning !== undefined ? <span className="sub"> · {count(reasoning)} thinking</span> : null}
-            </dd>
-          </>
-        ) : null}
-        {cached !== undefined || written !== undefined ? (
-          <>
-            <dt>cache</dt>
-            <dd title="read at roughly a tenth of the base rate; written above it">
-              {cached !== undefined ? `${count(cached)} read` : "—"}
-              {written !== undefined ? ` · ${count(written)} written` : ""}
-            </dd>
-          </>
-        ) : null}
-      </dl>
-    </section>
-  );
-}
-
-/**
- * The inspector when the address bar is standing on a RUN.
- *
- * The context panel describes the last element of the path, and once the path can end on a run, the
- * thing to describe is that run: what it was called with, how it went, what it cost. Those are per
- * EXECUTION facts, and the task panel below cannot carry them — a task that looped four times has
- * one status and four runs, and averaging them is how a failed pass disappears.
- *
- * The task is still here, underneath. A run belongs to one, and starting, cancelling and the live
- * event stream are the task's business rather than the run's.
- */
-export function RunInspector({
-  node,
-  stateId,
-  detail,
-  stream,
-  states,
-  depth,
-  onBack,
-  onShowTask,
-  onStart,
-  onCancel,
-  onOpenState,
-  onOpenConfig,
-}: {
-  /** The run being described. Null ⇒ the trail names an instance this task no longer has. */
-  node: InstanceNode | null;
-  /** The state that run entered — what the "open its file" link opens. */
-  stateId: string;
-  detail: TaskDetail | null;
-  stream: string[];
-  /** The task's session rows, from which this run's own metrics are taken. */
-  states: SessionRef[];
-  /** How deep the walk is, so Back can say what it goes back to. */
-  depth: number;
-  onBack: () => void;
-  /** Describe the TASK instead — the third subject of this column, and the only one with no click. */
-  onShowTask: () => void;
-  onStart: () => void;
-  onCancel: () => void;
-  onOpenState: (stateId: string) => void;
-  /**
-   * Read the configuration this run resolves against, in this column — see `configPanel.tsx`.
-   *
-   * A run names an executor and a model, and where those come from is one question further on. It is
-   * a link rather than a section because the answer is a whole document and this panel is about one
-   * execution; and it lands HERE rather than in Settings because leaving the run to find out what it
-   * ran under is exactly the trip this removes.
-   *
-   * Absent ⇒ no host holding a side panel, and the row is omitted rather than shown inert.
-   */
-  onOpenConfig?: (() => void) | undefined;
-}): JSX.Element {
-  const sig = node === null ? null : signatureOf(node);
-  // This run's own row, not the task's. `instanceId` is what tells four passes apart, and it is the
-  // whole reason these numbers are worth showing separately from the task's total.
-  const mine = node === null ? [] : states.filter((row) => row.instanceId === node.instanceId);
-  const took = node?.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
-  return (
-    <div className="inspector">
-      <div className="insp-crumb">
-        <button className="link back-arrow" onClick={onBack} title={depth > 1 ? "back to the run above" : "back to the state"}>
-          ←
-        </button>
-        <span className="state-id ellip">{sig?.label ?? sig?.name ?? stateId.split("/").pop()}</span>
-        <span className="sub">· the run</span>
-        <span className="grow" />
-        {detail !== null ? (
-          <button className="link" onClick={onShowTask} title="describe the task this run belongs to">
-            the task ↗
-          </button>
-        ) : null}
-      </div>
-
-      {node === null ? (
-        // Two different absences, and saying "it was re-run" about the first would be a bug report
-        // for something that is merely a round trip in flight.
-        <p className="empty">{detail === null ? "Reading the run…" : "That run is no longer in this task — it was re-run."}</p>
-      ) : (
-        <section>
-          <h3>
-            <span>This run</span>
-            <span className={`chip chip-${node.status === "completed" ? "ok" : node.status === "failed" ? "bad" : "warn"}`}>
-              {node.status.replace(/_/g, " ")}
-            </span>
-          </h3>
-          <dl className="kv">
-            <dt>state</dt>
-            <dd>
-              <button className="link ellip" onClick={() => onOpenState(node.stateId)} title="open its file">
-                {node.stateId}
-              </button>
-            </dd>
-            <dt>started</dt>
-            <dd title={new Date(node.startedAt).toISOString()}>{new Date(node.startedAt).toLocaleTimeString()}</dd>
-            {took !== undefined ? (
-              <>
-                <dt>took</dt>
-                <dd>{took}</dd>
-              </>
-            ) : null}
-            {/* What it was called with — the same values the card's signature previews, in full. */}
-            {(sig?.params ?? []).map((param) => (
-              <Fragment key={param.name}>
-                <dt className="ellip">{param.name}</dt>
-                <dd className="ellip" title={param.preview}>
-                  <code>{param.preview}</code>
-                </dd>
-              </Fragment>
-            ))}
-            {/* Last, and deliberately below the inputs: what a run was called with is a fact about
-                this execution, and the configuration is the ground all of them stand on. */}
-            {onOpenConfig !== undefined ? (
-              <>
-                <dt>config</dt>
-                <dd>
-                  <button className="link" onClick={onOpenConfig} title="read what this run resolves against">
-                    the effective configuration
-                  </button>
-                </dd>
-              </>
-            ) : null}
-          </dl>
-        </section>
-      )}
-
-      {mine.length > 0 ? <TaskMetrics states={mine} /> : null}
-
-      {detail !== null ? (
-        <TaskPanel detail={detail} stream={stream} onStart={onStart} onCancel={onCancel} onOpenState={onOpenState} />
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * The inspector when a task is what you clicked.
- *
- * The right column is a CONTEXT panel: it describes whatever you last clicked, and clicking a task
- * makes the task the context. Two things follow from that and neither was here before.
- *
- * **Back is always available.** It was a crumb rendered only when a state happened to be open, so a
- * task reached from anywhere else was a one-way trip — the column stayed on the task until you
- * clicked another file. It is now an arrow that is always there, and it RESTORES rather than
- * switches: `inspectFrom` remembers where the context came from, which matters because the links
- * below can move the open state out from under you.
- *
- * **It links out.** A task's whole shape is "these states, in this order", and every one of them is
- * a file you might want to open — most of all the one that just failed. Those links are what make
- * this a context panel rather than a status readout.
- */
-export function TaskInspector({
-  stateId,
-  detail,
-  stream,
-  states,
-  showing,
-  onBack,
-  onStart,
-  onCancel,
-  onOpenState,
-  onOpenStateAt,
-}: {
-  /** Where Back goes, for the label. Null ⇒ back to whatever file is open. */
-  stateId: string | null;
-  detail: TaskDetail | null;
-  stream: string[];
-  /** Every state the task ran, with its outcome — the panel's links out. */
-  states: SessionRef[];
-  /** Which instance's transcript the middle panel is showing, so the list says where you are. */
-  showing: string | null;
-  onBack: () => void;
-  onStart: () => void;
-  onCancel: () => void;
-  /** Open a state's file — the link back to authoring the thing that just ran. */
-  onOpenState: (stateId: string) => void;
-  /**
-   * Open one state THIS task ran, with that pass's transcript in it.
-   *
-   * One action rather than the two it replaced (read the transcript here / open the file there):
-   * "this is the state that failed" and "take me to it" are one thought.
-   */
-  onOpenStateAt: (stateId: string, instanceId: string) => void;
-}): JSX.Element {
-  const back = (
-    <button className="link back-arrow" onClick={onBack} title={stateId === null ? "Back" : `Back to ${stateId}`}>
-      ←
-    </button>
-  );
-  if (detail === null) {
-    return (
-      <div className="inspector">
-        <div className="insp-crumb">
-          {back}
-          <span className="sub">no task</span>
-        </div>
-        <p className="empty">That task could not be read.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="inspector">
-      <div className="insp-crumb">
-        {back}
-        <span className="state-id ellip">{detail.title}</span>
-        <span className="sub">· the task</span>
-      </div>
-
-      {states.length > 0 ? <TaskMetrics states={states} /> : null}
-
-      {states.length > 0 ? (
-        <section>
-          {/* In run order, because that is the shape of what happened. A row opens the state's FILE
-              and puts THIS run's pass through it in the transcript beside it — which is the move you
-              want when the answer to "what went wrong" turns out to be "the prompt". */}
-          <h3>
-            <span>States it ran</span>
-            <span className="count">{states.length}</span>
-          </h3>
-          <div className="task-states">
-            {states.map((row) => (
-              <div
-                key={row.instanceId}
-                className={`leaf-row task-state-row${row.instanceId === showing ? " sel" : ""}`}
-                onClick={() => onOpenStateAt(row.stateId, row.instanceId)}
-                title={`open ${row.stateId} and read this run's pass through it`}
-              >
-                <span className={`dot ${row.status ?? "unknown"}`} />
-                <span className="grow ellip">{row.stateId}</span>
-                {row.costUsd !== undefined ? <span className="cost">${row.costUsd.toFixed(3)}</span> : null}
-              </div>
-            ))}
+    <span className="facts-wrap">
+      <button type="button" className={`sp-icon facts-btn${open ? " on" : ""}`} aria-expanded={open} title="About this" onClick={() => setOpen((v) => !v)}>
+        <Icon name="info" />
+      </button>
+      {open ? (
+        <>
+          <span className="facts-scrim" onClick={() => setOpen(false)} />
+          <div className="facts-pop" role="dialog" aria-label="About this">
+            {children}
           </div>
-        </section>
+        </>
       ) : null}
-
-      <TaskPanel
-        detail={detail}
-        stream={stream}
-        onStart={onStart}
-        onCancel={onCancel}
-        onOpenState={onOpenState}
-      />
-    </div>
+    </span>
   );
 }

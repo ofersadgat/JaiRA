@@ -30,7 +30,8 @@
  */
 import { useCallback, useEffect, useMemo, useState, type JSX, type MouseEvent as ReactMouseEvent } from "react";
 import type { InstanceNode } from "@jaira/shared/browser";
-import { paletteOf, type RailLane, type RailStep } from "./rail";
+import { paletteOf, railOf, type RailLane, type RailStep } from "./rail";
+import { autoFold, compact, type DisplayItem, type FoldCandidate, type VisibleRow } from "./stepCompaction";
 import { RailedRows } from "./railView";
 import { headerToneOf, surfaceKindOf, type HeaderTone } from "./stateSurface";
 import { isLiveNode, metaOf } from "./sessionPanels";
@@ -74,9 +75,12 @@ export function keyOfNode(node: InstanceNode): string {
   return node.instanceId;
 }
 
-/** How many states a lane is holding — every descendant, not just its own children. */
-function countOf(node: InstanceNode): number {
-  return node.children.reduce((total, child) => total + 1 + countOf(child), 0);
+/**
+ * How many STEPS a lane is holding — the leaves under it, which is what a folded row's tile says
+ * ("12 steps"). Its composites are not counted: they are the drawing's structure, not work that ran.
+ */
+function stepsIn(node: InstanceNode): number {
+  return node.children.reduce((total, child) => total + (child.children.length === 0 ? 1 : stepsIn(child)), 0);
 }
 
 /**
@@ -284,6 +288,34 @@ function LoopTag({ times, onToggle }: { times: number; onToggle: () => void }): 
 }
 
 /**
+ * The index fitted to a box of fixed height — see `stepCompaction.ts` for the three levels.
+ *
+ * Handed in by a host that has a box to fill (the side panel's Steps tab); absent, the index draws
+ * every row and folds only by hand, as it always has.
+ */
+export interface RunIndexFit {
+  /** How many rows the box holds. */
+  capacity: number;
+  /**
+   * The step being viewed, by {@link keyOfNode}: the sheet at the conversation's centre, or the live
+   * one while it follows the bottom. Absent ⇒ the last step, which is usually the live one.
+   */
+  current?: string | undefined;
+  /** Every instance with a sheet on screen in the conversation beside the index. */
+  onScreen?: ReadonlySet<string> | undefined;
+  /** Whether a conversation is beside the index at all. Without one, off the path starts folded. */
+  convo: boolean;
+}
+
+/** A fold candidate's span over the WHOLE step list: its first and last step. */
+interface Span {
+  key: string;
+  first: number;
+  last: number;
+  loop: boolean;
+}
+
+/**
  * The Instances section: the run's shape, and a bookmark on every row.
  *
  * `onGoTo` is what makes a label a bookmark. Absent — a host with no conversation beside it — the
@@ -295,7 +327,13 @@ export function RunIndex({
   asking,
   onGoTo,
   onCut,
+  fit,
+  heading = true,
 }: {
+  /** Fit the rows to a box — see {@link RunIndexFit}. */
+  fit?: RunIndexFit | undefined;
+  /** Whether the section draws its own `Instances` heading. A host with its own head says `false`. */
+  heading?: boolean;
   /**
    * The two verbs of a cut (`cut.ts`), on a row's menu — the same point the conversation's entered
    * row offers, from the reading that surveys the run. Absent ⇒ a row has no menu.
@@ -315,9 +353,19 @@ export function RunIndex({
   asking?: string | undefined;
   onGoTo?: ((node: InstanceNode) => void) | undefined;
 }): JSX.Element {
-  const [shutLanes, setShutLanes] = useState<ReadonlySet<string>>(() => new Set());
-  const [shutLoops, setShutLoops] = useState<ReadonlySet<string>>(() => new Set());
+  const [ownLanes, setOwnLanes] = useState<ReadonlySet<string>>(() => new Set());
+  const [ownLoops, setOwnLoops] = useState<ReadonlySet<string>>(() => new Set());
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  /**
+   * Fitted, a fold made by hand is a STANDING instruction rather than the state itself: it sticks,
+   * stands aside while the current step is inside it, and holds again once the current step leaves
+   * (the person's ruling, 2026-09-24). So the hand is kept as two sets — shut and opened — and what is
+   * drawn is worked out from them every time the current step moves. See `autoFold`.
+   */
+  const [handShut, setHandShut] = useState<ReadonlySet<string>>(() => new Set());
+  const [handOpen, setHandOpen] = useState<ReadonlySet<string>>(() => new Set());
+  /** `⋯` placeholders the person opened: their rows are drawn whatever the height. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   /**
    * The clock the live rows read. Every state on the active path is live — the leaf that is running
    * AND the composites above it, which entered earlier and are still open — so a lane's parent shows
@@ -327,7 +375,99 @@ export function RunIndex({
    */
   const now = useNow(anyLive(instances));
 
+  /** Every foldable lane and loop over the WHOLE run, with its span — what level 1 reasons about. */
+  const spans = useMemo<{ list: Span[]; whole: RailStep[] }>(() => {
+    const whole = indexOf(instances, new Set());
+    const list: Span[] = [];
+    for (const [i, step] of whole.steps.entries()) {
+      const row = whole.rows[i];
+      if (row?.kind !== "state") continue;
+      // The run's own root never folds on its own: it is the whole task behind one row.
+      if (row.lane !== undefined && step.at.length > 1) {
+        const lane = row.lane;
+        let last = i;
+        while (last + 1 < whole.steps.length && whole.steps[last + 1]!.at.includes(lane)) last++;
+        list.push({ key: lane, first: i, last, loop: false });
+      }
+      if (row.loop?.head === true) {
+        const key = row.loop.key;
+        const members = whole.rows.flatMap((other, j) => (other.kind === "state" && other.loop?.key === key ? [j] : []));
+        list.push({ key, first: members[0]!, last: members[members.length - 1]!, loop: true });
+      }
+    }
+    return { list, whole: whole.steps };
+  }, [instances]);
+
+  const fitted = useMemo<{ lanes: ReadonlySet<string>; loops: ReadonlySet<string> } | undefined>(() => {
+    if (fit === undefined) return undefined;
+    const { list, whole } = spans;
+    const found = fit.current === undefined ? -1 : whole.findIndex((step) => step.key === fit.current);
+    const current = found >= 0 ? found : whole.length - 1;
+    const onScreen = fit.onScreen ?? new Set<string>();
+    const candidates: FoldCandidate[] = list.map((span) => {
+      let holdsOnScreen = false;
+      for (let i = span.first; i <= span.last && !holdsOnScreen; i++) holdsOnScreen = onScreen.has(whole[i]!.key);
+      return {
+        key: span.key,
+        distance: current < span.first ? span.first - current : current > span.last ? current - span.last : 0,
+        holdsCurrent: current >= span.first && current <= span.last,
+        holdsOnScreen,
+      };
+    });
+    const loopKeys = new Set(list.filter((span) => span.loop).map((span) => span.key));
+    const split = (shut: ReadonlySet<string>): { lanes: Set<string>; loops: Set<string> } => {
+      const lanes = new Set<string>();
+      const loops = new Set<string>();
+      for (const key of shut) (loopKeys.has(key) ? loops : lanes).add(key);
+      return { lanes, loops };
+    };
+    // The rows a fold set leaves: the step list with its loops merged, less what a shut lane holds.
+    const count = (shut: ReadonlySet<string>): number => {
+      const { lanes, loops } = split(shut);
+      const rail = railOf(indexOf(instances, loops).steps).rows;
+      return rail.filter(
+        (row) =>
+          !row.open.some((lane) => lanes.has(lane.key)) &&
+          !(row.exit !== undefined && lanes.has(row.exit.lane.key) && row.enter === undefined),
+      ).length;
+    };
+    return split(autoFold({ candidates, convo: fit.convo, capacity: fit.capacity, handShut, handOpen, count }));
+  }, [fit, spans, instances, handShut, handOpen]);
+
+  const shutLanes = fitted?.lanes ?? ownLanes;
+  const shutLoops = fitted?.loops ?? ownLoops;
+
+  /** A fold by hand. Fitted, it becomes a standing instruction; otherwise it is the fold itself. */
+  const toggleFold = useCallback(
+    (key: string, loop: boolean): void => {
+      if (fit !== undefined) {
+        const shutNow = (loop ? shutLoops : shutLanes).has(key);
+        setHandShut((was) => {
+          const next = new Set(was);
+          if (shutNow) next.delete(key);
+          else next.add(key);
+          return next;
+        });
+        setHandOpen((was) => {
+          const next = new Set(was);
+          if (shutNow) next.add(key);
+          else next.delete(key);
+          return next;
+        });
+        return;
+      }
+      (loop ? setOwnLoops : setOwnLanes)((was) => {
+        const next = new Set(was);
+        if (!next.delete(key)) next.add(key);
+        return next;
+      });
+    },
+    [fit, shutLanes, shutLoops],
+  );
+
   const { steps, rows } = useMemo(() => indexOf(instances, shutLoops), [instances, shutLoops]);
+  /** The rail's own rows over the same steps — what a placeholder's members index into. */
+  const railRows = useMemo(() => railOf(steps).rows, [steps]);
   /**
    * ⚠️ From the RUN, not from the rows on screen, and for two reasons at once.
    *
@@ -358,13 +498,7 @@ export function RunIndex({
     return { lanes, byKey, folds };
   }, [instances]);
 
-  const toggleLoop = useCallback((key: string): void => {
-    setShutLoops((was) => {
-      const next = new Set(was);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
-  }, []);
+  const toggleLoop = useCallback((key: string): void => toggleFold(key, true), [toggleFold]);
 
   const foldable = useCallback((key: string) => lanes.has(key), [lanes]);
   /** A lane with nothing under it cannot fold, so its mark does what its label does. */
@@ -377,7 +511,26 @@ export function RunIndex({
   );
 
   const allShut = folds.length > 0 && folds.every((key) => shutLanes.has(key));
-  const foldAll = (): void => setShutLanes(allShut ? new Set() : new Set(folds));
+  const foldAll = (): void => {
+    if (fit === undefined) {
+      setOwnLanes(allShut ? new Set() : new Set(folds));
+      return;
+    }
+    // Fitted, "all" is said by hand too — and still stands aside for the current step's own path.
+    setHandShut(allShut ? new Set() : new Set(folds));
+    setHandOpen(allShut ? new Set(folds) : new Set());
+  };
+  /** The rail's knot folds too: say it the same way as the chevron. */
+  const onShut = useCallback(
+    (next: ReadonlySet<string>): void => {
+      if (fit === undefined) {
+        setOwnLanes(next);
+        return;
+      }
+      for (const key of new Set([...next, ...shutLanes])) if (next.has(key) !== shutLanes.has(key)) toggleFold(key, false);
+    },
+    [fit, shutLanes, toggleFold],
+  );
 
   const row = (index: number, folded: boolean): JSX.Element | null => {
     const what = rows[index];
@@ -410,7 +563,7 @@ export function RunIndex({
 
     const node = what.node;
     const tone = toneOf(node, asking);
-    const held = countOf(node);
+    const held = stepsIn(node);
     const name = nameOf(node);
     const label = onGoTo === undefined ? undefined : `go to ${name} in the conversation`;
     const inside = (
@@ -422,7 +575,7 @@ export function RunIndex({
         ) : null}
         {folded ? (
           <span className="rail-mark-count">
-            {held} state{held === 1 ? "" : "s"}
+            {held} step{held === 1 ? "" : "s"}
           </span>
         ) : null}
         {metaOf(node, now) !== "" ? <span className="rail-mark-meta">{metaOf(node, now)}</span> : null}
@@ -434,6 +587,9 @@ export function RunIndex({
       <div
         className={[
           "rail-mark",
+          // A folded state is a TILE — an edge, like a closed folder — beside the stacked knot the rail
+          // draws for it (the person's pick, 2026-09-24: B's knot with D's tile).
+          folded ? "rolled" : "",
           tone !== undefined ? `tb ${tone}` : "",
           what.loop !== undefined ? "in-loop" : "",
           node.superseded ? "gone" : "",
@@ -467,13 +623,7 @@ export function RunIndex({
             type="button"
             className={`rail-mark-chev${folded ? "" : " open"}`}
             aria-label={`${folded ? "Expand" : "Collapse"} ${name}`}
-            onClick={() =>
-              setShutLanes((was) => {
-                const next = new Set(was);
-                if (!next.delete(what.lane!)) next.add(what.lane!);
-                return next;
-              })
-            }
+            onClick={() => toggleFold(what.lane!, false)}
           >
             <Icon name="chevron" />
           </button>
@@ -517,6 +667,131 @@ export function RunIndex({
     [rows, here],
   );
 
+  /** The current step in the rows as fitted: the one asked for, else the last. */
+  const currentKey = fit === undefined ? undefined : (fit.current ?? steps[steps.length - 1]?.key);
+  const fitRows = useMemo(() => {
+    if (fit === undefined) return undefined;
+    return (visible: readonly VisibleRow[]): DisplayItem[] => {
+      let at = visible.findIndex((one) => one.row.step !== undefined && steps[one.row.step]?.key === currentKey);
+      if (at < 0) {
+        // Inside a folded loop, or not drawn at all: the nearest row that stands for it.
+        const inLoop = rows.findIndex((row) => row.kind === "loop" && row.members.some((member) => keyOfNode(member) === currentKey));
+        at = inLoop < 0 ? -1 : visible.findIndex((one) => one.row.step === inLoop);
+      }
+      if (at < 0) at = visible.length - 1;
+      return compact(visible, at, fit.capacity, { expanded });
+    };
+  }, [fit, steps, rows, currentKey, expanded]);
+
+  /** Go to the TOP of a state named on a folded line — its own row in the conversation. */
+  const goTop = (key: string): void => {
+    const node = byKey.get(key);
+    if (node !== undefined) onGoTo?.(node);
+  };
+
+  const renderGap = (item: Extract<DisplayItem, { kind: "gap" }>): JSX.Element => {
+    // What it passes over, by name: the outermost states among its rows, each a way to the top of it.
+    const members = item.members.flatMap((index) => {
+      const step = railRows[index]?.step;
+      return step === undefined ? [] : [{ step: steps[step]!, row: rows[step]! }];
+    });
+    const depthOf = (step: RailStep): number => step.at.length + (step.opens ? -1 : 0);
+    const top = Math.min(...members.map((one) => depthOf(one.step)));
+    const named = members.filter((one) => depthOf(one.step) === top);
+    const count = members.reduce((sum, one) => sum + (one.row.kind === "loop" ? one.row.members.length : one.step.opens ? 0 : 1), 0);
+    return (
+      <div className="rail-mark rail-gap">
+        <span className="rail-mark-chev pad" aria-hidden="true" />
+        <button
+          type="button"
+          className="rail-gap-go"
+          title={`show the ${count} step${count === 1 ? "" : "s"} here`}
+          onClick={() => setExpanded((was) => new Set([...was, item.key]))}
+        >
+          <span className="rail-gap-glyph">⋯</span>
+          {count} step{count === 1 ? "" : "s"}
+        </button>
+        <span className="rail-gap-names">
+          {named.slice(0, 3).map((one, i) => (
+            <span key={one.step.key} className="rail-gap-name-wrap">
+              {i > 0 ? <span className="rail-crumb-sep">·</span> : null}
+              <button
+                type="button"
+                className="rail-gap-name"
+                title={`go to the top of ${one.step.stateId}`}
+                disabled={onGoTo === undefined}
+                onClick={() => goTop(one.row.kind === "loop" ? keyOfNode(one.row.members[0]!) : one.step.key)}
+              >
+                {one.step.stateId}
+              </button>
+            </span>
+          ))}
+          {named.length > 3 ? <span className="rail-crumb-sep">+{named.length - 3}</span> : null}
+        </span>
+      </div>
+    );
+  };
+
+  const renderCrumb = (item: Extract<DisplayItem, { kind: "crumb" }>): JSX.Element => {
+    const deepest = byKey.get(item.lanes[item.lanes.length - 1]?.key ?? "");
+    return (
+      <div className="rail-mark rail-crumbs-mark">
+        <span className="rail-mark-chev pad" aria-hidden="true" />
+        <span className="rail-crumbs">
+          {item.lanes.map((lane, i) => (
+            <span key={lane.key} className="rail-crumb-wrap">
+              {i > 0 ? <span className="rail-crumb-sep">›</span> : null}
+              <button
+                type="button"
+                className={i === item.lanes.length - 1 ? "rail-crumb last" : "rail-crumb"}
+                title={`go to the top of ${lane.stateId}`}
+                disabled={onGoTo === undefined}
+                onClick={() => goTop(lane.key)}
+              >
+                {lane.stateId}
+              </button>
+            </span>
+          ))}
+        </span>
+        {deepest !== undefined && metaOf(deepest, now) !== "" ? <span className="rail-mark-meta">{metaOf(deepest, now)}</span> : null}
+      </div>
+    );
+  };
+
+  const drawn =
+    instances.length === 0 ? (
+      <p className="empty">No run yet.</p>
+    ) : (
+      <RailedRows
+        className="run-index"
+        steps={steps}
+        renderStep={(index) => row(index, false)}
+        renderRolled={(lane) => {
+          const at = steps.findIndex((step) => step.key === lane.key);
+          return at < 0 ? null : row(at, true);
+        }}
+        mark={mark}
+        rowClass={rowClass}
+        palette={palette}
+        shut={shutLanes}
+        onShut={onShut}
+        foldable={foldable}
+        onPick={onPick}
+        compact={fitRows}
+        renderGap={renderGap}
+        renderCrumb={renderCrumb}
+      />
+    );
+
+  if (!heading) {
+    return (
+      <>
+        {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+        {drawn}
+      </>
+    );
+  }
+
   return (
     <section>
       {/* The fold-all lives in the heading, which is the row already reserved for saying what this
@@ -537,22 +812,7 @@ export function RunIndex({
         ) : null}
       </h3>
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
-      {instances.length === 0 ? <p className="empty">No run yet.</p> : <RailedRows
-        className="run-index"
-        steps={steps}
-        renderStep={(index) => row(index, false)}
-        renderRolled={(lane) => {
-          const at = steps.findIndex((step) => step.key === lane.key);
-          return at < 0 ? null : row(at, true);
-        }}
-        mark={mark}
-        rowClass={rowClass}
-        palette={palette}
-        shut={shutLanes}
-        onShut={setShutLanes}
-        foldable={foldable}
-        onPick={onPick}
-      />}
+      {drawn}
     </section>
   );
 }

@@ -194,7 +194,7 @@ describe("the state editor on the three kinds of file", () => {
   it("draws a built-in as read-only, with the two overrides and no Save", () => {
     const html = editor(source({ builtIn: { layers: ["system"] } }));
     expect(html).toContain("built in · read-only");
-    expect(html).toContain("Override for all projects");
+    expect(html).toContain("Edit a copy in Shared");
     expect(html).toContain("Override here");
     // The form is the inert reading, and the bar that holds Save and Revert is not drawn at all.
     expect(html).toContain("<fieldset");
@@ -318,7 +318,7 @@ describe("the tree's third root", () => {
     const items = builtInItems(state, root, act);
     expect(items.map((i) => i.label)).toEqual([
       "Open",
-      "Override for all projects",
+      "Edit a copy in Shared",
       "Override here",
       "Copy state id",
       "Copy path",
