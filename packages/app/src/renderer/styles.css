@@ -12731,6 +12731,17 @@ fieldset.reading {
   height: auto;
   min-height: 0;
 }
+/* Monaco assumes the page's default text wrapping and inherits whatever it is set inside instead. In
+   a fence in the markdown editor that is CodeMirror's `.cm-lineWrapping` — `white-space:
+   break-spaces` and `word-break: break-word` — and its line-number cells are sized to N digits and
+   rounded to a whole pixel, so `10` overflowed its 14px cell by a fraction, broke between its digits
+   and drew as `1` over `0`. Monaco's own rules (`.view-lines` and the rest) are more specific, so this only restores the
+   default underneath them. */
+.monaco-editor {
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+}
 .vv-media {
   display: block;
   max-width: 100%;
