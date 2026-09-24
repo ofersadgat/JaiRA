@@ -34,6 +34,7 @@ import {
   chosenWidths,
   describeAddition,
   entriesToRemember,
+  parseMcpSubject,
   type ApprovalScope,
   type ApprovalPermissionSetTarget,
   type CommandApproval,
@@ -301,7 +302,13 @@ export interface WhatChoice {
   key: string;
   /** The first asking part that offers these widths, for its colour. */
   part: number;
-  options: Array<{ width: string; /** The program alone: "every `git` command". */ program: boolean }>;
+  options: Array<{
+    width: string;
+    /** The program alone: "every `git` command". */
+    program: boolean;
+    /** An MCP tool's server, for its wider width: "every `figma` tool". */
+    server?: string;
+  }>;
   chosen: string;
 }
 
@@ -342,7 +349,13 @@ export function whatChoices(approval: CommandApproval, chosen: ChosenWidths = {}
     out.push({
       key,
       part: index,
-      options: part.widths.map((width, at) => ({ width, program: part.widths.length > 1 && at === part.widths.length - 1 && !/\s/.test(width) })),
+      options: part.widths.map((width, at) => {
+        // A call to an MCP tool is one part whose widths are the tool and its server — the server is no
+        // program, and reads as every tool of it.
+        const server = part.kind === "mcp" && at > 0 ? parseMcpSubject(width)?.server : undefined;
+        if (server !== undefined) return { width, program: false, server };
+        return { width, program: part.kind !== "mcp" && part.widths.length > 1 && at === part.widths.length - 1 && !/\s/.test(width) };
+      }),
       chosen: picked !== undefined && part.widths.includes(picked) ? picked : part.widths[0]!,
     });
   });

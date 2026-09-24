@@ -3,81 +3,84 @@ id: ui/surfaces/settings-files
 type: ui-surface
 status: shipped
 updated: 2026-09-23
-kind: screen
-realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/absence-is-stated, ux/patterns/verbs-on-the-thing-itself]
+kind: panel
+realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/absence-is-stated, ux/patterns/verbs-on-the-thing-itself, ux/patterns/preview-beside-the-setting]
 serves: [product/share-processes-across-projects, product/find-out-why-the-app-misbehaves, product/keep-track-of-everything]
-components: [ui/components/settings-header, ui/components/settings-field, ui/components/chip-box, ui/components/switch]
-mockups: [ui/assets/settings-files/default.html, ui/assets/settings-files/success.html, ui/assets/settings-files/empty.html, ui/assets/settings-files/disabled.html]
-siblings: [ui/surfaces/settings-view, ui/surfaces/settings-data, ui/surfaces/settings-appearance]
+components: [ui/components/settings-field, ui/components/switch]
+mockups: [ui/assets/settings-files/default.html, ui/assets/settings-files/success.html, ui/assets/settings-files/loading.html, ui/assets/settings-files/disabled.html]
+siblings: [ui/surfaces/settings-appearance, ui/surfaces/settings-view]
 ---
 
 # Settings files
 
-The Files page of the Settings room, in its `Project & shared` group: three sections that say which paths the file tree hides, a shared list for everyone who opens the project and a personal list for this person alone, a switch that shows JaiRA's own `system/` directory, and every rule in the order it is applied. Its head reads `Files` and `What the Files tree leaves out.` followed by the layer sentence, with the [layer switch](../components/settings-header.md) at the top-right, and it replaces whichever page was showing.
+The `Files tree` section, the last section of the [Appearance](settings-appearance.md) page: every rule that decides what the Files tree leaves out, with what each rule hides in THIS root — counted from one walk of it — where it came from, and a switch. It replaced the Files page (2026-09-23), whose chips could say a pattern was a rule but not what it hid: `**/build` stayed a default for months while every folder it hid in this repository was a workflow state's snapshot that `.jaira/system` already hid. It is drawn by `FilesTreeSection` in `filesTreePane.tsx`, and `data-part="files-tree"` is what the sidebar's accordion lists.
 
-## The two lists read first, the system switch second, and the combined order last
+## The layers add to one list, and the section draws it whole
 
-- **Section.** Each of the three is a quiet sentence-case heading, its hint behind an `ⓘ`, over one bordered card of [settings-field](../components/settings-field.md) rows.
-- **Hidden in the tree.** Two settings rows. `Shared` is led by a switch: on, the layer being edited states its own list; off, it shows the defaults dimmed and the layer inherits them — the switch is what the old Reset button did. `Yours` is kept in this person's own settings and has no switch. Each control is a [chip-box](../components/chip-box.md) on the right-hand rail.
-- **JaiRA's own directory.** One row, `Show system/`, whose control is a [switch](../components/switch.md) and whose hint says what the switch is doing.
-- **In effect.** Every rule as a chip in one wrapping line with no box around it, the shared list first and the personal list after, each chip ending in its origin word.
+`files.hidden` concatenates across the layers: the built-in defaults first, then `Shared`, `This project` and `Just you`, each layer's list being what it ADDS. Later rules win, so `!pattern` puts back what an earlier rule hid, and a folder that matches takes its contents with it — the walk never goes inside a hidden folder, so a `!` for something inside one puts back nothing.
 
-A rule chip holds a mark, the pattern in `.data-text` and an end part:
+- **Hidden in the tree.** One settings row, key `files.hidden`, led by the set / not set switch of the layer being edited. Its control says how many rules that layer adds. Off, the layer adds nothing and every rule it wrote goes.
+- **The rule list.** A bordered box with a head row — `Pattern` · `What it hides here` · `From` · the switch column — then one fold per group, in the order the rules apply: `JaiRA's own files`, `Secrets`, `Version control`, `Dependencies`, `Build output`, then `Added in Shared`, `Added in this project`, `Added just for you` for each layer that adds a rule. A fold head is a chevron, the group's name and `{n} rules · hides {amount}`, with `· puts back {amount}` and `· {n} off` where they apply.
+- **The add line.** Under the box: an input and `Add`. As a pattern is typed, a preview under it reads what the rule would do if it were added last.
+- **Why is a path hidden?** A wide row with an input; the answer is a line under it.
+- **Show system/.** A row with a switch, for this person alone: on, their own layer puts back `system` and `.jaira/system`.
 
-| Rule | Mark | Ground | End |
-| --- | --- | --- | --- |
-| Hide | `◌` in `--dim` | `--fill-ghost-hover` | `✕` when it can be removed, else the origin word |
-| Reveal, written `!{pattern}` | `◉` in `--accent`; the `!` is not drawn | `--tint-ok` | the same |
-| Default, while the shared list is not stated | `◌` | none, a 1px dashed `--line` border | `default` in `.app-secondary` |
+A rule line:
 
-## The lists show defaults, stated rules or no rules, and lock while a write is in flight
+| Part | Shows |
+| --- | --- |
+| Pattern | `.data-text`; a leading `!` in `--ok`, and a `puts back` chip on the `--tint-ok` ground |
+| What it hides here | `{amount}` (`8 folders`, `1 file`, `2 folders and 1 file`) over the first three matches and `+{rest}` in `.data-secondary`; `nothing here` in `.app-absent` when it decides nothing |
+| Note | a `--tint-warn` line where a rule earns one: `every match is inside .jaira/system, which is already hidden`, or `puts back nothing: {folder} is hidden by {rule}, and a hidden folder takes its contents with it` |
+| From | a pill: `built in` · `shared` · `this project` · `just you`; the edited layer's own in the accent |
+| Switch | on while the rule is in effect |
+
+A layer that switches off a rule it did not write writes `!pattern` — and that `!` is drawn as the rule's own line, off, struck through, reading `off here, so {layer} shows it (writes !pattern)`, not as a second rule of the layer's. A rule a layer read AFTER the one being edited has the last word on cannot be changed from here, and its switch is disabled with a tooltip naming the layer to edit.
+
+## The list folds what hides nothing, and says when it is partial
 
 | State | Surface shows | Mockup |
 | --- | --- | --- |
-| default | The layer states no list: the shipped patterns are drawn as dashed `default` chips with no `✕`, both in `Shared` and in `In effect`, and no Reset button. | [default.html](../assets/settings-files/default.html) |
-| success | A stated shared list with `✕` on each chip, a personal list holding `!system` as a green reveal chip, the switch on, and Reset under the combined order. | [success.html](../assets/settings-files/success.html) |
-| empty | The shared list is stated as empty and the personal list is empty: both boxes hold only their add field, and `In effect` reads `No rules: every root shows everything, system/ included.` | [empty.html](../assets/settings-files/empty.html) |
-| loading | Cannot occur as its own look: the lists arrive with the window's settings. | |
-| error | Not a look of its own: a write that fails is reported by the [error-notice](error-notice.md) and the chips stay as they were. | |
-| disabled | While a shared-list change or any other write in the window is in flight: the layer switch, both add fields, the system switch and Reset are inert, and every chip shows its origin word in place of `✕`. | [disabled.html](../assets/settings-files/disabled.html) |
+| default | Every group that hides something open, the rest folded; a rule switched off here drawn off; a rule whose only matches are under `.jaira/system` noted. | [default.html](../assets/settings-files/default.html) |
+| success | A pattern typed with its preview under the add line, and a path answered under `Why is a path hidden?`. | [success.html](../assets/settings-files/success.html) |
+| loading | The box holds `reading the tree…` until the walk answers; the rows around it are drawn. | [loading.html](../assets/settings-files/loading.html) |
+| capped | The walk ran out of its budget (1.5 s or 60,000 entries): every amount reads `at least …`. | |
+| error | The box holds the reason the report could not be read; a refused `why` (a full path outside the root) is the answer line, in `--bad`. | |
+| disabled | While a write is in flight: every switch, the add line and the system switch are inert. | [disabled.html](../assets/settings-files/disabled.html) |
 
-## Every add and remove is written at once
+A group that hides nothing starts folded unless a layer switched one of its rules off; a fold the person opened or closed stays that way while the page is open.
+
+## Every switch writes the layer's whole document at once
 
 | On | Does | Feedback |
 | --- | --- | --- |
-| Typing a pattern, then Enter or leaving the field | Appends it to that list; an empty entry or a bare `!` adds nothing | A new chip before the field, and the tree re-reads |
-| Escape in the add field | Clears the typed text | The placeholder returns |
-| The first add to a list shown as defaults | Writes every default with the new pattern, so nothing the defaults hid appears | The dashed chips become removable chips and the row's switch turns on |
-| `✕` on a chip | Removes that rule; removing the last shared rule states an empty list, which shows everything | The chip goes from its box and from `In effect` |
-| The system switch | Adds or removes `!system` at the end of the personal list | The hint changes and a reveal chip appears or goes |
-| `Shared`'s switch, off | Removes the layer's list, with no confirmation | Dashed `default` chips return, dimmed |
+| A rule's switch, off, on a rule another layer wrote | Appends `!pattern` to the edited layer | The line goes off and says what it writes; the report re-reads |
+| The same switch, on | Removes that `!` (or, where a lower layer had switched it off, writes `pattern`) | The line comes back on |
+| A rule's switch, off, on the edited layer's own rule | Removes it from the layer | The line goes |
+| `Hidden in the tree`'s switch, off | Removes the layer's `files.hidden` — never writes `[]` — and `files` with it when nothing else is in it | The layer's group goes |
+| Typing in the add line | After a 250 ms pause, asks `files:hiddenReport` with the pattern as `extra` | `would hide {amount}: a, b, +{rest}`, `would put back …` or `… nothing here` |
+| Enter, or `Add` | Appends the pattern to the edited layer; a blank, a bare `!` or a rule the layer already has adds nothing | The input clears and the line appears in its group |
+| Typing in the why line | After a 250 ms pause, asks `files:whyHidden` | `hidden by {rule}, {origin}, in {group}: its folder {folder} matches`, `not hidden: {rule}, {origin}, puts it back`, or `not hidden` |
+| `Show system/` | Adds or removes `!system` and `!.jaira/system` in the person's own layer | The hint changes |
 
-## The copy says where each list is kept and who sees it
+## The copy
 
 | Where | String |
 | --- | --- |
-| Section one | `Hidden in the tree` · `Glob patterns, matched against the path inside each root. A folder that matches takes its contents with it. Later rules win, so a !pattern below can put something back.` |
-| Shared row | `Shared`, key `files.hidden`; hint `What every root hides until someone says otherwise. Adding one keeps these.` while defaults show, else `Written in {the shared root's / this project's} {settings file}, so everyone who opens it sees the same tree.` |
-| Yours row | `Yours`, key `filesHidden`; hint `Applied after the shared list and kept out of it — in {personal settings file}, so it never arrives through a pull request.` |
-| Add fields | `+ pattern…` · `+ pattern, or !pattern to reveal…` |
-| Chip | tooltip `remove {pattern}` · origin words `default` · `shared` · `yours` |
-| Section two | `JaiRA's own directory` · `system/ holds the database, tasks, snapshots, logs and artifacts. Nobody authors it, so it is hidden — but reading what a run wrote is a fair thing to want when a run has gone wrong.` |
-| System row | `Show system/`; hint `Shown, for you alone. This is a `!system` rule in your own list.` or `Hidden — the default, and what almost everyone wants.`; switch name `shown` · `hidden` |
-| Section three | `In effect` · `Every rule, in the order it is applied. The last one to match a path decides.` · `No rules: every root shows everything, system/ included.` |
+| Section | `Files tree`; ⓘ `What the Files tree leaves out, and why. Built-in rules come first, then what Shared, this project and you add; the last rule to match a path decides.` |
+| Row | `Hidden in the tree`; `Later rules win, so a !pattern puts back something an earlier rule hid.`; ⓘ `A folder that matches takes its contents with it. Writes files.hidden.`; control `{layer} adds nothing` · `{layer} adds {n} rules` |
+| Add line | placeholder `pattern, or !pattern to put something back` · `Add` |
+| Why | `Why is a path hidden?` · `A path inside the tree's root, or a full path from a file manager.` · placeholder `packages/cli/dist/index.js` |
+| System row | `Show system/`; `Hidden — the default.` (ⓘ `It holds the database, tasks, snapshots and logs, which nobody authors.`) or `Shown, for you alone: a !system rule in your own list.` |
 
-## A person arrives from the Settings panel and returns to the tree to see the effect
+## What the walk counts
 
-- The sidebar's Settings panel lists `Files` under `Project & shared`, with or without a project open. With none open, the shared list is the shared root's.
-- Choosing another page or room leaves. Nothing is held unsaved, and the Files drawer already draws the new rules.
-- The personal list and the system switch follow the person into every project and stay editable on either layer.
+- One walk of one root — the project's checkout, or the shared root with no project open — breadth first, so a rule's samples are its shallowest matches.
+- Each path the tree would reach goes to the rule that DECIDES it, the last that matches. A hidden folder is one folder, and nothing under it is counted or walked. A `!` rule counts what it puts back: a path an earlier rule would have hidden.
+- After the visible tree, with what is left of the budget, it looks inside the folders JaiRA's own group hides, so a rule whose every match is there can say so.
 
-## The chip boxes wrap, and the combined order wraps with them
+## Narrow, a line stacks
 
-- Resize: chips wrap inside their box, and a long pattern ellipsises within its chip. Rows stack under their statement in a box 380px wide or less. Each section stops at 740px, and the combined order wraps within it.
-- Theme: chip grounds, the dashed border, the reveal tint and the marks are tokens in both themes.
-- Focus: nothing takes focus on entry. The order is the layer switch, each chip's `✕` then its box's add field, the system switch, then Reset. Chips in `In effect` take no focus.
-- Long content: the full default list is 18 chips and wraps onto several lines in both places it appears.
-
-## The screen departs from the direction in its reveal colour
-
-- A reveal chip's `◉` takes `--accent` on a `--tint-ok` ground, so one chip mixes the accent and success roles.
+- Below 520px of box width the head row goes, and each line puts its pattern, origin and switch across the top with what it hides under them.
+- Theme: every colour is a token or a tint of one, so the section reads in each palette and both modes.
+- Focus: the fold heads, each rule's switch in order, the add input and `Add`, the why input, the system switch.

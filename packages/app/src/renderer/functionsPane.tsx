@@ -38,7 +38,7 @@ import {
   type PermissionSetsView,
   type WorkflowLayer,
 } from "@jaira/shared/browser";
-import { configWriter } from "./configPane";
+import { configWriter, presetNamesOf } from "./configPane";
 import { Disclosure } from "./controls";
 import { Icon } from "./icons";
 import { RuleList } from "./executorTreePane";
@@ -46,14 +46,24 @@ import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 import { SettingsSection } from "./settingsLayout";
 import { modeMeta } from "./permissionSetRows";
+import { permissionSetLayersOf } from "./permissionSetsPane";
 
 export interface FunctionsProps {
   /** What the permission sets hold — the same read the pane above draws. Absent while it loads. */
   data: PermissionSetsView | null;
-  /** The layer the Tools page is showing: a project, the shared root, or what ships. */
-  layer: WorkflowLayer;
+  /**
+   * The layer the Tools page's switch is on. The table shows the permission sets that layer reads
+   * (`permissionSetLayersOf`), and a function's defaults are written into it.
+   */
+  layer: ConfigLayer;
   config: ConfigView | null;
   busy: boolean;
+  /**
+   * The settings layer a function's defaults write to, when it is not {@link layer}: the personal
+   * layer ("Just you") has settings and no permission sets of its own, so the table is read as the
+   * nearest layer sees it while the defaults are still written to you.
+   */
+  writeLayer?: ConfigLayer;
   /** Write a settings layer — what a function's defaults save through. */
   onSave: (layer: ConfigLayer, doc: unknown) => void;
   /** Agent runtimes this project configures — reachable as functions under their registry names. */
@@ -89,16 +99,12 @@ const WORKFLOW_FUNCTION_WHAT: Record<string, string> = {
 
 export function FunctionsSections(props: FunctionsProps): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
-  const columns = useMemo(() => columnsOf(props.data, props.layer), [props.data, props.layer]);
+  const columns = useMemo(() => columnsOf(props.data, props.data === null ? "base" : permissionSetLayersOf(props.layer, props.data.layers).reads), [props.data, props.layer]);
   const commands = useMemo(() => commandSubjectsOf(columns), [columns]);
   const toggle = (name: string): void => setOpen((current) => (current === name ? null : name));
 
-  const writableLayer: ConfigLayer | null = props.layer === "system" ? null : props.layer;
-  const writer =
-    props.config !== null ? configWriter(props.config, writableLayer ?? "base", props.busy || writableLayer === null, props.onSave) : null;
-  const detail = (name: string): JSX.Element => (
-    <FunctionDetail name={name} columns={columns} writer={writer} readOnly={writableLayer === null} onOpenSet={props.onOpenSet} />
-  );
+  const writer = props.config !== null ? configWriter(props.config, props.layer, props.busy, props.onSave) : null;
+  const detail = (name: string): JSX.Element => <FunctionDetail name={name} columns={columns} writer={writer} onOpenSet={props.onOpenSet} />;
 
   const workflowFunctions = [SMART_FUNCTION, ...COMPONENT_NAMES, ...props.agents];
 
@@ -204,7 +210,7 @@ export function FunctionsSections(props: FunctionsProps): JSX.Element {
             <RuleList
               rules={props.rules ?? []}
               known={[...BUILTIN_FUNCTIONS, ...props.agents.map((name) => ({ name, what: "agent — delegate this state to that runtime" }))]}
-              disabled={props.busy || props.layer === "system"}
+              disabled={props.busy}
               onChange={(next) => props.onRules(next.length > 0 ? next : undefined)}
             />
           </Disclosure>
@@ -272,31 +278,28 @@ function FunctionRow({
   );
 }
 
-/**
- * A function, opened: its defaults as rows of the schema form (read-only while the Tools page shows
- * what ships), and every permission set that uses it.
- */
+/** A function, opened: its defaults as rows of the schema form, and every permission set that uses it. */
 function FunctionDetail({
   name,
   columns,
   writer,
-  readOnly,
   onOpenSet,
 }: {
   name: string;
   columns: SetColumn[];
   writer: ReturnType<typeof configWriter> | null;
-  readOnly: boolean;
   onOpenSet: (id: string) => void;
 }): JSX.Element {
-  const schema = defaultsSchemaOf(name);
+  const declared = defaultsSchemaOf(name);
+  // The judge's model may name a preset (`resolveModelField`), so its box suggests the presets in effect.
+  const schema = name === SMART_FUNCTION && declared !== undefined && writer !== null ? withPresetSuggestions(declared, presetNamesOf(writer.effective)) : declared;
   const users = usersOf(name, columns);
   const prompt = name === SMART_FUNCTION && writer !== null ? valueAt(writer.effective, `${DEFAULTS_BLOCK}.${SMART_FUNCTION}.prompt`) : undefined;
   return (
     <div className="fx-detail">
       {schema !== undefined && writer !== null ? (
         <div className="fx-detail-defaults">
-          <div className="fx-detail-title">Defaults{readOnly ? <span className="sub"> · shown as in effect; set them in a project or the shared layer</span> : null}</div>
+          <div className="fx-detail-title">Defaults</div>
           <SchemaForm
             schema={schema}
             value={valueAt(writer.effective, `${DEFAULTS_BLOCK}.${name}`)}
@@ -372,6 +375,14 @@ function defaultsSchemaOf(name: string): Schema | undefined {
   const block = CONFIG_SECTIONS.find((s) => s.key === DEFAULTS_BLOCK)?.schema as Schema | undefined;
   const properties = (block as { properties?: Record<string, Schema> } | undefined)?.properties;
   return properties?.[name];
+}
+
+/** `smart`'s schema with the presets offered as its model's suggestions — `examples`, so any model id is still taken. */
+function withPresetSuggestions(schema: Schema, presets: readonly string[]): Schema {
+  const properties = (schema["properties"] ?? {}) as Record<string, Schema>;
+  const model = properties["model"];
+  if (model === undefined || presets.length === 0) return schema;
+  return { ...schema, properties: { ...properties, model: { ...model, examples: [...presets] } } };
 }
 
 /** One line for the Defaults column: what the function's defaults come to, or a dash. */

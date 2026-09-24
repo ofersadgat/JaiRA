@@ -56,6 +56,8 @@ import {
   DEFAULT_EXECUTOR,
   resolveExecutorTree,
   namedModelAnswer,
+  presetModelOf,
+  resolveModelField,
   unnamedModelAnswer,
   type JairaConfig,
   type JairaOperationNode,
@@ -63,6 +65,7 @@ import {
 } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
 import { buildPromptTree, withSecurityFloor } from "./executorTree";
+import { withPresetModels, type PresetModelOptions } from "./presetModels";
 import { agentPromptRouteNames, agentRouteVendors, usableRouteKeys } from "./modelRoutes";
 import type { StackedExecutor } from "./executorStack";
 import type { SecretResolver } from "./secrets";
@@ -72,8 +75,12 @@ const log = createLogger("jaira.runtime.wiring");
 
 export type WorkflowExecResult = ExecResult<ResolvedValue, WorkflowMetrics>;
 
-/** Model names referenced by `operation.config.model` across a bundle's states. */
-export function modelNamesOf(bundle: WorkflowBundle): string[] {
+/**
+ * Model names referenced by `operation.config.model` across a bundle's states — and, for a state that
+ * names none but picks a preset that does, the preset's NAME, which a model field may hold
+ * (`resolveModelField`) and which the start-time check resolves to the preset's candidates.
+ */
+export function modelNamesOf(bundle: WorkflowBundle, presets?: Record<string, unknown>): string[] {
   const names = new Set<string>();
   for (const def of Object.values(bundle.states)) {
     const op = def.operation;
@@ -81,9 +88,42 @@ export function modelNamesOf(bundle: WorkflowBundle): string[] {
     const config = op.config;
     if (config !== null && typeof config === "object" && !Array.isArray(config) && typeof config.model === "string") {
       names.add(config.model);
+    } else if (presetNaming(config, presets) !== undefined) {
+      names.add(presetNaming(config, presets)!);
     }
   }
   return [...names].sort();
+}
+
+/** The preset a state's config picks, when that preset states a model — see {@link modelNamesOf}. */
+function presetNaming(config: unknown, presets: Record<string, unknown> | undefined): string | undefined {
+  if (config === null || typeof config !== "object" || Array.isArray(config)) return undefined;
+  const ref = (config as Record<string, unknown>)["configRef"];
+  if (typeof ref !== "string" || presets === undefined) return undefined;
+  return presetModelOf(presets[ref]) === undefined ? undefined : ref;
+}
+
+/**
+ * Will the prompt half answer a model FIELD's value — a model id, or a preset's name standing for the
+ * preset's model? A candidate list answers when ANY candidate would: which one is chosen is the
+ * session's business, and refusing a run because its first choice is signed out would be refusing the
+ * fallback the list exists to provide.
+ */
+function namedOrPresetAnswer(
+  node: JairaPromptNode | undefined,
+  value: string,
+  presets: Record<string, unknown> | undefined,
+): { answers: true } | { answers: false; reason: string } {
+  const meant = resolveModelField(value, presets);
+  if ("presetless" in meant) return { answers: false, reason: `'${value}' names a preset that sets no model` };
+  if (typeof meant.model === "string") return namedModelAnswer(node, meant.model);
+  const refusals: string[] = [];
+  for (const candidate of meant.model.candidates) {
+    const answer = namedModelAnswer(node, candidate);
+    if (answer.answers) return { answers: true };
+    refusals.push(answer.reason);
+  }
+  return { answers: false, reason: `preset '${value}' names no model this machine serves — ${refusals.join("; ")}` };
 }
 
 /**
@@ -93,14 +133,14 @@ export function modelNamesOf(bundle: WorkflowBundle): string[] {
  * and the two questions have different fixes. A named model that nothing serves is refused by name;
  * a state naming none needs a route that picks its own.
  */
-export function hasUnnamedPromptModel(bundle: WorkflowBundle): boolean {
+export function hasUnnamedPromptModel(bundle: WorkflowBundle, presets?: Record<string, unknown>): boolean {
   return Object.values(bundle.states).some((def) => {
     const op = def.operation;
     if (op === undefined || op.kind !== "prompt") return false;
     const config = op.config;
     const model =
       config !== null && typeof config === "object" && !Array.isArray(config) ? config.model : undefined;
-    return typeof model !== "string" || model === "";
+    return (typeof model !== "string" || model === "") && presetNaming(config, presets) === undefined;
   });
 }
 
@@ -144,8 +184,12 @@ export interface PromptExecutorOptions {
    * (see `executorTree.ts` — a default applied at the leaf cannot influence routing).
    */
   tree?: JairaPromptNode;
-  /** Named presets (`config.models.presets`), selected per state by `operation.configRef`. */
-  configs?: { get(id: string): Record<string, JsonValue> | undefined };
+  /**
+   * Named presets (`config.models.presets`), selected per state by `operation.configRef` — and what
+   * choosing a preset's model needs: which models this machine can run, and what a session recorded.
+   * Expanded in FRONT of the tree (`withPresetModels`), so a preset's model decides the route.
+   */
+  presets?: PresetModelOptions;
   /** How each provider route is reached (`config.models.routes`), credentials already resolved. */
   router?: ModelRouterOptions;
   /**
@@ -186,18 +230,24 @@ export function buildPromptExecutor(options: PromptExecutorOptions = {}): Execut
   const tree = options.tree ?? { kind: "router" as const };
   const prompt = buildPromptTree(fake === undefined ? tree : { kind: "router" }, {
     ...(options.router !== undefined ? { router: options.router } : {}),
-    ...(options.configs !== undefined ? { configs: options.configs } : {}),
     ...(options.routes !== undefined ? { agents: options.routes as Record<string, StackedExecutor> } : {}),
     ...(options.memoCache !== undefined ? { memoCache: options.memoCache } : {}),
     ...(fake !== undefined ? { fakePrompt: fake } : {}),
   });
+
+  // Presets in FRONT of the tree: a preset's model has to be known before the router reads it. Not
+  // for a scripted run, which answers every model alike and has no routes to choose between.
+  const presetted =
+    options.presets === undefined || fake !== undefined
+      ? prompt
+      : withPresetModels(options.presets, (tree as { defaults?: Record<string, JsonValue> }).defaults, prompt);
 
   // The project's security floor, folded over every prompt call — INCLUDING a scripted one, so a
   // fake run exercises the same wiring rather than a quieter version of it. Over rather than under
   // the state's config: a floor a state could replace is a default with a misleading name. See
   // `withSecurityFloor`.
   const bounded =
-    options.securityFloor === undefined ? (fake ?? prompt) : withSecurityFloor(options.securityFloor, fake ?? prompt);
+    options.securityFloor === undefined ? (fake ?? presetted) : withSecurityFloor(options.securityFloor, fake ?? presetted);
   const base = repairing(
     bounded,
     options.repairTurns ?? DEFAULT_REPAIR_TURNS,
@@ -581,8 +631,9 @@ export function defaultExecutorTree(
     agents: Object.keys(agentPromptRouteNames(config.agents)),
     vendors: agentRouteVendors(config.agents),
   });
-  const unserved = modelNamesOf(bundle)
-    .map((model) => namedModelAnswer(configured.prompt, model))
+  const presets = config.models.presets;
+  const unserved = modelNamesOf(bundle, presets)
+    .map((model) => namedOrPresetAnswer(configured.prompt, model, presets))
     .filter((answer): answer is { answers: false; reason: string } => !answer.answers);
   if (unserved.length > 0) {
     throw refusal(log, 
@@ -594,7 +645,7 @@ export function defaultExecutorTree(
   // What is left is a state naming NO model, which is how JaiRA's own workflows are written,
   // deliberately, so they run on whatever this machine has. A bundle with none has nothing left to
   // refuse over.
-  if (!hasUnnamedPromptModel(bundle)) return tree;
+  if (!hasUnnamedPromptModel(bundle, presets)) return tree;
   // Whether anything here answers a state that names NO model. That is the failure worth catching at
   // the start: unanswered, the call lands in the provider fallback and is reported as an empty model
   // from inside the SDK, several layers under the state that asked.

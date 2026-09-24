@@ -7,8 +7,8 @@ realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/filter-in-place
 serves: [product/keep-track-of-everything, product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/chat-with-agents]
 surfaces: [ui/surfaces/sidebar]
 reuses: [ui/components/status-pill, ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/sidebar.tsx, packages/app/src/renderer/App.tsx]
-verified_by: [packages/app/test/pill.test.ts]
+implemented_by: [packages/app/src/renderer/sidebar.tsx, packages/app/src/renderer/App.tsx, packages/app/src/renderer/settingsSections.ts]
+verified_by: [packages/app/test/pill.test.ts, packages/app/test/settingsSections.test.ts]
 mockups: [ui/assets/sidebar-row/idle.html, ui/assets/sidebar-row/current.html, ui/assets/sidebar-row/lifted.html, ui/assets/sidebar-row/rail.html, ui/assets/sidebar-row/disabled.html]
 siblings: [ui/components/project-row, ui/components/conversation-row, ui/components/file-tree]
 ---
@@ -43,7 +43,7 @@ A 26px line in the sidebar with a dim glyph and an uppercase label, quiet `+` an
 | error | Cannot occur: a row only goes somewhere. | |
 | idle | Glyph and label in `--dim`, verbs at half strength, pills if anything counts. Shown in a column standing on a project's Tasks room. | [idle.html](../assets/sidebar-row/idle.html) |
 | current | Ground `--tint-accent`, glyph and label in `--text`, verbs at full strength, and the drawer open beneath. A verb that is on, such as `⌕` with its find field showing, is `--accent` on `--tint-accent`. | [current.html](../assets/sidebar-row/current.html) |
-| lifted | Settings, while it or Logs, Debug or Components is showing: a panel covers the column under the title row, headed by the Settings row with a `‹` before its glyph and its pages beneath, in two groups; Logs, Debug, Components and the theme row sit at the panel's foot under a rule. | [lifted.html](../assets/sidebar-row/lifted.html) |
+| lifted | Settings, while it or Logs, Debug or Components is showing: a panel covers the column under the title row, headed by the Settings row with a `‹` before its glyph and its six pages beneath as one list, the open page's sections indented under it; Logs, Debug, Components and the theme row sit at the panel's foot under a rule. | [lifted.html](../assets/sidebar-row/lifted.html) |
 | rail | The column collapsed to 46px: each row is a centred 34px glyph with no label, verbs, pills or drawer, 30px tall among the room glyphs. Logs, Debug, Components, the theme and Settings stand in the foot. | [rail.html](../assets/sidebar-row/rail.html) |
 | disabled | `Open a project…` at half strength while the app is busy with an action. | [disabled.html](../assets/sidebar-row/disabled.html) |
 
@@ -62,7 +62,7 @@ A 26px line in the sidebar with a dim glyph and an uppercase label, quiet `+` an
 | Click `+` on All conversations | Puts the address at the root, then the same | The new conversation belongs to the shared root |
 | Click `⌕` | Shows or hides the find field in that row's drawer | The verb lit `--accent`; the field takes the typing focus. On a row that is not current, the verb lights and nothing else shows until the row is chosen |
 | Click the pills | Marks what the row counts as seen | Flat pills leave; live ones stay |
-| Click the theme row | Switches between light and dark | The whole window changes theme |
+| Click the theme row | Switches between light and dark, writing `appearance.mode` into the strongest settings layer that states it, or into `Just you` when none does | The whole window changes theme |
 | Click `Open a project…` | Opens `Open project…` and `New project…` under the row | A context menu |
 
 Whether a find field is showing lasts for the session only.
@@ -83,7 +83,7 @@ Whether a find field is showing lasts for the session only.
 | Theme row in dark | `☀` `Light`, tooltip `switch to light`, announced `Toggle theme` |
 | Open another | `+` `Open a project…`, tooltip `open another project` |
 | Pills | tooltip `mark these seen` |
-| Settings pages | under `Just you`, `Appearance`; under `Project & shared`, `Connections` · `Models` · `Tools` · `Runs` · `Files` · `Data & history` · `settings.json` |
+| Settings pages | `Appearance` · `Connections` · `Models` · `Tools` · `Runs` · `Data & history`, one list with no group headings |
 
 ## The label gives way to the verbs and pills, and the rail keeps only the glyph
 

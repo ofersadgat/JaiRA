@@ -20,7 +20,10 @@
  * something none of them are involved in.
  */
 import { describe, expect, it } from "vitest";
-import { CONFIG_JSON, WORKFLOW_JSON, WORKFLOW_YAML, defaultRendererChoice, parseSettings } from "@jaira/shared/browser";
+import { CONFIG_JSON, WORKFLOW_JSON, WORKFLOW_YAML, defaultRendererChoice, parseAppearanceConfig } from "@jaira/shared/browser";
+
+/** The renderer choices a settings layer states, as `appearance.renderers` reads them. */
+const renderersOf = (raw: unknown): ReturnType<typeof parseAppearanceConfig>["renderers"] => parseAppearanceConfig({ renderers: raw }).renderers;
 import type { RendererChoices } from "@jaira/shared/browser";
 import {
   chosenRenderer,
@@ -263,7 +266,7 @@ describe("the text renderer a value view can honour", () => {
   it("is addressed with the same spelling the panel's choices are", () => {
     // One `rendererKey`, or the pane would write a preference the reader could not find.
     expect(rendererKey("text/x-typescript", "text")).toBe("text/x-typescript:text");
-    expect(parseSettings({ renderers: { "text/x-typescript:text": { read: "codeview" } } }).renderers).toEqual({
+    expect(renderersOf({ "text/x-typescript:text": { read: "codeview" } })).toEqual({
       "text/x-typescript:text": { ...defaultRendererChoice(), read: "codeview" },
     });
   });
@@ -272,30 +275,24 @@ describe("the text renderer a value view can honour", () => {
 /**
  * The stored side of the same choice.
  *
- * Deliberately forgiving, and deliberately incurious: `shared` has no registry, so it cannot know
- * whether a key names a type this app opens or a value names a renderer that exists. Both questions
- * are answered harmlessly at the point of use — see the resolution tests above — and what is checked
- * here is only that a hand-edited file cannot put something through that is not a renderer id.
+ * Deliberately incurious: `shared` has no registry, so it cannot know whether a key names a type
+ * this app opens or a value names a renderer that exists. Both questions are answered harmlessly at
+ * the point of use — see the resolution tests above. What is checked is the SHAPE, strictly, like
+ * every block of `settings.json`: a hand-edited layer cannot put something through that is not a
+ * renderer id, and is told which key it wrote.
  */
 describe("reading the renderer choices back", () => {
-  it("keeps a choice, and drops what is not one", () => {
-    const renderers = parseSettings({
-      renderers: {
-        "text/markdown:preview": { read: "none" },
-        "text/markdown:text": { id: "monaco" },
-        "not a key": { read: "monaco" },
-      },
-    }).renderers;
-    expect(renderers).toEqual({ "text/markdown:preview": { ...defaultRendererChoice(), read: "none" } });
+  it("keeps a choice, and refuses what is not one", () => {
+    expect(renderersOf({ "text/markdown:preview": { read: "none" } })).toEqual({ "text/markdown:preview": { ...defaultRendererChoice(), read: "none" } });
+    expect(() => renderersOf({ "text/markdown:text": { id: "monaco" } })).toThrow(/markdown:text.id is not a setting/);
+    expect(() => renderersOf({ "not a key": { read: "monaco" } })).toThrow(/is not a renderer key/);
   });
 
   it("keeps the four statements apart, including the palette each view is painted in", () => {
     expect(
-      parseSettings({
-        renderers: {
-          "application/json:data": { read: "tree", write: "form", off: ["none", "none"], theme: { write: "one-dark" } },
-        },
-      }).renderers,
+      renderersOf({
+        "application/json:data": { read: "tree", write: "form", off: ["none", "none"], theme: { write: "one-dark" } },
+      }),
     ).toEqual({
       "application/json:data": { read: "tree", write: "form", off: ["none"], theme: { read: null, write: "one-dark" } },
     });
@@ -304,18 +301,18 @@ describe("reading the renderer choices back", () => {
   it("drops a line that says nothing at all", () => {
     // What keeps "unset stays unwritten" true across a round trip: an empty object and an absent key
     // mean the same thing, so only one of them may survive being read back.
-    expect(parseSettings({ renderers: { "text/markdown:text": {}, "text/css:text": { off: [] } } }).renderers).toEqual({});
+    expect(renderersOf({ "text/markdown:text": {}, "text/css:text": { off: [] } })).toEqual({});
   });
 
   it("keeps a key for a renderer this build no longer has", () => {
     // Dropped at the point of USE rather than here — a settings file outlives a release, and a
     // renderer that comes back (a rename reverted, a plugin reinstalled) should find its preference
     // where it left it rather than having been quietly tidied away.
-    expect(parseSettings({ renderers: { "text/markdown:preview": { read: "gone" } } }).renderers["text/markdown:preview"]?.read).toBe("gone");
+    expect(renderersOf({ "text/markdown:preview": { read: "gone" } })["text/markdown:preview"]?.read).toBe("gone");
   });
 
-  it("reads a settings file written before any of this existed", () => {
-    expect(parseSettings({ theme: "dark" }).renderers).toEqual({});
+  it("reads a layer that says nothing about renderers as no choices at all", () => {
+    expect(parseAppearanceConfig({ mode: "dark" }).renderers).toEqual({});
   });
 });
 
@@ -427,7 +424,7 @@ describe("a mount that is a reading", () => {
  */
 describe("the palette that follows the window", () => {
   it("survives a settings file", () => {
-    const back = parseSettings({ renderers: { "text/markdown:text": { theme: { write: "app" } } } });
-    expect(back.renderers["text/markdown:text"]?.theme.write).toBe("app");
+    const back = renderersOf({ "text/markdown:text": { theme: { write: "app" } } });
+    expect(back["text/markdown:text"]?.theme.write).toBe("app");
   });
 });

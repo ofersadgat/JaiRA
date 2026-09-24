@@ -4,44 +4,48 @@ type: ui-component
 status: shipped
 updated: 2026-09-23
 realizes: [ux/patterns/inherited-unless-set-here]
-serves: [product/share-processes-across-projects, product/bring-your-own-models-and-agents]
-surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-connections, ui/surfaces/settings-models, ui/surfaces/settings-tools, ui/surfaces/settings-runs, ui/surfaces/settings-files, ui/surfaces/settings-data, ui/surfaces/settings-raw]
+serves: [product/share-processes-across-projects, product/bring-your-own-models-and-agents, product/read-comfortably]
+surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-appearance, ui/surfaces/settings-connections, ui/surfaces/settings-models, ui/surfaces/settings-tools, ui/surfaces/settings-runs, ui/surfaces/settings-data]
 reuses: []
-implemented_by: [packages/app/src/renderer/App.tsx, packages/app/src/renderer/panes.tsx, packages/app/src/renderer/settingsLayout.tsx]
-verified_by: []
-mockups: [ui/assets/settings-header/layered.html]
+implemented_by: [packages/app/src/renderer/App.tsx, packages/app/src/renderer/panes.tsx, packages/app/src/renderer/settingsLayout.tsx, packages/app/src/renderer/settingsSections.ts, packages/app/src/renderer/layerLabels.ts]
+verified_by: [packages/app/test/settingsSections.test.ts]
+mockups: [ui/assets/settings-header/layered.html, ui/assets/settings-header/project.html, ui/assets/settings-header/just-you.html, ui/assets/settings-header/nothing-yours.html, ui/assets/settings-header/no-project.html, ui/assets/settings-header/disabled.html]
 siblings: [ui/components/segmented-control, ui/components/settings-field, ui/components/provider-row]
 ---
 
 # Settings header
 
-The layer switch at the top-right corner of a settings page's head: two equal buttons, `This project` and `Shared (all projects)`, the chosen one filled blue, with a third, `Built in`, on the one page that holds what JaiRA ships. The page's name and its sentence — what the page is for and whose settings these are — sit to its left.
+The layer switch at the top-right corner of a settings page's head: three equal buttons, `Just you`, `This project` and `Shared (all projects)`, the chosen one filled blue. The page's name and its sentence — what the page is for and whose settings these are — sit to its left, and on `Just you` a second choice, `What you changed` · `Every row`, sits under the sentence.
 
 ## The switch says which layer a page writes to, and it is always in the same corner
 
-**Use when.** A settings page reads and writes one configuration layer: every page of the `Project & shared` group — Connections, Models, Tools, Runs, Files, Data & history and `settings.json`. One switch serves every such page, so the choice of layer is made once for the whole Settings room, and it sits at the head's top-right on every one of them however long the sentence beside it runs.
+**Use when.** A settings page reads and writes one configuration layer: every page of the Settings room — Appearance, Connections, Models, Tools, Runs and Data & history. One switch serves every page, so the choice of layer is made once for the whole Settings room, and it sits at the head's top-right on every one of them however long the sentence beside it runs.
 
-**Do not use when.** The page holds a person's own preferences, as Appearance does: no switch is drawn. A choice between two readings of the same thing is a [segmented-control](segmented-control.md). Whether one setting is set in this layer is the switch on the setting itself, in [settings-field](settings-field.md). When the availability checks last ran is said at the head of the Agents section on [Connections](../surfaces/settings-connections.md), beside its `Re-check`.
+**Do not use when.** A choice between two readings of the same thing is a [segmented-control](segmented-control.md). Whether one setting is set in this layer is the switch on the setting itself, in [settings-field](settings-field.md). What JaiRA ships is not a segment: the built-in layer is read-only, and a value it holds shows as what a row inherits. When the availability checks last ran is said at the head of the Agents section on [Connections](../surfaces/settings-connections.md), beside its `Re-check`.
 
 ## The switch keeps the corner, and the sentence says the same thing in words
 
-- **Switch.** Ghost buttons 4px apart. The chosen one takes `--fill-accent` with `--on-accent` text at 600 and the sheen; the others stay transparent with a `--line` outline and `--text`. It never wraps under the sentence: the sentence wraps, and the switch keeps its corner 2px below the head's top.
-- **Third segment.** The page that holds a value JaiRA SHIPS — [Tools](../surfaces/settings-tools.md), for its permission sets — gets a third button, `Built in`, drawn the same way ([decision 0006](../../engineering/decisions/0006-built-in-layer.md)). It is READ-ONLY: choosing it shows what ships, and the page offers the two overrides in place of its own actions. The other pages read `settings.json`, which the built-in layer does not have.
-- **No project.** With no project open the switch is not drawn, and the page's sentence says it edits `~/.jaira` and how to override it for one project. On Tools the switch stays, as `Shared (all projects)` and `Built in`, because `Built in` is still a choice worth making with nothing open.
-- **Sentence.** Beside the switch, under the page's name: the page's purpose, then `Editing {project}; anything left unset comes from ~/.jaira.` on the project layer, `Editing ~/.jaira, shared by every project on this machine.` on the shared one, or `Showing what JaiRA ships, read-only — override a line in a layer of your own to change it.` on `Built in`.
+- **Switch.** Ghost buttons 4px apart, strongest layer first. The chosen one takes `--fill-accent` with `--on-accent` text at 600 and the sheen; the others stay transparent with a `--line` outline and `--text`. It never wraps under the sentence: the sentence wraps, and the switch keeps its corner 2px below the head's top.
+- **No project.** With no project open the switch is `Just you` · `Shared (all projects)`; there is no project layer to choose.
+- **Sentence.** Under the page's name: the page's purpose, then whose settings these are — `Showing Just you: kept on this machine in personal-settings.json, never shared, and read after every other layer.`, `Editing {project}; anything left unset comes from ~/.jaira, and yours override both.`, or `Editing ~/.jaira, shared by every project on this machine; a project's own settings override it, and yours override both.`
+- **Which rows.** On `Just you` only, a segmented `What you changed` · `Every row` under the sentence. `What you changed` draws only the rows the personal layer states, each with a line saying what it replaces (`instead of 0.8 from Shared`); a section left with none is not drawn, and a page left with none says `Nothing is set just for you on this page. Choose Every row to set something.` under the head. `Every row` draws the page whole.
 
 ## Every state keeps the switch's shape and changes which button is filled
 
 | State | Rendered as | Mockup |
 | --- | --- | --- |
-| empty | Cannot occur: a page with no layer draws no switch at all. | |
+| empty | Cannot occur: every page has a layer. | |
 | loading | Cannot occur: the switch draws from the layer already chosen. | |
 | partial | Cannot occur: the switch draws whole. | |
 | error | Cannot occur in the switch. A page whose settings cannot be read says so under its head. | |
-| layered | A project is open: `This project` or `Shared (all projects)` filled. The mockup draws the switch above a section rather than in a page's head. | [layered.html](../assets/settings-header/layered.html) |
-| built in | Tools with `Built in` filled, and the sentence saying it shows what ships. | |
-| no project | No switch, except on Tools, where `Shared (all projects)` and `Built in` stand alone. | |
-| disabled | While a settings change is being written: every button at half strength and inert. | |
+| layered | The default: `Shared (all projects)` filled over Runs, with a project open. | [layered.html](../assets/settings-header/layered.html) |
+| project | `This project` filled, and the sentence naming the project. | [project.html](../assets/settings-header/project.html) |
+| just you | `Just you` filled, `What you changed` chosen under the sentence, and only the row the personal layer states, saying what it replaces. | [just-you.html](../assets/settings-header/just-you.html) |
+| nothing yours | `Just you` on `What you changed` with nothing stated on the page: the one line under the head, and no sections. | [nothing-yours.html](../assets/settings-header/nothing-yours.html) |
+| no project | `Just you` · `Shared (all projects)`, the second filled. | [no-project.html](../assets/settings-header/no-project.html) |
+| disabled | While a settings change is being written: every button at half strength and inert, and the page's controls with them. | [disabled.html](../assets/settings-header/disabled.html) |
+
+The mockups are rendered from the real components by `packages/app/shots/settings-header-static.mts`.
 
 ## A click on a layer re-reads the page
 
@@ -49,18 +53,22 @@ The layer switch at the top-right corner of a settings page's head: two equal bu
 | --- | --- | --- |
 | Click an unchosen layer | Makes that layer the one every page reads and writes, for the whole Settings room | The fill moves to that button, the sentence follows, and the page redraws from that layer. Open rows close, and unsaved typing in them is dropped |
 | Click the chosen layer | Nothing changes | None |
+| Click `What you changed` or `Every row` | Draws only what the personal layer states, or every row | The page redraws in place |
 | Pointer over a button | Nothing | The ghost side takes `--fill-ghost-hover`; the filled side deepens to `--fill-accent-hover` |
 
-The layer holds across pages while the app is open. `Built in` belongs to Tools: every other page keeps the layer chosen before it, and Tools is on `Built in` again on return. The switch starts on `This project` at launch. Standing on no project switches it to the shared layer, and opening a project again leaves it there.
+The layer holds across pages while the app is open. The switch starts on `Shared (all projects)` at launch, and opening a project does not move it. Standing on no project while on `This project` moves it to `Shared (all projects)`; `Just you` and `Shared (all projects)` stay where they are. `Just you` opens on `What you changed` each time a window opens.
 
 ## The copy names the layers
 
 | Where | String |
 | --- | --- |
-| Buttons | `This project` · `Shared (all projects)` · `Built in`, the last only on Tools |
-| Tooltips | `this project only` · `the shared root — changes here affect every project that has not overridden them` · `what ships with JaiRA — read-only; it is changed by overriding it in one of the other two` |
-| Group, announced | `Configuration layer` |
-| Sentence | `{purpose} Editing {project}; anything left unset comes from ~/.jaira.` · `{purpose} Editing ~/.jaira, shared by every project on this machine.`, then `Open a project to override it for one.` with none open · `{purpose} Showing what JaiRA ships, read-only — override a line in a layer of your own to change it.` |
+| Buttons | `Just you` · `This project` · `Shared (all projects)` |
+| Tooltips | `only you, on this machine — personal-settings.json, never shared, and read after every other layer` · `this project only` · `the shared root — changes here affect every project that has not overridden them` |
+| Group, announced | `Configuration layer`; the rows choice `Which rows` |
+| Rows choice | `What you changed` · `Every row` |
+| Sentence | `{purpose} Showing Just you: kept on this machine in personal-settings.json, never shared, and read after every other layer.` · `{purpose} Editing {project}; anything left unset comes from ~/.jaira, and yours override both.` · `{purpose} Editing ~/.jaira, shared by every project on this machine; a project's own settings override it, and yours override both.` |
+| Nothing stated | `Nothing is set just for you on this page. Choose Every row to set something.` |
+| What a stated row replaces | `instead of {value} from {Shared\|this project\|built in}` · `set nowhere else` |
 
 ## The switch holds its corner at every width
 

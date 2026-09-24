@@ -261,6 +261,10 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
                                     <>
                                       every <span className="mono">{option.width}</span> command
                                     </>
+                                  ) : option.server !== undefined ? (
+                                    <>
+                                      every <span className="mono">{option.server}</span> tool
+                                    </>
                                   ) : (
                                     <span className="mono">{option.width}</span>
                                   )}

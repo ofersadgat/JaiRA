@@ -403,6 +403,8 @@ describe("a bare model id finds its own route", () => {
   it("reads a model's family off its name, and admits when it cannot", () => {
     expect(vendorOfModel("claude-sonnet-5")).toBe("anthropic");
     expect(vendorOfModel("gpt-5")).toBe("openai");
+    // The built-in presets' OpenAI candidates route as `gpt-5` does, by their family.
+    for (const id of ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) expect(vendorOfModel(id)).toBe("openai");
     expect(vendorOfModel("o3-mini")).toBe("openai");
     // A full OpenRouter id is read by its LAST segment, which is the model — the vendor slug in
     // front of it is that route's spelling, not part of the name.
@@ -430,6 +432,7 @@ describe("a bare model id finds its own route", () => {
     expect(routeForBareModel({ "codex-cli": { kind: "agent", agent: "codex-cli", vendor: "openai" } },
       "claude-sonnet-5")).toBeUndefined();
     expect(routeForBareModel(routes(), "gpt-5")).toBe("codex-cli");
+    expect(routeForBareModel(routes(), "gpt-5.6-terra")).toBe("codex-cli");
   });
 
   it("takes an allow list as the last word, in both directions", () => {

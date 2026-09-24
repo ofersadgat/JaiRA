@@ -23,9 +23,12 @@ const text = (html: string): string => html.replace(/<[^>]+>/g, " ").replace(/\s
 const config = (doc: Record<string, unknown>): ConfigView => ({
   base: doc as never,
   project: null,
+  system: null,
+  you: null,
   effective: parseConfig(doc) as never,
   baseFile: "~/.jaira/settings.json",
   projectFile: "",
+  youFile: "~/.jaira/personal-settings.json",
   baseDir: "~/.jaira",
 });
 

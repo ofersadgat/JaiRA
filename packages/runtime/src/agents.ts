@@ -21,6 +21,7 @@ import {
   CODEX_CAPS,
   stderrTail,
   type CodexSandbox,
+  type ConnectMcpServer,
   type SpawnProcess,
   type StartMcpBridge,
 } from "@declarative-ai/agents-cli";
@@ -33,7 +34,8 @@ import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
 import type { ExecEnv } from "./paths";
 import { primaryNativeOf, type AgentToolDeclaration } from "@jaira/shared";
-import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction } from "./agentTools";
+import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction, permissionSetViewOf } from "./agentTools";
+import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
 import { claudeReplacements } from "./tools";
 import { observeAgentRun, type AgentOutcomeObserver } from "./agentOutcome";
 
@@ -249,6 +251,9 @@ export interface AgentRuntimeOptions {
    * whose loop is idle and was measured losing the CLI's handshake race in one that is not.
    */
   startBridge?: StartMcpBridge;
+  /** How codex's bridge connects to a configured MCP server it proxies — upstream's MCP SDK client
+   *  when absent; a probe stands in for the server with it. */
+  connectMcpServer?: ConnectMcpServer;
   /** Path to the codex binary (default: `codex` on PATH). */
   codexCommand?: string;
   /** Hears every agent call's outcome — how a refused sign-in reaches the settings screen. */
@@ -262,6 +267,12 @@ export interface AgentRuntimeOptions {
    * `policyEnforcement: "config"` rests on.
    */
   codexSandbox?: CodexSandbox;
+  /**
+   * The configured MCP servers that are on, their secrets looked up — the same servers an agent's
+   * prompt route is handed (`AgentRouteOptions.mcpServers`), per call and under the call's permission
+   * set, whether the agent is claude or codex: a function call is handed them as the route is.
+   */
+  mcpServers?: Record<string, ResolvedMcpServer>;
 }
 
 /**
@@ -293,7 +304,15 @@ export function registerAgentRuntimes(
   // cannot hold — see `holdAgentFunction`.
   const held = <F extends (inputs: never, ctx: never) => unknown>(run: F, declaration: AgentToolDeclaration, label: string): F =>
     holdAgentFunction(declaration, run as never, label) as unknown as F;
-  const claudeWrapper = (label: string) => ({ wrapExecutor: agentFunctionWrapper(CLAUDE_TOOLS, label) });
+  // The servers each call is handed, read off the call — upstream's function entry passes them to the
+  // executor it builds per call, exactly as a route's executor takes them. Codex's are started by its
+  // bridge in this process, so a WSL project's stdio servers are handed over as the distro runs them.
+  const claudeServers = mcpServersOfCall(options.mcpServers ?? {}, permissionSetViewOf);
+  const codexServers = mcpServersOfCall(mcpServersIn(options.mcpServers ?? {}, options.execEnv), permissionSetViewOf);
+  const claudeWrapper = (label: string) => ({
+    wrapExecutor: agentFunctionWrapper(CLAUDE_TOOLS, label),
+    ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}),
+  });
 
   if (adapters.includes("sdk")) {
     const sdk = createClaudeCodeFunction({
@@ -342,12 +361,20 @@ export function registerAgentRuntimes(
     // more than "unregistered function" would.
     const codex =
       options.query !== undefined
-        ? createClaudeCodeFunction({ ...sdkOptions, capabilities: CODEX_CAPS, approvalCallback: false, query: options.query })
+        ? createClaudeCodeFunction({
+            ...sdkOptions,
+            capabilities: CODEX_CAPS,
+            approvalCallback: false,
+            query: options.query,
+            ...(codexServers !== undefined ? { mcpServers: codexServers } : {}),
+          })
         : createCodexAgentFunction({
             ...options.sdk,
             ...(options.codexCommand !== undefined ? { command: options.codexCommand } : {}),
             ...(options.codexSandbox !== undefined ? { sandbox: options.codexSandbox } : {}),
             ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
+            ...(options.connectMcpServer !== undefined ? { connectMcpServer: options.connectMcpServer } : {}),
+            ...(codexServers !== undefined ? { mcpServers: codexServers } : {}),
             spawn,
           });
     registry.functions.set(

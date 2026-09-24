@@ -378,6 +378,21 @@ export function routeForBareModel(
   routes: Record<string, JairaPromptNode> | undefined,
   model: string,
 ): string | undefined {
+  return servingRoutes(routes, model)[0];
+}
+
+/**
+ * EVERY route that can serve a bare model id, in the order {@link routeForBareModel} tries them —
+ * agents first, then providers.
+ *
+ * The whole list rather than the first because a preset's candidate has to be able to say WHY it is
+ * not available (`presetModels.ts`): "claude-cli is not signed in" needs to know that claude-cli was
+ * the route that would have served it, and that nothing after it could either.
+ */
+export function servingRoutes(
+  routes: Record<string, JairaPromptNode> | undefined,
+  model: string,
+): string[] {
   const vendor = vendorOfModel(model);
   const entries = Object.entries(routes ?? {});
   const serves = (node: JairaPromptNode): boolean => {
@@ -389,9 +404,9 @@ export function routeForBareModel(
     if (leaf.allow !== undefined) return leaf.allow.some((pattern) => matchesModel(pattern, model));
     return vendor !== undefined && leaf.vendor === vendor;
   };
-  const pick = (kind: "agent" | "provider"): string | undefined =>
-    entries.find(([, node]) => node.kind === kind && serves(node))?.[0];
-  return pick("agent") ?? pick("provider");
+  const of = (kind: "agent" | "provider"): string[] =>
+    entries.filter(([, node]) => node.kind === kind && serves(node)).map(([prefix]) => prefix);
+  return [...of("agent"), ...of("provider")];
 }
 
 /** The name of the executor every UI-initiated operation uses when nothing says otherwise. */

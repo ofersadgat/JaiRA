@@ -49,7 +49,7 @@ Each section is a quiet sentence-case heading with an `ⓘ` over one bordered ca
 
 ## A person arrives from the sidebar, and every change is written as it is made
 
-- `Runs` in the sidebar shows this page, with or without a project open; with none open, every write goes to the shared root.
+- `Runs` in the sidebar shows this page, with or without a project open; with none open, the switch offers `Just you` and `Shared (all projects)`, and every write goes to one of those.
 - A row's switch on pins the value the row shows into this layer, so nothing changes until it is edited; off removes the key, and the row inherits again.
 - Choosing `inside a WSL distro` writes the distro `Ubuntu` unless one is named. An emptied box removes its key.
 - Nothing is held unsaved: choosing another page or room leaves with every change already written.

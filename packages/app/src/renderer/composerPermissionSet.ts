@@ -259,7 +259,7 @@ function sectionLines(permissionSet: PermissionSet, parked: Parked, category: To
   const lines: Array<[string, PermissionSetMode]> = toolsInCategory(category).map((spec) => [spec.name, toolModeOf(permissionSet, parked, spec.name)]);
   if (category !== "execution") return lines;
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    if (entry.kind !== "tool") lines.push([subject, entry.mode ?? MODE_WHEN_UNSET]);
+    if (entry.kind === "command" || entry.kind === "script") lines.push([subject, entry.mode ?? MODE_WHEN_UNSET]);
   }
   return lines;
 }
@@ -300,6 +300,8 @@ export function withSectionMode(
  */
 export function sectionCountOf(permissionSet: PermissionSet, category: ToolCategoryId): number {
   const tools = toolsInCategory(category).filter((spec) => holdsTool(permissionSet, spec.name)).length;
+  // An MCP server's line and each tool it names — the MCP section holds no standard tools.
+  if (category === "mcp") return tools + Object.values(permissionSet.entries).filter((entry) => entry.kind === "mcp").length;
   if (category !== "execution") return tools;
   const script = Object.hasOwn(permissionSet.entries, SCRIPT_SUBJECT) ? 1 : 0;
   return tools + script + commandGroupsOf(permissionSet).reduce((n, group) => n + Math.max(group.subs.length, 1), 0);

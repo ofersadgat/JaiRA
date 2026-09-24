@@ -1,7 +1,8 @@
 /**
- * Photograph every Settings page — the reorganisation of 2026-09-23: two sidebar groups with a glyph
- * per page, the layer switch in every head's top-right corner, Connections' rows with their boxes on
- * the right, and Tools' permission sets over the Functions table.
+ * Photograph every Settings page — the reorganisation of 2026-09-23 and its round 5: one sidebar list
+ * with a glyph per page, the layer switch (Just you | This project | Shared) in every head's top-right
+ * corner, Connections' rows with their boxes on the right, and Tools' permission sets over the
+ * Functions table.
  *
  *   npx tsx packages/app/shots/settings-tabs.mts
  *
@@ -16,7 +17,7 @@ import { buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "out", "settings");
 const WORLD = join(import.meta.dirname, ".world-settings");
-const PAGES = ["Connections", "Models", "Tools", "Runs", "Files", "Data & history", "settings.json", "Appearance"] as const;
+const PAGES = ["Appearance", "Connections", "Models", "Tools", "Runs", "Data & history"] as const;
 
 /** Click the sidebar's own entry for a page — its label is also the page's title, so not `clickText`. */
 const page = (label: string): string =>
@@ -33,13 +34,13 @@ async function main(): Promise<void> {
       await app.evaluate(`(() => { document.documentElement.dataset.theme = ${JSON.stringify(theme)}; return true; })()`);
       for (const name of PAGES) {
         await app.evaluate(page(name));
-        if (name !== "Appearance") await app.until(`document.querySelector(".set-title")?.textContent === ${JSON.stringify(name)}`, `the ${name} page to draw`);
+        await app.until(`document.querySelector(".set-title")?.textContent === ${JSON.stringify(name)}`, `the ${name} page to draw`);
         await new Promise((r) => setTimeout(r, 900));
         await app.shot(`${name.toLowerCase().replace(/[^a-z]+/g, "-")}-${theme}`, ".set-page");
       }
     }
 
-    // The window at an ordinary size: the sidebar's two groups, Tools' sections under it, and a
+    // The window at an ordinary size: the sidebar's one list, Tools' sections under it, and a
     // Functions row opened — smart, whose defaults show the prompt it ships with.
     await app.resize(1280, 900);
     await app.evaluate(`(() => { document.documentElement.dataset.theme = "light"; return true; })()`);

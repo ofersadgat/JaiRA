@@ -94,7 +94,7 @@ describe("remembered folds", () => {
     // The Files editor half defaults OPEN: folding it away is the exception, and an app that started
     // with the editor hidden would look like it had failed to load the file.
     expect(openOf(emptyUiState(), FOLD.filesEditor)).toBe(true);
-    expect(openOf(emptyUiState(), FOLD.settingsEffective)).toBe(false);
+    expect(openOf(emptyUiState(), FOLD.schemaReference)).toBe(false);
     expect(FOLD_DEFAULTS[FOLD.filesEditor]).toBe(true);
   });
 

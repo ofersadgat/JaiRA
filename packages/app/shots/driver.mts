@@ -206,17 +206,20 @@ export class App {
   /**
    * Choose the theme the NEXT launch opens in.
    *
-   * Not this one. The renderer reads the preference once and owns it afterwards — `store.ts` sets
-   * `:root[data-theme]` from its own state and main pushes no settings change back — so a write from
-   * out here reaches the file and not the window. Which is the same shape the predecessor had, for
-   * the same underlying reason: a theme is a property of the whole page, so it is one theme per
-   * load, and `run.mts` takes a pass per theme.
+   * Not this one. The renderer reads the configuration once per load and owns what it shows — a
+   * write from out here reaches the file and not the window. Which is the same shape the predecessor
+   * had, for the same underlying reason: a theme is a property of the whole page, so it is one theme
+   * per load, and `run.mts` takes a pass per theme.
    *
-   * The write itself still goes through `settings:write`, so the file is written by the code that
-   * owns its format rather than by this rig guessing at it.
+   * The mode is `appearance.mode` of the personal layer ("Just you", `personal-settings.json`), the
+   * one every project's look is laid under, and the write goes through `config:write` — so the file
+   * is written, and checked, by the code that owns its format rather than by this rig guessing at it.
    */
   async preferTheme(theme: "light" | "dark"): Promise<void> {
-    await this.ipc("settings:write", { theme });
+    const view = await this.ipc<{ you: Record<string, unknown> | null }>("config:read", {});
+    const you = view.you ?? {};
+    const appearance = { ...((you["appearance"] as Record<string, unknown> | undefined) ?? {}), mode: theme };
+    await this.ipc("config:write", { layer: "you", config: { ...you, appearance } });
   }
 
   /** What this window actually opened in, for the caller to name its pictures by. */

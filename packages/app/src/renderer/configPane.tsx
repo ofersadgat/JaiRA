@@ -3,7 +3,7 @@
  * JSON box — cut into the sections the Settings pages draw (the person's reorganisation, 2026-09-23):
  * Models draws the defaults a state that names nothing is filled in with; Runs draws where commands
  * run and the run-behaviour blocks; Data & history draws where artifacts land and how records are
- * stored; the `settings.json` entry draws the raw document.
+ * stored.
  *
  * Every row has a SWITCH that says whether this layer states it — "use a switch to enable/disable a
  * row". Off, the row shows what it inherits and cannot be edited; on, it pins the value it shows.
@@ -12,10 +12,11 @@
  * `"windows" | { wsl }`, a discriminated union spelled as a string or an object, which no
  * `type: object` schema describes honestly. Everything else goes through `SchemaForm`.
  *
- * The raw document stays reachable: a project may carry a field newer than these forms, and the
- * escape hatch is what keeps the screens from being lossy.
+ * There is no raw-document page any more (2026-09-23): every key of `settings.json` has a row on a
+ * page, and a save through a row writes one path of the layer's document, so a field these forms do
+ * not know about survives every save. The file itself opens in the Files view.
  */
-import { type JSX, type ReactNode } from "react";
+import { type JSX } from "react";
 import {
   ARTIFACT_DESTINATIONS,
   ARTIFACT_VARIABLES,
@@ -28,6 +29,7 @@ import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfi
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 import { SettingsSection } from "./settingsLayout";
+import { withPaths } from "./appearanceLayer";
 
 export interface ConfigPaneProps {
   config: ConfigView | null;
@@ -54,29 +56,8 @@ export function layerWriter(
   layer: ConfigLayer,
   onSave: (layer: ConfigLayer, doc: unknown) => void,
 ): { set: (path: string, value: unknown) => void; stated: (path: string) => boolean } {
-  const set = (path: string, value: unknown): void => {
-    const next = structuredClone(doc ?? {}) as Record<string, unknown>;
-    const parts = path.split(".");
-    const chain: Array<{ parent: Record<string, unknown>; key: string }> = [];
-    let cursor = next;
-    for (const part of parts.slice(0, -1)) {
-      const held = cursor[part];
-      cursor[part] = held !== null && typeof held === "object" && !Array.isArray(held) ? { ...(held as object) } : {};
-      chain.push({ parent: cursor, key: part });
-      cursor = cursor[part] as Record<string, unknown>;
-    }
-    const leaf = parts[parts.length - 1]!;
-    if (value === undefined) delete cursor[leaf];
-    else cursor[leaf] = value;
-    // A container the removal emptied goes with it, so an untouched section leaves no trace.
-    for (const { parent, key } of chain.reverse()) {
-      const block = parent[key];
-      if (block !== null && typeof block === "object" && !Array.isArray(block) && Object.keys(block).length === 0) {
-        delete parent[key];
-      }
-    }
-    onSave(layer, next);
-  };
+  // A container the removal emptied goes with it, so an untouched section leaves no trace.
+  const set = (path: string, value: unknown): void => onSave(layer, withPaths(doc, [[path, value]]));
 
   const stated = (path: string): boolean => {
     let cursor: unknown = doc;
@@ -112,7 +93,7 @@ export function configWriter(
   locked: boolean,
   onSave: (layer: ConfigLayer, doc: unknown) => void,
 ): Writer {
-  const doc = (layer === "base" ? config.base : config.project) as Record<string, unknown> | null;
+  const doc = config[layer] as Record<string, unknown> | null;
   const effective = config.effective as Record<string, unknown>;
   const { set, stated } = layerWriter(doc, layer, onSave);
   const toggle = (path: string, seed?: unknown): { on: boolean; onChange: (on: boolean) => void; disabled: boolean } => ({
@@ -145,18 +126,6 @@ export function ConfigBlockSection({ writer, block, title }: { writer: Writer; b
         onChange={(next) => writer.set(section.key, next)}
         ctx={{ path: section.key, disabled: writer.locked, isSet: writer.stated, setAt: writer.set }}
       />
-    </SettingsSection>
-  );
-}
-
-/**
- * The raw document — the escape hatch, and the reason these screens are not lossy: a project may carry
- * a field newer than the forms, and it survives every save made through them.
- */
-export function RawDocument({ children }: { children: ReactNode }): JSX.Element {
-  return (
-    <SettingsSection id="raw" title="The document" info="Everything this layer's settings.json holds, as it is stored. The Settings pages write into it; what they do not know about survives their saves.">
-      <div className="cfg-stack">{children}</div>
     </SettingsSection>
   );
 }
@@ -240,6 +209,19 @@ export function Artifacts({ effective, locked, set, toggle }: Writer): JSX.Eleme
             onChange={(n) => set("artifacts.inlineMaxBytes", n)}
           />
         </Field>
+        {/* Only the raw document reached this one before it went (2026-09-23). */}
+        <Field
+          label="Ask above"
+          param="artifacts.askAboveBytes"
+          hint="Producing an artifact bigger than this many bytes asks you first. There is no ceiling on size — this is a question, not a refusal; 0 turns it off."
+          toggle={toggle("artifacts.askAboveBytes")}
+        >
+          <NumInput
+            value={typeof artifacts["askAboveBytes"] === "number" ? (artifacts["askAboveBytes"] as number) : undefined}
+            disabled={locked}
+            onChange={(n) => set("artifacts.askAboveBytes", n)}
+          />
+        </Field>
       </FieldGrid>
     </SettingsSection>
   );
@@ -268,6 +250,7 @@ export function ModelDefaults({ effective, locked, set, toggle }: Writer): JSX.E
   const defaults = (prompt["defaults"] ?? {}) as Record<string, unknown>;
   const model = typeof defaults["model"] === "string" ? (defaults["model"] as string) : "";
   const { model: _model, ...knobs } = defaults;
+  const presets = presetNamesOf(effective);
 
   return (
     <SettingsSection
@@ -279,16 +262,18 @@ export function ModelDefaults({ effective, locked, set, toggle }: Writer): JSX.E
         <Field
           label="Default model"
           param={`${DEFAULT_ENVIRONMENT}.model`}
-          hint="A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state."
+          hint="A model id, or a preset's name — 'coder' means the model coder chooses. A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state."
           toggle={toggle(`${DEFAULT_ENVIRONMENT}.model`)}
         >
           <TextInput
             value={model}
             mono
-            placeholder="left to the state"
+            list={MODEL_OR_PRESET_LIST}
+            placeholder="a model id, or a preset"
             disabled={locked}
             onChange={(v) => set(`${DEFAULT_ENVIRONMENT}.model`, v === "" ? undefined : v)}
           />
+          <PresetOptions id={MODEL_OR_PRESET_LIST} presets={presets} />
         </Field>
         <Field label="Call settings" hint={summariseLlmConfig(knobs as LlmConfigDoc)} wide>
           <LlmConfigForm
@@ -305,6 +290,35 @@ export function ModelDefaults({ effective, locked, set, toggle }: Writer): JSX.E
         </Field>
       </FieldGrid>
     </SettingsSection>
+  );
+}
+
+/** The id of the Default model box's list of presets. */
+const MODEL_OR_PRESET_LIST = "default-model-presets";
+
+/**
+ * The presets a merged document states, by name — what a model field may name instead of a model id
+ * (`resolveModelField`): the built-in ones and every layer's own.
+ */
+export function presetNamesOf(effective: Record<string, unknown>): string[] {
+  const models = effective["models"];
+  const presets = models !== null && typeof models === "object" ? (models as Record<string, unknown>)["presets"] : undefined;
+  return presets !== null && typeof presets === "object" && !Array.isArray(presets) ? Object.keys(presets) : [];
+}
+
+/**
+ * A model box's suggestions: the presets, each marked as one — a list to pick a preset from, in a box
+ * that still takes any model id.
+ */
+function PresetOptions({ id, presets }: { id: string; presets: readonly string[] }): JSX.Element {
+  return (
+    <datalist id={id}>
+      {presets.map((name) => (
+        <option key={name} value={name}>
+          preset
+        </option>
+      ))}
+    </datalist>
   );
 }
 

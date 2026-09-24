@@ -143,7 +143,7 @@ not ask — it already means *write a layout here*.
 **Which projects are open survives the quit.** Opening a project adds a session
 and nothing evicts it (§2.3), which makes "these are the projects I work in" a
 statement a person makes by opening them — and one the app retracted on every
-quit. The list rides in `user-settings.json` as `projects`, beside the theme and
+quit. The list rides in `user-settings.json` as `projects`, beside the log policy and
 the layout, for the same reason they do: which checkouts one person has open on
 one machine is not a property of any of them, and a list of absolute paths must
 never arrive through a pull request. `AppService.restore()` re-opens them at
@@ -444,9 +444,7 @@ the project it is in.
 [toggle]  JAIRA
 ┌───────────────────────────────────────────┐    ← full height, over the column
 │ ‹  ⚙ SETTINGS                             │    ← the row IS the header
-│    JUST YOU                 this machine  │
-│    Appearance                             │
-│    PROJECT & SHARED              layered  │
+│    Appearance                             │    ← one list, no group headings (§6.8)
 │    Connections                            │
 │    Models                                 │
 │    Tools                                  │    ← the open page's sections,
@@ -454,9 +452,7 @@ the project it is in.
 │       Functions an agent calls            │
 │       Functions a workflow calls          │
 │    Runs                                   │
-│    Files                                  │
 │    Data & history                         │
-│    settings.json                          │
 │   ─────────────────────────────────────   │
 │    ≡ LOGS    ⌁ DEBUG    ☾ DARK            │    ← pinned to the bottom of the panel
 └───────────────────────────────────────────┘
@@ -634,6 +630,10 @@ argues for an idiom the app no longer uses.
 ---
 
 ## 6. Appearance — a new Settings section
+
+*`layered: false`, the `SECTIONS` entry and the preferences file below are how Appearance
+landed. Since 2026-09-23 the look is the `appearance` block of the settings, stated by any layer,
+and Appearance has the layer switch like every other page — §6.8.*
 
 None of §3 is fixed. **Appearance is a setting**: an entry in the `SECTIONS`
 array in `packages/app/src/renderer/App.tsx` — beside Providers, Executors,
@@ -1283,6 +1283,9 @@ accordion and a row switch.
 
 ### 6.7 The Settings pages, reorganised
 
+*The two groups, the `settings.json` and Files pages, the `Built in` segment and Tools'
+"Override here" below were superseded the same day — §6.8.*
+
 The person's rulings, 2026-09-23. The tabs had grown one per thing JaiRA was built
 out of — Providers, Integrations, Executors, Toolsets, Configuration, Files,
 Appearance, History — so a person looking for "the model a project uses" had two
@@ -1367,6 +1370,56 @@ The styles are the stylesheet's "SETTINGS, REORGANISED" section.
 `shots/settings-tabs.mts` photographs every page in both themes into
 `shots/out/settings/`; the per-page catalog docs are
 `docs/ui/surfaces/settings-*.md`.
+
+### 6.8 Round 5: "Just you" is a layer, and the sidebar is one list
+
+The person's designs, 2026-09-23, superseding the groups and the switch of §6.7.
+
+- **A fourth configuration layer, "Just you".** `personal-settings.json` in the shared
+  root — the same schema as `settings.json`, merged after the shared root and the
+  project, never in a checkout ([settings-json](docs/engineering/contracts/settings-json.md)).
+  How the app LOOKS is its `appearance` block now, and the look `user-settings.json` held
+  moved there once (`migrateUserSettings`); that file keeps only the window's own state.
+  The renderer paints the effective look of the address it stands on; the frame paints
+  the shared root's and yours.
+- **Four layers, weakest first**: `Built in` (`$SYSTEM/settings.json`, read-only — it ships
+  the presets `simple`, `coder` and `planner` and `functions.smart.model: "simple"`), Shared
+  (`~/.jaira/settings.json`), This project (`.jaira/settings.json`) and Just you. Built in has
+  no segment: what it holds is what a row inherits, and editing it writes into the layer on the
+  switch.
+- **One flat sidebar list**, no group headings: Appearance, Connections, Models, Tools,
+  Runs, Data & history (`settingsSections.ts`). The `settings.json` page is gone — every
+  key has a row somewhere — and so is Files: its hidden patterns are Appearance's last
+  section, "Files tree".
+- **Every page is layered, Appearance included**, with the switch `Just you | This
+  project | Shared (all projects)` at the head's top-right (`Just you | Shared` with no
+  project). Settings opens on Shared and stays where the switch is put. No `Built in`
+  segment. Each Appearance row — the Mode tiles, the Theme cards, the Board options,
+  Conversation, the Text rows, File types — has the row switch every layered row has.
+- **The Just you view.** On the personal layer the head offers `What you changed |
+  Every row`. What you changed draws only the rows the personal layer states — a section
+  left empty goes, and an empty page says "Nothing is set just for you on this page" —
+  and every row it states says what it replaces: "instead of sonnet from Shared"
+  (`SettingsLayerContext`, `useLayerRow`, `inheritedValue`).
+- **Appearance's last section is "Files tree"** (`filesTreePane.tsx`): `files.hidden` now
+  concatenates across the layers — the built-in defaults, then Shared, this project and Just you,
+  last match wins — drawn as one rule list folded by group, each rule with what it hides in this
+  root and where it came from, an add line with a live preview, "Why is a path hidden?" and
+  Show system/ ([settings-files](docs/ui/surfaces/settings-files.md)).
+- **Connections gains MCP servers**, after Local models (`mcpServersRows.tsx`): a row per server
+  with its state and the secrets it is sent, "Add a server", and the servers other tools on this
+  machine already run, one `Add` from being ours
+  ([mcp-servers](docs/engineering/units/mcp-servers.md)).
+- **Tools: what ships is live on every layer.** A built-in permission set is shown wherever the
+  layer does not state its own, and its first change writes that layer's copy with the change in
+  it; the copy reads `shared · copied from built in` until "Put back the built-in" deletes it. On
+  Just you, which holds no permission-set files, the first change asks whether the copy goes to
+  Shared or this project. A set's MCP section is a group per configured server (`mcpBucket.tsx`):
+  the server's own mode, then a line per named tool.
+- **Models: a preset chooses its model.** A preset's sections start with Model — the rule, "The
+  first available", over its candidates, each with the route it would take and whether it can run
+  here. The built-in presets are editable in place; saving writes the preset into the layer on the
+  switch, and "Put back the built-in" deletes that copy.
 
 
 ## 7. Changes to existing code

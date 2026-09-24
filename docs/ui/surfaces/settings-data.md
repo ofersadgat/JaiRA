@@ -31,7 +31,7 @@ Each section is a quiet sentence-case heading with an `ⓘ` over one bordered ca
 | --- | --- |
 | stated | A row's switch on: the control is live and edits this layer. |
 | inherited | The switch off: the row dimmed, its control inert, showing what it inherits. |
-| no project | Artifacts and Storage only, editing the shared root. Stored history and Pruning are not drawn. |
+| no project | Artifacts and Storage only, editing Shared or Just you. Stored history and Pruning are not drawn. |
 | counts pending | Right after a project opens and before its counts arrive: `Open a project to see its history.` in `--dim` in place of the last two sections. |
 | preview | A preview found tasks: a `Would delete` row, `The history of {n} task(s): {events} events, {commands} commands.`, a red `Delete permanently` and a ghost `Dismiss`; an `ⓘ` lists the unfinished tasks kept. |
 | settled | A preview that found nothing reads `Nothing matches — no task history is old enough.`; a delete reads `Deleted` and `The history of {n} task(s); {events} events remain.`, with the counts above already lowered. Both end in `Dismiss`. |
@@ -68,7 +68,7 @@ Changing the day count after a preview leaves that preview's report on screen; `
 
 ## A person arrives from the sidebar, and the day count does not outlive the visit
 
-- `Data & history` in the sidebar shows this page, with or without a project open; with none open, the settings are the shared root's and there is no history to show.
+- `Data & history` in the sidebar shows this page, with or without a project open; with none open, the switch offers `Just you` and `Shared (all projects)`, and there is no history to show.
 - Choosing another page or room leaves. The settings are already written; the day count returns to `30` on the next visit.
 - Closing the project while standing here removes the last two sections.
 

@@ -17,6 +17,7 @@ import type { Approver, PermissionDecision, PermissionRequest, PermissionScope }
 import type { CommandApproval } from "@jaira/shared";
 import { CommandGrants, approvalReasonOf, commandDecisionOf, type PolicyAuditEntry } from "./policy";
 import { withPermissionFunctions, type PermissionFunctionsOptions } from "./permissionFunctions";
+import { mcpCallOf } from "./mcpServers";
 
 /** Why an approval was refused, by the call's own input object — see {@link refusalOf}. */
 const REFUSALS = new WeakMap<object, string>();
@@ -182,15 +183,19 @@ export class ApprovalHub {
     }
     const requestId = this.options.nextId?.() ?? `approval-${++this.counter}`;
     const input = req.input as Record<string, unknown>;
-    const command = typeof input["command"] === "string" ? (input["command"] as string) : undefined;
     // The policy judged this very call a moment ago and kept what it found against the input.
     const decided = commandDecisionOf(req.input);
+    // A call to a tool of an MCP server is judged by name, as a line of one part — the tool's name
+    // (`mcp__figma__get_code`) is what the person reads, and is the tool, even where the gate was
+    // asked about it by its server's line.
+    const mcp = decided?.parts.parts[0]?.kind === "mcp" ? decided.parts.line : undefined;
+    const command = typeof input["command"] === "string" ? (input["command"] as string) : mcp;
     // The decision kept against the call is the freshest word — after the functions a line names have
     // answered, its reason is theirs, not the escalation the policy audited on the way in.
     const reason = decided?.reason ?? (command !== undefined ? this.reasons.get(command) : undefined) ?? approvalReasonOf(req.input);
     const request: ApprovalRequest = {
       requestId,
-      tool: req.tool,
+      tool: mcpCallOf(req.input) ?? req.tool,
       ...(command !== undefined ? { command } : {}),
       ...(reason !== undefined ? { reason } : {}),
       ...(decided !== undefined ? { parts: decided.parts } : {}),

@@ -29,6 +29,7 @@ import {
   isBuiltInModule,
   loadSnapshot,
   openProject,
+  openSharedProject,
   prepareUserModules,
   readWorkflowFiles,
   resetUserModules,
@@ -418,5 +419,72 @@ describe("the approval gate's exemption", () => {
     expect(isBuiltInModule(`${builtIn}-evil/functions/confidence.ts`, builtIn)).toBe(false);
     expect(isBuiltInModule(join(builtIn, "..", "elsewhere", "x.ts"), builtIn)).toBe(false);
     expect(isBuiltInModule(builtIn, builtIn)).toBe(false);
+  });
+});
+
+describe("the built-in settings layer", () => {
+  // A base of its own, so a `settings.json` written into it cannot reach another test's project.
+  let base: string;
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), "jaira-base-"));
+  });
+  afterEach(() => {
+    // Closed first: this runs before the outer hook, and an open database holds a file under `base`.
+    project?.close();
+    project = undefined;
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  const presetsOf = (p: Project): Record<string, Record<string, unknown>> => p.config.models.presets ?? {};
+
+  it("merges UNDER the shared root, which merges under the project — key by key, the weakest first", () => {
+    write(builtIn, "settings.json", {
+      models: { presets: { quick: { model: "claude-haiku-4-5", maxOutputTokens: 100 }, deep: { reasoning: { effort: "high" } } } },
+      functions: { smart: { model: "quick" } },
+    });
+    write(base, "settings.json", { models: { presets: { quick: { maxOutputTokens: 200 } } } });
+    initProject(dir, base);
+    write(dir, ".jaira/settings.json", { models: { presets: { deep: { reasoning: { effort: "xhigh" } } } } });
+    project = openProject(dir, { baseDir: base, builtInDir: builtIn });
+    expect(presetsOf(project)).toEqual({
+      // The shared root's field over what ships, the shipped model kept.
+      quick: { model: "claude-haiku-4-5", maxOutputTokens: 200 },
+      // The project's over both.
+      deep: { reasoning: { effort: "xhigh" } },
+    });
+    expect(project.config.functions.smart.model).toBe("quick");
+  });
+
+  it("gives a project with no settings at all the presets that ship — simple, coder, planner — and the judge on simple", () => {
+    // The REAL layer: `packages/shared/builtin/`, as a project that never wrote a settings file sees it.
+    rmSync(join(dir, ".jaira", "settings.json"), { force: true });
+    project = openProject(dir, { baseDir: base });
+    const presets = presetsOf(project);
+    expect(Object.keys(presets).sort()).toEqual(["coder", "planner", "simple"]);
+    expect(presets["simple"]!["model"]).toEqual({ candidates: ["claude-haiku-4-5", "gpt-5.6-luna"], choose: "first-available" });
+    expect(presets["coder"]).toEqual({
+      model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "first-available" },
+      reasoning: { effort: "high" },
+    });
+    expect(presets["planner"]).toEqual({
+      model: { candidates: ["claude-fable-5-1", "gpt-5.6-sol"], choose: "first-available" },
+      reasoning: { effort: "high" },
+    });
+    expect(project.config.functions.smart.model).toBe("simple");
+  });
+
+  it("is under the shared root opened as a project, too", () => {
+    write(builtIn, "settings.json", { models: { presets: { quick: { model: "claude-haiku-4-5" } } } });
+    write(base, "settings.json", { functions: { smart: { model: "quick" } } });
+    project = openSharedProject({ baseDir: base, builtInDir: builtIn });
+    expect(presetsOf(project)).toEqual({ quick: { model: "claude-haiku-4-5" } });
+    expect(project.config.functions.smart.model).toBe("quick");
+  });
+
+  it("is an empty layer when nothing ships a settings file", () => {
+    initProject(dir, base);
+    project = openProject(dir, { baseDir: base, builtInDir: builtIn });
+    expect(project.config.models.presets).toBeUndefined();
+    expect(project.config.functions.smart).toEqual({});
   });
 });

@@ -8,6 +8,8 @@
  *  - **Model APIs** — the providers that return a completion for a key.
  *  - **Local models** — what runs on this machine: an OpenAI-compatible server, found by asking the
  *    usual ports, and GGUF weights loaded into JaiRA itself, each file checked.
+ *  - **MCP servers** — the servers whose tools an agent can call, handed to every agent run; and the
+ *    ones other tools on this machine already run, one click from being ours (`mcpServersRows.tsx`).
  *  - **Forges** — where a review can also be opened as a merge request.
  *
  * Every row has one shape: what it is and whether it works on the left; who it connects as on the
@@ -27,6 +29,8 @@ import type {
 } from "@jaira/shared/browser";
 import { AddAgentRow, ProviderRows, providerGroups, type ProvidersPaneProps } from "./providersPane";
 import { ForgeRows, type IntegrationsPaneProps } from "./integrationsPane";
+import type { McpData } from "./mcpData";
+import { McpServerRows } from "./mcpServersRows";
 import { SettingsSection } from "./settingsLayout";
 
 export interface ConnectionsPageProps {
@@ -57,6 +61,8 @@ export interface ConnectionsPageProps {
   localServers?: LocalServerProbe[] | undefined;
   weights?: EmbeddedWeightsReport | undefined;
   oauth?: IntegrationsPaneProps["oauth"];
+  /** The MCP servers' state and tools, and what other tools on this machine run. Absent ⇒ the section is not drawn. */
+  mcp?: McpData | undefined;
 }
 
 export function ConnectionsPage(props: ConnectionsPageProps): JSX.Element {
@@ -107,6 +113,17 @@ export function ConnectionsPage(props: ConnectionsPageProps): JSX.Element {
       >
         <ProviderRows {...rows} specs={groups.local} />
       </SettingsSection>
+      {props.mcp !== undefined ? (
+        <SettingsSection
+          id="mcp-servers"
+          title="MCP servers"
+          info="Servers whose tools an agent can call: a command JaiRA starts, or a URL it calls. Every agent run is handed the ones that are on, and a permission set says what each of their tools may do (Settings → Tools)."
+          action={<RecheckLine checkedAt={props.mcp.report?.checkedAt ?? 0} rechecking={props.mcp.rechecking} busy={props.busy} onRecheck={props.mcp.recheck} />}
+        >
+          <McpServerRows config={props.config} layer={props.layer} busy={props.busy} editable={props.editable} secrets={props.secrets} mcp={props.mcp} onSave={props.onSave} />
+          {props.mcp.problem !== null ? <p className="sub warn-text">{props.mcp.problem}</p> : null}
+        </SettingsSection>
+      ) : null}
       <SettingsSection
         id="forges"
         title="Forges"

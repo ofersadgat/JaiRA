@@ -18,7 +18,7 @@
  * working providers on a machine configured for none. A provider therefore has four states, and the
  * pill says which: ready, not working, not set up, turned off.
  */
-import { useMemo, useState, type JSX } from "react";
+import { useContext, useMemo, useState, type JSX } from "react";
 import {
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
@@ -33,7 +33,7 @@ import {
   type SecretTarget,
   type WeightsFileCheck,
 } from "@jaira/shared/browser";
-import { Disclosure, Field, FieldGrid, Level, SelectInput, StatusDot, Switch, TextArea, TextInput, stateWord, type ProviderState } from "./controls";
+import { Disclosure, Field, FieldGrid, Level, SelectInput, SettingsLayerContext, StatusDot, Switch, TextArea, TextInput, stateWord, useLayerRow, type ProviderState } from "./controls";
 import { BrandIcon, Icon } from "./icons";
 import {
   MODEL_PROVIDERS,
@@ -118,7 +118,7 @@ const LOCAL_PROVIDERS = new Set(["local", "embedded"]);
 export function ProviderRows(props: ProvidersPaneProps & { specs: ProviderSpec[] }): JSX.Element {
   const { config, routeProbes, executorProbes, layer, specs } = props;
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
-  const layerDoc = layer === "base" ? config.base : config.project;
+  const layerDoc = config[layer];
   return (
     <ul className="cfg-rows">
       {specs.map((spec) => (
@@ -136,7 +136,9 @@ export function ProviderRows(props: ProvidersPaneProps & { specs: ProviderSpec[]
 }
 
 /** Declare another agent CLI — the last row of Connections → Agents. */
-export function AddAgentRow(props: Pick<ProvidersPaneProps, "layer" | "busy" | "editable" | "onAdd">): JSX.Element {
+export function AddAgentRow(props: Pick<ProvidersPaneProps, "layer" | "busy" | "editable" | "onAdd">): JSX.Element | null {
+  // Adding is setting something, which "What you changed" is not showing — Every row is.
+  if (useContext(SettingsLayerContext)?.onlyStated === true) return null;
   return <AddProvider layer={props.layer} busy={props.busy || !props.editable} onAdd={props.onAdd} />;
 }
 
@@ -371,7 +373,7 @@ function ProviderRow({
   probe: ProbeResult | undefined;
   layerDoc: unknown;
   effective: unknown;
-}): JSX.Element {
+}): JSX.Element | null {
   const { here, merged } = blocksFor(spec, layerDoc, effective);
   const fields = useMemo(() => allFields(spec), [spec]);
   const saved = useMemo(
@@ -432,6 +434,10 @@ function ProviderRow({
   // The key's store form opens under the row, across its width, from the key box on the right.
   const [keyOpen, setKeyOpen] = useState(false);
   const agentLogins = probe?.accounts !== undefined && state !== "off";
+  // The Just you view: a provider is a row the layer states when its block says anything there.
+  const blockPath = providerBlockPath(spec);
+  const layered = useLayerRow(blockPath !== null ? [blockPath.join(".")] : ["agents.genericCli"]);
+  if (layered.hidden) return null;
 
   return (
     <li className={`cfg-row conn-row ${state}`}>
@@ -533,6 +539,8 @@ function ProviderRow({
       ) : null}
 
       {open ? (
+        // The row's own form: what is in it is this provider's, drawn whole once the row is.
+        <SettingsLayerContext.Provider value={null}>
         <div className="cfg-row-body conn-wide">
           <p className="cfg-hint">{spec.hint}</p>
           {spec.levels.map((level, depth) => {
@@ -599,6 +607,7 @@ function ProviderRow({
             ) : null}
           </div>
         </div>
+        </SettingsLayerContext.Provider>
       ) : null}
     </li>
   );

@@ -31,6 +31,7 @@ import { SettingsSection } from "./settingsLayout";
 import { LAYER_LABELS } from "./layerLabels";
 import { modelsBlock, type ModelPatch } from "./modelsConfig";
 import { Presets, type PresetDocs } from "./presetTabs";
+import { candidateLookupOf, candidatesInDraft, type CandidateLookup } from "./presetModel";
 import type { ExecutorPatch, ExecutorTarget } from "./executorConfig";
 
 export interface ModelsPaneProps {
@@ -53,7 +54,7 @@ export function ModelsPane(props: ModelsPaneProps): JSX.Element {
   const { config, executors, availability, busy, layer, editable } = props;
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
 
-  const layerDoc = layer === "base" ? config.base : config.project;
+  const layerDoc = config[layer];
   const locked = busy || !editable;
   const overlay = definitionsOf(layerDoc)[DEFAULT_EXECUTOR];
   const onOverlay = (next: JairaOperationNode): void => props.onSaveDefinition(DEFAULT_EXECUTOR, next, layer);
@@ -74,7 +75,7 @@ export function ModelsPane(props: ModelsPaneProps): JSX.Element {
         )}
       </SettingsSection>
 
-      <PresetsGroup config={config} locked={locked} layer={layer} onSave={props.onSaveModels} />
+      <PresetsGroup config={config} locked={locked} layer={layer} lookup={candidateLookupOf(availability)} onSave={props.onSaveModels} />
 
       <SettingsSection
         id="advanced"
@@ -102,7 +103,7 @@ export function functionRulesOverlay(
   layer: ConfigLayer,
   rules: string[] | undefined,
 ): [name: string, definition: JairaOperationNode, layer: ConfigLayer] {
-  const overlay = definitionsOf(layer === "base" ? config.base : config.project)[DEFAULT_EXECUTOR];
+  const overlay = definitionsOf(config[layer])[DEFAULT_EXECUTOR];
   return [DEFAULT_EXECUTOR, pin(overlay, "function.rules", rules), layer];
 }
 
@@ -121,38 +122,63 @@ function presetsOf(doc: unknown): PresetDocs {
 }
 
 /**
+ * The model ids a candidate's box suggests: every candidate a preset in view already names, then the
+ * current families — suggestions only, the box takes any id.
+ */
+const MODEL_SUGGESTIONS = ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+
+function suggestionsOf(...docs: PresetDocs[]): string[] {
+  const named = docs.flatMap((doc) => Object.values(doc).flatMap((preset) => candidatesInDraft(preset["model"])));
+  return [...new Set([...named, ...MODEL_SUGGESTIONS].filter((id) => id.trim().length > 0))];
+}
+
+/** A layer as words in a sentence — "Shared (all projects)" → "shared", "This project" → "this project". */
+function layerWordOf(layer: ConfigLayer): string {
+  return LAYER_LABELS[layer].replace(/\s*\(.*\)\s*$/, "").toLowerCase();
+}
+
+/**
  * Named LLM configurations a state selects with `operation.configRef`.
  *
- * The group head, and the three documents the tabs are drawn from: what THIS layer states, what is
- * in effect, and what the other layer states. Everything else is `presetTabs.tsx`.
+ * The group head, and the documents the tabs are drawn from: what THIS layer states, what is in
+ * effect, what the other layer states, and what ships (`ConfigView.system`). Everything else is
+ * `presetTabs.tsx`.
  */
 function PresetsGroup({
   config,
   locked,
   layer,
+  lookup,
   onSave,
 }: {
   config: ConfigView;
   locked: boolean;
   layer: ConfigLayer;
+  lookup: CandidateLookup;
   onSave: (fields: ModelPatch, layer: ConfigLayer) => void;
 }): JSX.Element {
+  const builtIn = presetsOf(config.system);
+  const effective = presetsOf(config.effective);
   const other: ConfigLayer = layer === "base" ? "project" : "base";
   return (
     <SettingsSection
       id="presets"
       title="Presets"
-      info="A named set of call settings a state picks with configRef, merged under its own config. A definition is the heavier tool — it chooses the provider and the stack too; a preset is only the settings."
+      info="A named model and set of call settings a state picks with configRef, merged under its own config — simple, coder and planner ship built in, and editing one saves your copy in this layer. A model field (the default model, the judge) may name a preset too. A definition is the heavier tool — it chooses the provider and the stack too."
     >
       <Presets
         // A different layer is a different list: start clean rather than show one layer's unsaved
         // edits, or its selection, over another's presets.
         key={layer}
-        here={presetsOf(layer === "base" ? config.base : config.project)}
-        effective={presetsOf(config.effective)}
-        others={presetsOf(other === "base" ? config.base : config.project)}
+        here={presetsOf(config[layer])}
+        effective={effective}
+        others={presetsOf(config[other])}
+        builtIn={builtIn}
         locked={locked}
         originLabel={LAYER_LABELS[other]}
+        layerWord={layerWordOf(layer)}
+        lookup={lookup}
+        suggestions={suggestionsOf(effective, builtIn)}
         onWrite={(name, value) => onSave({ [`presets.${name}`]: value }, layer)}
       />
     </SettingsSection>

@@ -44,6 +44,7 @@ import type {
   JairaSettings,
   Appearance,
   ConversationLook,
+  JairaAppearanceConfig,
   ThemeMode,
   PendingApproval,
   ModuleApproval,
@@ -70,16 +71,11 @@ import type {
   WorkflowLayer,
   WritableLayer,
   WorkflowSource,
-  RendererChoice,
   RendererEdit,
 } from "@jaira/shared/browser";
 import {
   CONFIG_JSON,
-  defaultAppearance,
-  defaultConversationLook,
-  defaultEditors,
   defaultLogPolicy,
-  defaultRendererChoice,
   isTextMime,
   resolveTheme,
   SHARED_SESSION,
@@ -122,6 +118,8 @@ import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } fr
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
 import { applyAppearance, useSystemDark } from "./appearance";
+import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
+import { lookOf, lookWith, rendererWrites, targetLayerOf, withPaths, type PathWrite } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pill";
@@ -659,12 +657,12 @@ export interface AppState {
   /** Which section the Settings view is showing. */
   section: SettingsSection;
   /**
-   * Which configuration layer the Settings view is editing.
+   * Which configuration layer the Settings view is editing — Just you, This project or Shared.
    *
-   * An axis rather than a section, because it crosses two of them: Config and Executors are both
-   * per-layer, and listing "This project" and "Shared" as siblings of "Executors" made the layer a
-   * place you navigated to for one and a picker you operated for the other — two mechanisms for one
-   * question, which is how the two ended up able to disagree.
+   * An axis rather than a section, because it crosses every page: listing the layers as siblings of
+   * the pages made the layer a place you navigated to for one and a picker you operated for another
+   * — two mechanisms for one question, which is how the two ended up able to disagree. Opens on
+   * Shared ({@link DEFAULT_CONFIG_LAYER}) and stays where the switch puts it.
    */
   configLayer: ConfigLayer;
 }
@@ -793,8 +791,12 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-/** The Settings pages — see `SECTIONS` in App.tsx for their groups and order. */
-export type SettingsSection = "appearance" | "connections" | "models" | "tools" | "runs" | "files" | "data" | "raw";
+/**
+ * The Settings pages, in the sidebar's one list (2026-09-23) — see `SECTIONS` in App.tsx. Every one of
+ * them is layered; the raw `settings.json` page and the Files page are gone (the Files tree's patterns
+ * are the last section of Appearance).
+ */
+export type SettingsSection = "appearance" | "connections" | "models" | "tools" | "runs" | "data";
 
 const EMPTY: AppState = {
   at: null,
@@ -815,20 +817,13 @@ const EMPTY: AppState = {
   error: null,
   initPrompt: null,
   busy: false,
-  // Light until the saved preference says otherwise, matching the stylesheet's own default so the
-  // first paint and the loaded setting agree in the common case. The layout starts EMPTY rather than
-  // at the defaults: an absent id means "whatever this control opens at", so the first paint is the
-  // default layout without this having to restate what those numbers are.
+  // The layout starts EMPTY rather than at the defaults: an absent id means "whatever this control
+  // opens at", so the first paint is the default layout without this having to restate what those
+  // numbers are. The look is the configuration's (`lookOf`), and is the defaults until it is read.
   settings: {
-    theme: "light",
     ui: emptyUiState(),
-    appearance: defaultAppearance(),
-    editors: defaultEditors(),
-    renderers: {},
     logging: defaultLogPolicy(),
     projects: [],
-    filesHidden: [],
-    conversation: defaultConversationLook(),
   },
   config: null,
   executors: [],
@@ -881,7 +876,7 @@ const EMPTY: AppState = {
   trail: [],
   trailState: null,
   section: "connections",
-  configLayer: "project",
+  configLayer: DEFAULT_CONFIG_LAYER,
 };
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
@@ -2067,10 +2062,11 @@ export function useApp() {
     // With no project there is no project LAYER either, and the settings screens must not merely
     // hide the switch — they have to actually be editing the layer they say they are. Left on
     // `project`, every control rendered disabled with no visible reason, which is what a screen that
-    // says one thing and does another looks like.
+    // says one thing and does another looks like. Shared and Just you exist in every window, so a
+    // switch on either stays where it is.
     patch({
       at: current?.dir ?? null,
-      ...(current ? {} : { configLayer: "base" as ConfigLayer }),
+      ...(current || ref.current.configLayer !== "project" ? {} : { configLayer: DEFAULT_CONFIG_LAYER }),
     });
     // Before the early return: preferences are the person's, and the shared root is the machine's.
     // Both mean something with no project open, and the Files view and Settings are reachable on an
@@ -2133,10 +2129,15 @@ export function useApp() {
    * devtools when a colour looks wrong.
    */
   // `system` is resolved here, against the OS, and re-resolved when the OS changes its mind.
+  //
+  // Every piece of the look below is the EFFECTIVE `appearance` block of the address the window is
+  // standing on (`lookOf`): a project may state a look of its own, and the person's own layer is
+  // over every one. Before the first read it is the defaults, which is what `index.html` stamps.
   const systemDark = useSystemDark();
+  const look = useMemo(() => lookOf(state.config), [state.config]);
   useEffect(() => {
-    document.documentElement.dataset["theme"] = resolveTheme(state.settings.theme, systemDark);
-  }, [state.settings.theme, systemDark]);
+    document.documentElement.dataset["theme"] = resolveTheme(look.mode, systemDark);
+  }, [look.mode, systemDark]);
 
   /**
    * Apply the typography preferences to the same element (SHELL.md §6).
@@ -2147,8 +2148,8 @@ export function useApp() {
    * property writes and the whole window moves coherently.
    */
   useEffect(() => {
-    applyAppearance(document.documentElement, state.settings.appearance);
-  }, [state.settings.appearance]);
+    applyAppearance(document.documentElement, look);
+  }, [look]);
 
   /**
    * Publish how each editor looks, on the same terms — see `editorLook.ts`.
@@ -2159,8 +2160,8 @@ export function useApp() {
    * screen follows a switch as it is flipped instead of at the next time a file is opened.
    */
   useEffect(() => {
-    applyEditors(document.documentElement, state.settings.editors);
-  }, [state.settings.editors]);
+    applyEditors(document.documentElement, look.editors);
+  }, [look.editors]);
 
   /**
    * Publish the renderer choices for the components that cannot be handed them.
@@ -2170,8 +2171,8 @@ export function useApp() {
    * copy instead; see `renderChoice.ts` on why that is a delivery route rather than a second source.
    */
   useEffect(() => {
-    publishRenderChoices(state.settings.renderers);
-  }, [state.settings.renderers]);
+    publishRenderChoices(look.renderers);
+  }, [look.renderers]);
 
   // Initial load + push subscription.
   useEffect(() => {
@@ -2610,7 +2611,7 @@ export function useApp() {
           taskFocus: project,
           // With no project there is no project LAYER either, and the settings screens must not
           // merely hide the switch — they have to be editing the layer they say they are.
-          ...(project === null ? { configLayer: "base" as ConfigLayer } : {}),
+          ...(project === null && ref.current.configLayer === "project" ? { configLayer: DEFAULT_CONFIG_LAYER } : {}),
           trail: [],
           trailState: null,
         });
@@ -3401,19 +3402,27 @@ export function useApp() {
       // --- appearance -------------------------------------------------------
 
       /**
-       * Switch theme.
+       * Write paths of the `appearance` block into ONE layer — the one every look setter below goes
+       * through (`appearanceLayer.ts`).
        *
-       * The new value is applied to local state FIRST and persisted after: the toggle has to feel
-       * instant, and a settings file that cannot be written is not a reason to refuse the change
-       * for this session.
+       * The effective look moves FIRST and the layer is written after: a switch that waited for the
+       * round trip would read as a switch that had not registered. `layer` absent is a change made
+       * outside Settings (the sidebar's theme switch, an editor's wrap toggle), which lands where the
+       * window will show it — see `targetLayerOf`.
        */
-      setTheme: async (theme: ThemeMode) => {
-        patch({ settings: { ...ref.current.settings, theme } });
-        try {
-          patch({ settings: keepingUi(await invoke("settings:write", { theme })) });
-        } catch (e) {
-          fail(e);
-        }
+      writeLook: async (writes: readonly PathWrite[], layer?: ConfigLayer) => {
+        const current = ref.current.config;
+        if (current === null || writes.length === 0) return;
+        const into = layer ?? targetLayerOf(current, writes[0]![0]);
+        const doc = withPaths(current[into], writes);
+        const effective = { ...(current.effective as Record<string, unknown>), appearance: lookWith(lookOf(current), writes) } as unknown as JsonValue;
+        patch({ config: { ...current, [into]: doc as JsonValue, effective } });
+        await actions.saveConfig(into, doc);
+      },
+
+      /** Switch the mode — light, dark or the system's. See {@link writeLook} for where it lands. */
+      setTheme: async (theme: ThemeMode, layer?: ConfigLayer) => {
+        await actions.writeLook([["appearance.mode", theme]], layer);
       },
 
       // --- the remembered layout (see `uiState.ts`) ---------------------------
@@ -3722,10 +3731,12 @@ export function useApp() {
        * Replace one configuration layer. Main validates before writing, so a rejected save leaves
        * the file untouched and the message names the offending field.
        */
-      saveConfig: async (layer: "base" | "project", config: unknown) => {
+      saveConfig: async (layer: ConfigLayer, config: unknown) => {
         patch({ busy: true, error: null });
         try {
-          const next = await invoke("config:write", { layer, config: config as never, ...inLayer(layer === "base" ? "base" : "project") });
+          // The project named whatever the layer: it is where a project write lands, and for the
+          // other two it is which project's view the answer is read back for.
+          const next = await invoke("config:write", { layer, config: config as never, ...inLayer("project") });
           patch({ config: next, busy: false });
           await refreshConfig();
           // `settings.json` is the one editor that does not save through `saveDoc` — it writes a
@@ -3751,34 +3762,19 @@ export function useApp() {
       saveModels: async (fields: ModelPatch, layer: ConfigLayer) => {
         const current = ref.current.config;
         if (!current) return;
-        const doc = applyModelPatch(layer === "base" ? current.base : current.project, fields);
+        const doc = applyModelPatch(current[layer], fields);
         // The write itself makes main re-check and push, so nothing is probed from here: a probe
         // fired beside the write would race it and report the configuration that was just replaced.
         await actions.saveConfig(layer, doc);
       },
 
       /**
-       * Write `config.files.hidden` into a named layer — what the Files tree leaves out.
-       *
-       * `null` REMOVES the key, which is the difference between "I have no opinion" and "show
-       * everything": an absent key means the defaults, and `[]` means a person has asked to see
-       * `system/` and the rest. A pane that could only write an array could never say the first
-       * thing again once it had said the second.
+       * Write a layer's WHOLE document for the Files tree section — what the tree leaves out — and
+       * re-read the tree. The section builds the document itself (`filesTreePane.tsx`: a layer's
+       * `files.hidden` is what it ADDS, and it is never written `[]`).
        */
-      saveHiddenPaths: async (patterns: string[] | null, layer: ConfigLayer) => {
-        const current = ref.current.config;
-        if (!current) return;
-        const doc = (layer === "base" ? current.base : current.project) ?? {};
-        const base = typeof doc === "object" && doc !== null && !Array.isArray(doc) ? { ...doc } : {};
-        const files = base["files"];
-        const block = typeof files === "object" && files !== null && !Array.isArray(files) ? { ...files } : {};
-        if (patterns === null) delete block["hidden"];
-        else block["hidden"] = patterns;
-        // An empty `files` block is noise in a file people read, so it goes rather than being left
-        // behind as `"files": {}` by a person who removed their last pattern.
-        if (Object.keys(block).length === 0) delete base["files"];
-        else base["files"] = block;
-        await actions.saveConfig(layer, base);
+      saveTreeLayer: async (layer: ConfigLayer, doc: JsonValue) => {
+        await actions.saveConfig(layer, doc);
         // Main draws the tree from this, and `saveConfig` invalidates configuration alone — so
         // without this the pattern you just added does nothing visible until something else happens
         // to re-read the tree.
@@ -3862,7 +3858,7 @@ export function useApp() {
       setExecutorConfig: async (executor: ExecutorTarget, fields: ExecutorPatch, layer: ConfigLayer) => {
         const current = ref.current.config;
         if (!current) return;
-        const doc = applyExecutorPatch(layer === "base" ? current.base : current.project, executor, fields);
+        const doc = applyExecutorPatch(current[layer], executor, fields);
         // The write may have changed the binary or the credential, so what was known about this
         // executor's health no longer describes the executor that is now configured. Main re-checks
         // on every config write and pushes the result, so this does not ask for one itself — a probe
@@ -3884,7 +3880,7 @@ export function useApp() {
         const current = ref.current.config;
         if (!current) return;
         const doc = structuredClone(
-          (layer === "base" ? current.base : current.project) ?? {},
+          (current[layer]) ?? {},
         ) as Record<string, unknown>;
         const executors = { ...((doc["executors"] ?? {}) as Record<string, unknown>) };
         if (definition === undefined) delete executors[name];
@@ -3908,7 +3904,7 @@ export function useApp() {
         const current = ref.current.config;
         if (!current) return;
         try {
-          const doc = addGenericExecutor(layer === "base" ? current.base : current.project, spec);
+          const doc = addGenericExecutor(current[layer], spec);
           await actionsRef.current.saveConfig(layer, doc);
         } catch (e) {
           fail(e);
@@ -3919,7 +3915,7 @@ export function useApp() {
       removeExecutor: async (name: string, layer: ConfigLayer) => {
         const current = ref.current.config;
         if (!current) return;
-        const doc = removeGenericExecutor(layer === "base" ? current.base : current.project, name);
+        const doc = removeGenericExecutor(current[layer], name);
         await actionsRef.current.saveConfig(layer, doc);
       },
 
@@ -3982,7 +3978,7 @@ export function useApp() {
           patch({ busy: false });
           if (name !== named) {
             const view = ref.current.config;
-            const doc = structuredClone(((layer === "base" ? view?.base : view?.project) ?? {}) as Record<string, unknown>);
+            const doc = structuredClone(((view?.[layer]) ?? {}) as Record<string, unknown>);
             const integrations = (doc["integrations"] ??= {}) as Record<string, unknown>;
             const forges = (integrations["forges"] ??= {}) as Record<string, unknown>;
             forges[connection] = { ...((forges[connection] ?? {}) as object), credential: name };
@@ -4203,34 +4199,22 @@ export function useApp() {
       /**
        * Turn word wrap on or off in the JSON editor.
        *
-       * Written through to `user-settings.json` like the theme is, so the choice outlives the window. The
-       * local patch lands first: waiting for the round-trip would make the toggle feel like it had
-       * not registered, and a failed write leaves the setting where the file says it is on next read.
-       *
-       * It lands in `editors.json.wrap`, which is where the Appearance pane's own wrap switch reads
-       * from — so the toggle above the editor and the one in settings are the same setting rather
-       * than two that disagree the moment either is used. See {@link setEditorLook}.
+       * It lands in `appearance.editors.json.wrap`, which is where the Appearance pane's own wrap
+       * switch reads from — so the toggle above the editor and the one in settings are the same
+       * setting rather than two that disagree the moment either is used. Made outside Settings, so it
+       * lands in the layer the window will show it from (see {@link writeLook}).
        */
       setWrapJson: (wrap: boolean) => {
         void actions.setEditorLook("json", { wrap });
       },
 
       /**
-       * Change how one editing surface looks — see {@link EditorLook}.
-       *
-       * Patched locally first and written after, exactly like {@link setAppearance}: a switch that
-       * waited for a round trip before the editor moved would read as a switch that had not
-       * registered. Written WHOLE, for the reason every named block in that file is — `writeSettings`
-       * merges one level deep, so a partial `editors` would delete the three surfaces it omitted.
+       * Change how one editing surface looks — see {@link EditorLook}. One path per knob, so a layer
+       * states the knobs it changes and inherits the rest.
        */
-      setEditorLook: async (kind: EditorKind, patchTo: Partial<EditorLook>) => {
-        const editors = { ...ref.current.settings.editors, [kind]: { ...ref.current.settings.editors[kind], ...patchTo } };
-        patch({ settings: { ...ref.current.settings, editors } });
-        try {
-          patch({ settings: keepingUi(await invoke("settings:write", { editors })) });
-        } catch (e) {
-          fail(e);
-        }
+      setEditorLook: async (kind: EditorKind, patchTo: Partial<EditorLook>, layer?: ConfigLayer) => {
+        const writes = Object.entries(patchTo).map(([knob, value]): PathWrite => [`appearance.editors.${kind}.${knob}`, value]);
+        await actions.writeLook(writes, layer);
       },
 
       /**
@@ -4247,66 +4231,30 @@ export function useApp() {
        * the app's own default keeps reaching everybody who never expressed an opinion, including when
        * that default changes.
        */
-      setRenderer: async (edits: readonly RendererEdit[]) => {
-        const renderers = { ...ref.current.settings.renderers };
-        for (const { key, edit } of edits) {
-          if (edit === null) {
-            delete renderers[key];
-            continue;
-          }
-          const was = renderers[key] ?? defaultRendererChoice();
-          const next: RendererChoice = {
-            read: edit.read === undefined ? was.read : edit.read,
-            write: edit.write === undefined ? was.write : edit.write,
-            off: edit.off === undefined ? was.off : [...new Set(edit.off)],
-            theme: {
-              read: edit.theme?.read === undefined ? was.theme.read : edit.theme.read,
-              write: edit.theme?.write === undefined ? was.theme.write : edit.theme.write,
-            },
-          };
-          const says =
-            next.read !== null || next.write !== null || next.off.length > 0 || next.theme.read !== null || next.theme.write !== null;
-          if (says) renderers[key] = next;
-          else delete renderers[key];
-        }
-        patch({ settings: { ...ref.current.settings, renderers } });
-        try {
-          patch({ settings: keepingUi(await invoke("settings:write", { renderers })) });
-        } catch (e) {
-          fail(e);
-        }
+      setRenderer: async (edits: readonly RendererEdit[], layer?: ConfigLayer) => {
+        const current = ref.current.config;
+        if (current === null) return;
+        const into = layer ?? targetLayerOf(current, "appearance.renderers");
+        await actions.writeLook(rendererWrites(current[into], edits), into);
       },
 
       /**
-       * Change the typography (SHELL.md §6).
-       *
-       * Patched LOCALLY first and written after, like the theme: dragging a size slider must move
-       * the window as it moves, and a round-trip per pixel would make it feel like it was resisting.
-       * The write is whole rather than a delta, because appearance is one setting made of seven
-       * fields and `writeSettings` merges only one level deep.
+       * Change the typography and the palette (SHELL.md §6) — one path per field, so a layer states
+       * what it changes. Written to the layer the Settings page is on when it names one.
        */
-      setAppearance: async (patchTo: Partial<Appearance>) => {
-        const appearance = { ...ref.current.settings.appearance, ...patchTo };
-        patch({ settings: { ...ref.current.settings, appearance } });
-        try {
-          patch({ settings: keepingUi(await invoke("settings:write", { appearance })) });
-        } catch (e) {
-          fail(e);
-        }
+      setAppearance: async (patchTo: Partial<Appearance>, layer?: ConfigLayer) => {
+        await actions.writeLook(
+          Object.entries(patchTo).map(([field, value]): PathWrite => [`appearance.${field}`, value]),
+          layer,
+        );
       },
 
-      /**
-       * How a conversation is drawn — the Conversation section of Settings. Patched locally first
-       * and written whole, like the typography and for the same reason.
-       */
-      setConversation: async (patchTo: Partial<ConversationLook>) => {
-        const conversation = { ...ref.current.settings.conversation, ...patchTo };
-        patch({ settings: { ...ref.current.settings, conversation } });
-        try {
-          patch({ settings: keepingUi(await invoke("settings:write", { conversation })) });
-        } catch (e) {
-          fail(e);
-        }
+      /** How a conversation is drawn — the Conversation section of Appearance. */
+      setConversation: async (patchTo: Partial<ConversationLook>, layer?: ConfigLayer) => {
+        await actions.writeLook(
+          Object.entries(patchTo).map(([field, value]): PathWrite => [`appearance.conversation.${field}`, value]),
+          layer,
+        );
       },
 
       /**
@@ -4323,25 +4271,6 @@ export function useApp() {
         } catch (e) {
           fail(e);
         }
-      },
-
-      /**
-       * This person's own additions to what the tree hides.
-       *
-       * Written whole, like appearance and for the same reason — `writeSettings` merges one level
-       * deep, so a partial list would be the whole list. Patched locally first so a row disappears
-       * on the click rather than on the round-trip.
-       */
-      setFilesHidden: async (filesHidden: string[]) => {
-        patch({ settings: { ...ref.current.settings, filesHidden } });
-        try {
-          patch({ settings: keepingUi(await invoke("settings:write", { filesHidden })) });
-        } catch (e) {
-          fail(e);
-        }
-        // The tree is drawn in main from these rules, so it has to be re-read: nothing else in the
-        // settings file changes what `files:tree` answers, which is why no existing write does this.
-        await refreshTree();
       },
 
       // --- the Debug view's self-test (DESIGN §11.3) --------------------------

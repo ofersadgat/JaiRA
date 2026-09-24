@@ -42,7 +42,7 @@ describe("the provider hierarchy", () => {
     // from two different places in the hierarchy and flattening them loses which is which.
     const local = MODEL_PROVIDERS.find((p) => p.id === "local")!;
     expect(local.levels.map((l) => l.title)).toEqual(["API provider", "Local server"]);
-    expect(pathsOf(local)).toEqual(["credential", "baseURL", "supportsStructuredOutputs", "serve"]);
+    expect(pathsOf(local)).toEqual(["credential", "baseURL", "headers", "supportsStructuredOutputs", "serve"]);
   });
 
   /**

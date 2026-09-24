@@ -90,6 +90,12 @@ async function main(): Promise<void> {
     await app.clickText("Settings");
     await app.clickText("Appearance");
     await app.until(says("Lane colours"), "the theme fields to draw");
+    // The Theme section is one setting of the layer the page edits — Shared, by default — and it is
+    // switched on first: off, the cards show what is inherited and cannot be chosen.
+    await app.evaluate(
+      `(() => { const s = document.querySelector('[data-part="theme"] .set-section-title .cfg-switch'); if (s && s.getAttribute("aria-checked") !== "true") s.click(); return true; })()`,
+    );
+    await app.until(`document.querySelector('[data-part="theme"]')?.classList.contains("set-stated")`, "the Theme section to be set here");
     await app.clickText("Blueprint");
     await app.until(`document.documentElement.dataset.palette === "blueprint"`, "the Blueprint card to repaint the window");
     await app.shot("settings-blueprint-light");

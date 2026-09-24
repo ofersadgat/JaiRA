@@ -2,7 +2,7 @@
 id: engineering/units/document-types
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 implements: [product/read-what-work-produced, ux/patterns/one-document-several-readings, ui/components/value-view, ui/components/data-tree, ui/components/table-view, ui/components/file-changes-list, ui/components/schema-json-editor, ui/components/slot-table, ui/components/file-link-field, ui/components/file-types-pane]
 layer: core
 owns_contracts: []
@@ -32,7 +32,7 @@ It deliberately does not own:
 - Compiling a registered schema and validating a document or a form value against it: [schema-check](schema-check.md).
 - The six `component-<name>` schema entries, registered from `componentGallery.ts`: [component-contracts](component-contracts.md).
 - The `Change` shape and the diff strategies `viewsFor` and `changesOf` read: [changesets](changesets.md).
-- Which renderer draws a view and the per-person choice of one: renderer `fileTypes.ts` and [user-settings](user-settings.md).
+- Which renderer draws a view and the choice of one: renderer `fileTypes.ts`, and `appearance.renderers` in the settings layers, usually the personal one: [project-config](project-config.md).
 - Resolving a reference on disk, which the engine's loader does.
 
 ## The unit is pure core logic in the shared package, read by the renderer and main alike
@@ -83,7 +83,7 @@ It deliberately does not own:
 
 ## Renaming a type or a family orphans saved preferences, and nothing migrates
 
-- The MIME strings and `PaneFamily` ids are keys in the per-person renderer choices, `"<mime>:<kind>"` and `"family:<family>:<kind>"`. Renaming one leaves those preferences unread.
+- The MIME strings and `PaneFamily` ids are keys in `appearance.renderers` of any settings layer, `"<mime>:<kind>"` and `"family:<family>:<kind>"`. Renaming one leaves those choices unread.
 - The schema entry ids are what `schema:validate` callers send, and a renamed id is refused by name.
 - Changing what `isWorkflowDescription` matches changes which files carry the sync panel and which baselines [description-sync](description-sync.md) keeps.
 

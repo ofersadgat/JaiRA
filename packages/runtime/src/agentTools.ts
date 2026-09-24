@@ -59,6 +59,9 @@ import type { ExecPolicy, PermissionMode as GateMode, ToolGate } from "@declarat
 import {
   isFunctionMode,
   isLoweredPermissionSet,
+  mcpModeOf,
+  mcpServerSubject,
+  parseMcpSubject,
   nativesOfStandard,
   offeredTools,
   standardOfNative,
@@ -71,8 +74,10 @@ import {
   type ToolImplementation,
   type PermissionSet,
   type PermissionSetMode,
+  type McpLine,
 } from "@jaira/shared";
 import type { StackedExecutor } from "./executorStack";
+import { mcpDeniedSubjects, noteMcpCall, type McpView } from "./mcpServers";
 
 // --- what each executor declares ----------------------------------------------
 
@@ -167,6 +172,20 @@ export interface PermissionSetView {
    * on a guess would put every sub-agent call of an unrestricted state in front of a person.
    */
   otherIsAuthored: boolean;
+  /**
+   * What answers for an MCP call — the tool's line, its server's, a written `other` — or `undefined`
+   * when none is written and the gate answers as it would for any name nobody declared.
+   */
+  lineOf: McpView["lineOf"];
+  /** Every MCP line the permission set holds (`mcp__figma__get_code`, `mcp__figma`), by subject. */
+  lines: McpView["lines"];
+}
+
+/** Every MCP line a permission set holds, by subject. */
+function mcpLinesOf(permissionSet: PermissionSet): Record<string, McpLine["mode"]> {
+  const out: Record<string, McpLine["mode"]> = {};
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) if (entry.kind === "mcp" && entry.mode !== undefined) out[subject] = entry.mode;
+  return out;
 }
 
 /** A permission set in hand — a conversation turn's. */
@@ -178,7 +197,18 @@ export function viewOfPermissionSet(permissionSet: PermissionSet): PermissionSet
     modeOf: (standard) => entry(standard)?.mode,
     otherFor: () => permissionSet.other,
     otherIsAuthored: permissionSet.other !== undefined,
+    lineOf: (subject) => mcpModeOf(permissionSet, subject),
+    lines: () => mcpLinesOf(permissionSet),
   };
+}
+
+/**
+ * The permission set of one call, as the plan reads it — the one a conversation turn published, else
+ * the one read back off what the engine handed a run — or `undefined` for a state that declares none.
+ */
+export function permissionSetViewOf(ctx: ExecServices): PermissionSetView | undefined {
+  const known = permissionSetOf(ctx);
+  return known !== undefined ? viewOfPermissionSet(known) : viewOfServices(ctx);
 }
 
 /**
@@ -206,6 +236,8 @@ export function viewOfServices(ctx: ExecServices): PermissionSetView | undefined
     modeOf: (name) => entry(name)?.mode ?? gated(name),
     otherFor: (name) => permissionSet.other ?? gated(name),
     otherIsAuthored: permissionSet.other !== undefined,
+    lineOf: (subject) => mcpModeOf(permissionSet, subject),
+    lines: () => mcpLinesOf(permissionSet),
   };
 }
 
@@ -331,7 +363,7 @@ export interface AgentPermissionSetOptions {
    * to keep the one that was wrapped. This is how a flag that is fixed at construction is nonetheless
    * derived per call — there is one executor per setting, and the permission set picks.
    */
-  switched?: (switches: Readonly<Record<string, boolean>>) => StackedExecutor | undefined;
+  switched?: (switches: Readonly<Record<string, boolean>>, view: PermissionSetView) => StackedExecutor | undefined;
 }
 
 /**
@@ -383,13 +415,17 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
       }
 
       if (declaration.channel === "switches") {
-        return (options.switched?.(plan.switches) ?? executor).start(op, switchedServices(ctx, nativelyServed(view, declaration, ctx)));
+        return (options.switched?.(plan.switches, view) ?? executor).start(op, switchedServices(ctx, nativelyServed(view, declaration, ctx), view));
       }
 
-      const denied = [...new Set([...plan.displaced, ...plan.denyNatives])];
+      // An MCP tool the permission set refuses is on the deny list too, by the name the agent calls it —
+      // and a server every line of which refuses, as the server (claude's rule `mcp__figma` covers
+      // every tool of it): a `deny` needs no person.
+      const servers = new Set(Object.keys(view.lines()).flatMap((subject) => parseMcpSubject(subject)?.server ?? []));
+      const denied = [...new Set([...plan.displaced, ...plan.denyNatives, ...mcpDeniedSubjects(view, servers)])];
       return executor.start(
         withAskRules(op, options.providerOptionsKey ?? "claudeCode", plan.askNatives),
-        servicesUnder(ctx, declaration, denied, nativelyServed(view, declaration, ctx)),
+        servicesUnder(ctx, declaration, denied, nativelyServed(view, declaration, ctx), view.lineOf),
       );
     },
   } as unknown as E;
@@ -416,10 +452,17 @@ export function agentFunctionWrapper(declaration: AgentToolDeclaration, label: s
  * names left in it are the policy's command-tool vocabulary (`shell`, `sh`, `powershell`, …) and any
  * standard tool the map does not hold, all answering to the map's `other`: none is a tool of ours codex
  * could be served, and codex's own writers are shut or kept by the SWITCH, which is where the permission set's
- * removals reach this transport. The gate itself is untouched, so every call at the bridge is still
- * decided by the whole map.
+ * removals reach this transport.
+ *
+ * The gate still decides every call at the bridge by the whole map, asked about a configured MCP
+ * server's tool the way claude's callback asks about it ({@link translatedGate}): by its own line, else
+ * its server's (`mcp__figma`), else `other`, with the tool it really is left against the call's input.
+ * Codex's bridge proxies those servers and puts each of their calls to this gate, so without it a tool
+ * with no line of its own would answer to `other` where the same call on claude answers to its server.
+ * Nothing else is translated: the bridge is crossed only by tools of ours, already under their standard
+ * names, and by MCP tools — never by a native of codex's, which is why the declaration holds none.
  */
-function switchedServices(ctx: ExecServices, withheldNames: readonly string[]): ExecServices {
+function switchedServices(ctx: ExecServices, withheldNames: readonly string[], view: PermissionSetView): ExecServices {
   const tools = ctx.tools === undefined ? undefined : Object.fromEntries(Object.entries(ctx.tools).filter(([name]) => !withheldNames.includes(name)));
   const baseline = ctx.policy?.baseline?.tools;
   const policy: ExecPolicy | undefined =
@@ -432,8 +475,12 @@ function switchedServices(ctx: ExecServices, withheldNames: readonly string[]): 
             tools: Object.fromEntries(Object.entries(baseline).filter(([name]) => tools !== undefined && Object.hasOwn(tools, name))),
           },
         };
-  return { ...ctx, ...(tools !== undefined ? { tools } : {}), ...(policy !== undefined ? { policy } : {}) };
+  const gate = ctx.gate === undefined ? undefined : translatedGate(ctx.gate, BRIDGE_ONLY, new Set(), view.lineOf);
+  return { ...ctx, ...(tools !== undefined ? { tools } : {}), ...(policy !== undefined ? { policy } : {}), ...(gate !== undefined ? { gate } : {}) };
 }
+
+/** What crosses codex's bridge, as a declaration: no native of the agent's own (see {@link switchedServices}). */
+const BRIDGE_ONLY: AgentToolDeclaration = { channel: "switches", natives: {} };
 
 /**
  * The tools in `ctx.tools` whose entry chose the agent's OWN implementation — withheld from the
@@ -490,7 +537,7 @@ export function holdAgentFunction<R extends AgentFunctionRun>(declaration: Agent
     }
     const plan = planAgentTools(view, declaration);
     const shut = Object.values(plan.switches).some((on) => !on);
-    return run(shut ? { ...inputs, permissionMode: "plan" } : inputs, switchedServices(ctx, nativelyServed(view, declaration, ctx)));
+    return run(shut ? { ...inputs, permissionMode: "plan" } : inputs, switchedServices(ctx, nativelyServed(view, declaration, ctx), view));
   }) as R;
 }
 
@@ -507,6 +554,7 @@ export function servicesUnder(
   declaration: AgentToolDeclaration,
   denied: readonly string[],
   withheld: readonly string[] = [],
+  mcpLineOf?: McpView["lineOf"],
 ): ExecServices {
   const refused = new Set(denied);
   const tools =
@@ -524,7 +572,7 @@ export function servicesUnder(
             tools: { ...ctx.policy?.baseline?.tools, ...Object.fromEntries(denied.map((native) => [native, "deny" as GateMode])) },
           },
         };
-  const gate = ctx.gate === undefined ? undefined : translatedGate(ctx.gate, declaration, refused);
+  const gate = ctx.gate === undefined ? undefined : translatedGate(ctx.gate, declaration, refused, mcpLineOf);
   return { ...ctx, ...(policy !== undefined ? { policy } : {}), ...(gate !== undefined ? { gate } : {}), ...(tools !== undefined ? { tools } : {}) };
 }
 
@@ -535,9 +583,24 @@ export function servicesUnder(
  * entry and answers `other` — so a kept native would answer to the wrong line of the map. A native
  * with no standard tool, and any name nothing declared, passes through and answers to `other`, which
  * is the rule.
+ *
+ * A tool of an MCP server (`mcp__figma__get_code`) is the same question for a GROUP: its own line
+ * when the permission set holds one, else its SERVER's line (`mcp__figma`), which stands for every
+ * tool of that server no line names, else `other` — so a tool with no line is asked about by its
+ * server's name, the one its mode was written against. The tool it really is travels on the call's
+ * input ({@link noteMcpCall}), where the narrowing and the approval find it: the person is asked about
+ * `mcp__figma__get_code`, and "add to the permission set" writes that tool's line.
  */
-function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refused: ReadonlySet<string>): ToolGate {
+function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refused: ReadonlySet<string>, mcpLineOf?: McpView["lineOf"]): ToolGate {
+  const mcpName = (name: string): string | undefined => {
+    const parsed = mcpLineOf !== undefined ? parseMcpSubject(name) : undefined;
+    if (parsed?.tool === undefined) return undefined;
+    const server = mcpServerSubject(parsed.server);
+    return mcpLineOf!(name)?.line === server ? server : name;
+  };
   const subject = <T extends { name: string; readOnly?: boolean }>(tool: T): { name: string; readOnly?: boolean } => {
+    const grouped = mcpName(tool.name);
+    if (grouped !== undefined) return grouped === tool.name ? tool : { name: grouped };
     const standard = standardOfNative(declaration, tool.name);
     // `readOnly` is a claim about the NATIVE; the standard tool's own is the gate's to know.
     return typeof standard === "string" ? { name: standard } : tool;
@@ -552,6 +615,10 @@ function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refus
         return Promise.resolve({ allow: false as const, reason: `tool '${tool.name}' is not in this state's permission set` });
       }
       const asked = subject(tool);
+      if (mcpName(tool.name) !== undefined) {
+        noteMcpCall(input, tool.name);
+        return gate.check(asked, input);
+      }
       return gate.check(asked, asked === tool ? input : standardInput(asked.name, input));
     },
   };

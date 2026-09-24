@@ -15,7 +15,7 @@
  * Nothing on this screen is an identity. Commits are authored by `git config`; the merge request and
  * every comment JaiRA posts belong to whoever owns the token, which is what "signed in as" reports.
  */
-import { useState, type JSX } from "react";
+import { useContext, useState, type JSX } from "react";
 import {
   BUILTIN_FORGES,
   FORGE_LABELS,
@@ -31,7 +31,7 @@ import {
   type SecretTarget,
 } from "@jaira/shared/browser";
 import { layerWriter } from "./configPane";
-import { SelectInput, StatusDot, Switch, stateWord, type ProviderState } from "./controls";
+import { SelectInput, SettingsLayerContext, StatusDot, Switch, stateWord, type ProviderState } from "./controls";
 import { BrandIcon, Icon } from "./icons";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
@@ -143,12 +143,38 @@ const NEW_SCHEMA: Schema = {
   required: ["name", "provider", "host", "credential"],
 };
 
+/**
+ * The OAuth apps a sign-in through the browser uses, per forge — `integrations.oauth`. Absent is the
+ * ordinary case: JaiRA's own apps answer for gitlab.com and github.com. A layer names one for a
+ * self-hosted instance, or to sign in through an app of its own. Only the raw document reached this
+ * before it went (2026-09-23).
+ */
+const OAUTH_APPS_SCHEMA: Schema = {
+  type: "object",
+  properties: Object.fromEntries(
+    FORGE_PROVIDERS.map((provider) => [
+      provider,
+      {
+        type: "object",
+        title: `${FORGE_LABELS[provider].name} sign-in app`,
+        description: `The OAuth app a sign-in to ${FORGE_LABELS[provider].name} goes through — for a self-hosted instance, or an app of your own. Unset uses JaiRA's own app on the public host.`,
+        properties: {
+          clientId: { type: "string", title: "client ID", description: "The app's client ID. A device-flow sign-in is a public client, so there is no secret to name." },
+        },
+        required: ["clientId"],
+      },
+    ]),
+  ),
+};
+
 /** The forges, as the card of Connections → Forges: one row per connection, then "Another host". */
 export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
   const { config, layer, busy, editable, checks, onSave } = props;
+  // The Just you view's "What you changed": only the connections the layer states, and no adding.
+  const onlyStated = useContext(SettingsLayerContext)?.onlyStated === true;
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
 
-  const doc = (layer === "base" ? config.base : config.project) as Record<string, unknown> | null;
+  const doc = config[layer] as Record<string, unknown> | null;
   const effective = config.effective as Record<string, unknown>;
   const integrations = (effective["integrations"] ?? {}) as { forges?: Record<string, JairaForgeConnection> };
   const forges = integrations.forges ?? {};
@@ -156,8 +182,9 @@ export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
   const { set, stated } = layerWriter(doc, layer, onSave);
 
   return (
+    <>
     <ul className="cfg-rows">
-      {Object.entries(forges).map(([name, connection]) => (
+      {Object.entries(forges).filter(([name]) => !onlyStated || stated(`integrations.forges.${name}`)).map(([name, connection]) => (
         <ForgeRow
           key={`${layer}:${name}`}
           {...props}
@@ -169,8 +196,15 @@ export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
           stated={stated}
         />
       ))}
-      <AddHost forges={forges} locked={locked} set={set} />
+      {onlyStated ? null : <AddHost forges={forges} locked={locked} set={set} />}
     </ul>
+    <SchemaForm
+      schema={OAUTH_APPS_SCHEMA}
+      value={(effective["integrations"] as { oauth?: unknown } | undefined)?.oauth}
+      onChange={(next) => set("integrations.oauth", next)}
+      ctx={{ path: "integrations.oauth", disabled: locked, isSet: stated, setAt: set }}
+    />
+    </>
   );
 }
 

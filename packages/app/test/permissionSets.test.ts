@@ -48,7 +48,7 @@ import {
   toolsFieldOf,
 } from "../src/renderer/toolsFieldForm";
 import { openSectionsOf } from "../src/renderer/permissionSetCard";
-import { detachingLines, newPermissionSetProblem, permissionSetRailItems, PermissionSetsView } from "../src/renderer/permissionSetsPane";
+import { detachingLines, newPermissionSetProblem, permissionSetLayersOf, permissionSetRailItems, PermissionSetsView } from "../src/renderer/permissionSetsPane";
 
 const SHIPPED: PermissionSetDecl = { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" };
 
@@ -106,25 +106,42 @@ describe("the rail", () => {
     ]);
   });
 
-  it("offers no + rows on the built-in layer: nothing can be added to what ships", () => {
-    const items = permissionSetRailItems(permissionSetsAt(records, "system"), "system", {});
+  it("offers no + rows where nothing can be written — the personal layer holds no permission sets", () => {
+    const items = permissionSetRailItems(permissionSetsAt(records, "project"), undefined, {});
     expect(items.some((item) => item.id.startsWith("new:") || item.id === "+bucket")).toBe(false);
   });
 
-  it("marks what THIS layer states, and marks nothing on the layer that states everything", () => {
-    const here = (layer: "project" | "system"): string[] =>
-      permissionSetRailItems(permissionSetsAt(records, layer), layer, {})
+  it("marks what THIS layer states, and marks nothing on a layer that states nothing", () => {
+    const here = (writesTo: "project" | undefined): string[] =>
+      permissionSetRailItems(permissionSetsAt(records, "project"), writesTo, {})
         .filter((item) => item.heading === undefined && renderToStaticMarkup(createElement("i", {}, item.label)).includes("set-here-dot"))
         .map((item) => item.id);
     expect(here("project")).toEqual(["permissionSet:chat/read-only", "permissionSet:feature/writes"]);
-    // Every shipped permission set is stated by the built-in layer, so a dot on each would say nothing.
-    expect(here("system")).toEqual([]);
+    expect(here(undefined)).toEqual([]);
+  });
+
+  it("tags a copy of what ships beside its name, and nothing else", () => {
+    const tags = permissionSetRailItems(permissionSetsAt(records, "project"), "project", {})
+      .filter((item) => item.heading === undefined)
+      .map((item) => [item.id, /class="cx-src">([^<]*)</.exec(renderToStaticMarkup(createElement("i", {}, item.label)))?.[1]]);
+    expect(tags.filter(([, tag]) => tag !== undefined)).toEqual([["permissionSet:chat/read-only", "this project · copied from built in"]]);
   });
 
   it("says a row is unsaved from its draft", () => {
     const draft = parsePermissionSet({ read_file: "allow", other: "deny" }).permissionSet;
     const items = permissionSetRailItems(permissionSetsAt(records, "project"), "project", { "chat/read-only": draft });
     expect(items.find((item) => item.id === "permissionSet:chat/read-only")?.summary).toBe("unsaved · 1 line · other deny");
+  });
+});
+
+describe("which files a layer of the page reads, and where its changes go", () => {
+  it("reads and writes a layer that holds files; reads the nearest one from any other, and writes nowhere", () => {
+    expect(permissionSetLayersOf("project", ["project", "base", "system"])).toEqual({ reads: "project", writesTo: "project" });
+    expect(permissionSetLayersOf("base", ["project", "base", "system"])).toEqual({ reads: "base", writesTo: "base" });
+    // The personal layer — any layer that is not one of the two — is spelled here without naming it,
+    // so this holds on a branch whose ConfigLayer does not have it yet.
+    expect(permissionSetLayersOf("you", ["project", "base", "system"])).toEqual({ reads: "project", writesTo: undefined });
+    expect(permissionSetLayersOf("you", ["base", "system"])).toEqual({ reads: "base", writesTo: undefined });
   });
 });
 
@@ -305,6 +322,7 @@ describe("drawn", () => {
       createElement(PermissionSetsView, {
         data,
         layer: "project",
+        writesTo: "project",
         choice: { permissionSet: "chat/read-only" },
         onChoice: none,
         drafts: {},
@@ -317,7 +335,11 @@ describe("drawn", () => {
         problem: null,
         onSave: none,
         onReset: none,
-        onOverride: none,
+        onCopy: none,
+        onCopyTo: none,
+        puttingBack: false,
+        onPutBack: none,
+        told: null,
         onAdd: none,
         ...extra,
       } as never),
@@ -326,22 +348,57 @@ describe("drawn", () => {
   it("draws the path, the standing, who uses it, and the card's own rows", () => {
     const html = draw({ folds: new Set(["files", "execution"]) });
     expect(html).toContain("chat / read-only");
-    expect(html).toContain("overrides built in");
     expect(html).toContain("used by sync/review and 2 more states");
     // A held line starts with the minus, and the shell's line says what it stands for.
     expect(html).toContain("set-minus");
     expect(html).toContain("the shell — and the mode for any command not named below");
-    expect(html).toContain("Reset to built in");
   });
 
-  it("draws what ships as a reading: no minus, no add line, and the two overrides instead of Save", () => {
-    const html = draw({ layer: "system", choice: { permissionSet: "chat/full" } });
-    expect(html).toContain("set-readonly");
-    expect(html).not.toContain("set-minus");
-    expect(html).not.toContain("set-add-line");
-    expect(html).toContain("Override for all projects");
-    expect(html).toContain("Override here");
+  it("draws a built-in on a layer LIVE: every line changeable, where its copy will go, and no Override here", () => {
+    const html = draw({ choice: { permissionSet: "chat/full" }, folds: new Set(["execution"]) });
+    expect(html).not.toContain("set-readonly");
+    expect(html).toContain("set-minus");
+    expect(html).not.toContain("Override");
+    expect(html).toContain(">built in<");
+    expect(html).toContain("your first change copies it to <span class=\"mono\">.jaira/permission-sets/chat/full.json</span>");
+    // Nothing of this layer's to save, revert or put back until the first change writes the copy.
     expect(html).not.toContain(">Save<");
+    expect(html).not.toContain("Put back");
+  });
+
+  it("draws a copy: its tag, how many lines differ from what ships and where it lives, and Put back the built-in", () => {
+    const html = draw({ folds: new Set(["execution"]) });
+    expect(html).toContain("this project · copied from built in");
+    expect(html).toContain("<b>1 line</b> differs from what ships — <span class=\"mono\">.jaira/permission-sets/chat/read-only.json</span>");
+    expect(html).toContain(">Save<");
+    expect(html).toContain("Put back the built-in");
+    expect(html).not.toContain("Reset to built in");
+  });
+
+  it("asks before putting back, in the page, naming the file it deletes", () => {
+    const html = draw({ puttingBack: true });
+    expect(html).toContain('role="alertdialog"');
+    expect(html).toContain("Put back the built-in? This deletes <span class=\"mono\">.jaira/permission-sets/chat/read-only.json</span>.");
+    expect(html).toContain(">Put back<");
+    expect(html).toContain(">Cancel<");
+    // The confirmation takes the actions' place: nothing else can be pressed meanwhile.
+    expect(html).not.toContain(">Save<");
+  });
+
+  it("on the personal layer: shows what is in effect, and asks where a first change goes", () => {
+    const quiet = draw({ writesTo: undefined, choice: { permissionSet: "chat/full" } });
+    expect(quiet).toContain("Just you holds no permission sets, so your first change asks where to copy it");
+    expect(quiet).not.toContain("set-readonly");
+    const asking = draw({ writesTo: undefined, choice: { permissionSet: "chat/full" }, asking: "chat/full" });
+    expect(asking).toContain("Copy to Shared");
+    expect(asking).toContain("Copy to this project");
+    // While it is asked, the card is held still: the change waits for the answer.
+    expect(asking).toContain("set-readonly");
+    const noProject = draw({ data: { ...data, layers: ["base", "system"] }, layer: "base", writesTo: undefined, choice: { permissionSet: "chat/full" }, asking: "chat/full" });
+    expect(noProject).toContain("Copy to Shared");
+    expect(noProject).not.toContain("Copy to this project");
+    const told = draw({ writesTo: undefined, choice: { permissionSet: "chat/full" }, told: "Copied to Shared, with your change — ~/.jaira/permission-sets/chat/full.json." });
+    expect(told).toContain("Copied to Shared, with your change");
   });
 
   it("says why a file it cannot read is not drawn as a permission set", () => {

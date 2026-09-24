@@ -16,6 +16,7 @@ workflows/   state files, by id
 prompts/     fragments a state refers to as $/prompts/...
 functions/   operation documents and .ts callees
 permission-sets/    permission-sets/<bucket>/<name>.json (decision 0007)
+settings.json       the configuration layer under ~/.jaira/settings.json
 ```
 
 Rules that hold for everything in here:
@@ -47,6 +48,7 @@ from source (tsx, vitest).
 | `debug/hello_world`, `/say`, `/check` | the Debug view's self-test. Its scripted replies are in `packages/app/src/renderer/debugWorkflow.ts` and match these prompts by text |
 | `permission-sets/chat/{ask-first, read-only, auto, full}` | the composer's four permission presets, written down: every tool a conversation can be handed, a mode on each, and `other`. `packages/shared/test/permissionPresets.test.ts` holds them to the maps the presets wrote |
 | `permission-sets/chat_control/{ask-first, read-only, auto, full}` | its own versions of the same names: only the task and workflow tools (decision 0005 §3), and `other: "deny"`. Those tools are named in `toolVocabulary.ts` and marked `unserved` until they are built |
+| `settings.json` | the bottom CONFIGURATION layer, merged under the shared root's `settings.json` (and so under the project's): the presets `simple`, `coder` and `planner` — each a model candidate list chosen from when a session starts — and `functions.smart.model: "simple"`. It must pass `parseConfig` on its own (`packages/shared/test/presetModels.test.ts`). Settings edits a preset from here in place, writing the copy into the layer being edited |
 
 A permission set file is a map from a subject to a mode and nothing else, so what a
 shipped one is called on the composer's Permissions card, and the sentence under

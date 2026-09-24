@@ -61,7 +61,10 @@ describe("a subject", () => {
     ["stop", "command"],
     ["reed_file", "unknown-tool"],
     ["Glob", "unknown-tool"],
-    ["mcp__github__create_issue", "unknown-tool"],
+    // A tool of an MCP server, and a server's own line (the units doc `mcp-servers`).
+    ["mcp__github__create_issue", "mcp"],
+    ["mcp__github", "mcp"],
+    ["mcp__a__b__c", "mcp"],
   ])("'%s' is a %s", (subject, kind) => {
     expect(subjectKindOf(subject)).toBe(kind);
   });

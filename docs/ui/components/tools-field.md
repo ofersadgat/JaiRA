@@ -8,7 +8,7 @@ serves: [product/agents-act-only-where-allowed, product/share-processes-across-p
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel]
 reuses: [ui/components/permissionSet-card, ui/components/schema-form, ui/components/settings-field]
 implemented_by: [packages/app/src/renderer/toolsField.tsx, packages/app/src/renderer/toolsFieldForm.ts, packages/app/src/renderer/operationFields.tsx]
-verified_by: [packages/app/test/permission-sets.test.ts]
+verified_by: [packages/app/test/permissionSets.test.ts]
 mockups: [ui/assets/tools-field/state-field.html, ui/assets/tools-field/state-field-adding.html, ui/assets/tools-field/state-field-none.html]
 siblings: [ui/components/permissionSet-card, ui/components/composer-setting-chip, ui/components/settings-field]
 ---

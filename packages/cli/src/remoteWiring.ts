@@ -38,7 +38,7 @@ import {
   type PublishRequest,
   type WatchTarget,
 } from "@jaira/runtime";
-import { FORGE_LABELS, changesetInputOf, mergeConfigDocuments, parseComponentConfig, parseConfig, resultOfSettlement, type Changeset } from "@jaira/shared";
+import { FORGE_LABELS, changesetInputOf, mergeConfigLayers, parseComponentConfig, parseConfig, resultOfSettlement, type Changeset } from "@jaira/shared";
 
 export interface CliRemoteOptions {
   project: Project;
@@ -85,14 +85,16 @@ function grantProject(project: Project, log: (message: string) => void): void {
     }
     const functions = (doc["functions"] ??= {}) as Record<string, unknown>;
     functions["review_artifacts"] = { ...((functions["review_artifacts"] ?? {}) as object), publish: "allow" };
-    // Validated as it will be read — merged over the base — before anything is written.
-    let base: unknown;
-    try {
-      base = JSON.parse(readFileSync(project.paths.base.settingsFile, "utf8"));
-    } catch {
-      base = undefined;
-    }
-    parseConfig(mergeConfigDocuments(base, doc) ?? {});
+    // Validated as it will be read — the base under it, the person's own layer over it — before
+    // anything is written.
+    const layer = (at: string): unknown => {
+      try {
+        return JSON.parse(readFileSync(at, "utf8"));
+      } catch {
+        return undefined;
+      }
+    };
+    parseConfig(mergeConfigLayers([layer(project.paths.builtIn.settingsFile), layer(project.paths.base.settingsFile), doc, layer(project.paths.base.personalSettingsFile)]) ?? {});
     writeFileSync(file, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
   } catch (e) {
     log(`could not record the publish grant: ${(e as Error).message}`);

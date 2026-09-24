@@ -46,7 +46,8 @@ The shared root has no `.jaira/` inside it, and the built-in layer is not a root
 | `prompts/` | directory | no | prompt fragments referenced as `$/prompts/<name>.md`; never created |
 | `skills/` | directory | no | skills; created in both roots |
 | `.env`, `.env.local` | dotenv files | no | links of the secret chain: [secret-sources](secret-sources.md) |
-| `user-settings.json` | JSON file | no | the person's preferences, in the shared root only: [user-settings-json](user-settings-json.md) |
+| `user-settings.json` | JSON file | no | the window's own state (panes, folds, read marks, the log policy), in the shared root only: [user-settings-json](user-settings-json.md) |
+| `personal-settings.json` | JSON file | no | the fourth settings layer, "Just you": `settings.json`'s schema, read after the project's, in the shared root only: [settings-json](settings-json.md) |
 | `.gitignore` | text file | yes | written when absent, by `initProject` in a project and by `initBase` at every open in the shared root; patterns below |
 
 ### Inside system/ is what JaiRA generates
@@ -85,7 +86,7 @@ system/machine.key
 
 ### The Files tree hides JaiRA's own state, configuration, secrets and build output by default
 
-`DEFAULT_HIDDEN_PATHS` applies when `settings.json` has no `files.hidden`. Patterns are globs relative to the tree's root, a bare name matches only at that root, and a personal `filesHidden` list applies after it with the last match winning.
+`DEFAULT_HIDDEN_PATHS` always applies first; each layer's `files.hidden` is appended after it, weakest first — Shared, this project, then the personal layer's — the last match winning, so `!pattern` in a later list puts a default back. Patterns are globs relative to the tree's root and a bare name matches only at that root. The groups are the Files tree section's folds ([settings-json](settings-json.md)).
 
 ```
 system
@@ -93,18 +94,19 @@ system
 settings.json
 .jaira/settings.json
 user-settings.json
+personal-settings.json
 sync.json
+personal-settings.json
 **/.env
 **/.env.*
 .git
 **/node_modules
+**/vendor
+**/__pycache__
 **/dist
-**/build
 **/out
 **/target
-**/vendor
 **/coverage
-**/__pycache__
 ```
 
 ## Errors come from opening a root, and a missing file is otherwise read as absent

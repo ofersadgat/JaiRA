@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="doc" content="ui/surfaces/settings-files">
 <meta name="state" content="success">
-<meta name="captured" content="2026-09-13">
+<meta name="captured" content="2026-09-23">
 <meta name="reflects" content="shipped">
 <title>settings-files · success</title>
 <link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
@@ -13,98 +13,9 @@
 </head>
 <body class="mockup">
 <p class="mockup-caption">ui/surfaces/settings-files · success</p>
-<div class="mockup-stage" style="width: 1000px">
-  <div class="view settings-view">
-    <div class="col mid settings-body">
-      <div class="settings-head">
-        <div class="layer-picker" role="group" aria-label="Configuration layer">
-          <button class="layer-on" title="this project only">This project</button>
-          <button class="ghost" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button>
-        </div>
-      </div>
-      <div class="pane files-pane">
-        <section class="cfg-level" data-depth="0">
-          <div class="cfg-level-head">
-            <span class="cfg-level-title">Hidden in the tree</span>
-            <span class="cfg-hint">Glob patterns, matched against the path inside each root. A folder that matches takes its contents with it. Later rules win, so a <code class="cfg-param">!pattern</code> below can put something back.</span>
-          </div>
-          <div class="cfg-level-body">
-            <div class="cfg-fields">
-              <div class="cfg-field">
-                <div class="cfg-field-say">
-                  <span class="cfg-field-head"><span class="cfg-label">Shared</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
-                  <span class="cfg-hint">Written in this project's settings.json, so everyone who opens it sees the same tree.<code class="cfg-param">files.hidden</code></span>
-                </div>
-                <div class="cfg-control">
-                  <div class="rule-stack">
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">system</span><button class="rule-drop" title="remove system">✕</button></span>
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">.jaira/system</span><button class="rule-drop" title="remove .jaira/system">✕</button></span>
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/.env</span><button class="rule-drop" title="remove **/.env">✕</button></span>
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">.git</span><button class="rule-drop" title="remove .git">✕</button></span>
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/node_modules</span><button class="rule-drop" title="remove **/node_modules">✕</button></span>
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/dist</span><button class="rule-drop" title="remove **/dist">✕</button></span>
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">snapshot/out</span><button class="rule-drop" title="remove snapshot/out">✕</button></span>
-                    <input class="rule-add data-text" placeholder="+ pattern…" spellcheck="false">
-                  </div>
-                </div>
-              </div>
-              <div class="cfg-field">
-                <div class="cfg-field-say">
-                  <span class="cfg-field-head"><span class="cfg-label">Yours</span><span class="cfg-set" title="set in the layer you are editing">set here</span></span>
-                  <span class="cfg-hint">Applied after the shared list and kept out of it — in user-settings.json, so it never arrives through a pull request.<code class="cfg-param">filesHidden</code></span>
-                </div>
-                <div class="cfg-control">
-                  <div class="rule-stack">
-                    <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">docs/_archive</span><button class="rule-drop" title="remove docs/_archive">✕</button></span>
-                    <span class="rule-chip reveal"><span class="rule-mark" aria-hidden="true">◉</span><span class="rule-pattern data-text">system</span><button class="rule-drop" title="remove !system">✕</button></span>
-                    <input class="rule-add data-text" placeholder="+ pattern, or !pattern to reveal…" spellcheck="false">
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section class="cfg-level" data-depth="0">
-          <div class="cfg-level-head">
-            <span class="cfg-level-title">JaiRA's own directory</span>
-            <span class="cfg-hint"><code class="cfg-param">system/</code> holds the database, tasks, snapshots, logs and artifacts. Nobody authors it, so it is hidden — but reading what a run wrote is a fair thing to want when a run has gone wrong.</span>
-          </div>
-          <div class="cfg-level-body">
-            <div class="cfg-fields">
-              <div class="cfg-field">
-                <div class="cfg-field-say">
-                  <span class="cfg-field-head"><span class="cfg-label">Show system/</span></span>
-                  <span class="cfg-hint">Shown, for you alone. This is a `!system` rule in your own list.</span>
-                </div>
-                <div class="cfg-control"><button type="button" role="switch" aria-checked="true" aria-label="shown" title="shown" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button></div>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section class="cfg-level" data-depth="0">
-          <div class="cfg-level-head">
-            <span class="cfg-level-title">In effect</span>
-            <span class="cfg-hint">Every rule, in the order it is applied. The last one to match a path decides.</span>
-          </div>
-          <div class="cfg-level-body">
-            <div class="rule-effect">
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">system</span><span class="rule-origin app-secondary">shared</span></span>
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">.jaira/system</span><span class="rule-origin app-secondary">shared</span></span>
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/.env</span><span class="rule-origin app-secondary">shared</span></span>
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">.git</span><span class="rule-origin app-secondary">shared</span></span>
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/node_modules</span><span class="rule-origin app-secondary">shared</span></span>
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">**/dist</span><span class="rule-origin app-secondary">shared</span></span>
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">snapshot/out</span><span class="rule-origin app-secondary">shared</span></span>
-              <span class="rule-chip"><span class="rule-mark" aria-hidden="true">◌</span><span class="rule-pattern data-text">docs/_archive</span><span class="rule-origin app-secondary">yours</span></span>
-              <span class="rule-chip reveal"><span class="rule-mark" aria-hidden="true">◉</span><span class="rule-pattern data-text">system</span><span class="rule-origin app-secondary">yours</span></span>
-            </div>
-            <div class="pane-actions">
-              <button class="ghost">Reset shared list to the defaults</button>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+<div class="mockup-stage" style="width: 780px">
+  <div class="set-page">
+<section class="set-section" data-part="files-tree" data-part-label="Files tree"><div class="set-section-title" role="heading" aria-level="2"><span class="set-section-name">Files tree<span class="set-icon set-info" title="What the Files tree leaves out, and why. Built-in rules come first, then what Shared, this project and you add; the last rule to match a path decides." aria-label="What the Files tree leaves out, and why. Built-in rules come first, then what Shared, this project and you add; the last rule to match a path decides." role="img">ⓘ</span></span></div><div class="set-group"><div class="cfg-fields"><div class="cfg-field set-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" aria-label="Hidden in the tree is set here — switch off to inherit it" title="Hidden in the tree is set here — switch off to inherit it" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">Hidden in the tree</span><span class="set-icon set-info" title="A folder that matches takes its contents with it. Writes files.hidden." aria-label="A folder that matches takes its contents with it. Writes files.hidden." role="img">ⓘ</span></span><span class="cfg-hint">Later rules win, so a !pattern puts back something an earlier rule hid.</span></div><div class="cfg-control"><span class="hid-own app-secondary">this project adds 3 rules</span></div></div></div><div class="hid-body"><div class="hid-box" role="table" aria-label="Hidden-path rules"><div class="hid-cols" role="row"><span role="columnheader">Pattern</span><span role="columnheader">What it hides here</span><span role="columnheader">From</span><span role="columnheader" class="hid-col-switch" aria-label="in effect"></span></div><div class="hid-group"><button type="button" class="hid-fold" aria-expanded="false"><span class="hid-chev" aria-hidden="true">›</span><span class="hid-group-name">JaiRA&#x27;s own files</span><span class="hid-group-sum app-secondary">7 rules · hides 1 folder and 1 file</span></button></div><div class="hid-group"><button type="button" class="hid-fold" aria-expanded="false"><span class="hid-chev" aria-hidden="true">›</span><span class="hid-group-name">Secrets</span><span class="hid-group-sum app-secondary">2 rules · hides 1 file</span></button></div><div class="hid-group"><button type="button" class="hid-fold" aria-expanded="false"><span class="hid-chev" aria-hidden="true">›</span><span class="hid-group-name">Version control</span><span class="hid-group-sum app-secondary">1 rule · hides 1 file</span></button></div><div class="hid-group"><button type="button" class="hid-fold" aria-expanded="false"><span class="hid-chev" aria-hidden="true">›</span><span class="hid-group-name">Dependencies</span><span class="hid-group-sum app-secondary">3 rules · hides 1 folder</span></button></div><div class="hid-group open"><button type="button" class="hid-fold" aria-expanded="true"><span class="hid-chev" aria-hidden="true">›</span><span class="hid-group-name">Build output</span><span class="hid-group-sum app-secondary">4 rules · hides 2 folders · 1 off</span></button><ul class="hid-lines"><li class="hid-line is-off"><span class="hid-pat-cell"><span class="hid-pattern data-text">**/dist</span></span><span class="hid-what"><span class="hid-offnote">off here, so this project shows it (writes <code class="hid-code">!**/dist</code>)</span></span><span class="hid-chip hid-origin">built in</span><span class="hid-switch"><button type="button" role="switch" aria-checked="false" aria-label="switch on here — stops writing !**/dist" title="switch on here — stops writing !**/dist" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button></span></li><li class="hid-line"><span class="hid-pat-cell"><span class="hid-pattern data-text">**/out</span></span><span class="hid-what"><span class="hid-none app-absent">nothing here</span></span><span class="hid-chip hid-origin">built in</span><span class="hid-switch"><button type="button" role="switch" aria-checked="true" aria-label="switch off here — writes !**/out to this project" title="switch off here — writes !**/out to this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button></span></li><li class="hid-line"><span class="hid-pat-cell"><span class="hid-pattern data-text">**/target</span></span><span class="hid-what"><span class="hid-none app-absent">nothing here</span></span><span class="hid-chip hid-origin">built in</span><span class="hid-switch"><button type="button" role="switch" aria-checked="true" aria-label="switch off here — writes !**/target to this project" title="switch off here — writes !**/target to this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button></span></li><li class="hid-line"><span class="hid-pat-cell"><span class="hid-pattern data-text">**/coverage</span></span><span class="hid-what"><span class="hid-count">2 folders</span><span class="hid-samples data-secondary">packages/app/coverage, packages/shared/coverage</span></span><span class="hid-chip hid-origin">built in</span><span class="hid-switch"><button type="button" role="switch" aria-checked="true" aria-label="switch off here — writes !**/coverage to this project" title="switch off here — writes !**/coverage to this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button></span></li></ul></div><div class="hid-group open"><button type="button" class="hid-fold" aria-expanded="true"><span class="hid-chev" aria-hidden="true">›</span><span class="hid-group-name">Added in this project</span><span class="hid-group-sum app-secondary">2 rules · hides 1 folder</span></button><ul class="hid-lines"><li class="hid-line"><span class="hid-pat-cell"><span class="hid-pattern data-text">drafts</span></span><span class="hid-what"><span class="hid-count">1 folder</span><span class="hid-samples data-secondary">drafts</span></span><span class="hid-chip hid-origin is-here">this project</span><span class="hid-switch"><button type="button" role="switch" aria-checked="true" aria-label="drafts — switch off to remove it from this project" title="drafts — switch off to remove it from this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button></span></li><li class="hid-line"><span class="hid-pat-cell"><span class="hid-pattern data-text">**/build</span></span><span class="hid-what"><span class="hid-none app-absent">nothing here</span><span class="hid-note">every match is inside .jaira/system, which is already hidden</span></span><span class="hid-chip hid-origin is-here">this project</span><span class="hid-switch"><button type="button" role="switch" aria-checked="true" aria-label="**/build — switch off to remove it from this project" title="**/build — switch off to remove it from this project" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button></span></li></ul></div></div><div class="hid-add"><input class="cfg-input mono hid-add-input" placeholder="pattern, or !pattern to put something back" spellCheck="false" aria-label="add a rule" value="**/*.snap"/><button type="button">Add</button><span class="hid-preview data-secondary">would hide 14 files: packages/app/test/a.snap, packages/app/test/b.snap, packages/cli/test/c.snap, +11</span></div></div><div class="cfg-fields"><div class="cfg-field set-field wide"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Why is a path hidden?</span></span><span class="cfg-hint">A path inside the tree&#x27;s root, or a full path from a file manager.</span></div><div class="cfg-control"><div class="hid-ask"><input class="cfg-input mono" placeholder="packages/cli/dist/index.js" spellCheck="false" aria-label="path to explain" value="packages/app/coverage/index.html"/><div class="hid-why" aria-live="polite">hidden by <code class="hid-code">**/coverage</code>, built in, in Build output: its folder <code class="hid-code">packages/app/coverage</code> matches</div></div></div></div><div class="cfg-field set-field"><div class="cfg-field-say"><span class="cfg-field-head"><span class="cfg-label">Show system/</span><span class="set-icon set-info" title="It holds the database, tasks, snapshots and logs, which nobody authors." aria-label="It holds the database, tasks, snapshots and logs, which nobody authors." role="img">ⓘ</span></span><span class="cfg-hint">Hidden — the default.</span></div><div class="cfg-control"><button type="button" role="switch" aria-checked="false" aria-label="hidden" title="hidden" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button></div></div></div></div></section>
   </div>
 </div>
 </body>

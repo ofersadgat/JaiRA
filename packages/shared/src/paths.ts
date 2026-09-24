@@ -26,7 +26,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
+import { PERSONAL_SETTINGS_FILE_NAME, SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
 // Declared in `./hiddenPaths` rather than here, and re-exported so `@jaira/shared` is unchanged:
 // the Files screen needs the spelling too, and this module imports `node:fs`, which a renderer
 // bundle must not. A second constant with the same value was the alternative, and a spelling three
@@ -149,8 +149,13 @@ export interface JairaPaths {
 export interface JairaBasePaths {
   baseDir: string;
   settingsFile: string;
-  /** User preferences the app owns (theme, …) — see {@link USER_SETTINGS_FILE_NAME}. */
+  /** The window's own state (panes, folds, read marks, …) — see {@link USER_SETTINGS_FILE_NAME}. */
   userSettingsFile: string;
+  /**
+   * The fourth configuration layer, "Just you" — `settings.json`'s schema, read after the project's.
+   * See {@link PERSONAL_SETTINGS_FILE_NAME}.
+   */
+  personalSettingsFile: string;
   workflowsDir: string;
   functionsDir: string;
   skillsDir: string;
@@ -205,7 +210,9 @@ export const WORKTREES_DIR_NAME = ".jaira-worktrees";
  *    `workflowLoadOptions` appends its search directories after whatever `workflows.path`
  *    configured, so configuration can neither move it ahead of a person's file nor drop it.
  *  - **It is read-only.** Nothing JaiRA does writes here; "override" copies a file UP a layer. It
- *    has no `system/`, no database and no settings — nothing is generated into it.
+ *    has no `system/` and no database — nothing is generated into it. It does ship a
+ *    `settings.json`: the configuration layer under the shared root's (the built-in presets and the
+ *    judge's model), merged first and so overridden by every layer a person writes.
  *  - **It is trusted.** A `.ts` function under `functions/` here is the app's own code and is not
  *    put to the module approval gate (`userModules.ts`). A person's copy that shadows one is theirs,
  *    and gated like any other.
@@ -216,6 +223,8 @@ export const WORKTREES_DIR_NAME = ".jaira-worktrees";
  */
 export interface JairaBuiltInPaths {
   dir: string;
+  /** The bottom configuration layer — merged under the shared root's `settings.json`, never written. */
+  settingsFile: string;
   workflowsDir: string;
   functionsDir: string;
   promptsDir: string;
@@ -229,6 +238,7 @@ export function jairaBuiltInPaths(builtInDir: string = defaultBuiltInDir()): Jai
   const dir = resolve(builtInDir);
   return {
     dir,
+    settingsFile: join(dir, SETTINGS_FILE_NAME),
     workflowsDir: join(dir, "workflows"),
     functionsDir: join(dir, "functions"),
     promptsDir: join(dir, "prompts"),
@@ -382,6 +392,7 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     baseDir: root,
     settingsFile: join(root, SETTINGS_FILE_NAME),
     userSettingsFile: join(root, USER_SETTINGS_FILE_NAME),
+    personalSettingsFile: join(root, PERSONAL_SETTINGS_FILE_NAME),
     workflowsDir: join(root, "workflows"),
     functionsDir: join(root, "functions"),
     skillsDir: join(root, "skills"),
@@ -528,7 +539,7 @@ export { SHARED_SESSION } from "./ipc";
  * `ipc.ts`: the renderer needs them (the Files tree labels one, the config pane opens the other) and
  * this module is Node-only. Re-exported from here, where the rest of the layout lives.
  */
-export { SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
+export { PERSONAL_SETTINGS_FILE_NAME, SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
 
 export function sessionKey(dir: string): string {
   const resolved = resolve(dir);

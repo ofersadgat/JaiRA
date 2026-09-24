@@ -22,8 +22,13 @@ const READING_LINE = 56;
 /** How long a click's choice outranks the scroll it caused — a smooth scroll takes about this. */
 const CLICK_HOLD_MS = 900;
 
+/**
+ * The sections drawn on the page — not every one in the DOM: under the Just you view's "What you
+ * changed" a section with none of its rows left is still there and `display: none` (`styles.css`),
+ * and a list entry that scrolled to nothing would be a link to nowhere.
+ */
 function partsIn(body: HTMLElement): HTMLElement[] {
-  return [...body.querySelectorAll<HTMLElement>("[data-part]")];
+  return [...body.querySelectorAll<HTMLElement>("[data-part]")].filter((el) => el.getClientRects().length > 0);
 }
 
 /**

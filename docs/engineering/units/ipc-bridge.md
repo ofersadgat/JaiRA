@@ -2,7 +2,7 @@
 id: engineering/units/ipc-bridge
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 implements: [ui/surfaces/error-notice, ux/patterns/refuse-with-the-reason-and-the-fix]
 layer: service
 owns_contracts: [engineering/contracts/preload-bridge, engineering/contracts/ipc-channels, engineering/contracts/push-messages]
@@ -20,7 +20,7 @@ The bridge is three pieces that must agree:
 
 - `IpcContract`, `IPC_CHANNELS`, `PushMessage`, `PUSH_CHANNEL` and `JairaBridge` in `@jaira/shared` `ipc.ts`: the typed list of 96 request channels and the push union. `IPC_CHANNELS` is checked against `IpcContract` in both directions at compile time.
 - `preload.ts`: the `window.jaira` object, whose `invoke` admits only channels in `IPC_CHANNELS` and whose `subscribe` guards each listener. Its shape and failures are [preload-bridge](../contracts/preload-bridge.md).
-- `index.ts`: the `handlers` table, a record keyed by every `IpcChannel` whose entry casts the request and calls one `AppService` method, and `registerIpc`, which registers one `ipcMain.handle` per listed channel. A handler that throws is passed to `AppService.recordIpcFailure` and rethrown. After `settings:write` it repaints the title bar. The `publish` option `index.ts` gives `AppService` sends each push to the window only while `rendererAlive` is true, and turns a failed send into a `push` crash entry.
+- `index.ts`: the `handlers` table, a record keyed by every `IpcChannel` whose entry casts the request and calls one `AppService` method, and `registerIpc`, which registers one `ipcMain.handle` per listed channel. A handler that throws is passed to `AppService.recordIpcFailure` and rethrown. After `config:write` it repaints the title bar, since a write to a layer's `appearance` can change the frame's look. The `publish` option `index.ts` gives `AppService` sends each push to the window only while `rendererAlive` is true, and turns a failed send into a `push` crash entry.
 
 Every channel's request and response is [ipc-channels](../contracts/ipc-channels.md), and every push is [push-messages](../contracts/push-messages.md).
 

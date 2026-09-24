@@ -54,6 +54,13 @@
  * carries (empty when nothing is a function). The function is called per call — per PART of a shell
  * line — by the approver the host hands the engine, before any person is asked.
  *
+ * ## An MCP server's tools
+ *
+ * `mcp__figma__get_code` is a line for one tool of a configured MCP server, and `mcp__figma` the
+ * server's own line, standing for every tool of it no line names — bash's program groups again, for a
+ * server (`./mcp`). Neither is offered: the agent the server is handed to calls the tool by that name,
+ * and the line judges the call.
+ *
  * ## What a run reads
  *
  * The engine hands a run's policy and its executor the state's RESOLVED block, host keys included
@@ -72,6 +79,7 @@
  * so a child that inherits its parent's map inherits its marks with it.
  */
 import { INLINE_PERMISSION_SET } from "./commandParts";
+import { isMcpSubject } from "./mcp";
 import {
   PERMISSION_MODES,
   gateModeOf,
@@ -144,11 +152,18 @@ export function entryOfDecl(entry: PermissionSetEntryDecl): { mode: PermissionSe
 /** A permission set as AUTHORED, references already followed: subject → entry. */
 export type PermissionSetDecl = Record<string, PermissionSetEntryDecl>;
 
-/** What a subject names. `unknown-tool` is never stored — it is reported and dropped. */
-export type SubjectKind = "tool" | "command" | "script" | "other" | "unknown-tool";
+/**
+ * What a subject names. `unknown-tool` is never stored — it is reported and dropped.
+ *
+ * `mcp` is a tool of somebody else's MCP server (`mcp__figma__get_code`) or a server's own line
+ * (`mcp__figma`), which stands for every tool of it no line names — see `mcpModeOf` in `./mcp`.
+ * Neither is a tool JaiRA serves: nothing is offered under it, and the agent that has the server
+ * calls the tool by that name, which is what the line judges.
+ */
+export type SubjectKind = "tool" | "command" | "script" | "mcp" | "other" | "unknown-tool";
 
 export interface PermissionSetEntry {
-  kind: "tool" | "command" | "script";
+  kind: "tool" | "command" | "script" | "mcp";
   /**
    * The entry's mode. An authored map entry always has one. Absent only where a block read back
    * ({@link permissionSetOfEnvironment}) lists a tool it gives no mode — the always-granted tools of a turn
@@ -187,11 +202,13 @@ export interface PermissionSetIssue {
  * space in it is a command and its subcommand (`git commit`, `git push --force`). A single word that
  * looks like a PROGRAM — lowercase, no underscore (`git`, `terraform`, `apt-get`) — is a command
  * subject for every command of that program. What is left looks like a tool name and is not one we
- * know (`reed_file`, `Glob`, `mcp__x__y`): nothing is offered under it, which the linter says.
+ * know (`reed_file`, `Glob`): nothing is offered under it, which the linter says. `mcp__figma` and
+ * `mcp__figma__get_code` are MCP subjects: a server's line and one of its tools'.
  */
 export function subjectKindOf(subject: string): SubjectKind {
   if (subject === OTHER_SUBJECT) return "other";
   if (subject === SCRIPT_SUBJECT) return "script";
+  if (isMcpSubject(subject)) return "mcp";
   if (TOOL_SPEC_BY_NAME.has(subject)) return "tool";
   if (/\s/.test(subject)) return "command";
   return /^[a-z][a-z0-9.+-]*$/.test(subject) ? "command" : "unknown-tool";
@@ -396,7 +413,9 @@ export function offeredTools(permissionSet: PermissionSet): string[] {
 export function shellWithheld(permissionSet: PermissionSet): boolean {
   const shell = Object.hasOwn(permissionSet.entries, SHELL_TOOL) ? permissionSet.entries[SHELL_TOOL] : undefined;
   if (shell === undefined || shell.kind !== "tool" || shell.mode !== "deny") return false;
-  return Object.values(permissionSet.entries).every((entry) => entry.kind === "tool" || entry.mode === "deny");
+  // Only what a LINE can run keeps the shell: a command, or `script`. A tool, or an MCP server's
+  // line, is judged by name and never reaches the shell.
+  return Object.values(permissionSet.entries).every((entry) => (entry.kind !== "command" && entry.kind !== "script") || entry.mode === "deny");
 }
 
 /**
@@ -481,6 +500,15 @@ export function gateToolModes(permissionSet: PermissionSet): Record<string, Perm
   return modes;
 }
 
+/** Every MCP line's mode as the gate takes it — a function as `ask`. See {@link permissionsOfPermissionSet}. */
+export function mcpGateModes(permissionSet: PermissionSet): Record<string, PermissionMode> {
+  const out: Record<string, PermissionMode> = {};
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    if (entry.kind === "mcp" && entry.mode !== undefined) out[subject] = gateModeOf(entry.mode);
+  }
+  return out;
+}
+
 /**
  * Every subject whose entry is a FUNCTION, to the function's reference — tools, commands, `script`,
  * the shell's own entry and `other` alike. What lowering writes as `permissions.functions`.
@@ -515,7 +543,7 @@ export function toolImplementations(permissionSet: PermissionSet): Record<string
 export function shellSubjects(permissionSet: PermissionSet): Record<string, PermissionSetMode> {
   const out: Record<string, PermissionSetMode> = {};
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    if ((entry.kind !== "tool" || subject === SHELL_TOOL) && entry.mode !== undefined) out[subject] = entry.mode;
+    if ((entry.kind === "command" || entry.kind === "script" || subject === SHELL_TOOL) && entry.mode !== undefined) out[subject] = entry.mode;
   }
   return out;
 }
@@ -534,17 +562,27 @@ export function permissionsOfPermissionSet(permissionSet: PermissionSet, scopes?
   const hasSubjects = Object.keys(subjects).length > 0;
   // A MAP leaves its marks, so a run can tell it from a state that declared none. See the module
   // header and {@link PERMISSION_SET_MARKERS}.
-  const tools = { ...gateToolModes(permissionSet), ...PERMISSION_SET_MARKERS };
+  //
+  // An MCP line (`mcp__figma__get_code`, `mcp__figma`) lowers into `tools` too, at its gate mode: the
+  // gate reads a tool's line by the name the agent calls it, and a server's line is asked by the
+  // server's name for a tool no line names (`@jaira/runtime`'s `translatedGate`). None of them is in
+  // the lowered LIST — nothing JaiRA registers is offered under them — so reading the block back finds
+  // them as MCP entries ({@link permissionSetOfEnvironment}).
+  const tools = { ...gateToolModes(permissionSet), ...mcpGateModes(permissionSet), ...PERMISSION_SET_MARKERS };
   // ALWAYS written, empty when every held tool is ours. Upstream merges `permissions` per key down the
   // `environment` chain, so a child whose map chose no implementation and so wrote no key inherited its
   // parent's whole `implementations` — a parent's `grep: native` kept claude's `Grep` on a child whose
   // own line said nothing of the kind. A map is the whole statement of what a state holds and whose code
   // serves it (decision 0007 §1); an empty key replaces the parent's.
   const implementations = toolImplementations(permissionSet);
+  // Where the lines came from is what "add to the permission set" writes into — for a shell line's
+  // parts, and for an MCP call, which is judged by name and answered the same way.
+  const named = hasSubjects || Object.keys(mcpGateModes(permissionSet)).length > 0;
   return {
     ...(Object.keys(tools).length > 0 ? { tools } : {}),
     ...(permissionSet.other !== undefined ? { other: gateModeOf(permissionSet.other) } : {}),
-    ...(hasSubjects ? { subjects, ...(source !== undefined ? { source } : {}) } : {}),
+    ...(hasSubjects ? { subjects } : {}),
+    ...(named && source !== undefined ? { source } : {}),
     functions: permissionSetFunctions(permissionSet),
     implementations,
     ...(scopes !== undefined && scopes.length > 0 ? { scopes: [...scopes] } : {}),
@@ -584,7 +622,9 @@ export function permissionSetOfEnvironment(
   }
   for (const [name, mode] of Object.entries(permissions?.tools ?? {})) {
     if (Object.hasOwn(entries, name) || isPermissionSetMarkKey(name)) continue;
-    entries[name] = { kind: "tool", mode, offered: false };
+    // An MCP line is never listed — nothing JaiRA registers is offered under it — so its mode here IS
+    // the line, not a tool held back.
+    entries[name] = isMcpSubject(name) ? { kind: "mcp", mode } : { kind: "tool", mode, offered: false };
   }
   for (const [subject, mode] of Object.entries(permissions?.subjects ?? {})) {
     const held = Object.hasOwn(entries, subject) ? entries[subject] : undefined;

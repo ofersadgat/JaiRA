@@ -20,9 +20,12 @@ const base = { integrations: { forges: { work: { provider: "gitlab", host: "git.
 const config: ConfigView = {
   base: base as never,
   project: null,
+  system: null,
+  you: null,
   effective: parseConfig(base) as never,
   baseFile: "~/.jaira/settings.json",
   projectFile: "",
+  youFile: "~/.jaira/personal-settings.json",
   baseDir: "~/.jaira",
 };
 

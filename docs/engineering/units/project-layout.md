@@ -2,7 +2,7 @@
 id: engineering/units/project-layout
 type: engineering-unit
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-23
 implements: [product/share-processes-across-projects, product/all-projects-in-one-place, ui/components/file-tree, ui/surfaces/settings-files]
 layer: data
 owns_contracts: [engineering/contracts/jaira-layout]
@@ -16,7 +16,7 @@ siblings: [engineering/units/project-store, engineering/units/project-config, en
 
 ## The layout computes every path a root holds and the key a project opens under, and creates nothing
 
-`jairaPaths(projectDir, baseDir?, builtInDir?)` in `paths.ts` returns a project's `JairaPaths`: its `.jaira/` directory, `settings.json`, `workflows/` and `skills/`, the generated children of `.jaira/system/`, the shared root's layout as `base`, the built-in layer's as `builtIn`, the ordered layer `roots`, and `worktreesDir` outside the checkout. `jairaBasePaths(baseDir?)` returns the shared root's `JairaBasePaths`, which adds `user-settings.json`, `functions/`, `.env`, `.env.local` and `system/machine.key`. `baseAsProjectPaths(baseDir?, builtInDir?)` maps the shared root onto the project shape so it can be opened as a project. Each path, what it holds and whether git ignores it are [jaira-layout](../contracts/jaira-layout.md).
+`jairaPaths(projectDir, baseDir?, builtInDir?)` in `paths.ts` returns a project's `JairaPaths`: its `.jaira/` directory, `settings.json`, `workflows/` and `skills/`, the generated children of `.jaira/system/`, the shared root's layout as `base`, the built-in layer's as `builtIn`, the ordered layer `roots`, and `worktreesDir` outside the checkout. `jairaBasePaths(baseDir?)` returns the shared root's `JairaBasePaths`, which adds `user-settings.json`, `personal-settings.json`, `functions/`, `.env`, `.env.local` and `system/machine.key`. `baseAsProjectPaths(baseDir?, builtInDir?)` maps the shared root onto the project shape so it can be opened as a project. Each path, what it holds and whether git ignores it are [jaira-layout](../contracts/jaira-layout.md).
 
 ### There are three layers, and the third is what ships
 
@@ -37,13 +37,13 @@ Beside the path builders it owns:
 - `defaultBaseDir(env)`, which answers `JAIRA_HOME` when it is set, throws under `VITEST` when it is not, and otherwise answers `~/.jaira`; and `takeHomeFlag(argv)`, which lifts `--home <dir>` out of a command line.
 - `workflowSearchPath(roots)`, which is `<root>/workflows` then `<root>/functions` for each root in order, and `worktreePathFor(paths, taskId)`.
 - `sessionKey(dir)`, the identity of an open project: the resolved path, its real path when it exists, lower-cased on Windows only.
-- In `hiddenPaths.ts`, the names `JAIRA_DIR_NAME` and `SYSTEM_DIR_NAME`, `DEFAULT_HIDDEN_PATHS`, and the ordered rules the Files tree filters by: `hiddenRules`, `compileHidden` and `isHiddenPath`.
+- In `hiddenPaths.ts`, the names `JAIRA_DIR_NAME` and `SYSTEM_DIR_NAME`, `DEFAULT_HIDDEN_PATHS` and its groups `HIDDEN_PATH_GROUPS`, the ordered rules the Files tree filters by (`hiddenRules`, `layeredHiddenRules`, `compileHidden`, `isHiddenPath`, `decidingRule`), and what a rule does to a root: `whyHiddenPath` and `HiddenTally`, which the `files:hiddenReport` walk feeds.
 - `stripBom` and `parseJsonText` in `json.ts`, and `readJsonFile` in `jsonFile.ts`, which task files, snapshots, workflow files, project config and CLI JSON arguments are read through.
 
 It deliberately does not own:
 
 - Creating any directory and writing the `.gitignore` template: [project-store](project-store.md).
-- What a file holds. `settings.json` and its `files.hidden` block are [project-config](project-config.md); `user-settings.json` with its `filesHidden` and `baseDir` is [user-settings](user-settings.md).
+- What a file holds. `settings.json`, its `files.hidden` block and the personal layer `personal-settings.json`, which has the same schema, are [project-config](project-config.md); `user-settings.json` with its `baseDir` is [user-settings](user-settings.md).
 - Walking a root and building the tree the rules filter: [files-view-models](files-view-models.md).
 - Which projects are open under which key: [project-sessions](project-sessions.md).
 - The secret chain's file list, which `secrets.ts` builds from `JAIRA_DIR_NAME` rather than from a `JairaPaths` field: [secret-chain](secret-chain.md).
@@ -64,7 +64,7 @@ It deliberately does not own:
 | The built-in layer's location | found once per process by `defaultBuiltInDir` and remembered; replaced by `setBuiltInDir` | `packages/shared/builtin/`, copied to `dist/builtin/` by both builds | `workflowLoadOptions`, `prepareUserModules`, `projectSource` and `baseSource`, `workflowRoots`, and the `system` branch of `AppService`'s path helpers read it; nothing writes it |
 | The shared root's location | `JAIRA_HOME` read by `defaultBaseDir`; `--home` lifted by `takeHomeFlag` | the flag, the environment, `user-settings.json` `baseDir`, then `~/.jaira` | `AppService` and `settingsBaseDir` in `service.ts`; `runCli` in `cli.ts` |
 | A project's key | computed by `sessionKey` | the directory's real path | `AppService.sessions` keys every open project by it |
-| Hidden rules | compiled by `compileHidden(hiddenRules(shared, personal))` | `settings.json` `files.hidden`, or `DEFAULT_HIDDEN_PATHS` when absent, followed by `user-settings.json` `filesHidden` | `hiddenRulesFor` in `service.ts` compiles them; `fileTree` and `baseFileTree` in `stateViews.ts` filter by them |
+| Hidden rules | compiled by `compileHidden(hiddenRules(config.files.hidden))` | `DEFAULT_HIDDEN_PATHS`, then `files.hidden` of each layer concatenated: the shared root's, the project's, then the personal layer's | `hiddenRulesFor` in `service.ts` compiles them; `fileTree` and `baseFileTree` in `stateViews.ts` filter by them |
 
 ## The invariants keep generated files under system/, one key per directory, and the last hiding rule in charge
 
@@ -84,8 +84,8 @@ It deliberately does not own:
 | 5 | Two spellings of one directory never give two keys, and two directories never share one | `shared.test.ts` "collapses spellings of the same directory to one key", "keeps genuinely different directories apart", "ignores case on Windows, where one path is one directory" |
 | 6 | Case is never folded off Windows, and a directory that does not exist still has a key | `shared.test.ts` "keeps case elsewhere, where two spellings are two directories", "answers for a directory that does not exist yet, which is what `init` hands it" |
 | 7 | The defaults hide all of `system/` and nothing a person authors | `hiddenPaths.test.ts` "hides the whole of JaiRA's own directory and nothing a person authors" |
-| 8 | An absent shared list means the defaults, and an empty one hides nothing | `hiddenPaths.test.ts` "takes the defaults when the shared list says nothing", "treats an explicitly empty list as a statement, not as silence" |
-| 9 | The personal list applies after the shared one, and the last matching rule decides | `hiddenPaths.test.ts` "applies the personal list after the shared one", "lets a personal `!system` reveal what the shared list hid", "lets a later pattern hide again what an earlier one revealed" |
+| 8 | The defaults always come first; an absent list and an empty one both add nothing | `hiddenPaths.test.ts` "takes the defaults when the shared list says nothing", "reads an empty list as nothing to add, the same as an absent one" |
+| 9 | `hiddenRules`' `personal` argument applies after the configured list, and the last matching rule decides; no caller passes one, because the personal layer's `files.hidden` is already the last part of the configured list | `hiddenPaths.test.ts` "applies the defaults, then the configured list, then the personal one", "lets a personal `!system` reveal what the shared list hid", "lets a later pattern hide again what an earlier one revealed" |
 | 10 | A blank entry or a bare `!` never becomes a rule | `hiddenPaths.test.ts` "drops blank entries and a bare `!`, which would otherwise read as a rule" |
 | 11 | A single `*` never crosses a `/`, and a match never depends on case or separator spelling | `hiddenPaths.test.ts` "does not let a single star cross a directory boundary", "ignores case, because the filesystems this runs on disagree about it", "matches a path however the caller spelled it" |
 | 12 | `--home` is lifted wherever it sits, and a flag with no value consumes only itself | `home.test.ts` "lifts the flag out of the arguments wherever it sits, and resolves the path", "reports a flag with nothing after it, and one followed by another flag" |

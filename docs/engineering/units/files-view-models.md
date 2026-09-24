@@ -2,7 +2,7 @@
 id: engineering/units/files-view-models
 type: engineering-unit
 status: shipped
-updated: 2026-09-21
+updated: 2026-09-23
 implements: [product/catch-process-mistakes-before-running, product/share-processes-across-projects, product/try-one-step-on-its-own, product/keep-track-of-everything, ux/patterns/problems-marked-where-they-are, ux/patterns/pick-from-what-exists, ui/surfaces/files-view, ui/components/file-tree, ui/components/state-inspector, ui/components/slot-table, ui/components/issue-mark]
 layer: data
 owns_contracts: [engineering/contracts/task-view-models]
@@ -49,7 +49,7 @@ It deliberately does not own:
 | State documents | read by `stateSlots` across `<root>/workflows` with `.json`, `.yaml`, `.yml`; by `baseStateView` as `<id>.json`; by `effectiveState` as the browser's winning file | the files | authoring, the person's editor |
 | `WorkflowBrowser` | read, never built here | the files, through [workflow-browser](workflow-browser.md) | the caller builds it once per request |
 | Task summaries and journals | read through `taskSummaries`, `taskRun` and `bundleFor` | `task_runtime`, the task files and the journal | [board-projection](board-projection.md) |
-| Hidden rules | read as `HiddenRules`, defaulting to `DEFAULT_HIDDEN_PATHS` | `settings.json` `files.hidden` and `user-settings.json` `filesHidden` | compiled by `hiddenRulesFor` in `service.ts` |
+| Hidden rules | read as `HiddenRules`, defaulting to `DEFAULT_HIDDEN_PATHS` | `DEFAULT_HIDDEN_PATHS`, then `files.hidden` of each layer: the shared root's, the project's, then the personal layer's `personal-settings.json` | compiled by `hiddenRulesFor` in `service.ts` |
 
 ## The invariants keep every file in the tree, every fault on its file and every task on one root column
 

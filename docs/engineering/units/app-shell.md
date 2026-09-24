@@ -2,11 +2,11 @@
 id: engineering/units/app-shell
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 implements: [ui/surfaces/app-window, ui/components/context-menu, product/find-out-why-the-app-misbehaves, product/read-what-work-produced, ux/patterns/secret-goes-in-never-comes-back]
 layer: service
 owns_contracts: [engineering/contracts/artifact-frame-protocol]
-requires: [engineering/units/ipc-bridge, engineering/units/project-sessions, engineering/units/app-log, engineering/units/user-settings, engineering/units/uri-and-artifact-reads, engineering/units/project-layout, engineering/units/project-store]
+requires: [engineering/units/ipc-bridge, engineering/units/project-sessions, engineering/units/app-log, engineering/units/user-settings, engineering/units/project-config, engineering/units/uri-and-artifact-reads, engineering/units/project-layout, engineering/units/project-store]
 implemented_by: [packages/app/src/main/index.ts, packages/app/entry.cjs, packages/app/build.mjs, packages/app/src/renderer/index.html]
 verified_by: [packages/app/test/csp.test.ts, packages/app/test/service.test.ts, packages/cli/test/home.test.ts]
 siblings: [engineering/units/ipc-bridge, engineering/units/project-sessions, engineering/units/app-log, engineering/units/uri-and-artifact-reads]
@@ -20,7 +20,7 @@ Everything Electron owns lives in `index.ts`, and `AppService` stays Electron-fr
 
 - **Process hooks, at module load.** `crashReporter.start({uploadToServer: false})`; `unhandledRejection` and `uncaughtException` print the stack to the console and call `service.recordCrash`; `warning` calls `service.recordWarning`. None of them exits.
 - **The service and its ports.** `index.ts` builds the one `AppService` with `baseDir` from `takeHomeFlag`, the guarded `publish`, `electronKeychain()`, `probeOnStart: true`, `reveal` through `shell.showItemInFolder` and `chooseDirectory` through `dialog.showOpenDialog`. It then files the launch record through `recordApp("info", "JaiRA <version> started", {argv, home, baseDir, pid, platform, electron, chrome, node, logLevel})`.
-- **The window.** `createWindow` makes a 1440 by 900 `BrowserWindow`, hidden until loaded, painted with the saved theme's background, with `titleBarStyle: "hidden"` and an overlay 34 px high that `repaintTitleBar` recolours after `settings:write`. `webPreferences` are `nodeIntegration: false`, `contextIsolation: true`, `sandbox: false` and the bundled `preload.cjs`. `Menu.setApplicationMenu(null)` removes the menu bar.
+- **The window.** `createWindow` makes a 1440 by 900 `BrowserWindow`, hidden until loaded, painted with the ground colour `PALETTE_FRAME` gives for the look `service.windowAppearance()` answers — the shared root's `appearance` with the personal layer's over it, never a project's — with `titleBarStyle: "hidden"` and an overlay 34 px high that `repaintTitleBar` recolours after every `config:write` and when the OS switches between light and dark (`nativeTheme` `updated`), which a `system` mode follows. `webPreferences` are `nodeIntegration: false`, `contextIsolation: true`, `sandbox: false` and the bundled `preload.cjs`. `Menu.setApplicationMenu(null)` removes the menu bar.
 - **The window policy.** `renderer/index.html` declares `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self'; frame-src jaira-artifact:`.
 - **The artifact scheme.** `jaira-artifact` is registered privileged before ready, as `standard` and `secure` with no fetch API and no CORS. `registerArtifactProtocol` serves the body `service.servedArtifact(token)` holds, with a policy that admits inline script only when the grant was interactive. The response is [artifact-frame-protocol](../contracts/artifact-frame-protocol.md).
 - **Renderer hooks.** `did-finish-load` sets `rendererAlive`. `render-process-gone` clears it, files the reason, exit code and dump directory, and calls `reloadAfterCrash`. `unresponsive`, `did-fail-load` and each distinct console message at level 3 or above, up to 50, are filed as `renderer` crashes. `context-menu` is forwarded as a `frame:contextMenu` push.
@@ -53,7 +53,7 @@ It deliberately does not own:
 | `userData/secrets.json`, `{<name>: base64 safeStorage ciphertext}` | read whole on every `get`, `set` and `remove`; written whole with `writeFileSync` on `set` and `remove` | the file, unreadable without the OS keyring entry | [secret-chain](secret-chain.md) reads and writes through `KeychainPort` |
 | Crash dumps | written by crashpad under `app.getPath("crashDumps")`, never uploaded | that directory | named in the `renderer` crash entry |
 | `window`, `rendererAlive`, `closing`, `reloadedAt` | set by the window and quit hooks | `index.ts` memory | [ipc-bridge](ipc-bridge.md) reads `window` and `rendererAlive` before every push |
-| `theme` in `user-settings.json` | read at window creation and after `settings:write` | the file | [user-settings](user-settings.md) |
+| `appearance` in `<base>/settings.json` and `<base>/personal-settings.json` | read through `AppService.windowAppearance` at window creation, after every `config:write` and on `nativeTheme` `updated` | the files | [project-config](project-config.md) |
 | Launch, `app`, `crash` and `runtime` entries | filed through `recordApp`, `recordCrash`, `recordWarning` | the app log | [app-log](app-log.md) |
 
 `KeychainPort` is `available(): boolean` checked on every call against `safeStorage.isEncryptionAvailable()`, `reason` `this system provides no OS-backed encrypted store, so secrets must go in a .env.local file`, `get(name)`, `set(name, value)` and `remove(name)`.

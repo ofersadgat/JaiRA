@@ -167,6 +167,7 @@ import {
   writePermissionSet,
   policyAuditRow,
   recordHostRow,
+  migrateUserSettings,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -218,6 +219,9 @@ import {
   type DeviceAuthorization,
   type DeviceToken,
   discoverLocalServers,
+  detectMcpServers,
+  probeMcpServers,
+  resolveMcpServers,
   checkEmbeddedWeights,
   type LocalFetch,
   type WatchTarget,
@@ -253,6 +257,7 @@ import {
   InteractionHub,
   UserEventHub,
   defaultExecutorTree,
+  type PresetModelOptions,
   modelRouterOptions,
   probeModelRoutes,
   agentPromptRoutes,
@@ -343,7 +348,12 @@ import {
   jairaBuiltInPaths,
   baseAsProjectPaths,
   DEFAULT_EXECUTOR,
-  mergeConfigDocuments,
+  mergeConfigLayers,
+  modelAvailabilityIn,
+  routeHealthOf,
+  type ModelAvailability,
+  parseAppearanceConfig,
+  type JairaAppearanceConfig,
   mimeOfPath,
   parseComponentConfig,
   parseConfig,
@@ -369,6 +379,8 @@ import {
   type JairaForgeConnection,
   type EmbeddedWeightsReport,
   type LocalServerDiscovery,
+  type McpDetectedSource,
+  type McpToolsReport,
   type SecretSource,
   type RemoteStatusView,
   validateComponentResult,
@@ -574,6 +586,8 @@ import type {
   ToolChoice,
 } from "@jaira/shared";
 import { fanOutHostFor } from "./fanOut";
+import { walkHiddenReport } from "./hiddenReport";
+import { layeredHiddenRules, whyHiddenPath, type ConfigLayer, type HiddenReport, type HiddenReportRequest, type HiddenRule, type HiddenVerdict } from "@jaira/shared";
 
 export type Publish = (message: PushMessage) => void;
 
@@ -1127,6 +1141,14 @@ export class AppService {
 
   constructor(private readonly options: AppServiceOptions = {}) {
     this.baseDir = jairaBasePaths(options.baseDir ?? settingsBaseDir()).baseDir;
+    // Before anything reads how the app looks — the window's frame is painted from it before there is
+    // a window, and with no project open, so this cannot wait for an open to run it. Moves the look
+    // out of `user-settings.json` into `personal-settings.json`, once; a no-op ever after.
+    try {
+      migrateUserSettings(jairaBasePaths(this.baseDir));
+    } catch {
+      // Never a reason not to start: the old file keeps its fields, and the next start tries again.
+    }
     this.diagnostics = new Diagnostics({
       // Under the root's `system/` with the rest of what JaiRA writes for itself, rather than beside
       // the workflows a person authors — see `SYSTEM_DIR_NAME`.
@@ -2623,6 +2645,61 @@ export class AppService {
   }
 
   /**
+   * What each hidden-path rule does to the tree here (`files:hiddenReport`) — the Files tree
+   * section's rule list, and its add line's preview when `extra` is given.
+   *
+   * ONE walk of one root (`hiddenReport.ts`), budgeted, so it can be asked on every pause in typing.
+   */
+  async hiddenReport(request: HiddenReportRequest = {}): Promise<HiddenReport> {
+    const scope = this.hiddenScope(request.project);
+    const extra = request.extra?.trim();
+    const pattern = extra !== undefined && extra.length > 0 && extra !== "!" ? extra : undefined;
+    return walkHiddenReport(scope.root, scope.rules, pattern !== undefined ? { extra: { pattern, layer: request.layer ?? scope.layer } } : {});
+  }
+
+  /**
+   * Why one path is or is not in the tree (`files:whyHidden`). The path is relative to the root the
+   * report walks, or absolute inside it — what a person pastes from a file manager.
+   */
+  whyHidden(request: { project?: ProjectRef; path: string }): HiddenVerdict {
+    const scope = this.hiddenScope(request.project);
+    const typed = request.path.trim();
+    let path = typed;
+    if (isAbsolute(typed)) {
+      path = relative(scope.root, typed);
+      if (path.startsWith("..") || isAbsolute(path)) throw this.refusal("files", `'${typed}' is not inside ${scope.root}`);
+    }
+    return whyHiddenPath(path, scope.rules);
+  }
+
+  /**
+   * The root a hidden-path question is about, and its rules with their layers.
+   *
+   * A user project's checkout with its layers under it; with none open (or the shared root named),
+   * the shared root with the base's rules. The person's own list comes last either way — it is theirs,
+   * not the project's. Read from the layer DOCUMENTS rather than the parsed config, because the
+   * parsed list is already one concatenation and the question is whose each rule is.
+   */
+  private hiddenScope(project?: ProjectRef): { root: string; rules: HiddenRule[]; layer: ConfigLayer } {
+    const base = jairaBasePaths(this.baseDir);
+    const session = project === SHARED_SESSION ? undefined : this.sessionOf(project);
+    const user = session?.kind === "user" ? session : undefined;
+    const listOf = (file: string | undefined): string[] | undefined => {
+      const doc = file !== undefined ? readJsonIfPresent(file) : null;
+      const files = doc !== null && typeof doc === "object" && !Array.isArray(doc) ? doc["files"] : undefined;
+      const hidden = files !== null && typeof files === "object" && !Array.isArray(files) ? files["hidden"] : undefined;
+      return Array.isArray(hidden) ? hidden.filter((p): p is string => typeof p === "string") : undefined;
+    };
+    const rules = layeredHiddenRules({
+      // The base the project's own config was layered on — which is the service's, except in a test.
+      base: listOf(user !== undefined ? user.project.paths.base.settingsFile : base.settingsFile),
+      project: user !== undefined ? listOf(user.project.paths.settingsFile) : undefined,
+      you: listOf(user !== undefined ? user.project.paths.base.personalSettingsFile : base.personalSettingsFile),
+    });
+    return user !== undefined ? { root: user.project.paths.projectDir, rules, layer: "project" } : { root: base.baseDir, rules, layer: "base" };
+  }
+
+  /**
    * Everything the Files view shows about one state.
    *
    * Executor availability is passed in from *this* process's view of the machine, which is what
@@ -3410,6 +3487,7 @@ export class AppService {
         ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
         ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
         ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
+        mcpServers: this.mcpServersFor(config, this.secretResolver(open)),
       });
       // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered
       // when none are, so a state naming one fails honestly instead of running some
@@ -3646,6 +3724,8 @@ export class AppService {
         // that is where this run's database is — a memo is part of the run record, not of the config
         // that decided which model to call.
         memoCache: new SqliteMemoCache(project.db),
+        // How a preset's session keeps the model it chose across a resume: its record says what answered.
+        recorded: (at) => this.recordedModelAt(project, taskId, at),
       }),
       // The DEFAULT executor's tree, resolved from what this machine can actually do. The startup
       // check is what makes that adaptive: without it a derived route lands on whichever adapter is
@@ -4159,6 +4239,38 @@ export class AppService {
     const store = sessionStoreFor(open.project, { taskId });
     // The position is where the NEXT turn goes, so the last one written is the seq below it.
     const record = store.at(id, seq - 1) ?? store.at(id, seq);
+    return AppService.modelInRecord(record);
+  }
+
+  /**
+   * The model the last call BEFORE `at` in its session recorded — how a preset's candidate list keeps
+   * the model a session started on (`withPresetModels`). Walks back past a call that recorded none (a
+   * function op sharing the session), a bounded way: a session is short, and a miss only chooses again.
+   */
+  private recordedModelAt(project: Project, taskId: string, at: { id: string; seq: number }): string | undefined {
+    const store = sessionStoreFor(project, { taskId });
+    for (let seq = at.seq - 1; seq >= 0 && seq >= at.seq - 32; seq--) {
+      const model = AppService.modelInRecord(store.at(at.id, seq));
+      if (model !== undefined) return model;
+    }
+    return undefined;
+  }
+
+  /**
+   * Can this machine run a model id — what a preset's `first-available` asks of each candidate.
+   *
+   * Over the default executor built from every CONFIGURED route (no probe filter, unlike a run's own
+   * tree), with the last check's verdicts as each route's health: a candidate whose route is signed out
+   * then says so, where the run's tree would only have said that nothing serves it.
+   */
+  private modelAvailabilityFor(config: JairaConfigOf, secrets: SecretResolver): (model: string) => ModelAvailability {
+    const configured = defaultExecutorTree(config, { rootId: "presets", states: {} }, { secrets, refuse: false }).prompt;
+    const health = routeHealthOf(this.availability);
+    return (model) => modelAvailabilityIn(configured, model, health);
+  }
+
+  /** The `model` a stored record's output names, or undefined. */
+  private static modelInRecord(record: { value?: unknown } | undefined): string | undefined {
     // `record.value` is the ENVELOPE; the `LlmOutput` is its own `value` inside it — the same nesting
     // `messagesOfRecord` reads as `value.value.messages`. Reading one level too shallow found `model`
     // on nothing, so this silently never fired and every chip fell through to the router default.
@@ -4391,7 +4503,14 @@ export class AppService {
       // exactly how the run path came to spawn unrecorded agents. An agent started from a
       // conversation is therefore still unfindable as an orphan — worth closing, and it needs a claim
       // to close it, not another argument here.
-      ...this.promptWiring(config, { fake, secrets, memoCache: new SqliteMemoCache(project.db) }),
+      ...this.promptWiring(config, {
+        fake,
+        secrets,
+        memoCache: new SqliteMemoCache(project.db),
+        // A conversation keeps the model its first turn chose — each turn builds this executor afresh,
+        // so what it remembers is what the record says.
+        recorded: (at) => this.recordedModelAt(project, request.taskId, at),
+      }),
       tree: this.defaultTree(config, context.bundle, fake, secrets).prompt,
     });
     // The workspace root is READ, never ensured: a bound task's worktree path is recorded, and
@@ -7159,8 +7278,10 @@ export class AppService {
   // --- settings --------------------------------------------------------------
 
   /**
-   * User preferences (theme). Readable with NO project open — they belong to the person, not to a
-   * checkout, which is why they live in the shared root rather than in `.jaira/settings.json`.
+   * The window's own state — panes, folds, read marks, the log policy. Readable with NO project open:
+   * it belongs to the person at this machine, not to a checkout, which is why it lives in the shared
+   * root rather than in `.jaira/settings.json`. How the app looks is not here — it is the layered
+   * config's `appearance` block (`readConfig`, and {@link windowAppearance} for the frame).
    */
   readSettings(): JairaSettings {
     return readSettingsFile(this.baseDir);
@@ -7212,21 +7333,30 @@ export class AppService {
     const projectFile = this.sessionOf(project)?.project.paths.settingsFile;
     const baseDoc = readJsonIfPresent(base.settingsFile);
     const projectDoc = projectFile !== undefined ? readJsonIfPresent(projectFile) : null;
+    // What ships, under every layer (decision 0006) — read so a screen can tag a built-in value as one.
+    const systemDoc = readJsonIfPresent(jairaBuiltInPaths().settingsFile);
+    const youDoc = readJsonIfPresent(base.personalSettingsFile);
     return {
       base: baseDoc,
       project: projectDoc,
+      system: systemDoc,
+      you: youDoc,
       // Parsed, so the UI shows defaults filled in rather than the sparse document — "what will
       // actually happen" is the question this pane exists to answer.
       //
       // `?? {}` is load-bearing: with NEITHER layer holding a `settings.json` the merge is undefined,
       // and parsing that threw "config must be a JSON object" — so the one state where a person has
       // configured nothing yet was the state where the settings screen could not be read at all.
-      // Two absent layers mean the built-in defaults, which is what an empty document parses to.
+      // Absent layers mean the built-in defaults, which is what an empty document parses to.
+      //
+      // The shared root standing as a project has one file for both roles, read once — see
+      // `loadLayeredConfig`.
       effective: parseConfig(
-        mergeConfigDocuments(baseDoc ?? undefined, projectDoc ?? undefined) ?? {},
+        mergeConfigLayers([systemDoc, baseDoc, projectFile === base.settingsFile ? null : projectDoc, youDoc]) ?? {},
       ) as unknown as JsonValue,
       baseFile: base.settingsFile,
       projectFile: projectFile ?? "",
+      youFile: base.personalSettingsFile,
       baseDir: base.baseDir,
     };
   }
@@ -7234,18 +7364,21 @@ export class AppService {
   /**
    * Replace one layer's `settings.json`.
    *
-   * Validated BEFORE writing, and validated as it will actually be read — the project layer is
-   * checked merged over the base, because a project document that is only valid on its own would
-   * still break every run. Writing an unloadable config would leave the app unable to open the
-   * project it was just configured with, which is the one failure a settings screen must not cause.
+   * Validated BEFORE writing, and validated as it will actually be read — merged with the other
+   * layers, because a document that is only valid on its own would still break every run. The shared
+   * root and the personal layer lie under or over EVERY project, so a write to either is checked with
+   * each open project laid in as well. Writing an unloadable config would leave the app unable to
+   * open the project it was just configured with, which is the one failure a settings screen must
+   * not cause.
    */
   writeConfig(request: WriteConfigRequest): ConfigView {
     this.forges.clear();
     const base = jairaBasePaths(this.baseDir);
     // Before validating, not after: a document reported field by field and THEN refused for having
     // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
-    // it is the machine's, and `initBase` creates it — so only the project layer can fail here.
-    if (request.layer !== "base" && this.sessionOf(request.project) === undefined) {
+    // it is the machine's, and `initBase` creates it — and so is the personal layer beside it, so
+    // only the project layer can fail here.
+    if (request.layer === "project" && this.sessionOf(request.project) === undefined) {
       throw this.refusal("config", 
         request.project === undefined
           ? "no project was named, so there is no project config to write"
@@ -7253,17 +7386,32 @@ export class AppService {
       );
     }
     const current = this.readConfig(request.project);
-    const merged =
-      request.layer === "base"
-        ? mergeConfigDocuments(request.config, current.project ?? undefined)
-        : mergeConfigDocuments(current.base ?? undefined, request.config);
-    parseConfig(merged ?? {}); // throws with the offending field named
+    // Every layer with this one replaced — over the built-in layer too, because a layer is valid only
+    // as it will be read — over a given project document.
+    const layered = (projectDoc: JsonValue | null): unknown =>
+      mergeConfigLayers([
+        current.system,
+        request.layer === "base" ? request.config : current.base,
+        request.layer === "project" ? request.config : projectDoc,
+        request.layer === "you" ? request.config : current.you,
+      ]);
+    parseConfig(layered(current.projectFile === base.settingsFile ? null : current.project) ?? {}); // throws with the offending field named
+    if (request.layer !== "project") {
+      // Every project the change reaches, each as a run there would read it.
+      for (const open of this.userSessions()) {
+        try {
+          parseConfig(layered(readJsonIfPresent(open.project.paths.settingsFile)) ?? {});
+        } catch (e) {
+          throw new Error(`${(e as Error).message} (with ${open.project.paths.settingsFile} as the project layer)`);
+        }
+      }
+    }
     let file: string;
-    if (request.layer === "base") {
-      initBase(base.baseDir);
-      file = base.settingsFile;
-    } else {
+    if (request.layer === "project") {
       file = this.p(request.project).paths.settingsFile;
+    } else {
+      initBase(base.baseDir);
+      file = request.layer === "base" ? base.settingsFile : base.personalSettingsFile;
     }
     writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
     // The open project holds a PARSED copy, and everything downstream of this write reads that copy
@@ -7383,7 +7531,13 @@ export class AppService {
       // will do — a bare `claude-sonnet-5` resolving to `claude-cli` is a property of the tree.
       vendors: agentRouteVendors(config.agents),
     });
-    this.availability = { routes, executors, forges, tree, checkedAt: Date.now() };
+    // …and over every configured agent, probed or not, for the presets' candidates (`modelAvailabilityIn`).
+    const configured = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], {
+      providers: usableRouteKeys(config.models, secrets),
+      agents: Object.keys(agentPromptRouteNames(config.agents)),
+      vendors: agentRouteVendors(config.agents),
+    });
+    this.availability = { routes, executors, forges, tree, configured, checkedAt: Date.now() };
     this.publish({ type: "store:invalidate", scope: "availability" });
     return this.availability;
   }
@@ -7548,6 +7702,59 @@ export class AppService {
       ...(configured !== undefined ? { configured } : {}),
       ...(this.options.localFetch !== undefined ? { fetch: this.options.localFetch } : {}),
     });
+  }
+
+  // --- MCP servers (Settings → Connections → MCP servers) ------------------
+
+  /**
+   * The configured MCP servers a run hands its agents: the ones that are on, each secret they name
+   * looked up through the same chain a provider's key is. One that names a secret nothing stores is
+   * left out — the tools probe says which and why.
+   */
+  private mcpServersFor(config: JairaConfigOf, secrets: SecretResolver): ReturnType<typeof resolveMcpServers>["servers"] {
+    return resolveMcpServers(config.mcp, (name) => secrets.lookup(name)?.value).servers;
+  }
+
+  /**
+   * Where other tools on this machine keep MCP servers, and what answers on a known port. Files are
+   * READ and a port is asked; nothing a source lists is started.
+   */
+  detectMcpServers(): Promise<McpDetectedSource[]> {
+    const open = this.sessionOf();
+    return detectMcpServers({ ...(open !== undefined ? { projectDir: open.dir } : {}) });
+  }
+
+  /** The last tools probe, the configuration it was of, and one still running — see {@link mcpTools}. */
+  private mcpProbe: { key: string; report?: McpToolsReport; running?: Promise<McpToolsReport> } | undefined;
+
+  /**
+   * Each configured server's state and tools, from the last probe.
+   *
+   * The probe STARTS the servers the person added, so it is not run on every read: the answer is
+   * cached in main and asked again only when the servers' configuration has changed since (their
+   * block, the project, the execution environment) or `recheck` says so — the section's Re-check, and
+   * a stored secret. Two reads while one runs share it.
+   */
+  mcpTools(request?: { recheck?: boolean }): Promise<McpToolsReport> {
+    const open = this.sessionOf();
+    const config = this.effectiveConfig();
+    const key = JSON.stringify([open?.dir ?? null, config.execEnvironment, config.mcp]);
+    const held = this.mcpProbe;
+    if (held !== undefined && held.key === key) {
+      if (held.running !== undefined) return held.running;
+      if (held.report !== undefined && request?.recheck !== true) return Promise.resolve(held.report);
+    }
+    const secrets = this.secretResolver(open);
+    const running = probeMcpServers(config.mcp, {
+      lookup: (name) => secrets.lookup(name)?.value,
+      describe: (name) => secrets.describe(name),
+      execEnv: config.execEnvironment,
+    }).then((report) => {
+      if (this.mcpProbe?.running === running) this.mcpProbe = { key, report };
+      return report;
+    });
+    this.mcpProbe = { key, running };
+    return running;
   }
 
   /**
@@ -7760,8 +7967,8 @@ export class AppService {
     const view = this.readConfig();
     const defines = (doc: unknown): boolean =>
       ((doc as { integrations?: { forges?: Record<string, unknown> } } | null)?.integrations?.forges?.[name]) !== undefined;
-    const layer = view.project !== null && defines(view.project) ? "project" : "base";
-    const doc = structuredClone(((layer === "base" ? view.base : view.project) ?? {}) as Record<string, unknown>);
+    const layer = defines(view.you) ? "you" : view.project !== null && defines(view.project) ? "project" : "base";
+    const doc = structuredClone((view[layer] ?? {}) as Record<string, unknown>);
     const integrations = (doc["integrations"] ??= {}) as Record<string, unknown>;
     const forges = (integrations["forges"] ??= {}) as Record<string, unknown>;
     forges[name] = { ...((forges[name] ?? {}) as object), credential };
@@ -7880,7 +8087,7 @@ export class AppService {
     try {
       const layer = open.kind === "shared" ? "base" : "project";
       const view = this.readConfig(open.key);
-      const doc = structuredClone(((layer === "base" ? view.base : view.project) ?? {}) as Record<string, unknown>);
+      const doc = structuredClone((view[layer] ?? {}) as Record<string, unknown>);
       const functions = (doc["functions"] ??= {}) as Record<string, unknown>;
       functions["review_artifacts"] = { ...((functions["review_artifacts"] ?? {}) as object), publish: "allow" };
       this.writeConfig({ layer, project: open.key, config: doc as JsonValue });
@@ -8824,7 +9031,7 @@ export class AppService {
     return written;
   }
 
-  /** "Reset to built in": delete a layer's override of a permission set, and nothing that is not one. */
+  /** "Put back the built-in": delete a layer's copy of a permission set, and nothing that is not one. */
   resetPermissionSetSettings(request: ResetPermissionSetRequest): { file: string } {
     this.writable(request.layer);
     let removed: { file: string };
@@ -10046,11 +10253,18 @@ export class AppService {
    */
   private promptWiring(
     config: JairaConfigOf,
-    opts: { fake?: boolean; memoCache?: MemoCache; secrets?: SecretResolver; observer?: ExecObserver } = {},
+    opts: {
+      fake?: boolean;
+      memoCache?: MemoCache;
+      secrets?: SecretResolver;
+      observer?: ExecObserver;
+      /** What a session recorded last before a position — see `PresetModelOptions.recorded`. */
+      recorded?: (at: { id: string; seq: number }) => string | undefined;
+    } = {},
   ): {
     router?: ReturnType<typeof modelRouterOptions>;
     routes?: ReturnType<typeof agentPromptRoutes>;
-    configs?: { get(id: string): Record<string, JsonValue> | undefined };
+    presets?: PresetModelOptions;
     definitions?: JairaConfigOf["executors"];
     memoCache?: MemoCache;
   } {
@@ -10070,8 +10284,20 @@ export class AppService {
         ...(opts.observer !== undefined ? { observer: opts.observer } : {}),
         startBridge: this.startBridge,
         onOutcome: this.onAgentOutcome,
+        mcpServers: this.mcpServersFor(config, opts.secrets ?? this.secretResolver()),
       }),
-      ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
+      // The presets, and what choosing a preset's model asks: which models this machine can run — every
+      // CONFIGURED route, judged by the last check (a route the check found signed out is named as the
+      // reason rather than silently missing) — and, for a resumed session, what it recorded.
+      ...(presets !== undefined
+        ? {
+            presets: {
+              presets,
+              available: this.modelAvailabilityFor(config, opts.secrets ?? this.secretResolver()),
+              ...(opts.recorded !== undefined ? { recorded: opts.recorded } : {}),
+            },
+          }
+        : {}),
       // The named stacks. Each becomes a route keyed by its name, so a state naming `review/…` gets
       // the executor this project built rather than whatever the prefix would otherwise have meant.
       ...(Object.keys(config.executors).length > 0 ? { definitions: config.executors } : {}),
@@ -10080,22 +10306,44 @@ export class AppService {
   }
 
   /**
-   * What this tree leaves out: the layered `config.files.hidden`, then the person's own list.
+   * What this tree leaves out: the layered `config.files.hidden` — the person's own patterns are the
+   * personal layer's, already in it.
    *
-   * Compiled per CALL rather than cached, because both halves can change under the app — a config
-   * write, a settings write, a project opened — and a stale filter is a folder that will not come
-   * back until a restart. A tree walk costs orders of magnitude more than compiling five globs.
+   * Compiled per CALL rather than cached, because it can change under the app — a config write, a
+   * project opened — and a stale filter is a folder that will not come back until a restart. A tree
+   * walk costs orders of magnitude more than compiling five globs.
    */
   private hiddenRulesFor(config: JairaConfigOf): HiddenRules {
-    return compileHidden(hiddenRules(config.files.hidden, this.readSettings().filesHidden));
+    return compileHidden(hiddenRules(config.files.hidden));
   }
 
-  /** The merged configuration, or plain defaults when no project is open. */
+  /** The merged configuration, or the shared root and the personal layer when no project is open. */
   private effectiveConfig(): JairaConfigOf {
     const open = this.sessionOf();
     if (open) return open.project.config;
-    const doc = readJsonIfPresent(jairaBasePaths(this.baseDir).settingsFile);
-    return parseConfig(doc ?? {});
+    const base = jairaBasePaths(this.baseDir);
+    return parseConfig(
+      mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]) ?? {},
+    );
+  }
+
+  /**
+   * How the WINDOW looks — its frame and the OS's window controls: the shared root's `appearance`
+   * with the personal layer's over it.
+   *
+   * Never a project's. A window holds several projects at once (SHELL.md §2.2), and the frame is
+   * painted before any of them is open, so the one look it can honestly have is the one that is the
+   * same in all of them. A layer that cannot be read is the defaults here rather than an error: the
+   * frame must be painted whatever state the settings files are in, and Settings says what is wrong.
+   */
+  windowAppearance(): JairaAppearanceConfig {
+    const base = jairaBasePaths(this.baseDir);
+    try {
+      const merged = mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]);
+      return parseAppearanceConfig((merged as { appearance?: unknown } | undefined)?.appearance);
+    } catch {
+      return parseAppearanceConfig(undefined);
+    }
   }
 
   /**

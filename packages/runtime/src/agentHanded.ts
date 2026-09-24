@@ -17,13 +17,14 @@
  * answer stays true when any of them changes. Reach is judged, not mechanism: a way in that is
  * refused is not a way in, and a shell every line of which is refused is not a shell.
  */
-import { mcpToolName, type AgentQuery, type AgentQueryOptions, type InjectedTool } from "@declarative-ai/agents-api";
-import type { SpawnProcess, StartMcpBridge } from "@declarative-ai/agents-cli";
+import { mcpToolName, type AgentPermissionDecision, type AgentQuery, type AgentQueryOptions, type AgentToolRequest, type InjectedTool } from "@declarative-ai/agents-api";
+import type { ConnectMcpServer, SpawnProcess, StartMcpBridge } from "@declarative-ai/agents-cli";
 import type { Tool } from "@declarative-ai/exec";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import { loadBundle } from "@declarative-ai/hw";
 import {
   nativesOfStandard,
+  parseMcpSubject,
   SHELL_TOOL,
   TOOL_SPECS,
   unmappedNatives,
@@ -34,6 +35,7 @@ import { CLAUDE_TOOLS } from "./agentTools";
 import { agentPromptRoutes } from "./modelRoutes";
 import { compilePolicy, type JairaPolicy } from "./policy";
 import { answeredWithoutAsking, withPermissionFunctions, type PermissionFunctionRunner } from "./permissionFunctions";
+import type { ResolvedMcpServer } from "./mcpServers";
 import { grantAlwaysGrantedTools, JAIRA_TOOL_NAMES } from "./tools";
 import { buildPromptExecutor, executeWorkflow, newRegistry } from "./wiring";
 
@@ -84,6 +86,11 @@ export interface AgentHanded {
   other: HandedDecision;
   /** What decides each of {@link SHELL_PROBES}; empty when no shell is reachable. */
   shell: Record<string, HandedDecision>;
+  /** The configured MCP servers the agent is handed (upstream's `mcpServers`, which the claude
+   *  transports write into the one `--mcp-config` document beside the bridge's), by name. */
+  mcpServers: string[];
+  /** What decides a call to each of {@link HandedOptions.mcpProbes}, by its name. */
+  mcp: Record<string, HandedDecision>;
 }
 
 export interface HandedOptions {
@@ -115,6 +122,14 @@ export interface HandedOptions {
    * the functions (`ApprovalHub.approver`).
    */
   functions?: PermissionFunctionRunner;
+  /** The configured MCP servers the route is built with, as a host resolves them (`resolveMcpServers`). */
+  mcpServers?: Record<string, ResolvedMcpServer>;
+  /**
+   * MCP tools (`mcp__figma__get_code`) to decide a call to — {@link AgentHanded.mcp}: through claude's
+   * permission callback, or the gate codex's bridge puts a proxied server's call to. For codex they
+   * are also the tools each proxied server stands in listing.
+   */
+  mcpProbes?: readonly string[];
 }
 
 /** The `policy` and `approve` a probe run is handed, with every approval counted by `onAsk`. */
@@ -227,14 +242,17 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
   );
   grantAlwaysGrantedTools(states);
   const registry = stubRegistry();
-  if (viaFunction) registerAgentRuntimes(registry, { query, adapters: ["cli"] });
+  if (viaFunction) registerAgentRuntimes(registry, { query, adapters: ["cli"], ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}) });
 
   let asked = 0;
   const result = await executeWorkflow({
     bundle: loadBundle(states, root),
     inputs: {},
     registry,
-    prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { query }), tree: { kind: "agent", agent: AGENT_CLI } }),
+    prompt: buildPromptExecutor({
+      routes: agentPromptRoutes({}, { query, ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}) }),
+      tree: { kind: "agent", agent: AGENT_CLI },
+    }),
     ...governanceOf(options, () => {
       asked += 1;
     }),
@@ -303,6 +321,13 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
   const natives: Record<string, HandedDecision | "removed"> = {};
   for (const native of unmappedNatives(CLAUDE_TOOLS)) natives[native] = removed.has(native) ? "removed" : await decide(native, {});
 
+  // An MCP tool refused up front is on the deny list by its own name or by its server's (claude's rule
+  // `mcp__figma` covers every tool of it).
+  const mcp: Record<string, HandedDecision> = {};
+  for (const name of options.mcpProbes ?? []) {
+    const server = /^mcp__[^_]+(?:_[^_]+)*/.exec(name)?.[0];
+    mcp[name] = removed.has(name) || (server !== undefined && removed.has(server)) ? "deny" : await decide(name, { probe: true });
+  }
   return {
     served: [...served].sort(),
     removed: [...removed].sort(),
@@ -312,6 +337,8 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
     natives,
     other: await decide("mcp__somebody__a_tool_nobody_declared", {}),
     shell,
+    mcpServers: Object.keys(opts.mcpServers ?? {}).sort(),
+    mcp,
   };
 }
 
@@ -334,6 +361,14 @@ export interface CodexHanded {
   tools: Record<string, HandedDecision>;
   /** What decides each of {@link SHELL_PROBES} through a served shell; empty when none is served. */
   shell: Record<string, HandedDecision>;
+  /**
+   * Every `-c mcp_servers.<name>=…` override on the argv but `dai`'s — the configured MCP servers
+   * codex is pointed at, each at the bridge that proxies it (the run's secret replaced by `<url>`).
+   */
+  mcpServers: string[];
+  /** What decides a call to each of {@link HandedOptions.mcpProbes} at the bridge, by its name — as
+   *  {@link AgentHanded.mcp} is on claude. A probe of a server codex was not handed is `deny`. */
+  mcp: Record<string, HandedDecision>;
 }
 
 export type CodexHandedOptions = HandedOptions;
@@ -367,10 +402,24 @@ export async function handedToCodex(environment: HandedEnvironment, options: Cod
     };
   };
   let bridged: Record<string, InjectedTool> | undefined;
+  let serverGate: ((req: AgentToolRequest) => Promise<AgentPermissionDecision>) | undefined;
+  let proxied: string[] = [];
   const startBridge: StartMcpBridge = async (spec) => {
     bridged = spec.tools;
+    serverGate = spec.serverToolGate;
+    proxied = Object.keys(spec.servers ?? {});
     return { url: PROBE_BRIDGE_URL, close: async () => undefined };
   };
+  // A double for each configured server: it lists the probes named for it, and is never called — a
+  // call is decided by the gate the bridge would put it to, which is what is measured.
+  const connectMcpServer: ConnectMcpServer = async (name) => ({
+    tools: (options.mcpProbes ?? []).flatMap((probe) => {
+      const parsed = parseMcpSubject(probe);
+      return parsed?.server === name && parsed.tool !== undefined ? [{ name: parsed.tool, inputSchema: { type: "object" } }] : [];
+    }),
+    call: async () => ({ content: [] }),
+    close: async () => undefined,
+  });
 
   const viaFunction = options.via === "function";
   const { states, root } = probeStates(
@@ -383,13 +432,18 @@ export async function handedToCodex(environment: HandedEnvironment, options: Cod
   );
   grantAlwaysGrantedTools(states);
   const registry = stubRegistry();
-  if (viaFunction) registerAgentRuntimes(registry, { spawn, startBridge, adapters: ["codex"] });
+  if (viaFunction) {
+    registerAgentRuntimes(registry, { spawn, startBridge, connectMcpServer, adapters: ["codex"], ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}) });
+  }
   let asked = 0;
   const result = await executeWorkflow({
     bundle: loadBundle(states, root),
     inputs: {},
     registry,
-    prompt: buildPromptExecutor({ routes: agentPromptRoutes({}, { spawn, startBridge }), tree: { kind: "agent", agent: AGENT_CODEX } }),
+    prompt: buildPromptExecutor({
+      routes: agentPromptRoutes({}, { spawn, startBridge, connectMcpServer, ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}) }),
+      tree: { kind: "agent", agent: AGENT_CODEX },
+    }),
     ...governanceOf(options, () => {
       asked += 1;
     }),
@@ -415,12 +469,29 @@ export async function handedToCodex(environment: HandedEnvironment, options: Cod
       tools[name] = await decide(tool, PROBE_INPUT);
     }
   }
+  const mcp: Record<string, HandedDecision> = {};
+  for (const name of options.mcpProbes ?? []) {
+    const server = parseMcpSubject(name)?.server;
+    if (server === undefined || !proxied.includes(server)) {
+      mcp[name] = "deny";
+      continue;
+    }
+    if (serverGate === undefined) {
+      mcp[name] = "allow";
+      continue;
+    }
+    const before = asked;
+    const verdict = await serverGate({ toolName: name, input: { probe: true } });
+    mcp[name] = asked > before ? "ask" : verdict.allow ? "allow" : "deny";
+  }
   const setting = (prefix: string): string | undefined => argv.find((arg) => arg.startsWith(prefix));
   return {
     sandbox: /^sandbox_mode="(.*)"$/.exec(setting("sandbox_mode=") ?? "")?.[1],
     served: Object.keys(bridged ?? {}).sort(),
-    bridge: setting("mcp_servers.")?.replace(PROBE_BRIDGE_URL, "<url>"),
+    bridge: setting("mcp_servers.dai=")?.replace(PROBE_BRIDGE_URL, "<url>"),
     tools,
     shell,
+    mcpServers: argv.filter((arg) => arg.startsWith("mcp_servers.") && !arg.startsWith("mcp_servers.dai=")).map((arg) => arg.split(PROBE_BRIDGE_URL).join("<url>")),
+    mcp,
   };
 }

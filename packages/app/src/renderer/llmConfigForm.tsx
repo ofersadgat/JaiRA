@@ -43,8 +43,23 @@ const EFFORTS: Array<[string, string]> = [
   ["xhigh", "xhigh"],
 ];
 
-/** The categories, their fields, and how each summarises itself when collapsed. */
-export type CategoryKey = "sampling" | "reasoning" | "limits" | "advanced";
+/**
+ * The categories, their fields, and how each summarises itself when collapsed. `model` is drawn only
+ * where a host supplies it ({@link LlmConfigForm}'s `lead`) — a preset's Model.
+ */
+export type CategoryKey = "model" | "sampling" | "reasoning" | "limits" | "advanced";
+
+/**
+ * A section a HOST draws first, before the call settings: a preset's Model, which only a preset has.
+ * The form places it in the rail and the detail pane; what it says and edits are the host's.
+ */
+export interface LeadSection {
+  key: "model";
+  label: string;
+  hint: string;
+  summary: string;
+  body: ReactNode;
+}
 
 // --- the rail ------------------------------------------------------------------------
 
@@ -205,8 +220,13 @@ function reasoningOf(doc: LlmConfigDoc): { effort?: string; budgetTokens?: numbe
     : undefined;
 }
 
-/** The keys this form edits with a dedicated control. Everything else is "advanced", never dropped. */
+/**
+ * The keys this form edits with a dedicated control. Everything else is "advanced", never dropped.
+ * `model` is one of them wherever it is edited — a preset's Model section, or the field a Defaults
+ * form draws beside this one — so it never turns up in Advanced as an "extra".
+ */
 const KNOWN_KEYS = new Set<string>([
+  "model",
   ...SAMPLING_KEYS,
   "reasoning",
   "maxOutputTokens",
@@ -226,6 +246,7 @@ export function LlmConfigForm({
   footer,
   unframed = false,
   marks = true,
+  lead,
 }: {
   value: LlmConfigDoc;
   onChange: (next: LlmConfigDoc) => void;
@@ -253,10 +274,14 @@ export function LlmConfigForm({
    * preset — however many of them it states.
    */
   marks?: boolean;
+  /** A section of the host's, drawn first — see {@link LeadSection}. */
+  lead?: LeadSection | undefined;
 }): JSX.Element {
   const here = (stated: unknown): boolean => marks && stated !== undefined;
-  const [own, setOwn] = useState<CategoryKey>("sampling");
-  const active = section ?? own;
+  const [own, setOwn] = useState<CategoryKey>(lead?.key ?? "sampling");
+  // A host keeping its section across forms may ask for the lead on a form that has none.
+  const asked = section ?? own;
+  const active: CategoryKey = asked === "model" && lead === undefined ? "sampling" : asked;
   const setActive = (next: CategoryKey): void => {
     setOwn(next);
     onSection?.(next);
@@ -280,6 +305,7 @@ export function LlmConfigForm({
   const extras = useMemo(() => Object.keys(value).filter((k) => !KNOWN_KEYS.has(k)), [value]);
 
   const summaries: Record<CategoryKey, string> = {
+    model: lead?.summary ?? "",
     sampling: reasoningOn
       ? "not applicable — reasoning is on"
       : (() => {
@@ -297,6 +323,7 @@ export function LlmConfigForm({
   };
 
   const CATEGORIES: Array<{ key: CategoryKey; label: string; hint: string }> = [
+    ...(lead !== undefined ? [{ key: lead.key, label: lead.label, hint: lead.hint }] : []),
     {
       key: "sampling",
       label: "Sampling",
@@ -331,6 +358,8 @@ export function LlmConfigForm({
           <span className="cfg-hint">{CATEGORIES.find((c) => c.key === active)!.hint}</span>
           {hint && active === "sampling" ? <span className="cfg-hint">{hint}</span> : null}
         </div>
+
+        {active === "model" ? lead?.body : null}
 
         {active === "sampling" ? (
           reasoningOn ? (

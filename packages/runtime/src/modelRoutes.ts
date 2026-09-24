@@ -27,7 +27,7 @@ import { existsSync, statSync } from "node:fs";
 import { keyForModel, ModelInfo } from "@declarative-ai/llm";
 import type { EmbeddedModelConfig, LocalServerConfig, ModelRouterOptions } from "@declarative-ai/llm";
 import { AGENT_DEFAULT_MODEL, AgentApiExecutor, type AgentQuery } from "@declarative-ai/agents-api";
-import { AgentCliExecutor, AgentCodexExecutor, type SpawnProcess, type StartMcpBridge } from "@declarative-ai/agents-cli";
+import { AgentCliExecutor, AgentCodexExecutor, type ConnectMcpServer, type SpawnProcess, type StartMcpBridge } from "@declarative-ai/agents-cli";
 import {
   type ExecServices,
   type Executor,
@@ -52,7 +52,8 @@ import {
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
 import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
-import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, withAgentPermissionSet } from "./agentTools";
+import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, permissionSetViewOf, withAgentPermissionSet } from "./agentTools";
+import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
 import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
 import type { Exec } from "./exec";
@@ -194,8 +195,17 @@ export interface AgentRouteOptions {
   /** The bridge seam, the same one {@link AgentRuntimeOptions.startBridge} is: the persistent
    *  worker-hosted listener in production, upstream's per-run bridge when absent. */
   startBridge?: StartMcpBridge;
+  /** How codex's bridge connects to a configured MCP server it proxies — upstream's MCP SDK client
+   *  when absent; a probe stands in for the server with it. */
+  connectMcpServer?: ConnectMcpServer;
   /** Hears every agent call's outcome — the same observer {@link AgentRuntimeOptions.onOutcome} is. */
   onOutcome?: AgentOutcomeObserver;
+  /**
+   * The configured MCP servers that are on, their secrets looked up (`resolveMcpServers`) — handed to
+   * claude and codex on every call, less a server the call's permission set refuses outright
+   * (`./mcpServers`). A generic CLI is handed none: JaiRA knows no way to tell one.
+   */
+  mcpServers?: Record<string, ResolvedMcpServer>;
 }
 
 /**
@@ -223,12 +233,23 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
       ...(options.observer !== undefined ? { observer: options.observer } : {}),
     });
   const query = options.query;
+  // The servers each call is handed, read off the call's permission set. Codex's are started by its
+  // bridge, in THIS process, so a WSL project's stdio servers are handed over as the distro runs them.
+  const claudeServers = mcpServersOfCall(options.mcpServers ?? {}, permissionSetViewOf);
+  const codexServers = mcpServersOfCall(mcpServersIn(options.mcpServers ?? {}, options.execEnv), permissionSetViewOf);
 
   // EVERY agent route is held to the permission set of each call it answers (decision 0007 §3): the
   // executor's own declaration says which natives it has and what channel a permission set reaches it by,
   // and `withAgentPermissionSet` applies the plan where the route is finally known.
   if (adapters.includes("sdk")) {
-    bind(AGENT_SDK, withAgentPermissionSet(CLAUDE_TOOLS, new AgentApiExecutor({ ...(query !== undefined ? { query } : {}) }), { label: AGENT_SDK }));
+    bind(
+      AGENT_SDK,
+      withAgentPermissionSet(
+        CLAUDE_TOOLS,
+        new AgentApiExecutor({ ...(query !== undefined ? { query } : {}), ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}) }),
+        { label: AGENT_SDK },
+      ),
+    );
   }
   if (adapters.includes("cli")) {
     bind(
@@ -240,6 +261,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
           ...(agents.claudeCli?.command !== undefined ? { command: agents.claudeCli.command } : {}),
           ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
           ...(query !== undefined ? { query } : {}),
+          ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}),
         }),
         { label: AGENT_CLI },
       ),
@@ -250,14 +272,20 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     // there is one executor per setting of the switch, and the permission set picks. `permissionMode: "plan"`
     // is nothing but `--sandbox read-only` on this transport (`sandboxFor`), and an explicit mode
     // outranks everything else the executor would read.
+    //
+    // The MCP servers are not a reason for another executor: they are read off each call, and codex's
+    // bridge proxies them, putting every call to the gate before it is forwarded — so a tool's line is
+    // answered at the call, whatever it says, and nothing about them is fixed at construction.
     const codex = (readOnly: boolean): AgentCodexExecutor =>
       new AgentCodexExecutor({
         spawn,
         ...(agents.codex?.command !== undefined ? { command: agents.codex.command } : {}),
         ...(agents.codex?.sandbox !== undefined ? { sandbox: agents.codex.sandbox } : {}),
         ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
+        ...(options.connectMcpServer !== undefined ? { connectMcpServer: options.connectMcpServer } : {}),
         ...(query !== undefined ? { query } : {}),
         ...(readOnly ? { permissionMode: "plan" as const } : {}),
+        ...(codexServers !== undefined ? { mcpServers: codexServers } : {}),
       });
     const writing = codex(false);
     const reading = codex(true);
@@ -796,14 +824,27 @@ export interface KnownModel {
 }
 
 export function knownModels(): KnownModel[] {
-  return ModelInfo.instance
-    .list()
-    .map((row) => ({
-      id: keyForModel(row),
-      // Defaulted rather than left empty: every model takes text and answers with it, and a filter
-      // over an absent field would hide a row for saying nothing rather than for being unable.
-      input: [...(row.modalities?.input ?? ["text"])],
-      output: [...(row.modalities?.output ?? ["text"])],
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const listed = ModelInfo.instance.list().map((row) => ({
+    id: keyForModel(row),
+    // Defaulted rather than left empty: every model takes text and answers with it, and a filter
+    // over an absent field would hide a row for saying nothing rather than for being unable.
+    input: [...(row.modalities?.input ?? ["text"])],
+    output: [...(row.modalities?.output ?? ["text"])],
+  }));
+  const ids = new Set(listed.map((m) => m.id));
+  return [...listed, ...AHEAD_OF_CATALOG.filter((m) => !ids.has(m.id))].sort((a, b) => a.id.localeCompare(b.id));
 }
+
+/**
+ * Models the built-in presets name (`builtin/settings.json`) that the catalog snapshot does not list
+ * yet. The catalog is upstream's and is regenerated there; until it catches up, a preset's candidate
+ * should still be a model the picker offers. Routing never needed this — a bare id routes by its
+ * family (`vendorOfModel`) — only the list of choices did. Once the catalog lists one, its row is used instead.
+ */
+const AHEAD_OF_CATALOG: KnownModel[] = [
+  { id: "anthropic/claude-opus-5-5", input: ["text", "image"], output: ["text"] },
+  { id: "anthropic/claude-fable-5-1", input: ["text", "image"], output: ["text"] },
+  { id: "openai/gpt-5.6-luna", input: ["text", "image"], output: ["text"] },
+  { id: "openai/gpt-5.6-terra", input: ["text", "image"], output: ["text"] },
+  { id: "openai/gpt-5.6-sol", input: ["text", "image"], output: ["text"] },
+];

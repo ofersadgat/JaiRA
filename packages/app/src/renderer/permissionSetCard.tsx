@@ -30,6 +30,8 @@ import {
   type ToolChoice,
   type PermissionSet,
 } from "@jaira/shared/browser";
+import type { McpServerStatus } from "@jaira/shared/browser";
+import { McpBucket } from "./mcpBucket";
 import {
   addableScript,
   addableTools,
@@ -89,9 +91,11 @@ export interface PermissionSetCardProps {
   startAdding?: string | undefined;
   /** A tool line's mode menu drawn open from the first render — on its words or on the function form — for a still picture. */
   startMode?: { subject: string; open: "menu" | "function" } | undefined;
+  /** The configured MCP servers, as the tools probe last found them — the MCP section's groups (`mcpBucket.tsx`). */
+  mcp?: readonly McpServerStatus[] | undefined;
 }
 
-export function PermissionSetCard({ permissionSet, tools, onChange, readOnly, folds, onFold, startAdding, startMode }: PermissionSetCardProps): JSX.Element {
+export function PermissionSetCard({ permissionSet, tools, onChange, readOnly, folds, onFold, startAdding, startMode, mcp }: PermissionSetCardProps): JSX.Element {
   const [own, setOwn] = useState<ReadonlySet<string>>(() => new Set(openSectionsOf(permissionSet)));
   const open = folds ?? own;
   const toggle = (id: string, to?: boolean): void => {
@@ -106,6 +110,22 @@ export function PermissionSetCard({ permissionSet, tools, onChange, readOnly, fo
   return (
     <div className={`cx-cats${locked ? " set-readonly" : ""}`}>
       {TOOL_CATEGORIES.map((category) => {
+        // MCP: one group per configured server — its own line, and a line per tool it names.
+        if (category.id === "mcp") {
+          return (
+            <McpBucket
+              key={category.id}
+              category={category}
+              permissionSet={permissionSet}
+              servers={mcp}
+              locked={locked}
+              write={write}
+              open={open}
+              toggle={toggle}
+              startAdding={startAdding}
+            />
+          );
+        }
         const inCategory = tools.filter((tool) => TOOL_SPEC_BY_NAME.get(tool.name)?.category === category.id);
         if (inCategory.length === 0) {
           return (

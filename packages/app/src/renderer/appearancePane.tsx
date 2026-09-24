@@ -1,8 +1,11 @@
 /**
- * Settings → Appearance: how JaiRA looks on this machine, for every project (SHELL.md §6).
+ * Settings → Appearance: how JaiRA looks (SHELL.md §6) — a LAYERED page since 2026-09-23, like every
+ * other: the look is the `appearance` block of the settings, stated by the shared root, a project, or
+ * "Just you" over both, and each row has the switch that says whether the layer being edited states it.
  *
  * Built from `settingsLayout.tsx` — the row-and-card shape the person picked from t3code on
- * 2026-09-23 — as six sections, each one a place the sidebar's accordion can jump to:
+ * 2026-09-23 — as six sections, each one a place the sidebar's accordion can jump to, and the Files
+ * tree after them (the caller's):
  *
  *  - **Mode** — light, dark, or follow the system, as three tiles drawn in the current theme.
  *  - **Theme** — the palettes as cards, each a miniature task board in its own colours
@@ -26,7 +29,7 @@
  *    shell. A sample string cannot show that a data font is wider than the column.
  *  - **The proportional check is a NOTE, not a block.** It is their app.
  */
-import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import {
   PALETTES,
   PALETTE_SURFACE,
@@ -56,11 +59,12 @@ import {
   stackOf,
   useSystemDark,
 } from "./appearance";
-import { Switch } from "./controls";
+import { SelectInput, Switch, shortValue } from "./controls";
+import { EDITOR_THEMES, EDITOR_THEME_APP } from "./editorThemes";
 import { Pill } from "./pill";
 import { Column, Tile } from "./board";
 import { PALETTE_CARDS, ThemeMini } from "./paletteCards";
-import { Segmented, SettingsPage, SettingsRow, SettingsSection } from "./settingsLayout";
+import { Segmented, SettingsRow, SettingsSection, type RowLayer } from "./settingsLayout";
 
 /**
  * Faces worth offering by name.
@@ -418,6 +422,63 @@ const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
   ["Side by side", "band"],
 ];
 
+/**
+ * How the Appearance rows sit in the layers — handed in by the caller, which knows the layer being
+ * edited and how to write it. Absent draws the rows as plain controls, with no switch.
+ */
+export interface AppearanceLayering {
+  /** Whether the layer being edited states a path (`appearance.palette`, …). */
+  stated: (path: string) => boolean;
+  /** Switch rows on (pin what they show into the layer) or off (take them out, so they inherit). */
+  pin: (paths: readonly string[], on: boolean) => void;
+  /** Nothing on the page may be changed — a write in flight, or a layer that cannot be written. */
+  locked: boolean;
+}
+
+/** A value of the look in the words its row uses — for the "instead of … from …" line. */
+function lookWords(value: unknown, path: string): string {
+  const field = path.replace(/^appearance\./, "");
+  const own = "the palette's own";
+  switch (field) {
+    case "mode":
+      return MODES.find(([, mode]) => mode === value)?.[0].toLowerCase() ?? shortValue(value, path);
+    case "palette":
+      return PALETTE_CARDS[value as Appearance["palette"]]?.label ?? shortValue(value, path);
+    case "laneColors":
+    case "statusWash":
+      return value === null || value === undefined ? own : value === true ? "on" : "off";
+    case "buckets":
+      return value === null || value === undefined ? own : value === "line" ? "a line" : "a box";
+    case "conversation.sequentialBatches":
+      return BATCH_CHOICES.find(([, layout]) => layout === value)?.[0].toLowerCase() ?? shortValue(value, path);
+    case "appFamily":
+    case "dataFamily":
+      return Array.isArray(value) && value.length > 0 ? value.join(", ") : "JaiRA's own face";
+    case "sizeApp":
+    case "sizeData":
+    case "sizeEditor":
+      return typeof value === "number" ? `${value} px` : shortValue(value, path);
+    case "advanced":
+      return value === true ? "a size of its own" : "following the data font";
+    case "editorTheme":
+      return value === EDITOR_THEME_APP ? "following the window" : (EDITOR_THEMES.find((theme) => theme.id === value)?.label ?? shortValue(value, path));
+    default:
+      return shortValue(value, path);
+  }
+}
+
+/**
+ * Settings → Appearance, as the sections of its page (the page itself — its title, whose settings
+ * these are, the layer switch — is the caller's, like every other page's).
+ *
+ * Every value here is the EFFECTIVE look of the address the window stands on, and every change is
+ * written to the layer the page's switch shows. With `layered`, each row — the Mode tiles, the Theme
+ * cards, the Board options, the Conversation layout, the Text rows, File types — has the switch every
+ * layered row has: on, this layer states it and the control edits it; off, the control shows what it
+ * inherits and cannot be changed. The controls themselves are what they were.
+ *
+ * `children` are the sections after File types — the Files tree, which is a look of the tree.
+ */
 export function AppearancePane({
   appearance,
   theme,
@@ -425,11 +486,13 @@ export function AppearancePane({
   editors,
   renderers,
   busy,
+  layered,
   onChange,
   onTheme,
   onConversation,
   onEditor,
   onRenderer,
+  children,
 }: {
   appearance: Appearance;
   /** Light, dark or system — the window's mode, which lives beside the palette it paints. */
@@ -443,11 +506,13 @@ export function AppearancePane({
   editors?: Record<EditorKind, EditorLook> | undefined;
   renderers?: RendererChoices | undefined;
   busy: boolean;
+  layered?: AppearanceLayering | undefined;
   onChange: (patch: Partial<Appearance>) => void;
   onTheme: (mode: ThemeMode) => void;
   onConversation: (patch: Partial<ConversationLook>) => void;
   onEditor?: ((kind: EditorKind, patch: Partial<EditorLook>) => void) | undefined;
   onRenderer?: ((edits: readonly RendererEdit[]) => void) | undefined;
+  children?: ReactNode;
 }): JSX.Element {
   // Measured once per stack rather than per render: reading a canvas metric is cheap but not free,
   // and the answer only changes when the list does.
@@ -461,21 +526,26 @@ export function AppearancePane({
   const own = PALETTE_SURFACE[appearance.palette];
   const card = PALETTE_CARDS[appearance.palette];
   const backTo = (what: string): string => `Back to ${card.label}'s own: ${what}`;
+  // One row's place in the layers, from the `appearance.*` fields it writes.
+  const layer = (...fields: string[]): RowLayer | undefined => {
+    if (layered === undefined) return undefined;
+    const paths = fields.map((field) => `appearance.${field}`);
+    return {
+      paths,
+      on: paths.some((path) => layered.stated(path)),
+      onChange: (on) => layered.pin(paths, on),
+      disabled: layered.locked,
+      format: lookWords,
+    };
+  };
 
   return (
-    <SettingsPage
-      title="Appearance"
-      lead={
-        <>
-          How JaiRA looks on <b>this machine</b>, for every project.
-        </>
-      }
-    >
-      <SettingsSection id="mode" title="Mode">
+    <>
+      <SettingsSection id="mode" title="Mode" layer={layer("mode")}>
         <ModeTiles mode={theme} palette={appearance.palette} busy={busy} onTheme={onTheme} />
       </SettingsSection>
 
-      <SettingsSection id="theme" title="Theme">
+      <SettingsSection id="theme" title="Theme" layer={layer("palette")}>
         {/* Choosing a palette puts the board options back to what it was designed with, so it arrives
             looking the way it was picked. */}
         <ThemeCards
@@ -490,18 +560,21 @@ export function AppearancePane({
         <SettingsRow
           name="Lane colours"
           description="Tint each column its own colour, so a step of the workflow is recognisable at a glance."
+          layer={layer("laneColors")}
           reset={appearance.laneColors !== null ? { label: backTo(own.laneColors ? "on" : "off"), onReset: () => onChange({ laneColors: null }), disabled: busy } : undefined}
           control={<Switch on={surface.laneColors} label="Lane colours" disabled={busy} onChange={(laneColors) => onChange({ laneColors })} />}
         />
         <SettingsRow
           name="Columns"
           description="A box around each column's cards, or a rule under its heading."
+          layer={layer("buckets")}
           reset={appearance.buckets !== null ? { label: backTo(own.buckets), onReset: () => onChange({ buckets: null }), disabled: busy } : undefined}
           control={<Segmented label="Columns" value={surface.buckets} options={BUCKET_CHOICES} disabled={busy} onChange={(buckets) => onChange({ buckets })} />}
         />
         <SettingsRow
           name="Status wash"
           description="Colour a whole card by what it is doing — running, waiting or failed. Finished cards fade."
+          layer={layer("statusWash")}
           reset={appearance.statusWash !== null ? { label: backTo(own.statusWash ? "on" : "off"), onReset: () => onChange({ statusWash: null }), disabled: busy } : undefined}
           control={<Switch on={surface.statusWash} label="Status wash" disabled={busy} onChange={(statusWash) => onChange({ statusWash })} />}
         />
@@ -515,6 +588,7 @@ export function AppearancePane({
           name="Batches that ran in turn"
           description="A fan-out whose elements ran one after another: down the page in the order they ran, or side by side as a band."
           info="A band is two columns, or tabs from three elements up — the way elements that ran at the same time are always drawn."
+          layer={layer("conversation.sequentialBatches")}
           reset={conversation.sequentialBatches !== "stacked" ? { label: "Back to one after another", onReset: () => onConversation({ sequentialBatches: "stacked" }), disabled: busy } : undefined}
           control={
             <Segmented
@@ -542,6 +616,7 @@ export function AppearancePane({
               </span>
             </>
           }
+          layer={layer("appFamily", "sizeApp")}
           reset={
             appearance.appFamily.length > 0 || appearance.sizeApp !== SIZE_LIMITS.sizeApp.default
               ? { label: `Back to ${SHIPPED_APP_FAMILY}, ${SIZE_LIMITS.sizeApp.default} px`, onReset: () => onChange({ appFamily: [], sizeApp: SIZE_LIMITS.sizeApp.default }), disabled: busy }
@@ -572,6 +647,7 @@ export function AppearancePane({
               </span>
             </>
           }
+          layer={layer("dataFamily", "sizeData")}
           reset={
             appearance.dataFamily.length > 0 || appearance.sizeData !== SIZE_LIMITS.sizeData.default
               ? { label: `Back to ${SHIPPED_DATA_FAMILY}, ${SIZE_LIMITS.sizeData.default} px`, onReset: () => onChange({ dataFamily: [], sizeData: SIZE_LIMITS.sizeData.default }), disabled: busy }
@@ -598,6 +674,7 @@ export function AppearancePane({
         <SettingsRow
           name="Editor size"
           description="Editors follow the data font until you give them a size of their own."
+          layer={layer("advanced", "sizeEditor")}
           reset={appearance.advanced ? { label: "Back to following the data font", onReset: () => onChange({ advanced: false }), disabled: busy } : undefined}
           control={
             <>
@@ -611,8 +688,23 @@ export function AppearancePane({
           }
         />
         <SettingsRow
+          name="Editor palette"
+          description="What every editor is painted in, where a file type has not been given one of its own."
+          info="One answer for every editing surface: Monaco paints every editor on the page from one theme, so two palettes side by side would read as a fault. A file type can still be given its own under File types."
+          layer={layer("editorTheme")}
+          control={
+            <SelectInput
+              value={appearance.editorTheme}
+              options={[["Follows the window", EDITOR_THEME_APP], ...EDITOR_THEMES.map((theme): [string, string] => [theme.label, theme.id])]}
+              disabled={busy}
+              onChange={(editorTheme) => onChange({ editorTheme })}
+            />
+          }
+        />
+        <SettingsRow
           name="Smooth text"
           description="Grayscale antialiasing, instead of the platform's own rendering."
+          layer={layer("smoothing")}
           control={<Switch on={appearance.smoothing} label="Smooth text" disabled={busy} onChange={(smoothing) => onChange({ smoothing })} />}
         />
         <SettingsRow name="Preview" description="Both voices side by side, as a file row and a task row draw them." full>
@@ -622,12 +714,15 @@ export function AppearancePane({
 
       {renderers !== undefined && onRenderer !== undefined && editors !== undefined && onEditor !== undefined ? (
         // A workspace rather than a list of settings — a tree beside a stage beside a live editor — so
-        // it takes the page's full width and draws its own surfaces instead of sitting in a card.
-        <SettingsSection id="file-types" title="File types" plain wide>
+        // it takes the page's full width and draws its own surfaces instead of sitting in a card. One
+        // setting as far as the layers go: what opens each type and how each editor looks.
+        <SettingsSection id="file-types" title="File types" plain wide layer={layer("renderers", "editors")}>
           <FileTypesPane renderers={renderers} editorTheme={appearance.editorTheme} editors={editors} busy={busy} onRenderer={onRenderer} onEditor={onEditor} />
         </SettingsSection>
       ) : null}
-    </SettingsPage>
+
+      {children}
+    </>
   );
 }
 

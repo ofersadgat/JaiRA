@@ -2,13 +2,13 @@
 id: engineering/units/renderer-store
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 implements: [ui/surfaces/app-window, ui/surfaces/error-notice, ui/surfaces/inbox-strip, ux/patterns/waiting-requests-gathered, product/keep-track-of-everything, product/all-projects-in-one-place]
 layer: ui
 owns_contracts: []
-requires: [engineering/units/ipc-bridge, engineering/units/live-turns, engineering/units/drafts, engineering/units/ui-layout-state, engineering/units/address-trail, engineering/units/user-settings]
-implemented_by: [packages/app/src/renderer/store.ts, packages/app/src/renderer/sessionCache.ts, packages/app/src/renderer/main.tsx]
-verified_by: [packages/app/test/runForm.test.ts, packages/app/test/sessionCache.test.ts]
+requires: [engineering/units/ipc-bridge, engineering/units/live-turns, engineering/units/drafts, engineering/units/ui-layout-state, engineering/units/address-trail, engineering/units/user-settings, engineering/units/project-config]
+implemented_by: [packages/app/src/renderer/store.ts, packages/app/src/renderer/sessionCache.ts, packages/app/src/renderer/appearanceLayer.ts, packages/app/src/renderer/main.tsx]
+verified_by: [packages/app/test/runForm.test.ts, packages/app/test/sessionCache.test.ts, packages/app/test/appearanceLayer.test.ts]
 siblings: [engineering/units/live-turns, engineering/units/drafts, engineering/units/ui-layout-state, engineering/units/address-trail, engineering/units/ipc-bridge]
 ---
 
@@ -22,6 +22,7 @@ siblings: [engineering/units/live-turns, engineering/units/drafts, engineering/u
 - Every action is built once in a `useMemo` and reached through `actionsRef`.
 - `invoke(channel, request)` and `subscribe(listener)` wrap `window.jaira`; `invoke` throws `the JaiRA bridge is unavailable (preload did not run)` when the preload is absent.
 - `AppState` holds the address in `view`, `at`, `selected`, `selectedProject`, `stateId` and `trail`; a local copy of each projection main serves, the inbox lists, the selected task's `sessions` cache and `liveTurn`, `producing` per task, `settings`, `drafts`, `logs` and `error`.
+- The look is not a slice of its own: `lookOf(state.config)` in `appearanceLayer.ts` reads the effective `appearance` block of the address the window stands on, the defaults before the first read. `writeLook` changes it by writing a few paths into ONE layer's document (`withPaths`) through `saveConfig`, after patching the local `config` so the window changes first. A change made outside Settings, such as the sidebar's theme switch, lands in the strongest layer that states the key, else the personal one (`targetLayerOf`).
 - `sessionCache.ts` keys the session cache by the durable instance id through `sessionKey`, and `withoutSession` drops one entry.
 - `main.tsx` mounts `App` inside `CrashBoundary`, with `LooseErrorBanner` outside it.
 
@@ -50,6 +51,7 @@ It deliberately does not own:
 | `sessions` | filled per instance on demand; cleared on selection change, task delete and `run:finished` for the selected task; one entry dropped when its operation settles | main's session view | none |
 | `producing` | depth per task from `operation.started` and its settle, deleted on `run:finished` | the journal's push stream | the conversation list's spinner |
 | `settings` | patched locally then written through `settings:write`; the response keeps the window's `ui` | `<base>/user-settings.json`, except `ui` after hydration | [user-settings](user-settings.md), [ui-layout-state](ui-layout-state.md) |
+| The look, `config.effective.appearance` | read through `lookOf`; `writeLook` patches the local `config`, then writes one layer through `config:write` | the settings layers, the personal `personal-settings.json` last | [project-config](project-config.md) |
 | `stream`, `logs`, `sync.progress` | appended from pushes and capped | main's journal and log | none |
 | `error` | set by `fail(e)` with the raw message; cleared by the next action or a click | the renderer | the error notice |
 
@@ -64,6 +66,7 @@ It deliberately does not own:
 | 5 | `producing` never goes below zero | unasserted |
 | 6 | A settled operation drops that instance's cached session and the live tail | unasserted |
 | 7 | `ref.current` equals the latest patch within the same tick | unasserted |
+| 8 | The look is the effective block, the defaults before a read; a look write touches only the paths it names in one layer and removes a container it empties; a change made outside Settings lands where the window will show it | `appearanceLayer.test.ts` "is the effective block, and the defaults before anything is read", "writes the paths it is given and takes an emptied container with it", "lands a change made outside Settings where the window will show it" |
 
 ## Races resolve to the last response, and most read failures show an empty panel rather than an error
 
@@ -72,6 +75,7 @@ It deliberately does not own:
 | Two reads of one slice overlap, as after a quick change of selection | the last response wins; `refreshDetail` and `refreshConversation` do not re-check the selection after their await | the next invalidate or selection | the previous task's detail or transcript under the new selection |
 | Two `settings:write` calls on different blocks overlap | each response replaces every block but `ui` | the later response lands | a control flickers |
 | A preference write fails | the local patch stays and the error is shown | none | the change holds until restart, with the error notice |
+| A look write is refused by `config:write` | the look patched locally stays and the error is shown | the next config read puts the layers' look back | the window shows the refused look until then, with the error notice |
 | A read fails | most refreshes swallow it and set the slice to empty or null | the next push or navigation | an empty panel |
 | A batch delete, rerun or cancel fails part way | the loop stops at the failure with earlier items applied and no refresh on that path | pushes from main | the error notice; lists catch up as pushes arrive |
 | A failed batch rerun is retried | every task rerun before the failure is rerun again | delete the extra tasks | duplicate reruns |

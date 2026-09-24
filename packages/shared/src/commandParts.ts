@@ -30,7 +30,14 @@ export type CommandPartKind =
   /** Anything else: the program and its subcommand (`git commit`). */
   | "command"
   /** The line, or a payload inside it, that the parser could not model. Never allowed without asking. */
-  | "unparsed";
+  | "unparsed"
+  /**
+   * Not a shell part at all: a call to a tool of an MCP server (`mcp__figma__get_code`), judged by its
+   * name — the tool's line, its server's, `other` — and carried in the same shape so that one approval,
+   * one "for this run" and one "add to the permission set" serve both. Its line IS the tool's name, and
+   * its widths are the tool and its server.
+   */
+  | "mcp";
 
 /**
  * The answers a part can have. A line runs only if every part is `allowed`.

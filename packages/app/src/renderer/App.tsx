@@ -28,7 +28,7 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
-import { resolveTheme, permissionSetChoicesAt, permissionSetsAt } from "@jaira/shared/browser";
+import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, statesPath } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
@@ -60,10 +60,12 @@ import {
 } from "./menu";
 import { AppearancePane } from "./appearancePane";
 import { useSettingsParts } from "./settingsParts";
-import { SettingsPage } from "./settingsLayout";
-import { SettingsRowsContext } from "./controls";
+import { Segmented, SettingsPage } from "./settingsLayout";
+import { SettingsLayerContext, SettingsRowsContext } from "./controls";
+import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSections";
+import { lookOf, pinnedValue } from "./appearanceLayer";
 import { useSystemDark } from "./appearance";
-import { FilesPane } from "./filesPane";
+import { FilesTreeSection } from "./filesTreePane";
 import {
   addCounts,
   hueOf,
@@ -106,13 +108,13 @@ import "./fileSurfaces";
 import "./fenceRender";
 import type { FileSurfaceContext } from "./fileTypes";
 import { LogsPanel } from "./logs";
-import { LayerPicker, SettingsPane } from "./panes";
-import { RawDocument } from "./configPane";
+import { LayerPicker } from "./panes";
 import { ConfigPanel } from "./configPanel";
 import { DebugPane } from "./debugPane";
 import { GalleryPane } from "./galleryPane";
 import { ModelsPane, functionRulesOverlay } from "./modelsPane";
 import { PermissionSetsPane, type PermissionSetsChannel } from "./permissionSetsPane";
+import { useMcpData } from "./mcpData";
 import { FunctionsSections } from "./functionsPane";
 import { DataPane, RunsPane } from "./settingsPages";
 import { ConnectionsPage } from "./connectionsPane";
@@ -204,73 +206,68 @@ function PinnedPane({ pinned, onClose }: { pinned: PinnedValue; onClose: () => v
 }
 
 /**
- * The layer switch at a settings page's top-right corner — always there, whatever the page's lead
- * runs to (the person's ruling, 2026-09-23: "the this project/shared/built in should always be on the
- * top right"). When the checks last ran is Connections' to say, on the section it is about.
+ * The layer switch at a settings page's top-right corner — always there, on every page, whatever the
+ * page's lead runs to (the person's rulings, 2026-09-23): `Just you | This project | Shared (all
+ * projects)`, strongest first. When the checks last ran is Connections' to say, on the section it is
+ * about.
  *
  * One component rather than a picker in each pane, and it is where the no-project rule lives. With
- * no project open there is no `.jaira/settings.json` to write, so the switch is not merely disabled —
- * it is ABSENT, along with every mention of "this project". A control offering a choice that cannot
- * be made is worse than no control.
+ * no project open there is no `.jaira/settings.json` to write, so "This project" is not merely
+ * disabled — it is ABSENT. A control offering a choice that cannot be made is worse than no control.
+ * What JaiRA ships is not a segment: it is what every row falls back to, and says so where it does.
  */
 function SettingsHeader({
-  section,
   layer,
   hasProject,
   busy,
   onLayer,
-  builtIn,
-  onBuiltIn,
 }: {
-  section: SettingsSection;
   layer: ConfigLayer;
   hasProject: boolean;
   busy: boolean;
   onLayer: (layer: ConfigLayer) => void;
-  /** The section is showing what SHIPS — only ever true where the section holds a built-in value. */
-  builtIn: boolean;
-  onBuiltIn: (on: boolean) => void;
-}): JSX.Element | null {
-  const meta = SECTIONS.find((s) => s.id === section);
-  if (meta === undefined || !meta.layered) return null;
-  if (meta.builtIn === true) {
-    // The third, read-only segment (decision 0006) — here because this page holds something JaiRA
-    // ships. With no project open there is still a choice to make, so the switch stays.
-    return (
-      <LayerPicker<WorkflowLayer>
-        value={builtIn ? "system" : layer}
-        layers={hasProject ? ["project", "base", "system"] : ["base", "system"]}
-        disabled={busy}
-        onChange={(next) => {
-          onBuiltIn(next === "system");
-          if (next !== "system") onLayer(next);
-        }}
-      />
-    );
-  }
-  // With no project there is one layer to edit, and the page's own sentence says so.
-  return hasProject ? <LayerPicker value={layer} onChange={onLayer} disabled={busy} /> : null;
+}): JSX.Element {
+  return <LayerPicker value={layer} layers={settingsLayersFor(hasProject)} onChange={onLayer} disabled={busy} />;
 }
 
+/** The Just you view's two readings: only what the personal layer states, or every row. */
+type JustYouView = "changed" | "every";
+
+const JUST_YOU_VIEWS: ReadonlyArray<readonly [string, JustYouView]> = [
+  ["What you changed", "changed"],
+  ["Every row", "every"],
+];
+
 /**
- * A settings tab as a PAGE — its name, whose settings these are, and the layer switch — around the
- * tab's own sections. Appearance draws its own page (it has no layer to switch), so it passes through.
+ * A settings tab as a PAGE — its name, whose settings these are, the layer switch, and on the personal
+ * layer the choice between what you changed and every row — around the tab's own sections.
  */
 function SettingsFrame({
   section,
   lead,
   aside,
+  justYou,
+  onJustYou,
+  layer,
   children,
 }: {
   section: SettingsSection;
   lead: ReactNode;
   aside: ReactNode;
+  justYou: JustYouView;
+  onJustYou: (view: JustYouView) => void;
+  layer: ConfigLayer;
   children: ReactNode;
 }): JSX.Element {
-  if (section === "appearance") return <>{children}</>;
   const meta = SECTIONS.find((s) => s.id === section);
   return (
-    <SettingsPage title={meta?.label ?? "Settings"} lead={lead} aside={aside}>
+    <SettingsPage
+      title={meta?.label ?? "Settings"}
+      lead={lead}
+      aside={aside}
+      onlyStated={layer === "you" && justYou === "changed"}
+      {...(layer === "you" ? { under: <Segmented label="Which rows" value={justYou} options={JUST_YOU_VIEWS} onChange={onJustYou} /> } : {})}
+    >
       {children}
     </SettingsPage>
   );
@@ -280,21 +277,27 @@ function SettingsFrame({
  * The page's lead: what the page is FOR, in one clause, then WHOSE settings these are and what anything
  * left unset falls back to — what the layer switch at the head's right edge changes, said in words.
  */
-function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: string | null, builtIn: boolean): ReactNode {
+function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: string | null): ReactNode {
   const meta = SECTIONS.find((s) => s.id === section);
-  if (meta === undefined || !meta.layered) return undefined;
+  if (meta === undefined) return undefined;
   const purpose = meta.purpose;
-  if (builtIn && meta.builtIn === true) return <>{purpose} Showing what JaiRA <b>ships</b>, read-only — override a line in a layer of your own to change it.</>;
+  if (layer === "you") {
+    return (
+      <>
+        {purpose} Showing <b>Just you</b>: kept on this machine in <b>personal-settings.json</b>, never shared, and read after every other layer.
+      </>
+    );
+  }
   if (layer === "project" && project !== null) {
     return (
       <>
-        {purpose} Editing <b>{projectName(project)}</b>; anything left unset comes from <b>~/.jaira</b>.
+        {purpose} Editing <b>{projectName(project)}</b>; anything left unset comes from <b>~/.jaira</b>, and yours override both.
       </>
     );
   }
   return (
     <>
-      {purpose} Editing <b>~/.jaira</b>, shared by every project on this machine.{project === null ? " Open a project to override it for one." : ""}
+      {purpose} Editing <b>~/.jaira</b>, shared by every project on this machine; a project's own settings override it, and yours override both.
     </>
   );
 }
@@ -366,68 +369,10 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
 }
 
 /**
- * The Settings sections.
- *
- * `layered` marks the ones the layer switch applies to. History is a project's run journal — there is
- * no shared version of it to edit — so showing the switch above it would offer a choice that changes
- * nothing. `needsProject` marks the ones with nothing to say on an empty window; they are HIDDEN
- * there rather than shown empty, because a section that cannot do anything is a section that should
- * not be offered.
- *
- * Providers and Executors are the two halves of one question that used to be one tab and answered
- * neither half: *what can run here* and *what actually gets used*. "Anthropic has a key" and
- * "prompts go to Anthropic" are different facts, and one row with one checkbox was being asked to
- * mean both.
- */
-/**
- * The Settings pages, in the sidebar's two groups (the person's reorganisation, 2026-09-23): what is
- * JUST YOURS — stored in `user-settings.json`, no layer switch — and what is PROJECT & SHARED —
- * layered, the same switch on every page. The layered pages run in the order a project is set up:
- * connect a service, pick a model, decide what the tools may do, then adjust how runs behave.
- */
-interface SettingsPageMeta {
-  id: SettingsSection;
-  label: string;
-  group: "you" | "layered";
-  icon: SettingsIconName;
-  layered: boolean;
-  /** The page holds something JaiRA SHIPS, so its switch has the third, read-only segment. */
-  builtIn?: boolean;
-  /** The lead's first clause: what the page is for. */
-  purpose: string;
-  /** Drawn as the file it opens rather than as a page name. */
-  file?: boolean;
-}
-
-const SECTIONS: readonly SettingsPageMeta[] = [
-  // Not layered: typography and the window's look belong to a PERSON, not to a checkout, and a window
-  // with nothing open is exactly where somebody sets them up. File types stay here (the person's call).
-  { id: "appearance", label: "Appearance", group: "you", icon: "appearance", layered: false, purpose: "" },
-  { id: "connections", label: "Connections", group: "layered", icon: "connections", layered: true, purpose: "What JaiRA can reach, and as whom." },
-  { id: "models", label: "Models", group: "layered", icon: "models", layered: true, purpose: "What answers a state that names nothing, and how." },
-  // `builtIn`: the permission sets are what JaiRA SHIPS, so this page's switch has the third segment.
-  { id: "tools", label: "Tools", group: "layered", icon: "tools", layered: true, builtIn: true, purpose: "What an agent may do, and every function a run can call." },
-  { id: "runs", label: "Runs", group: "layered", icon: "runs", layered: true, purpose: "How a run behaves while it is going." },
-  // Layered, because a checkout can have an opinion about its own tree worth sharing — and not
-  // project-only, because the shared root is a tree too.
-  { id: "files", label: "Files", group: "layered", icon: "files", layered: true, purpose: "What the Files tree leaves out." },
-  { id: "data", label: "Data & history", group: "layered", icon: "data", layered: true, purpose: "Where runs keep what they produce, and how much there is." },
-  // The raw document: the escape hatch, named after the file it opens.
-  { id: "raw", label: "settings.json", group: "layered", icon: "json", layered: true, file: true, purpose: "Everything this layer's settings hold, as stored." },
-];
-
-/** The sidebar's two groups, as their headings say them. */
-const SETTINGS_GROUPS: ReadonlyArray<{ id: SettingsPageMeta["group"]; label: string; note: string }> = [
-  { id: "you", label: "Just you", note: "this machine" },
-  { id: "layered", label: "Project & shared", note: "layered" },
-];
-
-type SettingsIconName = "appearance" | "connections" | "models" | "tools" | "runs" | "files" | "data" | "json";
-
-/**
- * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models, Tools,
- * Files and the document borrow its model, tool, folder and braces; the other four are new: a disc half
- * filled (how a thing looks), a plug (what it connects to), a play mark (a run), stacked disks (stored).
+ * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models and
+ * Tools borrow its model and tool; the other four are its own: a disc half filled (how a thing looks),
+ * a plug (what it connects to), a play mark (a run), stacked disks (stored). The pages themselves, in
+ * the sidebar's one list, are `settingsSections.ts`.
  */
 const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
   appearance: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 3v18"],
@@ -435,12 +380,7 @@ const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
   models: ["m12 3 8 4.5v9L12 21l-8-4.5v-9Z", "M12 12l8-4.5", "M12 12v9", "M12 12 4 7.5"],
   tools: ["M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"],
   runs: ["M7 4.5v15l12-7.5Z"],
-  files: ["M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"],
   data: ["M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z", "M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6", "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"],
-  json: [
-    "M8 4a3 3 0 0 0-3 3v2a3 3 0 0 1-2 3 3 3 0 0 1 2 3v2a3 3 0 0 0 3 3",
-    "M16 4a3 3 0 0 1 3 3v2a3 3 0 0 0 2 3 3 3 0 0 0-2 3v2a3 3 0 0 1-3 3",
-  ],
 };
 
 function SettingsIcon({ name }: { name: SettingsIconName }): JSX.Element {
@@ -568,6 +508,14 @@ export default function App(): JSX.Element {
    * tree width dragged narrow should not follow you into a board.
    */
   const ui = state.settings.ui;
+  /** How the app looks here — the effective `appearance` block of the address (`appearanceLayer.ts`). */
+  const look = useMemo(() => lookOf(state.config), [state.config]);
+  /**
+   * The Just you view's reading: what the personal layer states, or every row. Session-scoped, and
+   * "What you changed" whenever a window opens — the reason to look at your own layer is usually to
+   * see what is in it.
+   */
+  const [justYou, setJustYou] = useState<JustYouView>("changed");
   /**
    * Which diagnostic the inspector last asked the editor to show.
    *
@@ -606,14 +554,6 @@ export default function App(): JSX.Element {
   const [runFocus, setRunFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
   /** The state the middle column's conversation is scrolled to — see `FileSurfaceContext.runHere`. */
   const [runHere, setRunHere] = useState<string | undefined>(undefined);
-  /**
-   * Settings → Permission sets is showing the BUILT-IN layer (decision 0006).
-   *
-   * Beside `configLayer` rather than in it: that one names a `settings.json` to write, which what
-   * ships does not have, and every other section reads it as one of two. Session-scoped — a window
-   * that reopened on a read-only layer would open looking as if nothing could be changed.
-   */
-  const [permissionSetsBuiltIn, setPermissionSetsBuiltIn] = useState(false);
   /** What the permission sets pane last read — the Functions table below it draws the same records. */
   const [toolsData, setToolsData] = useState<PermissionSetsData | null>(null);
   /** A set a Functions cell asked the pane above to open. */
@@ -626,6 +566,8 @@ export default function App(): JSX.Element {
   const [localServers, setLocalServers] = useState<LocalServerProbe[] | undefined>(undefined);
   const [weightsChecks, setWeightsChecks] = useState<EmbeddedWeightsReport | undefined>(undefined);
   const onConnections = state.view === "settings" && state.section === "connections";
+  /** The MCP servers' state and tools, and what other tools here run — Connections, and Tools' MCP groups. */
+  const mcp = useMcpData(onConnections || (state.view === "settings" && state.section === "tools"), state.config);
   useEffect(() => {
     if (!onConnections) return;
     let live = true;
@@ -1484,7 +1426,7 @@ export default function App(): JSX.Element {
             readState: actions.readState,
             loadStateSlots: actions.stateSlots,
             validateSchema: actions.validateSchema,
-            wrapJson: state.settings.editors.json.wrap,
+            wrapJson: look.editors.json.wrap,
             onWrapJson: actions.setWrapJson,
           }}
           onOpenState={(id) => {
@@ -1551,7 +1493,7 @@ export default function App(): JSX.Element {
     waiting: waiting ? { component: waiting.config?.prompt ?? waiting.component } : undefined,
     onSelectTask: actions.select,
     // How a sequential batch's elements are laid out — the reader's own setting.
-    batches: state.settings.conversation.sequentialBatches,
+    batches: look.conversation.sequentialBatches,
     onDrill: actions.selectState,
     // The address bar's tail and the viewer read the same list: the bar draws it, the viewer shows
     // its last element. See `trail.ts`.
@@ -1588,7 +1530,7 @@ export default function App(): JSX.Element {
             drafts: state.drafts,
             onDraft: actions.setDraft,
             validateSchema: actions.validateSchema,
-            wrapJson: state.settings.editors.json.wrap,
+            wrapJson: look.editors.json.wrap,
             onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
           },
         }
@@ -1662,10 +1604,10 @@ export default function App(): JSX.Element {
     editorTabLast: state.editorTabLast,
     onEditorTab: actions.setEditorTab,
     detectSchema: actions.detectSchema,
-    wrapJson: state.settings.editors.json.wrap,
+    wrapJson: look.editors.json.wrap,
     onWrapJson: actions.setWrapJson,
     // Which renderer draws each type, for the panel that resolves one — see `resolveFileSurface`.
-    renderers: state.settings.renderers,
+    renderers: look.renderers,
     revealIssue: reveal,
     /**
      * Follow a definition into another file.
@@ -1900,58 +1842,50 @@ export default function App(): JSX.Element {
     glyph: "⚙",
     label: "Settings",
     panel: (
-      <div className="sections-groups">
-        {SETTINGS_GROUPS.map((group) => (
-          <div key={group.id} className="sections-group">
-            <div className="sections-group-head">
-              <span>{group.label}</span>
-              <small>{group.note}</small>
-            </div>
-            <ul className="sections icons">
-              {SECTIONS.filter((s) => s.group === group.id).flatMap(({ id, label, icon, file }) => {
-                const open = view === "settings" && state.section === id;
-                const row = (
+      // ONE list, in the order a person sets things up (`settingsSections.ts`): which layer a page
+      // edits is its switch's to say, so the sidebar no longer groups the pages by it.
+      <ul className="sections icons">
+        {SECTIONS.flatMap(({ id, label, icon }) => {
+          const open = view === "settings" && state.section === id;
+          const row = (
+            <li
+              key={id}
+              // Only while Settings is what you are LOOKING at. The list stays drawn in Logs and in
+              // Debug — it is the panel's, not the view's — and a row marked selected there claimed
+              // the window was showing a page while it was showing the log.
+              className={open ? "sel" : undefined}
+              onClick={() => {
+                actions.setSection(id);
+                // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
+                actions.setView("settings");
+              }}
+            >
+              <SettingsIcon name={icon} />
+              <span className="sections-label">{label}</span>
+            </li>
+          );
+          // The open page's own sections, indented under it: lit as the page is scrolled past
+          // them, and a click scrolls to one. A page of one section has nothing to list.
+          if (!open || settingsParts.parts.length < 2) return [row];
+          return [
+            row,
+            <li key={`${id}:parts`} className="parts">
+              <ul className="section-parts" aria-label={`${label} sections`}>
+                {settingsParts.parts.map((part) => (
                   <li
-                    key={id}
-                    // Only while Settings is what you are LOOKING at. The list stays drawn in Logs and in
-                    // Debug — it is the panel's, not the view's — and a row marked selected there claimed
-                    // the window was showing a page while it was showing the log.
-                    className={[open ? "sel" : "", file === true ? "file" : ""].filter(Boolean).join(" ") || undefined}
-                    onClick={() => {
-                      actions.setSection(id);
-                      // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
-                      actions.setView("settings");
-                    }}
+                    key={part.id}
+                    className={settingsParts.active === part.id ? "on" : undefined}
+                    aria-current={settingsParts.active === part.id ? "location" : undefined}
+                    onClick={() => settingsParts.go(part.id)}
                   >
-                    <SettingsIcon name={icon} />
-                    <span className="sections-label">{label}</span>
+                    {part.label}
                   </li>
-                );
-                // The open page's own sections, indented under it: lit as the page is scrolled past
-                // them, and a click scrolls to one. A page of one section has nothing to list.
-                if (!open || settingsParts.parts.length < 2) return [row];
-                return [
-                  row,
-                  <li key={`${id}:parts`} className="parts">
-                    <ul className="section-parts" aria-label={`${label} sections`}>
-                      {settingsParts.parts.map((part) => (
-                        <li
-                          key={part.id}
-                          className={settingsParts.active === part.id ? "on" : undefined}
-                          aria-current={settingsParts.active === part.id ? "location" : undefined}
-                          onClick={() => settingsParts.go(part.id)}
-                        >
-                          {part.label}
-                        </li>
-                      ))}
-                    </ul>
-                  </li>,
-                ];
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
+                ))}
+              </ul>
+            </li>,
+          ];
+        })}
+      </ul>
     ),
   };
 
@@ -1984,7 +1918,7 @@ export default function App(): JSX.Element {
         busy={state.busy}
         // The theme on SCREEN: the sidebar's toggle flips what you see, so on `system` it starts from
         // whatever the OS resolved to and makes the other one an explicit choice.
-        theme={resolveTheme(state.settings.theme, systemDark)}
+        theme={resolveTheme(look.mode, systemDark)}
         onTheme={actions.setTheme}
         onChooseProject={(mode) => void actions.chooseProject(mode)}
       />
@@ -2426,7 +2360,7 @@ export default function App(): JSX.Element {
                             drafts: state.drafts,
                             onDraft: actions.setDraft,
                             validateSchema: actions.validateSchema,
-                            wrapJson: state.settings.editors.json.wrap,
+                            wrapJson: look.editors.json.wrap,
                             onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
                           },
                         }
@@ -2537,24 +2471,20 @@ export default function App(): JSX.Element {
                another one is the chevron beside it. */
             <div className="view settings-view">
               <div className="col mid settings-body" ref={setSettingsBody}>
-                {/* Every field below is a settings ROW (`controls.tsx`), and every tab but Appearance —
-                    which draws its own — is a settings PAGE: its title, whose settings these are, and
-                    the layer switch at the head's right edge. */}
+                {/* Every field below is a settings ROW (`controls.tsx`), and every tab is a settings
+                    PAGE: its title, whose settings these are, and the layer switch at the head's right
+                    edge. */}
                 <SettingsRowsContext.Provider value={true}>
+                {/* Which layer every row on the page answers to, and on the personal layer whether
+                    only what it states is drawn — see `SettingsLayerContext`. */}
+                <SettingsLayerContext.Provider value={{ layer: state.configLayer, view: state.config, onlyStated: state.configLayer === "you" && justYou === "changed" }}>
                 <SettingsFrame
                   section={state.section}
-                  lead={settingsLeadOf(state.section, state.configLayer, state.at, permissionSetsBuiltIn)}
-                  aside={
-                    <SettingsHeader
-                      section={state.section}
-                      layer={state.configLayer}
-                      hasProject={state.at !== null}
-                      busy={state.busy}
-                      onLayer={actions.setConfigLayer}
-                      builtIn={permissionSetsBuiltIn}
-                      onBuiltIn={setPermissionSetsBuiltIn}
-                    />
-                  }
+                  lead={settingsLeadOf(state.section, state.configLayer, state.at)}
+                  aside={<SettingsHeader layer={state.configLayer} hasProject={state.at !== null} busy={state.busy} onLayer={actions.setConfigLayer} />}
+                  layer={state.configLayer}
+                  justYou={justYou}
+                  onJustYou={setJustYou}
                 >
                 {state.section === "connections" ? (
                   <ConnectionsPage
@@ -2566,7 +2496,7 @@ export default function App(): JSX.Element {
                     secrets={state.secrets}
                     busy={state.busy}
                     layer={state.configLayer}
-                    editable={state.configLayer === "base" || state.at !== null}
+                    editable={state.configLayer !== "project" || state.at !== null}
                     checkedAt={state.availability.checkedAt}
                     rechecking={state.rechecking}
                     onRecheck={actions.recheckAvailability}
@@ -2584,6 +2514,7 @@ export default function App(): JSX.Element {
                     localServers={localServers}
                     weights={weightsChecks}
                     oauth={forgeOAuth}
+                    mcp={mcp}
                   />
                 ) : null}
                 {state.section === "models" ? (
@@ -2594,7 +2525,7 @@ export default function App(): JSX.Element {
                     availability={state.availability}
                     busy={state.busy}
                     layer={state.configLayer}
-                    editable={state.configLayer === "base" || state.at !== null}
+                    editable={state.configLayer !== "project" || state.at !== null}
                     onSaveModels={actions.saveModels}
                     onSaveExecutor={actions.setExecutorConfig}
                     onSaveDefinition={actions.saveDefinition}
@@ -2608,20 +2539,17 @@ export default function App(): JSX.Element {
                       // one project's unsaved lines over another's permission sets.
                       key={state.at ?? "shared"}
                       channel={permissionSetsChannel}
-                      layer={permissionSetsBuiltIn ? "system" : state.configLayer}
-                      onLayer={(next) => {
-                        setPermissionSetsBuiltIn(next === "system");
-                        if (next !== "system") actions.setConfigLayer(next);
-                      }}
+                      layer={state.configLayer}
                       busy={state.busy}
                       focus={toolsFocus}
                       onData={setToolsData}
+                      mcp={mcp.report?.servers}
                     />
                     <FunctionsSections
                       data={toolsData}
-                      layer={permissionSetsBuiltIn ? "system" : state.configLayer}
+                      layer={state.configLayer}
                       config={state.config}
-                      busy={state.busy || !(state.configLayer === "base" || state.at !== null)}
+                      busy={state.busy || !(state.configLayer !== "project" || state.at !== null)}
                       onSave={actions.saveConfig}
                       agents={state.executors.map((e) => e.name)}
                       rules={state.availability.tree?.function?.rules}
@@ -2641,19 +2569,8 @@ export default function App(): JSX.Element {
                     config={state.config}
                     layer={state.configLayer}
                     busy={state.busy}
-                    editable={state.configLayer === "base" || state.at !== null}
+                    editable={state.configLayer !== "project" || state.at !== null}
                     onSave={actions.saveConfig}
-                  />
-                ) : null}
-                {state.section === "files" ? (
-                  <FilesPane
-                    config={state.config}
-                    layer={state.configLayer}
-                    personal={state.settings.filesHidden}
-                    busy={state.busy}
-                    editable={state.configLayer === "base" || state.at !== null}
-                    onSaveShared={actions.saveHiddenPaths}
-                    onSavePersonal={actions.setFilesHidden}
                   />
                 ) : null}
                 {state.section === "data" ? (
@@ -2661,7 +2578,7 @@ export default function App(): JSX.Element {
                     config={state.config}
                     layer={state.configLayer}
                     busy={state.busy}
-                    editable={state.configLayer === "base" || state.at !== null}
+                    editable={state.configLayer !== "project" || state.at !== null}
                     onSave={actions.saveConfig}
                     history={
                       state.at !== null ? (
@@ -2677,38 +2594,41 @@ export default function App(): JSX.Element {
                     }
                   />
                 ) : null}
-                {state.section === "raw" ? (
-                  <div className="cfg-pane">
-                    <RawDocument>
-                      <SettingsPane
-                        config={state.config}
-                        layer={state.configLayer}
-                        busy={state.busy}
-                        drafts={state.drafts}
-                        onDraft={actions.setDraft}
-                        onSave={actions.saveConfig}
-                        showEffective={openOf(ui, FOLD.settingsEffective)}
-                        onShowEffective={(open) => actions.setFold(FOLD.settingsEffective, open)}
-                      />
-                    </RawDocument>
-                  </div>
-                ) : null}
                 {state.section === "appearance" ? (
                   <AppearancePane
-                    appearance={state.settings.appearance}
-                    theme={state.settings.theme}
-                    conversation={state.settings.conversation}
-                    editors={state.settings.editors}
-                    renderers={state.settings.renderers}
+                    appearance={look}
+                    theme={look.mode}
+                    conversation={look.conversation}
+                    editors={look.editors}
+                    renderers={look.renderers}
                     busy={state.busy}
-                    onChange={actions.setAppearance}
-                    onTheme={(mode) => void actions.setTheme(mode)}
-                    onConversation={actions.setConversation}
-                    onEditor={actions.setEditorLook}
-                    onRenderer={actions.setRenderer}
-                  />
+                    // Every change lands in the layer the page's switch shows, and each row's switch
+                    // pins what it shows there or takes it out (`appearanceLayer.ts`).
+                    layered={{
+                      stated: (path) => statesPath(state.config?.[state.configLayer], path),
+                      pin: (paths, on) => void actions.writeLook(paths.map((path) => [path, on ? pinnedValue(look, path) : undefined] as const), state.configLayer),
+                      locked: state.busy || !(state.configLayer !== "project" || state.at !== null),
+                    }}
+                    onChange={(patchTo) => void actions.setAppearance(patchTo, state.configLayer)}
+                    onTheme={(mode) => void actions.setTheme(mode, state.configLayer)}
+                    onConversation={(patchTo) => void actions.setConversation(patchTo, state.configLayer)}
+                    onEditor={(kind, patchTo) => void actions.setEditorLook(kind, patchTo, state.configLayer)}
+                    onRenderer={(edits) => void actions.setRenderer(edits, state.configLayer)}
+                  >
+                    {/* The look of the tree: what it leaves out. Its own page until 2026-09-23. */}
+                    {state.config !== null ? (
+                      <FilesTreeSection
+                        view={state.config}
+                        layer={state.configLayer}
+                        project={state.at}
+                        busy={state.busy || !(state.configLayer !== "project" || state.at !== null)}
+                        onWrite={(layer, doc) => void actions.saveTreeLayer(layer, doc)}
+                      />
+                    ) : null}
+                  </AppearancePane>
                 ) : null}
                 </SettingsFrame>
+                </SettingsLayerContext.Provider>
                 </SettingsRowsContext.Provider>
               </div>
             </div>

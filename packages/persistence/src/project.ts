@@ -16,7 +16,7 @@ import {
   jairaBasePaths,
   jairaPaths,
   JAIRA_DIR_NAME,
-  mergeConfigDocuments,
+  mergeConfigLayers,
   parseConfig,
   readJsonFile,
   SYSTEM_DIR_NAME,
@@ -26,7 +26,9 @@ import {
 } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
 import { migrateSettingsLayers } from "./settingsMigration";
+import { migrateHiddenLists } from "./hiddenMigration";
 import { renamePermissionSetLayers } from "./permissionSetRename";
+import { migrateUserSettings } from "./userSettingsMigration";
 import { applyStorage, isFileBacked, type ShadowReport } from "./shadow";
 import { journalFiles, replayJournal } from "./journalFile";
 import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
@@ -198,7 +200,10 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     // `functions` likewise: which model judges your tool calls, whether a workflow may publish, and
     // whether the built-in refusals stand are set once, in the shared root, and a project states only
     // what it changes.
-    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, ...starter } = defaultConfig();
+    //
+    // `appearance` likewise, and it is the plainest case: how the app looks is set once, for you, in
+    // `personal-settings.json` or the shared root, and a project states a look only to change it.
+    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, appearance: _yourLook, ...starter } = defaultConfig();
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");
@@ -262,7 +267,9 @@ export function initBase(baseDir?: string): JairaBasePaths {
  * are the same file — harmless today only because merging a document over itself is idempotent, and
  * a trap the moment a merge rule stops being.
  *
- * So the config is parsed directly: there is no layer behind the base, because it IS the layer.
+ * So the config is parsed from the base alone — over the built-in layer, the one layer behind the base,
+ * and under the person's own, the one layer read after everything: there is no project layer between
+ * them, because the base IS the root being opened.
  */
 export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string; builtInDir?: string }): Project {
   const base = initBase(opts?.baseDir);
@@ -270,15 +277,11 @@ export function openSharedProject(opts?: { now?: () => number; staleMs?: number;
   // The directory first: the settings migration reads the permission sets it writes into.
   renamePermissionSetLayers(paths);
   migrateSettingsLayers(paths);
-  const doc = existsSync(paths.settingsFile) ? readJsonFile(paths.settingsFile) : undefined;
-  return openAt(paths, doc === undefined ? defaultConfig() : parseConfig(doc), "shared", opts);
+  migrateHiddenLists(paths);
+  migrateUserSettings(base);
+  return openAt(paths, layeredConfigOf([paths.builtIn.settingsFile, base.settingsFile, base.personalSettingsFile]), "shared", opts);
 }
 
-/**
- * The effective configuration: the shared base root's `settings.json` with the project's laid over it
- * (DESIGN §3). Absent files are empty layers, so a machine with no base root behaves exactly as
- * before one existed.
- */
 /**
  * A session store wired to whatever `config.storage.conversations` says.
  *
@@ -296,11 +299,28 @@ export function sessionStoreFor(project: Project, scope: SessionScope = {}, open
   return new SqliteSessionStore(project.db, scope, log, openingBy);
 }
 
+/**
+ * The effective configuration: every layer, weakest first — what JaiRA ships (`$SYSTEM/settings.json`,
+ * decision 0006), the shared base root's `settings.json`, the project's laid over it, and the person's
+ * own `personal-settings.json` over all of them (DESIGN §3, and the fourth layer of 2026-09-23). Absent
+ * files are empty layers, so a machine with no base root behaves exactly as before one existed.
+ */
 export function loadLayeredConfig(paths: JairaPaths): JairaConfig {
-  const base = existsSync(paths.base.settingsFile) ? readJsonFile(paths.base.settingsFile) : undefined;
-  const project = existsSync(paths.settingsFile) ? readJsonFile(paths.settingsFile) : undefined;
-  if (base === undefined && project === undefined) return defaultConfig();
-  return parseConfig(mergeConfigDocuments(base, project));
+  return layeredConfigOf([paths.builtIn.settingsFile, paths.base.settingsFile, paths.settingsFile, paths.base.personalSettingsFile]);
+}
+
+/**
+ * Read and merge a stack of layer files, weakest first, and parse the result.
+ *
+ * A file named twice is read once, in its FIRST place — the shared root opened as a project has ONE
+ * settings file for both roles (`baseAsProjectPaths`), and reading it again as the project would merge
+ * a document over itself, which doubles every `files.hidden` rule now that the lists concatenate. A
+ * missing file is an empty layer; a malformed one is still an error.
+ */
+function layeredConfigOf(files: readonly string[]): JairaConfig {
+  const docs = [...new Set(files)].map((file) => (existsSync(file) ? readJsonFile(file) : undefined));
+  const merged = mergeConfigLayers(docs);
+  return merged === undefined ? defaultConfig() : parseConfig(merged);
 }
 
 export function openProject(
@@ -317,6 +337,10 @@ export function openProject(
   // The directory first: the settings migration reads the permission sets it writes into.
   renamePermissionSetLayers(paths);
   migrateSettingsLayers(paths);
+  // A `files.hidden` written when a layer's list REPLACED the one under it, rewritten as what it adds.
+  migrateHiddenLists(paths);
+  // The look moved out of the preferences file into the personal layer, which is read just below.
+  migrateUserSettings(paths.base);
   return openAt(paths, loadLayeredConfig(paths), "project", opts);
 }
 

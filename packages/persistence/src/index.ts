@@ -27,6 +27,7 @@ export * from "./permissionSets";
 // The one-shot move of the `policy` block into `functions` and the permission sets (decision 0007, amended 2026-09-23).
 export * from "./settingsMigration";
 export * from "./permissionSetRename";
+export * from "./userSettingsMigration";
 // The list-and-block form rewritten as permission sets, each rewrite held to a measurement (decision 0007 step 7).
 // js/ts function modules: the approval store, the process-wide symbol index, and the freeze
 // (SPEC §7.5.5).

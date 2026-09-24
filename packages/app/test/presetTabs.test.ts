@@ -21,6 +21,7 @@ import {
   type PresetChoice,
   type PresetTabsProps,
 } from "../src/renderer/presetTabs";
+import { PresetModelSection, presetModelLine, presetModelProblem, type CandidateStatus } from "../src/renderer/presetModel";
 
 const HERE = { fast: { temperature: 0.2, maxOutputTokens: 1200 }, review: { reasoning: { effort: "high" }, maxOutputTokens: 4000 } };
 const EFFECTIVE = { ...HERE, thorough: { reasoning: { effort: "xhigh" }, providerOptions: {} } };
@@ -40,9 +41,11 @@ const draw = (choice: PresetChoice, extra: Partial<PresetTabsProps> = {}): strin
       onNewName: () => undefined,
       locked: false,
       originOf: () => "Shared (all projects)",
+      layerWord: "shared",
+      lookup: () => ({ state: "unchecked" as const }),
+      suggestions: [],
       onSave: () => undefined,
       onRemove: () => undefined,
-      onOverride: () => undefined,
       onAdd: () => undefined,
       ...extra,
     }),
@@ -124,11 +127,15 @@ describe("a new preset's name", () => {
   it("is refused when empty, dotted, or already in the rail — and says which", () => {
     expect(presetNameProblem("  ", TABS)).toBe("can't be empty");
     expect(presetNameProblem("cheap", TABS)).toBeUndefined();
-    // `presets.gpt.fast` would be written as a preset called `gpt` holding a setting called `fast`.
-    expect(presetNameProblem("gpt.fast", TABS)).toContain("can't contain a dot");
+    // `presets.gpt.fast` would be written as a preset called `gpt` holding a setting called `fast` —
+    // and a name with a dot, a dash or a slash could be read as a model id where a model field names it.
+    expect(presetNameProblem("gpt.fast", TABS)).toContain("a preset's name is a word");
+    expect(presetNameProblem("my-fast", TABS)).toContain("a preset's name is a word");
+    // A word a model family claims is refused too: `o3` in a model field must mean the model.
+    expect(presetNameProblem("o3", TABS)).toContain("reads as a model id of the openai family");
     // Adding a name the layer already states used to REPLACE it with an empty preset.
     expect(presetNameProblem(" fast ", TABS)).toBe("there is already a preset called 'fast'");
-    expect(presetNameProblem("thorough", TABS)).toBe("'thorough' is inherited here — open it and choose Override here");
+    expect(presetNameProblem("thorough", TABS)).toBe("'thorough' is inherited here — open it and edit it, and the edit is saved here");
   });
 });
 
@@ -190,6 +197,8 @@ describe("the editor, drawn", () => {
   it("opens the section the host names, with the sections' own summaries", () => {
     const html = draw({ preset: "fast" }, { section: "limits" });
     expect(tabsOf(html, "Sections")).toEqual([
+      // The preset's Model comes first — it is what makes `coder` coder.
+      ["Model not set", false, "-1"],
       ["Sampling temperature", false, "-1"],
       ["Reasoning off", false, "-1"],
       ["Output limits 1200 tokens", true, "0"],
@@ -217,30 +226,24 @@ describe("the editor, drawn", () => {
     expect(tabsOf(html, "Presets")[0]![0]).toBe("fast unsaved · temperature 0.7");
   });
 
-  it("opens an INHERITED preset in the same editor, read-only, saying where it comes from", () => {
+  it("opens an INHERITED preset in the same editor, editable, saying its first save is the copy", () => {
     const html = draw({ preset: "thorough" }, { section: "reasoning" });
     expect(html.match(/role="tablist"/g)).toHaveLength(2);
-    expect(tabsOf(html, "Sections")[1]).toEqual(["Reasoning xhigh", true, "0"]);
+    expect(tabsOf(html, "Sections")[2]).toEqual(["Reasoning xhigh", true, "0"]);
 
     const controls = controlsOf(html);
     expect(controls.length).toBeGreaterThan(0);
-    for (const control of controls) expect(control).toContain('disabled=""');
+    expect(controls.some((control) => !control.includes('disabled=""'))).toBe(true);
 
     // `set here` means the layer being edited states it, which is false of everything in this one.
     expect(html).not.toContain("cfg-set");
     expect(draw({ preset: "review" }, { section: "reasoning" })).toContain("cfg-set");
 
-    expect(html.replace(/<[^>]+>/g, "")).toContain("inherited from Shared (all projects). Nothing here can be changed in this layer until it is overridden.");
-    // Override here is the only action: nothing to save, nothing of this layer's to remove.
+    expect(html.replace(/<[^>]+>/g, "")).toContain("inherited from Shared (all projects). Saving a change copies it into");
+    // No Override here: Save is the copy. Nothing of this layer's to remove yet.
     const buttons = Array.from(html.matchAll(/<button(?![^>]*role="tab")[^>]*>(.*?)<\/button>/gs)).map((m) => m[1]);
-    expect(buttons).toEqual(["Override here"]);
-  });
-
-  it("keeps every inherited section read-only, the JSON escape hatch included", () => {
-    for (const section of ["sampling", "limits", "advanced"] as const) {
-      const controls = controlsOf(draw({ preset: "thorough" }, { section }));
-      for (const control of controls) expect(control).toContain('disabled=""');
-    }
+    expect(buttons).toEqual(["Save", "Revert"]);
+    expect(html).not.toContain("Override here");
   });
 
   it("asks only for a Name under + preset, with no section rail until it has one", () => {
@@ -281,5 +284,112 @@ describe("the editor, drawn", () => {
     // Revert only touches the draft, so it stays.
     expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Revert/);
     expect(html).not.toMatch(/<button[^>]*role="tab"[^>]*disabled/);
+  });
+});
+
+describe("the presets that ship built in", () => {
+  const SHIPPED = {
+    coder: { model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "first-available" }, reasoning: { effort: "high" } },
+    simple: { model: { candidates: ["claude-haiku-4-5", "gpt-5.6-luna"], choose: "first-available" } },
+  };
+  /** claude-cli signed in on a max plan; codex signed out; no OpenAI key. */
+  const lookup = (model: string): CandidateStatus =>
+    model.startsWith("claude")
+      ? { state: "available", route: "claude-cli", plan: "max" }
+      : { state: "unavailable", why: "codex-cli is not signed in" };
+
+  it("lists a built-in preset untouched by any layer as built in, and one a layer states as that layer's copy", () => {
+    const tabs = presetTabsOf({ coder: { ...SHIPPED.coder, reasoning: { effort: "low" } } }, { ...SHIPPED, coder: { ...SHIPPED.coder, reasoning: { effort: "low" } } }, SHIPPED);
+    expect(tabs.map((t) => [t.name, t.origin, t.shipped === true])).toEqual([
+      ["coder", "here", true],
+      ["simple", "built-in", false],
+    ]);
+    // A shared layer that changed one field of what ships makes it an inherited preset, not a built-in one.
+    const touched = presetTabsOf({}, { ...SHIPPED, simple: { ...SHIPPED.simple, maxOutputTokens: 10 } }, SHIPPED);
+    expect(touched.find((t) => t.name === "simple")!.origin).toBe("inherited");
+  });
+
+  it("tags the rail: built in, and '<layer> · copied from built in' once edited", () => {
+    const tabs = presetTabsOf({ coder: SHIPPED.coder }, SHIPPED, SHIPPED);
+    const html = draw({ preset: "simple" }, { tabs, lookup });
+    expect(tabsOf(html, "Presets")).toEqual([
+      ["coder shared · copied from built in first available: opus · gpt-5.6-terra · reasoning high", false, "-1"],
+      ["simple built in first available: haiku · gpt-5.6-luna", true, "0"],
+      ["+ preset", false, "-1"],
+    ]);
+    expect(html).toMatch(/<span class="cx-src">built in<\/span>/);
+  });
+
+  it("opens a built-in preset EDITABLE, with Save and no Remove — a save writes it into this layer", () => {
+    const tabs = presetTabsOf({}, SHIPPED, SHIPPED);
+    const html = draw({ preset: "coder" }, { tabs, lookup, section: "reasoning" });
+    for (const control of controlsOf(html)) expect(control).not.toContain('disabled=""');
+    expect(html.replace(/<[^>]+>/g, "")).toContain("What JaiRA ships. Saving a change copies it into shared, where it wins");
+    const actions = /<div class="pane-actions">(.*?)<\/div>/s.exec(html)![1]!;
+    expect(actions.replace(/<[^>]+>/g, "|").split("|").filter((s) => s.length > 0)).toEqual(["Save", "Revert"]);
+    // An edit to it is a draft like any other.
+    expect(isDirty(tabs[0]!, { ...SHIPPED.coder, reasoning: { effort: "xhigh" } })).toBe(true);
+  });
+
+  it("offers 'Put back the built-in' — not a red Remove — on this layer's copy of one", () => {
+    const tabs = presetTabsOf({ coder: SHIPPED.coder }, SHIPPED, SHIPPED);
+    const html = draw({ preset: "coder" }, { tabs, lookup });
+    const actions = /<div class="pane-actions">(.*?)<\/div>/s.exec(html)![1]!;
+    expect(actions).toMatch(/<button[^>]*class="ghost"[^>]*>Put back the built-in<\/button>/);
+    expect(actions).not.toContain("Remove");
+  });
+
+  it("will not name a new preset after a built-in one", () => {
+    const tabs = presetTabsOf({}, SHIPPED, SHIPPED);
+    expect(presetNameProblem("coder", tabs)).toBe("'coder' ships built in — open it and edit it, and the edit is saved here");
+  });
+});
+
+describe("the Model section", () => {
+  const coder = { model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "first-available" }, reasoning: { effort: "high" } };
+  const lookup = (model: string): CandidateStatus =>
+    model === "gpt-5.6-terra" ? { state: "available", route: "codex-cli", plan: "ChatGPT" } : { state: "unavailable", why: "claude-cli is not signed in" };
+  const text = (html: string): string => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
+
+  it("comes first in the sections, summarised as its rule and its models", () => {
+    const tabs = presetTabsOf({ coder }, { coder });
+    const html = draw({ preset: "coder" }, { tabs, lookup, section: "model" });
+    expect(tabsOf(html, "Sections")[0]).toEqual(["Model first available: opus · gpt-5.6-terra", true, "0"]);
+  });
+
+  it("shows the one rule pressed, then each candidate with its route, whether it can run, and the one picked now", () => {
+    const html = renderToStaticMarkup(
+      createElement(PresetModelSection, { value: coder.model, onChange: () => undefined, disabled: false, lookup, suggestions: ["claude-opus-5-5", "gpt-5.6-terra"] }),
+    );
+    expect(html).toMatch(/<div class="set-seg" role="group" aria-label="How a candidate is chosen"><button[^>]*aria-pressed="true"[^>]*>The first available<\/button><\/div>/);
+    // One row per candidate, through the schema form's list editor — in order, movable.
+    expect(html.match(/class="cfg-list-row"/g)).toHaveLength(2);
+    expect(html).toContain('value="claude-opus-5-5"');
+    expect(html).toContain('value="gpt-5.6-terra"');
+    expect(html).toContain('title="move up"');
+    const rows = Array.from(html.matchAll(/<div class="preset-candidate">(.*?)<\/div>/gs)).map((m) => text(m[1]!).trim());
+    expect(rows).toEqual(["not available — claude-cli is not signed in", "via codex-cli · ChatGPT available picked now"]);
+    expect(text(html)).toContain("+ another model");
+  });
+
+  it("says when nothing has been checked yet, and picks nothing", () => {
+    const html = renderToStaticMarkup(
+      createElement(PresetModelSection, { value: coder.model, onChange: () => undefined, disabled: false, lookup: (): CandidateStatus => ({ state: "unchecked" }), suggestions: [] }),
+    );
+    expect(text(html)).toContain("not checked yet");
+    expect(html).not.toContain("picked now");
+  });
+
+  it("is switched off when the preset states no model, and summarised as not set", () => {
+    const html = renderToStaticMarkup(createElement(PresetModelSection, { value: undefined, onChange: () => undefined, disabled: false, lookup, suggestions: [] }));
+    expect(html).toContain('class="cfg-field wide off"');
+    expect(presetModelLine(undefined)).toBe("not set");
+  });
+
+  it("will not save a candidate list the parser would refuse, and says why once nothing is still being typed", () => {
+    const bad = { candidates: ["gpt-5"], choose: "most-budget-left" };
+    expect(presetModelProblem(bad)).toBe('model.choose must be "first-available"');
+    const html = draw({ preset: "coder" }, { tabs: presetTabsOf({ coder }, { coder }), lookup, drafts: { coder: { ...coder, model: bad } } });
+    expect(html).toMatch(/<button[^>]*class="primary"[^>]*disabled=""[^>]*>Save/);
   });
 });

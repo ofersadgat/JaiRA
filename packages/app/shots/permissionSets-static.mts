@@ -15,7 +15,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TOOL_SPECS, parsePermissionSet, type PermissionSetDecl, type PermissionSetRecord, type PermissionSetsView as PermissionSetsData, type WorkflowLayer } from "@jaira/shared";
+import { TOOL_SPECS, parsePermissionSet, type McpServerStatus, type PermissionSetDecl, type PermissionSetRecord, type PermissionSetsView as PermissionSetsData, type WritableLayer } from "@jaira/shared";
+import { mcpServerFold } from "../src/renderer/mcpBucket";
 import { LayerPicker } from "../src/renderer/panes";
 import { ToolsFieldControl } from "../src/renderer/toolsField";
 import { toolsFieldOf } from "../src/renderer/toolsFieldForm";
@@ -48,17 +49,34 @@ const READ_ONLY: PermissionSetDecl = {
   "git diff": "allow",
   web_fetch: "ask",
 };
+/** The shared root's copy of `chat/ask-first`, made by its first change: the shell allowed, the rest as ships. */
+const SHIPPED_ASK_FIRST = JSON.parse(readFileSync(join(PERMISSION_SETS, "chat", "ask-first.json"), "utf8")) as PermissionSetDecl;
 const records: PermissionSetRecord[] = [
   ...shipped.map((record) =>
     record.id === "chat/read-only"
       ? { ...record, files: [{ layer: "project" as const, file: ".jaira/permission-sets/chat/read-only.json", format: "json" as const, follows: "$SYSTEM/permission-sets/chat/read-only", decl: READ_ONLY }, ...record.files] }
-      : record,
+      : record.id === "chat/ask-first"
+        ? {
+            ...record,
+            files: [
+              { layer: "base" as const, file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json" as const, follows: "$SYSTEM/permission-sets/chat/ask-first", decl: { ...SHIPPED_ASK_FIRST, bash: "allow" as const } },
+              ...record.files,
+            ],
+          }
+        : record,
   ),
   {
     id: "feature/writes-asking",
     bucket: "feature",
     name: "writes-asking",
-    files: [{ layer: "project", file: ".jaira/permission-sets/feature/writes-asking.json", format: "json", decl: { read_file: "allow", glob: "allow", grep: "allow", edit: "ask", write_file: "ask", bash: "ask", "npm test": "allow", script: "ask", other: "ask" } }],
+    files: [
+      {
+        layer: "project",
+        file: ".jaira/permission-sets/feature/writes-asking.json",
+        format: "json",
+        decl: { read_file: "allow", glob: "allow", grep: "allow", edit: "ask", write_file: "ask", bash: "ask", "npm test": "allow", script: "ask", mcp__figma: "ask", mcp__figma__get_code: "allow", mcp__figma__get_screenshot: "allow", other: "ask" },
+      },
+    ],
   },
   {
     // Lines that name FUNCTIONS (decision 0007, amended 2026-09-22): the shipped `smart` on the shell,
@@ -87,20 +105,58 @@ const NATIVES: Record<string, string> = { read_file: "Read", glob: "Glob", grep:
 const tools = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true).map((spec) => ({ name: spec.name, ...(NATIVES[spec.name] !== undefined ? { natives: { "claude-cli": NATIVES[spec.name]! } } : {}) }));
 const data: PermissionSetsData = {
   records,
-  usedBy: { "chat/read-only": ["sync/review", ...Array.from({ length: 18 }, (_, i) => `feature/s${i}`)], "chat_control/ask-first": ["chat/control"], "feature/writes-asking": ["feature/build", "feature/fix"] },
+  usedBy: {
+    "chat/read-only": ["sync/review", ...Array.from({ length: 18 }, (_, i) => `feature/s${i}`)],
+    "chat/ask-first": ["chat/session"],
+    "chat_control/ask-first": ["chat/control"],
+    "feature/writes-asking": ["feature/build", "feature/fix"],
+  },
   tools,
   layers: ["project", "base", "system"],
 };
 
+/** Two configured MCP servers as the tools probe last found them — what the card's MCP section groups by. */
+const MCP_SERVERS: McpServerStatus[] = [
+  {
+    name: "figma",
+    state: "ready",
+    transport: "http",
+    where: "http://127.0.0.1:3845/mcp",
+    tools: [
+      { name: "get_code", description: "Generate code for the selected frame", annotations: { readOnlyHint: true } },
+      { name: "get_screenshot", description: "A screenshot of the selected frame", annotations: { readOnlyHint: true } },
+      { name: "add_comment", description: "Comment on a node", annotations: { destructiveHint: false } },
+      { name: "get_variable_defs", description: "The variables the selection uses", annotations: { readOnlyHint: true } },
+      { name: "whoami", annotations: { readOnlyHint: true } },
+    ],
+    credentials: [],
+    checkedAt: 1,
+  },
+  {
+    name: "playwright",
+    state: "ready",
+    transport: "stdio",
+    where: "npx @playwright/mcp",
+    tools: [
+      { name: "browser_navigate", description: "Navigate to a URL", annotations: {} },
+      { name: "browser_click", description: "Click an element", annotations: { destructiveHint: true } },
+      { name: "browser_snapshot", description: "The page's accessibility snapshot", annotations: { readOnlyHint: true } },
+    ],
+    credentials: [],
+    checkedAt: 1,
+  },
+];
+
 const none = (): void => undefined;
-const view = (layer: WorkflowLayer, permissionSet: string, extra: Partial<PermissionSetsViewProps> = {}): string =>
+const view = (layer: WritableLayer, permissionSet: string, extra: Partial<PermissionSetsViewProps> = {}): string =>
   `<div class="settings-head">` +
-  renderToStaticMarkup(createElement(LayerPicker<WorkflowLayer>, { value: layer, layers: ["project", "base", "system"], onChange: none })) +
+  renderToStaticMarkup(createElement(LayerPicker, { value: layer, onChange: none })) +
   `</div>` +
   renderToStaticMarkup(
     createElement(PermissionSetsView, {
       data,
       layer,
+      writesTo: layer,
       choice: { permissionSet },
       onChoice: none,
       drafts: {},
@@ -113,7 +169,11 @@ const view = (layer: WorkflowLayer, permissionSet: string, extra: Partial<Permis
       problem: null,
       onSave: none,
       onReset: none,
-      onOverride: none,
+      onCopy: none,
+      onCopyTo: none,
+      puttingBack: false,
+      onPutBack: none,
+      told: null,
       onAdd: none,
       ...extra,
     }),
@@ -136,8 +196,15 @@ const stages: Array<{ name: string; caption: string; html: string; panel?: true 
     caption: "This project — chat / read-only is the one this project overrides (the dot); git is open, and its add line lists what it does not hold",
     html: view("project", "chat/read-only", { folds: new Set(["files", "execution", programFold("git")]), startAdding: programFold("git") }),
   },
-  { name: "built-in", caption: "Built in — what ships. It reads the same and changes nothing; the way to change it is to override it", html: view("system", "chat_control/ask-first", { folds: new Set(["tasks"]) }) },
-  { name: "inherited", caption: "This project, a permission set it only inherits — read, until it is overridden here", html: view("project", "chat/full", { folds: new Set(["files"]) }) },
+  { name: "built-in", caption: "Shared — a set that ships, shown and live: its first change writes the shared copy with that change in it", html: view("base", "chat_control/ask-first", { folds: new Set(["tasks"]) }) },
+  { name: "inherited", caption: "This project, a permission set it only inherits — live, and its first change copies it here", html: view("project", "chat/full", { folds: new Set(["files"]) }) },
+  { name: "copied", caption: "Shared — the copy a first change made: copied from built in, the line that differs counted, Put back the built-in", html: view("base", "chat/ask-first", { folds: new Set(["execution"]) }) },
+  { name: "put-back", caption: "Put back the built-in, asked in the page before the copy is deleted", html: view("base", "chat/ask-first", { puttingBack: true }) },
+  {
+    name: "just-you",
+    caption: "Just you — no permission set lives there, so a first change asks which layer the copy goes to",
+    html: view("project", "chat/full", { writesTo: undefined, asking: "chat/full", folds: new Set(["files"]) }),
+  },
   {
     name: "unsaved",
     caption: "edited and not saved — a line what ships holds was taken out, so the save stops following; compared with what ships",
@@ -145,9 +212,14 @@ const stages: Array<{ name: string; caption: string; html: string; panel?: true 
   },
   { name: "nested", caption: "a project's own permission set, in a bucket that holds another bucket; Execution's add line open", html: view("project", "feature/writes-asking", { folds: new Set(["execution", programFold("npm")]), startAdding: "execution" }) },
   {
+    name: "mcp",
+    caption: "MCP — a group per configured server: figma open with its own mode and the two tools named, playwright folded at other",
+    html: view("project", "feature/writes-asking", { mcp: MCP_SERVERS, folds: new Set(["mcp", mcpServerFold("figma")]) }),
+  },
+  {
     name: "function",
-    caption: "Built in — chat / auto: every line hands its call to the smart function, which asks you when it is unsure",
-    html: view("system", "chat/auto", { folds: new Set(["files", "execution"]) }),
+    caption: "chat / auto, as it ships: every line hands its call to the smart function, which asks you when it is unsure",
+    html: view("base", "chat/auto", { folds: new Set(["files", "execution"]) }),
   },
   {
     name: "function-menu",
@@ -159,7 +231,7 @@ const stages: Array<{ name: string; caption: string; html: string; panel?: true 
     caption: "function… picked — which function decides the line, asked through the schema form",
     html: view("project", "feature/judged", { folds: new Set(["files", "execution"]), startMode: { subject: "write_file", open: "function" } }),
   },
-  { name: "new-permission set", caption: "+ permission set, a name it has to refuse", html: view("project", "", { choice: { newIn: "chat" }, naming: { name: "read-only" } }) },
+  { name: "new-permissionSet", caption: "+ permission set, a name it has to refuse", html: view("project", "", { choice: { newIn: "chat" }, naming: { name: "read-only" } }) },
   { name: "new-bucket", caption: "+ bucket", html: view("base", "", { choice: "bucket", naming: { bucket: "review", name: "reads" } }) },
   { name: "refused", caption: "while a write is in flight, and what the last one was refused with", html: view("project", "feature/writes-asking", { locked: true, problem: "'feature/writes-asking' changed on disk since it was read — nothing was written", folds: new Set(["files"]) }) },
   { name: "state-field", caption: "the state editor — the permission set it starts from, and what it writes over it", html: field({ $ref: "$/permission-sets/chat/read-only", write_file: "ask", "git commit": "ask" }), panel: true },

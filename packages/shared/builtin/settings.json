@@ -1,0 +1,20 @@
+{
+  "models": {
+    "presets": {
+      "simple": {
+        "model": { "candidates": ["claude-haiku-4-5", "gpt-5.6-luna"], "choose": "first-available" }
+      },
+      "coder": {
+        "model": { "candidates": ["claude-opus-5-5", "gpt-5.6-terra"], "choose": "first-available" },
+        "reasoning": { "effort": "high" }
+      },
+      "planner": {
+        "model": { "candidates": ["claude-fable-5-1", "gpt-5.6-sol"], "choose": "first-available" },
+        "reasoning": { "effort": "high" }
+      }
+    }
+  },
+  "functions": {
+    "smart": { "model": "simple" }
+  }
+}

@@ -8,9 +8,16 @@
  * the layer being edited states one), `+ permission set`; `+ bucket` closes it. The detail is the permission set:
  * its path, where its value comes from, which states name it, and then the card.
  *
- * Layered like the rest of Settings, with the one thing the rest does not have yet: a BUILT-IN layer
- * (decision 0006). It reads the same and changes nothing, and offers only the two overrides, which
- * write the override and move the pane to the layer they wrote into.
+ * Layered like the rest of Settings, over the layer the page's switch is on. What ships (decision
+ * 0006) is not a segment of that switch any more (round 5, 2026-09-23): it is shown on every layer,
+ * as whatever that layer does not state itself, and it is LIVE there — the first change to a set a
+ * layer only sees writes that layer's copy with the change in it, in one write, and the set then
+ * reads `shared · copied from built in` until "Put back the built-in" deletes the copy. "Override
+ * here", which wrote an untouched copy and moved the pane onto it, is gone with the segment.
+ *
+ * The personal layer ("Just you") is one settings file, and a permission set is a file of its own, so
+ * that layer cannot hold one: it shows what the nearest layer says, and its first change to a set asks
+ * whether the copy goes to Shared or this project.
  *
  * Two layers of code, because the renderer has no DOM test infrastructure:
  *
@@ -24,13 +31,17 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import {
   comparePermissionSets,
+  copiedFrom,
+  copyDifferences,
   declOfPermissionSet,
   isPermissionSetDirty,
-  isWritableLayer,
   overridesOf,
+  parsePermissionSet,
+  rebasePermissionSetChange,
   resolvePermissionSetChoice,
   permissionSetBucketProblem,
   PERMISSION_SET_LAYER_LABELS,
+  permissionSetFileLabel,
   permissionSetNameProblem,
   permissionSetOfAt,
   permissionSetRailOf,
@@ -38,6 +49,7 @@ import {
   permissionSetsAt,
   permissionSetStanding,
   usedByLine,
+  type ConfigLayer,
   type PermissionSet,
   type PermissionSetAt,
   type PermissionSetDecl,
@@ -52,6 +64,7 @@ import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 import { SettingsSection } from "./settingsLayout";
 import { PermissionSetCard } from "./permissionSetCard";
+import type { McpServerStatus } from "@jaira/shared/browser";
 
 // --- the model ---------------------------------------------------------------------------
 
@@ -73,9 +86,24 @@ function tabOfChoice(choice: PermissionSetChoiceOf | undefined): string | undefi
   return "newIn" in choice ? newTab(choice.newIn) : permissionSetTab(choice.permissionSet);
 }
 
-/** The rail, as the tab rail takes it. A read-only layer gets no `+` rows: nothing can be added to what ships. */
-export function permissionSetRailItems(ats: readonly PermissionSetAt[], layer: WorkflowLayer, drafts: PermissionSetDrafts): RailItem[] {
-  const writable = isWritableLayer(layer);
+/**
+ * What the pane reads, and where a change lands, for the layer the page's switch is on.
+ *
+ * A layer that holds files reads its own and writes its own. Any other — the personal layer, one
+ * settings file with no `permission-sets/` beside it — reads as the nearest layer that does (this
+ * project when one is open, else Shared), and has nowhere to write until the person says which.
+ */
+export function permissionSetLayersOf(layer: ConfigLayer, layers: readonly WorkflowLayer[]): { reads: WritableLayer; writesTo: WritableLayer | undefined } {
+  if (layer === "project" || layer === "base") return { reads: layer, writesTo: layer };
+  return { reads: layers.includes("project") ? "project" : "base", writesTo: undefined };
+}
+
+/**
+ * The rail, as the tab rail takes it. With nowhere to write there are no `+` rows and no dots: the
+ * dot means "the layer you are editing states it", and that layer states nothing.
+ */
+export function permissionSetRailItems(ats: readonly PermissionSetAt[], writesTo: WritableLayer | undefined, drafts: PermissionSetDrafts): RailItem[] {
+  const writable = writesTo !== undefined;
   const items: RailItem[] = [];
   for (const { bucket, permissionSets } of permissionSetRailOf(ats)) {
     items.push({
@@ -94,20 +122,24 @@ export function permissionSetRailItems(ats: readonly PermissionSetAt[], layer: W
       ),
     });
     for (const at of permissionSets) {
+      // A copy says so beside its name, in the words its head's pill uses — the bucket's own pill
+      // names the layer that DEFINES the bucket, which for a copy of what ships is still built in.
+      const copy = copiedFrom(at) !== undefined ? <span className="cx-src">{permissionSetStanding(at).label}</span> : null;
       items.push({
         id: permissionSetTab(at.id),
         mono: true,
         indent: bucket.depth,
-        // The dot means "the layer you are EDITING states it". On the built-in layer every permission set
-        // is stated here and nothing is being edited, so a dot on all of them would say nothing.
-        label: at.here && writable ? (
-          <>
-            {at.name}
-            <i className="set-here-dot" title="set in the layer you are editing" />
-          </>
-        ) : (
-          at.name
-        ),
+        // The dot means "the layer you are EDITING states it".
+        label:
+          (at.here && writable) || copy !== null ? (
+            <>
+              {at.name}
+              {at.here && writable ? <i className="set-here-dot" title="set in the layer you are editing" /> : null}
+              {copy}
+            </>
+          ) : (
+            at.name
+          ),
         summary: permissionSetRailSummary(at, drafts[at.id]),
       });
     }
@@ -133,7 +165,7 @@ export function newPermissionSetProblem(ats: readonly PermissionSetAt[], bucket:
   if (problem !== undefined) return problem;
   const taken = ats.find((at) => at.id === `${bucket.trim()}/${name.trim()}`);
   if (taken === undefined) return undefined;
-  return taken.here ? `there is already a permission set called '${taken.id}'` : `'${taken.id}' is inherited here — open it and override it`;
+  return taken.here ? `there is already a permission set called '${taken.id}'` : `'${taken.id}' is inherited here — open it, and your first change copies it here`;
 }
 
 /** The map a new permission set starts as: nothing offered, and everything else asked about. */
@@ -149,13 +181,20 @@ const HEAD_HINT = (
 );
 
 const LOWER_NAME: Readonly<Record<WorkflowLayer, string>> = { system: "what ships", base: "the shared one", project: "this project's" };
-const RESET_LABEL: Readonly<Record<WorkflowLayer, string>> = { system: "Reset to built in", base: "Reset to shared", project: "Reset" };
-const OVERRIDE_LABEL: Readonly<Record<WritableLayer, string>> = { base: "Override for all projects", project: "Override here" };
+/** A layer a copy can be written into, as "Copy to …" and "copied to …" name it. */
+const INTO_NAME: Readonly<Record<WritableLayer, string>> = { base: "Shared", project: "this project" };
+/** The personal layer, as the page's switch names it. */
+const PERSONAL = "Just you";
 
 export interface PermissionSetsViewProps {
   data: PermissionSetsData;
-  /** The layer the picker is on. */
-  layer: WorkflowLayer;
+  /** The layer whose files the pane reads: its own, and those of every layer below it. */
+  layer: WritableLayer;
+  /**
+   * Where a change is written: the layer being read — or, on the personal layer, which holds no
+   * permission sets, nowhere yet, so a change waits on {@link asking} for the person to say where.
+   */
+  writesTo: WritableLayer | undefined;
   choice: PermissionSetChoiceOf | undefined;
   onChoice: (next: PermissionSetChoiceOf) => void;
   drafts: PermissionSetDrafts;
@@ -171,15 +210,30 @@ export interface PermissionSetsViewProps {
   /** What the last write was refused with. */
   problem: string | null;
   onSave: (id: string, permissionSet: PermissionSet) => void;
+  /** Delete this layer's copy — "Put back the built-in" once confirmed, or "Reset to shared". */
   onReset: (id: string) => void;
-  /** Write an override of `id` into `into`, and move there. */
-  onOverride: (id: string, into: WritableLayer) => void;
+  /**
+   * A change to a set this layer does not hold: `next` is the whole map as shown, with the change.
+   * The host writes it as this layer's copy, or — with nowhere to write — asks where it goes.
+   */
+  onCopy: (id: string, next: PermissionSet) => void;
+  /** The set whose change is waiting on "Copy to Shared" / "Copy to this project". */
+  asking?: string | undefined;
+  /** The answer: the layer the copy goes into, or `null` to drop the change. */
+  onCopyTo: (into: WritableLayer | null) => void;
+  /** "Put back the built-in?" is being asked, in place of the actions. */
+  puttingBack: boolean;
+  onPutBack: (open: boolean) => void;
+  /** Where the last change made on the personal layer went, said until the person moves on. */
+  told: string | null;
   onAdd: (bucket: string, name: string) => void;
   /** For a still picture: the card's folds, and an add-menu drawn open. */
   folds?: ReadonlySet<string> | undefined;
   startAdding?: string | undefined;
   /** For a still picture: a tool line's mode menu drawn open. */
   startMode?: { subject: string; open: "menu" | "function" } | undefined;
+  /** The configured MCP servers as the tools probe last found them — the card's MCP groups. */
+  mcp?: readonly McpServerStatus[] | undefined;
 }
 
 export function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element {
@@ -194,13 +248,13 @@ export function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element 
         <div className="llm-config set-config">
           <TabRail
             label="Permission sets"
-            items={permissionSetRailItems(ats, props.layer, props.drafts)}
+            items={permissionSetRailItems(ats, props.writesTo, props.drafts)}
             selected={tabOfChoice(open !== undefined ? { permissionSet: open.id } : adding ? props.choice : undefined)}
             onSelect={(id) => props.onChoice(choiceOfTab(id))}
           />
           {open !== undefined ? (
-            <OpenPermissionSet key={`${props.layer}:${open.id}:${open.here}`} at={open} {...props} />
-          ) : adding && isWritableLayer(props.layer) ? (
+            <OpenPermissionSet key={`${props.layer}:${open.id}`} at={open} {...props} />
+          ) : adding && props.writesTo !== undefined ? (
             <NewPermissionSet ats={ats} {...props} />
           ) : (
             <div className="llm-detail" role="tabpanel">
@@ -216,16 +270,21 @@ export function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element 
 /** One permission set: its path and standing, the card, and what can be done with it as a whole. */
 function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: PermissionSetAt }): JSX.Element {
   const standing = permissionSetStanding(at);
-  const system = props.layer === "system";
+  // The layer's OWN file: what Save edits in place and a reset deletes. The personal layer owns none.
+  const own = at.here && props.writesTo !== undefined;
   const draft = props.drafts[at.id];
-  const dirty = at.here && !system && isPermissionSetDirty(at, draft);
-  const shown = at.here && !system ? (draft ?? permissionSetOfAt(at)) : permissionSetOfAt(at);
-  // Only a layer's OWN JSON file is edited in place. What it merely inherits is read, until it is
-  // overridden — the same rule Presets has, and the same one the built-in layer follows.
-  const editable = at.here && !system && at.source.format === "json" && at.source.decl !== undefined;
+  const dirty = own && isPermissionSetDirty(at, draft);
+  const shown = own ? (draft ?? permissionSetOfAt(at)) : permissionSetOfAt(at);
+  // Only a layer's own JSON file is edited in place, as a draft. Everything else that could be read is
+  // LIVE as well: its first change is written at once, as this layer's copy with that change in it.
+  const editable = own && at.source.format === "json" && at.source.decl !== undefined;
+  const copyable = !own && at.source.decl !== undefined;
+  const asking = props.asking === at.id;
+  const from = copiedFrom(at);
+  const differ = copyDifferences(at);
   const detaching = detachingLines(at, draft);
   const differences = props.comparing && at.lower?.decl !== undefined ? comparePermissionSets(at.lower.decl, declOfPermissionSet(shown)) : [];
-  const overrideInto = (["base", "project"] as WritableLayer[]).filter((into) => props.data.layers.includes(into));
+  const into = (["base", "project"] as WritableLayer[]).filter((layer) => props.data.layers.includes(layer));
 
   return (
     <div className="llm-detail" role="tabpanel" aria-label={at.id}>
@@ -234,7 +293,7 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
           <span className="mono" title={at.source.file}>
             {at.bucket.split("/").join(" / ")} / {at.name}
           </span>{" "}
-          <span className={`cfg-status ${standing.here && !system ? "here" : "unchecked"}`}>
+          <span className={`cfg-status ${standing.here && props.writesTo !== undefined ? "here" : "unchecked"}`}>
             <span className="cfg-dot" aria-hidden="true" />
             {standing.label}
           </span>
@@ -245,7 +304,36 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
             </span>
           ) : null}
         </span>
-        <span className="cfg-hint">{usedByLine(props.data.usedBy[at.id])}</span>
+        <span className="cfg-hint">
+          {usedByLine(props.data.usedBy[at.id])}
+          {differ !== undefined && from !== undefined ? (
+            <>
+              {" · "}
+              {differ === 0 ? (
+                `nothing differs from ${LOWER_NAME[from]}`
+              ) : (
+                <>
+                  <b>
+                    {differ} line{differ === 1 ? "" : "s"}
+                  </b>{" "}
+                  {differ === 1 ? "differs" : "differ"} from {LOWER_NAME[from]}
+                </>
+              )}
+              {" — "}
+              <span className="mono">{at.source.file}</span>
+            </>
+          ) : null}
+          {copyable ? (
+            props.writesTo !== undefined ? (
+              <>
+                {" · your first change copies it to "}
+                <span className="mono">{permissionSetFileLabel(props.writesTo, at.id)}</span>
+              </>
+            ) : (
+              ` · ${PERSONAL} holds no permission sets, so your first change asks where to copy it`
+            )
+          ) : null}
+        </span>
       </div>
 
       {at.source.decl === undefined ? (
@@ -256,15 +344,16 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
         <PermissionSetCard
           permissionSet={shown}
           tools={props.data.tools}
-          readOnly={!editable || props.locked}
-          onChange={editable ? (next) => props.onDraft(at.id, next) : undefined}
+          readOnly={!(editable || copyable) || asking || props.locked}
+          onChange={editable ? (next) => props.onDraft(at.id, next) : copyable ? (next) => props.onCopy(at.id, next) : undefined}
           folds={props.folds}
           startAdding={props.startAdding}
           startMode={props.startMode}
+          mcp={props.mcp}
         />
       )}
 
-      {at.here && !system && at.source.format !== "json" ? (
+      {own && at.source.format !== "json" ? (
         <p className="cfg-hint">This layer holds it as a YAML file, which JaiRA reads and does not edit. Change it in Files.</p>
       ) : null}
       {detaching.length > 0 ? (
@@ -299,9 +388,53 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
           )}
         </div>
       ) : null}
+      {props.told !== null ? (
+        <p className="cfg-hint" role="status">
+          {props.told}
+        </p>
+      ) : null}
       {props.problem !== null ? <p className="sub warn-text">{props.problem}</p> : null}
 
-      {editable || (at.here && !system) ? (
+      {asking ? (
+        // Asked in place, not in a dialog: the change is held until it is answered, and the card
+        // shows what is in effect meanwhile.
+        <div className="set-ask" role="group" aria-label={`Where the change to ${at.id} goes`}>
+          <span>
+            {PERSONAL} is one settings file, and a permission set is a file of its own. Copy <span className="mono">{at.id}</span>, with your change, to:
+          </span>
+          <div className="pane-actions">
+            {into.map((layer, i) => (
+              <button
+                key={layer}
+                type="button"
+                className={i === 0 ? "primary" : "ghost"}
+                disabled={props.locked}
+                title={`write ${permissionSetFileLabel(layer, at.id)}`}
+                onClick={() => props.onCopyTo(layer)}
+              >
+                Copy to {INTO_NAME[layer]}
+              </button>
+            ))}
+            <button type="button" className="ghost" onClick={() => props.onCopyTo(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : own && props.puttingBack && from === "system" ? (
+        <div className="set-ask" role="alertdialog" aria-label="Put back the built-in">
+          <span>
+            Put back the built-in? This deletes <span className="mono">{at.source.file}</span>.
+          </span>
+          <div className="pane-actions">
+            <button type="button" className="danger" disabled={props.locked} onClick={() => props.onReset(at.id)}>
+              Put back
+            </button>
+            <button type="button" className="ghost" onClick={() => props.onPutBack(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : own ? (
         <div className="pane-actions">
           <button type="button" className="primary" disabled={props.locked || !dirty} onClick={() => props.onSave(at.id, shown)}>
             Save
@@ -315,38 +448,26 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
               <button type="button" className="link" aria-expanded={props.comparing} onClick={() => props.onCompare(!props.comparing)}>
                 {props.comparing ? "Hide the comparison" : `Compare with ${LOWER_NAME[at.lower.layer]}`}
               </button>
-              <button
-                type="button"
-                className="ghost danger"
-                disabled={props.locked}
-                title={`delete ${at.source.file}, so ${LOWER_NAME[at.lower.layer]} answers again`}
-                onClick={() => props.onReset(at.id)}
-              >
-                {RESET_LABEL[at.lower.layer]}
-              </button>
+              {from === "system" ? (
+                // Asked first, in the page: it deletes a file, and every change made in it goes too.
+                <button type="button" className="ghost danger" disabled={props.locked} title={`delete ${at.source.file}, so what ships answers again`} onClick={() => props.onPutBack(true)}>
+                  Put back the built-in
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="ghost danger"
+                  disabled={props.locked}
+                  title={`delete ${at.source.file}, so ${LOWER_NAME[at.lower.layer]} answers again`}
+                  onClick={() => props.onReset(at.id)}
+                >
+                  Reset to shared
+                </button>
+              )}
             </>
           ) : null}
         </div>
-      ) : (
-        // Read, not edited: what ships, or what this layer only inherits. The one thing to do about
-        // it is to override it — into every layer nearer than the one that supplies it.
-        <div className="pane-actions">
-          {overrideInto
-            .filter((into) => (system ? true : into === props.layer))
-            .map((into) => (
-              <button
-                key={into}
-                type="button"
-                className="ghost"
-                disabled={props.locked || at.source.decl === undefined}
-                title={`write an override of ${at.id} that keeps following ${PERMISSION_SET_LAYER_LABELS[at.source.layer]}, and edit it there`}
-                onClick={() => props.onOverride(at.id, into)}
-              >
-                {OVERRIDE_LABEL[into]}
-              </button>
-            ))}
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -421,25 +542,33 @@ export interface PermissionSetsChannel {
   reset: (request: { id: string; layer: WritableLayer }) => Promise<unknown>;
 }
 
+/** A change made on the personal layer, held while the person says which layer it goes to. */
+interface HeldChange {
+  id: string;
+  /** The map as the card showed it, and as the change left it — what {@link rebasePermissionSetChange} replays. */
+  from: PermissionSetDecl;
+  to: PermissionSetDecl;
+}
+
 /**
  * The state {@link PermissionSetsView} is drawn from, and the writes it asks for.
  *
- * Drafts are kept PER LAYER AND PERMISSION_SET, so that looking at another permission set — or at what ships —
- * loses nothing. The selection is an id, not an index, which is the whole of "the selection survives
- * a save": the records are re-read, this component does not remount, and the id still resolves.
+ * Drafts are kept PER LAYER AND PERMISSION_SET, so that looking at another permission set loses
+ * nothing. The selection is an id, not an index, which is the whole of "the selection survives a
+ * save" — and a first change's copy: the records are re-read, this component does not remount, and
+ * the id still resolves, now to the layer's own file.
  */
 export function PermissionSetsPane({
   channel,
   layer,
-  onLayer,
   busy,
   focus,
   onData,
+  mcp,
 }: {
   channel: PermissionSetsChannel;
-  layer: WorkflowLayer;
-  /** Move the layer picker — what an override does once it has written. */
-  onLayer: (layer: WorkflowLayer) => void;
+  /** The layer the page's switch is on — any of them; see {@link permissionSetLayersOf}. */
+  layer: ConfigLayer;
   busy: boolean;
   /**
    * Open this permission set — what a cell of Settings → Tools → Functions asks for. `nonce` makes asking
@@ -448,6 +577,8 @@ export function PermissionSetsPane({
   focus?: { id: string; nonce: number } | undefined;
   /** Every read, handed up — the Functions table below draws the same records. */
   onData?: ((data: PermissionSetsData) => void) | undefined;
+  /** The configured MCP servers and the tools each listed — what the card's MCP section groups by. */
+  mcp?: readonly McpServerStatus[] | undefined;
 }): JSX.Element {
   const [data, setData] = useState<PermissionSetsData | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -458,6 +589,14 @@ export function PermissionSetsPane({
   const [naming, setNaming] = useState<{ bucket?: string; name?: string }>({});
   const [writing, setWriting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [puttingBack, setPuttingBack] = useState(false);
+  const [held, setHeld] = useState<HeldChange | null>(null);
+  const [told, setTold] = useState<string | null>(null);
+  /**
+   * Where each set's personal-layer changes went, once asked: the next change to it goes there too
+   * without asking again, for as long as the page is open.
+   */
+  const [sentTo, setSentTo] = useState<Readonly<Record<string, WritableLayer>>>({});
 
   const load = useCallback(
     (): Promise<void> =>
@@ -478,10 +617,17 @@ export function PermissionSetsPane({
     setComparing(false);
     setProblem(null);
   }, [focus]);
+  // A question asked on one layer is not a question on another.
+  useEffect(() => {
+    setHeld(null);
+    setTold(null);
+    setPuttingBack(false);
+  }, [layer]);
 
   if (data === null) return <p className="empty">{failed !== null ? `Permission sets could not be read — ${failed}` : "Reading permission sets…"}</p>;
 
-  const ats = permissionSetsAt(data.records, layer);
+  const { reads, writesTo } = permissionSetLayersOf(layer, data.layers);
+  const ats = permissionSetsAt(data.records, reads);
   const chosenId = wanted !== undefined && wanted !== "bucket" && "permissionSet" in wanted ? wanted.permissionSet : undefined;
   const resolved = resolvePermissionSetChoice(ats, chosenId, pending);
   const choice: PermissionSetChoiceOf | undefined = wanted === "bucket" || (wanted !== undefined && "newIn" in wanted) ? wanted : resolved !== undefined ? { permissionSet: resolved } : undefined;
@@ -503,60 +649,106 @@ export function PermissionSetsPane({
       .finally(() => setWriting(false));
   };
 
+  /**
+   * A personal-layer change, sent where the person said: replayed over the set as THAT layer sees it
+   * (so none of a nearer layer's lines ride along), written there, and said — with where it landed,
+   * and when a nearer copy means the layer being read will not show it.
+   */
+  const send = ({ id, from, to }: HeldChange, into: WritableLayer): void => {
+    const there = permissionSetsAt(data.records, into).find((one) => one.id === id);
+    const onto = there?.source.decl !== undefined ? declOfPermissionSet(parsePermissionSet(there.source.decl).permissionSet) : from;
+    const file = there?.here === true ? there.source.file : permissionSetFileLabel(into, id);
+    const nearer = ats.find((one) => one.id === id);
+    const hidden = into === "base" && reads === "project" && nearer?.here === true && nearer.source.follows?.startsWith("$BASE/") !== true;
+    run(
+      () => channel.write({ id, layer: into, permissionSet: rebasePermissionSetChange(from, to, onto) }),
+      () => {
+        setHeld(null);
+        setSentTo((current) => ({ ...current, [id]: into }));
+        setTold(
+          `${there?.here === true ? `Changed in ${INTO_NAME[into]}` : `Copied to ${INTO_NAME[into]}, with your change`} — ${file}.` +
+            (hidden ? " This project has its own copy, and that is the one it reads." : ""),
+        );
+      },
+    );
+  };
+
   return (
     <PermissionSetsView
       data={data}
-      layer={layer}
+      layer={reads}
+      writesTo={writesTo}
       choice={choice}
       onChoice={(next) => {
         setWanted(next);
         setComparing(false);
         setProblem(null);
+        setPuttingBack(false);
+        setHeld(null);
+        setTold(null);
       }}
-      drafts={drafts[layer] ?? {}}
-      onDraft={(id, next) => (next === undefined ? dropDraft(layer, id) : setDrafts((current) => ({ ...current, [layer]: { ...current[layer], [id]: next } })))}
+      drafts={drafts[reads] ?? {}}
+      onDraft={(id, next) => (next === undefined ? dropDraft(reads, id) : setDrafts((current) => ({ ...current, [reads]: { ...current[reads], [id]: next } })))}
       comparing={comparing}
       onCompare={setComparing}
       naming={naming}
       onNaming={setNaming}
       locked={busy || writing}
       problem={problem}
+      mcp={mcp}
       onSave={(id, permissionSet) => {
-        if (!isWritableLayer(layer)) return;
+        if (writesTo === undefined) return;
         run(
-          () => channel.write({ id, layer, permissionSet: declOfPermissionSet(permissionSet) }),
-          () => dropDraft(layer, id),
+          () => channel.write({ id, layer: writesTo, permissionSet: declOfPermissionSet(permissionSet) }),
+          () => dropDraft(reads, id),
         );
       }}
       onReset={(id) => {
-        if (!isWritableLayer(layer)) return;
+        if (writesTo === undefined) return;
         run(
-          () => channel.reset({ id, layer }),
+          () => channel.reset({ id, layer: writesTo }),
           () => {
-            dropDraft(layer, id);
+            dropDraft(reads, id);
             setComparing(false);
+            setPuttingBack(false);
           },
         );
       }}
-      onOverride={(id, into) => {
+      puttingBack={puttingBack}
+      onPutBack={setPuttingBack}
+      onCopy={(id, next) => {
         const at = ats.find((one) => one.id === id);
         if (at?.source.decl === undefined) return;
-        const decl = at.source.decl;
-        run(
-          // The map it overrides, unchanged: what is written is `{ "$ref": … }` and nothing else, so
-          // the override keeps following until a line is changed in it.
-          () => channel.write({ id, layer: into, permissionSet: decl }),
-          () => {
-            setWanted({ permissionSet: id });
-            onLayer(into);
-          },
-        );
+        const to = declOfPermissionSet(next);
+        if (writesTo !== undefined) {
+          // The map as shown, with the one change: the writer keeps what the lower layer says as a
+          // `$ref` and writes only the line that differs — the copy and the change are one write.
+          run(
+            () => channel.write({ id, layer: writesTo, permissionSet: to }),
+            () => setWanted({ permissionSet: id }),
+          );
+          return;
+        }
+        const change: HeldChange = { id, from: declOfPermissionSet(permissionSetOfAt(at)), to };
+        const known = sentTo[id];
+        if (known !== undefined) send(change, known);
+        else {
+          setTold(null);
+          setHeld(change);
+        }
       }}
+      asking={held?.id}
+      onCopyTo={(into) => {
+        if (held === null) return;
+        if (into === null) setHeld(null);
+        else send(held, into);
+      }}
+      told={told}
       onAdd={(bucket, name) => {
-        if (!isWritableLayer(layer)) return;
+        if (writesTo === undefined) return;
         const id = `${bucket}/${name}`;
         run(
-          () => channel.write({ id, layer, permissionSet: NEW_PERMISSION_SET }),
+          () => channel.write({ id, layer: writesTo, permissionSet: NEW_PERMISSION_SET }),
           () => {
             setPending(id);
             setWanted({ permissionSet: id });

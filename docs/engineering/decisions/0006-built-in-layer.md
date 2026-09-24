@@ -2,7 +2,7 @@
 id: engineering/decisions/0006-built-in-layer
 type: decision
 status: built
-updated: 2026-09-21
+updated: 2026-09-23
 decides_for: [engineering/units/project-layout, engineering/units/workflow-snapshots, engineering/units/workflow-browser, engineering/units/tool-policy, engineering/units/chat-turns]
 ---
 
@@ -106,6 +106,9 @@ projects" and "Override here", which write the copy and switch to that
 layer. "Reset to built in" deletes an override; "Compare with what ships"
 diffs the two. The pane that edits permission sets is 0007's.
 
+*In Settings, superseded on 2026-09-23 by copy-on-edit — see "Copy on edit" at the end. The Files
+tree and the state editor still offer the two overrides for a state file.*
+
 ### What ships
 
 | Id | Is |
@@ -115,6 +118,20 @@ diffs the two. The pane that edits permission sets is 0007's.
 | `chat/assistant`, `chat/agent` | unchanged, so conversations already started as one keep running |
 | `debug/hello_world` | the self-test |
 | `permission-sets/chat/*`, `permission-sets/chat_control/*` | ask-first, read-only, auto and full, in each bucket (0007 §2) |
+| `settings.json` | added 2026-09-23 (Settings round 5): the configuration layer under the shared root's — the presets `simple`, `coder` and `planner`, each a candidate list chosen from when a session starts, and `functions.smart.model: "simple"` |
+
+### The layer also ships settings (amended 2026-09-23)
+
+`$SYSTEM/settings.json` is the bottom of the configuration layers, as the directory is the bottom of
+the search path: `loadLayeredConfig` merges built in, then the shared root, then the project, key by
+key; the shared root opened as a project merges built in under its own file. It is found by
+`jairaBuiltInPaths().settingsFile`, copied to `dist/builtin/` with the rest of the directory, and
+returned to Settings as `ConfigView.system` so a built-in value can be tagged as one. It is read-only
+like everything here, but Settings does not make a person "Override" first: a built-in preset is
+edited in place, and saving writes it into the layer being edited (a normal layered write, into any
+`ConfigLayer`), after which the rail reads "copied from built in" and "Put back the built-in" deletes
+the copy. The presets and what a preset's model is: [settings-json](../contracts/settings-json.md)
+and [model-routing](../units/model-routing.md).
 
 ### What draws
 
@@ -269,6 +286,38 @@ already started as one keeps running. What the build settled:
 - **Neither names a model**, as `chat/agent` and `chat/assistant` do not: a
   conversation that pinned one would ignore the machine it runs on, and the
   run's start-time route check would refuse it on a machine set up differently.
+
+**Copy on edit (2026-09-23, Settings round 5).** The person's note: "any config is editable, and
+editing a built-in copies it to the selected layer first". In Settings the built-in layer is no longer
+something a person switches TO: the Tools page's `Built in` segment is gone (and, with it, the page's
+session-scoped `permissionSetsBuiltIn` and the pane's `system` layer), and so is `Override here`.
+A shipped permission set is shown on every layer that does not state its own, and it is live there.
+What the build settled:
+
+- **The first change IS the override, in one write.** The pane sends the map as shown with that one
+  change through the existing `permissionSets:write`, and `writePermissionSet` already wrote what
+  `Override here` wrote — `{ "$ref": "$SYSTEM/permission-sets/<bucket>/<name>" }` — plus the lines
+  that differ. So the copy still FOLLOWS what ships (an upgrade reaches every line the person did not
+  change), a change that takes a line out still detaches, and no channel was added: there is never a
+  copy on disk that the change did not reach, because they are one `wx` write.
+- **"Copied from" is where the files are, not whether the copy follows.** A layer's file over a lower
+  one reads `shared · copied from built in` / `this project · copied from built in` / `this project ·
+  copied from Shared` (`permissionSetStanding`, `copiedFrom`), and the head counts the lines that
+  differ from what it was copied from, on the resolved maps (`copyDifferences`). A detached copy is
+  still a copy of what ships.
+- **A project over a shared copy copies what is in effect** — the shared one, by `$BASE/…`, as the
+  writer always chose the nearest lower layer.
+- **"Reset to built in" became "Put back the built-in"**, asked in the page first (`Put back the
+  built-in? This deletes {file}.`), because it deletes a file and every change made in it. A
+  project's copy of the shared one keeps `Reset to shared`.
+- **The personal layer (Just you) cannot hold a permission set**: it is one settings file and a set is
+  a file of its own. It reads what the nearest layer that holds files says, and its first change to
+  a set asks `Copy to Shared` / `Copy to this project`; the answer replays the change over that
+  layer's own view of the set (`rebasePermissionSetChange`), so a nearer layer's lines never ride
+  along, and is remembered for that set while the page is open.
+- **The Functions sections below the pane take the page's layer**: their defaults were read-only on
+  `Built in` and are now always written into the layer being shown.
+
 ## Revisit when
 
 Overrides of built-ins go stale often enough that people are running old

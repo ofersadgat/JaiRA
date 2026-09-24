@@ -185,6 +185,15 @@ session uses it — one that continues the conversation by ref included, since t
 it and not another session — a resumed task reads the journaled choice rather than picking again,
 and the next session picks afresh. Editing the alternatives affects sessions created afterwards.
 
+**What ships of this today (2026-09-23) is a subset, in the settings layers rather than in state
+files:** a preset's `model` may be `{ "candidates": [...], "choose": "first-available" }`
+(`models.presets.<name>.model`, `presetModels.ts`) — `$any` over model ids, with the one `$pick` that
+needs no readings: the first candidate this machine can run (a configured route, not failing, not
+signed out). It is fixed when its session is created, kept for the session's life, read back off the
+session's record on a resume, and chosen again by the next session, as above. There is no `$pick`
+expression and no other rule; `"choose"` refuses anything but `"first-available"`. The rule with the
+most rate limit left waits for [usage-readings](docs/engineering/contracts/usage-readings.md).
+
 ## 7. Default arguments, typed
 
 A function's default arguments live in the environment **under the function's name**, which is

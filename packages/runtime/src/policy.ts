@@ -48,8 +48,13 @@ import {
   entriesToRemember,
   isAbsolutePath,
   isFunctionMode,
+  isLoweredPermissionSet,
   isPermissionSetMarkKey,
   gateToolModes,
+  mcpModeOf,
+  mcpServerSubject,
+  parseMcpSubject,
+  permissionSetOfEnvironment,
   modeFunction,
   modeWord,
   permissionSetFunctions,
@@ -67,6 +72,7 @@ import {
 // Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
 import { standardOfAnyNative } from "./agentTools";
 import { partScopeFor, scopeNarrowingFor } from "./tools";
+import { mcpCallOf } from "./mcpServers";
 
 /** What a line comes to — DESIGN §10.1's vocabulary. */
 export type PolicyAction = "allow" | "deny" | "require_approval";
@@ -794,7 +800,32 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const functionsFor = (block: PermissionsDecl | undefined): Record<string, string> | undefined =>
     block?.functions ?? (options.permissionSet !== undefined ? permissionSetFunctions(options.permissionSet) : undefined);
 
+  /**
+   * A call to a tool of an MCP server, judged by NAME against the permission set the line would be: the
+   * state's own block when it is a lowered map, else the one this policy was compiled for. The decision
+   * is kept against the call's input like a shell line's, so the approver lets an allowed call through,
+   * refuses a denied one, runs a function a line names, and puts the rest to a person as one part whose
+   * widths are the tool and its server — see {@link decideMcpCall}.
+   */
+  const mcpNarrowing = (tool: string, input: unknown, block: PermissionsDecl | undefined): PermissionMode | undefined => {
+    const judging = isLoweredPermissionSet(block)
+      ? { permissionSet: permissionSetOfEnvironment([], block), source: block?.source ?? INLINE_PERMISSION_SET }
+      : options.permissionSet !== undefined
+        ? { permissionSet: options.permissionSet, source: INLINE_PERMISSION_SET }
+        : undefined;
+    if (judging === undefined) return undefined;
+    const decision = decideMcpCall(tool, judging.permissionSet, judging.source, options.grants);
+    if (decision === undefined) return undefined;
+    if (input !== null && typeof input === "object") LINE_DECISIONS.set(input, decision);
+    audit({ tool, action: decision.action, reason: decision.reason, parts: decision.parts, sessionId: "" });
+    if (decision.action === "deny") return "deny";
+    return decision.parts.verdict === "allowed" ? undefined : "ask";
+  };
+
   const commandNarrowing: ScopeNarrowing = (tool, input, authored) => {
+    // The MCP tool the call really is, when the gate was asked about it by its server's name.
+    const mcpTool = mcpCallOf(input) ?? tool.name;
+    if (parseMcpSubject(mcpTool)?.tool !== undefined) return mcpNarrowing(mcpTool, input, authored as PermissionsDecl | undefined);
     const name = COMMAND_TOOLS.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
     const args = (input ?? {}) as Record<string, unknown>;
     const block = authored as PermissionsDecl | undefined;
@@ -919,6 +950,74 @@ export function functionCallOf(input: unknown): FunctionCall | undefined {
  */
 export function commandNarrowingOf(policy: ExecPolicy | undefined): ScopeNarrowing | undefined {
   return policy !== undefined ? COMMAND_NARROWINGS.get(policy) : undefined;
+}
+
+/**
+ * One call to a tool of an MCP server, judged by name — the tool's line, then its server's, then
+ * `other` ({@link mcpModeOf}) — as a decision of ONE part, so everything a shell line's parts get, it
+ * gets: allowed and denied without a person, a function asked first, the rest put to a person with
+ * the line that asked, an answer remembered "for this run" at the tool or the whole server, and "add to
+ * the permission set" writing the tool's line by default.
+ *
+ * `undefined` for a name that is no MCP tool, and when the permission set writes nothing that answers
+ * — no line, and no `other` — which leaves the call to the gate, as any name nobody declared is.
+ */
+export function decideMcpCall(tool: string, permissionSet: PermissionSet, source: string, grants?: CommandGrants): CommandDecision | undefined {
+  const parsed = parseMcpSubject(tool);
+  if (parsed?.tool === undefined) return undefined;
+  const answer = mcpModeOf(permissionSet, tool);
+  if (answer === undefined) return undefined;
+  const server = mcpServerSubject(parsed.server);
+  const widths = [tool, server];
+  const reference = modeFunction(answer.mode);
+  let composed: Composed = {
+    verdict: verdictOfMode(answer.mode),
+    source: "permissionSet",
+    entry: answer.line,
+    ...(reference !== undefined ? { function: reference } : {}),
+    reason:
+      answer.line === OTHER_SUBJECT
+        ? `the permission set has no line for '${tool}' or its server, so 'other' answers: ${modeWord(answer.mode)}`
+        : reference !== undefined
+          ? `the permission set's '${answer.line}' is decided by the function '${reference}'`
+          : `the permission set's '${answer.line}' is ${modeWord(answer.mode)}`,
+  };
+  // Remembered for this run: settles a call that asks, as it settles a shell part — never a denied one,
+  // never one a function decides.
+  if (composed.verdict === "asks") {
+    const remembered = grants?.answerFor(widths);
+    if (remembered !== undefined) {
+      composed = {
+        verdict: remembered.decision === "allow" ? "allowed" : "denied",
+        source: "remembered",
+        entry: remembered.width,
+        reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run`,
+      };
+    }
+  }
+  const span: TextSpan = { start: 0, end: tool.length };
+  // The words that matched: the whole name for its own line, the server's part of it for the server's.
+  const matched: TextSpan[] = answer.line === server ? [{ start: 0, end: server.length }] : [span];
+  const part: CommandPart = {
+    span,
+    matched,
+    text: tool,
+    kind: "mcp",
+    subject: tool,
+    verdict: composed.verdict,
+    decidedBy: {
+      source: composed.source,
+      ...(composed.entry !== undefined ? { entry: composed.entry } : {}),
+      ...(composed.function !== undefined ? { function: composed.function } : {}),
+      reason: composed.reason,
+    },
+    widths,
+  };
+  return {
+    action: composed.verdict === "denied" ? "deny" : composed.verdict === "allowed" ? "allow" : "require_approval",
+    reason: composed.reason,
+    parts: { line: tool, dialect: "posix", parts: [part], verdict: composed.verdict, permissionSet: source },
+  };
 }
 
 /** A human-readable line for an approval prompt. */

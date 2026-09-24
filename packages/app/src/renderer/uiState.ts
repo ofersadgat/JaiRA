@@ -118,8 +118,6 @@ export const FOLD = {
   filesEditor: "files.editor",
   /** Whether the JSON editor is showing the schema's field reference. */
   schemaReference: "schema.reference",
-  /** "Show effective" under the configuration editor. */
-  settingsEffective: "settings.effective",
 } as const;
 
 /**
@@ -133,7 +131,6 @@ export const FOLD_DEFAULTS: Record<string, boolean> = {
   [FOLD.shellSidebar]: true,
   [FOLD.filesEditor]: true,
   [FOLD.schemaReference]: false,
-  [FOLD.settingsEffective]: false,
 };
 
 /**

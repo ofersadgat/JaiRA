@@ -224,6 +224,12 @@ export interface AvailabilitySnapshot {
    * a state with no model of its own gets is this executor.
    */
   tree?: JairaOperationNode;
+  /**
+   * The same tree over every CONFIGURED route, working or not — what a preset's candidate is judged
+   * against (`modelAvailabilityIn`), so one whose route the check found signed out can say so rather
+   * than read as a model nothing here serves.
+   */
+  configured?: JairaOperationNode;
   /** Epoch ms of the check, or 0 when none has run yet. */
   checkedAt: number;
 }

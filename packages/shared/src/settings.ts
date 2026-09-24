@@ -1,14 +1,20 @@
 /**
- * User settings — `~/.jaira/user-settings.json` (the shared base root, DESIGN §3).
+ * User settings — `~/.jaira/user-settings.json` (the shared base root, DESIGN §3) — and the
+ * vocabulary of how the app LOOKS, which the layered `appearance` block (`./appearanceConfig`) is
+ * written in.
  *
  * Deliberately NOT `settings.json`. That file describes how a PROJECT runs and is committed with it:
- * models, policy, executors, the search path. This one describes how the app looks to ONE person on
- * ONE machine, so it belongs to the base root and never to a checkout. Keeping the two apart is why
- * a theme preference cannot arrive through a pull request.
+ * models, policy, executors, the search path. This one is the WINDOW's own state on one machine —
+ * where its panes were left, what is folded, which conversations have been read, how loudly the log
+ * talks, which projects were open — a cache of gestures rather than anything anyone authored.
  *
- * The pair used to be `config.json` and `settings.json`, and those two words carried no direction —
- * nothing in "config" says it is the shared one, nothing in "settings" says it is the private one.
- * The qualifier does that work now.
+ * How the app looks used to live here too (the theme, the typography, the editors, the renderer
+ * choices, the conversation's layout, a personal Files-tree list), and moved into the layered
+ * configuration (2026-09-23): a look is a SETTING a project or the shared root may have an opinion
+ * about, and the person's own opinion is the fourth layer, `personal-settings.json` — the same schema
+ * as `settings.json`, read after every other layer. It is a file of its own rather than a key in this
+ * one because this one has its own whole-file writer, and two writers of one file overwrite each
+ * other. `@jaira/persistence` `migrateUserSettings` moved the old fields across.
  *
  * Everything here is types and pure functions, so the renderer can import it: the file is READ and
  * WRITTEN in the main process, and the parsed value crosses IPC.
@@ -31,6 +37,15 @@ export const SETTINGS_FILE_NAME = "settings.json";
 
 /** The file this module is about — see the note above on why the names are a pair. */
 export const USER_SETTINGS_FILE_NAME = "user-settings.json";
+
+/**
+ * The fourth configuration layer — "Just you" — beside the other two in the shared root.
+ *
+ * The same schema as {@link SETTINGS_FILE_NAME}, merged after the shared root and the project, so what
+ * it says wins everywhere on this machine and nowhere else: it is never in a checkout, and a pull
+ * request cannot carry it.
+ */
+export const PERSONAL_SETTINGS_FILE_NAME = "personal-settings.json";
 
 /** Which palette the renderer paints — light or dark, once `system` has been resolved. */
 export type JairaTheme = "light" | "dark";
@@ -129,12 +144,6 @@ export interface JairaUiState {
 
 export interface JairaSettings {
   /**
-   * Light by default — an explicit product decision, not an inherited one. The window's own
-   * background colour is set from this too, so a cold start does not flash the wrong palette.
-   * `system` follows the operating system — see {@link ThemeMode}.
-   */
-  theme: ThemeMode;
-  /**
    * Where the window's panes and folds were left — see {@link JairaUiState}.
    *
    * Written WHOLE. `writeSettings` merges one level deep, so a partial `ui` would replace the maps
@@ -178,60 +187,6 @@ export interface JairaSettings {
    */
   baseDir?: string;
   /**
-   * How each editing surface looks — see {@link EditorLook}.
-   *
-   * This is where `wrapJson` went. It was one boolean for one editor, on the argument that word wrap
-   * is "the same KIND of thing as the theme"; that argument was right and it was never only about
-   * JSON. Every editor in the app has the same handful of questions to answer — does it number its
-   * lines, does it wrap, how far apart are they — and answering them one boolean at a time is how a
-   * settings file grows a field per editor per knob.
-   */
-  editors: Record<EditorKind, EditorLook>;
-  /**
-   * Which renderer draws a file type, where more than one can — see `app/renderer/fileTypes.ts`.
-   *
-   * Keyed `"<mime>:<kind>"` for one type, or `"family:<family>:<kind>"` for a whole family of them,
-   * and read in that order: a type's own line, then its family's, then whatever the app registers
-   * first. ABSENT is the common case — this map holds DISAGREEMENTS, not the table — which is what
-   * keeps a change to the app's own best answer reaching everybody who never had an opinion.
-   *
-   * A key naming a renderer that no longer exists is ignored rather than repaired, on the same terms
-   * as every other value in this file: a preference nobody can satisfy is not a reason to refuse the
-   * ones that can be.
-   *
-   * Here rather than in a project's `settings.json` for the reason the rest of this file is: whether
-   * you would rather read markdown rendered or as its source is a fact about you, not about the
-   * checkout, and it should not arrive through a pull request.
-   */
-  renderers: RendererChoices;
-  /**
-   * The two voices' faces and sizes — see {@link Appearance} and SHELL.md §6.
-   *
-   * Beside `theme` rather than inside `ui`, because it is the same kind of thing: a display
-   * preference belonging to one person on one machine, and not a cache of gestures the way panes,
-   * folds and read-marks are. It also has NAMED fields, which is exactly what `ui`'s three maps
-   * exist to avoid — a font stack is not "how big is this pane".
-   */
-  appearance: Appearance;
-  /**
-   * This person's additions to what the Files tree hides (`./hiddenPaths`).
-   *
-   * Applied AFTER `config.files.hidden`, and last match wins, so this list can do the two things a
-   * shared one cannot: hide something only you find noisy, and reveal something the project hid.
-   * `!system` is the second case and the reason the rule is ordered rather than a union — wanting to
-   * read a run's journal is not a reason to edit a file everybody shares.
-   *
-   * Empty for almost everybody, and that is the intended shape: the defaults are already right, and
-   * this is the escape hatch for when they are not.
-   */
-  filesHidden: string[];
-  /**
-   * How a run's conversation is drawn — see {@link ConversationLook}. A reading preference belonging
-   * to one person on one machine, like the theme and the typography, and not a fact about any
-   * checkout: it lives beside them, in this file.
-   */
-  conversation: ConversationLook;
-  /**
    * The forge tokens a sign-in through the browser stored, by secret NAME — see {@link ForgeSignInMark}.
    *
    * Here because it is a fact about this machine's secret store, and this is the one file that is
@@ -271,7 +226,7 @@ export interface ForgeSignInMark {
 export type SequentialBatchLayout = "stacked" | "band";
 export const SEQUENTIAL_BATCH_LAYOUTS: readonly SequentialBatchLayout[] = ["stacked", "band"];
 
-/** The conversation's reading preferences — see {@link JairaSettings.conversation}. */
+/** The conversation's reading preferences — `appearance.conversation` (`./appearanceConfig`). */
 export interface ConversationLook {
   sequentialBatches: SequentialBatchLayout;
 }
@@ -336,7 +291,7 @@ export interface Appearance {
   editorTheme: string;
   /**
    * Which palette the WINDOW is painted in — see {@link Palette}. Independent of light and dark:
-   * every palette has both, and {@link JairaSettings.theme} still picks between them.
+   * every palette has both, and `appearance.mode` still picks between them.
    */
   palette: Palette;
   /**
@@ -693,15 +648,9 @@ export function defaultEditors(): Record<EditorKind, EditorLook> {
 
 export function defaultSettings(): JairaSettings {
   return {
-    theme: "light",
     ui: defaultUiState(),
-    appearance: defaultAppearance(),
-    editors: defaultEditors(),
-    renderers: {},
     projects: [],
-    filesHidden: [],
     logging: defaultLogPolicy(),
-    conversation: defaultConversationLook(),
   };
 }
 
@@ -769,34 +718,16 @@ const PANE_LIMIT = 4000;
  *
  * Forgiving where `parseConfig` is strict, and for a reason: a malformed *project* config is an
  * authoring error worth failing on, whereas an unreadable preferences file should never stop the
- * app from opening. An unknown theme falls back to the default rather than throwing.
+ * app from opening. An unreadable field falls back to its default rather than throwing.
  */
 export function parseSettings(raw: unknown): JairaSettings {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return defaultSettings();
   const doc = raw as Record<string, unknown>;
-  const theme = doc["theme"];
   const baseDir = doc["baseDir"];
   return {
-    theme: THEME_MODES.includes(theme as ThemeMode) ? (theme as ThemeMode) : "light",
     ui: parseUiState(doc["ui"]),
-    appearance: parseAppearance(doc["appearance"]),
-    editors: parseEditors(doc["editors"]),
-    renderers: parseRenderers(doc["renderers"]),
     projects: parseProjects(doc["projects"]),
     logging: parseLogPolicy(doc["logging"]),
-    // Trimmed and de-duplicated, dropping anything that is not a usable pattern. Forgiving like the
-    // rest of this file: one unreadable entry is no reason to reset what a person can see.
-    filesHidden: Array.isArray(doc["filesHidden"])
-      ? [
-          ...new Set(
-            (doc["filesHidden"] as unknown[])
-              .filter((p): p is string => typeof p === "string")
-              .map((p) => p.trim())
-              .filter((p) => p.length > 0 && p !== "!"),
-          ),
-        ]
-      : [],
-    conversation: parseConversationLook(doc["conversation"]),
     ...(typeof baseDir === "string" && baseDir.length > 0 ? { baseDir } : {}),
     ...withForgeSignIns(doc["forgeSignIns"]),
   };
@@ -823,126 +754,6 @@ function withForgeSignIns(raw: unknown): { forgeSignIns?: Record<string, ForgeSi
     };
   }
   return Object.keys(out).length > 0 ? { forgeSignIns: out } : {};
-}
-
-/** Per field, keeping whatever is readable — the forgiveness every other section of this file has. */
-function parseConversationLook(raw: unknown): ConversationLook {
-  const out = defaultConversationLook();
-  const batches = objectOf(raw)["sequentialBatches"];
-  if (SEQUENTIAL_BATCH_LAYOUTS.includes(batches as SequentialBatchLayout)) out.sequentialBatches = batches as SequentialBatchLayout;
-  return out;
-}
-
-/**
- * Parse the appearance preferences, per field, keeping whatever is readable.
- *
- * Same forgiveness as {@link parseUiState} and for the same reason: this is a preference file, not
- * something anyone authored, and one unreadable field is no reason to reset a person's whole
- * typography. A size out of range is CLAMPED rather than dropped — an 80px chrome is a window with
- * no visible controls, and a 2px one is the same window from the other direction.
- */
-function parseAppearance(raw: unknown): Appearance {
-  const out = defaultAppearance();
-  const doc = objectOf(raw);
-  const families = (value: unknown): string[] | undefined =>
-    Array.isArray(value)
-      ? // Trimmed, non-empty and de-duplicated: a stack is an ORDERED LIST of alternatives, and the
-        // same family twice means the second entry can never be reached.
-        [...new Set(value.filter((f): f is string => typeof f === "string").map((f) => f.trim()).filter((f) => f.length > 0))]
-      : undefined;
-  out.appFamily = families(doc["appFamily"]) ?? out.appFamily;
-  out.dataFamily = families(doc["dataFamily"]) ?? out.dataFamily;
-  for (const key of ["sizeApp", "sizeData", "sizeEditor"] as const) {
-    const size = doc[key];
-    if (typeof size === "number" && Number.isFinite(size)) out[key] = clampSize(key, size);
-  }
-  out.advanced = doc["advanced"] === true;
-  out.smoothing = doc["smoothing"] === true;
-  // Any non-empty word, checked by whoever draws it — this file has no registry of palettes and an
-  // id it refused would be an id a future release could not add. The renderer falls back to the
-  // default for anything it does not recognise.
-  const editorTheme = doc["editorTheme"];
-  if (typeof editorTheme === "string" && editorTheme.length > 0) out.editorTheme = editorTheme;
-  // Unlike the editor theme, the palettes are known here — their frame colours are — so an id this
-  // release does not have falls back to the default rather than being kept.
-  const palette = doc["palette"];
-  if (PALETTES.includes(palette as Palette)) out.palette = palette as Palette;
-  const flag = (value: unknown): boolean | null => (typeof value === "boolean" ? value : null);
-  out.laneColors = flag(doc["laneColors"]);
-  out.statusWash = flag(doc["statusWash"]);
-  const buckets = doc["buckets"];
-  out.buckets = BUCKET_STYLES.includes(buckets as BucketStyle) ? (buckets as BucketStyle) : null;
-  return out;
-}
-
-/**
- * Parse the per-editor looks, per surface and per knob, keeping whatever is readable.
- */
-function parseEditors(raw: unknown): Record<EditorKind, EditorLook> {
-  const out = defaultEditors();
-  const doc = objectOf(raw);
-  for (const kind of EDITOR_KINDS) {
-    const look = objectOf(doc[kind]);
-    for (const knob of EDITOR_KNOBS[kind]) {
-      const value = look[knob];
-      if (knob === "tabSize") {
-        // Snapped to what the control offers rather than clamped: a hand-written 3 is not a size
-        // this app draws, and rounding it to 2 is a choice somebody can see and correct.
-        if (typeof value === "number" && TAB_SIZES.includes(value)) out[kind].tabSize = value;
-      } else if (knob === "lineHeight") {
-        // Clamped, like a font size and for the same reason: a 0.2 line height is an editor whose
-        // rows overlap, with no control visible to drag it back.
-        if (typeof value === "number" && Number.isFinite(value)) {
-          out[kind].lineHeight = Math.min(LINE_HEIGHT.max, Math.max(LINE_HEIGHT.min, value));
-        }
-      } else if (typeof value === "boolean") {
-        out[kind][knob] = value;
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * Parse the renderer choices, keeping the entries that are plausibly one.
- *
- * Nothing here checks that the key names a type this app knows or that the value names a renderer
- * that exists — neither question is answerable in `shared`, where there is no registry, and both are
- * answered harmlessly at the point of use: an unrecognised choice falls through to the default. What
- * IS checked is the shape, so a hand-edited file cannot put an object where a renderer id goes.
- */
-/**
- * The renderer preferences, per key.
- *
- * Forgiving per ENTRY, like the rest of this file. A malformed line costs its own type rather than
- * the other forty, because this is a document a person may have edited by hand and one bad key is
- * not a reason to hand them back the defaults for everything.
- */
-function parseRenderers(raw: unknown): RendererChoices {
-  const out: RendererChoices = {};
-  for (const [key, value] of Object.entries(objectOf(raw))) {
-    if (!key.includes(":")) continue;
-    const doc = objectOf(value);
-    const choice = defaultRendererChoice();
-    const read = doc["read"];
-    const write = doc["write"];
-    if (typeof read === "string" && read.length > 0) choice.read = read;
-    if (typeof write === "string" && write.length > 0) choice.write = write;
-    if (Array.isArray(doc["off"])) {
-      choice.off = [...new Set(doc["off"].filter((id): id is string => typeof id === "string" && id.length > 0))];
-    }
-    const theme = objectOf(doc["theme"]);
-    for (const view of RENDER_VIEWS) {
-      const named = theme[view];
-      if (typeof named === "string" && named.length > 0) choice.theme[view] = named;
-    }
-    // A line that says nothing is not a line. Dropping it here is what keeps "unset stays unwritten"
-    // true after a round trip through this parser.
-    if (choice.read !== null || choice.write !== null || choice.off.length > 0 || choice.theme.read !== null || choice.theme.write !== null) {
-      out[key] = choice;
-    }
-  }
-  return out;
 }
 
 /** One size, held inside the bounds its control offers. */

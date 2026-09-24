@@ -52,6 +52,14 @@ export interface PermissionSetsView {
 /** The layers, nearest first — the order a bare `$` reference is searched in. */
 export const PERMISSION_SET_LAYER_ORDER: readonly WorkflowLayer[] = ["project", "base", "system"];
 
+/** A layer's root as a person reads it, the start of {@link PermissionSetLayerFile.file}. */
+export const PERMISSION_SET_ROOT_LABELS: Readonly<Record<WorkflowLayer, string>> = { project: ".jaira", base: "~/.jaira", system: "built in" };
+
+/** The file a layer holds `id` in, or would once written — `~/.jaira/permission-sets/chat/ask-first.json`. */
+export function permissionSetFileLabel(layer: WorkflowLayer, id: string): string {
+  return `${PERMISSION_SET_ROOT_LABELS[layer]}/permission-sets/${id}.json`;
+}
+
 const depthOf = (layer: WorkflowLayer): number => PERMISSION_SET_LAYER_ORDER.indexOf(layer);
 
 /** One permission set as ONE layer's pane shows it. */
@@ -105,20 +113,69 @@ export function permissionSetRailOf(ats: readonly PermissionSetAt[]): Array<{ bu
   return permissionSetBuckets(permissionSetChoicesAt(ats)).map((bucket) => ({ bucket, permissionSets: bucket.permissionSets.map((choice) => byId.get(choice.id)!) }));
 }
 
-const OVERRIDES: Readonly<Record<WorkflowLayer, string>> = { system: "overrides built in", base: "overrides all projects", project: "overrides this project" };
 const OVERRIDDEN: Readonly<Record<WorkflowLayer, string>> = { project: "overridden in this project", base: "overridden for all projects", system: "overridden" };
 const SOURCE: Readonly<Record<WorkflowLayer, string>> = { system: "built in", base: "all projects", project: "this project" };
+/** A layer as the head of a COPY names the one holding it: `shared · copied from built in`. */
+const HOLDER: Readonly<Record<WorkflowLayer, string>> = { system: "built in", base: "shared", project: "this project" };
+/** …and the one it was copied from. `Shared` is the switch's own word for the layer. */
+const COPIED_FROM: Readonly<Record<WorkflowLayer, string>> = { system: "built in", base: "Shared", project: "this project" };
 
 /**
  * Where a permission set's value comes from, as the pills beside its path say it.
  *
- * `here` is the accent pill — this layer states it, so it can be changed here. Otherwise the pill
+ * `here` is the accent pill — this layer states it, so it can be changed here. A layer's file over a
+ * lower one is a COPY of it (the first change to a set a layer only sees writes one, round 5), and
+ * says which: `shared · copied from built in`, `this project · copied from Shared`. Otherwise the pill
  * names the layer that supplies it. A second pill says when a nearer layer hides it, because editing
  * something a project never reads is worth knowing before the edit rather than after.
  */
 export function permissionSetStanding(at: PermissionSetAt): { here: boolean; label: string; shadowed?: string } {
-  const label = at.here ? (at.lower !== undefined ? OVERRIDES[at.lower.layer] : SOURCE[at.source.layer]) : SOURCE[at.source.layer];
+  const from = copiedFrom(at);
+  const label = from !== undefined ? `${HOLDER[at.source.layer]} · copied from ${COPIED_FROM[from]}` : SOURCE[at.source.layer];
   return { here: at.here, label, ...(at.shadowedBy !== undefined ? { shadowed: OVERRIDDEN[at.shadowedBy] } : {}) };
+}
+
+/**
+ * The layer this layer's file was copied from — the nearest one below that holds the id — or nothing
+ * when the layer states no file of it, or the only one there is.
+ *
+ * Decided by WHERE the files are and not by whether the copy still `$ref`s the lower one: a copy that
+ * took a line out had to stop following (`detach`), and is no less a copy of what ships for that.
+ */
+export function copiedFrom(at: PermissionSetAt): WorkflowLayer | undefined {
+  return at.here ? at.lower?.layer : undefined;
+}
+
+/**
+ * How many lines of a copy say something other than what it was copied from — the head's
+ * `1 line differs from what ships`. Counted on the RESOLVED maps, so a line an override repeats
+ * unchanged is not a difference and a line a detached copy took out is one. Absent where the set is
+ * no copy, or either file could not be read.
+ */
+export function copyDifferences(at: PermissionSetAt): number | undefined {
+  if (copiedFrom(at) === undefined || at.source.decl === undefined || at.lower?.decl === undefined) return undefined;
+  return comparePermissionSets(at.lower.decl, at.source.decl).length;
+}
+
+/**
+ * The same change, made to another map: every line on which `to` differs from `from` is set (or taken
+ * out) in `onto`, and every other line of `onto` is left as it says.
+ *
+ * What a change made on the personal layer is, once the person says where it goes. That layer holds
+ * no permission sets (it is one settings file, and a set is a file of its own), so the card there shows
+ * what the NEAREST layer says; the layer chosen may say something else, and copying the whole map
+ * shown would write that nearer layer's lines into it along with the one line that was changed.
+ */
+export function rebasePermissionSetChange(from: PermissionSetDecl, to: PermissionSetDecl, onto: PermissionSetDecl): PermissionSetDecl {
+  const out: PermissionSetDecl = { ...onto };
+  for (const subject of new Set([...Object.keys(from), ...Object.keys(to)])) {
+    const was = Object.hasOwn(from, subject) ? from[subject] : undefined;
+    const is = Object.hasOwn(to, subject) ? to[subject] : undefined;
+    if (samePermissionSetEntry(subject, was, is)) continue;
+    if (is === undefined) delete out[subject];
+    else out[subject] = is;
+  }
+  return out;
 }
 
 /** `used by sync/review and 18 more states`, or that nothing names it. */

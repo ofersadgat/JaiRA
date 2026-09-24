@@ -62,8 +62,6 @@ import { functionAllowed } from "@jaira/shared";
 export interface TreeDeps {
   /** How each provider route is reached, credentials already resolved. */
   router?: ModelRouterOptions;
-  /** Named presets, selected per state by `operation.configRef`. */
-  configs?: { get(id: string): Record<string, JsonValue> | undefined };
   /** One executor per agent runtime, keyed by its registry name — `agentPromptRoutes`. */
   agents?: Record<string, StackedExecutor>;
   /** The run's capability registry; the function half of the operation node. */
@@ -120,10 +118,9 @@ function buildBarePromptNode(
 
 /** The provider path: `PromptExecutor` over `ModelRouter`, which owns every model-route prefix. */
 function buildProviderNode(node: JairaProviderNode, deps: TreeDeps): StackedExecutor {
-  const provider = createPromptExecutor({
-    router: createModelRouter(deps.router ?? {}),
-    ...(deps.configs !== undefined ? { configs: deps.configs } : {}),
-  });
+  // No `configs`: a preset is expanded in front of the whole tree (`withPresetModels`), so nothing
+  // reaching a leaf still names one.
+  const provider = createPromptExecutor({ router: createModelRouter(deps.router ?? {}) });
   return constrained(node, node.provider, provider);
 }
 

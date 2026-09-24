@@ -11,6 +11,7 @@ export * from "./wiring";
 // executors a model prefix can name, and the default id chosen when nothing names one.
 export * from "./modelRoutes";
 export * from "./localServers";
+export * from "./mcpServers";
 export * from "./fakeExecutor";
 export * from "./scriptedFunctions";
 export * from "./interaction";
@@ -59,6 +60,7 @@ export * from "./executors";
 export * from "./agentOutcome";
 export * from "./executorStack";
 export * from "./executorTree";
+export * from "./presetModels";
 export * from "./chatOperation";
 export * from "./chatTurn";
 export * from "./liveHandles";

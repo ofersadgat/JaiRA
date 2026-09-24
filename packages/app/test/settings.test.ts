@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { defaultAppearance, defaultConversationLook, defaultEditors, defaultLogPolicy, type PushMessage } from "@jaira/shared";
+import { defaultAppearanceConfig, defaultLogPolicy, type JairaAppearanceConfig, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService, type KeychainPort } from "../src/main/service";
 
@@ -62,14 +62,16 @@ afterEach(async () => {
 });
 
 describe("user settings", () => {
-  it("defaults to the light theme, with no project open", () => {
-    // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [], logging: defaultLogPolicy(), conversation: defaultConversationLook() });
+  it("defaults to an empty layout, with no project open", () => {
+    // The window's own state belongs to the person at this machine, not the checkout. How the app
+    // LOOKS is not here any more — it is the layered configuration's `appearance` block.
+    expect(service.readSettings()).toEqual({ ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, projects: [], logging: defaultLogPolicy() });
   });
 
   it("persists a change and reads it back", () => {
-    expect(service.writeSettings({ theme: "dark" })).toMatchObject({ theme: "dark" });
-    expect(service.readSettings().theme).toBe("dark");
+    const logging = { minLevel: "warn" as const, overrides: [] };
+    expect(service.writeSettings({ logging })).toMatchObject({ logging });
+    expect(service.readSettings().logging).toEqual(logging);
     expect(existsSync(join(baseDir, "user-settings.json"))).toBe(true);
   });
 
@@ -77,25 +79,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "user-settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [], logging: defaultLogPolicy(), conversation: defaultConversationLook() });
-  });
-
-  it("keeps the JSON editor's wrap preference, and defaults it off", () => {
-    // A display preference like the theme: it belongs to the person, so it lives here rather than in
-    // component state that resets on every file you open. It sits with the other seven questions
-    // about that editor now (`editors.json`) rather than in a boolean of its own — see `EditorLook`.
-    expect(service.readSettings().editors.json.wrap).toBe(false);
-    const editors = { ...service.readSettings().editors };
-    editors.json = { ...editors.json, wrap: true };
-    expect(service.writeSettings({ editors }).editors.json.wrap).toBe(true);
-    expect(service.readSettings().editors.json.wrap).toBe(true);
-    // And it does not disturb what was already saved.
-    expect(service.readSettings().theme).toBe("light");
-  });
-
-  it("reads a settings file that states only a theme", () => {
-    writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [], logging: defaultLogPolicy(), conversation: defaultConversationLook() });
+    expect(service.readSettings()).toEqual({ ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, projects: [], logging: defaultLogPolicy() });
   });
 
   it("reads a hand-edited project list without throwing any of it away", () => {
@@ -139,8 +123,8 @@ describe("user settings", () => {
 
   it("keeps the layout out of the way of the other preferences", () => {
     service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} } });
-    expect(service.writeSettings({ theme: "dark" }).ui.panes["files.tree"]).toBe(310);
-    expect(service.readSettings().theme).toBe("dark");
+    expect(service.writeSettings({ logging: { minLevel: "warn", overrides: [] } }).ui.panes["files.tree"]).toBe(310);
+    expect(service.readSettings().logging.minLevel).toBe("warn");
   });
 
   it("drops layout entries of the wrong shape rather than the whole layout", () => {
@@ -340,12 +324,12 @@ describe("remembering the projects that were open", () => {
   });
 
   it("leaves the rest of the preferences alone", async () => {
-    service.writeSettings({ theme: "dark", ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} } });
+    service.writeSettings({ logging: { minLevel: "warn", overrides: [] }, ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} } });
     await service.open(dir);
 
     // The list is written by main while the renderer owns the layout — a project open must not cost
     // somebody the divider they dragged a moment ago.
-    expect(service.readSettings()).toMatchObject({ theme: "dark", projects: [dir] });
+    expect(service.readSettings()).toMatchObject({ logging: { minLevel: "warn" }, projects: [dir] });
     expect(service.readSettings().ui.panes["files.tree"]).toBe(310);
   });
 });
@@ -381,6 +365,78 @@ describe("configuration", () => {
     // The layer switch became the crumb (SHELL.md §2.2): at the root there is no project layer to
     // edit, and Settings edits `base` only — which is the rule this case already stated.
     expect(() => service.writeConfig({ layer: "project", config: {} })).toThrow(/no project was named/);
+  });
+});
+
+/**
+ * The fourth layer, `personal-settings.json` ("Just you"), and the look that moved into the layered
+ * configuration (2026-09-23): written with no project open, laid over everything, checked against
+ * every open project it reaches, and — for the window's frame — read without any project at all.
+ */
+describe("the personal layer", () => {
+  const lookOf = (): JairaAppearanceConfig => (service.readConfig().effective as unknown as { appearance: JairaAppearanceConfig }).appearance;
+
+  it("keeps the JSON editor's wrap preference there, and defaults it off", () => {
+    expect(lookOf().editors.json.wrap).toBe(false);
+    const view = service.writeConfig({ layer: "you", config: { appearance: { editors: { json: { wrap: true } } } } });
+    expect(view.you).toEqual({ appearance: { editors: { json: { wrap: true } } } });
+    expect(lookOf().editors.json.wrap).toBe(true);
+    expect(view.youFile).toBe(join(baseDir, "personal-settings.json"));
+    // Its own file — never the shared root's, and never the window's own state.
+    expect(existsSync(join(baseDir, "personal-settings.json"))).toBe(true);
+    expect(existsSync(join(baseDir, "settings.json"))).toBe(false);
+  });
+
+  it("wins over the project and the shared root, key by key", async () => {
+    await service.open(dir);
+    service.writeConfig({ layer: "base", config: { memo: { enabled: true }, artifacts: { dir: "shared" } } });
+    service.writeConfig({ layer: "project", config: { artifacts: { dir: "project", inlineMaxBytes: 10 } } });
+    service.writeConfig({ layer: "you", config: { artifacts: { dir: "mine" }, agents: { claudeCli: { enabled: false } } } });
+
+    expect(service.readConfig().effective).toMatchObject({ memo: { enabled: true }, artifacts: { dir: "mine", inlineMaxBytes: 10 } });
+    // The open project's own configuration follows at once — it is what a run is built from.
+    expect(service.listExecutors().find((e) => e.name === "claude-cli")?.enabled).toBe(false);
+  });
+
+  it("refuses a document that is valid alone but breaks an open project", async () => {
+    await service.open(dir);
+    service.writeConfig({ layer: "project", config: { executors: { default: { prompt: { kind: "agent", agent: "claude-cli" } } } } });
+
+    // A router's routes laid over the project's agent node: a leaf with routes, which no run can read.
+    expect(() =>
+      service.writeConfig({ layer: "you", config: { executors: { default: { prompt: { routes: { local: {} } } } } } }),
+    ).toThrow(/prompt.routes is not a setting/);
+    expect(existsSync(join(baseDir, "personal-settings.json"))).toBe(false);
+  });
+
+  it("paints the window's frame from the shared root and the personal layer, never a project", async () => {
+    await service.open(dir);
+    service.writeConfig({ layer: "base", config: { appearance: { palette: "pastel" } } });
+    service.writeConfig({ layer: "project", config: { appearance: { palette: "zinc", mode: "dark" } } });
+    service.writeConfig({ layer: "you", config: { appearance: { mode: "system" } } });
+
+    // A window holds several projects: the frame is the look that is the same in all of them.
+    expect(service.windowAppearance()).toMatchObject({ palette: "pastel", mode: "system" });
+    // The address the window stands on is the project, and it paints the project's palette.
+    expect(lookOf()).toMatchObject({ palette: "zinc", mode: "system" });
+  });
+
+  it("moves the look out of user-settings.json when the app starts, once", async () => {
+    await service.close();
+    writeFileSync(
+      join(baseDir, "user-settings.json"),
+      JSON.stringify({ theme: "dark", ui: { panes: { "files.tree": 310 } }, appearance: { palette: "zinc" }, filesHidden: ["drafts"] }),
+      "utf8",
+    );
+    service = new AppService({ baseDir, watchWorkflows: false, keychain: fakeKeychain(), publish: (m) => pushes.push(m) });
+
+    expect(JSON.parse(readFileSync(join(baseDir, "personal-settings.json"), "utf8"))).toEqual({
+      appearance: { mode: "dark", palette: "zinc" },
+      files: { hidden: ["drafts"] },
+    });
+    expect(service.readSettings().ui.panes["files.tree"]).toBe(310);
+    expect(service.windowAppearance()).toMatchObject({ palette: "zinc", mode: "dark" });
+    expect(lookOf()).toMatchObject({ palette: "zinc", mode: "dark", sizeApp: defaultAppearanceConfig().sizeApp });
   });
 });
 

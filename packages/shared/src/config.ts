@@ -23,6 +23,9 @@ import {
 } from "./forge";
 import { EXECUTOR_STEPS, type JairaExecutorSteps } from "./executorStack";
 import { parseFunctionRule, type JairaOperationNode, type JairaPromptNode } from "./executorTree";
+import { defaultMcp, parseMcp, type JairaMcpConfig } from "./mcp";
+import { candidatesOf, parsePresetModel, presetNameRefusal } from "./presetModels";
+import { defaultAppearanceConfig, parseAppearanceConfig, type JairaAppearanceConfig } from "./appearanceConfig";
 
 /**
  * How each provider route is REACHED, and the named presets.
@@ -54,9 +57,14 @@ export interface JairaModelConfig {
   /**
    * Named prompt-op configurations, selected per state by `operation.configRef`.
    *
-   * The mechanism is upstream's and predates this block: `configRef` resolves against
-   * a `ConfigurationRegistry` and merges UNDER a state's inline config and OVER the
-   * defaults. All that was ever missing was somewhere to write the presets down.
+   * A preset merges UNDER a state's inline config and OVER the defaults. It is expanded by JaiRA
+   * before the call is routed (`withPresetModels` in `@jaira/runtime`), not by the provider leaf that
+   * used to read it: a preset's `model` decides the route, so a preset applied after routing could
+   * never choose one — and an agent route never read `configRef` at all.
+   *
+   * `model` is a model id, or candidates and a rule (`presetModels.ts`). Three ship in the built-in
+   * layer (`builtin/settings.json`): `simple`, `coder` and `planner`. A preset's NAME is a word no
+   * model id can be (`presetNameRefusal`), so a model field may name one.
    */
   presets?: Record<string, Record<string, JsonValue>>;
 }
@@ -310,6 +318,14 @@ export interface JairaConfig {
   autopilot: JairaAutopilotConfig;
   /** Each shipped function's defaults, by the function's name — one place per function (decision 0007, amended 2026-09-23). */
   functions: JairaFunctionsConfig;
+  /** The MCP servers every agent run is handed, by the name their tools are called under (`./mcp`). */
+  mcp: JairaMcpConfig;
+  /**
+   * How the app LOOKS — the palette, the mode, the typography, the editors, the renderer choices
+   * (`./appearanceConfig`). Layered like everything else here; the person's own answer is usually in
+   * the fourth layer, `personal-settings.json`, which is where the old preferences file's look went.
+   */
+  appearance: JairaAppearanceConfig;
 }
 
 /**
@@ -357,7 +373,8 @@ export interface JairaBashConfig {
 export interface JairaSmartConfig {
   /**
    * The model that judges, written as a state's `model` is (`claude-haiku-4`, or `claude-cli/haiku`
-   * to insist on a route). Absent ⇒ whatever this machine's default executor answers with.
+   * to insist on a route), or the name of a preset, which means that preset's model — the built-in
+   * layer sets `simple`. Absent ⇒ whatever this machine's default executor answers with.
    */
   model?: string;
   /**
@@ -406,17 +423,18 @@ export const DEFAULT_ASK_BELOW = 0.2;
  * Here rather than in `user-settings.json` alone because a checkout can have an opinion worth
  * sharing — a project whose `functions/` carries a build directory wants everyone to stop seeing
  * it, and that is a fact about the project, not about whoever opened it. The PERSONAL half of the
- * setting lives in `JairaSettings.filesHidden` and is applied after this one, so a preference never
- * has to arrive through a pull request to be honoured.
+ * setting is the same key in `personal-settings.json`, the layer read after this one, so a
+ * preference never has to arrive through a pull request to be honoured.
  */
 export interface JairaFilesConfig {
   /**
-   * Glob patterns hidden from the tree, in order — see {@link DEFAULT_HIDDEN_PATHS}.
+   * Glob patterns this layer ADDS to what the tree hides, in order — see {@link DEFAULT_HIDDEN_PATHS}.
    *
-   * Absent means the defaults, which is not the same as `[]`: an empty array is a project saying
-   * *show everything*, including `system/`. Like every other array in this document a project's
-   * list REPLACES the base's rather than extending it, so a project that sets one takes on naming
-   * everything it wants hidden — including, if it still wants it, `system`.
+   * Unlike every other array in this document the layers CONCATENATE (`mergeConfigDocuments`): the
+   * built-in defaults first, then the base's list, then the project's. Last match wins, so a layer
+   * puts back something an earlier rule hid with `!pattern` — `!system` shows JaiRA's own
+   * directory. Parsed, this is the concatenation of the layers' lists WITHOUT the defaults, which
+   * `hiddenRules` puts in front; absent and `[]` both mean "nothing to add".
    */
   hidden?: string[];
 }
@@ -610,6 +628,8 @@ export function defaultConfig(): JairaConfig {
     integrations: defaultIntegrations(),
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
     functions: defaultFunctions(),
+    mcp: defaultMcp(),
+    appearance: defaultAppearanceConfig(),
   };
 }
 
@@ -966,12 +986,13 @@ function genericCliName(entry: unknown): string {
 }
 
 /**
- * Lay a project's `settings.json` over the shared base root's (DESIGN §3).
+ * Lay one layer's `settings.json` over another's (DESIGN §3) — the project's over the shared root's,
+ * and `personal-settings.json` over both; see `mergeConfigLayers` for the order.
  *
  * Merged as raw DOCUMENTS, before parsing, so validation sees exactly the configuration that will be
  * used and an error names a field rather than an internal merge artefact.
  *
- * Three rules, each chosen because the other reading is worse:
+ * Four rules, each chosen because the other reading is worse:
  *
  *  - **Objects merge key by key.** A project that sets only `models.default` must not lose the base's
  *    `agents` and `functions`, which is what a wholesale replace would do — and the reason to keep a
@@ -981,8 +1002,30 @@ function genericCliName(entry: unknown): string {
  *  - **`agents.genericCli` merges by name.** It is the one array that is really a keyed map: the
  *    base defines the shared executors, and a project expects to add one or retune one, not to
  *    redeclare the set. An entry with a base name overrides it in place, keeping the base's order.
+ *  - **`files.hidden` concatenates.** It is a list of RULES evaluated in order, last match wins
+ *    (`./hiddenPaths`), and a layer's list is what it adds: the base's rules, then the project's.
+ *    Replacing made a project that wanted one more folder hidden restate every rule under it — and
+ *    a project that forgot one showed a database. A layer takes a rule back with `!pattern`.
  */
 export function mergeConfigDocuments(base: unknown, project: unknown): unknown {
+  const merged = mergeLayer(base, project);
+  const under = hiddenListOf(base);
+  const over = hiddenListOf(project);
+  // Only when BOTH layers state a list is there anything to append: with one, the plain merge has
+  // already carried it, and a list that is not an array is left for the parser to refuse by name.
+  if (under === undefined || over === undefined || !isPlainObject(merged)) return merged;
+  return { ...merged, files: { ...(merged["files"] as Record<string, unknown>), hidden: [...under, ...over] } };
+}
+
+/** `files.hidden` as a layer's document holds it, when it is a list — what {@link mergeConfigDocuments} appends. */
+function hiddenListOf(doc: unknown): unknown[] | undefined {
+  if (!isPlainObject(doc) || !isPlainObject(doc["files"])) return undefined;
+  const hidden = doc["files"]["hidden"];
+  return Array.isArray(hidden) ? hidden : undefined;
+}
+
+/** One level of {@link mergeConfigDocuments}: objects by key, arrays replace, `agents.genericCli` by name. */
+function mergeLayer(base: unknown, project: unknown): unknown {
   if (!isPlainObject(base)) return project;
   if (!isPlainObject(project)) return base;
   const merged: Record<string, unknown> = { ...base };
@@ -997,13 +1040,27 @@ export function mergeConfigDocuments(base: unknown, project: unknown): unknown {
   return merged;
 }
 
+/**
+ * Lay any number of layers' documents over each other, WEAKEST FIRST — the built-in layer, then the
+ * shared root, then the project, then whatever sits above those.
+ *
+ * {@link mergeConfigDocuments} folded, so every pair of adjacent layers obeys its three rules and a
+ * layer added to the stack is one more element rather than one more nested call. An absent layer
+ * (`undefined`, `null`) is an empty one. `undefined` only when every layer is absent.
+ */
+export function mergeConfigLayers(docs: readonly unknown[]): unknown {
+  let merged: unknown = undefined;
+  for (const doc of docs) if (doc !== undefined && doc !== null) merged = merged === undefined ? doc : mergeConfigDocuments(merged, doc);
+  return merged;
+}
+
 /** `agents` is a plain object merge except for its one keyed array. */
 function mergeAgentBlock(
   key: string,
   base: Record<string, unknown>,
   project: Record<string, unknown>,
 ): Record<string, unknown> {
-  const merged = mergeConfigDocuments(base, project) as Record<string, unknown>;
+  const merged = mergeLayer(base, project) as Record<string, unknown>;
   if (key !== "agents") return merged;
   const baseList = base["genericCli"];
   const projectList = project["genericCli"];
@@ -1012,7 +1069,7 @@ function mergeAgentBlock(
   for (const entry of projectList) {
     const name = genericCliName(entry);
     const under = byName.get(name);
-    byName.set(name, isPlainObject(under) && isPlainObject(entry) ? mergeConfigDocuments(under, entry) : entry);
+    byName.set(name, isPlainObject(under) && isPlainObject(entry) ? mergeLayer(under, entry) : entry);
   }
   return { ...merged, genericCli: [...byName.values()] };
 }
@@ -1162,8 +1219,22 @@ function parseModels(value: unknown): JairaModelConfig {
 
   if (raw["presets"] !== undefined) {
     const presets: Record<string, Record<string, JsonValue>> = {};
-    for (const [name, entry] of Object.entries(plainObject(raw["presets"], "config.models.presets"))) {
-      presets[name] = plainObject(entry, `config.models.presets.${name}`) as Record<string, JsonValue>;
+    const block = plainObject(raw["presets"], "config.models.presets");
+    for (const [name, entry] of Object.entries(block)) {
+      const at = `config.models.presets.${name}`;
+      // The name first: a preset spelled like a model id would make every model field that names it
+      // ambiguous (`presetModels.ts`), and that is a property of the name, not of what it holds.
+      const badName = presetNameRefusal(name);
+      if (badName !== undefined) throw new Error(`${at}: ${badName}`);
+      presets[name] = plainObject(entry, at) as Record<string, JsonValue>;
+      if (presets[name]["model"] === undefined) continue;
+      // A candidate is a MODEL. One naming another preset would be a preset of presets, which nothing
+      // resolves — refused here, where the whole block is in view, rather than at the call.
+      for (const id of candidatesOf(parsePresetModel(presets[name]["model"], `${at}.model`))) {
+        if (Object.prototype.hasOwnProperty.call(block, id)) {
+          throw new Error(`${at}.model names the preset '${id}' — a preset's model is a model id, not another preset`);
+        }
+      }
     }
     models.presets = presets;
   }
@@ -1194,6 +1265,8 @@ export function parseConfig(raw: unknown): JairaConfig {
     integrations: parseIntegrations(cfg["integrations"]),
     autopilot: parseAutopilot(cfg["autopilot"]),
     functions: parseFunctions(cfg["functions"]),
+    mcp: parseMcp(cfg["mcp"]),
+    appearance: parseAppearanceConfig(cfg["appearance"]),
   };
 }
 

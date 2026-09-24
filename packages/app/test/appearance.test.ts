@@ -16,7 +16,8 @@ import {
   SIZE_LIMITS,
   clampSize,
   defaultAppearance,
-  parseSettings,
+  defaultAppearanceConfig,
+  parseAppearanceConfig,
   resolveTheme,
   surfaceOf,
   type Appearance,
@@ -31,8 +32,7 @@ import {
   stackOf,
 } from "../src/renderer/appearance";
 
-const appearanceOf = (patch: Record<string, unknown>): Appearance =>
-  parseSettings({ appearance: patch }).appearance;
+const appearanceOf = (patch: Record<string, unknown>): Appearance => parseAppearanceConfig(patch);
 
 describe("the stack a chosen family produces", () => {
   it("puts the choice in FRONT of the default rather than instead of it", () => {
@@ -56,44 +56,50 @@ describe("the stack a chosen family produces", () => {
   });
 });
 
-describe("parsing a preferences file", () => {
+describe("parsing the appearance block of a settings layer", () => {
   it("defaults to the shipped sizes and no chosen families", () => {
-    expect(parseSettings({}).appearance).toEqual(defaultAppearance());
+    expect(parseAppearanceConfig(undefined)).toEqual(defaultAppearanceConfig());
+    expect(parseAppearanceConfig({})).toMatchObject(defaultAppearance());
     expect(defaultAppearance().sizeApp).toBe(SIZE_LIMITS.sizeApp.default);
   });
 
-  it("clamps a size rather than dropping it", () => {
-    // An 80px chrome is a window with no visible controls, and a 2px one is the same window from
-    // the other direction — so the value is held inside the bounds the control offers.
-    expect(appearanceOf({ sizeApp: 900 }).sizeApp).toBe(SIZE_LIMITS.sizeApp.max);
-    expect(appearanceOf({ sizeData: 1 }).sizeData).toBe(SIZE_LIMITS.sizeData.min);
+  it("refuses a size outside what its control offers, naming the key", () => {
+    // Strict, like every block of settings.json: an 80px chrome is a window with no visible
+    // controls, and a document asking for one is refused rather than quietly clamped. The old
+    // preferences file's clamping lives on only in its migration.
+    expect(() => appearanceOf({ sizeApp: 900 })).toThrow(/config\.appearance\.sizeApp must be a size from 11 to 17/);
+    expect(() => appearanceOf({ sizeData: 1 })).toThrow(/sizeData/);
+    expect(() => appearanceOf({ sizeApp: "big" })).toThrow(/sizeApp/);
     expect(clampSize("sizeEditor", 13)).toBe(13);
+    expect(appearanceOf({ sizeData: 14, advanced: true }).sizeData).toBe(14);
   });
 
-  it("ignores a size that is not a number at all, keeping the default", () => {
-    expect(appearanceOf({ sizeApp: "big" }).sizeApp).toBe(SIZE_LIMITS.sizeApp.default);
-    expect(appearanceOf({ sizeData: Number.NaN }).sizeData).toBe(SIZE_LIMITS.sizeData.default);
-  });
-
-  it("de-duplicates a family list, because a repeat can never be reached", () => {
+  it("refuses a family named twice, because a repeat can never be reached", () => {
     // A stack is an ordered list of ALTERNATIVES: the second copy of a family is behind the first,
     // which always resolves, so it is dead weight in a control whose whole point is the order.
-    expect(appearanceOf({ dataFamily: ["Menlo", " Menlo ", "", "Consolas"] }).dataFamily).toEqual(["Menlo", "Consolas"]);
+    expect(() => appearanceOf({ dataFamily: ["Menlo", " Menlo ", "Consolas"] })).toThrow(/names 'Menlo' twice/);
+    expect(appearanceOf({ dataFamily: [" Menlo ", "Consolas"] }).dataFamily).toEqual(["Menlo", "Consolas"]);
   });
 
-  it("keeps the readable fields of a half-broken document", () => {
-    // Per FIELD, like the layout parser: this is a preference file rather than something anyone
-    // authored, and one bad value is no reason to reset a person's whole typography.
-    const parsed = appearanceOf({ appFamily: "Inter", sizeData: 14, advanced: true, smoothing: "yes" });
-    expect(parsed.appFamily).toEqual([]);
-    expect(parsed.sizeData).toBe(14);
-    expect(parsed.advanced).toBe(true);
-    // Not the string's truthiness — only a real `true` turns a switch on.
-    expect(parsed.smoothing).toBe(false);
+  it("refuses a value of the wrong kind, and a key the block does not have", () => {
+    // Not the string's truthiness — only a real `true` turns a switch on, and anything else is refused.
+    expect(() => appearanceOf({ smoothing: "yes" })).toThrow(/smoothing must be true or false/);
+    expect(() => appearanceOf({ appFamily: "Inter" })).toThrow(/appFamily must be a list/);
+    expect(() => appearanceOf({ theme: "dark" })).toThrow(/config\.appearance\.theme is not a setting/);
+    expect(() => appearanceOf({ editors: { json: { minimap: true } } })).toThrow(/editors\.json\.minimap is not a setting/);
+    expect(() => appearanceOf({ renderers: { markdown: { read: "x" } } })).toThrow(/not a renderer key/);
   });
 
-  it("reads a settings file written before any of this existed", () => {
-    expect(parseSettings({ theme: "dark" }).appearance).toEqual(defaultAppearance());
+  it("reads the nested blocks a layer states partly, with every default filled in", () => {
+    const parsed = parseAppearanceConfig({
+      conversation: { sequentialBatches: "band" },
+      editors: { json: { wrap: true } },
+      renderers: { "text/markdown:view": { read: "source" } },
+    });
+    expect(parsed.conversation.sequentialBatches).toBe("band");
+    expect(parsed.editors.json.wrap).toBe(true);
+    expect(parsed.editors.code).toEqual(defaultAppearanceConfig().editors.code);
+    expect(parsed.renderers["text/markdown:view"]).toEqual({ read: "source", write: null, off: [], theme: { read: null, write: null } });
   });
 });
 
@@ -153,7 +159,7 @@ describe("the palette and the board's options", () => {
   };
 
   it("is ink rail with every option left to it, for a file written before any of this", () => {
-    expect(parseSettings({ appearance: { sizeApp: 13 } }).appearance).toMatchObject({
+    expect(parseAppearanceConfig({ sizeApp: 13 })).toMatchObject({
       palette: "ink",
       laneColors: null,
       buckets: null,
@@ -161,13 +167,16 @@ describe("the palette and the board's options", () => {
     });
   });
 
-  it("reads each field on its own, and drops what it cannot use", () => {
-    // Unlike the editor theme, the palettes are known here, so an id this release does not have
-    // falls back rather than being kept for a release that might.
-    const parsed = appearanceOf({ palette: "neon", laneColors: true, buckets: "dotted", statusWash: "yes" });
-    expect(parsed.palette).toBe("ink");
+  it("reads each field on its own, and refuses what it cannot use", () => {
+    // Unlike the editor theme, the palettes are known here, so an id this release does not have is
+    // refused by name rather than kept for a release that might.
+    expect(() => appearanceOf({ palette: "neon" })).toThrow(/palette must be one of ink, classic/);
+    expect(() => appearanceOf({ buckets: "dotted" })).toThrow(/buckets must be one of box, line/);
+    expect(() => appearanceOf({ statusWash: "yes" })).toThrow(/statusWash must be true, false or null/);
     expect(appearanceOf({ palette: "classic" }).palette).toBe("classic");
     expect(appearanceOf({ palette: "blueprint" }).palette).toBe("blueprint");
+    // Null is a statement: "the palette's own", which is how a layer takes a weaker layer's choice back.
+    const parsed = appearanceOf({ laneColors: true, buckets: null, statusWash: null });
     expect(parsed.laneColors).toBe(true);
     expect(parsed.buckets).toBeNull();
     expect(parsed.statusWash).toBeNull();
@@ -220,10 +229,11 @@ describe("the palette and the board's options", () => {
   });
 
   it("takes light, dark or system as the mode, and paints system as the OS says", () => {
-    expect(parseSettings({ theme: "system" }).theme).toBe("system");
-    expect(parseSettings({ theme: "dark" }).theme).toBe("dark");
-    // Anything else is the default, light — as it always was.
-    expect(parseSettings({ theme: "dim" }).theme).toBe("light");
+    expect(parseAppearanceConfig({ mode: "system" }).mode).toBe("system");
+    expect(parseAppearanceConfig({ mode: "dark" }).mode).toBe("dark");
+    // Unstated is the default, light — as it always was; a mode that does not exist is refused.
+    expect(parseAppearanceConfig({}).mode).toBe("light");
+    expect(() => parseAppearanceConfig({ mode: "dim" })).toThrow(/mode must be one of light, dark, system/);
     expect(resolveTheme("system", true)).toBe("dark");
     expect(resolveTheme("system", false)).toBe("light");
     // An explicit choice ignores the OS.

@@ -5,6 +5,8 @@
 import { describe, expect, it } from "vitest";
 import {
   comparePermissionSets,
+  copiedFrom,
+  copyDifferences,
   isPermissionSetDirty,
   newPermissionSetText,
   overridesOf,
@@ -15,7 +17,9 @@ import {
   permissionSetRailOf,
   permissionSetRailSummary,
   permissionSetsAt,
+  permissionSetFileLabel,
   permissionSetStanding,
+  rebasePermissionSetChange,
   usedByLine,
   type PermissionSetRecord,
 } from "../src/index";
@@ -108,6 +112,66 @@ const records: PermissionSetRecord[] = [
   { id: "team/review", bucket: "team", name: "review", files: [{ layer: "base", file: "~/.jaira/permission-sets/team/review.json", format: "yaml", problem: "bad" }] },
 ];
 
+describe("a copy, and what it says against what it was copied from", () => {
+  const copy = (files: PermissionSetRecord["files"]): PermissionSetRecord => ({ id: "chat/ask-first", bucket: "chat", name: "ask-first", files });
+  const shipped = { layer: "system" as const, file: "built in/permission-sets/chat/ask-first.json", format: "json" as const, decl: { ...SHIPPED } };
+
+  it("is a layer's file over a lower one, named by both — whether or not it still follows", () => {
+    const followed = permissionSetsAt(
+      [copy([{ layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", follows: "$SYSTEM/permission-sets/chat/ask-first", decl: { ...SHIPPED, bash: "allow" } }, shipped])],
+      "base",
+    )[0]!;
+    expect(copiedFrom(followed)).toBe("system");
+    expect(permissionSetStanding(followed).label).toBe("shared · copied from built in");
+    // A copy that took a line out had to stop following; it is still a copy of what ships.
+    const { glob: _gone, ...rest } = SHIPPED;
+    const detached = permissionSetsAt([copy([{ layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", format: "json", decl: rest }, shipped])], "project")[0]!;
+    expect(permissionSetStanding(detached).label).toBe("this project · copied from built in");
+    // A project's copy of the shared one names Shared, the switch's own word for it.
+    const ofShared = permissionSetsAt(
+      [
+        copy([
+          { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", format: "json", follows: "$BASE/permission-sets/chat/ask-first", decl: { ...SHIPPED, bash: "allow" } },
+          { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", decl: { ...SHIPPED, bash: "ask" } },
+          shipped,
+        ]),
+      ],
+      "project",
+    )[0]!;
+    expect(permissionSetStanding(ofShared).label).toBe("this project · copied from Shared");
+    // What a layer only sees, or states alone, is no copy.
+    expect(copiedFrom(permissionSetsAt([copy([shipped])], "base")[0]!)).toBeUndefined();
+    expect(copiedFrom(permissionSetsAt(records, "project").find((at) => at.id === "feature/writes-asking")!)).toBeUndefined();
+  });
+
+  it("counts the lines that differ, on the resolved maps: a changed line, an added one, one taken out", () => {
+    const { glob: _gone, ...rest } = SHIPPED;
+    const at = permissionSetsAt(
+      [copy([{ layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", decl: { ...rest, bash: "allow", web_fetch: "ask" } }, shipped])],
+      "base",
+    )[0]!;
+    expect(copyDifferences(at)).toBe(3);
+    // An override that restates a line unchanged differs by nothing.
+    const same = permissionSetsAt([copy([{ layer: "base", file: "x", format: "json", follows: "$SYSTEM/permission-sets/chat/ask-first", decl: { ...SHIPPED } }, shipped])], "base")[0]!;
+    expect(copyDifferences(same)).toBe(0);
+    expect(copyDifferences(permissionSetsAt([copy([shipped])], "base")[0]!)).toBeUndefined();
+  });
+
+  it("replays a change over another layer's map, leaving that layer's other lines as it says them", () => {
+    const shown = { ...SHIPPED, bash: "ask" } as const;
+    const theirs = { ...SHIPPED, web_fetch: "allow" } as const;
+    // bash changed, glob taken out: both land; web_fetch (only theirs) and bash's old value do not leak.
+    const { glob: _gone, ...changed } = { ...shown, bash: "allow" as const };
+    expect(rebasePermissionSetChange(shown, changed, theirs)).toEqual({ read_file: "allow", bash: "allow", "git status": "allow", other: "deny", web_fetch: "allow" });
+    expect(rebasePermissionSetChange(shown, shown, theirs)).toEqual(theirs);
+  });
+
+  it("names the file a layer holds a set in", () => {
+    expect(permissionSetFileLabel("base", "chat/ask-first")).toBe("~/.jaira/permission-sets/chat/ask-first.json");
+    expect(permissionSetFileLabel("project", "feature/impl/reads")).toBe(".jaira/permission-sets/feature/impl/reads.json");
+  });
+});
+
 describe("what one layer's pane reads", () => {
   it("a project sees all three layers, and marks what it states and what that overrides", () => {
     const ats = permissionSetsAt(records, "project");
@@ -118,7 +182,7 @@ describe("what one layer's pane reads", () => {
       ["team/review", "base", false, undefined],
     ]);
     expect(ats.map((at) => permissionSetStanding(at))).toEqual([
-      { here: true, label: "overrides built in" },
+      { here: true, label: "this project · copied from built in" },
       { here: false, label: "built in" },
       { here: true, label: "this project" },
       { here: false, label: "all projects" },

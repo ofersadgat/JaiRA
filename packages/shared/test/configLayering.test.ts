@@ -86,9 +86,8 @@ describe("the merged document is what gets validated", () => {
   });
 
   it("leaves the hidden-path list ABSENT, which means the defaults", () => {
-    // Same reading as the search path above, and the same reason: an absent key is "no opinion",
-    // and `[]` is a project saying *show everything*. A parser that defaulted one to the other
-    // would make the second statement impossible to write.
+    // The parsed list is what the layers ADD — the defaults are put in front by `hiddenRules`, not
+    // here — so absent and `[]` both parse to "nothing added", kept as written.
     expect(parseConfig({}).files.hidden).toBeUndefined();
     expect(parseConfig({ files: { hidden: [] } }).files.hidden).toEqual([]);
   });
@@ -109,11 +108,16 @@ describe("the merged document is what gets validated", () => {
     expect(() => parseConfig({ files: [] })).toThrow(/config\.files/);
   });
 
-  it("lets a project replace the base's hidden list rather than adding to it", () => {
-    // Arrays replace, as everywhere else in this document: a project that could only ADD could
-    // never stop hiding something the base hid.
-    const merged = mergeConfigDocuments({ files: { hidden: ["system"] } }, { files: { hidden: ["drafts"] } });
-    expect(parseConfig(merged).files.hidden).toEqual(["drafts"]);
+  it("appends a project's hidden list to the base's rather than replacing it", () => {
+    // The one array that concatenates: it is a list of rules, last match wins, and a project that
+    // wants to stop hiding something the base hid says `!pattern` rather than restating the rest.
+    const merged = mergeConfigDocuments({ files: { hidden: ["drafts"] } }, { files: { hidden: ["!drafts/keep", "**/*.log"] } });
+    expect(parseConfig(merged).files.hidden).toEqual(["drafts", "!drafts/keep", "**/*.log"]);
+    // One layer alone is carried as it is, and the rest of `files` still merges key by key.
+    expect(mergeConfigDocuments({ files: { hidden: ["drafts"] } }, { memo: { enabled: true } })).toEqual({ files: { hidden: ["drafts"] }, memo: { enabled: true } });
+    expect(mergeConfigDocuments({ memo: { enabled: true } }, { files: { hidden: ["drafts"] } })).toEqual({ memo: { enabled: true }, files: { hidden: ["drafts"] } });
+    // Other arrays still replace.
+    expect(mergeConfigDocuments({ workflows: { path: ["$BASE/a"] } }, { workflows: { path: ["$BASE/b"] } })).toEqual({ workflows: { path: ["$BASE/b"] } });
   });
 
   it("reads the executor fields off every kind of executor", () => {

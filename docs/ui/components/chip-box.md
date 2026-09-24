@@ -5,9 +5,9 @@ status: shipped
 updated: 2026-09-13
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/preview-beside-the-setting]
 serves: [product/read-comfortably, product/share-processes-across-projects]
-surfaces: [ui/surfaces/settings-files, ui/surfaces/settings-appearance]
+surfaces: [ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/filesPane.tsx, packages/app/src/renderer/appearancePane.tsx]
+implemented_by: [packages/app/src/renderer/appearancePane.tsx]
 verified_by: [packages/app/test/appearance.test.ts]
 mockups: [ui/assets/chip-box/empty.html, ui/assets/chip-box/defaults.html, ui/assets/chip-box/chosen.html, ui/assets/chip-box/warning.html, ui/assets/chip-box/menu-open.html, ui/assets/chip-box/read-only.html]
 siblings: [ui/components/preset-chips, ui/components/size-stepper, ui/components/settings-field]

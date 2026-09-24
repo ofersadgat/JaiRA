@@ -818,6 +818,15 @@ permission set, and each function's defaults live in one place, a layered `funct
 - **Permission sets are to be renamed "permission sets"** in the same redesign. That is a separate,
   mechanical change; the code still says permission set.
 
+### Amended 2026-09-23 (later): an MCP server is a group, as a program is
+
+Round five of the Settings redesign configures MCP servers (`mcp.servers`, [mcp-servers](../units/mcp-servers.md)) and hands them to every agent run, so a permission set says what each of their tools may do. It says it the way §4 and §5 already say it for a shell program:
+
+- **`mcp__<server>__<tool>`** — the name every agent gives the tool — is a line for one tool, and **`mcp__<server>`** is the server's own line, the mode for every tool of it no line names. A call answers to its tool's line, then its server's, then `other`: `git commit`, then `git`, then the shell's line. Neither is offered: nothing JaiRA registers is served under them, and the agent that has the server calls the tool by that name. They were `unknown-tool` warnings until now; they are the subject kind `mcp`.
+- **In a run**, the lines lower into `permissions.tools` at their gate modes, a tool with no line is asked about by its server's name (`translatedGate`, as a native is asked about by its standard tool's), and the narrowing judges the call as ONE part — its line the tool's name, its widths the tool and its server — so the approval draws it, "for this run" remembers it at the tool or the whole server, and "add to the permission set" writes a TOOL line by default. A tool the map refuses, and a server every line of which refuses, go on claude's deny list, and such a server is not handed over at all.
+- **Codex is asked as claude is.** Codex could not be asked about a tool of a server it calls itself — the call never crosses the bridge — so this amendment first wrote the map into codex's own config: an allowed tool `approval_mode = "approve"`, anything else taken away. The same day the person asked for codex to ask as well, and upstream's bridge now PROXIES each configured server (declarative-ai `task/mcp-server-proxy`): codex is pointed at the bridge under the server's own name, and every call is put to the gate there, by `mcp__<server>__<tool>` and the call's input, before it is forwarded. Every mode — `allow`, `ask`, a function, `deny` — answers on codex as on claude, and nothing of the map is written into codex's config.
+- **Settings → Tools** draws the MCP section as Execution draws a program: a group per configured server, its button the server's line (`other` until the first change writes one), a line per named tool, and a line that names another from the tools the server listed. A tool named from that list starts at what the server says of it: `readOnlyHint` allows, `destructiveHint` refuses.
+
 ## Open
 
 Nothing. (`smart` on a command subject — what the approver is shown for one part of

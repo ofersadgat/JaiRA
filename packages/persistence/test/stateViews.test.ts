@@ -362,9 +362,13 @@ describe("fileTree", () => {
     const layer = fileTree(project, browseWorkflows(project), rules).roots[0]!.nodes.find((n) => n.name === ".jaira");
     const workflows = layer?.children?.find((n) => n.name === "workflows");
     expect(workflows?.children?.map((n) => n.name)).not.toContain("scratch");
-    // The setting REPLACES the defaults rather than adding to them, which is what makes a list a
-    // person can read the whole of. Nobody named `system`, so it is back.
-    expect(layer?.children?.map((n) => n.name)).toContain("system");
+    // The setting ADDS to the defaults rather than replacing them: a project that hides one more
+    // folder does not have to restate the rest, so `system` stays hidden without being named.
+    expect(layer?.children?.map((n) => n.name)).not.toContain("system");
+    // ...and a layer that wants it back says so with a `!`.
+    const back = compileHidden(hiddenRules([".jaira/workflows/scratch", "!.jaira/system"]));
+    const shown = fileTree(project, browseWorkflows(project), back).roots[0]!.nodes.find((n) => n.name === ".jaira");
+    expect(shown?.children?.map((n) => n.name)).toContain("system");
   });
 
   it("says where the LAYER sits inside each root, which is what the tree's menus ask", () => {
@@ -378,9 +382,9 @@ describe("fileTree", () => {
   });
 
   it("puts a hidden directory back when a later rule reveals it", () => {
-    // The personal half of the setting: `!` after the defaults, which is what the Files screen's
-    // switch writes. A run that has gone wrong is read out of this directory.
-    const rules = compileHidden(hiddenRules(undefined, ["!.jaira/system"]));
+    // `!` after the defaults, which is what the Files tree section's Show system/ writes (into the
+    // person's own layer, merged into the list like any other). A run gone wrong is read out of here.
+    const rules = compileHidden(hiddenRules(["!.jaira/system"]));
     const layer = fileTree(project, browseWorkflows(project), rules).roots[0]!.nodes.find((n) => n.name === ".jaira");
     expect(layer?.children?.map((n) => n.name)).toContain("system");
   });

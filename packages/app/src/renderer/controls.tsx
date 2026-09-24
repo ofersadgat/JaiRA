@@ -20,6 +20,8 @@
  * that dark mode cannot override.
  */
 import { createContext, useContext, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { inheritedValue, statesPath, type ConfigLayer, type ConfigView } from "@jaira/shared/browser";
+import { SOURCE_WORDS } from "./layerLabels";
 
 /**
  * Whether a {@link Field} is being drawn on a SETTINGS PAGE — the row shape the person picked from
@@ -30,6 +32,77 @@ import { createContext, useContext, useState, type JSX, type KeyboardEvent, type
  * the config key it writes — sit behind an ⓘ beside the name.
  */
 export const SettingsRowsContext = createContext(false);
+
+/**
+ * The layer a Settings page is editing, as every row on it needs to know it — provided once around
+ * the page, so that the "Just you" view is one rule every row follows rather than a prop threaded
+ * through thirty panes (the person's design, 2026-09-23).
+ *
+ * With `onlyStated` — "What you changed", the Just you view's default — a row the layer does not
+ * state is not drawn at all, and a section left with no rows goes with it (`styles.css`, `.set-page
+ * [data-only-stated]`). On the personal layer a row it DOES state says what it replaces: "instead of
+ * sonnet from Shared". Null outside Settings, and inside a row's own control, so a field nested in a
+ * stated row is drawn as the row's content rather than judged again.
+ */
+export interface SettingsLayerView {
+  layer: ConfigLayer;
+  /** Every layer's own document, for what a row inherits and from where. Null before the first read. */
+  view: ConfigView | null;
+  /** Draw only the rows this layer states. */
+  onlyStated: boolean;
+}
+
+export const SettingsLayerContext = createContext<SettingsLayerView | null>(null);
+
+/**
+ * A value in a few words, for the "instead of …" line: a model id as itself, yes or no, a count of a
+ * list's entries ("3 patterns"), a count of an object's settings.
+ */
+export function shortValue(value: unknown, path = ""): string {
+  if (value === undefined) return "nothing";
+  if (value === null) return "none";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "string") return value.length === 0 ? "nothing" : value.length > 40 ? `${value.slice(0, 39)}…` : value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) {
+    const noun = path.endsWith("hidden") ? "pattern" : "entry";
+    return `${value.length} ${value.length === 1 ? noun : noun === "entry" ? "entries" : `${noun}s`}`;
+  }
+  const n = Object.keys(value as object).length;
+  return `${n} ${n === 1 ? "setting" : "settings"}`;
+}
+
+/**
+ * What a row on a layered page does in the Just you view — whether it is drawn, and the line it
+ * carries — for the config `paths` it writes.
+ *
+ * `stated` is the row's own answer when it has one (its switch); otherwise a row is stated when the
+ * layer's document says anything at one of its paths. The "instead of" line is drawn only on the
+ * personal layer, for a path that layer actually states, with the value from the layers below it —
+ * `inheritedValue` — or the shipped default ("built in"). `format` spells a value the way its row
+ * does (a palette's name rather than its id).
+ */
+export function useLayerRow(
+  paths: readonly string[] | undefined,
+  stated?: boolean,
+  format?: (value: unknown, path: string) => string,
+): { hidden: boolean; instead: string | undefined } {
+  const at = useContext(SettingsLayerContext);
+  if (at === null) return { hidden: false, instead: undefined };
+  const doc = at.view?.[at.layer];
+  const own = paths?.filter((path) => statesPath(doc, path)) ?? [];
+  const here = stated ?? own.length > 0;
+  let instead: string | undefined;
+  if (here && at.layer === "you" && at.view !== null && own.length > 0) {
+    const path = own[0]!;
+    const { value, from } = inheritedValue(at.view, path, "you");
+    instead =
+      value === undefined && from === "built in"
+        ? "set nowhere else"
+        : `instead of ${format !== undefined ? format(value, path) : shortValue(value, path)} from ${SOURCE_WORDS[from]}`;
+  }
+  return { hidden: at.onlyStated && !here, instead };
+}
 
 /** The first sentence of a hint, and the rest — the split a settings row draws. */
 export function splitHint(hint: string): { first: string; rest: string } {
@@ -89,13 +162,18 @@ export function Field({
   /** What is wrong with the value, under the control that holds it. */
   error?: string | undefined;
   children: ReactNode;
-}): JSX.Element {
+}): JSX.Element | null {
   const row = useContext(SettingsRowsContext);
   // Switched on with nothing to write yet — an empty model box, say — the row stays enabled until
   // something is typed, rather than writing an empty value that would read back as "not set".
   const [armed, setArmed] = useState(false);
   const on = toggle !== undefined ? toggle.on || armed : !off;
   const disabled = !on;
+  // The Just you view (`SettingsLayerContext`): the row's switch says whether the layer states it —
+  // a toggle, or the schema form's own switch before the name — and the key it writes says so
+  // otherwise.
+  const layered = useLayerRow(param !== undefined ? [param] : undefined, toggle !== undefined ? toggle.on || armed : lead !== undefined ? !off : undefined);
+  if (layered.hidden) return null;
   const leading =
     toggle !== undefined ? (
       <Switch
@@ -136,9 +214,11 @@ export function Field({
             {param && !row ? <code className="cfg-param">{param}</code> : null}
           </span>
         ) : null}
+        {layered.instead !== undefined ? <span className="cfg-hint set-instead">{layered.instead}</span> : null}
       </div>
       <div className="cfg-control" {...(disabled ? { inert: true } : {})}>
-        {children}
+        {/* What is inside a row is the row's content, not rows of the page: judged once, here. */}
+        <SettingsLayerContext.Provider value={null}>{children}</SettingsLayerContext.Provider>
         {error !== undefined ? <div className="reason cfg-error">{error}</div> : null}
       </div>
     </div>

@@ -12,7 +12,7 @@
  * `@jaira/shared`'s `executorStack.ts` — still ONE declaration, read by the config parser, this form,
  * and the composition.
  */
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { FieldError } from "./model";
 
 /** A JSON Schema node. Self-contained: nothing here resolves a `$ref`. */
@@ -120,6 +120,14 @@ export interface SchemaFormContext {
    * means, are the host's. A member with a source picked holds no value of its own.
    */
   sources?: ValueSources;
+  /**
+   * What a LIST row says beside its value, by the list's path — a preset's candidate saying which
+   * route would serve it and whether it can run here. The host's words; the form only places them,
+   * under the row's value. Undefined, or nothing returned, draws nothing.
+   */
+  itemNote?: (listPath: string, item: unknown, index: number) => ReactNode;
+  /** The words on a list's add button, by the list's path — "+ another model". Absent ⇒ "+ add". */
+  addLabel?: (listPath: string) => string | undefined;
   disabled?: boolean;
 }
 

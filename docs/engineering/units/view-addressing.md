@@ -2,7 +2,7 @@
 id: engineering/units/view-addressing
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 implements: [product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/keep-history-within-bounds, product/share-processes-across-projects, ux/patterns/live-facts-and-unseen-counts, ux/patterns/absence-is-stated, ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/settings-data, ui/components/project-row]
 layer: service
 owns_contracts: []
@@ -49,7 +49,7 @@ It deliberately does not own:
 | `ProjectSession.interactive` | read into the gate vocabulary | process memory | set by the session's registry |
 | Parked requests: `hub.list()`, `approvals.list()`, `questions.list()`, `requestTask` | read by `listProjects` for `waiting` | the session's hubs | [interaction-hub](interaction-hub.md), [interaction-gateway](interaction-gateway.md) |
 | `lastProbes` and `listExecutors()` | read by `stateViewOptions` | process memory and the effective config | [agent-executors](agent-executors.md) probes |
-| `settings.json` `files.hidden`, `user-settings.json` `filesHidden` | read per call by `hiddenRulesFor` | the files | [project-config](project-config.md), [user-settings](user-settings.md) |
+| `files.hidden` of each settings layer, the personal `personal-settings.json` last | read per call by `hiddenRulesFor`, from the parsed configuration | the files | [project-config](project-config.md) |
 | Journal rows and operation records for `values` | read by `runValuesOf` | the journal and the record store | [event-journal](event-journal.md), [operation-record-store](operation-record-store.md) |
 
 ## The invariants keep a read in the database it names and never guess between projects

@@ -6,22 +6,22 @@ updated: 2026-09-23
 visibility: internal
 kind: format
 owned_by: [engineering/units/user-settings]
-consumers: ["@jaira/app main service.ts readSettings, writeSettings, remember, restore, hiddenRulesFor and applyLogPolicy", "@jaira/app main index.ts, for the window background and title bar colours", "the renderer store and layout state, through settings:read and settings:write", "people editing user-settings.json by hand"]
+consumers: ["@jaira/app main service.ts readSettings, writeSettings, remember, restore and applyLogPolicy", "@jaira/persistence userSettingsMigration.ts migrateUserSettings, which moved the look out", "the renderer store and layout state, through settings:read and settings:write", "people editing user-settings.json by hand"]
 since: 2026-08-04
 siblings: [engineering/contracts/settings-json, engineering/contracts/ipc-channels]
 ---
 
 # user-settings.json
 
-`user-settings.json` is one person's app preferences on one machine, kept in the shared root beside `settings.json` and never in a checkout.
+`user-settings.json` is the window's own state on one machine — where its panes were left, what is folded, which conversations have been read, how loudly the log talks, which projects were open — kept in the shared root beside `settings.json` and never in a checkout.
 
-## A caller reaches for user-settings.json when a value belongs to the person at the machine, and never when a run depends on it
+## A caller reaches for user-settings.json when a value is a gesture the window remembers, and never for a setting
 
-**Use when.** Remembering how the app looks and where it was left: theme, typography, editor looks, renderer choices, pane sizes and folds, read marks, the open projects, the log policy, a personal hidden list, the conversation layout. Reading goes through `settings:read`; changing goes through `settings:write` with a patch.
+**Use when.** Remembering where the window was left: pane sizes and folds, read marks, the open projects, the log policy, a relocated shared root, the forge sign-in marks. Reading goes through `settings:read`; changing goes through `settings:write` with a patch.
 
-**Do not use when.** The value changes what a run does or should be shared with everyone on the project: [settings-json](settings-json.md). Holding a credential: [secret-sources](secret-sources.md).
+**Do not use when.** The value is a setting — anything a project or the shared root may also have an opinion about, including how the app LOOKS: that is [settings-json](settings-json.md), whose personal layer, `personal-settings.json` ("Just you"), holds one person's own answers and is read after every other layer. Holding a credential: [secret-sources](secret-sources.md).
 
-## The shape is eleven fields, each read forgivingly with its own default
+## The shape is five fields and the sign-in marks, each read forgivingly with its own default
 
 ### The document lives at the shared root and holds these top-level fields
 
@@ -29,16 +29,10 @@ The file is `<base>/user-settings.json`, UTF-8 JSON written with two-space inden
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `theme` | `"light"`, `"dark"` or `"system"` | no, default `"light"` | light or dark, or `system` to follow the operating system; any other value reads as `"light"` |
 | `ui` | object | no | layout memory and read marks, see below |
 | `projects` | string array | no, default `[]` | the projects open at quit, oldest first; trimmed, blanks and non-strings dropped, de-duplicated |
 | `logging` | object | no, default `{minLevel: "info", overrides: []}` | what the app log keeps, see below |
 | `baseDir` | non-empty string | no | a relocated shared root; read only from `~/.jaira/user-settings.json` |
-| `editors` | object | no | how each editing surface looks, see below |
-| `renderers` | object | no, default `{}` | renderer choices that disagree with the app's defaults, see below |
-| `appearance` | object | no | typefaces, sizes and the editor palette, see below |
-| `filesHidden` | string array | no, default `[]` | personal Files tree globs applied after `files.hidden`, last match wins; trimmed, blanks and a lone `!` dropped, de-duplicated |
-| `conversation` | `{sequentialBatches: "stacked" or "band"}` | no, default `"stacked"` | whether a fan-out batch whose elements ran one after another is drawn down the page or as a band |
 | `forgeSignIns` | object keyed by secret name | no, absent when empty | the forge tokens a sign-in through the browser stored: `{provider: "github" \| "gitlab", host, source: SecretSource, at, expiresAt?, refreshCredential?}` — where the token was written, when, when it dies and the secret its refresh token is under. Written and removed by main only ([forge-integrations](../units/forge-integrations.md)); an entry missing `provider`, `host`, `source` or `at` is dropped on read. A check reports `via: "oauth"` only while the chain still finds the token at `source` |
 
 ### The layout block is six maps keyed by ids the renderer owns
@@ -66,75 +60,29 @@ Every map defaults to `{}`, and an absent id means that control's own default. T
 
 An override with an unknown `match` or `minLevel`, or a blank `key`, is dropped. Of two overrides with the same `match` and `key`, the later is kept.
 
-### Each editor surface answers only the knobs it has
+### The look moved out, once
 
-`editors` has four keys, `code`, `markdown`, `json` and `diff`, each an object of the knobs below. A knob not listed for a surface is ignored, and a knob of the wrong type keeps its default.
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `lineNumbers` | boolean | no; default true, false for `markdown` and `json` | a numbered gutter; `code`, `diff`, `markdown` |
-| `wrap` | boolean | no; default false, true for `markdown` | wrap long lines; every surface |
-| `minimap` | boolean | no, default false | `code`, `diff` |
-| `indentGuides` | boolean | no, default true | `code`, `diff` |
-| `currentLine` | boolean | no, default false | mark the caret's line; `code`, `diff`, `markdown` |
-| `whitespace` | boolean | no, default false | draw spaces and tabs; `code`, `diff` |
-| `brackets` | boolean | no, default false | tint matching brackets; `code`, `diff` |
-| `tabSize` | 2, 4 or 8 | no, default 2 | any other number keeps the default; every surface |
-| `lineHeight` | number | no; default 1.5, 1.6 for `markdown`, 1.55 for `json` | clamped to 1.1 through 2.2; every surface |
-
-### A renderer choice is keyed by type or family and states up to four things
-
-A key is `"<mime>:<kind>"` for one type or `"family:<family>:<kind>"` for a family, and a key without `:` is dropped. Neither the key nor the renderer ids are checked against what the app registers.
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `renderers.<key>` | object | no | a value that is not an object is dropped |
-| `….read` | non-empty string or `null` | no, default `null` | the renderer for the view that cannot be typed into; `null` is the app's own |
-| `….write` | non-empty string or `null` | no, default `null` | the renderer for the editable view |
-| `….off` | string array | no, default `[]` | renderers taken off this type's menu; de-duplicated |
-| `….theme.read`, `….theme.write` | non-empty string or `null` | no, default `null` | the palette each view is painted in |
-
-A choice whose four statements are all at their defaults is dropped.
-
-### Appearance holds the window's theme, two voices, the editor size and the editor palette
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `appearance.appFamily` | string array | no, default `[]` | families tried before the app voice's default stack; trimmed, blanks dropped, de-duplicated |
-| `appearance.dataFamily` | string array | no, default `[]` | the same for the data voice |
-| `appearance.sizeApp` | number | no, default 12.5 | px, clamped to 11 through 17 |
-| `appearance.sizeData` | number | no, default 12 | px, clamped to 10 through 16 |
-| `appearance.sizeEditor` | number | no, default 13 | px, clamped to 10 through 20; used only when `advanced` is true |
-| `appearance.advanced` | boolean | no, default false | separates the editor size from the data voice; only `true` counts |
-| `appearance.smoothing` | boolean | no, default false | grayscale antialiasing; only `true` counts |
-| `appearance.editorTheme` | non-empty string | no, default `"monokai-light"` | a palette id or `app`; an unknown id is kept and the renderer falls back |
-| `appearance.palette` | `"ink"`, `"classic"`, `"hairline"`, `"contrast"`, `"blueprint"`, `"pastel"`, `"pastel-rail"` or `"zinc"` | no, default `"ink"` | the window's theme, in both light and dark; an unknown id reads as the default |
-| `appearance.laneColors` | boolean or null | no, default null | each board column its own colour; null is the palette's own (on for `pastel`) |
-| `appearance.buckets` | `"box"`, `"line"` or null | no, default null | a board column drawn as a box or as a rule under its heading; null is the palette's own (`line` for `ink`) |
-| `appearance.statusWash` | boolean or null | no, default null | a card washed in its status's colour; null is the palette's own (off everywhere) |
-
-Choosing a palette in the pane writes the three options back to null, so a palette arrives the way it was designed.
+The file used to hold the look too: `theme`, `appearance`, `editors`, `renderers`, `conversation` and a personal `filesHidden`. On 2026-09-23 they became settings — the `appearance` block and `files.hidden` of [settings-json](settings-json.md) — and `migrateUserSettings` (`@jaira/persistence` `userSettingsMigration.ts`) moves them into `personal-settings.json`: as the app's service is constructed, before anything paints, and at every project open, so the CLI's first open moves them too. It reads them the way this file used to be read — forgivingly, a size clamped, an unreadable value dropped — writes only what differs from the default, keeps what the personal layer already states, appends the patterns to its `files.hidden`, and then removes the six fields from this file, leaving every other field as it was. A file with none of them is not touched; a personal layer that cannot be read leaves both files alone. The reader of the old fields is gone: after the move nothing reads them.
 
 ## Nothing is refused on read, and a write fails only when the disk does
 
 | Condition | Response | Caller does |
 | --- | --- | --- |
 | The file is absent, not JSON or not an object | `readSettings` answers `defaultSettings()` | nothing |
-| A field or entry has the wrong shape | dropped, clamped or snapped as each table says | nothing |
+| A field or entry has the wrong shape | dropped or capped as each table says | nothing |
 | `settings:write` is sent any patch | written without validation and returned as sent | read again for the parsed value |
 | The directory cannot be created or the file written | `writeSettings` throws the filesystem error | the renderer shows it, except its layout write, which ignores it; `remember` logs a warning |
 
 ## A renamed field silently resets that preference unless the file is migrated first
 
 - The file is never validated, so a renamed or retyped field raises nothing: every file holding the old form reads with the default.
-- The path is to migrate the file to the new form and then read only that form; no reader keeps the old form alive.
+- The path is to migrate the file to the new form and then read only that form; no reader keeps the old form alive — the move of the look above is the example.
 - A `ui` id that is retired and later reused inherits whatever value a file still holds for it.
-- Narrowing a bound such as `SIZE_LIMITS` changes what existing files read as.
 
 ## A write rewrites the whole file, and a nested patch replaces the whole block
 
-- `settings:write` merges one level deep. A patch carrying `ui`, `appearance`, `editors`, `logging`, `renderers` or `conversation` replaces that entire block, so every caller sends the block whole.
+- `settings:write` merges one level deep. A patch carrying `ui` or `logging` replaces that entire block, so every caller sends the block whole.
 - Every write is `{...readSettings(), ...patch}`. Fields the parser does not know are dropped from the file, and a corrupt file followed by any write persists the defaults plus that patch.
-- A write is not atomic and takes no lock. Two app processes on one shared root overwrite each other's changes.
+- A write is not atomic and takes no lock. Two app processes on one shared root overwrite each other's changes — which is why the personal settings layer is a file of its own rather than a field here.
 - `baseDir` is read only from `~/.jaira/user-settings.json`. The same field in a relocated root's file is kept and never read, and no code writes it.
-- Corruption resets every preference with no message.
+- Corruption resets every field with no message.

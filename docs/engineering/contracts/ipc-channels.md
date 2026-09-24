@@ -76,6 +76,8 @@ Opening, closing and restoring are [project-sessions](../units/project-sessions.
 | `board:view` | `{level?: string; project?}` or `void` | `BoardView`; `level` is any state id |
 | `board:roots` | `{project?}` or `void` | `BoardView` with one column per workflow root; empty when no session resolves |
 | `files:tree` | `{project?}` or `void` | `FileTree` |
+| `files:hiddenReport` | `HiddenReportRequest`: `{project?; extra?: string; layer?: ConfigLayer}` | `HiddenReport` |
+| `files:whyHidden` | `{project?; path: string}` | `HiddenVerdict` |
 | `state:view` | `{stateId: string; project?}` | `StateView` |
 | `state:slots` | `{stateIds: string[]; project?}` | `Record<string, StateSlots>`, keyed by state id, omitting an id that names no state |
 | `state:effective` | `{stateId: string; taskId?: string; instanceId?: string; project?}` | `EffectiveState` |
@@ -94,6 +96,36 @@ Opening, closing and restoring are [project-sessions](../units/project-sessions.
 | `values.inputs` | `Record<string, JsonValue>` | no | the inputs on that execution's `instance.entered` |
 | `values.output` | `JsonValue` | no | the record's value at the execution's conversation position |
 | `values.children` | record of child key to input record | no | each child's entered inputs, the latest pass per key |
+
+`files:hiddenReport` and `files:whyHidden` answer about ONE root: the named user project's checkout, or the shared root when the call names the shared root or none resolves. The rules are `layeredHiddenRules` (`@jaira/shared` `hiddenPaths.ts`): the built-in defaults, then each layer's `files.hidden` as its document holds it — `base`, `project`, and `you`, the person's own list. The report is ONE breadth-first walk (`packages/app/src/main/hiddenReport.ts`) with a budget of 1.5 s and 60,000 entries. Each path the walk reaches goes to the rule that decides it, the last to match; a hidden folder counts once and is not entered. After the visible tree, with what is left, it looks inside the folders JaiRA's own group hides. `HiddenReport`:
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `root` | string | yes | the directory walked |
+| `rules` | `HiddenRuleReport[]` | yes | every effective rule, in the order applied |
+| `extra` | `HiddenRuleReport` | no | the request's `extra`, appended after every other rule and reported here alone; its `layer` is the request's `layer`, else `project` with a project and `base` without |
+| `capped` | boolean | yes | the budget ran out in the visible tree, so every count is at least |
+
+`HiddenRuleReport`:
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `pattern` | string | yes | the rule as written, `!` included |
+| `layer` | `"built in"`, `"base"`, `"project"` or `"you"` | yes | who states it |
+| `hides` | `{files: number; folders: number}` | yes | the top-most paths it decides; for a `!` rule, the ones it puts back that an earlier rule hid |
+| `samples` | string[] | yes | at most three of those paths, relative, shallowest first |
+| `inside` | `{folders: string[]; count: number}` | no | its matches inside a folder JaiRA's own group hides, which the tree never shows |
+
+`HiddenVerdict`, answered top-down the way the walk decides — the first hidden ancestor, not the path's own last match:
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `hidden` | boolean | yes | whether the tree shows the path |
+| `rule` | string | no | the rule that hid it or the folder it is in; for a shown path, the `!` rule that put it back |
+| `layer` | as `HiddenRuleReport.layer` | no | who states `rule` |
+| `via` | string | no | the ancestor folder that matched, when the path is inside it |
+
+`files:whyHidden` takes a path relative to the root or absolute inside it; one outside it is a `Refusal` "'<path>' is not inside <root>".
 
 ### Record channels read what a task's calls said
 
@@ -299,13 +331,15 @@ These are [app-shell](../units/app-shell.md).
 | --- | --- | --- |
 | `settings:read` | `void` | `JairaSettings` |
 | `settings:write` | a partial `JairaSettings`, merged one level deep | the whole `JairaSettings` written |
-| `config:read` | `{project?}` or `void` | `ConfigView` |
-| `config:write` | `{layer: "base" \| "project"; project?; config: JsonValue}` | `ConfigView` after the write |
+| `config:read` | `{project?}` or `void` | `ConfigView`: the three layers and their merge; with no project, the shared root and the personal layer |
+| `config:write` | `{layer: "you" \| "project" \| "base"; project?; config: JsonValue}`; `project` names where a project write lands, and for the other two which project's view is read back | `ConfigView` after the write |
 | `executor:list` | `void` | `ExecutorInfo[]` |
 | `executor:probe` | `{name?: string}` or `void` | `ProbeResult[]`, every executor when `name` is absent |
 | `model:probe` | `void` | `ProbeResult[]` for the configured routes; no model is called |
 | `model:probeLocal` | `{baseURL?: string}` or `void`; `baseURL` compares with the field as typed instead of the configured `local.baseURL` | `LocalServerDiscovery`: Ollama `:11434`, LM Studio `:1234`, llama.cpp `:8080`, vLLM `:8000` and Jan `:1337`, each asked `GET {base}/v1/models` in parallel with an 800 ms deadline, `inUse` on the row the `local` route names, and a `Configured` row when it names none of them; on demand only |
 | `model:checkWeights` | `{weights?: Record<string, {modelPath: string}>}` or `void`; absent checks the configured `embedded.weights` | `EmbeddedWeightsReport`: one `WeightsFileCheck` per model (`exists`, `sizeBytes`, a split model's `parts` summed, `error`) and whether `node-llama-cpp` resolves — the rows the `embedded` route's probe is decided from |
+| `mcp:detect` | `void` | `McpDetectedSource[]`: where other tools on this machine keep MCP servers — Claude Code's `~/.claude.json` (its own list and this project's entry), the project's `.mcp.json`, Claude Desktop's config, Cursor's (`~/.cursor` and the project's), VS Code's `.vscode/mcp.json` — each `found`, `none listed` or `not found` with its servers converted to ours, and Figma Dev Mode's `127.0.0.1:3845/mcp` asked for its tools within 1.5 s. READ only: nothing a source lists is started ([mcp-servers](../units/mcp-servers.md)) |
+| `mcp:tools` | `{recheck?: boolean}` or `void` | `McpToolsReport`: each configured server `ready` with its tools (name, description, `readOnlyHint`, `destructiveHint`, title), `failed` with the reason and a fix, or `not started` (off, or a secret it names is stored nowhere), with the transport, its command or address, and each secret it names with where the chain found it — never the value. The probe STARTS those servers, 10 s each, side by side, so main caches it by the servers' block, the project and the execution environment and probes again only when one changed or `recheck` is set |
 | `forge:signIn` | `{connection: string}` | `ForgeSignInStart`: `{ok: true, pending: ForgeSignInPending}` once the forge hands out a code (the page is opened in the browser, polling continues in main), or `{ok: false, reason, fix?}` — no `integrations.oauth.<provider>.clientId`, the connection is off, or the forge refused the app; an unknown connection rejects. A second call while one waits answers with the one waiting. How it ends is the `forge:signInFinished` push ([forge-integrations](../units/forge-integrations.md)) |
 | `forge:cancelSignIn` | `{connection: string}` | `void`; the waiting sign-in ends `canceled`, and nothing waiting is not an error |
 | `forge:signIns` | `void` | `ForgeSignInPending[]`, the sign-ins waiting on the person now |
@@ -319,9 +353,9 @@ These are [app-shell](../units/app-shell.md).
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `ConfigView.base`, `project` | `JsonValue` or `null` | yes | each layer's document as authored, `null` when it has no file |
-| `ConfigView.effective` | `JsonValue` | yes | the merge, parsed with defaults |
-| `ConfigView.baseFile`, `projectFile`, `baseDir` | string | yes | the files and the base root; `projectFile` is `""` when no session resolves |
+| `ConfigView.base`, `project`, `you` | `JsonValue` or `null` | yes | each layer's document as authored — the shared root's `settings.json`, the project's, and `personal-settings.json` — `null` when it has no file |
+| `ConfigView.effective` | `JsonValue` | yes | base, then project, then you, merged and parsed with defaults — what a run uses, and the `appearance` the window paints |
+| `ConfigView.baseFile`, `projectFile`, `youFile`, `baseDir` | string | yes | the files and the base root; `projectFile` is `""` when no session resolves |
 | `ExecutorInfo.name`, `kind` | string, `"sdk"`, `"cli"`, `"codex"` or `"generic"` | yes | the registry name and runtime |
 | `ExecutorInfo.enabled` | boolean | yes | `false` when configuration turned it off |
 | `ExecutorInfo.credentialUse` | `"required"`, `"optional"` or `"none"` | yes | whether the runtime uses a key |
@@ -353,7 +387,7 @@ These are [app-shell](../units/app-shell.md).
 | No `tsconfig.json` covers a checked file, or the check throws inside the program | resolves `checked: false` with `reason` | draw nothing |
 | The type checker is closing | rejects `the type checker is shutting down` | nothing |
 | `artifact:serve` or `artifact:list` resolves no session, or names an artifact that is gone | rejects `no project is open`, `no artifact at '<path>' for task <taskId>`, or `the bytes for '<path>' are no longer where they were placed` | name the project, or say the artifact is gone |
-| `config:write` to the project layer with no session, or a document whose merge does not parse | rejects `no project was named, so there is no project config to write`, `project '<ref>' is not open`, or the parse error naming the field; nothing is written | name the project, or fix the field |
+| `config:write` to the project layer with no session, or a document whose merge does not parse | rejects `no project was named, so there is no project config to write`, `project '<ref>' is not open`, or the parse error naming the field — for the shared or the personal layer, also merged with each open project, the error then ending `(with <file> as the project layer)`; nothing is written | name the project, or fix the field |
 | `executor:probe` names no configured executor | rejects `unknown executor '<name>'` | pick from `executor:list` |
 | `secret:set` with a bad name, or the keychain target where none is available | rejects `'<name>' is not a usable secret name`, or `keychainReason`, else `no encrypted store is available here` | choose a name matching `[A-Za-z_][A-Za-z0-9_.-]*`, or a file target |
 | `history:prune` with a negative or non-finite age | rejects `olderThanDays must be a non-negative number` | send a number of days |
@@ -373,9 +407,9 @@ How a rejection reaches the renderer, and what it loses on the way, is [preload-
 - The path-addressed file channels and the check channels address a `project`-layer path from the checkout, so a state file is `.jaira/workflows/<id>.json` there, while `workflow:*` channels take a state id under `workflows/`.
 - On Windows a `path` on another drive, such as `D:/x.txt`, passes the containment check of the file and check channels, because the relative path from the root is absolute and resolves back to itself; `workflow:*` channels refuse it.
 - No request is validated at runtime. A field the type requires can be missing and reach the service.
-- `executor:list`, `executor:probe`, `model:probe` and `availability:refresh` read the only open user project's configuration and credentials, and with none or several open, the base root's `settings.json` alone.
+- `executor:list`, `executor:probe`, `model:probe` and `availability:refresh` read the only open user project's configuration and credentials, and with none or several open, the base root's `settings.json` with `personal-settings.json` laid over it.
 - `settings:write` merges one level deep, so a partial `ui` or `logging` replaces the whole block. A write carrying `logging` changes what the log keeps from the next entry.
-- `config:write` writes the document as sent once its merge parses, re-layers every open session, and pushes `config` and `workflows` invalidations.
+- `config:write` writes the document as sent once its merge parses, re-layers every open session, and pushes `config` and `workflows` invalidations. It is also the channel after which main repaints the OS window controls: the frame is the shared root's and the personal layer's `appearance` (`AppService.windowAppearance`), never a project's. `settings:write` no longer carries anything the frame reads.
 - `artifact:serve` and `artifact:list` say `no project is open` for a named project that is not open. `artifact:serve` keeps the 64 newest grants, so an older frame URL stops resolving.
 - `git:identity` is cached per project for the life of the process, so a changed `user.name` is not seen until restart.
 - `file:find` visits at most 20 000 entries breadth first, skips dot directories and `node_modules`, `dist`, `build`, `out`, `target`, `vendor`, `coverage` and `__pycache__`, clamps `limit` to 1 through 200 with 30 by default, sorts by depth then name, and sets `truncated` whenever directories were left unvisited.

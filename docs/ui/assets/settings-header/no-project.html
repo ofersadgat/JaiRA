@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="doc" content="ui/components/settings-header">
 <meta name="state" content="no-project">
-<meta name="captured" content="2026-09-13">
+<meta name="captured" content="2026-09-24">
 <meta name="reflects" content="shipped">
 <title>settings-header · no-project</title>
 <link rel="stylesheet" href="../../../../packages/app/src/renderer/styles.css">
@@ -13,39 +13,8 @@
 </head>
 <body class="mockup">
 <p class="mockup-caption">ui/components/settings-header · no-project</p>
-<div class="mockup-stage" style="width: 960px">
-  <div class="view settings-view">
-    <div class="col mid settings-body">
-      <div class="settings-head">
-        <span class="sub">Editing the shared settings, which apply to every project on this machine. Open a project to override them for it.</span>
-      </div>
-      <div class="cfg-pane">
-        <section class="cfg-group">
-          <header class="cfg-group-head">
-            <h4>Artifacts</h4>
-          </header>
-        </section>
-      </div>
-    </div>
-  </div>
-  <div class="view settings-view">
-    <div class="col mid settings-body">
-      <div class="settings-head">
-        <span class="sub">Editing the shared settings, which apply to every project on this machine. Open a project to override them for it.</span>
-        <div class="settings-head-right">
-          <span class="sub">checked just now</span>
-          <button class="ghost">Re-check</button>
-        </div>
-      </div>
-      <div class="cfg-pane">
-        <section class="cfg-group">
-          <header class="cfg-group-head">
-            <h4>Model providers</h4>
-          </header>
-        </section>
-      </div>
-    </div>
-  </div>
+<div class="mockup-stage" style="width: 900px; background: var(--bg)">
+<div class="view settings-view"><div class="col mid settings-body"><div class="set-page"><header class="set-head"><div class="set-head-say"><div class="set-title" role="heading" aria-level="1">Runs</div><p class="set-lead">How a run behaves while it is going. Editing <b>~/.jaira</b>, shared by every project on this machine; a project&#x27;s own settings override it, and yours override both.</p></div><div class="set-head-aside"><div class="layer-picker" role="group" aria-label="Configuration layer"><button class="ghost" title="only you, on this machine — personal-settings.json, never shared, and read after every other layer">Just you</button><button class="layer-on" title="the shared root — changes here affect every project that has not overridden them">Shared (all projects)</button></div></div></header><div class="cfg-pane"><section class="set-section" data-part="exec-environment" data-part-label="Where commands run"><div class="set-section-title" role="heading" aria-level="2"><span class="set-section-name">Where commands run<span class="set-icon set-info" title="Natively, or inside a WSL distro — which is where git and every agent then run too. Deliberately not Windows git against \\wsl$, which is slow and permission-fragile." aria-label="Natively, or inside a WSL distro — which is where git and every agent then run too. Deliberately not Windows git against \\wsl$, which is slow and permission-fragile." role="img">ⓘ</span></span></div><div class="set-group"><div class="cfg-fields"><div class="cfg-field set-field off"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set Environment here" title="set Environment here" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">Environment</span><span class="set-icon set-info" title="Writes execEnvironment." aria-label="Writes execEnvironment." role="img">ⓘ</span></span><span class="cfg-hint">Naming a distro runs everything inside it.</span></div><div class="cfg-control" inert=""><select class="cfg-input"><option value="windows" selected="">natively on Windows</option><option value="wsl">inside a WSL distro</option></select></div></div></div></div></section><section class="set-section" data-part="memo" data-part-label="Memoization"><div class="set-section-title" role="heading" aria-level="2"><span class="set-section-name">Memoization<span class="set-icon set-info" title="Remember what a model answered and reuse it. Off by default, because it changes what a re-run observes." aria-label="Remember what a model answered and reuse it. Off by default, because it changes what a re-run observes." role="img">ⓘ</span></span></div><div class="set-group"><div class="cfg-fields"><div class="cfg-field set-field off"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set enabled here" title="set enabled here" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">remember model answers</span><span class="sf-type">yes / no</span><span class="set-icon set-info" title="Writes memo.enabled." aria-label="Writes memo.enabled." role="img">ⓘ</span></span><span class="cfg-hint">It saves real money, and it is not a pure optimization: a re-run returns the first run&#x27;s answer rather than asking again — surprising if you re-ran precisely because you wanted a fresh one.</span></div><div class="cfg-control" inert=""><div class="sf-absent">not set here — inherits false</div></div></div></div></div></section><section class="set-section" data-part="autopilot" data-part-label="Fast-forward"><div class="set-section-title" role="heading" aria-level="2"><span class="set-section-name">Fast-forward<span class="set-icon set-info" title="When a fast-forward lets the conversation answer a question for you, and when it leaves it." aria-label="When a fast-forward lets the conversation answer a question for you, and when it leaves it." role="img">ⓘ</span></span></div><div class="set-group"><div class="cfg-fields"><div class="cfg-field set-field"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="true" aria-label="askBelow is set here — switch off to inherit it" title="askBelow is set here — switch off to inherit it" class="cfg-switch on"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">leave it to me below</span><span class="sf-type">number</span><span class="set-icon set-info" title="Under this confidence it does not: the question waits for you, as it would have. 1 means never answer for me; 0 means always. It has nothing to do with any threshold a workflow of your own declares. Writes autopilot.askBelow." aria-label="Under this confidence it does not: the question waits for you, as it would have. 1 means never answer for me; 0 means always. It has nothing to do with any threshold a workflow of your own declares. Writes autopilot.askBelow." role="img">ⓘ</span></span><span class="cfg-hint">A fast-forward runs the states between where the work stands and where you sent it, and the conversation steering it answers the questions that come up — each marked, and each a point you can rewind to.</span></div><div class="cfg-control"><input class="cfg-input mono num" inputMode="decimal" value="0.95"/></div></div></div></div></section><section class="set-section" data-part="workflows" data-part-label="Workflow lookup"><div class="set-section-title" role="heading" aria-level="2"><span class="set-section-name">Workflow lookup<span class="set-icon set-info" title="The roots a bare workflow reference is searched along — shell PATH semantics, first match wins." aria-label="The roots a bare workflow reference is searched along — shell PATH semantics, first match wins." role="img">ⓘ</span></span></div><div class="set-group"><div class="cfg-fields"><div class="cfg-field set-field wide off"><div class="cfg-field-say"><span class="cfg-field-head"><button type="button" role="switch" aria-checked="false" aria-label="set path here" title="set path here" class="cfg-switch"><span class="cfg-switch-knob" aria-hidden="true"></span></button><span class="cfg-label">search path</span><span class="sf-type">list</span><span class="set-icon set-info" title="Setting it REPLACES that list rather than extending it, so a project that sets it takes on naming every root it wants. Writes workflows.path." aria-label="Setting it REPLACES that list rather than extending it, so a project that sets it takes on naming every root it wants. Writes workflows.path." role="img">ⓘ</span></span><span class="cfg-hint">Empty means the layers in order, generated from the roots — which is what almost every project wants.</span></div><div class="cfg-control" inert=""><div class="sf-absent">not set</div></div></div></div></div></section></div></div></div></div>
 </div>
 </body>
 </html>

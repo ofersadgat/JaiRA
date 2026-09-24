@@ -7,9 +7,9 @@ realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exi
 serves: [product/agents-act-only-where-allowed, product/risky-actions-wait-for-approval, product/share-processes-across-projects]
 surfaces: [ui/surfaces/settings-tools, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/icon, ui/components/schema-form]
-implemented_by: [packages/app/src/renderer/permissionSetRows.tsx, packages/app/src/renderer/permissionSetCard.tsx, packages/app/src/renderer/composerPermissionSet.ts]
-verified_by: [packages/app/test/permission-sets.test.ts, packages/app/test/composer.test.ts]
-mockups: [ui/assets/settings-toolsets/project.html, ui/assets/settings-toolsets/built-in.html, ui/assets/settings-toolsets/nested.html, ui/assets/tools-field/state-field.html]
+implemented_by: [packages/app/src/renderer/permissionSetRows.tsx, packages/app/src/renderer/permissionSetCard.tsx, packages/app/src/renderer/composerPermissionSet.ts, packages/app/src/renderer/mcpBucket.tsx, packages/app/src/renderer/mcpBucketModel.ts]
+verified_by: [packages/app/test/permissionSets.test.ts, packages/app/test/composer.test.ts, packages/app/test/mcpBucket.test.ts]
+mockups: [ui/assets/settings-toolsets/project.html, ui/assets/settings-toolsets/built-in.html, ui/assets/settings-toolsets/nested.html, ui/assets/settings-toolsets/mcp.html, ui/assets/tools-field/state-field.html]
 siblings: [ui/components/composer-setting-chip, ui/components/tools-field, ui/components/command-approval, ui/components/settings-field]
 ---
 
@@ -23,7 +23,7 @@ A permission set drawn as the sections of the tool vocabulary — File permissio
 
 **Do not use when.** A whole permission set is being PICKED rather than read — that is the Permissions card's rows, on the [composer setting chip](composer-setting-chip.md). One shell line being judged part by part is the [command approval](command-approval.md).
 
-**Two things differ between hosts, and both are props rather than forks.** How a line leaves: the composer lists every tool and TICKS the held ones, so an unticked tool keeps its row and the mode it would run under; a permission set being edited lists what it HOLDS, so every held line starts with a red minus and what is not held is reached through the section's last line. And whether anything can change: what ships is drawn with the same rows, inert.
+**Two things differ between hosts, and both are props rather than forks.** How a line leaves: the composer lists every tool and TICKS the held ones, so an unticked tool keeps its row and the mode it would run under; a permission set being edited lists what it HOLDS, so every held line starts with a red minus and what is not held is reached through the section's last line. And whether anything can change: the same rows, inert, where nothing can be written (a YAML file, a write in flight, a change waiting to be told where it goes). What ships is not one of those since 2026-09-23 — its first change writes the layer's copy ([settings-tools](../surfaces/settings-tools.md)).
 
 ## Sections fold, a line carries two buttons, and commands hang under their program
 
@@ -33,6 +33,7 @@ A permission set drawn as the sections of the tool vocabulary — File permissio
 - **Mode button.** The four modes with their glyphs — a shut lock `ask`, a star `auto`, an open lock `allow` in `--ok`, a shield `deny` in `--bad` — opening a submenu with a sentence under each. `custom` with no glyph is what a section reads as when its lines disagree.
 - **Implementation button.** Quieter than the mode beside it: `JaiRA` or the agent's own name for that tool. Drawn only where there is a choice — the answering agent has a built-in for the job. In a permission set with no one agent answering it reads `native`, and the menu names which agent calls it what.
 - **Command group.** A program under Execution, folded, its name in the data face over `{n} subcommands named; any other {program} {verb}` when open and the subcommand names joined by ` · ` when closed. Its mode is the entry for the bare program and is NOT derived from its subcommands. Its subcommands hang 18px further in.
+- **MCP server group.** The MCP section holds one group per MCP server configured on Settings → Connections, and per server a line names, drawn as a command group is: the server's name in the data face over `{n} tools · {m} named; the rest {mode}`, a count, and its own mode button — the server's line (`mcp__figma`), reading the set's `other` until its first change writes one. Open, a line per named tool (`mcp__figma__get_code`) with the server's description of it and `read-only, says the server` or `destructive, says the server`, then the add line `name another {server} tool: {k} more, from {first} to {last}` from the list the server last answered with; a tool picked there starts `allow` if the server calls it read-only and `deny` if destructive. With no server configured the section reads `nothing here — add a server in Settings → Connections` (`mcpBucket.tsx`).
 - **Add line.** Last in a section and last in a group, in a permission set being edited: a dashed `+` circle and a `--tok-hint` label. It opens the card's own floating menu listing what that section does not hold — the tools, `script`, and the programs nobody has named — with `another…` last, which swaps the line for a one-box [schema form](schema-form.md) that takes anything typed. A section with nothing left to offer and nothing to type draws no add line.
 - **Other.** Always last, parted by a rule: the catch-all with its own mode button and no minus.
 - **Empty section.** Drawn with `nothing here` rather than dropped — a category with nothing in it is a fact about this project. In a reading, a section that holds no line is left out entirely.

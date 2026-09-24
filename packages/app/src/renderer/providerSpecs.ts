@@ -176,6 +176,13 @@ export const MODEL_PROVIDERS: ProviderSpec[] = [
             placeholder: "http://localhost:11434/v1",
           },
           {
+            // Only the raw document reached this before it went (2026-09-23).
+            path: "headers",
+            label: "Headers",
+            hint: "Extra request headers, NAME=value per line — for a server behind a proxy that wants one.",
+            control: "env",
+          },
+          {
             path: "supportsStructuredOutputs",
             label: "Structured output",
             hint: "A CEILING on what a call may ask for. llama-server and vLLM honour a full JSON schema; a bare completion shim does not.",

@@ -2,7 +2,7 @@
 id: engineering/units/project-store
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-09-23
 implements: [product/pick-up-where-it-left-off, product/share-processes-across-projects, product/run-history-travels-with-the-repository, ux/patterns/refuse-with-the-reason-and-the-fix]
 layer: data
 owns_contracts: [engineering/contracts/sqlite-schema]
@@ -16,7 +16,7 @@ siblings: [engineering/units/storage-policy, engineering/units/process-claims, e
 
 ## The project store turns a directory into an open `Project`, and leaves what each store writes to the stores
 
-`openProject(dir, {baseDir})` in `project.ts` refuses a directory with no `.jaira/`, creates the shared root's layout with `initBase`, loads the layered config with `loadLayeredConfig` and hands both to `openAt`. `openSharedProject` opens the shared root itself as a `Project` of `kind: "shared"`, parsing its `settings.json` alone because no layer sits behind it. `openAt` then runs, in this order:
+`openProject(dir, {baseDir})` in `project.ts` refuses a directory with no `.jaira/`, creates the shared root's layout with `initBase`, loads the layered config with `loadLayeredConfig` — built in, the shared root, the project and the personal layer `<base>/personal-settings.json` — and hands both to `openAt`. `openSharedProject` opens the shared root itself as a `Project` of `kind: "shared"`, merging the built-in layer, its own `settings.json` once and the personal layer, with no project layer between. Before either reads its config, the open runs the settings migrations, `migrateUserSettings` among them, which moves the look out of `user-settings.json` into the personal layer ([user-settings](user-settings.md)). `openAt` then runs, in this order:
 
 1. It creates `system/snapshots` and `system/tasks`, so a deleted or never-cloned `system/` is regenerated rather than refused.
 2. It opens `system/jaira.db` with `openDb`.
@@ -73,7 +73,7 @@ It deliberately does not own:
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| Either `settings.json` layer is malformed, half-written or holds a refused field | `readJsonFile` or `parseConfig` throws out of the open | fix the named field and reopen | the project does not open; the error names `config.<field>` |
+| A settings layer is malformed, half-written or holds a refused field | `readJsonFile` or `parseConfig` throws out of the open | fix the named field and reopen | the project does not open; the error names `config.<field>` |
 | No addon is built for this runtime's ABI | `openDb` throws a `Refusal` carrying the loader's message and the advice | run `npm run abi` | the open error names the command |
 | Two processes open one database at once | each migration step takes the write lock, so the second waits and skips a step whose version it re-reads as applied; a lock held past `better-sqlite3`'s busy timeout throws `database is locked` | reopen | the second open fails only when the lock outlasts the timeout |
 | The process is killed during a migration | the step's transaction never commits and the database stays at the last whole version; rebuild steps check the table's shape, never the version | the next open re-runs the step | none |

@@ -45,14 +45,14 @@ Files, Chat and All conversations carry quiet verbs at the row's far end, 20px g
 | loading | Cannot occur as its own state: rows draw from the projects already open, and counts change as work loads. | |
 | partial | Counts folded into `+{n}` where a row has no room for them, drawn on the All tasks row. | [at-root.html](../assets/sidebar/at-root.html) |
 | error | Cannot occur in the column: a project that fails to open is reported by the [error notice](error-notice.md) and adds no row. | |
-| settings | While Settings, Logs, Debug or Components is the room, a sheet covers the column below the title row. | [settings.html](../assets/sidebar/settings.html) |
+| settings | While Settings, Logs, Debug or Components is the room, a sheet covers the column below the title row: the six pages, Tools open with its three sections under it. | [settings.html](../assets/sidebar/settings.html) |
 | collapsed | The 46px rail, at the root and standing in a project side by side. | [collapsed.html](../assets/sidebar/collapsed.html) |
 
 ## The settings sheet holds everything that belongs to no project
 
 - **Ground.** Opaque `--panel-2` with the `--lift` shadow, from under the title row to the bottom of the window. The foot's Settings row is not drawn while it is open.
 - **Header.** The Settings row lifted to the top with `‹` left of its glyph, lit while Settings is the room.
-- **Pages.** Two groups, each an uppercase heading with a `--dim` note at its right: `Just you` · `this machine` holding `Appearance`, and `Project & shared` · `layered` holding `Connections`, `Models`, `Tools`, `Runs`, `Files`, `Data & history` and `settings.json`, the last in the data face. Each page is a line glyph and its name. The page on screen takes `--fill-ghost-selected`, `--text` and weight 600, and only while Settings is the room; its own sections are listed indented under it, the one being read lit as the page scrolls. The [settings view](settings-view.md) describes the pages.
+- **Pages.** One list with no group headings: `Appearance`, `Connections`, `Models`, `Tools`, `Runs` and `Data & history`. Which layer a page edits is said by the switch on the page, not by the list. Each page is a line glyph and its name. The page on screen takes `--fill-ghost-selected`, `--text` and weight 600, and only while Settings is the room; its own sections are listed indented under it, the one being read lit as the page scrolls. The [settings view](settings-view.md) describes the pages.
 - **Rest.** Pinned to the sheet's foot under a `--line` rule: `≡ Logs`, `⌁ Debug`, `▤ Components`, then `☾ Dark` in light or `☀ Light` in dark. The one on screen is lit.
 
 ## The rail keeps every room one click away in 46px

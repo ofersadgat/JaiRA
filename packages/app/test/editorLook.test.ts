@@ -26,7 +26,7 @@ import {
   defaultAppearance,
   defaultEditors,
   editorKnobApplies,
-  parseSettings,
+  parseAppearanceConfig,
   type EditorKind,
   type EditorLook,
 } from "@jaira/shared";
@@ -37,7 +37,7 @@ import { MONOKAI_LIGHT_TM } from "../src/renderer/themes/monokaiLight";
 import { applyEditors, editorLook, onEditorLook } from "../src/renderer/editorLook";
 
 const looksOf = (patch: Record<string, unknown>): Record<EditorKind, EditorLook> =>
-  parseSettings({ editors: patch }).editors;
+  parseAppearanceConfig({ editors: patch }).editors;
 
 describe("what an untouched app is set in", () => {
   it("keeps the values the components had before they were settings", () => {
@@ -72,43 +72,44 @@ describe("what an untouched app is set in", () => {
   });
 });
 
-describe("reading the preference back", () => {
-  it("keeps the readable knobs of a half-broken document", () => {
-    // Per KNOB, like the typography parser and the remembered layout: this is a preference file
-    // rather than something anyone authored, and one bad value is no reason to reset an editor.
-    const looks = looksOf({ code: { minimap: true, wrap: "yes", tabSize: 4 } });
+describe("reading the looks a settings layer states", () => {
+  it("fills in what the layer does not state, knob by knob and surface by surface", () => {
+    const looks = looksOf({ code: { minimap: true, tabSize: 4 } });
     expect(looks.code.minimap).toBe(true);
-    expect(looks.code.wrap).toBe(false);
+    expect(looks.code.wrap).toBe(defaultEditorLook("code").wrap);
     expect(looks.code.tabSize).toBe(4);
     // …and the three surfaces the document said nothing about are untouched.
     expect(looks.markdown).toEqual(defaultEditorLook("markdown"));
   });
 
-  it("snaps a tab width to one the control offers, rather than clamping it", () => {
-    // A hand-written 3 is not a width this app draws. Falling back to the default is a state
-    // somebody can see and correct; drawing a 3-column tab nothing can set would not be.
-    expect(looksOf({ code: { tabSize: 3 } }).code.tabSize).toBe(2);
+  it("refuses a knob of the wrong kind, naming it", () => {
+    // Strict, like every block of settings.json — the old preferences file's forgiveness lives on only
+    // in its migration, which cleaned what it moved.
+    expect(() => looksOf({ code: { wrap: "yes" } })).toThrow(/editors\.code\.wrap must be true or false/);
+  });
+
+  it("refuses a tab width the control does not offer", () => {
+    // A hand-written 3 is not a width this app draws.
+    expect(() => looksOf({ code: { tabSize: 3 } })).toThrow(/tabSize must be one of 2, 4, 8/);
     for (const size of TAB_SIZES) expect(looksOf({ code: { tabSize: size } }).code.tabSize).toBe(size);
   });
 
-  it("clamps line spacing instead of dropping it", () => {
-    // A 0.2 line height is an editor whose rows overlap, with no control on screen to drag it back
-    // — the same argument that clamps a font size rather than refusing it.
-    expect(looksOf({ code: { lineHeight: 0.2 } }).code.lineHeight).toBe(LINE_HEIGHT.min);
-    expect(looksOf({ code: { lineHeight: 40 } }).code.lineHeight).toBe(LINE_HEIGHT.max);
+  it("refuses line spacing outside what the control offers", () => {
+    // A 0.2 line height is an editor whose rows overlap, with no control on screen to drag it back.
+    expect(() => looksOf({ code: { lineHeight: 0.2 } })).toThrow(new RegExp(`lineHeight must be a number from ${LINE_HEIGHT.min}`));
+    expect(() => looksOf({ code: { lineHeight: 40 } })).toThrow(/lineHeight/);
     expect(looksOf({ code: { lineHeight: 1.8 } }).code.lineHeight).toBe(1.8);
   });
 
-  it("ignores a knob the surface does not have, however the file spells it", () => {
-    // The document may say anything; what is READ is `EDITOR_KNOBS`. A minimap written against the
-    // JSON editor is a setting nothing could spend, and it must not come back out of the parser as
-    // one — the pane derives its controls from the same table.
-    expect(looksOf({ json: { minimap: true } }).json).toEqual(defaultEditorLook("json"));
+  it("refuses a knob the surface does not have", () => {
+    // A minimap written against the JSON editor is a setting nothing could spend; the pane derives
+    // its controls from the same table, so only a hand-edited layer can say it — and is told.
+    expect(() => looksOf({ json: { minimap: true } })).toThrow(/editors\.json\.minimap is not a setting/);
     expect(EDITOR_KNOBS.json).not.toContain("minimap");
   });
 
-  it("reads a settings file written before any of this existed", () => {
-    expect(parseSettings({ theme: "dark" }).editors).toEqual(defaultEditors());
+  it("reads a layer that says nothing about editors as every default", () => {
+    expect(parseAppearanceConfig({ mode: "dark" }).editors).toEqual(defaultEditors());
   });
 });
 
@@ -228,7 +229,7 @@ describe("which palette the editors are painted in", () => {
     // The parser keeps it: a settings file outlives a release, and a theme that comes back should
     // find its preference where it was left. The RENDERER decides what to draw, and draws the
     // default — a state somebody can see and correct — rather than turning the setting off.
-    expect(parseSettings({ appearance: { editorTheme: "gruvbox" } }).appearance.editorTheme).toBe("gruvbox");
+    expect(parseAppearanceConfig({ editorTheme: "gruvbox" }).editorTheme).toBe("gruvbox");
     expect(editorThemeSpec("gruvbox")?.id).toBe(DEFAULT_EDITOR_THEME);
     // …except the one id that is not a theme, which means exactly what it says.
     expect(editorThemeSpec(EDITOR_THEME_APP)).toBeUndefined();

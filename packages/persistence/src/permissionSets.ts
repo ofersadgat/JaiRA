@@ -48,6 +48,7 @@ import {
   permissionSetBucketProblem,
   permissionSetNameProblem,
   permissionSetTextFollows,
+  PERMISSION_SET_ROOT_LABELS,
   type JairaPaths,
   type StatePermissionSetIssue,
   type PermissionSetAddition,
@@ -346,9 +347,9 @@ export interface PermissionSetLayer {
  */
 export function permissionSetLayers(paths: JairaPaths): PermissionSetLayer[] {
   const layers: PermissionSetLayer[] = [
-    { layer: "project", root: paths.jairaDir, token: "$JAIRA", label: ".jaira" },
-    { layer: "base", root: paths.base.baseDir, token: "$BASE", label: "~/.jaira" },
-    { layer: "system", root: paths.builtIn.dir, token: "$SYSTEM", label: "built in" },
+    { layer: "project", root: paths.jairaDir, token: "$JAIRA", label: PERMISSION_SET_ROOT_LABELS.project },
+    { layer: "base", root: paths.base.baseDir, token: "$BASE", label: PERMISSION_SET_ROOT_LABELS.base },
+    { layer: "system", root: paths.builtIn.dir, token: "$SYSTEM", label: PERMISSION_SET_ROOT_LABELS.system },
   ];
   return layers.filter((layer) => !(layer.layer === "project" && resolve(layer.root) === resolve(paths.base.baseDir)));
 }
@@ -589,7 +590,8 @@ export function writePermissionSet(paths: JairaPaths, id: string, layer: Workflo
 }
 
 /**
- * "Reset to built in": delete a layer's OVERRIDE, so the layer below answers again.
+ * "Put back the built-in" / "Reset to shared": delete a layer's COPY of a lower layer's permission set,
+ * so the layer below answers again.
  *
  * Refused where there is nothing below — that is deleting a permission set states may name, which is the
  * Files view's act, with its own question about who refers to it — and for the built-in layer.

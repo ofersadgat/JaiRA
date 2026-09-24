@@ -643,6 +643,7 @@ function ListNode({
                 />
               ) : null}
               {!composite && errorAt(ctx, path) !== undefined ? <div className="reason cfg-error">{errorAt(ctx, path)}</div> : null}
+              {ctx.itemNote?.(ctx.path, item, i) ?? null}
             </div>
             {composite ? null : acts}
           </div>
@@ -656,7 +657,7 @@ function ListNode({
             disabled={disabled}
             onClick={() => write([...list, seedFor(items, root)], new Set([...open, list.length]))}
           >
-            + add
+            {ctx.addLabel?.(ctx.path) ?? "+ add"}
           </button>
         </div>
       )}

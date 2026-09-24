@@ -18,7 +18,7 @@ import {
   PUSH_CHANNEL,
   resolveTheme,
   takeHomeFlag,
-  type JairaSettings,
+  type JairaAppearanceConfig,
   type IpcChannel,
   type PushMessage,
   type SaveFileRequest,
@@ -408,6 +408,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "board:view": ((request: { level?: string; project?: string } | undefined) => service.board(request ?? {})) as Handler,
   "board:roots": ((request: { project?: string } | undefined) => service.boardRoots(request ?? {})) as Handler,
   "files:tree": ((request: { project?: string } | undefined) => service.filesTree(request)) as Handler,
+  "files:hiddenReport": ((request: Parameters<typeof service.hiddenReport>[0]) => service.hiddenReport(request)) as Handler,
+  "files:whyHidden": ((request: Parameters<typeof service.whyHidden>[0]) => service.whyHidden(request)) as Handler,
   "state:view": ((request: { stateId: string; project?: string }) =>
     service.stateView(request.stateId, request.project)) as Handler,
   "state:slots": ((request: { stateIds: string[]; project?: string }) =>
@@ -508,6 +510,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "executor:probe": ((request: { name?: string } | undefined) => service.probeExecutors(request?.name)) as Handler,
   "model:probe": (() => service.probeModelRoutes()) as Handler,
   "model:probeLocal": ((request: { baseURL?: string } | undefined) => service.probeLocalServers(request ?? {})) as Handler,
+  "mcp:detect": (() => service.detectMcpServers()) as Handler,
+  "mcp:tools": ((request: { recheck?: boolean } | undefined) => service.mcpTools(request ?? {})) as Handler,
   "model:checkWeights": ((request: { weights?: Record<string, { modelPath: string }> } | undefined) => service.checkWeights(request ?? {})) as Handler,
   "availability:read": (() => service.readAvailability()) as Handler,
   "executor:signIn": ((request: { name: string }) => service.signInExecutor(request.name)) as Handler,
@@ -530,8 +534,9 @@ function registerIpc(): void {
         // messages are already human-facing ("unknown task 't-1'").
         const answer = await (handlers[channel] as (request: unknown) => unknown)(request);
         // The one handler whose result the frame depends on: the window controls are drawn by the
-        // OS, so a theme switch has to be pushed back out to it.
-        if (channel === "settings:write") repaintTitleBar();
+        // OS, so a theme switch — a write to a settings layer's `appearance` — has to be pushed back
+        // out to it.
+        if (channel === "config:write") repaintTitleBar();
         return answer;
       } catch (e) {
         // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
@@ -547,14 +552,15 @@ function registerIpc(): void {
 /**
  * The frame colour Chromium paints before the document exists.
  *
- * Read from the saved preference rather than hardcoded: this is painted before any CSS loads, so a
- * fixed value means every cold start flashes the wrong theme at anyone using the other one. The
- * values are `PALETTE_FRAME`, a copy of each palette's `--bg` in `styles.css` — the two have to be
- * kept in step, which is why both say so.
+ * Read from the saved look rather than hardcoded: this is painted before any CSS loads, so a fixed
+ * value means every cold start flashes the wrong theme at anyone using the other one. The look is the
+ * shared root's with the personal layer's over it (`AppService.windowAppearance`) — never a project's,
+ * because a window holds several. The values are `PALETTE_FRAME`, a copy of each palette's `--bg` in
+ * `styles.css` — the two have to be kept in step, which is why both say so.
  */
-function frameOf(settings: JairaSettings): { ground: string; panel: string; dim: string } {
+function frameOf(look: JairaAppearanceConfig): { ground: string; panel: string; dim: string } {
   // `system` asks the OS, which is what the renderer asks too (`prefers-color-scheme`).
-  return PALETTE_FRAME[settings.appearance.palette][resolveTheme(settings.theme, nativeTheme.shouldUseDarkColors)];
+  return PALETTE_FRAME[look.palette][resolveTheme(look.mode, nativeTheme.shouldUseDarkColors)];
 }
 /**
  * How many DISTINCT renderer console errors are mirrored into the log before the window stops being
@@ -580,8 +586,8 @@ const TITLE_BAR_HEIGHT = 34;
  * ours to style in CSS — it is this value — and a fixed one would leave a white notch in the corner
  * of the dark theme. `--panel`, because what sits under that corner is a panel in every view.
  */
-function titleBarOverlay(settings: JairaSettings): { color: string; symbolColor: string; height: number } {
-  const frame = frameOf(settings);
+function titleBarOverlay(look: JairaAppearanceConfig): { color: string; symbolColor: string; height: number } {
+  const frame = frameOf(look);
   return { color: frame.panel, symbolColor: frame.dim, height: TITLE_BAR_HEIGHT };
 }
 
@@ -589,7 +595,7 @@ function titleBarOverlay(settings: JairaSettings): { color: string; symbolColor:
  * Repaint the window controls after a theme switch.
  *
  * Called from the IPC seam rather than from the renderer over a channel of its own: the theme is
- * already written through `settings:write`, and a second round trip that the renderer had to
+ * already written through `config:write`, and a second round trip that the renderer had to
  * remember to make is a second round trip it would eventually forget. macOS draws its own traffic
  * lights and has no overlay to set, so the call is guarded rather than platform-branched at every
  * use.
@@ -598,7 +604,7 @@ function repaintTitleBar(): void {
   if (process.platform === "darwin") return;
   if (window === undefined || window.isDestroyed()) return;
   try {
-    window.setTitleBarOverlay(titleBarOverlay(service.readSettings()));
+    window.setTitleBarOverlay(titleBarOverlay(service.windowAppearance()));
   } catch {
     // Only available on a window created with an overlay. Nothing here is worth failing a settings
     // write over.
@@ -606,11 +612,11 @@ function repaintTitleBar(): void {
 }
 
 async function createWindow(): Promise<BrowserWindow> {
-  const settings = service.readSettings();
+  const look = service.windowAppearance();
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
-    backgroundColor: frameOf(settings).ground,
+    backgroundColor: frameOf(look).ground,
     show: false,
     /*
      * NO TITLE BAR, and no menu bar either (see `app.whenReady`).
@@ -626,7 +632,7 @@ async function createWindow(): Promise<BrowserWindow> {
      * describes, and the layout reserves that band through the `titlebar-area-*` env variables.
      */
     titleBarStyle: "hidden",
-    titleBarOverlay: titleBarOverlay(settings),
+    titleBarOverlay: titleBarOverlay(look),
     webPreferences: {
       preload: PRELOAD,
       // The renderer gets no Node: its only capability is the typed bridge

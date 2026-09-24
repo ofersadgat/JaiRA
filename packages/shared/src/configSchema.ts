@@ -190,7 +190,7 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
               type: "string",
               title: "model",
               description:
-                "Which model judges each call, written as a state's model is — claude-haiku-4, or claude-cli/haiku to insist on a route. Empty uses whatever this machine's default executor answers with. A fast, cheap model is the point: it runs once per call.",
+                "Which model judges each call, written as a state's model is — claude-haiku-4-5, or claude-cli/haiku to insist on a route — or a preset's name, which means the model that preset chooses (JaiRA ships simple here). Empty uses whatever this machine's default executor answers with. A fast, cheap model is the point: it runs once per call.",
             },
             prompt: {
               type: "string",

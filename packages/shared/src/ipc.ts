@@ -26,6 +26,7 @@ import type {
 } from "./executors";
 import type { ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
+import type { HiddenReport, HiddenVerdict } from "./hiddenPaths";
 import type { SchemaViolation } from "./schemas";
 import type { TaskFastForwardRequest, TaskFastForwardResult, TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
 import type { TaskConnectRequest, TaskConnectResult, TaskConnectUndoRequest, TaskConnectUndoResult } from "./connect";
@@ -35,6 +36,7 @@ import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { CommandApproval } from "./commandParts";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
+import type { McpDetectedSource, McpToolsReport } from "./mcp";
 import type { PermissionSetsView, PermissionSetWriteKind } from "./permissionSetSettings";
 import type {
   BoardView,
@@ -402,32 +404,56 @@ export interface PruneRequest {
 // --- configuration, executors and workflow authoring -------------------------
 
 /**
- * The two configuration layers, as the settings UI addresses them.
+ * The three configuration layers a person writes, as the settings UI addresses them — weakest first
+ * in {@link CONFIG_LAYERS}.
  *
  * `base` is the shared root behind every project on this machine; `project` is this checkout's own
- * `.jaira/settings.json`, laid over it. Every write names its layer explicitly — there is no "current"
- * layer — because "did I just change this project or every project?" is precisely the question a
- * settings screen must never leave ambiguous.
+ * `.jaira/settings.json`, laid over it; `you` is `personal-settings.json` in the shared root, laid over
+ * both — the settings that are one person's on this machine and never arrive through a pull request.
+ * Every write names its layer explicitly — there is no "current" layer — because "did I just change
+ * this project, every project, or only what I see?" is precisely the question a settings screen must
+ * never leave ambiguous.
  */
-export type ConfigLayer = "base" | "project";
+export type ConfigLayer = "you" | "project" | "base";
 
-/** Both layers as authored, plus what they add up to. */
+/** See `files:hiddenReport`. */
+export interface HiddenReportRequest {
+  project?: ProjectRef;
+  /** A rule to preview, appended after every other. */
+  extra?: string;
+  /** Whose the previewed rule would be. Absent: the project's with one open, else the shared root's. */
+  layer?: ConfigLayer;
+}
+
+/** The layers in the order they are merged, weakest first: the shared root, the project, you. */
+export const CONFIG_LAYERS: readonly ConfigLayer[] = ["base", "project", "you"];
+
+/** Every layer as authored, plus what they add up to. */
 export interface ConfigView {
-  /** The raw document of each layer, or null when that layer has no `settings.json`. */
+  /** The raw document of each layer, or null when that layer has no file. */
   base: JsonValue | null;
   project: JsonValue | null;
-  /** Base merged under project, parsed and defaulted — what a run would actually use. */
+  /**
+   * What JaiRA ships — `$SYSTEM/settings.json`, the layer under every other (decision 0006). Read-only:
+   * no {@link ConfigLayer} names it, and editing a value it holds writes that value into the layer being
+   * edited. Here so a screen can say which values are the built-in ones.
+   */
+  system: JsonValue | null;
+  /** `personal-settings.json` — the same schema as `settings.json`, read after every other layer. */
+  you: JsonValue | null;
+  /** Every layer merged, weakest first (built in, base, project, you), parsed and defaulted — what a run would actually use. */
   effective: JsonValue;
   /** Where each layer's file lives, so the UI can show the path it is editing. */
   baseFile: string;
   projectFile: string;
+  youFile: string;
   /** The shared root itself, for the "where does this come from" line. */
   baseDir: string;
 }
 
 export interface WriteConfigRequest {
   layer: ConfigLayer;
-  /** WHICH project, for the `project` layer — see {@link ReadWorkflowRequest.project}. */
+  /** WHICH project, for the `project` layer — see {@link ReadWorkflowRequest.project}. The other two need none. */
   project?: ProjectRef;
   /** The whole document for that layer. Parsed and validated before it is written. */
   config: JsonValue;
@@ -1017,6 +1043,11 @@ export interface SavePermissionSetRequest {
  * the nearest lower layer's file, holding only the lines that differ; or — when a line the lower
  * layer holds was taken out, which an override has no way to say — the whole map, no longer
  * following. The built-in layer is refused.
+ *
+ * It is also the whole of copy-on-edit: the first change to a set a layer only SEES (what ships, or
+ * the shared one seen from a project) sends the map as shown with that one change, and the override
+ * that lands is the layer's copy — made and changed in one write, so there is never a copy on disk
+ * that the change did not reach.
  */
 export interface WritePermissionSetRequest {
   /** `<bucket>/<name>`. */
@@ -1033,7 +1064,7 @@ export interface WritePermissionSetResult {
   kind: PermissionSetWriteKind;
 }
 
-/** "Reset to built in": delete a layer's override, so the layer below answers again. */
+/** "Put back the built-in" (or "Reset to shared"): delete a layer's copy, so the layer below answers again. */
 export interface ResetPermissionSetRequest {
   id: string;
   layer: WorkflowLayer;
@@ -1561,6 +1592,18 @@ export interface IpcContract {
    * surface where "where am I" is the whole question, so it is asked.
    */
   "files:tree": { request: { project?: ProjectRef } | void; response: FileTree };
+  /**
+   * What each hidden-path rule does to the tree here — the Files tree section's rule list.
+   *
+   * ONE walk of the root (the project's checkout, or the shared root with no project), every hidden
+   * top-most path attributed to the rule that decided it. `extra` is a rule being typed, appended
+   * after every other and reported on its own (`HiddenReport.extra`) — the add line's live preview;
+   * `layer` says whose it would be. Capped by time and entries; `capped` says the counts are
+   * "at least".
+   */
+  "files:hiddenReport": { request: HiddenReportRequest; response: HiddenReport };
+  /** Why one path is or is not in the tree — the rule, its layer, and the folder that matched. */
+  "files:whyHidden": { request: { project?: ProjectRef; path: string }; response: HiddenVerdict };
   /** Everything the Files view shows about one state: its board or its tasks, plus the inspector. */
   "state:view": { request: { stateId: string; project?: ProjectRef }; response: StateView };
   /**
@@ -1855,6 +1898,18 @@ export interface IpcContract {
    */
   "model:checkWeights": { request: { weights?: Record<string, { modelPath: string }> } | void; response: EmbeddedWeightsReport };
   /**
+   * Where other tools on this machine keep MCP servers — Claude Code, the project's `.mcp.json`,
+   * Claude Desktop, Cursor, VS Code — and whether a known local server answers on its port. READ only:
+   * nothing a source lists is started (Settings → Connections → MCP servers, "Add").
+   */
+  "mcp:detect": { request: void; response: McpDetectedSource[] };
+  /**
+   * Each configured server's state and tools. This STARTS the servers the person added — never a
+   * detected one — so it is cached in main: asked again when the servers' configuration changed, or
+   * when `recheck` says so (the section's Re-check).
+   */
+  "mcp:tools": { request: { recheck?: boolean } | void; response: McpToolsReport };
+  /**
    * What can answer a prompt here, as last observed — routes, executors, and the chosen default.
    *
    * The CACHED snapshot. The checks behind it run by themselves at startup, at project open and after
@@ -2030,7 +2085,11 @@ export interface IpcContract {
   "shell:edit": { request: { verb: "cut" | "copy" | "paste" | "selectAll" }; response: { verb: string } };
   "history:size": { request: { project?: ProjectRef } | void; response: HistorySize };
   "history:prune": { request: PruneRequest; response: PruneResult & { remaining: HistorySize } };
-  /** User preferences (theme). Readable with no project open — they belong to the person. */
+  /**
+   * The window's own state — panes, folds, read marks, the log policy, the open projects. Readable with
+   * no project open. How the app LOOKS is not here: it is the `appearance` block of the layered
+   * configuration (`config:read`), whose personal layer is `personal-settings.json`.
+   */
   "settings:read": { request: void; response: JairaSettings };
   "settings:write": { request: Partial<JairaSettings>; response: JairaSettings };
   "config:read": { request: { project?: ProjectRef } | void; response: ConfigView };
@@ -2082,6 +2141,8 @@ export const IPC_CHANNELS = [
   "board:view",
   "board:roots",
   "files:tree",
+  "files:hiddenReport",
+  "files:whyHidden",
   "state:view",
   "state:slots",
   "state:effective",
@@ -2169,6 +2230,8 @@ export const IPC_CHANNELS = [
   "executor:probe",
   "model:probe",
   "model:probeLocal",
+  "mcp:detect",
+  "mcp:tools",
   "model:checkWeights",
   "availability:read",
   "executor:signIn",

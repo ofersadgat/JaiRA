@@ -60,6 +60,7 @@ import {
   takeHomeFlag,
   jairaBasePaths,
   jairaPaths,
+  modelAvailabilityIn,
   parseJsonText,
   ApprovalRequired,
   approvalRefusalMessage,
@@ -98,6 +99,7 @@ import {
   type McpBridgeHost,
   type StartMcpBridge,
   SecretResolver,
+  resolveMcpServers,
   newRegistry,
   NodeExec,
   parseFakeRules,
@@ -605,6 +607,10 @@ function buildRunEnvironment(
   });
   const scripted = wiring.fakeRules !== undefined;
   const presets = config.models.presets;
+  // The DEFAULT executor, resolved — the same tree the app builds, so a workflow behaves the
+  // same way whichever drives it. The CLI passes no availability: it takes no probes, and must not
+  // refuse over a check it never ran.
+  const tree = defaultExecutorTree(config, bundle, { fake: scripted, secrets }).prompt;
   const prompt = buildPromptExecutor({
     ...(wiring.fakeRules !== undefined ? { fakeRules: wiring.fakeRules } : {}),
     ...(wiring.repairTurns !== undefined ? { repairTurns: wiring.repairTurns } : {}),
@@ -618,13 +624,14 @@ function buildRunEnvironment(
             exec,
             startBridge,
             ...(files?.observer !== undefined ? { observer: files.observer } : {}),
+            // The same servers the app hands its agents, looked up through the same chain.
+            mcpServers: resolveMcpServers(config.mcp, (name) => secrets.lookup(name)?.value).servers,
           }),
-          ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
+          // A preset's candidates are judged by the routes alone — registered and enabled is all the
+          // CLI knows, having taken no probes — and a session keeps its choice for this process's life.
+          ...(presets !== undefined ? { presets: { presets, available: (model: string) => modelAvailabilityIn(tree, model) } } : {}),
         }),
-    // The DEFAULT executor, resolved — the same tree the app builds, so a workflow behaves the
-    // same way whichever drives it. The CLI passes no availability: it takes no probes, and must not
-    // refuse over a check it never ran.
-    tree: defaultExecutorTree(config, bundle, { fake: scripted, secrets }).prompt,
+    tree,
   });
   // One store for both halves — a conversation's messages ARE its records.
   const session = sessionServicesFor();
