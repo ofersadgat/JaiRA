@@ -215,6 +215,7 @@ import {
   RemoteEventHub,
   EventHub,
   RepositoryWatcher,
+  FAST_MS as REPO_WATCH_CADENCE_MS,
   projectRemotes,
   type EventWaitRequest,
   type GitEventWaits,
@@ -366,6 +367,8 @@ import {
   isEventEnabled,
   eventSummary,
   type EventDelivery,
+  type EventRemoteView,
+  type EventsStatusView,
   type EventName,
   type JairaEvent,
   isTextMime,
@@ -486,6 +489,7 @@ let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
+import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITING } from "./session";
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
@@ -1685,6 +1689,7 @@ export class AppService {
   deliverEvent(project: string, event: JairaEvent | EventDelivery, from?: string): number {
     const session = this.sessions.get(project) ?? this.sessionOf(project);
     if (session === undefined) return 0;
+    this.eventTally.record(session.key, event);
     return session.events.deliver(event, from !== undefined ? { from } : {});
   }
 
@@ -1711,6 +1716,7 @@ export class AppService {
     if (name === undefined || !isEventEnabled(open.project.config, name)) return;
     const task = open.project.tasks.tryRead(taskId);
     const payload = { task_id: taskId, title: task?.title ?? taskId, workflow: workflow ?? task?.workflow ?? "", status: status as "completed" | "failed" };
+    this.eventTally.record(open.key, { name, payload } as JairaEvent);
     open.events.deliver({ name, payload } as JairaEvent, { from: taskId });
   }
 
@@ -1859,6 +1865,60 @@ export class AppService {
   /** The notices the events tasks posted in this process, oldest first. */
   notices(): EventsNotice[] {
     return [...this.postedNotices];
+  }
+
+  /** What has arrived of each event, per project — what Settings → Events says under an event that is on. */
+  private readonly eventTally = new EventTally();
+
+  /**
+   * Settings → Tools → Events (`events:status`): the remotes of the named project's own `.git/config`
+   * — or, with none named and none open, the shared root's, which is usually not a repository and so
+   * has none — each with its connection, the account the last connection check found, how the
+   * repository watcher stands with it, and what has arrived per event. Reads git and memory only.
+   */
+  async readEventStatus(request: { project?: string } = {}): Promise<EventsStatusView> {
+    // `shared` names the shared root by role; read as a directory, not opened as a session.
+    const open = request.project === SHARED_SESSION ? undefined : request.project !== undefined || this.hasProject ? this.session(request.project) : undefined;
+    const config = open?.project.config ?? this.effectiveConfig();
+    const dir = open?.project.paths.projectDir ?? this.baseDir;
+    const key = open?.key;
+    const activity = (remote: string | undefined): EventRemoteView["events"] => {
+      const out: EventRemoteView["events"] = {};
+      if (key === undefined) return out;
+      for (const name of EVENT_NAMES) {
+        if ((EVENT_SPECS[name].group === "git") !== (remote !== undefined)) continue;
+        const seen = this.eventTally.activity(key, remote, name);
+        if (seen !== undefined) out[name] = seen;
+      }
+      return out;
+    };
+    const view: EventsStatusView = { remotes: [], tasks: activity(undefined), cadenceMs: REPO_WATCH_CADENCE_MS };
+    try {
+      const git = new Git({ exec: new NodeExec({ execEnv: config.execEnvironment }), repoDir: dir, execEnv: config.execEnvironment });
+      const checks = this.availability.forges ?? [];
+      // The shared root's remotes are its OWN `.git/config`, not those of a repository it happens to
+      // sit inside (a home directory kept in git would otherwise lend it that repository's remotes).
+      const remotes = open === undefined && !existsSync(join(dir, ".git")) ? [] : await projectRemotes(git, config.integrations);
+      for (const remote of remotes) {
+        const check = remote.connection !== undefined ? checks.find((one) => one.name === remote.connection) : undefined;
+        const watched = key !== undefined && this.repoWatch !== undefined ? this.repoWatch.status(key, remote.name) : { watching: false };
+        view.remotes.push({
+          name: remote.name,
+          host: remote.host,
+          repository: remote.repository,
+          ...(remote.provider !== undefined ? { provider: remote.provider } : {}),
+          ...(remote.connection !== undefined
+            ? { connection: { name: remote.connection, ...(check?.identity !== undefined ? { account: check.identity.login } : {}), ...(check !== undefined ? { status: check.status } : {}) } }
+            : {}),
+          watchable: remote.connection !== undefined,
+          ...watched,
+          events: activity(remote.name),
+        });
+      }
+    } catch (e) {
+      view.problem = (e as Error).message.split("\n")[0] ?? String(e);
+    }
+    return view;
   }
 
   // --- watching merge requests (decision 0004) ---------------------------------

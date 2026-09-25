@@ -608,3 +608,19 @@ describe("a restart", () => {
     second.dispose();
   });
 });
+
+describe("status, for Settings → Events", () => {
+  it("says whether a remote is watched, when it was last looked at, and what the last look failed with", async () => {
+    const w = watcher();
+    expect(w.status("p1", "origin")).toEqual({ watching: false });
+    await w.kick();
+    expect(w.status("p1", "origin")).toEqual({ watching: true, checkedAt: T0 });
+    expect(w.status("p1", "upstream")).toEqual({ watching: false });
+    forge.failWith = new Error("the forge answered 502");
+    await clock.advance(MIN);
+    expect(w.status("p1", "origin")).toEqual({ watching: true, checkedAt: T0 + MIN, error: "the forge answered 502" });
+    forge.failWith = undefined;
+    await clock.advance(2 * MIN);
+    expect(w.status("p1", "origin")).toEqual({ watching: true, checkedAt: T0 + 3 * MIN });
+  });
+});

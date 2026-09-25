@@ -28,7 +28,7 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
-import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, statesPath } from "@jaira/shared/browser";
+import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, statesPath, withPaths, SHARED_SESSION } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
@@ -115,6 +115,10 @@ import { ModelsPane, functionRulesOverlay } from "./modelsPane";
 import { PermissionSetsPane, type PermissionSetsChannel } from "./permissionSetsPane";
 import { useMcpData } from "./mcpData";
 import { FunctionsSections } from "./functionsPane";
+import { EventsSection, useEventStatus } from "./eventsPane";
+import { eventsConfigOf } from "./eventsModel";
+import { AutomationsPane, type AutomationsChannel } from "./automationsPane";
+import { EVENTS_STATE_ID, eventsTaskOf } from "./automationsModel";
 import { DataPane, RunsPane } from "./settingsPages";
 import { ConnectionsPage } from "./connectionsPane";
 import { ToolsFieldProvider, type ToolsFieldData } from "./toolsField";
@@ -635,6 +639,20 @@ export default function App(): JSX.Element {
       read: () => invoke("permissionSets:read", { ...project }),
       write: (request) => invoke("permissionSets:write", { ...request, ...project }),
       reset: (request) => invoke("permissionSets:reset", { ...request, ...project }),
+    };
+  }, [permissionSetsProject]);
+  /**
+   * Settings → Tools → Events and Automations (decision 0010 §2, §4): the remotes and the watcher's
+   * word on them for the page's project — the shared root's on Shared — and the events workflow's
+   * three copies, read and written through the ordinary workflow channels.
+   */
+  const eventsProject = state.configLayer !== "base" ? state.at : null;
+  const eventStatus = useEventStatus(() => invoke("events:status", { project: eventsProject ?? SHARED_SESSION }), eventsProject ?? SHARED_SESSION);
+  const automationsChannel = useMemo<AutomationsChannel>(() => {
+    const project = permissionSetsProject !== null ? { project: permissionSetsProject } : {};
+    return {
+      read: (layer) => invoke("workflow:read", { stateId: EVENTS_STATE_ID, layer, ...(layer === "base" ? {} : project) }),
+      write: (layer, text) => invoke("workflow:write", { stateId: EVENTS_STATE_ID, layer, text, ...(layer === "base" ? {} : project) }),
     };
   }, [permissionSetsProject]);
   /**
@@ -2700,6 +2718,41 @@ export default function App(): JSX.Element {
                         setToolsFocus({ id, nonce: Date.now() });
                         settingsParts.go("permission-sets");
                       }}
+                    />
+                    <EventsSection
+                      status={eventStatus.status}
+                      events={eventsConfigOf(state.config)}
+                      layerDoc={state.config?.[state.configLayer] ?? null}
+                      locked={state.busy || state.config === null || !(state.configLayer !== "project" || state.at !== null)}
+                      now={eventStatus.now}
+                      onWrite={(writes) => {
+                        if (state.config === null) return;
+                        actions.saveConfig(state.configLayer, withPaths(state.config[state.configLayer], writes));
+                      }}
+                      onOpenConnections={() => actions.setSection("connections")}
+                    />
+                    <AutomationsPane
+                      key={`${state.at ?? "shared"}`}
+                      channel={automationsChannel}
+                      layer={state.configLayer}
+                      hasProject={state.at !== null}
+                      busy={state.busy}
+                      events={eventsConfigOf(state.config)}
+                      status={eventStatus.status}
+                      workflows={state.workflows.map((entry) => ({ id: entry.rootId, label: entry.label }))}
+                      forms={state.workflowForms}
+                      onWorkflow={actions.pickWorkflow}
+                      projectName={state.at !== null ? (state.at.split(/[\\/]/).filter(Boolean).pop() ?? state.at) : "Shared"}
+                      hasTask={eventsTaskOf(state.tasks) !== undefined}
+                      onOpenConversation={() => {
+                        const task = eventsTaskOf(state.tasks);
+                        if (task === undefined) return;
+                        actions.setView("tasks");
+                        actions.select(task.taskId);
+                      }}
+                      onEditFile={(layer) => void actions.openWorkflow(EVENTS_STATE_ID, layer)}
+                      onOpenEvents={() => settingsParts.go("events")}
+                      onOpenConnections={() => actions.setSection("connections")}
                     />
                   </>
                 ) : null}

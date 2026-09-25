@@ -15,6 +15,7 @@
  *    and a branch's head's checks by the branch's name.
  */
 import type { EventName, JairaEvent } from "./events";
+import type { ForgeCheck, ForgeProviderKind } from "./forge";
 
 /** What the watcher remembers one of. */
 export type RepoWatchKind = "merge_request" | "branch" | "checks";
@@ -107,3 +108,48 @@ export interface EventWaitPort {
  * its name, its payload, and when JaiRA saw it happen (ISO 8601).
  */
 export type EventDelivery = JairaEvent & { at: string };
+
+// --- what Settings → Tools → Events shows (`events:status`) ------------------------------------
+
+/** What has arrived of one event, where Settings can say it: when it was last seen, and how often today. */
+export interface EventActivity {
+  /** When one last arrived, epoch ms — absent while none has since JaiRA started. */
+  lastSeenAt?: number;
+  /** How many arrived since local midnight. */
+  today: number;
+}
+
+/** One git remote of the project's own `.git/config`, and how it is watched. */
+export interface EventRemoteView {
+  /** The remote's name — `origin`. */
+  name: string;
+  host: string;
+  /** The project's path on the host — `owner/repo`. */
+  repository: string;
+  /** Which forge speaks for the host — the connection's, else the public host's. Absent: neither is known. */
+  provider?: ForgeProviderKind;
+  /** The connection its host picked, with the account the last connection check found, when it has run. */
+  connection?: { name: string; account?: string; status?: ForgeCheck["status"] };
+  /** A connection exists, so switching an event on for it can make something arrive. */
+  watchable: boolean;
+  /** The repository watcher has it as a target now. */
+  watching: boolean;
+  /** When the watcher last looked at it, epoch ms. */
+  checkedAt?: number;
+  /** What its last look failed with. */
+  error?: string;
+  /** What has arrived per event, from this remote. */
+  events: Partial<Record<EventName, EventActivity>>;
+}
+
+/** The answer to `events:status`: a project's (or the shared root's) remotes, and JaiRA's own events. */
+export interface EventsStatusView {
+  /** The remotes, in `.git/config` order. None for the shared root, which is not usually a repository. */
+  remotes: EventRemoteView[];
+  /** What has arrived of JaiRA's own events (`task.*`), per event. */
+  tasks: Partial<Record<EventName, EventActivity>>;
+  /** How often a watched remote is looked at while JaiRA is open, ms. */
+  cadenceMs: number;
+  /** Set when the remotes could not be read — the git error, as one line. */
+  problem?: string;
+}

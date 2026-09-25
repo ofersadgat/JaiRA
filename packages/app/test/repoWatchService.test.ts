@@ -75,3 +75,36 @@ describe("the service's repository watcher", () => {
     expect(replay.seen).toEqual([]);
   });
 });
+
+describe("events:status", () => {
+  it("lists the project's remotes with their connection, and how the watcher stands with each", async () => {
+    const before = await service.readEventStatus();
+    expect(before.cadenceMs).toBe(60_000);
+    expect(before.remotes).toEqual([
+      { name: "origin", host: "gitlab.com", repository: "gitlab-org/gitlab-runner", provider: "gitlab", connection: { name: "gitlab" }, watchable: true, watching: false, events: {} },
+    ]);
+    service.setSecret({ name: "GITLAB_TOKEN", value: "good", target: "project-env-local" });
+    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.push": { enabled: true } } } as JsonValue });
+    await until(() => branchReads() >= 2, "the branches of origin to be read");
+    let status = await service.readEventStatus();
+    for (const deadline = Date.now() + 30_000; status.remotes[0]?.checkedAt === undefined && Date.now() < deadline; ) {
+      await new Promise((r) => setTimeout(r, 20));
+      status = await service.readEventStatus();
+    }
+    expect(status.remotes[0]).toMatchObject({ name: "origin", watching: true });
+    expect(typeof status.remotes[0]!.checkedAt).toBe("number");
+  });
+
+  it("answers the shared root by role, which is no repository, with a project open", async () => {
+    const status = await service.readEventStatus({ project: "shared" });
+    expect(status.remotes).toEqual([]);
+  });
+
+  it("answers the shared root with no remotes when no project is open", async () => {
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: () => undefined, forgeHttp: replay.http, watchWorkflows: false });
+    const status = await service.readEventStatus();
+    expect(status.remotes).toEqual([]);
+    expect(status.tasks).toEqual({});
+  });
+});

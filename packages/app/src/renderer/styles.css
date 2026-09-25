@@ -17359,3 +17359,239 @@ button.link.cfg-login-add-sub {
   border-radius: 10px;
   box-shadow: var(--lift);
 }
+
+/* --- Settings → Tools → Events and Automations (decision 0010, mockup B.1–B.2) ---
+   Scoped to the two sections: the app's global `button`, `h3` and `.pane` rules would otherwise
+   reach the pills, the grips and the step heads. */
+
+/* A group's heading: the remote and the repository it points at, or JaiRA. */
+:is([data-part="events"], [data-part="automations"]) .ev-group {
+  padding: 9px 16px 6px;
+  background: color-mix(in srgb, var(--panel-2) 70%, var(--panel));
+  font-family: var(--font-data);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: calc(var(--size-data) * 11 / 12);
+  font-weight: 600;
+}
+:is([data-part="events"], [data-part="automations"]) .set-group > .ev-group:first-child {
+  border-radius: 11px 11px 0 0;
+}
+
+/* The connection badge: the rail's source pill with the forge's own mark. */
+:is([data-part="events"], [data-part="automations"]) .cx-src.src-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 0 7px 0 5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel-2);
+  box-shadow: none;
+  color: var(--dim);
+  font: 500 calc(var(--size-app) * 9.5 / 12.5) / 1.5 var(--font-data);
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+:is([data-part="events"], [data-part="automations"]) .src-logo {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+:is([data-part="events"], [data-part="automations"]) .cx-src.src-none {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--tok-hint);
+  cursor: pointer;
+}
+:is([data-part="events"], [data-part="automations"]) .cx-src.src-none:hover:not(:disabled) {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rule);
+  color: var(--text);
+}
+:is([data-part="events"], [data-part="automations"]) .cx-src.src-none .src-logo {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+/* An event row: its label, its id in the data voice, its badge. */
+[data-part="events"] .ev-name {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 0;
+}
+[data-part="events"] .ev-id {
+  margin-left: 8px;
+  color: var(--dim);
+  font-weight: 400;
+}
+[data-part="events"] .ev-unanswered .set-name,
+[data-part="events"] .ev-unanswered .set-desc {
+  color: var(--dim);
+}
+/* Opened while on: the branches and how it is watched. */
+[data-part="events"] .ev-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+[data-part="events"] .ev-status,
+[data-part="events"] .ev-hint {
+  margin: 0;
+}
+
+/* An automation: grip and name, When, then its numbered steps. */
+[data-part="automations"] .au-row .set-row-line {
+  align-items: start;
+}
+[data-part="automations"] .au-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+[data-part="automations"] .au-grip {
+  padding: 0 4px;
+  letter-spacing: -3px;
+  color: var(--tok-hint);
+  cursor: grab;
+  user-select: none;
+}
+[data-part="automations"] .au-name {
+  width: 16em;
+  max-width: 100%;
+}
+[data-part="automations"] .au-name .cfg-input {
+  padding: 2px 8px;
+  font-weight: 600;
+}
+[data-part="automations"] .au-name-static {
+  font-weight: 600;
+}
+[data-part="automations"] .au-head .cx-src {
+  margin-left: 0;
+}
+[data-part="automations"] .au-when,
+[data-part="automations"] .au-action-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+[data-part="automations"] .au-when .cx-src.src-conn,
+[data-part="automations"] .au-action-head .cx-src {
+  margin-left: 0;
+}
+[data-part="automations"] .au-word {
+  color: var(--dim);
+  white-space: nowrap;
+}
+[data-part="automations"] .au-event {
+  width: 17em;
+  max-width: 100%;
+}
+[data-part="automations"] .au-wf {
+  width: 15em;
+  max-width: 100%;
+}
+[data-part="automations"] .au-note {
+  flex: 1 1 16em;
+  min-width: 0;
+}
+[data-part="automations"] .au-raw {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+[data-part="automations"] .au-filter {
+  margin: 6px 0 0 2em;
+}
+[data-part="automations"] .au-actions {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+[data-part="automations"] .au-action {
+  padding: 4px 0 0;
+}
+[data-part="automations"] .au-n {
+  width: 1.4em;
+  height: 1.4em;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--dim);
+  font: 600 calc(var(--size-data) * 0.85) / 1 var(--font-data);
+}
+[data-part="automations"] .au-summary {
+  font-family: var(--font-data);
+}
+[data-part="automations"] .au-inputs {
+  margin: 8px 0 0 2em;
+  padding: 2px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+[data-part="automations"] .au-inputs-note,
+[data-part="automations"] .au-order,
+[data-part="automations"] .au-add-action {
+  margin: 6px 0 0 2em;
+}
+[data-part="automations"] .au-remove {
+  padding: 0 7px;
+  font-size: 1.1em;
+}
+[data-part="automations"] .au-flag {
+  margin-top: 8px;
+}
+[data-part="automations"] .au-flag.warn-text {
+  color: var(--warn);
+}
+[data-part="automations"] .au-filter-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin-top: 4px;
+}
+[data-part="automations"] .au-link {
+  font-size: inherit;
+  font-family: inherit;
+}
+[data-part="automations"] .au-off .au-when {
+  opacity: 0.7;
+}
+[data-part="automations"] .au-ignored .au-name-static,
+[data-part="automations"] .au-ignored .au-when,
+[data-part="automations"] .au-ignored .au-actions {
+  text-decoration: line-through;
+  color: var(--tok-hint);
+  opacity: 0.7;
+}
+[data-part="automations"] .set-row.au-add {
+  padding: 6px 12px;
+}
+[data-part="automations"] .set-row.au-foot {
+  padding: 10px 16px;
+}
+[data-part="automations"] .au-foot p,
+[data-part="automations"] .au-empty,
+[data-part="automations"] .au-problem,
+[data-part="automations"] .au-told {
+  margin: 0;
+  padding: 10px 16px;
+}
+[data-part="automations"] .au-ask {
+  margin: 10px 16px;
+}

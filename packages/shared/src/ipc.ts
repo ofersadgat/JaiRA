@@ -41,6 +41,7 @@ import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
 import type { McpDetectedSource, McpToolsReport } from "./mcp";
 import type { PermissionSetsView, PermissionSetWriteKind } from "./permissionSetSettings";
+import type { EventsStatusView } from "./repoWatch";
 import type {
   BoardView,
   ChatThreadView,
@@ -2095,6 +2096,12 @@ export interface IpcContract {
   "permissionSets:write": { request: WritePermissionSetRequest; response: WritePermissionSetResult };
   /** Delete a layer's override of a permission set — see {@link ResetPermissionSetRequest}. */
   "permissionSets:reset": { request: ResetPermissionSetRequest; response: { file: string } };
+  /**
+   * What Settings → Tools → Events shows (decision 0010 §2): the project's git remotes from its own
+   * `.git/config` — or the shared root's, with no project named — each with its connection and how
+   * the repository watcher stands with it, and what has arrived per event. Read-only; asks no forge.
+   */
+  "events:status": { request: { project?: ProjectRef }; response: EventsStatusView };
   /** Create a plain file or a directory under a layer root, addressed by path. */
   "file:create": { request: CreateFileRequest; response: { file: string } };
   /** Rename or move a file or directory within a layer root. Refuses when it would break referrers. */
@@ -2286,6 +2293,7 @@ export const IPC_CHANNELS = [
   "permissionSets:read",
   "permissionSets:write",
   "permissionSets:reset",
+  "events:status",
   "file:create",
   "file:rename",
   "file:delete",

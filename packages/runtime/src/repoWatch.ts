@@ -150,6 +150,19 @@ interface Polling {
   floorSeconds?: number;
   looking: boolean;
   again?: boolean;
+  /** When the last look ended (epoch ms), and what it failed with — for {@link RepositoryWatcher.status}. */
+  checkedAt?: number;
+  error?: string;
+}
+
+/** What Settings shows of one watched remote (the `events:status` channel). */
+export interface RepoWatchStatus {
+  /** The watcher has it as a target now: something is switched on for it and it has a connection. */
+  watching: boolean;
+  /** When the last look at it ended, epoch ms. */
+  checkedAt?: number;
+  /** What the last look failed with — absent once one succeeds. */
+  error?: string;
 }
 
 export class RepositoryWatcher {
@@ -161,6 +174,20 @@ export class RepositoryWatcher {
 
   constructor(private readonly options: RepositoryWatcherOptions) {
     this.clock = options.clock ?? realClock;
+  }
+
+  /**
+   * One remote of one project, as Settings shows it: whether it is watched, when it was last looked
+   * at, and what that look failed with. Read-only; asks the forge nothing.
+   */
+  status(project: string, remote: string): RepoWatchStatus {
+    const polling = [...this.polling.values()].find((one) => one.target.project === project && one.target.remote === remote);
+    if (polling === undefined) return { watching: false };
+    return {
+      watching: true,
+      ...(polling.checkedAt !== undefined ? { checkedAt: polling.checkedAt } : {}),
+      ...(polling.error !== undefined ? { error: polling.error } : {}),
+    };
   }
 
   /** The targets being watched now, by key. */
@@ -254,9 +281,13 @@ export class RepositoryWatcher {
       await this.diff(target);
       polling.failures = 0;
       polling.floorSeconds = undefined;
+      polling.checkedAt = this.clock.now();
+      polling.error = undefined;
     } catch (error) {
       if (!this.alive(key, target)) return;
       polling.failures += 1;
+      polling.checkedAt = this.clock.now();
+      polling.error = (error as Error).message;
       if (error instanceof ForgeError && error.retryAfterSeconds !== undefined) polling.floorSeconds = error.retryAfterSeconds;
       try {
         const scope = scopeOf(target);

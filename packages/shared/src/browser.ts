@@ -64,5 +64,7 @@ export * from "./hiddenPaths";
 export * from "./refusal";
 // The prompt the shipped `smart` judge is told when no layer writes its own — Settings → Tools shows it.
 export { DEFAULT_SMART_PROMPT } from "./config";
+// Which events are on — what Settings → Tools → Events and Automations read of the merged document.
+export { isEventEnabled, enabledEvents, type JairaEventsConfig, type JairaEventSetting, type EnabledEvent } from "./config";
 // What the Licenses page reads: the build's manifest of third-party notices, its decoder and search.
 export * from "./thirdPartyLicenses";

@@ -23,6 +23,7 @@
  * states it, and on the personal layer the line saying what it replaces.
  */
 import type { JSX, ReactNode } from "react";
+import type { ConfigPath } from "@jaira/shared/browser";
 import { InheritButton, SettingsLayerContext, useInheritLabel, useLayerRow } from "./controls";
 
 /** A Settings page: its title, whose settings these are, and its sections. */
@@ -75,7 +76,7 @@ export function SettingsPage({
  */
 export interface RowLayer {
   /** The config paths the row writes, the first stated one being what its "instead of" line reports. */
-  paths: readonly string[];
+  paths: readonly ConfigPath[];
   /** The layer being edited states it — the ↺ is drawn. */
   stated: boolean;
   /** Take the row's paths out of the layer being edited, so it inherits again. */

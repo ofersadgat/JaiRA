@@ -20,7 +20,7 @@
  * that dark mode cannot override.
  */
 import { createContext, useContext, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
-import { inheritedValue, statesPath, type ConfigLayer, type ConfigView } from "@jaira/shared/browser";
+import { inheritedValue, pathKeys, statesPath, type ConfigLayer, type ConfigPath, type ConfigView } from "@jaira/shared/browser";
 import { SOURCE_WORDS } from "./layerLabels";
 
 /**
@@ -83,7 +83,7 @@ export function shortValue(value: unknown, path = ""): string {
  * does (a palette's name rather than its id).
  */
 export function useLayerRow(
-  paths: readonly string[] | undefined,
+  paths: readonly ConfigPath[] | undefined,
   stated?: boolean,
   format?: (value: unknown, path: string) => string,
 ): { hidden: boolean; instead: string | undefined } {
@@ -96,10 +96,11 @@ export function useLayerRow(
   if (here && at.layer === "you" && at.view !== null && own.length > 0) {
     const path = own[0]!;
     const { value, from } = inheritedValue(at.view, path, "you");
+    const dotted = pathKeys(path).join(".");
     instead =
       value === undefined && from === "built in"
         ? "set nowhere else"
-        : `instead of ${format !== undefined ? format(value, path) : shortValue(value, path)} from ${SOURCE_WORDS[from]}`;
+        : `instead of ${format !== undefined ? format(value, dotted) : shortValue(value, dotted)} from ${SOURCE_WORDS[from]}`;
   }
   return { hidden: at.onlyStated && !here, instead };
 }
@@ -108,12 +109,13 @@ export function useLayerRow(
  * What a setting goes back to if the layer being edited stops stating it — "Back to Zinc, from
  * Shared" — the ↺'s label. `format` spells a value the way its row does.
  */
-export function useInheritLabel(paths: readonly string[] | undefined, format?: (value: unknown, path: string) => string): string {
+export function useInheritLabel(paths: readonly ConfigPath[] | undefined, format?: (value: unknown, path: string) => string): string {
   const at = useContext(SettingsLayerContext);
   const path = paths?.[0];
   if (at === null || at.view === null || path === undefined) return "Take this out of this layer, so it inherits";
   const { value, from } = inheritedValue(at.view, path, at.layer);
-  const words = value === undefined ? "not set" : format !== undefined ? format(value, path) : shortValue(value, path);
+  const dotted = pathKeys(path).join(".");
+  const words = value === undefined ? "not set" : format !== undefined ? format(value, dotted) : shortValue(value, dotted);
   return `Back to ${words}, from ${SOURCE_WORDS[from]}`;
 }
 
