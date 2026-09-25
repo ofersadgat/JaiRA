@@ -38,7 +38,7 @@ function rig(host?: Partial<EventsTaskHost>) {
 describe("start_task", () => {
   it("starts a task of the workflow with its inputs and title, and hands the event on", async () => {
     const { started, call } = rig();
-    const result = await call(START_TASK, { workflow: "feature/review", inputs: { issue: "fix it" }, title: "Review", event: push });
+    const result = await call(START_TASK, { workflow: "feature/review", inputs: { issue: "fix it" }, title: "Review", event: push as never });
     expect(result.value).toEqual({ task_id: "t1", event: push });
     expect(started).toEqual([{ workflow: "feature/review", inputs: { issue: "fix it" }, title: "Review", event: push }]);
   });
@@ -78,7 +78,7 @@ describe("start_task", () => {
 describe("notify", () => {
   it("posts the text with its event, and hands the event on", async () => {
     const { notices, call } = rig();
-    expect((await call(NOTIFY, { text: " deployed ", event: push })).value).toEqual({ event: push });
+    expect((await call(NOTIFY, { text: " deployed ", event: push as never })).value).toEqual({ event: push });
     expect(notices).toEqual([{ text: "deployed", event: push }]);
     expect((await call(NOTIFY, { text: "" })).error?.reason).toMatch(/'text'/);
   });

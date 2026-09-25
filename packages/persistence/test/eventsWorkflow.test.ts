@@ -117,7 +117,7 @@ describe("the events workflow", () => {
     // Shared's line arrives whole, its inputs included.
     expect(root.transitions?.[1]).toMatchObject({ name: "push_main", to: "push_main" });
     // And the whole of it validates as a run would: the step states' wiring, `.event`, `$literal`.
-    const functions = new Map([...hostCalleeSignatures()].map(([name]) => [name, { interactive: false, readOnly: false, memoizable: false }]));
+    const functions = new Map([...hostCalleeSignatures()].map(([name]) => [name, { kind: "host" as const, capabilities: { interactive: false, readOnly: false, memoizable: false } }]));
     expect(validateBundle(reading.bundle, { functions }).errors).toEqual([]);
   });
 
