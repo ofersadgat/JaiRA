@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { PERMISSION_SET_MARKERS } from "@jaira/shared";
-import { loadBundle, snapshotHash } from "@declarative-ai/hw";
+import { environmentOf as callEnvironmentOf, loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
 import { listPermissionSets, loadWorkflowBundle, readPermissionSets } from "../src/permissionSets";
@@ -136,7 +136,7 @@ describe("a permission set, referenced from a state", () => {
     write(project.paths.workflowsDir, "wf/b.json", leaf);
     const bundle = load("wf");
     expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", functions: {} } });
-    expect(bundle.states["wf/b"]!.environment?.tools).toEqual(["bash"]);
+    expect(callEnvironmentOf(bundle.states["wf/b"]!)?.tools).toEqual(["bash"]);
   });
 });
 
@@ -163,10 +163,10 @@ describe("a permission set inside a REFERENCED block", () => {
 
     // Before 0007's follow-up this load FAILED: the map reached the engine inside the referenced
     // block and the engine refused it as `unrecognized binding form`.
-    const same = load("written").states["written"]!.environment;
+    const same = callEnvironmentOf(load("written").states["written"]!);
     expect(same?.tools).toEqual(["read_file", "glob", "bash"]);
     expect(load("byref").states["byref"]!.environment).toEqual(same);
-    const dollar = load("bydollarref").states["bydollarref"]!.environment;
+    const dollar = callEnvironmentOf(load("bydollarref").states["bydollarref"]!);
     expect({ tools: dollar?.tools, permissions: dollar?.permissions }).toEqual(same);
     // A permission set REFERENCE inside a block that starts from another: resolved, and named as the source.
     expect(load("chained").states["chained"]!.environment).toEqual(load("writtenname").states["writtenname"]!.environment);
@@ -176,7 +176,7 @@ describe("a permission set inside a REFERENCED block", () => {
       return { operation: resolved.operation, environment: resolved.environment };
     };
     expect(opOf("refop")).toEqual(opOf("writtenop"));
-    expect(opOf("refop").environment?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(callEnvironmentOf(opOf("refop"))?.tools).toEqual(["read_file", "glob", "bash"]);
   });
 
   it("is inherited by a child exactly as a map written on the parent — or on the child's mount", () => {
@@ -189,11 +189,11 @@ describe("a permission set inside a REFERENCED block", () => {
       write(project.paths.workflowsDir, `m${id}.json`, { children: { a: { environment } }, sequence: ["a"] });
       write(project.paths.workflowsDir, `m${id}/a.json`, leaf);
     }
-    const written = load("wfw").states["wfw/a"]!.environment;
+    const written = callEnvironmentOf(load("wfw").states["wfw/a"]!);
     expect(written?.tools).toEqual(["read_file", "glob", "bash"]);
     expect(load("wfr").states["wfr/a"]!.environment).toEqual(written);
     expect(load("mwfr").states["mwfr/a"]!.environment).toEqual(load("mwfw").states["mwfw/a"]!.environment);
-    expect(load("mwfr").states["mwfr/a"]!.environment?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(callEnvironmentOf(load("mwfr").states["mwfr/a"]!)?.tools).toEqual(["read_file", "glob", "bash"]);
   });
 
   it("is PINNED: the block's file is in the closure, and a pinned task does not see a later edit to it", async () => {
@@ -250,7 +250,7 @@ describe("the snapshot", () => {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "deny", other: "deny" });
     const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
-    expect(pinned.states["plan"]!.environment?.permissions).toEqual({ tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", functions: {} });
+    expect(callEnvironmentOf(pinned.states["plan"]!)?.permissions).toEqual({ tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", functions: {} });
     // …and the edit is a different workflow to the next task.
     expect(snapshotHash(load("plan"))).not.toBe(snap.hash);
   });

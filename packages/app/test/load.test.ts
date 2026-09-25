@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addressKey, buildTaskLoad, initProject, loadSnapshot, openProject, type TaskLoad } from "@jaira/persistence";
-import type { LoadedInstance } from "@declarative-ai/hw";
+import type { LoadedInstance, LoadedOperation } from "@declarative-ai/hw";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
@@ -158,7 +158,7 @@ describe("the load description", () => {
     expect(loop.children!.map((c) => [c.childKey, c.occurrence])).toEqual([["tick", 2]]);
     // The recorded answer, unwrapped from the record's `{ value }` envelope — what the loaded
     // machine recomputes the state's outputs from.
-    expect(loop.children![0]!.operation?.value).toEqual({ confirmed: false });
+    expect((loop.children![0]!.operation as LoadedOperation | undefined)?.value).toEqual({ confirmed: false });
   }, 30000);
 
   it("names the live leaf a stopped run would re-enter", async () => {
@@ -228,7 +228,7 @@ describe("the load description", () => {
     const load = loadOf(taskId);
     expect(load.unreadable).toEqual([]);
     const ticks = flat(load.loaded).filter((n) => n.childKey === "tick");
-    expect(ticks.at(-1)!.operation?.value).toEqual(value);
+    expect((ticks.at(-1)!.operation as LoadedOperation | undefined)?.value).toEqual(value);
   }, 30000);
 });
 
@@ -264,7 +264,7 @@ function promptFiles(): Record<string, JsonValue> {
 
 /** The loaded value of the state mounted under `childKey`, out of the description's tree. */
 function valueUnder(load: TaskLoad, childKey: string): unknown {
-  return flat(load.loaded).find((n) => n.childKey === childKey)?.operation?.value;
+  return (flat(load.loaded).find((n) => n.childKey === childKey)?.operation as LoadedOperation | undefined)?.value;
 }
 
 describe("the load description over a conversation", () => {

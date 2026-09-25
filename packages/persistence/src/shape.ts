@@ -6,7 +6,7 @@
  * human) so it stays testable with hand-written fixtures. This module is the one
  * adapter from `@declarative-ai/hw`'s bundle to that shape.
  */
-import type { WorkflowBundle } from "@declarative-ai/hw";
+import { operationsOf, type WorkflowBundle } from "@declarative-ai/hw";
 import type { StateShape, WorkflowShape } from "./projection";
 
 export interface ShapeOptions {
@@ -43,12 +43,10 @@ export function workflowShape(bundle: WorkflowBundle, options?: ShapeOptions): W
         ...(bundle.states[childState]?.label !== undefined ? { label: bundle.states[childState]!.label } : {}),
       };
     });
-    const op = def.operation;
-    const interactive =
-      op !== undefined &&
-      op.kind === "function" &&
-      typeof op.functionRef === "string" &&
-      options?.interactiveFunctions?.has(op.functionRef) === true;
+    // Any call of the state's operation — one, or each of a list (hw SPEC §7.1d) — that needs a human.
+    const interactive = operationsOf(def).some(
+      (op) => op.kind === "function" && typeof op.functionRef === "string" && options?.interactiveFunctions?.has(op.functionRef) === true,
+    );
     const entry: StateShape = { children };
     if (def.label !== undefined) entry.label = def.label;
     if (interactive) entry.interactive = true;

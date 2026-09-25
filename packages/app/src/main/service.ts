@@ -6454,7 +6454,7 @@ export class AppService {
       if (row === undefined || (row.snapshotHash === undefined && row.documentId === undefined)) return false;
       try {
         const bundle = loadPinnedBundle(project, row);
-        return bundle.states[bundle.rootId]?.operation?.kind === "prompt";
+        return holdsConversation(bundle.states[bundle.rootId]);
       } catch {
         return false;
       }

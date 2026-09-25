@@ -25,7 +25,8 @@ import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { LoadedState, WorkflowBundle } from "@declarative-ai/hw";
+import { isOperationList, operationsOf, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
+import type { InlineFamily, Operation } from "@declarative-ai/exec";
 import { loadWorkflowBundle } from "./permissionSets";
 import { isUnder } from "./descriptions";
 import type { Project } from "./project";
@@ -406,16 +407,21 @@ function contractLines(id: string, state: LoadedState, boundary: DigestBoundary,
  */
 function resolvedLine(state: LoadedState): string {
   const parts: string[] = [];
-  const op = state.operation;
+  const calls = operationsOf(state);
+  const callLine = (op: Operation<InlineFamily>): string => {
+    if (op.kind !== "prompt") return `function '${op.functionRef}'`;
+    const config = op.config !== null && typeof op.config === "object" && !Array.isArray(op.config) ? op.config : {};
+    return `prompt${typeof config.model === "string" ? ` on model '${config.model}'` : ""}`;
+  };
   if (state.operationError !== undefined) {
     parts.push(`operation could not be built (${state.operationError})`);
-  } else if (op === undefined) {
+  } else if (state.operation === undefined) {
     parts.push("composite (no operation of its own)");
-  } else if (op.kind === "prompt") {
-    const config = op.config !== null && typeof op.config === "object" && !Array.isArray(op.config) ? op.config : {};
-    parts.push(`prompt${typeof config.model === "string" ? ` on model '${config.model}'` : ""}`);
+  } else if (isOperationList(state.operation)) {
+    // hw SPEC §7.1d: the calls run in order, and the result is the array of theirs.
+    parts.push(`a list of ${calls.length} call(s), run in order: ${calls.map(callLine).join(" → ")}`);
   } else {
-    parts.push(`function '${op.functionRef}'`);
+    parts.push(callLine(calls[0]!));
   }
   const sequence = state.sequence ?? [];
   const children = state.children ?? {};

@@ -9,6 +9,7 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { environmentOf } from "@declarative-ai/hw";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PERMISSION_SET_MARKERS, jairaPaths, setBuiltInDir, type JairaPaths } from "@jaira/shared";
@@ -47,7 +48,7 @@ function loadPlan(): { permissions: unknown; issues: string[] } {
     ...workflowLoadOptions(paths),
     onPermissionSetIssue: (issue) => issues.push(`${issue.severity}: ${issue.message}`),
   });
-  return { permissions: bundle.states["plan"]!.environment?.permissions, issues };
+  return { permissions: environmentOf(bundle.states["plan"]!)?.permissions, issues };
 }
 
 beforeEach(() => {

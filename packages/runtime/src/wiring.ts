@@ -29,6 +29,7 @@ import {
 } from "@declarative-ai/exec";
 import {
   createWorkflowExecutor,
+  operationsOf,
   type CallResult,
   type EngineEvent,
   type FanOutHost,
@@ -83,9 +84,8 @@ export type WorkflowExecResult = ExecResult<ResolvedValue, WorkflowMetrics>;
  */
 export function modelNamesOf(bundle: WorkflowBundle, presets?: Record<string, unknown>): string[] {
   const names = new Set<string>();
-  for (const def of Object.values(bundle.states)) {
-    const op = def.operation;
-    if (op === undefined || op.kind !== "prompt") continue;
+  for (const op of callsOf(bundle)) {
+    if (op.kind !== "prompt") continue;
     const config = op.config;
     if (config !== null && typeof config === "object" && !Array.isArray(config) && typeof config.model === "string") {
       names.add(config.model);
@@ -135,9 +135,8 @@ function namedOrPresetAnswer(
  * a state naming none needs a route that picks its own.
  */
 export function hasUnnamedPromptModel(bundle: WorkflowBundle, presets?: Record<string, unknown>): boolean {
-  return Object.values(bundle.states).some((def) => {
-    const op = def.operation;
-    if (op === undefined || op.kind !== "prompt") return false;
+  return callsOf(bundle).some((op) => {
+    if (op.kind !== "prompt") return false;
     const config = op.config;
     const model =
       config !== null && typeof config === "object" && !Array.isArray(config) ? config.model : undefined;
@@ -147,19 +146,21 @@ export function hasUnnamedPromptModel(bundle: WorkflowBundle, presets?: Record<s
 
 /** True when any state runs a `PromptOp` — i.e. when the run needs a model at all. */
 export function hasPromptOp(bundle: WorkflowBundle): boolean {
-  return Object.values(bundle.states).some((def) => def.operation?.kind === "prompt");
+  return callsOf(bundle).some((op) => op.kind === "prompt");
 }
 
 /** Function names referenced by `operation.function` across a bundle's states. */
 export function functionNamesOf(bundle: WorkflowBundle): string[] {
   const names = new Set<string>();
-  for (const def of Object.values(bundle.states)) {
-    const op = def.operation;
-    if (op !== undefined && op.kind === "function" && typeof op.functionRef === "string") {
-      names.add(op.functionRef);
-    }
+  for (const op of callsOf(bundle)) {
+    if (op.kind === "function" && typeof op.functionRef === "string") names.add(op.functionRef);
   }
   return [...names].sort();
+}
+
+/** Every call a bundle's states make — each state's one operation, or every call of a list (hw SPEC §7.1d). */
+function callsOf(bundle: WorkflowBundle): Operation<InlineFamily>[] {
+  return Object.values(bundle.states).flatMap((def) => operationsOf(def));
 }
 
 /** Bounded output-repair default for interactive use (DESIGN §7.5). */

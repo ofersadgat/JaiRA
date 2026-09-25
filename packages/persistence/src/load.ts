@@ -95,7 +95,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { hashOperation, scopedOperationId, type Failure, type ResolvedValue } from "@declarative-ai/exec";
-import type { CallResult, DirectedDescent, LoadedInstance, WorkflowMetrics } from "@declarative-ai/hw";
+import type { CallResult, DirectedDescent, LoadedInstance, LoadedOperation, WorkflowMetrics } from "@declarative-ai/hw";
 import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { InstanceAddress } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
@@ -175,7 +175,13 @@ interface FoldNode {
   opStarted: boolean;
   /** False between a start and its settle — which, for a stopped run, is "the process died in it". */
   opSettled: boolean;
-  opCompleted?: { operationId?: string; op: "prompt" | "function"; metrics?: WorkflowMetrics };
+  opCompleted?: OpCompletion;
+  /**
+   * An operation LIST's completed calls, by the `index` its rows carry (hw SPEC §7.1d) — one slot
+   * per call, left empty where that call has not completed. A single operation leaves this empty and
+   * uses `opCompleted`.
+   */
+  callsCompleted: Array<OpCompletion | undefined>;
   opInterrupted: boolean;
   /**
    * The computed fields that SETTLED (SPEC §5.3), by authored path — `LoadedInstance.fields`.
@@ -185,6 +191,13 @@ interface FoldNode {
    * again and coming back with a different name.
    */
   fields: Map<string, ResolvedValue>;
+}
+
+/** What an `operation.completed` row said about one call. */
+interface OpCompletion {
+  operationId?: string;
+  op: "prompt" | "function";
+  metrics?: WorkflowMetrics;
 }
 
 /** The record row the description joins to. */
@@ -198,7 +211,7 @@ interface RecordRow {
 }
 
 /** The shape of the pinned definition the fold needs: which child keys form each state's sequence. */
-export type SequenceShape = Record<string, { sequence?: readonly string[]; operation?: { kind?: string } | undefined; children?: unknown } | undefined>;
+export type SequenceShape = Record<string, { sequence?: readonly string[]; operation?: { kind?: string } | readonly { kind?: string }[] | undefined; children?: unknown } | undefined>;
 
 /** What an idle conversation's never-run operation is loaded as having said — see the header. */
 export const IDLE_CONVERSATION_VALUE = "";
@@ -399,6 +412,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           superseded: false,
           opStarted: false,
           opSettled: false,
+          callsCompleted: [],
           opInterrupted: false,
           fields: new Map(),
         };
@@ -486,11 +500,15 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         if (node !== undefined) {
           node.opSettled = true;
           node.opInterrupted = false;
-          node.opCompleted = {
+          const completion: OpCompletion = {
             ...(event.operationId !== undefined ? { operationId: event.operationId } : {}),
             op: event.op,
             ...(event.metrics !== undefined ? { metrics: event.metrics } : {}),
           };
+          // A call of an operation LIST is kept at its index, so a resume sees every call that
+          // completed rather than only the last one.
+          if (event.index !== undefined) node.callsCompleted[event.index] = completion;
+          else node.opCompleted = completion;
         }
         break;
       }
@@ -498,7 +516,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         const node = nodes.get(event.instanceId);
         if (node !== undefined) {
           node.opSettled = true;
-          node.opCompleted = undefined;
+          if (event.index !== undefined) node.callsCompleted[event.index] = undefined;
+          else node.opCompleted = undefined;
           node.opInterrupted = event.failure.classification === "interrupted";
         }
         break;
@@ -577,20 +596,36 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
   let loadedOps = answers.size;
 
   const operationOf = (node: FoldNode, required: boolean): LoadedInstance["operation"] => {
-    if (node.opCompleted === undefined) return undefined;
+    // An operation LIST loads as the completed PREFIX of its calls (hw SPEC §7.1d): the engine
+    // resumes at the first call without a record, so a gap or an unreadable record ends the prefix
+    // there and everything after it runs again.
+    if (node.callsCompleted.length > 0) {
+      const prefix: LoadedOperation[] = [];
+      for (const completion of node.callsCompleted) {
+        const read = completion === undefined ? undefined : completionOf(node, completion, required);
+        if (read === undefined) break;
+        prefix.push(read);
+      }
+      return prefix.length > 0 ? prefix : undefined;
+    }
+    return node.opCompleted === undefined ? undefined : completionOf(node, node.opCompleted, required);
+  };
+
+  /** One completed call read back from its record — the value it returned, with its metrics. */
+  const completionOf = (node: FoldNode, completion: OpCompletion, required: boolean): LoadedOperation | undefined => {
     const miss = (reason: string): undefined => {
       if (required) unreadable.push({ stateId: node.stateId, reason });
       return undefined;
     };
-    const opId = node.opCompleted.operationId;
+    const opId = completion.operationId;
     if (opId === undefined) return miss("its completion names no operation record");
     const row = recordById.get(opId);
     if (row === undefined) return miss("no operation record for this event");
     if (row.status !== "completed") return miss(`its record is '${row.status}', not completed`);
-    const value = recordValue(project.db, row.result_json, node.opCompleted.op);
+    const value = recordValue(project.db, row.result_json, completion.op);
     if (value === undefined) return miss("the record holds no readable value");
     loadedOps += 1;
-    const metrics = node.opCompleted.metrics;
+    const metrics = completion.metrics;
     const sessionRef = (metrics as { sessionRef?: string } | undefined)?.sessionRef;
     return {
       value: value as ResolvedValue,
@@ -659,10 +694,12 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     // The state's own operation. Required reading for a live instance (re-dispatching a completed
     // op is the double-apply this whole join exists to prevent) and for successful history (its
     // outputs are recomputed from the value); a failed instance's own record is not — it re-runs.
-    const stateHasOp = node.opStarted || node.opCompleted !== undefined;
+    const stateHasOp = node.opStarted || node.opCompleted !== undefined || node.callsCompleted.length > 0;
     const required = live || node.terminated?.outcome === "success";
     // A conversation a move made starts idle — see the header.
-    const idle = !stateHasOp && node === root && inDocument && shape[node.stateId]?.operation?.kind === "prompt" && hasChildren(shape[node.stateId]?.children);
+    // A single prompt only: a conversation is one call, and a LIST (hw SPEC §7.1d) has nothing to leave unsaid.
+    const rootOp = shape[node.stateId]?.operation;
+    const idle = !stateHasOp && node === root && inDocument && rootOp !== undefined && !Array.isArray(rootOp) && (rootOp as { kind?: string }).kind === "prompt" && hasChildren(shape[node.stateId]?.children);
     const operation = stateHasOp ? operationOf(node, required) : idle ? { value: IDLE_CONVERSATION_VALUE as ResolvedValue } : undefined;
 
     if (live && !anyChildLive) {

@@ -431,11 +431,23 @@ function capabilitiesOf(
  * states — a check that never fires is worse than no check, because it reads as
  * one that passed.
  */
-function functionRefOf(def: { operation?: { kind?: string; functionRef?: unknown; function?: unknown } }): string | undefined {
-  const op = def.operation;
-  if (op?.kind !== "function") return undefined;
+function functionRefOf(op: GatedCall): string | undefined {
+  if (op.kind !== "function") return undefined;
   if (typeof op.functionRef === "string") return op.functionRef;
   return typeof op.function === "string" ? op.function : undefined;
+}
+
+/** One call as either state shape spells it. */
+type GatedCall = { kind?: string; functionRef?: unknown; function?: unknown };
+
+/** A state's operation in either shape — one call, or a list of them (hw SPEC §7.1d). */
+type GatedState = { operation?: GatedCall | readonly GatedCall[] };
+
+/** Every call a state makes, so a list is gated call by call. */
+function callsOfState(def: GatedState): readonly GatedCall[] {
+  const op = def.operation;
+  if (op === undefined) return [];
+  return Array.isArray(op) ? (op as readonly GatedCall[]) : [op as GatedCall];
 }
 
 /**
@@ -449,12 +461,12 @@ function functionRefOf(def: { operation?: { kind?: string; functionRef?: unknown
  */
 export function gateCapabilities(
   registry: CapabilityRegistry<WorkflowMetrics>,
-  states: Record<string, { operation?: { kind?: string; functionRef?: unknown; function?: unknown } }>,
+  states: Record<string, GatedState>,
   options: GateOptions = {},
 ): GateIssue[] {
   const issues: GateIssue[] = [];
-  for (const [stateId, def] of Object.entries(states)) {
-    const functionRef = functionRefOf(def);
+  for (const [stateId, def] of Object.entries(states)) for (const call of callsOfState(def)) {
+    const functionRef = functionRefOf(call);
     if (functionRef === undefined) continue;
     const caps = capabilitiesOf(registry, functionRef);
     if (caps === undefined) continue; // a host function or an unregistered ref — not this check's business

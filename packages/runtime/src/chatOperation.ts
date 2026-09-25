@@ -43,7 +43,7 @@
  * belongs to is a question the reader answers by picking one, not one this can guess. The caller
  * reports that there is nothing here to continue and the composer disables itself.
  */
-import type { ExecEnvironmentDecl, LoadedState } from "@declarative-ai/hw";
+import { environmentOf, isOperationList, type ExecEnvironmentDecl, type LoadedState } from "@declarative-ai/hw";
 import type { InlineFamily, NamedParameter, PromptOp } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
 import { ALWAYS_GRANTED_TOOLS, SHELL_TOOL, declaresTools, lowerPermissionSet, permissionsOfPermissionSet, permissionSetOfSettings } from "@jaira/shared";
@@ -97,10 +97,23 @@ function exprOf(value: unknown): string | undefined {
   return typeof expr === "string" ? expr : undefined;
 }
 
+/**
+ * The state's ONE prompt call — the conversation a hand-written message continues.
+ *
+ * A LIST (hw SPEC §7.1d) has none: its calls are several, each with its own settings, and which of
+ * them a message would continue is not something the list says. It reads as a composite does — there
+ * is nothing here to continue.
+ */
+function promptCallOf(state: LoadedState | undefined): PromptOp<InlineFamily> | undefined {
+  const op = state?.operation;
+  if (op === undefined || isOperationList(op) || op.kind !== "prompt") return undefined;
+  return op;
+}
+
 /** The config bag of a prompt op, as a record — `{}` for anything that is not one. */
 function configOf(state: LoadedState | undefined): Record<string, JsonValue> {
-  const op = state?.operation;
-  if (op === undefined || op.kind !== "prompt") return {};
+  const op = promptCallOf(state);
+  if (op === undefined) return {};
   const config = op.config as unknown;
   if (config === null || typeof config !== "object" || Array.isArray(config)) return {};
   return config as Record<string, JsonValue>;
@@ -116,7 +129,7 @@ function configOf(state: LoadedState | undefined): Record<string, JsonValue> {
  * node that was clicked — and a composite could then be planned for and never sent to.
  */
 export function holdsConversation(state: LoadedState | undefined): boolean {
-  return state?.operation?.kind === "prompt";
+  return promptCallOf(state) !== undefined;
 }
 
 /**
@@ -134,6 +147,7 @@ export function holdsConversation(state: LoadedState | undefined): boolean {
  */
 export function chatPlanFor(path: readonly (LoadedState | undefined)[], overrides: ChatSettings = {}): ChatPlan {
   const host = path.find(holdsConversation);
+  const hostCall = promptCallOf(host);
   const config = configOf(host);
   const unresolved: UnresolvedSetting[] = [];
 
@@ -149,8 +163,8 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
 
   const model = inherited<string>("model", config["model"]);
   const reasoning = inherited<ReasoningSpec>("reasoning", config["reasoning"]);
-  const tools = inherited<readonly string[]>("tools", host?.environment?.tools);
-  const lowered = inherited<PermissionsDecl>("permissions", host?.environment?.permissions);
+  const tools = inherited<readonly string[]>("tools", environmentOf(host ?? {})?.tools);
+  const lowered = inherited<PermissionsDecl>("permissions", environmentOf(host ?? {})?.permissions);
   // The shell's entry lowers as `ask`, with the mode its author wrote carried in `subjects`
   // (decision 0007 §4). A composer shows and edits the AUTHORED mode, so it is put back here; sending
   // lowers it again, and `permissionSetOfEnvironment` reads either spelling as the same permission set.
@@ -210,9 +224,7 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
       permissionSet: permissionSetOrigin,
     },
     ...(host?.id !== undefined ? { from: host.id } : {}),
-    ...(host?.operation?.kind === "prompt" && typeof host.operation.system === "string"
-      ? { system: host.operation.system }
-      : {}),
+    ...(hostCall?.system !== undefined ? { system: hostCall.system } : {}),
     passthrough,
     unresolved,
   };
@@ -236,8 +248,8 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
  * composite, and writing one somewhere it might apply is worse than saying it did not apply.
  */
 export function stateWithChatSettings(state: LoadedState, settings: ChatSettings): LoadedState | undefined {
-  const operation = state.operation;
-  if (operation?.kind !== "prompt") return undefined;
+  const operation = promptCallOf(state);
+  if (operation === undefined) return undefined;
   const config = { ...configOf(state) };
   if (settings.model !== undefined) config["model"] = settings.model;
   if (settings.reasoning !== undefined) config["reasoning"] = settings.reasoning as unknown as JsonValue;
@@ -249,7 +261,7 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
       ...state,
       operation: { ...operation, config: config as typeof operation.config },
       environment: {
-        ...state.environment,
+        ...environmentOf(state),
         tools: lowered.tools,
         ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}),
       },
@@ -259,7 +271,7 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
     ...state,
     operation: { ...operation, config: config as typeof operation.config },
     environment: {
-      ...state.environment,
+      ...environmentOf(state),
       // The WHOLE list, as everywhere else — `[]` is how the composer says "no tools", and merging
       // it with what the file declared would make that the one instruction it cannot give.
       ...(settings.tools !== undefined ? { tools: [...settings.tools] } : {}),

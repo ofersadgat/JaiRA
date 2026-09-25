@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hashOperation, scopedOperationId } from "@declarative-ai/exec";
+import type { LoadedOperation } from "@declarative-ai/hw";
 import { testHome } from "@jaira/testing";
 import {
   artifactContentOf,
@@ -96,6 +97,43 @@ function begin(): void {
 
 const SHAPE = { root: { sequence: ["a", "b", "c"] } };
 
+/** One call of an operation LIST (hw SPEC §7.1d) — its rows carry the call's `index`. */
+function callStarted(id: string, stateId: string, index: number): void {
+  journal(id, { type: "operation.started", instanceId: id, stateId, op: "function", index });
+}
+function callCompleted(id: string, stateId: string, index: number, operationId: string): void {
+  journal(id, { type: "operation.completed", instanceId: id, stateId, op: "function", index, operationId });
+}
+function callFailed(id: string, stateId: string, index: number): void {
+  journal(id, { type: "operation.failed", instanceId: id, stateId, op: "function", index, failure: { classification: "permanent", reason: "boom" } });
+}
+
+describe("an operation list's calls", () => {
+  it("load as the completed prefix, so the run resumes at the call that was cut", () => {
+    begin();
+    entered("i-root", "root");
+    callStarted("i-root", "root", 0);
+    callCompleted("i-root", "root", 0, "op-0");
+    record("op-0", { answer: "first" });
+    callStarted("i-root", "root", 1); // the process died in here
+
+    const load = buildTaskLoad(project, "t", { root: {} });
+    expect(load.unreadable).toEqual([]);
+    expect(load.loaded!.operation).toEqual([{ value: { answer: "first" } }]);
+  });
+
+  it("stop at a failed call — it and everything after it run again", () => {
+    begin();
+    entered("i-root", "root");
+    callCompleted("i-root", "root", 0, "op-0");
+    record("op-0", { answer: "first" });
+    callFailed("i-root", "root", 1);
+
+    const load = buildTaskLoad(project, "t", { root: {} });
+    expect(load.loaded!.operation).toEqual([{ value: { answer: "first" } }]);
+  });
+});
+
 describe("the load description of a half-done run", () => {
   it("loads what completed, presents what was cut, and points at the frontier", () => {
     begin();
@@ -117,7 +155,7 @@ describe("the load description of a half-done run", () => {
     const [a, b] = root.children!;
     expect(a).toMatchObject({ id: "i-a", live: false, outcome: "success", occurrence: 0 });
     // The recorded value, unwrapped from the `{ value }` envelope — what `finish` recomputes from.
-    expect(a!.operation?.value).toEqual({ ok: true });
+    expect((a!.operation as LoadedOperation | undefined)?.value).toEqual({ ok: true });
     // Entered and never terminated: the leaf that CONTINUES, with no operation to take — it re-asks.
     expect(b).toMatchObject({ id: "i-b", live: true });
     expect(b!.operation).toBeUndefined();
