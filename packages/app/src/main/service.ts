@@ -173,6 +173,10 @@ import {
   type ModelStore,
   EVENTS_TASK,
   EVENTS_WORKFLOW,
+  callingStateOf,
+  mirrorStarted,
+  settleStartedMirror,
+  startedTaskOf,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -352,6 +356,7 @@ import {
   ON_EVENT,
   type EventsTaskNotice,
   type EventsTaskStart,
+  type EventsTaskCaller,
 } from "@jaira/runtime";
 import {
   ARTIFACT_SCHEME,
@@ -366,6 +371,8 @@ import {
   enabledEvents,
   isEventEnabled,
   eventSummary,
+  signComment,
+  type StartingState,
   type EventDelivery,
   type EventRemoteView,
   type EventsStatusView,
@@ -1712,6 +1719,7 @@ export class AppService {
   /** A task's run ended: tell the tasks listening (`task.finished` / `task.failed`), when that event is on. */
   private taskEnded(open: ProjectSession, taskId: string, status: string, workflow: string | undefined): void {
     this.eventsRunEnded(open, taskId, status);
+    this.settleStarted(open, taskId, status);
     const name = status === "completed" ? "task.finished" : status === "failed" ? "task.failed" : undefined;
     if (name === undefined || !isEventEnabled(open.project.config, name)) return;
     const task = open.project.tasks.tryRead(taskId);
@@ -1811,8 +1819,8 @@ export class AppService {
   private eventsCapabilities(open: ProjectSession, taskId: string): (registry: ReturnType<typeof newRegistry>) => void {
     return (registry) =>
       registerEventsTaskFunctions(registry, {
-        startTask: (request) => this.startFromEvents(open, taskId, request),
-        notify: (notice) => this.postNotice(open, taskId, notice),
+        startTask: (request, caller) => this.startFromEvents(open, taskId, request, caller),
+        notify: (notice, caller) => this.postNotice(open, taskId, notice, caller),
       });
   }
 
@@ -1820,23 +1828,58 @@ export class AppService {
    * `start_task`: make a task in the events task's own project, record where it came from, start it,
    * and answer as soon as its run has started. A task that was made and could not start is answered
    * with why — and left, queued, where a person can see it and its origin.
+   *
+   * Who called is the engine's dispatch site (`caller`), read against the events task's journal
+   * (`callingStateOf`): the automation, which firing of it, and the event it was entered with. The task
+   * is that state's CHILD (the rulings of 2026-09-25) — `origin.kind: "started"`, and mirrored into the
+   * events task's journal as `each: "task"` elements are — unless the call said `top_level: true`, which
+   * starts it on its own, `startedBy` saying where from. A call with no site to read (none dispatched
+   * it) can only start one on its own. A call the events task already made — resumed after a crash
+   * before its answer was recorded — is answered with the task it made.
    */
-  private async startFromEvents(open: ProjectSession, fromTask: string, request: EventsTaskStart): Promise<{ task_id: string; error?: string }> {
-    const summary = request.event !== undefined ? eventSummary(request.event) : "";
+  private async startFromEvents(open: ProjectSession, fromTask: string, request: EventsTaskStart, caller: EventsTaskCaller): Promise<{ task_id: string; error?: string }> {
+    const project = open.project;
+    const at = caller.instanceId !== undefined ? callingStateOf(project, fromTask, caller.instanceId) : undefined;
+    const event = request.event ?? at?.event;
+    const summary = event !== undefined ? eventSummary(event) : "";
     const inputs = request.inputs ?? {};
-    const meta = createTask(open.project, {
-      title: request.title ?? request.workflow,
-      workflow: request.workflow,
-      ...(Object.keys(inputs).length > 0
-        ? { inputs, inputProvenance: Object.fromEntries(Object.keys(inputs).map((name) => [name, { via: "bound" as const }])) }
-        : {}),
-      startedBy: { by: "events", fromTask, event: request.event?.name ?? "", summary },
-    });
+    const child = !request.topLevel && at !== undefined;
+    const state: StartingState | undefined = at !== undefined ? { key: at.key, path: at.path, stateId: at.stateId, occurrence: at.occurrence, call: caller.call } : undefined;
+    const made = state !== undefined ? startedTaskOf(project, fromTask, state) : undefined;
+    const meta =
+      made ??
+      createTask(project, {
+        title: request.title ?? request.workflow,
+        workflow: request.workflow,
+        ...(Object.keys(inputs).length > 0
+          ? { inputs, inputProvenance: Object.fromEntries(Object.keys(inputs).map((name) => [name, { via: "bound" as const }])) }
+          : {}),
+        ...(child
+          ? {
+              origin: {
+                kind: "started" as const,
+                taskId: fromTask,
+                key: at.key,
+                ...(at.occurrence !== 0 ? { occurrence: at.occurrence } : {}),
+                index: caller.call,
+                ...(event !== undefined ? { event: { name: event.name, summary } } : {}),
+                state: { stateId: at.stateId, path: at.path },
+              },
+            }
+          : { startedBy: { by: "events" as const, fromTask, ...(state !== undefined ? { state } : {}), event: event?.name ?? "", summary } }),
+      });
+    if (child) {
+      mirrorStarted(project, fromTask, at, meta);
+      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: fromTask });
+    }
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
     this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    const standing = project.runtime.get(meta.id)?.status;
+    if (made !== undefined && standing !== "queued") return { task_id: meta.id };
     try {
       await this.startTask({ taskId: meta.id, project: this.refOfSession(open) });
-      this.log({ level: "info", source: "events", message: `started ${request.workflow} (${meta.id})${summary.length > 0 ? ` · ${summary}` : ""}`, project: open.key, taskId: fromTask });
+      const why = [at?.key, summary].filter((part) => part !== undefined && part.length > 0).join(" · ");
+      this.log({ level: "info", source: "events", message: `started ${request.workflow} (${meta.id})${child ? " as a child" : " on its own"}${why.length > 0 ? ` · ${why}` : ""}`, project: open.key, taskId: fromTask });
       return { task_id: meta.id };
     } catch (e) {
       const reason = (e as Error).message;
@@ -1845,8 +1888,23 @@ export class AppService {
     }
   }
 
+  /**
+   * A task the events task started as its child has ended: the end of its mirror goes into the events
+   * task's journal (`settleStartedMirror`), as a fan-out writes an element's.
+   */
+  private settleStarted(open: ProjectSession, taskId: string, status: string): void {
+    if (status !== "completed" && status !== "failed" && status !== "canceled") return;
+    // Stopped by the app closing is suspended, not ended: the next open resumes it.
+    if (status === "canceled" && (open.closing || open.suspendedAtClose.has(taskId) || open.forwardingAtClose.has(taskId))) return;
+    const into = settleStartedMirror(open.project, taskId, status);
+    if (into !== undefined) this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: into });
+  }
+
   /** `notify`: a notice, kept for the process, pushed, and written to the log. */
-  private postNotice(open: ProjectSession, fromTask: string, notice: EventsTaskNotice): void {
+  private postNotice(open: ProjectSession, fromTask: string, given: EventsTaskNotice, caller: EventsTaskCaller): void {
+    // The event the calling automation was entered with, when the call did not name one.
+    const event = given.event ?? (caller.instanceId !== undefined ? callingStateOf(open.project, fromTask, caller.instanceId)?.event : undefined);
+    const notice: EventsTaskNotice = { ...given, ...(event !== undefined ? { event } : {}) };
     const summary = notice.event !== undefined ? eventSummary(notice.event) : undefined;
     const posted: EventsNotice = {
       project: open.dir,
@@ -2040,8 +2098,9 @@ export class AppService {
    * An outward act, and not a new kind of one: the task has already been allowed to publish — the
    * request this thread lives on exists because it was — and a reply on it is the same conversation.
    * So it is refused only for a request this task never opened. The reply is JaiRA's own voice on the
-   * forge (`own`), which the settlement mapping never treats as an event: replying does not restart
-   * the quiet window and cannot settle the gate.
+   * forge — signed, with JaiRA's marker (`signComment`), which is what `own` is read from — so the
+   * settlement mapping never treats it as an event: replying does not restart the quiet window and
+   * cannot settle the gate. No model asked for it, so its line is JaiRA's.
    */
   async replyRemote(request: { taskId: string; key: string; thread: string; body: string; resolve?: boolean; project?: string }): Promise<RemoteStatusView[]> {
     const session = this.session(request.project);
@@ -2051,7 +2110,7 @@ export class AppService {
     const body = request.body.trim();
     if (body.length === 0) throw this.refusal("run", "a reply needs words");
     const target = this.watchTargets().find((t) => t.key === session.key)!;
-    await target.provider(row.host).reply(handle, request.thread, body, request.resolve === true);
+    await target.provider(row.host).reply(handle, request.thread, signComment(body, { taskId: request.taskId }), request.resolve === true);
     return this.checkRemotes(request.taskId, request.project);
   }
 
@@ -4195,6 +4254,7 @@ export class AppService {
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
         publishing: { authorize: (request) => remotePrimitives.publishing.authorize(request) },
         events: this.gitEventWaits(open, taskId),
+        modelOf: (ctx) => this.modelOfCall(project, taskId, ctx),
       }),
     );
 
@@ -4299,6 +4359,8 @@ export class AppService {
       // A yes given in a typed turn of this task (an agent's `git_push`) counts here too, and back.
       publishAnswered: () => open.publishGranted.has(taskId),
       onPublishGranted: () => open.publishGranted.add(taskId),
+      // What a comment it posts is signed with: the model behind the call, where it can be told.
+      modelOf: (ctx) => this.modelOfCall(project, taskId, ctx),
     });
     // The gate's second door (decision 0004 §3). `review_artifacts` is interactive and was routed to
     // the hub above like every component; with a `remote` it ALSO lives on the forge, so this run's
@@ -4926,6 +4988,40 @@ export class AppService {
   }
 
   /**
+   * The model behind a call made from `ctx` — an agent's tool call, or a function op — which is what a
+   * comment JaiRA posts is signed with (`signComment`, the rulings of 2026-09-25).
+   *
+   * The call's CONVERSATION first: the model its last recorded turn names, because routing happens
+   * inside a call and the record is the only place the answer exists (`recordedModelAt`). Then the
+   * call's own request: the model its record asked for — the latest dispatch of the calling instance,
+   * by the journal's `operation.dispatched`. Neither: `undefined`, and the comment is signed as JaiRA's.
+   */
+  private modelOfCall(project: Project, taskId: string, ctx: unknown): string | undefined {
+    const services = ctx as { session?: { at?: { id: string; seq: number } }; scope?: { instanceId: string } } | undefined;
+    const at = services?.session?.at;
+    if (at !== undefined) {
+      const recorded = this.recordedModelAt(project, taskId, at);
+      if (recorded !== undefined) return recorded;
+    }
+    const instanceId = services?.scope?.instanceId;
+    if (instanceId === undefined) return undefined;
+    const dispatched = project.events
+      .list(taskId)
+      .filter((row) => row.event.type === "operation.dispatched" && row.event.instanceId === instanceId)
+      .at(-1)?.event as { operationId?: string } | undefined;
+    if (dispatched?.operationId === undefined) return undefined;
+    const row = project.db.prepare(`SELECT request_json FROM operation_records WHERE id = ?`).get(dispatched.operationId) as { request_json: string | null } | undefined;
+    if (row?.request_json == null) return undefined;
+    try {
+      const op = JSON.parse(row.request_json) as { config?: { model?: unknown }; model?: unknown };
+      const model = op.config?.model ?? op.model;
+      return typeof model === "string" && model.length > 0 ? model : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Can this machine run a model id — what a preset's `first-available` asks of each candidate.
    *
    * Over the default executor built from every CONFIGURED route (no probe filter, unlike a run's own
@@ -5337,6 +5433,7 @@ export class AppService {
           onGranted: () => open.publishGranted.add(request.taskId),
         }),
         events: this.gitEventWaits(open, request.taskId),
+        modelOf: (ctx) => this.modelOfCall(project, request.taskId, ctx),
       }),
     );
     // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,

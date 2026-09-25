@@ -7,7 +7,8 @@
 import { describe, expect, it } from "vitest";
 import { loadBundle } from "@declarative-ai/hw";
 import { CHANGESET_REVIEW_LOOP_ID, changesetReviewLoopFiles } from "../src/changesetGate";
-import { saysFixed, threadReplies } from "../src/remoteReview";
+import { isJairaComment, signComment, type ForgeProvider, type RemoteHandle } from "@jaira/shared";
+import { answerThreads, saysFixed, threadReplies } from "../src/remoteReview";
 import { hostCalleeSignatures } from "../src/userEvents";
 
 const HEAD = "9f3c1a2b7e55aa00";
@@ -49,6 +50,26 @@ describe("which threads a revision answers", () => {
     expect(threadReplies([thread("t1", "a.ts", [theirs], true)], edits, HEAD)).toEqual([]);
     expect(threadReplies([thread("t2", "a.ts", [ours])], edits, HEAD)).toEqual([]);
     expect(threadReplies([thread("t3", undefined, [theirs])], edits, HEAD)).toEqual([]);
+  });
+
+  it("posts each reply SIGNED, so the next read finds JaiRA's own last word there — and says nothing again", async () => {
+    // A forge that keeps what it is told, and reads `own` the way the providers do: off the marker.
+    const said: Array<{ thread: string; body: string; resolve: boolean }> = [];
+    const comments: Array<{ body: string }> = [{ body: "Why this key?" }];
+    const forge = {
+      read: async () => ({ threads: [{ id: "t1", resolved: false, anchor: { path: "a.ts", line: 3, side: "after" }, comments: comments.map((c) => ({ id: "x", who: "ofer", at: "", canWrite: true, body: c.body, own: isJairaComment(c.body) })) }] }),
+      reply: async (_handle: unknown, id: string, body: string, resolve: boolean) => {
+        said.push({ thread: id, body, resolve });
+        comments.push({ body });
+      },
+    } as unknown as ForgeProvider;
+    const handle = {} as RemoteHandle;
+    const sign = (body: string): string => signComment(body, { model: "claude-opus-5-5", taskId: "t-9" });
+    expect(await answerThreads(forge, handle, [{ path: "a.ts", reason: "fixed: keyed on the arch too" }], HEAD, sign)).toBe(1);
+    expect(said).toEqual([{ thread: "t1", body: signComment("fixed: keyed on the arch too (9f3c1a2b)", { model: "claude-opus-5-5", taskId: "t-9" }), resolve: true }]);
+    expect(said[0]!.body.split("\n")[0]).toBe("🤖 claude-opus-5-5 · via JaiRA");
+    // The same round re-reached: the thread's last word is the signed reply, so nothing more is said.
+    expect(await answerThreads(forge, handle, [{ path: "a.ts", reason: "fixed: keyed on the arch too" }], HEAD, sign)).toBe(0);
   });
 });
 

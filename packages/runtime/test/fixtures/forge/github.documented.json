@@ -198,7 +198,7 @@
                           },
                           {
                             "id": "PRRC_2",
-                            "body": "Fixed in the next push.",
+                            "body": "\ud83e\udd16 claude-opus-5-5 \u00b7 via JaiRA\n\nFixed in the next push.\n\n<!-- jaira:comment model=claude-opus-5-5 task=t-review -->",
                             "createdAt": "2026-09-18T09:25:00Z",
                             "authorAssociation": "COLLABORATOR",
                             "author": {

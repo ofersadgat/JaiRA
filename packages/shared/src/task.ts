@@ -78,8 +78,9 @@ export interface TaskMeta {
    */
   connectUndo?: StoredConnectUndo;
   /**
-   * What STARTED this task, when something other than a person did (decision 0010 §4): the events
-   * task, because of an event. Kept apart from {@link origin}, which says where a COPY came from.
+   * What STARTED this task ON ITS OWN, when the events task did (decision 0010 §4, the rulings of
+   * 2026-09-25): a `start_task` asked with `top_level: true`. A task the events task starts as its
+   * CHILD (the default) says so in {@link origin} instead — `kind: "started"` — and is never both.
    */
   startedBy?: TaskStartedBy;
   /**
@@ -90,14 +91,41 @@ export interface TaskMeta {
   createdAt: string; // ISO 8601
 }
 
-/** Where a task the events task started came from — see {@link TaskMeta.startedBy}. */
+/** Where a task the events task started ON ITS OWN came from — see {@link TaskMeta.startedBy}. */
 export interface TaskStartedBy {
   by: "events";
   /** The events task that started it. */
   fromTask: string;
+  /**
+   * The STATE of that task that called `start_task` — the automation — and which firing of it. Absent
+   * on a task started before the state was recorded (it cannot be recovered, so it is left out).
+   */
+  state?: StartingState;
   /** The event's name (`git.push`), or empty when the step was handed none. */
   event: string;
   /** What happened, in a line: "git.push a1b2c3d on main" — see `eventSummary`. */
+  summary: string;
+}
+
+/** The state that called `start_task`, as its task's journal records it. */
+export interface StartingState {
+  /** Its child key under the events root — the automation's name. */
+  key: string;
+  /** Its path from the root (`push_main`), the conversation's spelling. */
+  path: string;
+  /** Its state id (`system/events/push_main`) — what opening the task AT it names. */
+  stateId: string;
+  /** Which entry of that key — the n-th firing of the automation, from 0. */
+  occurrence: number;
+  /** Which call of its operation list made the start. */
+  call: number;
+}
+
+/** What a started task keeps of the event that started it — the card's line. */
+export interface StartingEvent {
+  /** `git.push`. */
+  name: string;
+  /** "git.push a1b2c3d on main" — `eventSummary`. */
   summary: string;
 }
 
@@ -115,9 +143,13 @@ export interface TaskProvenance {
    * `split`: a copy of the parent, standing at the mount. `task`: a fresh task rooted at the mounted
    * state. `adopt`: a task that ran ALONE and was taken up afterwards (decision 0005 §2) — `taskId`
    * is the parent that adopted it and `key` the child it stands for there. It keeps its own journal,
-   * sessions and workspace; only where it files changes.
+   * sessions and workspace; only where it files changes. `started`: a task the EVENTS task started
+   * as its child (decision 0010 §4, the rulings of 2026-09-25) — `taskId` is the events task, `key`
+   * the automation (the calling state's key), `occurrence` which firing of it, `index` which call of
+   * its operation list. A fresh task in its own workspace, filed under the events task as a
+   * `task` child is, and mirrored into its journal the same way.
    */
-  kind: "split" | "task" | "adopt";
+  kind: "split" | "task" | "adopt" | "started";
   /** The task whose list made this one. */
   taskId: string;
   /** The mount key the list was on, in that task. */
@@ -126,6 +158,10 @@ export interface TaskProvenance {
   occurrence?: number;
   /** The element's position in the list. */
   index: number;
+  /** For `started`: the event it was started because of — the card's "started by events · …" line. */
+  event?: StartingEvent;
+  /** For `started`: the calling state's id and path, so opening the events task lands at it. */
+  state?: { stateId: string; path: string };
   /** The element's own identity, when the wire named an id field. */
   item?: string;
   /**

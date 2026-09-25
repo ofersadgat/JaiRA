@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseIntegrations, type RemoteHandle } from "@jaira/shared";
+import { parseIntegrations, signComment, type RemoteHandle } from "@jaira/shared";
 import { checkForges, ForgeError, forgeForHost, forgeProvider, NoForgeConnection } from "../src/forge";
 import { SecretResolver } from "../src/secrets";
 import { replayForge, type Replay } from "./forgeReplay";
@@ -18,6 +18,9 @@ let replay: Replay;
 beforeEach(() => {
   replay = replayForge();
 });
+
+/** The recorded reply JaiRA posted: signed, so it is JaiRA's own (`own`) whoever's account posted it. */
+const SIGNED_FIX = signComment("Fixed in the next push.", { model: "claude-opus-5-5", taskId: "t-review" });
 
 const GITLAB = { provider: "gitlab", host: "gitlab.com" } as const;
 const GITHUB = { provider: "github", host: "github.com" } as const;
@@ -153,7 +156,7 @@ describe("GitLab", () => {
         resolved: false,
         comments: [
           { id: "1101", who: "mara", body: "This cache key ignores the runner's architecture.", at: "2026-09-18T09:00:00.000Z", canWrite: true, own: false },
-          { id: "1102", who: "jaira-bot", body: "Fixed in the next push.", at: "2026-09-18T09:20:00.000Z", canWrite: true, own: true },
+          { id: "1102", who: "jaira-bot", body: SIGNED_FIX, at: "2026-09-18T09:20:00.000Z", canWrite: true, own: true },
         ],
       });
       // A line that only exists BEFORE the change anchors on the old side; resolved is the forge's word.
@@ -381,7 +384,7 @@ describe("GitHub", () => {
           resolved: false,
           comments: [
             { id: "PRRC_1", who: "mara", body: "This flag is never read.", at: "2026-09-18T09:15:00Z", canWrite: true, own: false },
-            { id: "PRRC_2", who: "jaira-bot", body: "Fixed in the next push.", at: "2026-09-18T09:25:00Z", canWrite: true, own: true },
+            { id: "PRRC_2", who: "jaira-bot", body: SIGNED_FIX, at: "2026-09-18T09:25:00Z", canWrite: true, own: true },
           ],
         },
         {
@@ -404,7 +407,8 @@ describe("GitHub", () => {
     it("lists general comments in order — a review submitted as a comment is one — and marks write access and its own", async () => {
       const { comments } = await github().read(pr(14462));
       expect(comments.map((c) => [c.who, c.body, c.canWrite, c.own])).toEqual([
-        ["jaira-bot", "Opened by JaiRA for review.", true, true],
+        // The token's own account, unsigned: the PERSON's words (the rulings of 2026-09-25) — not JaiRA's.
+        ["jaira-bot", "Opened by JaiRA for review.", true, false],
         ["drive-by", "nice", false, false],
         ["mara", "An overall comment, submitted as a review.", true, false],
         ["sam", "approve", true, false],

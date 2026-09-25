@@ -15,6 +15,7 @@
  */
 import {
   ciStateOf,
+  isJairaComment,
   remoteHandleId,
   type CiConclusion,
   type CiRun,
@@ -278,10 +279,7 @@ export class GitHubProvider implements ForgeProvider {
 
   async read(handle: RemoteHandle): Promise<RemoteState> {
     const [owner, name] = handle.project.split("/");
-    const [me, data] = await Promise.all([
-      this.whoami(),
-      this.graphql(GITHUB_READ_QUERY, { owner, name, number: handle.number }, `reading ${handle.id}`),
-    ]);
+    const data = await this.graphql(GITHUB_READ_QUERY, { owner, name, number: handle.number }, `reading ${handle.id}`);
     const pr = asRecord(asRecord(data["repository"])["pullRequest"]);
     if (Object.keys(pr).length === 0) throw new ForgeError(`reading ${handle.id}: GitHub has no such pull request for this token`, 404);
 
@@ -293,7 +291,8 @@ export class GitHubProvider implements ForgeProvider {
         body: asText(node["body"]),
         at: asText(node["createdAt"] ?? node["submittedAt"]),
         canWrite: WRITERS.has(asText(node["authorAssociation"])),
-        own: who === me.login,
+        // JaiRA's own words are the ones carrying its marker — not the token's account, which is the person's.
+        own: isJairaComment(asText(node["body"])),
       };
     };
     const nodes = (value: unknown): Array<Record<string, unknown>> => asList(asRecord(value)["nodes"]).map(asRecord);
@@ -311,7 +310,7 @@ export class GitHubProvider implements ForgeProvider {
         verdict: state === "APPROVED" ? "approved" : "changes_requested",
         ...(body.length > 0 ? { body } : {}),
         canWrite: WRITERS.has(asText(node["authorAssociation"])),
-        own: who === me.login,
+        own: isJairaComment(body),
       });
     }
 

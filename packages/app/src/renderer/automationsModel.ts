@@ -1,26 +1,25 @@
 /**
- * Settings → Tools → Automations, as data (decision 0010 §4): the lines of a layer's events workflow
- * (`workflows/system/events.json`), read out of the file and written back into it. Pure — the section
- * (`automationsPane.tsx`) draws what this says and the tests read it without a DOM.
+ * Settings → Tools → Automations, as data (decision 0010 §4, the rulings of 2026-09-25): the lines of a
+ * layer's events workflow (`workflows/system/events.json`) and the state each runs
+ * (`workflows/system/events/<name>.json`), read out of the files and written back into them. Pure —
+ * the section (`automationsPane.tsx`) draws what this says and the tests read it without a DOM.
  *
- * ## The file's shape
+ * ## The files' shape
  *
- * A root with no spine (`sequence: []`) whose own rules are the lines. A line is ONE named rule,
- * `{ name, when: "on_event('git.push', { branch: 'main' })", to: <the line's first step> }`, and its
- * steps are async children chained by `{ when: "true", to: <next> }`:
+ * The root has no spine (`sequence: []`) and its own rules are the lines. A line is ONE named rule and
+ * ONE async child:
  *
- *  - step 1 is the child keyed by the line's name, and the RULE hands it everything, because `.event`
- *    (what the rule's `on_event` resolved to) is readable in the rule's own `inputs` and nowhere else;
- *  - step n ≥ 2 is `<name>_<n>`, wired from the step before it — the event is each step's output, so
- *    `.children.<prev>.output.event.payload.x` reads what `.event.payload.x` read for step 1.
+ *  - the rule `{ name, when: "on_event('git.push', { branch: 'main' })", to: name, inputs: { event:
+ *    ".event" } }` — it hands the event in, because `.event` (what the rule's `on_event` resolved to)
+ *    is readable in the rule's own `inputs` and nowhere else;
+ *  - the child `name: { "async": true }`, whose state is the default `./name`: `system/events/<name>`,
+ *    a state file of its own beside the root, found through the layers like any state;
+ *  - that state's steps are ONE operation list — each step one call, `start_task` or `notify`, run in
+ *    order (`@jaira/shared` `automations.ts` writes and reads it).
  *
- * Each step is one of two built-in states: `system/events/start` (`start_task` — `workflow`, `inputs`,
- * `event`) or `system/events/notify` (`text`, `event`). Literals are the binding sugar's own: a string
- * is `{ "text": … }` (a bare string would read as a reference), and the `inputs` map is `{ "$literal":
- * { … } }` with each value picked from the event wrapped `{ "$binding": ".event.payload.x" }`.
- *
- * A rule this editor does not recognise — a hand-written guard, a child of another state — is kept
- * exactly as it stands and shown as a line that is edited as a workflow file.
+ * A rule this editor does not recognise — a hand-written guard, a child wired some other way, a state
+ * whose operation it cannot take apart — is kept exactly as it stands and shown as a line that is
+ * edited as a workflow file.
  *
  * ## Layers
  *
@@ -28,16 +27,32 @@
  * lines first, then Shared's spliced in minus any it ignores —
  * `{ "$ref": "...filter($BASE/workflows/system/events.transitions, (t) => !['push_main'].includes(t.name))" }`
  * — and its children beside Shared's (`"children": { "$ref": "$BASE/workflows/system/events.children", … }`).
+ *
+ * An automation's STATE resolves through the layers on its own, so a project changes a Shared line's
+ * steps by writing its own `system/events/<name>.json` — a copy of that one file, for that project
+ * alone — and needs no copy of the root for it. Changing a Shared line's event or filter from a project
+ * is a line of the project's own: Shared's is ignored there (the splice's filter) and the project's
+ * copy gets a rule of the same name.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import { EVENT_SPECS, isEventName, matchesGlobs, type EventFilterKey, type EventName, type JairaEventsConfig } from "@jaira/shared/browser";
+import {
+  automationStateIdOf,
+  automationStateOf,
+  EVENT_SPECS,
+  EVENTS_STATE_ID,
+  isEventName,
+  matchesGlobs,
+  stepsOfAutomationState,
+  type AutomationStep,
+  type EventFilterKey,
+  type EventName,
+  type JairaEventsConfig,
+  type StepValue,
+  type WritableLayer,
+} from "@jaira/shared/browser";
 import type { ValueSourceOption } from "./schemaForm/types";
 
-/** The state the events task runs, in every layer. */
-export const EVENTS_STATE_ID = "system/events";
-/** The step states a line's steps mount (decision 0010 §4, built in beside the root). */
-export const START_STEP = "system/events/start";
-export const NOTIFY_STEP = "system/events/notify";
+export { EVENTS_STATE_ID, automationStateIdOf, type AutomationStep, type StepValue };
 
 /**
  * The events task among a project's tasks: the one the supervisor marks `system: "events"` — or,
@@ -51,16 +66,6 @@ const BASE_EVENTS = "$BASE/workflows/system/events";
 
 // --- the model -------------------------------------------------------------------------------
 
-/**
- * Where a step input's value comes from: typed, or picked from the event — by its path under the
- * delivered event (`payload.branch`, `payload.commits[0].message`; `""` for the whole event).
- */
-export type StepValue = { literal: JsonValue } | { event: string };
-
-export type AutomationStep =
-  | { kind: "start"; workflow: string; inputs: Record<string, StepValue> }
-  | { kind: "notify"; text: string };
-
 export type EventFilterValue = string | string[];
 
 export interface AutomationLine {
@@ -69,13 +74,29 @@ export interface AutomationLine {
   event: string;
   /** `on_event`'s filter, by key. */
   filter: Partial<Record<EventFilterKey, EventFilterValue>>;
+  /** Its state's operation list, one step per call. */
   steps: AutomationStep[];
   /**
-   * A line this editor cannot take apart: its rule and the children it reaches, kept as they are.
-   * Drawn read-only; edited as a workflow file.
+   * A line this editor cannot take apart: its rule and the child it reaches, kept as they are. Drawn
+   * read-only; edited as a workflow file.
    */
   raw?: { rule: Record<string, unknown>; children: Record<string, unknown> };
 }
+
+/** An automation's steps as a page reads them: through the layers, and from which. */
+export interface StepsRead {
+  steps?: AutomationStep[];
+  /** The layer whose `system/events/<name>` answered. Absent: none has one. */
+  from?: WritableLayer;
+  /** That file is there but is not an operation list this editor writes. */
+  unreadable?: boolean;
+}
+
+/** How a page finds a line's steps: by name, through its layers. */
+export type StepsOf = (name: string) => StepsRead;
+
+/** Steps no layer holds: a new line, before its state is written. */
+export const NO_STEPS: StepsOf = () => ({});
 
 // --- the guard ---------------------------------------------------------------------------------
 
@@ -173,63 +194,12 @@ export function parseWhen(when: unknown): { event: string; filter: AutomationLin
   return { event, filter };
 }
 
-// --- one step's bindings -------------------------------------------------------------------------
+// --- a document ↔ its lines ---------------------------------------------------------------------
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
-/** What a step reads the event through: the rule's `.event`, or the previous step's output. */
-const eventRefOf = (previous: string | undefined): string => (previous === undefined ? ".event" : `.children.${previous}.output.event`);
-
-/** A step's wiring — the rule's `inputs` for step 1, the mount's for the rest. */
-function wiringOf(step: AutomationStep, previous: string | undefined): Record<string, unknown> {
-  const event = eventRefOf(previous);
-  if (step.kind === "notify") return { event, text: { text: step.text } };
-  const wiring: Record<string, unknown> = { event, workflow: { text: step.workflow } };
-  const entries = Object.entries(step.inputs);
-  if (entries.length > 0) {
-    const literal: Record<string, unknown> = {};
-    for (const [key, value] of entries) {
-      literal[key] = "literal" in value ? value.literal : { $binding: value.event.length > 0 ? `${event}.${value.event}` : event };
-    }
-    wiring["inputs"] = { $literal: literal };
-  }
-  return wiring;
-}
-
-/** A step read back from its state and wiring; `undefined` when it is not one this editor writes. */
-function stepOf(state: unknown, wiring: unknown, previous: string | undefined): AutomationStep | undefined {
-  if (!isRecord(wiring)) return undefined;
-  const event = eventRefOf(previous);
-  if (wiring["event"] !== event) return undefined;
-  const textOf = (value: unknown): string | undefined => (isRecord(value) && typeof value["text"] === "string" && Object.keys(value).length === 1 ? value["text"] : undefined);
-  if (state === NOTIFY_STEP) {
-    const text = textOf(wiring["text"]);
-    return text === undefined ? undefined : { kind: "notify", text };
-  }
-  if (state !== START_STEP) return undefined;
-  const workflow = textOf(wiring["workflow"]);
-  if (workflow === undefined) return undefined;
-  const inputs: Record<string, StepValue> = {};
-  const held = wiring["inputs"];
-  if (held !== undefined) {
-    if (!isRecord(held) || !isRecord(held["$literal"])) return undefined;
-    for (const [key, value] of Object.entries(held["$literal"])) {
-      if (isRecord(value) && Object.keys(value).length === 1 && typeof value["$binding"] === "string") {
-        const ref = value["$binding"] as string;
-        if (ref !== event && !ref.startsWith(`${event}.`)) return undefined;
-        inputs[key] = { event: ref.slice(event.length + 1) };
-      } else inputs[key] = { literal: value as JsonValue };
-    }
-  }
-  return { kind: "start", workflow, inputs };
-}
-
-const stateOfStep = (step: AutomationStep): string => (step.kind === "start" ? START_STEP : NOTIFY_STEP);
-
-/** The child keys a line's steps are mounted under: its name, then `<name>_2`, `<name>_3`… */
-export const stepKeysOf = (line: Pick<AutomationLine, "name" | "steps">): string[] => line.steps.map((_, i) => (i === 0 ? line.name : `${line.name}_${i + 1}`));
-
-// --- a document ↔ its lines ---------------------------------------------------------------------
+/** The rule's `inputs`, exactly: the event and nothing else. */
+const RULE_INPUTS = { event: ".event" } as const;
 
 /** How a project's copy splices the base layer's lines in, when it does. */
 export interface Splice {
@@ -271,8 +241,11 @@ export function ignoredOfSplice(ref: unknown): string[] | undefined {
   return out;
 }
 
-/** Read a layer's events workflow into its lines. A document that is not an object reads as none. */
-export function parseEventsDoc(doc: unknown): EventsDoc {
+/**
+ * Read a layer's events workflow into its lines, each line's steps found by `stepsOf` (through the
+ * page's layers). A document that is not an object reads as none.
+ */
+export function parseEventsDoc(doc: unknown, stepsOf: StepsOf = NO_STEPS): EventsDoc {
   const root = isRecord(doc) ? doc : {};
   const children = isRecord(root["children"]) ? root["children"] : {};
   const rules = Array.isArray(root["transitions"]) ? root["transitions"] : [];
@@ -286,67 +259,39 @@ export function parseEventsDoc(doc: unknown): EventsDoc {
         return;
       }
     }
-    lines.push(lineOf(rule, children, index));
+    lines.push(lineOf(rule, children, index, stepsOf));
   });
   return { lines, ...(splice !== undefined ? { splice } : {}), follows: typeof root["$ref"] === "string" };
 }
 
-/** One rule and the chain of children it starts, as a line — or kept raw. */
-function lineOf(rule: unknown, children: Record<string, unknown>, index: number): AutomationLine {
+/** One rule and the child it enters, as a line — or kept raw. */
+function lineOf(rule: unknown, children: Record<string, unknown>, index: number, stepsOf: StepsOf): AutomationLine {
   const record = isRecord(rule) ? rule : {};
   const name = typeof record["name"] === "string" ? record["name"] : `line_${index + 1}`;
+  const guard = parseWhen(record["when"]);
   const raw = (): AutomationLine => {
-    const guard = parseWhen(record["when"]);
-    // The children the rule reaches along plain `true` chains — what goes with it if it is removed.
-    const reached: Record<string, unknown> = {};
-    let key = typeof record["to"] === "string" ? record["to"] : undefined;
-    while (key !== undefined && children[key] !== undefined && reached[key] === undefined) {
-      reached[key] = children[key];
-      const mount = children[key];
-      const next = isRecord(mount) && Array.isArray(mount["transitions"]) && mount["transitions"].length === 1 && isRecord(mount["transitions"][0]) ? mount["transitions"][0]["to"] : undefined;
-      key = typeof next === "string" ? next : undefined;
-    }
+    const to = typeof record["to"] === "string" ? record["to"] : undefined;
+    const reached = to !== undefined && children[to] !== undefined ? { [to]: children[to] } : {};
     return { name, event: guard?.event ?? "", filter: guard?.filter ?? {}, steps: [], raw: { rule: record, children: reached } };
   };
-  const guard = parseWhen(record["when"]);
   const known = new Set(["name", "when", "to", "inputs"]);
   if (guard === undefined || typeof record["name"] !== "string" || record["to"] !== name || Object.keys(record).some((k) => !known.has(k))) return raw();
-  const steps: AutomationStep[] = [];
-  let key: string | undefined = name;
-  let previous: string | undefined;
-  let wiring: unknown = record["inputs"];
-  while (key !== undefined) {
-    const mount: unknown = children[key];
-    if (!isRecord(mount) || mount["async"] !== true) return raw();
-    if (key !== (steps.length === 0 ? name : `${name}_${steps.length + 1}`)) return raw();
-    const step = stepOf(mount["state"], previous === undefined ? wiring : mount["inputs"], previous);
-    if (step === undefined) return raw();
-    if (previous === undefined && mount["inputs"] !== undefined) return raw();
-    steps.push(step);
-    const rules: unknown = mount["transitions"];
-    previous = key;
-    if (rules === undefined) key = undefined;
-    else if (Array.isArray(rules) && rules.length === 1 && isRecord(rules[0]) && rules[0]["when"] === "true" && typeof rules[0]["to"] === "string") key = rules[0]["to"];
-    else return raw();
-    wiring = undefined;
-  }
-  return { name, event: guard.event, filter: guard.filter, steps };
+  if (JSON.stringify(record["inputs"]) !== JSON.stringify(RULE_INPUTS)) return raw();
+  const mount = children[name];
+  if (!isRecord(mount) || mount["async"] !== true || Object.keys(mount).length !== 1) return raw();
+  const read = stepsOf(name);
+  // A state file this editor cannot take apart is edited as one, and so is the line that runs it.
+  if (read.unreadable === true) return raw();
+  return { name, event: guard.event, filter: guard.filter, steps: read.steps ?? [] };
 }
 
-/** The rule and the children one line writes. A raw line writes what it held. */
+/** The rule and the child one line writes. A raw line writes what it held. */
 export function writeLine(line: AutomationLine): { rule: Record<string, unknown>; children: Record<string, unknown> } {
   if (line.raw !== undefined) return { rule: line.raw.rule, children: line.raw.children };
-  const keys = stepKeysOf(line);
-  const children: Record<string, unknown> = {};
-  line.steps.forEach((step, i) => {
-    const mount: Record<string, unknown> = { state: stateOfStep(step), async: true };
-    if (i > 0) mount["inputs"] = wiringOf(step, keys[i - 1]);
-    if (i + 1 < keys.length) mount["transitions"] = [{ when: "true", to: keys[i + 1] }];
-    children[keys[i]!] = mount;
-  });
-  const rule: Record<string, unknown> = { name: line.name, when: whenOf(line.event, line.filter), to: line.name };
-  if (line.steps.length > 0) rule["inputs"] = wiringOf(line.steps[0]!, undefined);
-  return { rule, children };
+  return {
+    rule: { name: line.name, when: whenOf(line.event, line.filter), to: line.name, inputs: { ...RULE_INPUTS } },
+    children: { [line.name]: { async: true } },
+  };
 }
 
 /** The children a document's lines own — what rewriting the lines replaces. */
@@ -409,7 +354,7 @@ export function sharedSeedOf(builtIn: unknown): Record<string, unknown> {
 export function skeleton(): Record<string, unknown> {
   return {
     label: "Events",
-    description: "Waits for events and starts tasks. Each rule is one automation of Settings → Tools → Automations.",
+    description: "Waits for events and starts tasks. Each rule is one automation of Settings → Tools → Automations, and runs the state `system/events/<its name>`.",
     sequence: [],
     transitions: [],
     children: {},
@@ -418,6 +363,136 @@ export function skeleton(): Record<string, unknown> {
 
 /** Serialize as the Files view would — two spaces, a trailing newline. */
 export const eventsDocText = (doc: unknown): string => `${JSON.stringify(doc, null, 2)}\n`;
+
+// --- an automation's state ------------------------------------------------------------------------
+
+/**
+ * A line's steps as a page reads them from the state files it has: `own`'s layer first, then the ones
+ * behind it — the project's copy of `system/events/<name>`, else Shared's.
+ */
+export function stepsReaderOf(layers: ReadonlyArray<{ layer: WritableLayer; states: Readonly<Record<string, unknown>> }>): StepsOf {
+  return (name) => {
+    for (const { layer, states } of layers) {
+      const doc = states[name];
+      if (doc === undefined) continue;
+      const steps = stepsOfAutomationState(doc);
+      return steps === undefined ? { from: layer, unreadable: true } : { steps, from: layer };
+    }
+    return {};
+  };
+}
+
+/** Two step lists say the same thing. */
+export const sameSteps = (a: readonly AutomationStep[] | undefined, b: readonly AutomationStep[] | undefined): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** `name`'s state file as it is written with `steps` — `previous` (that layer's file) kept where it has more. */
+export const automationStateText = (name: string, steps: readonly AutomationStep[], previous?: unknown): string => eventsDocText(automationStateOf(name, steps, previous));
+
+// --- a page's files, and what a change writes ------------------------------------------------------
+
+/** One writable layer's files as a page read them: its events root, and its automations' states by name. */
+export interface LayerFiles {
+  /** Its `system/events` — absent: the layer has no copy. */
+  root?: unknown;
+  /** Its `system/events/<name>` files, parsed, by name. */
+  states: Readonly<Record<string, unknown>>;
+}
+
+export interface Copies {
+  project?: LayerFiles;
+  base?: LayerFiles;
+  /** What JaiRA ships: the root only (it ships no automation). */
+  system?: { root?: unknown };
+}
+
+/** One file a change writes, or takes away. */
+export type AutomationWrite = { layer: WritableLayer; stateId: string; text: string } | { layer: WritableLayer; stateId: string; remove: true };
+
+/** The layers a page on `layer` reads a state through, nearest first. */
+export function stateLayersOf(copies: Copies, layer: WritableLayer): Array<{ layer: WritableLayer; states: Readonly<Record<string, unknown>> }> {
+  const base = { layer: "base" as const, states: copies.base?.states ?? {} };
+  return layer === "project" ? [{ layer: "project", states: copies.project?.states ?? {} }, base] : [base];
+}
+
+/** What a page on `reads` lists: its own lines, Shared's (on a project page), and where each line's steps come from. */
+export function automationsReadOf(copies: Copies, reads: WritableLayer): { own: EventsDoc; source: "copy" | "built in" | "none"; shared: AutomationLine[] | undefined; stepsOf: StepsOf } {
+  const stepsOf = stepsReaderOf(stateLayersOf(copies, reads));
+  const base = copies.base?.root;
+  const system = copies.system?.root;
+  const sharedDoc = base ?? system;
+  // Shared's lines as THIS page runs them: on a project page, a line's steps are the project's own copy
+  // of its state where there is one.
+  const shared = sharedDoc !== undefined ? parseEventsDoc(sharedDoc, stepsOf).lines : [];
+  if (reads === "base") {
+    if (base !== undefined) return { own: parseEventsDoc(base, stepsOf), source: "copy", shared: undefined, stepsOf };
+    return { own: parseEventsDoc(system ?? skeleton(), stepsOf), source: system !== undefined ? "built in" : "none", shared: undefined, stepsOf };
+  }
+  const project = copies.project?.root;
+  if (project !== undefined) return { own: parseEventsDoc(project, stepsOf), source: "copy", shared, stepsOf };
+  return { own: { lines: [], splice: { ignored: [] }, follows: true }, source: "none", shared, stepsOf };
+}
+
+/**
+ * The files one change to a layer's OWN lines writes (`before` → `after`), in order:
+ *
+ *  1. Shared's copy made from the built-in, when a project's copy is being made and Shared has none (a
+ *     project's copy `$ref`s Shared's, and a `$BASE` that is not there does not fall back);
+ *  2. each line's state, `system/events/<name>` in the layer — only where the steps now differ from
+ *     what the layer reads through its layers (so a project line of a Shared name, with Shared's steps,
+ *     writes no copy of them);
+ *  3. the layer's events root, when its rules or its ignored list changed;
+ *  4. the state of each line taken out — unless Shared still has a line of that name, whose steps a
+ *     project's file of that name is changing.
+ *
+ * `ignored` is a project's new ignore list; absent: as it stands.
+ */
+export function automationsWritesOf(
+  copies: Copies,
+  into: WritableLayer,
+  before: readonly AutomationLine[],
+  after: readonly AutomationLine[],
+  ignored?: readonly string[],
+): AutomationWrite[] {
+  const out: AutomationWrite[] = [];
+  const base = copies.base?.root;
+  const system = copies.system?.root;
+  const mine = copies[into];
+  const stepsOf = stepsReaderOf(stateLayersOf(copies, into));
+  const sharedNames = new Set(into === "project" && (base ?? system) !== undefined ? parseEventsDoc(base ?? system).lines.map((line) => line.name) : []);
+
+  let root: Record<string, unknown>;
+  if (into === "base") root = writeEventsDoc(base ?? sharedSeedOf(system), after);
+  else {
+    const held = copies.project?.root;
+    const splice = { ignored: [...(ignored ?? (held !== undefined ? (parseEventsDoc(held).splice?.ignored ?? []) : []))] };
+    root = writeEventsDoc(held ?? {}, after, splice);
+  }
+  const rootChanged = JSON.stringify(root) !== JSON.stringify(mine?.root);
+  // A `$BASE` that is not there does not fall back to the built-in: Shared's copy is written first.
+  if (into === "project" && rootChanged && base === undefined) out.push({ layer: "base", stateId: EVENTS_STATE_ID, text: eventsDocText(sharedSeedOf(system)) });
+  for (const line of after) {
+    if (line.raw !== undefined || sameSteps(stepsOf(line.name).steps, line.steps)) continue;
+    out.push({ layer: into, stateId: automationStateIdOf(line.name), text: automationStateText(line.name, line.steps, mine?.states[line.name]) });
+  }
+  if (rootChanged) out.push({ layer: into, stateId: EVENTS_STATE_ID, text: eventsDocText(root) });
+  const kept = new Set(after.map((line) => line.name));
+  for (const line of before) {
+    if (line.raw !== undefined || kept.has(line.name) || sharedNames.has(line.name) || mine?.states[line.name] === undefined) continue;
+    out.push({ layer: into, stateId: automationStateIdOf(line.name), remove: true });
+  }
+  return out;
+}
+
+/**
+ * A Shared line's STEPS changed from a project page: that project's own `system/events/<name>` — a
+ * copy of that one file, for that project alone. Steps back to Shared's own take the copy away.
+ */
+export function sharedStepsWritesOf(copies: Copies, name: string, steps: readonly AutomationStep[]): AutomationWrite[] {
+  const shared = stepsReaderOf(stateLayersOf(copies, "base"))(name).steps;
+  const own = copies.project?.states[name];
+  if (sameSteps(shared, steps)) return own !== undefined ? [{ layer: "project", stateId: automationStateIdOf(name), remove: true }] : [];
+  return [{ layer: "project", stateId: automationStateIdOf(name), text: automationStateText(name, steps, own ?? copies.base?.states[name]) }];
+}
 
 // --- what a layer shows ---------------------------------------------------------------------------
 
@@ -428,18 +503,34 @@ export interface ShownLine {
   from: "own" | "shared";
   /** A Shared line this project leaves out. */
   ignored: boolean;
+  /** Where its steps are read from — the project's own `system/events/<name>`, or Shared's. */
+  stepsFrom?: WritableLayer;
+  /** An own line standing in for a Shared line of the same name, which this project ignores. */
+  replaces?: boolean;
 }
 
 /**
- * What the section lists for a layer: its own lines, then — on a project's copy — Shared's, each
- * marked ignored or not. `shared` is the base layer's lines (its copy, or the built-in's); a project
- * with no copy of its own shows every Shared line, none ignored.
+ * What the section lists for a layer: its own lines, then — on a project page — Shared's, each marked
+ * ignored or not. `shared` is the base layer's lines (its copy, or the built-in's); a project with no
+ * copy of its own shows every Shared line, none ignored. `stepsOf` says where each line's steps come
+ * from on this page.
  */
-export function shownLinesOf(own: EventsDoc, shared: readonly AutomationLine[] | undefined): ShownLine[] {
-  const out: ShownLine[] = own.lines.map((line) => ({ line, from: "own", ignored: false }));
+export function shownLinesOf(own: EventsDoc, shared: readonly AutomationLine[] | undefined, stepsOf: StepsOf = NO_STEPS): ShownLine[] {
+  const ignored = new Set(own.splice?.ignored ?? []);
+  const sharedNames = new Set((shared ?? []).map((line) => line.name));
+  const from = (name: string): { stepsFrom?: WritableLayer } => {
+    const layer = stepsOf(name).from;
+    return layer !== undefined ? { stepsFrom: layer } : {};
+  };
+  const out: ShownLine[] = own.lines.map((line) => ({
+    line,
+    from: "own",
+    ignored: false,
+    ...from(line.name),
+    ...(shared !== undefined && ignored.has(line.name) && sharedNames.has(line.name) ? { replaces: true } : {}),
+  }));
   if (shared !== undefined && own.splice !== undefined) {
-    const ignored = new Set(own.splice.ignored);
-    for (const line of shared) out.push({ line, from: "shared", ignored: ignored.has(line.name) });
+    for (const line of shared) out.push({ line, from: "shared", ignored: ignored.has(line.name), ...from(line.name) });
   }
   return out;
 }
@@ -627,11 +718,12 @@ export function stepFormOf(step: Extract<AutomationStep, { kind: "start" }>): { 
   return { values, picked };
 }
 
-export function stepOfForm(workflow: string, values: Record<string, unknown>, picked: Record<string, string>): Extract<AutomationStep, { kind: "start" }> {
+/** A start with its inputs as the form holds them — its workflow, title and how it starts kept. */
+export function stepOfForm(step: Extract<AutomationStep, { kind: "start" }>, values: Record<string, unknown>, picked: Record<string, string>): Extract<AutomationStep, { kind: "start" }> {
   const inputs: Record<string, StepValue> = {};
   for (const [key, value] of Object.entries(values)) if (value !== undefined && picked[key] === undefined) inputs[key] = { literal: value as JsonValue };
   for (const [key, id] of Object.entries(picked)) inputs[key] = { event: id };
-  return { kind: "start", workflow, inputs };
+  return { ...step, inputs };
 }
 
 /** "issue ← event.commits[0].message · branch ← event.branch" — a step's inputs in one line. */
@@ -640,7 +732,7 @@ export function stepSummary(step: AutomationStep): string {
   const parts = Object.entries(step.inputs).map(([key, value]) =>
     "literal" in value ? `${key} = ${JSON.stringify(value.literal)}` : `${key} ← event${value.event.length > 0 ? value.event.slice("payload".length) : ""}`,
   );
-  return parts.length > 0 ? parts.join(" · ") : "no inputs";
+  return `${parts.length > 0 ? parts.join(" · ") : "no inputs"}${step.topLevel === true ? " · on its own" : ""}`;
 }
 
 /** A name for a new line that no line has: `automation_1`, `automation_2`, … */

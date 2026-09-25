@@ -97,7 +97,9 @@ notice only).
 Its shape: state-level transitions, each **named** (`name`), `when: on_event(...)`, `to` ONE `async:
 true` child. Several things on one event are that child's own transitions to the next child ("have
 one async child and have a transition from that async child to the next child"). Transitions are
-first-match; a later line an earlier one always catches is flagged "not reached".
+first-match; a later line an earlier one always catches is flagged "not reached". *(Reworked the same
+day: the child is ONE state whose operation is a list of calls — see "Reworked after the rulings of
+2026-09-25" below.)*
 
 Layering is the workflow machinery, not settings merging: a project's
 `.jaira/workflows/system/events.json` `$ref`s Shared's and overrides the transitions block, its own
@@ -157,6 +159,86 @@ What the research found the engine lacks (2026-09-25):
   `{ "$literal": { … { "$binding": ".event.payload.x" } … } }`; a later step reads
   `.children.<prev>.output.event`; a `$BASE` miss does not fall back, so Shared's copy
   (`{ "$ref": "$SYSTEM/workflows/system/events", "transitions", "children" }`) is written first.
-- Open: `notify` notices have no surface yet (pushed as `notice:posted`, logged); a started task does
-  not record which rule fired; comments by the connection's own account never fire
+- Open (as first built): `notify` notices have no surface yet (pushed as `notice:posted`, logged); a
+  started task does not record which rule fired; comments by the connection's own account never fire
   `git.merge_request.comments`; Shared's lines are edited on Shared, not from a project page.
+
+### Reworked after the rulings of 2026-09-25
+
+The person's rulings, the same day (not re-opened here):
+
+1. **An automation is ONE state whose operation is a LIST of calls** (hw SPEC §7.1d). "Tell me" is a
+   function call (`notify`), and so is a start (`start_task`). The built-in step states
+   `system/events/start` / `notify` and the `<name>_2` chaining are gone.
+2. **`start_task` starts the task as the calling state's CHILD** — provenance and mirrored rows, as a
+   hosted fan-out's `each: "task"` does — so the events task lists what it started; `top_level: true`
+   starts it ON ITS OWN, `startedBy` saying where from (the refinement of the same day).
+3. **Every comment JaiRA posts is signed**, and JaiRA knows its own words by the signature's marker,
+   not by the account.
+
+As built:
+
+- **The shape** (`@jaira/shared` `automations.ts`, which the editor and the migration both write).
+  A line `<name>` is the rule `{ name, when: "on_event('git.push', { branch: 'main' })", to: name,
+  inputs: { event: ".event" } }` into the child `name: { "async": true }`, whose state is the default
+  `./<name>` — `system/events/<name>.json`, a state file beside the root in the layer that holds the
+  line. That state takes `event` (`{ schema: {}, optional: true }`), declares NO outputs (a list must
+  bind every output it declares, and nothing reads one), and its steps are `"operation": [ { "function":
+  "start_task", "args": { "workflow": "feature/review", "inputs": { "issue": { "$binding": { "$expr":
+  ".inputs.event.payload.commits[0].message" } }, "ask_below": 0.8 }, "title"?: …, "top_level"?: true } },
+  { "function": "notify", "args": { "text": "…" } } ]`. In `args` a string is a literal; a pick from the
+  event is WRAPPED (`$binding`, SPEC §5.3) and spelled `$expr`, because the loader takes a bare
+  `.inputs.<name>` reference only one segment deep.
+- **Who called** is not an argument: the engine puts the dispatch site on every call's context
+  (`ExecServices.scope` — the calling instance, and `-i` for call i of a list), and the service reads
+  the rest off the events task's journal (`callingStateOf`): the instance's child key (the automation),
+  its path, which entry of that key it is (the firing), and the event it was entered with. `notify`
+  names that event when the call does not.
+- **A child** (the default) carries `origin: { kind: "started", taskId: <events task>, key:
+  <automation>, occurrence: <firing>, index: <call>, event: { name, summary }, state: { stateId, path }
+  }` — a new provenance kind, not `task`: a started task runs in its OWN workspace (a `task` child runs
+  in its parent's) and is no element of a mount. It is mirrored into the events task's journal as an
+  `instance.entered` whose instance id is the task's, parented at the calling instance, marked
+  `started: true`, with no child key; its end (`completed`/`failed`/`canceled`, not a close's suspend)
+  as `instance.terminated`. The load leaves those rows out of the machine (the calling state never
+  mounted it); the Steps list shows the task as the automation's child (`InstanceNode.made`), the
+  conversation draws "started <title> · running" at the automation, and boards file it as a fan-out's
+  task is — in the automation's column of the events task's board, off the roots. A re-run call after
+  a crash finds the task it already made (`startedTaskOf`) rather than making a second.
+- **On its own** (`top_level: true`): no provenance, nothing mirrored; `startedBy: { by: "events",
+  fromTask, state: { key, path, stateId, occurrence, call }, event, summary }`. `startedBy.state` is
+  optional; no real task had a `startedBy`, so nothing was migrated.
+- **The card line**, either way: "started by events · push_main · git.push a1b2c3d on main"; a click
+  opens the events task AT the automation (`select(taskId, project, stateId)`).
+- **Layering.** A project's copy of the root still `$ref`s Shared's and splices its rules. An
+  automation's state resolves through the layers on its own, so editing a Shared line's STEPS on the
+  This project page writes the project's own `system/events/<name>.json` — for that project alone,
+  with no copy of the root — and the line says so ("Use Shared's steps" takes it away); editing its
+  event, filter or name ignores Shared's rule there and adds a project rule of the same name. Shared's
+  lines are editable on a project page now.
+- **Migration** (`persistence` `eventsMigration.ts`, at every open of a project and of the shared root):
+  a copy in the old shape — Shared's and a project's own lines — is rewritten into the new one, each
+  automation's state written before the root, the original kept under
+  `<system>/logs/events-migration-<stamp>/`; a line it cannot take apart is left and named. The
+  person's real data (2026-09-25): `~/.jaira/workflows` holds `feature*` and `plan` only, and the one
+  project JaiRA knows (`C:\UbuntuCode\JaiRA`) has an empty `.jaira/workflows` — no `system/events` in
+  either — so the migration had nothing to do there.
+- **Signing** (`signComment`, `isJairaComment` in `@jaira/shared` `forge.ts`): every comment and reply
+  JaiRA posts — `git_comment` (comments and thread replies), `remote_comment`, the review gate's thread
+  replies after a revise round, its notes and closing line when a person answers in JaiRA, and the
+  reviewer's `remote:reply` — begins "🤖 <model> · via JaiRA" and ends
+  `<!-- jaira:comment model=<model> task=<taskId> -->`. The model is the one behind the call where the
+  host can tell it (`modelOfCall`: the conversation's last recorded model, else the model the call's
+  own record asked for); where none asked — a person's words carried, the closing line — the first
+  line is "🤖 JaiRA" and the marker says `model=JaiRA`. The marker must END the body, so a comment
+  quoting one part-way is still somebody's.
+- **JaiRA's own is the marker.** The forge readers set a comment's `own` from the marker (the account
+  lookup they made for it is gone), and the repository watcher excludes marked comments explicitly, so
+  the person's own comments from the connection's account fire `git.merge_request.comments`. Decision
+  0004's `own` rule was protecting against JaiRA reacting to ITSELF — its closing line, its notes, its
+  thread replies settling or restarting the gate — so it follows the marker too: the person's own
+  comments, reviews and approvals from the token's account now COUNT (settle a gate, start its window,
+  decide a change) where before they were shown and ignored; JaiRA's signed comments still never do,
+  and a revise round's "last word is JaiRA's" test reads the marker. Comments JaiRA posted before
+  signing read as the person's.
+- Still open: `notify` notices have no surface beyond the log and `notice:posted`.

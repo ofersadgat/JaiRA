@@ -25,8 +25,11 @@
  * ## Who counts
  *
  * Only an account with WRITE access can settle a gate or start its window. Anyone's comment is
- * shown — it rides the result as a note — and the token's own account is JaiRA's own voice, never an
- * event.
+ * shown — it rides the result as a note — and what JaiRA itself posted (it carries JaiRA's marker,
+ * `isJairaComment`) is JaiRA's own voice, never an event. Since 2026-09-25 that is decided by the
+ * marker and not by the account: the token's account is the PERSON's, so what they write on the forge
+ * with it counts like anyone's with write access — which is what lets a person settle their own
+ * review from the forge.
  */
 import { DECISION_KINDS, type Change, type ChangeDecision, type Changeset, type DecisionKind } from "./changeset";
 import type { ForgeComment, ForgeThread, RemoteHandle, RemoteState } from "./forge";

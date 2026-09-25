@@ -1,18 +1,22 @@
 /**
- * Settings → Tools → Automations as data (decision 0010 §4): a layer's events workflow read into lines
- * and written back — the rule and its chain of async step children, the literal spellings, a
- * project's `$ref` copy with Shared's lines spliced in minus the ignored ones — and the flags a line
- * carries (not reached, switched off). The written file is loaded and validated by the engine itself,
- * over stand-in step states, so the shape is one the events task can run.
+ * Settings → Tools → Automations as data (decision 0010 §4, the rulings of 2026-09-25): a layer's events
+ * workflow read into lines and written back — the rule into ONE async child, whose state
+ * (`system/events/<name>`) runs the line's steps as one operation list; the literal and `$binding`
+ * spellings of `args`; a project's `$ref` copy with Shared's lines spliced in minus the ignored ones;
+ * a Shared line changed from a project page (its steps: the project's own copy of that one state; its
+ * event: a project line in its place) — and the flags a line carries. The written files are loaded and
+ * validated by the engine itself, so the shape is one the events task can run.
  */
 import { describe, expect, it } from "vitest";
 import { loadBundle, validateBundle } from "@declarative-ai/hw";
 import { hostCalleeSignatures } from "@jaira/runtime";
+import { automationStateOf, stepsOfAutomationState } from "@jaira/shared";
 import {
   EVENTS_STATE_ID,
-  NOTIFY_STEP,
-  START_STEP,
   SYSTEM_EVENTS,
+  automationStateIdOf,
+  automationsReadOf,
+  automationsWritesOf,
   eventPicksOf,
   eventsTaskOf,
   filterCovers,
@@ -29,17 +33,20 @@ import {
   parseEventsDoc,
   parseWhen,
   rebaseLines,
+  sharedStepsWritesOf,
   shownLinesOf,
   spliceRefOf,
   stepFormOf,
   stepOfForm,
+  stepsReaderOf,
   stepSummary,
   whenOf,
   writeEventsDoc,
   writeLine,
   type AutomationLine,
+  type AutomationWrite,
+  type Copies,
 } from "../src/renderer/automationsModel";
-import { automationsReadOf, automationsWritesOf } from "../src/renderer/automationsPane";
 
 /** The decision's own example: a push to main starts a review, then docs sync. */
 const pushMainDocs: AutomationLine = {
@@ -48,7 +55,7 @@ const pushMainDocs: AutomationLine = {
   filter: { branch: "main" },
   steps: [
     { kind: "start", workflow: "feature/review", inputs: { issue: { event: "payload.commits[0].message" }, branch: { event: "payload.branch" }, ask_below: { literal: 0.8 } } },
-    { kind: "start", workflow: "docs/sync", inputs: { branch: { event: "payload.branch" } } },
+    { kind: "start", workflow: "docs/sync", inputs: { branch: { event: "payload.branch" } }, topLevel: true },
   ],
 };
 
@@ -57,12 +64,22 @@ const mrOpened: AutomationLine = {
   event: "git.merge_request.opened",
   filter: {},
   steps: [
-    { kind: "start", workflow: "review/merge-request", inputs: { request: { event: "payload.merge_request" } } },
+    { kind: "start", workflow: "review/merge-request", inputs: { request: { event: "payload.merge_request" } }, title: "Review the request" },
     { kind: "notify", text: "Review started" },
   ],
 };
 
 const on = { "git.push": { enabled: true }, "git.merge_request.opened": { enabled: true } } as const;
+
+/** Each line's state as a layer holds it, by name. */
+const statesOf = (...lines: AutomationLine[]): Record<string, unknown> => Object.fromEntries(lines.map((line) => [line.name, automationStateOf(line.name, line.steps)]));
+/** A page's steps, read from `states` alone. */
+const readerOf = (states: Record<string, unknown>) => stepsReaderOf([{ layer: "base", states }]);
+/** The text of the write to one state, parsed. */
+const written = (writes: readonly AutomationWrite[], layer: string, stateId: string): unknown => {
+  const found = writes.find((w) => w.layer === layer && w.stateId === stateId && !("remove" in w));
+  return found !== undefined && "text" in found ? JSON.parse(found.text) : undefined;
+};
 
 describe("a line's guard", () => {
   it("writes on_event with the filter, and reads it back", () => {
@@ -83,41 +100,44 @@ describe("a line's guard", () => {
 });
 
 describe("one line with two steps", () => {
-  it("is one named rule to an async child, and a second child the first chains to", () => {
+  it("is one named rule handing in the event, to ONE async child — the steps are that child's state", () => {
     const { rule, children } = writeLine(pushMainDocs);
-    expect(rule).toEqual({
-      name: "push_main_docs",
-      when: "on_event('git.push', { branch: 'main' })",
-      to: "push_main_docs",
-      inputs: {
-        event: ".event",
-        workflow: { text: "feature/review" },
-        inputs: { $literal: { issue: { $binding: ".event.payload.commits[0].message" }, branch: { $binding: ".event.payload.branch" }, ask_below: 0.8 } },
-      },
-    });
-    expect(children).toEqual({
-      push_main_docs: { state: START_STEP, async: true, transitions: [{ when: "true", to: "push_main_docs_2" }] },
-      push_main_docs_2: {
-        state: START_STEP,
-        async: true,
-        inputs: {
-          event: ".children.push_main_docs.output.event",
-          workflow: { text: "docs/sync" },
-          inputs: { $literal: { branch: { $binding: ".children.push_main_docs.output.event.payload.branch" } } },
-        },
-      },
-    });
+    expect(rule).toEqual({ name: "push_main_docs", when: "on_event('git.push', { branch: 'main' })", to: "push_main_docs", inputs: { event: ".event" } });
+    expect(children).toEqual({ push_main_docs: { async: true } });
   });
 
-  it("round-trips through the document, a notify step included", () => {
+  it("writes the state as one operation list: literals as they are, picks from the event wrapped `$binding`", () => {
+    expect(automationStateOf(pushMainDocs.name, pushMainDocs.steps)).toEqual({
+      label: "push_main_docs",
+      inputs: { event: { schema: {}, optional: true, description: "The event the automation fired on — its rule hands `.event` in." } },
+      operation: [
+        {
+          function: "start_task",
+          args: {
+            workflow: "feature/review",
+            inputs: { issue: { $binding: { $expr: ".inputs.event.payload.commits[0].message" } }, branch: { $binding: { $expr: ".inputs.event.payload.branch" } }, ask_below: 0.8 },
+          },
+        },
+        { function: "start_task", args: { workflow: "docs/sync", inputs: { branch: { $binding: { $expr: ".inputs.event.payload.branch" } } }, top_level: true } },
+      ],
+    });
+    // A notify is its text; a title rides as its own argument. No outputs: a list must bind each one.
+    const state = automationStateOf(mrOpened.name, mrOpened.steps);
+    expect(state["operation"]).toEqual([
+      { function: "start_task", args: { workflow: "review/merge-request", inputs: { request: { $binding: { $expr: ".inputs.event.payload.merge_request" } } }, title: "Review the request" } },
+      { function: "notify", args: { text: "Review started" } },
+    ]);
+    expect(state["outputs"]).toBeUndefined();
+  });
+
+  it("round-trips through the root and the states, a notify and a start on its own included", () => {
     const doc = writeEventsDoc(undefined, [pushMainDocs, mrOpened]);
     expect(doc["sequence"]).toEqual([]);
-    expect(parseEventsDoc(doc)).toEqual({ lines: [pushMainDocs, mrOpened], follows: false });
-    expect(writeLine(mrOpened).children["mr_opened_2"]).toEqual({
-      state: NOTIFY_STEP,
-      async: true,
-      inputs: { event: ".children.mr_opened.output.event", text: { text: "Review started" } },
-    });
+    expect(parseEventsDoc(doc, readerOf(statesOf(pushMainDocs, mrOpened)))).toEqual({ lines: [pushMainDocs, mrOpened], follows: false });
+    for (const line of [pushMainDocs, mrOpened]) expect(stepsOfAutomationState(automationStateOf(line.name, line.steps))).toEqual(line.steps);
+    // A state hand-edited to keep its label and a description keeps them when its steps are rewritten.
+    const edited = { ...automationStateOf("x", mrOpened.steps), label: "Mine", description: "by hand" };
+    expect(automationStateOf("x", pushMainDocs.steps, edited)).toMatchObject({ label: "Mine", description: "by hand", operation: automationStateOf("x", pushMainDocs.steps)["operation"] });
   });
 
   it("keeps what it does not write — other keys, other children, a hand-written rule", () => {
@@ -129,35 +149,31 @@ describe("one line with two steps", () => {
     const doc = writeEventsDoc(previous, [...read.lines, pushMainDocs]);
     expect(doc["label"]).toBe("Mine");
     expect(doc["transitions"]).toEqual([hand, writeLine(pushMainDocs).rule]);
-    expect(Object.keys(doc["children"] as object).sort()).toEqual(["odd_child", "push_main_docs", "push_main_docs_2", "spare"]);
-    // Removing a line removes its children and nothing else.
+    expect(Object.keys(doc["children"] as object).sort()).toEqual(["odd_child", "push_main_docs", "spare"]);
+    // Removing a line removes its child and nothing else.
     const without = writeEventsDoc(doc, [read.lines[0]!]);
     expect(Object.keys(without["children"] as object).sort()).toEqual(["odd_child", "spare"]);
   });
 
-  it("is a raw line when its chain is not one this editor writes", () => {
+  it("is a raw line when its rule, its child or its state is not one this editor writes", () => {
     const doc = writeEventsDoc(undefined, [pushMainDocs]);
-    (doc["children"] as Record<string, Record<string, unknown>>)["push_main_docs_2"]!["state"] = "somewhere/else";
-    const [line] = parseEventsDoc(doc).lines;
-    expect(line!.raw).toBeDefined();
-    expect(Object.keys(line!.raw!.children)).toEqual(["push_main_docs", "push_main_docs_2"]);
+    const withState = (state: unknown) => parseEventsDoc(doc, readerOf({ push_main_docs: state })).lines[0]!;
+    expect(withState(automationStateOf(pushMainDocs.name, pushMainDocs.steps)).raw).toBeUndefined();
+    // A call of some other function, or a state with outputs: edited as a file.
+    expect(withState({ operation: [{ function: "claude-code", args: {} }] }).raw).toBeDefined();
+    expect(withState({ ...automationStateOf("x", mrOpened.steps), outputs: { a: { binding: ".operation[0].output" } } }).raw).toBeDefined();
+    const wired = { ...doc, children: { push_main_docs: { async: true, inputs: { x: ".event" } } } };
+    expect(parseEventsDoc(wired).lines[0]!.raw).toEqual({ rule: writeLine(pushMainDocs).rule, children: { push_main_docs: { async: true, inputs: { x: ".event" } } } });
   });
 
-  it("loads and validates in the engine, over stand-in step states", () => {
-    // Every input optional: step 1's mount wires nothing (only its rule can read `.event`), and the
-    // validator asks a mount to wire a REQUIRED input even when the rule's own inputs give it.
-    const step = (text: boolean) => ({
-      inputs: text
-        ? { text: { schema: { type: "string" }, optional: true }, event: { schema: {}, optional: true } }
-        : { workflow: { schema: { type: "string" }, optional: true }, inputs: { schema: { type: "object" }, optional: true }, event: { schema: {}, optional: true } },
-      outputs: { event: { schema: {}, binding: ".inputs.event" } },
-    });
+  it("loads and validates in the engine: `.event` in, `.inputs.event` read in `args`, calls in order", () => {
     const files = {
       [`${EVENTS_STATE_ID}.json`]: writeEventsDoc(undefined, [pushMainDocs, mrOpened]),
-      [`${START_STEP}.json`]: step(false),
-      [`${NOTIFY_STEP}.json`]: step(true),
+      [`${automationStateIdOf(pushMainDocs.name)}.json`]: automationStateOf(pushMainDocs.name, pushMainDocs.steps),
+      [`${automationStateIdOf(mrOpened.name)}.json`]: automationStateOf(mrOpened.name, mrOpened.steps),
     };
     const bundle = loadBundle(files as never, EVENTS_STATE_ID, { functions: hostCalleeSignatures() });
+    expect(Object.keys(bundle.states).sort()).toEqual([EVENTS_STATE_ID, "system/events/mr_opened", "system/events/push_main_docs"]);
     expect(validateBundle(bundle).errors).toEqual([]);
   });
 });
@@ -170,7 +186,7 @@ describe("a project's copy", () => {
       $ref: "...filter($BASE/workflows/system/events.transitions, (t) => !['push_main'].includes(t.name))",
     });
     expect((doc["children"] as Record<string, unknown>)["$ref"]).toBe("$BASE/workflows/system/events.children");
-    const read = parseEventsDoc(doc);
+    const read = parseEventsDoc(doc, readerOf(statesOf(pushMainDocs)));
     expect(read).toEqual({ lines: [pushMainDocs], splice: { ignored: ["push_main"] }, follows: true });
   });
 
@@ -181,65 +197,123 @@ describe("a project's copy", () => {
     expect(ignoredOfSplice("...filter($BASE/x.transitions, (t) => true)")).toBeUndefined();
   });
 
-  it("shows its own lines, then Shared's, the ignored ones marked", () => {
+  it("shows its own lines, then Shared's, the ignored ones marked — and one standing in for Shared's of its name", () => {
     const shared = [{ ...pushMainDocs, name: "push_main" }, mrOpened];
-    const shown = shownLinesOf(parseEventsDoc(writeEventsDoc({}, [pushMainDocs], { ignored: ["push_main"] })), shared);
-    expect(shown.map((s) => [s.line.name, s.from, s.ignored])).toEqual([
-      ["push_main_docs", "own", false],
-      ["push_main", "shared", true],
-      ["mr_opened", "shared", false],
+    const shown = shownLinesOf(parseEventsDoc(writeEventsDoc({}, [pushMainDocs, { ...mrOpened, filter: { author: "ofer" } }], { ignored: ["push_main", "mr_opened"] })), shared);
+    expect(shown.map((s) => [s.line.name, s.from, s.ignored, s.replaces === true])).toEqual([
+      ["push_main_docs", "own", false, false],
+      ["mr_opened", "own", false, true],
+      ["push_main", "shared", true, false],
+      ["mr_opened", "shared", true, false],
     ]);
   });
 });
 
 describe("the layers the section reads and writes", () => {
-  const source = (doc: unknown, layer: "project" | "base" | "system") => ({ stateId: EVENTS_STATE_ID, layer, file: `${layer}/events.json`, text: doc === undefined ? "" : JSON.stringify(doc), exists: doc !== undefined });
-  const builtIn = writeEventsDoc(undefined, [mrOpened]);
+  const builtIn = writeEventsDoc(undefined, []);
 
-  it("Shared with no copy reads the built-in, and its first write is Shared's copy — following the built-in, stating its own lines", () => {
-    const copies = { base: source(undefined, "base"), system: source(builtIn, "system") };
+  it("Shared with no copy reads the built-in, and its first write is each line's state, then Shared's copy of the root", () => {
+    const copies: Copies = { base: { states: {} }, system: { root: builtIn } };
     const read = automationsReadOf(copies, "base");
     expect(read.source).toBe("built in");
-    expect(read.own.lines).toEqual([mrOpened]);
-    const writes = automationsWritesOf(copies, "base", [mrOpened, pushMainDocs], undefined);
-    expect(writes.map((w) => w.layer)).toEqual(["base"]);
-    const written = JSON.parse(writes[0]!.text) as Record<string, unknown>;
-    expect(written["$ref"]).toBe(SYSTEM_EVENTS);
-    expect(Object.keys(written).sort()).toEqual(["$ref", "children", "transitions"]);
-    expect(parseEventsDoc(written).lines).toEqual([mrOpened, pushMainDocs]);
+    expect(read.own.lines).toEqual([]);
+    const writes = automationsWritesOf(copies, "base", [], [mrOpened, pushMainDocs]);
+    expect(writes.map((w) => [w.layer, w.stateId])).toEqual([
+      ["base", "system/events/mr_opened"],
+      ["base", "system/events/push_main_docs"],
+      ["base", EVENTS_STATE_ID],
+    ]);
+    const root = written(writes, "base", EVENTS_STATE_ID) as Record<string, unknown>;
+    expect(root["$ref"]).toBe(SYSTEM_EVENTS);
+    expect(Object.keys(root).sort()).toEqual(["$ref", "children", "transitions"]);
+    expect(written(writes, "base", "system/events/push_main_docs")).toEqual(automationStateOf(pushMainDocs.name, pushMainDocs.steps));
     // Taking every line out keeps both keys: a project's copy reads them off this file.
-    expect(writeEventsDoc(written, [])).toEqual({ $ref: SYSTEM_EVENTS, transitions: [], children: {} });
+    expect(writeEventsDoc(root, [])).toEqual({ $ref: SYSTEM_EVENTS, transitions: [], children: {} });
+  });
+
+  it("a change to a line's steps alone writes its state and not the root; a line taken out takes its state with it", () => {
+    const root = writeEventsDoc({ $ref: SYSTEM_EVENTS }, [pushMainDocs, mrOpened]);
+    const copies: Copies = { base: { root, states: statesOf(pushMainDocs, mrOpened) } };
+    const quicker = { ...mrOpened, steps: [{ kind: "notify" as const, text: "a request opened" }] };
+    expect(automationsWritesOf(copies, "base", [pushMainDocs, mrOpened], [pushMainDocs, quicker]).map((w) => w.stateId)).toEqual(["system/events/mr_opened"]);
+    const gone = automationsWritesOf(copies, "base", [pushMainDocs, mrOpened], [pushMainDocs]);
+    expect(gone.map((w) => [w.stateId, "remove" in w])).toEqual([
+      [EVENTS_STATE_ID, false],
+      ["system/events/mr_opened", true],
+    ]);
+    // A rename is a new state, and the old one goes.
+    const renamed = automationsWritesOf(copies, "base", [pushMainDocs, mrOpened], [pushMainDocs, { ...mrOpened, name: "mr_new" }]);
+    expect(renamed.map((w) => [w.stateId, "remove" in w])).toEqual([
+      ["system/events/mr_new", false],
+      [EVENTS_STATE_ID, false],
+      ["system/events/mr_opened", true],
+    ]);
   });
 
   it("a project with no copy shows Shared's lines, and its first write makes Shared's copy from the built-in first", () => {
-    const copies = { project: source(undefined, "project"), base: source(undefined, "base"), system: source(builtIn, "system") };
+    const copies: Copies = { project: { states: {} }, base: { states: {} }, system: { root: writeEventsDoc(undefined, [mrOpened]) } };
     const read = automationsReadOf(copies, "project");
     expect(read.source).toBe("none");
     expect(shownLinesOf(read.own, read.shared).map((s) => s.from)).toEqual(["shared"]);
-    const writes = automationsWritesOf(copies, "project", [pushMainDocs], ["mr_opened"]);
-    expect(writes.map((w) => w.layer)).toEqual(["base", "project"]);
-    expect(JSON.parse(writes[0]!.text)).toEqual({ $ref: SYSTEM_EVENTS, transitions: builtIn["transitions"], children: builtIn["children"] });
-    // With no built-in (or an empty one), Shared's copy is the rule `ensureBaseEventsCopy` writes.
-    expect(JSON.parse(automationsWritesOf({ system: source(undefined, "system") }, "project", [pushMainDocs], undefined)[0]!.text)).toEqual({
-      $ref: SYSTEM_EVENTS,
-      transitions: [],
-      children: {},
-    });
-    expect(parseEventsDoc(JSON.parse(writes[1]!.text))).toEqual({ lines: [pushMainDocs], splice: { ignored: ["mr_opened"] }, follows: true });
+    const writes = automationsWritesOf(copies, "project", [], [pushMainDocs], ["mr_opened"]);
+    expect(writes.map((w) => [w.layer, w.stateId])).toEqual([
+      ["base", EVENTS_STATE_ID],
+      ["project", "system/events/push_main_docs"],
+      ["project", EVENTS_STATE_ID],
+    ]);
+    const seed = written(writes, "base", EVENTS_STATE_ID) as Record<string, unknown>;
+    expect(seed).toEqual({ $ref: SYSTEM_EVENTS, transitions: (copies.system!.root as Record<string, unknown>)["transitions"], children: (copies.system!.root as Record<string, unknown>)["children"] });
+    expect(parseEventsDoc(written(writes, "project", EVENTS_STATE_ID), readerOf(statesOf(pushMainDocs)))).toEqual({ lines: [pushMainDocs], splice: { ignored: ["mr_opened"] }, follows: true });
   });
 
-  it("a project whose Shared has a copy writes only its own", () => {
-    const copies = { project: source(undefined, "project"), base: source(builtIn, "base") };
-    expect(automationsWritesOf(copies, "project", [pushMainDocs], undefined).map((w) => w.layer)).toEqual(["project"]);
-  });
-
-  it("keeps a project's ignored lines when its own lines change", () => {
+  it("a project whose Shared has a copy writes only its own, and keeps its ignored lines when its own change", () => {
+    const shared: Copies["base"] = { root: writeEventsDoc({ $ref: SYSTEM_EVENTS }, [mrOpened]), states: statesOf(mrOpened) };
+    expect(automationsWritesOf({ project: { states: {} }, base: shared }, "project", [], [pushMainDocs]).every((w) => w.layer === "project")).toBe(true);
     const project = writeEventsDoc({}, [], { ignored: ["x"] });
-    const copies = { project: source(project, "project"), base: source(builtIn, "base") };
-    const [write] = automationsWritesOf(copies, "project", [pushMainDocs], undefined);
-    expect(parseEventsDoc(JSON.parse(write!.text)).splice).toEqual({ ignored: ["x"] });
+    const writes = automationsWritesOf({ project: { root: project, states: {} }, base: shared }, "project", [], [pushMainDocs]);
+    expect(parseEventsDoc(written(writes, "project", EVENTS_STATE_ID)).splice).toEqual({ ignored: ["x"] });
   });
 });
+
+describe("a Shared line, changed from a project page", () => {
+  const sharedRoot = writeEventsDoc({ $ref: SYSTEM_EVENTS }, [mrOpened]);
+  const shared = (): Copies => ({ project: { states: {} }, base: { root: sharedRoot, states: statesOf(mrOpened) } });
+
+  it("its STEPS: the project's own copy of that one state — no copy of the root, and nothing in Shared", () => {
+    const steps = [{ kind: "notify" as const, text: "only here" }];
+    const writes = sharedStepsWritesOf(shared(), "mr_opened", steps);
+    expect(writes).toEqual([{ layer: "project", stateId: "system/events/mr_opened", text: expect.any(String) }]);
+    // A copy of Shared's file, its operation list replaced.
+    expect(written(writes, "project", "system/events/mr_opened")).toEqual(automationStateOf("mr_opened", steps, automationStateOf("mr_opened", mrOpened.steps)));
+    // The project page then reads that line's steps from the project, and says so.
+    const copies: Copies = { ...shared(), project: { states: { mr_opened: automationStateOf("mr_opened", steps) } } };
+    const read = automationsReadOf(copies, "project");
+    const shown = shownLinesOf(read.own, read.shared, read.stepsOf);
+    expect(shown.map((s) => [s.line.name, s.from, s.stepsFrom])).toEqual([["mr_opened", "shared", "project"]]);
+    expect(shown[0]!.line.steps).toEqual(steps);
+    // Back to Shared's own steps: the project's copy goes.
+    expect(sharedStepsWritesOf(copies, "mr_opened", mrOpened.steps)).toEqual([{ layer: "project", stateId: "system/events/mr_opened", remove: true }]);
+    expect(sharedStepsWritesOf(shared(), "mr_opened", mrOpened.steps)).toEqual([]);
+  });
+
+  it("its EVENT or filter: a line of the project's own of that name, Shared's ignored here — its steps still Shared's", () => {
+    const mine = { ...mrOpened, filter: { author: "ofer" } };
+    const writes = automationsWritesOf(shared(), "project", [], [mine], ["mr_opened"]);
+    // No copy of the steps: through the layers, the project's line runs Shared's state already.
+    expect(writes.map((w) => [w.layer, w.stateId])).toEqual([["project", EVENTS_STATE_ID]]);
+    const root = written(writes, "project", EVENTS_STATE_ID);
+    const read = parseEventsDoc(root, readerOf(statesOf(mrOpened)));
+    expect(read.splice).toEqual({ ignored: ["mr_opened"] });
+    expect(read.lines).toEqual([mine]);
+  });
+
+  it("a project line taken out that stood in for Shared's leaves the project's steps copy, which is Shared's line's now", () => {
+    const copies: Copies = { project: { root: writeEventsDoc({}, [mrOpened], { ignored: ["mr_opened"] }), states: { mr_opened: automationStateOf("mr_opened", []) } }, base: shared().base! };
+    const writes = automationsWritesOf(copies, "project", [mrOpened], [], []);
+    expect(writes.some((w) => "remove" in w)).toBe(false);
+  });
+});
+
 
 describe("flags", () => {
   const line = (name: string, event: string, filter: AutomationLine["filter"] = {}): AutomationLine => ({ name, event, filter, steps: [{ kind: "notify", text: "x" }] });
@@ -307,8 +381,8 @@ describe("editing a line", () => {
     const step = pushMainDocs.steps[0] as Extract<AutomationLine["steps"][number], { kind: "start" }>;
     const form = stepFormOf(step);
     expect(form).toEqual({ values: { ask_below: 0.8 }, picked: { issue: "payload.commits[0].message", branch: "payload.branch" } });
-    expect(stepOfForm(step.workflow, form.values, form.picked)).toEqual({ ...step, inputs: { ask_below: { literal: 0.8 }, issue: step.inputs["issue"], branch: step.inputs["branch"] } });
-    expect(stepSummary(pushMainDocs.steps[1]!)).toBe("branch ← event.branch");
+    expect(stepOfForm(step, form.values, form.picked)).toEqual({ ...step, inputs: { ask_below: { literal: 0.8 }, issue: step.inputs["issue"], branch: step.inputs["branch"] } });
+    expect(stepSummary(pushMainDocs.steps[1]!)).toBe("branch ← event.branch · on its own");
   });
 
   it("says what stops a set of lines being written", () => {

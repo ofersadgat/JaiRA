@@ -254,31 +254,40 @@ export function Tile({
   );
 }
 
-/** The words of a card's origin line — `started by events · git.push a1b2c3d on main` — or none. */
-export function originLineOf(card: Pick<BoardCard, "startedBy">): string | undefined {
+/**
+ * A card's origin line — `started by events · push_main · git.push a1b2c3d on main` — the words, and
+ * where a click goes: the events task, AT the automation that started it. Two sources, one line (the
+ * rulings of 2026-09-25): a task started as the automation's CHILD carries it in its provenance
+ * (`origin.kind: "started"`), one started on its own in `startedBy`. None: no line.
+ */
+export function originLineOf(card: Pick<BoardCard, "startedBy" | "origin">): { words: string; taskId: string; stateId?: string } | undefined {
+  const say = (key: string | undefined, summary: string | undefined): string => ["started by events", key, summary].filter((part) => part !== undefined && part.length > 0).join(" · ");
   const by = card.startedBy;
-  if (by === undefined) return undefined;
-  return by.summary.length > 0 ? `started by events · ${by.summary}` : "started by events";
+  if (by !== undefined) return { words: say(by.state?.key, by.summary), taskId: by.fromTask, ...(by.state !== undefined ? { stateId: by.state.stateId } : {}) };
+  const made = card.origin;
+  if (made?.kind === "started") return { words: say(made.key, made.event), taskId: made.taskId, ...(made.stateId !== undefined ? { stateId: made.stateId } : {}) };
+  return undefined;
 }
 
 /**
- * "started by events · git.push a1b2c3d on main" (decision 0010 §4): a task the events task started
- * says so, small, in the card's meta voice, under its meta line. Clicking it selects the events task —
- * and only that: the click stops here, so the card under it is not selected on the way.
+ * "started by events · push_main · git.push a1b2c3d on main" (decision 0010 §4): a task the events task
+ * started says so, small, in the card's meta voice, under its meta line. Clicking it opens the events
+ * task at the automation that started it — and only that: the click stops here, so the card under it
+ * is not selected on the way.
  */
-export function OriginLine({ card, onGo }: { card: Pick<BoardCard, "startedBy">; onGo?: ((taskId: string, e: ReactMouseEvent) => void) | undefined }): JSX.Element | null {
-  const words = originLineOf(card);
-  if (words === undefined || card.startedBy === undefined) return null;
-  const events = card.startedBy.fromTask;
+export function OriginLine({ card, onGo }: { card: Pick<BoardCard, "startedBy" | "origin">; onGo?: ((taskId: string, e: ReactMouseEvent, stateId?: string) => void) | undefined }): JSX.Element | null {
+  const line = originLineOf(card);
+  if (line === undefined) return null;
+  const words = line.words;
   return (
     <div
       className={`card-origin${onGo !== undefined ? " card-origin-link" : ""}`}
-      title={onGo !== undefined ? "Started by the events task — click to select it" : "Started by the events task"}
+      title={onGo !== undefined ? "Started by the events task — click to open it at the automation that started this" : "Started by the events task"}
       {...(onGo !== undefined
         ? {
             onClick: (e: ReactMouseEvent) => {
               e.stopPropagation();
-              onGo(events, e);
+              onGo(line.taskId, e, line.stateId);
             },
           }
         : {})}
@@ -696,8 +705,8 @@ export function Card({
   onOrigin,
 }: {
   card: BoardCard;
-  /** The origin line was clicked: select the events task it names (decision 0010 §4). */
-  onOrigin?: ((taskId: string, e: ReactMouseEvent) => void) | undefined;
+  /** The origin line was clicked: open the events task it names, at the automation (decision 0010 §4). */
+  onOrigin?: ((taskId: string, e: ReactMouseEvent, stateId?: string) => void) | undefined;
   /**
    * A NEXT-TRANSITION chip was pressed (decision 0005, the rulings of 2026-09-22): take that move.
    * Absent where the board moves nothing — the chips are not drawn at all there.
@@ -785,7 +794,7 @@ export function Card({
       onDrill={onDrill}
       onMenu={onMenu}
       child={child}
-      {...(card.startedBy !== undefined ? { origin: <OriginLine card={card} onGo={onOrigin} /> } : {})}
+      {...(originLineOf(card) !== undefined ? { origin: <OriginLine card={card} onGo={onOrigin} /> } : {})}
       {...(onMove !== undefined && (card.next ?? []).length > 0 ? { children: <NextChips moves={card.next!} onMove={onMove} /> } : {})}
       {...(onDragStart !== undefined
         ? {
@@ -830,8 +839,14 @@ export function Board({
   dragOffers = NO_DRAG_OFFERS,
   onTaskDrop,
   connect,
+  onOpenAt,
 }: {
   board: BoardView;
+  /**
+   * Open a task AT one of its states — what a card's "started by events · …" line does with the events
+   * task and the automation that started the card. Absent: the line selects the events task.
+   */
+  onOpenAt?: ((taskId: string, stateId: string | undefined) => void) | undefined;
   selected: string | null;
   /**
    * A multi-selection, when the caller keeps one. Takes over from `selected` entirely — the two are
@@ -1056,7 +1071,7 @@ export function Board({
                     card={card}
                     selected={isSelected(card)}
                     onSelect={(e) => onSelectTask(card.taskId, e)}
-                    onOrigin={(taskId, e) => onSelectTask(taskId, e)}
+                    onOrigin={(taskId, e, stateId) => (onOpenAt !== undefined ? onOpenAt(taskId, stateId) : onSelectTask(taskId, e))}
                     {...(drill !== undefined ? { onDrill: drill } : {})}
                     {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
                     child={card.under !== undefined && column.cards.some((other) => other.taskId === card.under)}
@@ -1084,6 +1099,7 @@ export function Board({
           selected={selected}
           selectedSet={selectedSet}
           onSelectTask={onSelectTask}
+          onOpenAt={onOpenAt}
           {...(onOpenTask !== undefined ? { onOpenTask } : {})}
           {...(onTaskMenu !== undefined ? { onTaskMenu } : {})}
         />
@@ -1135,6 +1151,7 @@ function Tray({
   onSelectTask,
   onOpenTask,
   onTaskMenu,
+  onOpenAt,
 }: {
   label: string;
   cards: readonly BoardCard[];
@@ -1143,6 +1160,7 @@ function Tray({
   onSelectTask: (taskId: string, e: ReactMouseEvent) => void;
   onOpenTask?: ((card: BoardCard) => void) | undefined;
   onTaskMenu?: ((card: BoardCard, at: MenuPoint) => void) | undefined;
+  onOpenAt?: ((taskId: string, stateId: string | undefined) => void) | undefined;
 }): JSX.Element {
   return (
     <div className="tray">
@@ -1156,7 +1174,7 @@ function Tray({
               card={card}
               selected={selectedSet !== undefined ? selectedSet.has(card.taskId) : card.taskId === selected}
               onSelect={(e) => onSelectTask(card.taskId, e)}
-              onOrigin={(taskId, e) => onSelectTask(taskId, e)}
+              onOrigin={(taskId, e, stateId) => (onOpenAt !== undefined ? onOpenAt(taskId, stateId) : onSelectTask(taskId, e))}
               {...(onOpenTask !== undefined ? { onDrill: () => onOpenTask(card) } : {})}
               {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
             />

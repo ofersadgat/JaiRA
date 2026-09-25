@@ -148,7 +148,7 @@ export interface InstanceNode {
    * operation and no children of its own — its work is in that task — so a conversation draws it as
    * a line rather than a panel, and a board files the task by it.
    */
-  made?: { taskId: string; kind: "split" | "task" | "adopt" };
+  made?: { taskId: string; kind: "split" | "task" | "adopt" | "started" };
   /**
    * How each of {@link inputs} was settled (decision 0005 §4) — `bound` by the workflow's wiring,
    * `inferred` by a conversation, `asked` of a person. Per input name; an input with no entry was
@@ -278,7 +278,7 @@ export interface BoardCard {
   inReview?: InReview;
   /** How a fan-out made this task, when one did — the word the card's origin line uses. */
   origin?: TaskOrigin;
-  /** What started it, when the events task did — the card's "started by events · …" line. See {@link TaskSummary.startedBy}. */
+  /** What started it ON ITS OWN, when the events task did — the card's "started by events · …" line; a child it started says so in `origin` (`kind: "started"`). See {@link TaskSummary.startedBy}. */
   startedBy?: TaskStartedBy;
   /**
    * The task this card files BENEATH (decision 0005 §2): an adopted task, under the task that
@@ -1039,8 +1039,12 @@ export interface MoveQuestionView {
  * parent is in the list nowhere, since it made every element.
  */
 export interface MadeBatch {
-  /** `adopt`: not a fan-out at all — a task that ran alone, taken up as this child (decision 0005 §2). */
-  kind: "split" | "task" | "adopt";
+  /**
+   * `adopt`: not a fan-out at all — a task that ran alone, taken up as this child (decision 0005 §2).
+   * `started`: a task the events task's `start_task` started as a child of the calling state
+   * (decision 0010 §4).
+   */
+  kind: "split" | "task" | "adopt" | "started";
   /** Every element's run, in element order — the reader's own included. */
   runs: MadeTask[];
 }
@@ -1190,7 +1194,7 @@ export interface TaskSummary {
   /** Present when this task is a FORK of {@link parentTaskId} — a copy cut at a point, not a re-run. */
   origin?: TaskOrigin;
   /**
-   * What started it, when the events task did (decision 0010 §4): the card's "started by events · …"
+   * What started it ON ITS OWN, when the events task did (decision 0010 §4; a child it started carries `origin`): the card's "started by events · …"
    * line. `fromTask` names the project's CURRENT events task when the one that started it was replaced.
    */
   startedBy?: TaskStartedBy;
@@ -1546,13 +1550,20 @@ export interface TaskOrigin {
    * What made the copy. A `fork` is a person's verb; `split` and `task` are a fan-out's (decision
    * 0003). Absent means `fork`, which is every origin projected before the field existed.
    */
-  kind?: "fork" | "split" | "task" | "adopt";
+  kind?: "fork" | "split" | "task" | "adopt" | "started";
   taskId: string;
   /** The parent's title, when the parent is still there to have one. */
   title?: string;
   /** For a fan-out's task: the mount key in the parent, and which element — what files a mount task in that column. */
   key?: string;
   index?: number;
+  /**
+   * For a task the events task STARTED as its child (`started`): what happened, in a line — the
+   * card's "started by events · <key> · <event>" — and the calling state, so the line opens the events
+   * task AT it.
+   */
+  event?: string;
+  stateId?: string;
   at: number;
   boundary: number;
   /** When the boundary event happened — where the seam sits among rows laid out by the clock. */

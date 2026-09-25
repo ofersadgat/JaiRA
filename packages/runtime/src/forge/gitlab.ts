@@ -13,6 +13,7 @@
  *    the system note a reviewer's act leaves in the discussions, which is also where WHO and WHEN are.
  */
 import {
+  isJairaComment,
   remoteHandleId,
   type CiConclusion,
   type CiRun,
@@ -188,8 +189,7 @@ export class GitLabProvider implements ForgeProvider {
 
   async read(handle: RemoteHandle): Promise<RemoteState> {
     const path = this.mr(handle);
-    const [me, mrResponse, discussions, approvalsResponse] = await Promise.all([
-      this.whoami(),
+    const [mrResponse, discussions, approvalsResponse] = await Promise.all([
       this.call("GET", path),
       this.pages(`${path}/discussions`, `reading the discussions of ${handle.id}`),
       this.call("GET", `${path}/approvals`),
@@ -206,7 +206,8 @@ export class GitLabProvider implements ForgeProvider {
         body: asText(note["body"]),
         at: asText(note["created_at"]),
         canWrite: await this.canWrite(handle.project, Number(author["id"])),
-        own: who === me.login,
+        // JaiRA's own words are the ones carrying its marker — not the token's account, which is the person's.
+        own: isJairaComment(asText(note["body"])),
       };
     };
 
@@ -251,7 +252,8 @@ export class GitLabProvider implements ForgeProvider {
         at: asText(asRecord(entry)["approved_at"]),
         verdict: "approved",
         canWrite: await this.canWrite(handle.project, Number(user["id"])),
-        own: who === me.login,
+        // An approval has no body to carry a marker, and JaiRA never approves: it is the person's.
+        own: false,
       });
     }
     for (const [who, { note, act }] of lastAct) {
@@ -262,7 +264,7 @@ export class GitLabProvider implements ForgeProvider {
         at: asText(note["created_at"]),
         verdict: "changes_requested",
         canWrite: await this.canWrite(handle.project, Number(asRecord(note["author"])["id"])),
-        own: who === me.login,
+        own: false,
       });
     }
 
@@ -429,7 +431,7 @@ export class GitLabProvider implements ForgeProvider {
    * needs and a list of what was said does not.
    */
   async comments(handle: RemoteHandle, options: { since?: string } = {}): Promise<ForgeNote[]> {
-    const [me, discussions] = await Promise.all([this.whoami(), this.pages(`${this.mr(handle)}/discussions`, `reading the discussions of ${handle.id}`)]);
+    const discussions = await this.pages(`${this.mr(handle)}/discussions`, `reading the discussions of ${handle.id}`);
     const notes: ForgeNote[] = [];
     for (const entry of discussions) {
       const discussion = asRecord(entry);
@@ -446,7 +448,7 @@ export class GitLabProvider implements ForgeProvider {
           body: asText(note["body"]),
           at: asText(note["created_at"]),
           ...(anchor !== undefined ? { anchor } : {}),
-          own: who === me.login,
+          own: isJairaComment(asText(note["body"])),
         });
       }
     }

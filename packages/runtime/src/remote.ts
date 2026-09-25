@@ -46,6 +46,7 @@ import {
   handleOfRow,
   parseRemoteUrl,
   remoteBranchName,
+  signComment,
   type Changeset,
   type ForgeAnchor,
   type ForgeProvider,
@@ -185,6 +186,11 @@ export interface RemoteOptions {
   publishAnswered?: () => boolean;
   /** Told when a person says yes — see {@link PublishAuthorizerOptions.onGranted}. */
   onPublishGranted?: () => void;
+  /**
+   * The model behind a call, when it can be told from the call's context — what a comment JaiRA posts
+   * is signed with (`signComment`). Absent, or answering nothing: signed as JaiRA's.
+   */
+  modelOf?: (ctx: unknown) => string | undefined;
 }
 
 /** A failure a person reads. Thrown inside a primitive, returned as the function's `error`. */
@@ -453,10 +459,20 @@ export class RemotePrimitives {
     return { row, handle };
   }
 
+  /**
+   * `body` as JaiRA posts it: signed with the model behind `ctx` where it can be told, and JaiRA's
+   * marker — every comment and reply that leaves through these primitives, the review's included.
+   */
+  signed(body: string, ctx: unknown): string {
+    const model = this.options.modelOf?.(ctx);
+    return signComment(body, { ...(model !== undefined && model.length > 0 ? { model } : {}), taskId: this.options.taskId });
+  }
+
   async comment(inputs: FunctionInputs, ctx: unknown): Promise<Record<string, never>> {
     const { row, handle } = await this.opened(inputs, ctx);
-    const body = text(arg(inputs, "body"));
-    if (body === undefined) throw new RemoteRefusal("remote_comment needs a body");
+    const said = text(arg(inputs, "body"));
+    if (said === undefined) throw new RemoteRefusal("remote_comment needs a body");
+    const body = this.signed(said, ctx);
     const provider = this.provider(row.host);
     const thread = text(arg(inputs, "thread"));
     if (thread !== undefined) {

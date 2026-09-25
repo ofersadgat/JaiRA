@@ -46,12 +46,16 @@
  * closed for a weekend, the first look after start is one comparison, and the latest state is what
  * fires.
  *
- * Comments by the connection's own account are never events: that is JaiRA's own voice on the forge
- * (decision 0004's `own`), and an events task that answered its own comment would never stop.
+ * Comments JaiRA posted are never events: every one carries JaiRA's marker (`signComment`,
+ * `isJairaComment` — the forge's `own`), and an events task that answered its own comment would never
+ * stop. Only the MARKER excludes, not the account (the rulings of 2026-09-25): the connection's token is
+ * the person's, and what they write on the forge with it fires `git.merge_request.comments` like
+ * anyone's.
  */
 import { createHash } from "node:crypto";
 import {
   EVENT_SPECS,
+  isJairaComment,
   matchesGlobs,
   NEW_BRANCH_SHA,
   handleOfSummary,
@@ -469,7 +473,8 @@ export class RepositoryWatcher {
     if (summary.updatedAt !== prev.updatedAt && wants("git.merge_request.comments", branch)) {
       const handle = handleOfSummary(provider.kind, target.host, target.repository, summary);
       const notes = await provider.comments(handle, { since: prev.commentsAt });
-      const fresh = notes.filter((note) => !note.own && note.at > prev.commentsAt);
+      // The marker, read here rather than trusted off `own`: this is the rule, and a note is its body.
+      const fresh = notes.filter((note) => !isJairaComment(note.body) && note.at > prev.commentsAt);
       for (const note of notes) commentsAt = later(commentsAt, note.at);
       if (fresh.length > 0) {
         const comments: EventComment[] = fresh.map((note) => ({

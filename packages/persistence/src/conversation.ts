@@ -203,6 +203,34 @@ export function conversationView(project: Project, taskId: string, options: Conv
         // id is the task's id, and the task's provenance is what confirms the join.
         if (isMadeRow(project, taskId, event.instanceId)) {
           madeIds.add(event.instanceId);
+          // A task the events task STARTED (decision 0010 §4): the mirrored entry is the line, as an
+          // adoption's is — "started [title] · running" — at the automation that started it, which is
+          // the entry's parent: the calling state, not a mount of it.
+          if ((event as { started?: boolean }).started === true) {
+            const started = project.tasks.tryRead(event.instanceId);
+            turns.push({
+              seq,
+              at,
+              kind: "made",
+              stateId: event.stateId,
+              ...(event.parentInstanceId !== undefined ? { ...mountedAt(pathOf.get(event.parentInstanceId)), instanceId: event.parentInstanceId } : {}),
+              made: {
+                kind: "started",
+                runs: [
+                  {
+                    taskId: event.instanceId,
+                    element: event.element ?? 0,
+                    title: started?.title ?? event.instanceId,
+                    status: project.runtime.get(event.instanceId)?.status ?? "queued",
+                    holding: started !== undefined ? holdingOf(project, started).length : 0,
+                    self: false,
+                    waitsFor: false,
+                  },
+                ],
+              },
+            });
+            break;
+          }
           // An ADOPTION (decision 0005 §2) has no batch row to draw its line from — it was never an
           // element — so the mirrored entry is the line: "adopted [title] · standing", at the child
           // it stands for. The task's standing is read now, as a batch's is.

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostFunction, type FunctionInputs, type JsonValue } from "@declarative-ai/exec";
 import { initProject, openProject, type Project } from "@jaira/persistence";
 import { INTERACTIVE, NodeExec, REMOTE_FUNCTIONS, REVIEW_ARTIFACTS, newRegistry } from "@jaira/runtime";
-import type { Changeset } from "@jaira/shared";
+import { isJairaComment, type Changeset } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { wireRemotes } from "../src/remoteWiring";
 import { replayForge, type Replay } from "../../runtime/test/forgeReplay";
@@ -134,7 +134,10 @@ describe("the gate's second door at a terminal", () => {
     const result = await call(REVIEW_ARTIFACTS, { prompt: "Review the implementation", options: ["approve", "revise", "cut"], remote: { to: "origin", target: "main" }, changeset: changeset() });
     expect(result.value).toMatchObject({ decision: "revise", settled_by: { via: "local", who: "Test Author" }, remote: { number: 7430 } });
     const notes = replay.seen.filter((r) => r.method === "POST" && r.url.endsWith("/7430/notes")).map((r) => (r.body as { body: string }).body);
-    expect(notes).toEqual(["`app.txt` — Say what was revised.", "Decided in JaiRA by Test Author: **revise** (1 comment)."]);
+    // Each signed as JaiRA's — first line, the words, and the marker the next read knows them by.
+    expect(notes.every(isJairaComment)).toBe(true);
+    expect(notes.map((note) => note.split("\n\n")[1])).toEqual(["`app.txt` — Say what was revised.", "Decided in JaiRA by Test Author: **revise** (1 comment)."]);
+    expect(notes.map((note) => note.split("\n")[0])).toEqual(["🤖 JaiRA", "🤖 JaiRA"]);
   });
 
   it("is the plain gate when the state names no remote", async () => {

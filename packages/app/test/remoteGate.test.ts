@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initProject, openProject } from "@jaira/persistence";
 import { anchorOfNote, closingComment, describeReview, writeWorkflowFiles, type ForgeHttp } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
-import type { Changeset, PushMessage } from "@jaira/shared";
+import { signComment, type Changeset, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { replayForge, type Replay } from "../../runtime/test/forgeReplay";
@@ -172,10 +172,13 @@ describe("replying here posts there", () => {
     release();
     const rows = await service.replyRemote({ taskId, key: "review", thread: THREAD, body: "  Renamed it, as you suggested.  ", resolve: true });
     const writes = replay.seen.filter((r) => r.url.includes(`/discussions/${THREAD}`)).map((r) => [r.method, r.body]);
+    // Signed as JaiRA's (the rulings of 2026-09-25): a person's words JaiRA carried, which its own read
+    // must not count as a remark — no model asked for them, so the line is JaiRA's.
     expect(writes).toEqual([
-      ["POST", { body: "Renamed it, as you suggested." }],
+      ["POST", { body: signComment("Renamed it, as you suggested.", { taskId }) }],
       ["PUT", { resolved: true }],
     ]);
+    expect((writes[0]![1] as { body: string }).body.startsWith("🤖 JaiRA\n\nRenamed it")).toBe(true);
     expect(rows[0]).toMatchObject({ number: 7430 });
     expect(rows[0]!.checkedAt).toBeGreaterThan(0);
   });
@@ -271,8 +274,9 @@ describe("the person settles first", () => {
     const writes = replay.seen.filter((r) => r.method === "POST" && r.url.includes("/7430/"));
     expect(writes.map((r) => new URL(r.url).pathname.split("/").pop())).toEqual(["discussions", "notes"]);
     // The note went where it points: line 2 of the file as it would be.
-    expect(writes[0]!.body).toMatchObject({ body: "Say what was revised.", position: { new_path: "app.txt", new_line: 2 } });
-    expect(writes[1]!.body).toEqual({ body: "Decided in JaiRA by Test Author: **revise** (1 comment)." });
+    // Both signed: what JaiRA posts carries its marker, so the next read neither counts nor fires them.
+    expect(writes[0]!.body).toMatchObject({ body: signComment("Say what was revised.", { taskId }), position: { new_path: "app.txt", new_line: 2 } });
+    expect(writes[1]!.body).toEqual({ body: signComment("Decided in JaiRA by Test Author: **revise** (1 comment).", { taskId }) });
     // Approve at the gate does not merge the request, and neither does anything else here.
     expect(replay.seen.some((r) => r.method === "PUT")).toBe(false);
 

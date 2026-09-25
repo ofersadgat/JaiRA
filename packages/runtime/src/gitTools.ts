@@ -36,6 +36,7 @@ import {
   handleOfSummary,
   parseDuration,
   parseRemoteUrl,
+  signComment,
   type EventDelivery,
   type EventFilter,
   type EventName,
@@ -95,6 +96,11 @@ export interface GitToolHost {
   authorizePublish(request: () => Promise<PublishRequest>): Promise<void>;
   /** The event hub `wait_git_event` waits on. Absent: no repository watcher runs here, and the tool says so. */
   readonly events?: GitEventWaits;
+  /**
+   * The model of the agent or turn making this call, when it can be told — what `git_comment` signs
+   * its comment with (`signComment`). Absent, or answering nothing: the comment is signed as JaiRA's.
+   */
+  modelOf?(ctx: ExecServices | undefined): string | undefined;
 }
 
 /** What {@link workspaceGitHost} is built from — what the review primitives are built from. */
@@ -110,6 +116,8 @@ export interface WorkspaceGitOptions {
   publishing: Pick<PublishAuthorizer, "authorize">;
   /** What `wait_git_event` waits on. Absent: it answers that nothing watches the repository here. */
   events?: GitEventWaits;
+  /** See {@link GitToolHost.modelOf}. */
+  modelOf?: (ctx: ExecServices | undefined) => string | undefined;
 }
 
 /** The host a run or a typed turn lends the tools. */
@@ -122,6 +130,7 @@ export function workspaceGitHost(options: WorkspaceGitOptions): GitToolHost {
     forge: (host) => forgeAccess(options.integrations, host, { secrets: options.secrets, ...(options.http !== undefined ? { http: options.http } : {}) }),
     authorizePublish: (request) => options.publishing.authorize(request),
     ...(options.events !== undefined ? { events: options.events } : {}),
+    ...(options.modelOf !== undefined ? { modelOf: options.modelOf } : {}),
   };
 }
 
@@ -139,6 +148,8 @@ class GitToolRefusal extends Error {}
 
 const record = (input: unknown): Record<string, unknown> => (input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {});
 const text = (value: unknown): string | undefined => (typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined);
+/** A signature's `model`, only where there is one. */
+const modelField = (model: string | undefined): { model?: string } => (model !== undefined && model.length > 0 ? { model } : {});
 
 /** The forge a call reaches: the remote, where it points, and the connection that answers there. */
 interface Reached {
@@ -430,10 +441,12 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
         readOnly: false,
       },
       async (args, ctx) => {
-        const body = text(args["body"]);
-        if (body === undefined) throw new GitToolRefusal("say something: `body` is empty");
+        const said = text(args["body"]);
+        if (said === undefined) throw new GitToolRefusal("say something: `body` is empty");
         const at = await reach(args, ctx);
         const handle = await handleOf(at, args["number"]);
+        // Signed — who asked, and JaiRA's marker — so the watcher and a review gate know it for JaiRA's.
+        const body = signComment(said, { ...modelField(host.modelOf?.(ctx)), taskId: host.taskId });
         const thread = text(args["thread"]);
         if (thread !== undefined) {
           await at.access.provider.reply(handle, thread, body, args["resolve"] === true);

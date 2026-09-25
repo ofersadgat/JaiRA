@@ -1141,6 +1141,8 @@ const MADE_VERB: Record<MadeBatch["kind"], string> = {
   task: "made",
   // Not made at all: a task that ran alone, taken up as this child (decision 0005 §2).
   adopt: "adopted",
+  // What an automation's `start_task` started, as the calling state's child (decision 0010 §4).
+  started: "started",
 };
 
 /** What each kind of note says it is. The row reads as a sentence, so this is its verb. */

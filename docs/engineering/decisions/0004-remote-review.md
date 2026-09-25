@@ -249,7 +249,11 @@ the `remote` option overrides it per state.
 `author_association` of OWNER / MEMBER / COLLABORATOR; GitLab Developer and
 up) can settle a gate or start its window. Anyone's comment is *shown*.
 Comments by the token's own account are JaiRA's own and are ignored as
-events.
+events. *Amended 2026-09-25 (decision 0010, the rulings of that day):* "JaiRA's
+own" is decided by the MARKER every comment JaiRA posts now carries
+(`<!-- jaira:comment … -->`, under a first line naming the model that asked),
+not by the account — the token's account is the person's, so what they write
+on the forge themselves counts like anyone's with write access.
 
 **The result** is today's, plus the handle:
 

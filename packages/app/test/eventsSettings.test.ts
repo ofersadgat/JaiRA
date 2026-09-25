@@ -191,6 +191,8 @@ const automationsProps = (shown: ShownLine[], over: Partial<AutomationsViewProps
   layerName: "JaiRA",
   hasTask: true,
   onLines: () => undefined,
+  onSharedLine: () => undefined,
+  onUseSharedSteps: () => undefined,
   onIgnore: () => undefined,
   onAnswer: () => undefined,
   onOpenConversation: () => undefined,
@@ -217,6 +219,9 @@ describe("the Automations section", () => {
     expect(words).toContain("from the event");
     expect(words).toContain("← event.commits[0].message");
     expect(html).toContain('value="Review started"');
+    // A start is the events task's child unless it is asked to stand on its own.
+    expect(words).toContain("as a child on its own");
+    expect(html).toMatch(/aria-pressed="true"[^>]*>as a child</);
     expect(words).toContain("In order: each step starts when the one before it has finished.");
     expect(words).toContain("Runs as the task events in JaiRA");
     expect(words).toContain("Open its conversation");
@@ -242,6 +247,24 @@ describe("the Automations section", () => {
     expect(words).toContain("ignored here · Put back");
     expect(words).toContain("Ignore in this project");
     expect(words).toContain("from Shared");
+    // A Shared line not ignored is EDITABLE here: its name, its event, its steps — and it says what an edit does.
+    expect(html).toContain('value="mr_opened"');
+    expect(html).toContain('value="git.merge_request.opened"');
+    expect(words).toContain("A change to its steps here is this project's own copy of them; a change to its event or filter makes it a line of this project's.");
+  });
+
+  it("says when a Shared line's steps are this project's own, and offers Shared's back", () => {
+    const words = text(
+      renderToStaticMarkup(createElement(AutomationsView, automationsProps([{ line: { ...line, name: "push_main" }, from: "shared", ignored: false, stepsFrom: "project" }]))),
+    );
+    expect(words).toContain("Its steps are changed for this project only, in this project's system/events/push_main");
+    expect(words).toContain("Shared's line and every other project keep Shared's.");
+    expect(words).toContain("Use Shared's steps");
+  });
+
+  it("says when a project line stands in for Shared's of the same name", () => {
+    const words = text(renderToStaticMarkup(createElement(AutomationsView, automationsProps([{ line, from: "own", ignored: false, replaces: true }]))));
+    expect(words).toContain("This project's version of Shared's line of this name, which is ignored here.");
   });
 
   it("flags a line an earlier one catches, and an event switched off, with a way to Events", () => {

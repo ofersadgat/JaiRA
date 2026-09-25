@@ -78,7 +78,10 @@ export function taskSummaries(project: Project): TaskSummary[] {
       meta?.startedBy === undefined || project.runtime.get(meta.startedBy.fromTask) !== undefined
         ? meta?.startedBy
         : { ...meta.startedBy, fromTask: eventsNow() ?? meta.startedBy.fromTask };
-    const origin = taskOriginOf(project, row, meta);
+    const made = taskOriginOf(project, row, meta);
+    // A task an events task started as its CHILD names that task; replaced since, the child files
+    // under the one that runs the project's automations now, like the `startedBy` line below.
+    const origin = made?.kind === "started" && project.runtime.get(made.taskId) === undefined ? { ...made, taskId: eventsNow() ?? made.taskId } : made;
     const waitingFor = meta !== undefined ? holdingOf(project, meta) : [];
     // The request the task is parked on, when it is parked on one — the oldest, if there are several.
     const awaited = project.remotes.forTask(row.taskId).find((r) => r.awaiting && r.number !== undefined && r.url !== undefined);
@@ -132,8 +135,16 @@ export function taskOriginOf(project: Project, row: TaskRuntimeRow, meta?: TaskM
       at: row.forkedAtSeq ?? 0,
       boundary: row.forkBoundarySeq ?? 0,
       boundaryAt: boundary?.created_at ?? 0,
-      // An adoption (decision 0005 §2) was no element of anything: it stands for the child itself.
-      label: made.kind === "adopt" ? `as ${made.key}` : `element ${made.index + 1} of ${made.key}${made.item !== undefined ? ` (${made.item})` : ""}`,
+      // An adoption (decision 0005 §2) was no element of anything: it stands for the child itself. A
+      // started task (decision 0010 §4) was started by an automation, which is its key.
+      label:
+        made.kind === "adopt"
+          ? `as ${made.key}`
+          : made.kind === "started"
+            ? `started by events · ${made.key}${made.event !== undefined && made.event.summary.length > 0 ? ` · ${made.event.summary}` : ""}`
+            : `element ${made.index + 1} of ${made.key}${made.item !== undefined ? ` (${made.item})` : ""}`,
+      ...(made.kind === "started" && made.event !== undefined ? { event: made.event.summary } : {}),
+      ...(made.kind === "started" && made.state !== undefined ? { stateId: made.state.stateId } : {}),
     };
   }
   if (row.parentTaskId === undefined || row.forkedAtSeq === undefined || row.forkBoundarySeq === undefined) return undefined;

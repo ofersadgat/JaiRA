@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Tool } from "@declarative-ai/exec";
-import { parseIntegrations, type JairaEvent, type JairaIntegrationsConfig } from "@jaira/shared";
+import { isJairaComment, parseIntegrations, signComment, type JairaEvent, type JairaIntegrationsConfig } from "@jaira/shared";
 import { NodeExec, type Exec, type ExecOptions } from "../src/exec";
 import { createGitTools, GIT_TOOL_NAMES, noGitToolHost, pushCredentials, workspaceGitHost, type GitEventWaits } from "../src/gitTools";
 import { EventHub } from "../src/eventHub";
@@ -50,6 +50,8 @@ interface Setup {
   env?: Record<string, string>;
   root?: string;
   events?: GitEventWaits;
+  /** The model behind a call — what a comment is signed with. */
+  modelOf?: () => string | undefined;
 }
 
 function tools(setup: Setup = {}): Record<string, Tool> {
@@ -62,6 +64,7 @@ function tools(setup: Setup = {}): Record<string, Tool> {
       secrets: new SecretResolver({ env: setup.env ?? { GITLAB_TOKEN: "good" } }),
       http: replay.http,
       ...(setup.events !== undefined ? { events: setup.events } : {}),
+      ...(setup.modelOf !== undefined ? { modelOf: setup.modelOf } : {}),
       publishing: new PublishAuthorizer({
         publish: setup.publish ?? "allow",
         ...(setup.answer !== undefined
@@ -306,11 +309,17 @@ describe("open_merge_request", () => {
 describe("the writers on a request", () => {
   it("git_comment comments on the request, on a line, or replies in a thread and resolves it", async () => {
     expect(await call(tools(), "git_comment", { number: 7429, body: "Looks right." })).toEqual({ ok: true, merge_request: "gitlab.com/gitlab-org/gitlab-runner!7429" });
-    expect(replay.seen.at(-1)).toMatchObject({ method: "POST", body: { body: "Looks right." } });
+    // Signed (the rulings of 2026-09-25): with no model to name, as JaiRA's — and its marker either way.
+    expect(replay.seen.at(-1)).toMatchObject({ method: "POST", body: { body: "🤖 JaiRA\n\nLooks right.\n\n<!-- jaira:comment model=JaiRA task=t-1 -->" } });
     expect(new URL(replay.seen.at(-1)!.url).pathname.endsWith("/7429/notes")).toBe(true);
 
-    await call(tools(), "git_comment", { number: 7429, body: "This line.", path: "commands/helpers/cache.go", line: 42 });
-    expect(replay.seen.filter((r) => r.method === "POST").at(-1)!.body).toMatchObject({ position: { new_path: "commands/helpers/cache.go", new_line: 42 } });
+    // The model of the agent that asked, where the host can tell it.
+    await call(tools({ modelOf: () => "claude-opus-5-5" }), "git_comment", { number: 7429, body: "This line.", path: "commands/helpers/cache.go", line: 42 });
+    const inline = replay.seen.filter((r) => r.method === "POST").at(-1)!.body as { body: string };
+    expect(inline).toMatchObject({ position: { new_path: "commands/helpers/cache.go", new_line: 42 } });
+    expect(inline.body).toBe(signComment("This line.", { model: "claude-opus-5-5", taskId: "t-1" }));
+    expect(inline.body.split("\n")[0]).toBe("🤖 claude-opus-5-5 · via JaiRA");
+    expect(inline.body.endsWith("<!-- jaira:comment model=claude-opus-5-5 task=t-1 -->")).toBe(true);
 
     const thread = "6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c";
     expect(await call(tools(), "git_comment", { number: 7429, body: "Done.", thread, resolve: true })).toEqual({
@@ -319,6 +328,9 @@ describe("the writers on a request", () => {
       thread,
       resolved: true,
     });
+    // A reply is signed as a comment is.
+    const reply = replay.seen.filter((r) => r.method === "POST").at(-1)!.body as { body: string };
+    expect(isJairaComment(reply.body)).toBe(true);
     expect(replay.seen.at(-1)).toMatchObject({ method: "PUT", body: { resolved: true } });
   });
 

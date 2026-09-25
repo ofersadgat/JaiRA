@@ -37,6 +37,7 @@ import {
   changesetInputOf,
   handleOfRow,
   parseDuration,
+  signComment,
   type Change,
   type ChangeDecision,
   type Changeset,
@@ -157,11 +158,12 @@ function addressedOf(inputs: FunctionInputs): AddressedEdit[] {
   });
 }
 
-async function answerThreads(provider: ForgeProvider, handle: RemoteHandle, addressed: readonly AddressedEdit[], head: string): Promise<number> {
+export async function answerThreads(provider: ForgeProvider, handle: RemoteHandle, addressed: readonly AddressedEdit[], head: string, sign: (body: string) => string): Promise<number> {
   if (addressed.length === 0) return 0;
   const state = await provider.read(handle);
   const replies = threadReplies(state.threads, addressed, head);
-  for (const reply of replies) await provider.reply(handle, reply.thread, reply.body, reply.resolve);
+  // Signed, so the next read finds the reply JaiRA's own (`own`) — the thread's last word, answered.
+  for (const reply of replies) await provider.reply(handle, reply.thread, sign(reply.body), reply.resolve);
   return replies.length;
 }
 
@@ -205,7 +207,7 @@ export async function reviewWithRemote(options: RemoteReviewOptions, inputs: Fun
 
   // --- a revise round says what it did, on the threads that asked ------------------------------------
   try {
-    const told = await answerThreads(primitives.providerFor(row), handle, addressedOf(inputs), row.pushedHead ?? handle.head);
+    const told = await answerThreads(primitives.providerFor(row), handle, addressedOf(inputs), row.pushedHead ?? handle.head, (body) => primitives.signed(body, ctx));
     if (told > 0) options.log(`replied on ${told} thread(s) the revision addressed`);
   } catch (error) {
     // The revision is pushed and the review goes on; a reply that could not be posted is a warning.
@@ -276,17 +278,20 @@ export async function reviewWithRemote(options: RemoteReviewOptions, inputs: Fun
   const who = await options.who().catch(() => undefined);
   try {
     const provider = primitives.providerFor(row);
+    // A PERSON's words, carried to the forge: signed as JaiRA's (no model asked for them) so the next
+    // read neither counts them as a remark nor fires them as an event — they were said here already.
+    const carried = (body: string): string => signComment(body, { taskId });
     for (const decision of (Array.isArray(value["decisions"]) ? value["decisions"] : []) as ChangeDecision[]) {
       const change = changeset?.changes.find((c) => c.id === decision.id);
       if (change === undefined) continue;
       // Only what the forge has not already got: a note that came FROM it carries its source.
       for (const note of (decision.notes ?? []).filter((n) => n.source === undefined)) {
-        await provider.comment(handle, note.body, anchorOfNote(note, change));
+        await provider.comment(handle, carried(note.body), anchorOfNote(note, change));
       }
-      if (decision.comment !== undefined && decision.comment.trim().length > 0) await provider.comment(handle, `\`${change.path}\` — ${decision.comment}`);
+      if (decision.comment !== undefined && decision.comment.trim().length > 0) await provider.comment(handle, carried(`\`${change.path}\` — ${decision.comment}`));
     }
-    if (typeof value["comments"] === "string" && value["comments"].trim().length > 0) await provider.comment(handle, value["comments"]);
-    await provider.comment(handle, closingComment(who, value));
+    if (typeof value["comments"] === "string" && value["comments"].trim().length > 0) await provider.comment(handle, carried(value["comments"]));
+    await provider.comment(handle, carried(closingComment(who, value)));
   } catch (error) {
     // The decision was made and stands. A forge that could not be told is a warning, not a failure.
     options.log(`the review was answered, but ${row.host} could not be told: ${(error as Error).message}`);

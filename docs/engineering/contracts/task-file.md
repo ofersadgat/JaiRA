@@ -48,14 +48,23 @@ The file is `.jaira/system/tasks/<taskId>.json` in a project and `system/tasks/<
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `origin.kind` | `"split"`, `"task"` or `"adopt"` | yes | `split`: a copy of the parent standing at the mount; `task`: a fresh task rooted at the mounted state; `adopt`: a task that ran alone and was taken up afterwards ([adoption](../units/adoption.md)) |
-| `origin.taskId` | string | yes | the task whose list made this one, or the task that adopted it |
-| `origin.key` | string | yes | the mount's child key in that task |
-| `origin.occurrence` | number | no | which entry of the mount made the batch; absent reads as 0 |
-| `origin.index` | number | yes | the element's position in the list |
+| `origin.kind` | `"split"`, `"task"`, `"adopt"` or `"started"` | yes | `split`: a copy of the parent standing at the mount; `task`: a fresh task rooted at the mounted state; `adopt`: a task that ran alone and was taken up afterwards ([adoption](../units/adoption.md)); `started`: a task an events automation's `start_task` started as its child (decision 0010 §4) |
+| `origin.taskId` | string | yes | the task whose list made this one, the task that adopted it, or the events task that started it |
+| `origin.key` | string | yes | the mount's child key in that task; for `started`, the automation — the calling state's key |
+| `origin.occurrence` | number | no | which entry of the mount made the batch — for `started`, which firing of the automation; absent reads as 0 |
+| `origin.index` | number | yes | the element's position in the list; for `started`, which call of the automation's operation list |
 | `origin.item` | string | no | the element's own id, when the wire named an id field |
 | `origin.start` | `"manual"` or `"when_ready"` | no | for a split, who starts the task once its dependencies complete; absent reads as `when_ready` |
 | `origin.formerParentTaskId` | string | no | for an adoption, the `parentTaskId` the task had before, put back when it is un-adopted |
+| `origin.event` | `{name, summary}` | no | for `started`, the event it was started because of: `git.push`, and `git.push a1b2c3d on main` |
+| `origin.state` | `{stateId, path}` | no | for `started`, the calling state: `system/events/push_main`, `push_main` |
+
+### `startedBy` and `system` are the events task's (decision 0010 §4)
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `startedBy` | `{by: "events", fromTask, state?, event, summary}` | no | a task an events automation started ON ITS OWN (`start_task` with `top_level: true`): the events task, the calling state (`{key, path, stateId, occurrence, call}`; absent on a task started before it was recorded), the event's name and its one-line summary. Never beside `origin` |
+| `system` | `"events"` | no | the project's events task, which the supervisor keeps; never started by hand |
 
 ## Errors are thrown by every reader, and a list stops at the first bad file
 

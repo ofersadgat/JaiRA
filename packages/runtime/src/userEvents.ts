@@ -340,7 +340,8 @@ export function hostCalleeSignatures(): ReadonlyMap<string, EntrySignature> {
   // `on_event`, the third: something that happened on a remote or in JaiRA (decision 0010 §3).
   new EventHub().register(probe, undefined);
   // `start_task` and `notify`, the events task's two step functions (decision 0010 §4): declared here so
-  // `system/events/start` and `/notify` load anywhere; only the events task's run registers them to act.
+  // an automation's state (`system/events/<name>`, an operation list of them) loads anywhere; only the
+  // events task's run registers them to act.
   registerEventsTaskFunctions(probe);
   // `smart` and `approve_tool_call` — what a permission set line names as a function, and what a permission
   // function calls to ask the person. Resolvable by name for the same reason (decision 0007).

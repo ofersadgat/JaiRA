@@ -664,7 +664,8 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
     let current = summary;
     const seen = new Set<string>([current.taskId]);
     // An ADOPTED task (decision 0005 §2) files as a mount's task does: under the task that took it up.
-    while (current.origin?.kind === "task" || current.origin?.kind === "adopt") {
+    // A task the events task STARTED as its child (decision 0010 §4) comes along with the events task.
+    while (current.origin?.kind === "task" || current.origin?.kind === "adopt" || current.origin?.kind === "started") {
       const parent = byTaskId.get(current.origin.taskId);
       if (parent === undefined || seen.has(parent.taskId)) break;
       seen.add(parent.taskId);
@@ -862,6 +863,9 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
     // a card a person knows, so here it stays in sight: in its parent's column, marked `under` it,
     // which the board draws indented beneath the parent's card.
     if (summary.origin?.kind === "task") continue;
+    // A task the events task started as its CHILD (decision 0010 §4) is drawn the way a mount's task
+    // is: under the events task, in its automation's column — while that task is there to hold it.
+    if (summary.origin?.kind === "started" && byTaskId.has(summary.origin.taskId)) continue;
     const adoptedBy = summary.origin?.kind === "adopt" && byTaskId.has(summary.origin.taskId) ? summary.origin.taskId : undefined;
     // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
     // active path, and `taskRun` without a shape still yields one.

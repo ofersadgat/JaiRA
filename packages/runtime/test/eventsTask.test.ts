@@ -1,14 +1,26 @@
 /**
  * `start_task` and `notify`, the events task's two step functions (decision 0010 §4), against a host
- * of the test's own. The service's half — the task made, its origin, its start — is `app/test/
- * eventsTask.test.ts`; this is the contract: what the functions take, what they hand back (the event,
- * for the next step), and that a start is answered once it has STARTED, not when the task ends.
+ * of the test's own. The service's half — the task made, its provenance and mirror, its start — is
+ * `app/test/eventsTask.test.ts`; this is the contract: what the functions take, who called (the
+ * engine's dispatch site on the context), and that a start is answered once it has STARTED, not when
+ * the task ends.
  */
 import { describe, expect, it } from "vitest";
 import { newCapabilityRegistry, type FunctionInputs } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { eventSummary, type EventDelivery } from "@jaira/shared";
-import { checkStartTask, hostCalleeSignatures, NOTIFY, registerEventsTaskFunctions, START_TASK, type EventsTaskHost, type EventsTaskNotice, type EventsTaskStart } from "../src/index";
+import {
+  callerOf,
+  checkStartTask,
+  hostCalleeSignatures,
+  NOTIFY,
+  registerEventsTaskFunctions,
+  START_TASK,
+  type EventsTaskCaller,
+  type EventsTaskHost,
+  type EventsTaskNotice,
+  type EventsTaskStart,
+} from "../src/index";
 
 const push: EventDelivery = {
   name: "git.push",
@@ -16,31 +28,48 @@ const push: EventDelivery = {
   at: "2026-09-25T10:00:00.000Z",
 };
 
+/** Call 1 of the automation instance `i-1`'s operation list, as the engine dispatches it (SPEC §7.1d). */
+const SITE = { scope: { instanceId: "i-1", sequence: -1 } };
+
 function rig(host?: Partial<EventsTaskHost>) {
-  const started: EventsTaskStart[] = [];
-  const notices: EventsTaskNotice[] = [];
+  const started: Array<{ request: EventsTaskStart; caller: EventsTaskCaller }> = [];
+  const notices: Array<{ notice: EventsTaskNotice; caller: EventsTaskCaller }> = [];
   const registry = newCapabilityRegistry<WorkflowMetrics>();
   registerEventsTaskFunctions(registry, {
-    startTask: async (request) => {
-      started.push(request);
+    startTask: async (request, caller) => {
+      started.push({ request, caller });
       return { task_id: `t${started.length}` };
     },
-    notify: (notice) => void notices.push(notice),
+    notify: (notice, caller) => void notices.push({ notice, caller }),
     ...host,
   });
-  const call = async (name: string, inputs: FunctionInputs) => {
+  const call = async (name: string, inputs: FunctionInputs, ctx: unknown = {}) => {
     const entry = registry.functions.get(name)!;
-    return (entry as unknown as { impl(inputs: FunctionInputs, ctx: unknown): Promise<{ value?: unknown; error?: { reason: string } }> }).impl(inputs, {});
+    return (entry as unknown as { impl(inputs: FunctionInputs, ctx: unknown): Promise<{ value?: unknown; error?: { reason: string } }> }).impl(inputs, ctx);
   };
   return { registry, started, notices, call };
 }
 
 describe("start_task", () => {
-  it("starts a task of the workflow with its inputs and title, and hands the event on", async () => {
+  it("starts a task of the workflow with its inputs and title, as the CALLING STATE's child by default", async () => {
     const { started, call } = rig();
-    const result = await call(START_TASK, { workflow: "feature/review", inputs: { issue: "fix it" }, title: "Review", event: push as never });
-    expect(result.value).toEqual({ task_id: "t1", event: push });
-    expect(started).toEqual([{ workflow: "feature/review", inputs: { issue: "fix it" }, title: "Review", event: push }]);
+    const result = await call(START_TASK, { workflow: "feature/review", inputs: { issue: "fix it" }, title: "Review" }, SITE);
+    expect(result.value).toEqual({ task_id: "t1" });
+    // Who called is the engine's dispatch site, not an argument: the instance, and which call of its list.
+    expect(started).toEqual([{ request: { workflow: "feature/review", inputs: { issue: "fix it" }, title: "Review", topLevel: false }, caller: { instanceId: "i-1", call: 1 } }]);
+  });
+
+  it("`top_level: true` asks for a task on its own; an event named in the call is handed over", async () => {
+    const { started, call } = rig();
+    await call(START_TASK, { workflow: "feature/review", top_level: true, event: push as never }, { scope: { instanceId: "i-2", sequence: 0 } });
+    expect(started[0]).toEqual({ request: { workflow: "feature/review", topLevel: true, event: push }, caller: { instanceId: "i-2", call: 0 } });
+  });
+
+  it("a call no engine dispatched has no site: call 0, and no instance", () => {
+    expect(callerOf(undefined)).toEqual({ call: 0 });
+    expect(callerOf({ scope: { instanceId: "i", sequence: -3 } })).toEqual({ instanceId: "i", call: 3 });
+    // A call SITE (sequence ≥ 1) is not an operation of a list: call 0 of the state.
+    expect(callerOf({ scope: { instanceId: "i", sequence: 2 } })).toEqual({ instanceId: "i", call: 0 });
   });
 
   it("answers once the start is answered — it never waits for the task", async () => {
@@ -63,7 +92,8 @@ describe("start_task", () => {
     const { call } = rig();
     expect((await call(START_TASK, {})).error?.reason).toMatch(/'workflow' names the workflow/);
     expect((await call(START_TASK, { workflow: "a", inputs: [1] })).error?.reason).toMatch(/'inputs' is an object/);
-    expect(checkStartTask({ workflow: " a ", event: { name: "not.an.event", payload: {} } })).toEqual({ workflow: "a" });
+    expect((await call(START_TASK, { workflow: "a", top_level: "yes" })).error?.reason).toMatch(/'top_level' is true or false/);
+    expect(checkStartTask({ workflow: " a ", event: { name: "not.an.event", payload: {} } })).toEqual({ workflow: "a", topLevel: false });
   });
 
   it("without a host it is only a declaration — what every workflow loads against, and no run but the events task's acts on", async () => {
@@ -76,13 +106,18 @@ describe("start_task", () => {
 });
 
 describe("notify", () => {
-  it("posts the text with its event, and hands the event on", async () => {
+  it("posts the text — its event read by the host off the calling state when the call names none", async () => {
     const { notices, call } = rig();
-    expect((await call(NOTIFY, { text: " deployed ", event: push as never })).value).toEqual({ event: push });
-    expect(notices).toEqual([{ text: "deployed", event: push }]);
+    expect((await call(NOTIFY, { text: " deployed " }, SITE)).value).toEqual({});
+    expect((await call(NOTIFY, { text: "again", event: push as never })).value).toEqual({});
+    expect(notices).toEqual([
+      { notice: { text: "deployed" }, caller: { instanceId: "i-1", call: 1 } },
+      { notice: { text: "again", event: push }, caller: { call: 0 } },
+    ]);
     expect((await call(NOTIFY, { text: "" })).error?.reason).toMatch(/'text'/);
   });
 });
+
 
 describe("eventSummary", () => {
   it("says what happened in a line, the event's name first", () => {

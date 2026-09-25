@@ -46,6 +46,7 @@ export * from "./scopes";
 export * from "./hiddenPaths";
 export * from "./userEvents";
 export * from "./events";
+export * from "./automations";
 export * from "./repoWatch";
 export * from "./adopt";
 export * from "./connect";

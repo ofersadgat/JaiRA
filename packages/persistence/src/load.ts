@@ -390,6 +390,12 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         // of the host's own op. Skipping the entry here drops the whole chat quietly — its other
         // events find no node — and deliberately does NOT advance the host.
         if (event.instanceId.startsWith(CHAT_INSTANCE_PREFIX)) break;
+        // A task the events task's `start_task` STARTED (decision 0010 §4) is mirrored here as a child
+        // of the calling state (`started: true`, the task's id as the instance's) so the task's views list
+        // it — but the calling state never mounted it and nothing waits for it: it is not part of the
+        // machine, and folded in it would count as the state acting. Its end finds no node, and is
+        // dropped with it.
+        if ((event as { started?: boolean }).started === true) break;
         const existing = nodes.get(event.instanceId);
         if (existing !== undefined) {
           // A revived instance re-entered: the structure is already known, and the entry means it is

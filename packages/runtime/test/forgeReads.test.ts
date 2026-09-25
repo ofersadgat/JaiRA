@@ -6,7 +6,7 @@
  * fixtures are `*.git-tools.json` (built from the documented shapes) beside the recorded ones.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { ciStateOf, handleOfSummary, type RemoteHandle } from "@jaira/shared";
+import { ciStateOf, handleOfSummary, signComment, type RemoteHandle } from "@jaira/shared";
 import { ForgeError, forgeProvider } from "../src/forge";
 import { replayForge, type Replay } from "./forgeReplay";
 
@@ -150,8 +150,8 @@ describe("GitHub", () => {
       const general = notes.filter((n) => n.threadId === undefined);
       expect(general.length).toBeGreaterThan(0);
       expect(general.every((n) => n.anchor === undefined)).toBe(true);
-      // One GraphQL read, plus who the token is — never a REST walk.
-      expect(replay.seen.map((r) => new URL(r.url).pathname).sort()).toEqual(["/graphql", "/user"]);
+      // One GraphQL read — never a REST walk, and no asking who the token is: JaiRA's own words are the signed ones.
+      expect(replay.seen.map((r) => new URL(r.url).pathname).sort()).toEqual(["/graphql"]);
     });
 
     it("keeps only what was written after `since`", async () => {
@@ -277,7 +277,7 @@ describe("GitLab", () => {
           id: "1102",
           threadId: "6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c",
           who: "jaira-bot",
-          body: "Fixed in the next push.",
+          body: signComment("Fixed in the next push.", { model: "claude-opus-5-5", taskId: "t-review" }),
           at: "2026-09-18T09:20:00.000Z",
           anchor: { path: "commands/helpers/cache.go", line: 42, side: "after" },
           own: true,

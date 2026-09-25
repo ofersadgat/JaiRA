@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   NEW_BRANCH_SHA,
+  signComment,
   type CiStatus,
   type EnabledEvent,
   type EventDelivery,
@@ -377,16 +378,19 @@ describe("merge requests — the latest-state rule", () => {
     expect(names()).toEqual(["git.merge_request.opened !2"]);
   });
 
-  it("new comments are ONE event carrying all of them — and the connection's own words are not news", async () => {
+  it("new comments are ONE event carrying all of them — and what JaiRA signed is not news, whoever's account posted it", async () => {
     const w = watcher();
     forge.request(3, {});
     await w.kick();
     clock.at += 10_000;
     forge.say(3, { id: "c1", who: "sam", body: "why?", threadId: "t1", anchor: { path: "a.ts", line: 4, side: "after" } });
     clock.at += 1_000;
-    forge.say(3, { id: "c2", who: "jaira-bot", body: "because", own: true });
+    // JaiRA's reply carries its marker. The rule is the MARKER: even a note the provider does not call
+    // `own` is left out when it carries one.
+    forge.say(3, { id: "c2", who: "jaira-bot", body: signComment("because", { model: "claude-opus-5-5", taskId: "t1" }) });
     clock.at += 1_000;
-    forge.say(3, { id: "c3", who: "mara", body: "ok" });
+    // The connection's own account, unsigned: the person, writing on the forge themselves — news.
+    forge.say(3, { id: "c3", who: "jaira-bot", body: "ok, merging after lunch", own: true });
     await look(w);
     expect(names()).toEqual(["git.merge_request.comments !3"]);
     const comments = (events[0]!.payload as unknown as { comments: Array<Record<string, unknown>> }).comments;

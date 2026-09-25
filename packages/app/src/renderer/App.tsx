@@ -651,8 +651,11 @@ export default function App(): JSX.Element {
   const automationsChannel = useMemo<AutomationsChannel>(() => {
     const project = permissionSetsProject !== null ? { project: permissionSetsProject } : {};
     return {
-      read: (layer) => invoke("workflow:read", { stateId: EVENTS_STATE_ID, layer, ...(layer === "base" ? {} : project) }),
-      write: (layer, text) => invoke("workflow:write", { stateId: EVENTS_STATE_ID, layer, text, ...(layer === "base" ? {} : project) }),
+      read: (layer, stateId) => invoke("workflow:read", { stateId, layer, ...(layer === "base" ? {} : project) }),
+      write: (layer, stateId, text) => invoke("workflow:write", { stateId, layer, text, ...(layer === "base" ? {} : project) }),
+      // An automation's state taken away: nothing names it once its line is gone, and a project's copy
+      // of a Shared line's state is referred to by Shared's root, so the refusal is not the question.
+      remove: (layer, stateId) => invoke("workflow:delete", { stateId, layer, force: true, ...(layer === "base" ? {} : project) }),
     };
   }, [permissionSetsProject]);
   /**
@@ -2470,6 +2473,12 @@ export default function App(): JSX.Element {
                           selectedSet={picked !== null && picked.project === p.project ? pickedSet! : undefined}
                           numbered={state.boards[p.project]!.level !== ""}
                           onSelectTask={(taskId, e) => pickTask(p.project, taskId, e)}
+                          // A card's "started by events · …" line: the events task, opened at the
+                          // automation that started the card (decision 0010 §4).
+                          onOpenAt={(taskId, stateId) => {
+                            setPicked({ project: p.project, ids: [taskId], anchor: taskId });
+                            actions.select(taskId, p.project, stateId ?? null);
+                          }}
                           // Clicking a COLUMN describes the state it stands for, in the panel that
                           // describes whatever was last clicked — the Files view's answer to clicking
                           // a state in the tree, reached from the board instead. The project travels

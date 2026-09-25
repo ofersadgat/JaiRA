@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FunctionInputs, JsonValue } from "@declarative-ai/exec";
-import { parseIntegrations, type Changeset } from "@jaira/shared";
+import { parseIntegrations, signComment, type Changeset } from "@jaira/shared";
 import { NodeExec } from "../src/exec";
 import { registerRemoteFunctions, REMOTE_FUNCTIONS, type PublishAnswer, type PublishRequest, type RemoteOptions } from "../src/remote";
 import { SecretResolver } from "../src/secrets";
@@ -299,10 +299,11 @@ describe("the request afterwards", () => {
   };
 
   it("adopts a handle passed BY VALUE — how a request crosses a task boundary", async () => {
-    const { call } = functions({ ...allow, taskId: "t-2" });
+    // The model behind the call signs what `remote_comment` posts, and the marker says it is JaiRA's.
+    const { call } = functions({ ...allow, taskId: "t-2", modelOf: () => "claude-opus-5-5" });
     expect((await call("remote_comment", { remote: byValue, body: "Decided in JaiRA: revise." })).error).toBeUndefined();
     expect(handles.get("t-2", "review")).toMatchObject({ number: 7429, host: "gitlab.com" });
-    expect(replay.seen.map((r) => [r.method, r.body])).toEqual([["POST", { body: "Decided in JaiRA: revise." }]]);
+    expect(replay.seen.map((r) => [r.method, r.body])).toEqual([["POST", { body: signComment("Decided in JaiRA: revise.", { model: "claude-opus-5-5", taskId: "t-2" }) }]]);
   });
 
   it("comments inline, replies on a thread, and resolves it when asked", async () => {

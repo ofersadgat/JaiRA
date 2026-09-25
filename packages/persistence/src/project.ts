@@ -29,6 +29,7 @@ import { migrateSettingsLayers } from "./settingsMigration";
 import { migrateHiddenLists } from "./hiddenMigration";
 import { renamePermissionSetLayers } from "./permissionSetRename";
 import { migrateUserSettings } from "./userSettingsMigration";
+import { migrateEventsWorkflows } from "./eventsMigration";
 import { applyStorage, isFileBacked, type ShadowReport } from "./shadow";
 import { journalFiles, replayJournal } from "./journalFile";
 import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
@@ -286,6 +287,8 @@ export function openSharedProject(opts?: { now?: () => number; staleMs?: number;
   migrateSettingsLayers(paths);
   migrateHiddenLists(paths);
   migrateUserSettings(base);
+  // The events workflow's automations, from one child per step into one state with an operation list.
+  migrateEventsWorkflows(paths);
   return openAt(paths, layeredConfigOf([paths.builtIn.settingsFile, base.settingsFile, base.personalSettingsFile]), "shared", opts);
 }
 
@@ -348,6 +351,9 @@ export function openProject(
   migrateHiddenLists(paths);
   // The look moved out of the preferences file into the personal layer, which is read just below.
   migrateUserSettings(paths.base);
+  // The events workflow's automations — Shared's copy and this project's — from one child per step into
+  // one state with an operation list (decision 0010, the rulings of 2026-09-25).
+  migrateEventsWorkflows(paths);
   return openAt(paths, loadLayeredConfig(paths), "project", opts);
 }
 

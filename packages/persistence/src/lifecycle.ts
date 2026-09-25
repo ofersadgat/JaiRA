@@ -46,7 +46,7 @@ export interface CreateTaskInput {
    * document's root id, and the task pins the document's latest version each time it loads.
    */
   documentId?: string;
-  /** What started this task, when the events task did — see `TaskMeta.startedBy`. */
+  /** What started this task ON ITS OWN, when the events task did — see `TaskMeta.startedBy`. A child it started carries `origin` instead. */
   startedBy?: TaskStartedBy;
   /** A task JaiRA keeps for itself — see `TaskMeta.system`. */
   system?: TaskMeta["system"];

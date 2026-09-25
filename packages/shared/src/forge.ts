@@ -378,7 +378,7 @@ export interface ForgeAnchor {
   side: "before" | "after";
 }
 
-/** One thing somebody wrote. `canWrite` and `own` are the two facts "who counts" is decided from. */
+/** One thing somebody wrote. `canWrite` and `own` (JaiRA's marker) are the two facts "who counts" is decided from. */
 export interface ForgeComment {
   id: string;
   who: string;
@@ -386,7 +386,11 @@ export interface ForgeComment {
   at: string;
   /** Write access to the project — GitHub OWNER / MEMBER / COLLABORATOR, GitLab Developer and up. */
   canWrite: boolean;
-  /** Written by the token's own account: JaiRA's own words, shown and never an event. */
+  /**
+   * JaiRA's own words: the body carries its marker (`isJairaComment`) — shown, and never an event.
+   * Not "written by the token's account": that account is the person's, and so are the comments they
+   * write with it on the forge (the rulings of 2026-09-25).
+   */
   own: boolean;
 }
 
@@ -407,6 +411,7 @@ export interface ForgeReview {
   verdict: "approved" | "changes_requested";
   body?: string;
   canWrite: boolean;
+  /** Its body carries JaiRA's marker. JaiRA never submits a review, so in practice never. */
   own: boolean;
 }
 
@@ -521,7 +526,7 @@ export interface ForgeNote {
   at: string;
   /** Where in the diff, for an inline comment. */
   anchor?: ForgeAnchor;
-  /** Written by the token's own account. */
+  /** JaiRA wrote it: the body carries its marker (`isJairaComment`). Never an event. */
   own: boolean;
 }
 
@@ -802,4 +807,70 @@ export function handleOfRow(row: RemoteHandleRow): RemoteHandle | undefined {
     url: row.url,
     head: row.pushedHead ?? "",
   };
+}
+
+// --- JaiRA's signature on what it posts ---------------------------------------------------------
+
+/**
+ * Every comment and reply JaiRA posts to a forge is SIGNED (the person's ruling, 2026-09-25): a
+ * visible first line saying who wrote it — `🤖 claude-opus-5-5 · via JaiRA`, the model of the agent or
+ * turn that asked for it, or `🤖 JaiRA` where no model asked (a person's words JaiRA carried, the
+ * review's own closing line) — and a hidden marker at the end, `<!-- jaira:comment model=… task=… -->`,
+ * which is how JaiRA knows its own words when it reads the request back.
+ *
+ * The marker, not the account, is what "JaiRA's own" means. The connection's token belongs to the
+ * person, so the account is theirs too: a comment they write on the forge themselves is theirs, fires
+ * `git.merge_request.comments`, and counts on a review gate; one JaiRA posted with the same token is
+ * never an event and never settles anything, because it carries the marker.
+ */
+export interface CommentSignature {
+  /** The model that asked for it, when one did. */
+  model?: string;
+  /** The task it was posted for. */
+  taskId?: string;
+}
+
+/**
+ * The marker, where {@link signComment} puts it: the END of the body. A comment that only quotes one
+ * part-way through is somebody's, answering JaiRA — not JaiRA's.
+ */
+const MARKER = /<!--\s*jaira:comment\b([^>]*)-->\s*$/;
+
+/** A marker attribute's value: no spaces, and nothing that would end the HTML comment. */
+const attr = (value: string): string => value.trim().replace(/\s+/g, "_").replace(/-->|[<>"]/g, "");
+
+/** The comment's first line: who wrote it. */
+export function signatureLine(signature: CommentSignature): string {
+  const model = signature.model !== undefined && signature.model.trim().length > 0 ? signature.model.trim() : undefined;
+  return model !== undefined ? `🤖 ${model} · via JaiRA` : "🤖 JaiRA";
+}
+
+/** The hidden marker that ends a signed comment. */
+export function commentMarker(signature: CommentSignature): string {
+  const model = signature.model !== undefined && signature.model.trim().length > 0 ? attr(signature.model) : "JaiRA";
+  const task = signature.taskId !== undefined && signature.taskId.length > 0 ? ` task=${attr(signature.taskId)}` : "";
+  return `<!-- jaira:comment model=${model}${task} -->`;
+}
+
+/** `body`, signed: the visible line first, the marker last. A body already signed is returned as it is. */
+export function signComment(body: string, signature: CommentSignature): string {
+  if (isJairaComment(body)) return body;
+  return `${signatureLine(signature)}\n\n${body}\n\n${commentMarker(signature)}`;
+}
+
+/** Whether JaiRA wrote this — it ends with the marker. */
+export function isJairaComment(body: string | undefined): boolean {
+  return body !== undefined && MARKER.test(body);
+}
+
+/** What a signed comment's marker says, or `undefined` for a comment JaiRA did not write. */
+export function commentSignatureOf(body: string | undefined): CommentSignature | undefined {
+  const found = body !== undefined ? MARKER.exec(body) : null;
+  if (found === null) return undefined;
+  const out: CommentSignature = {};
+  for (const [, key, value] of (found[1] ?? "").matchAll(/(\w+)=(\S+)/g)) {
+    if (key === "model" && value !== "JaiRA") out.model = value;
+    if (key === "task") out.taskId = value;
+  }
+  return out;
 }

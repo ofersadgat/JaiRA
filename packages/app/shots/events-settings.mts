@@ -19,7 +19,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { App } from "./driver.mjs";
 import { buildWorld } from "./world.mjs";
-import { sharedSeedOf, writeEventsDoc, type AutomationLine } from "../src/renderer/automationsModel";
+import { automationStateText, sharedSeedOf, writeEventsDoc, type AutomationLine } from "../src/renderer/automationsModel";
 
 const OUT = join(import.meta.dirname, "out", "events-settings");
 const WORLD = join(import.meta.dirname, ".world-events-settings");
@@ -64,12 +64,20 @@ async function main(): Promise<void> {
     ]),
     line("checks_red", "git.checks.failed", { branch: "main" }, [{ kind: "notify", text: "Checks failed on main" }]),
   ];
+  // Each line's steps are its own state beside the root, `system/events/<name>.json`, in the layer that
+  // holds the line — and this project runs its own copy of mr_opened's steps.
+  const states = (dir: string, lines: readonly AutomationLine[]): void => {
+    mkdirSync(join(dir, "events"), { recursive: true });
+    for (const one of lines) writeFileSync(join(dir, "events", `${one.name}.json`), automationStateText(one.name, one.steps));
+  };
   const baseEvents = join(world.home, "workflows", "system");
   mkdirSync(baseEvents, { recursive: true });
   writeFileSync(join(baseEvents, "events.json"), `${JSON.stringify(writeEventsDoc(sharedSeedOf(undefined), shared), null, 2)}\n`);
+  states(baseEvents, shared);
   const projectEvents = join(world.project, ".jaira", "workflows", "system");
   mkdirSync(projectEvents, { recursive: true });
   writeFileSync(join(projectEvents, "events.json"), `${JSON.stringify(writeEventsDoc({}, own, { ignored: ["push_main"] }), null, 2)}\n`);
+  states(projectEvents, [...own, { ...shared[1]!, steps: [{ kind: "notify", text: "A request opened here" }] }]);
 
   const app = await App.launch(world, { out: OUT, port: 9243 });
   const spoke: string[] = [];
