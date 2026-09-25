@@ -45,6 +45,7 @@
     "ajv": "^8.20.0",
     "markdown-it": "^15.0.0",
     "monaco-editor": "^0.56.0",
+    "node-llama-cpp": "^3.21.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "shiki": "^4.4.3",
