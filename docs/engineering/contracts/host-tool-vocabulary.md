@@ -55,6 +55,17 @@ The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered.
 | `list_tasks` | true | `registerWorkflowTools` | none | none |
 | `answer_question` | false | `registerWorkflowTools` | none | none |
 | `hold_task`, `release_task`, `stop_task` | false | `registerWorkflowTools` | none | none |
+| `list_merge_requests`, `read_merge_request`, `git_checks` | true | `registerGitTools` | none | none |
+| `open_merge_request`, `git_comment`, `git_merge`, `close_merge_request`, `git_push` | false | `registerGitTools` | none | none |
+| `wait_git_event` | named and not yet served (`unserved`) | nothing yet | none | none |
+
+The **Git tools** ([0010](../decisions/0010-git-tools-and-events.md) §1), category `git`, reach the forge of
+the WORKSPACE's git remote (the one named in `remote`, else the only one, else `origin`) through the
+connection signed in for its host. A call with no connection answers `{error: "no connection for <host> —
+sign in on Connections"}`. `git_push` and `open_merge_request` also pass `functions.review_artifacts.publish`,
+asked once per task and shared with `remote_push`/`remote_open`; the push carries the connection's token
+as an `Authorization` header in `GIT_CONFIG_*` environment variables, to the project's https url, never
+forced. `chat_control` sets do not hold them.
 
 The last eight are the **workflow tools** ([0005](../decisions/0005-connect.md) §3), and they are the tools of a
 CONVERSATION rather than of a workspace: none of them names a place, so no scope table narrows one, and no

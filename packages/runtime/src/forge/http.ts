@@ -127,6 +127,11 @@ export function expectStatus(response: ForgeResponse, ok: readonly number[], wha
   );
 }
 
+/** `limit` as the list calls take it (`MergeRequestQuery.limit`): 20 when absent, at least 1, at most 100. */
+export function limitOf(limit: number | undefined): number {
+  return limit === undefined || !Number.isFinite(limit) ? 20 : Math.max(1, Math.min(100, Math.floor(limit)));
+}
+
 export function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }

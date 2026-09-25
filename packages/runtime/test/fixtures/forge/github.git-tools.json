@@ -1,0 +1,305 @@
+{
+  "_source": "BUILT from GitHub's documented response shapes (docs.github.com/rest: pulls list with state/head/base/sort/direction and its Link pagination, checks runs for a ref, the combined commit status, branches) for the reads decision 0010's Git tools and repository watcher make. Field names and nesting follow the docs; numbers, logins, shas and times are invented. The repository is the one the recorded fixtures use (cli/cli).",
+  "fixtures": [
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/pulls",
+        "query": { "sort": "updated", "direction": "desc", "state": "open" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "link": "<https://api.github.com/repos/cli/cli/pulls?state=open&sort=updated&direction=desc&per_page=20&page=2>; rel=\"next\", <https://api.github.com/repos/cli/cli/pulls?state=open&sort=updated&direction=desc&per_page=20&page=2>; rel=\"last\""
+        },
+        "body": [
+          {
+            "number": 14470,
+            "title": "Sign in with a device code",
+            "state": "open",
+            "draft": false,
+            "merged_at": null,
+            "user": { "login": "octo" },
+            "head": { "ref": "feature/login", "sha": "aaaa000000000000000000000000000000000001" },
+            "base": { "ref": "trunk" },
+            "updated_at": "2026-09-20T10:00:00Z",
+            "html_url": "https://github.com/cli/cli/pull/14470",
+            "body": "Adds the device flow."
+          },
+          {
+            "number": 14469,
+            "title": "Draft: tidy the help text",
+            "state": "open",
+            "draft": true,
+            "merged_at": null,
+            "user": { "login": "mona" },
+            "head": { "ref": "docs/help", "sha": "aaaa000000000000000000000000000000000002" },
+            "base": { "ref": "trunk" },
+            "updated_at": "2026-09-19T10:00:00Z",
+            "html_url": "https://github.com/cli/cli/pull/14469",
+            "body": null
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/pulls",
+        "query": { "sort": "updated", "direction": "desc", "state": "open", "page": "2" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "number": 14460,
+            "title": "An older one",
+            "state": "open",
+            "draft": false,
+            "merged_at": null,
+            "user": { "login": "octo" },
+            "head": { "ref": "old/thing", "sha": "aaaa000000000000000000000000000000000003" },
+            "base": { "ref": "trunk" },
+            "updated_at": "2026-09-10T10:00:00Z",
+            "html_url": "https://github.com/cli/cli/pull/14460",
+            "body": ""
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/pulls",
+        "query": { "sort": "updated", "direction": "desc", "state": "open", "head": "cli:feature/login" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "number": 14470,
+            "title": "Sign in with a device code",
+            "state": "open",
+            "draft": false,
+            "merged_at": null,
+            "user": { "login": "octo" },
+            "head": { "ref": "feature/login", "sha": "aaaa000000000000000000000000000000000001" },
+            "base": { "ref": "trunk" },
+            "updated_at": "2026-09-20T10:00:00Z",
+            "html_url": "https://github.com/cli/cli/pull/14470",
+            "body": "Adds the device flow."
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/pulls",
+        "query": { "sort": "updated", "direction": "desc", "state": "closed" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "number": 14468,
+            "title": "Merged work",
+            "state": "closed",
+            "draft": false,
+            "merged_at": "2026-09-18T09:00:00Z",
+            "user": { "login": "mona" },
+            "head": { "ref": "feature/merged", "sha": "aaaa000000000000000000000000000000000004" },
+            "base": { "ref": "trunk" },
+            "updated_at": "2026-09-18T09:00:00Z",
+            "html_url": "https://github.com/cli/cli/pull/14468",
+            "body": "Done."
+          },
+          {
+            "number": 14467,
+            "title": "Abandoned work",
+            "state": "closed",
+            "draft": false,
+            "merged_at": null,
+            "user": { "login": "octo" },
+            "head": { "ref": "feature/abandoned", "sha": "aaaa000000000000000000000000000000000005" },
+            "base": { "ref": "trunk" },
+            "updated_at": "2026-09-17T09:00:00Z",
+            "html_url": "https://github.com/cli/cli/pull/14467",
+            "body": ""
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/pulls/14470",
+        "withoutHeader": "if-none-match"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "number": 14470,
+          "title": "Sign in with a device code",
+          "state": "open",
+          "draft": false,
+          "merged_at": null,
+          "user": { "login": "octo" },
+          "head": { "ref": "feature/login", "sha": "aaaa000000000000000000000000000000000001" },
+          "base": { "ref": "trunk" },
+          "updated_at": "2026-09-20T10:00:00Z",
+          "html_url": "https://github.com/cli/cli/pull/14470",
+          "body": "Adds the device flow."
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/pulls/404"
+      },
+      "response": {
+        "status": 404,
+        "headers": {},
+        "body": { "message": "Not Found" }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/feature%2Flogin/check-runs"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "total_count": 2,
+          "check_runs": [
+            {
+              "name": "build",
+              "status": "completed",
+              "conclusion": "success",
+              "head_sha": "aaaa000000000000000000000000000000000001",
+              "html_url": "https://github.com/cli/cli/runs/1"
+            },
+            {
+              "name": "test",
+              "status": "in_progress",
+              "conclusion": null,
+              "head_sha": "aaaa000000000000000000000000000000000001",
+              "html_url": "https://github.com/cli/cli/runs/2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/feature%2Flogin/status"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "state": "failure",
+          "sha": "aaaa000000000000000000000000000000000001",
+          "statuses": [
+            {
+              "context": "ci/legacy",
+              "state": "failure",
+              "target_url": "https://ci.example.test/builds/9"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/trunk/check-runs"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "total_count": 1,
+          "check_runs": [
+            {
+              "name": "build",
+              "status": "completed",
+              "conclusion": "timed_out",
+              "head_sha": "aaaa000000000000000000000000000000000009",
+              "details_url": "https://ci.example.test/runs/3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/trunk/status"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": { "state": "pending", "sha": "aaaa000000000000000000000000000000000009", "statuses": [] }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/check-runs"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": { "total_count": 0, "check_runs": [] }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/status"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": { "state": "pending", "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "statuses": [] }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/branches"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "link": "<https://api.github.com/repos/cli/cli/branches?per_page=100&page=2>; rel=\"next\""
+        },
+        "body": [
+          { "name": "trunk", "commit": { "sha": "aaaa000000000000000000000000000000000009" }, "protected": true },
+          { "name": "feature/login", "commit": { "sha": "aaaa000000000000000000000000000000000001" }, "protected": false }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/branches",
+        "query": { "page": "2" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [{ "name": "docs/help", "commit": { "sha": "aaaa000000000000000000000000000000000002" }, "protected": false }]
+      }
+    }
+  ]
+}

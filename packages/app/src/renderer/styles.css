@@ -15891,6 +15891,11 @@ button.set-rail-fold:hover {
 .conn-wide.cfg-row-body {
   margin-top: 0;
 }
+/* An opened forge row's first line (decision 0010 §1): what uses the connection, plain — the hint's
+   own type, and the link in it the same size as the words around it. */
+.conn-tools-line button.link {
+  font: inherit;
+}
 /* The boxes are smaller than the old grid's cards: a row stays one row tall beside them. */
 .conn-boxes .cfg-login-card,
 .conn-boxes .cfg-key-box {

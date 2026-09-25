@@ -85,6 +85,59 @@ export interface PublishRequest {
   commitsAs: string;
   /** `@ofer` — whose token opens the request, when the host would say. */
   openedBy?: string;
+  /**
+   * What is being asked, when it is not a review's push-and-open — an agent's `git_push` or
+   * `open_merge_request` (decision 0010) — with the word its yes button says. Absent: the review's.
+   */
+  question?: string;
+  confirmLabel?: string;
+}
+
+/**
+ * `functions.review_artifacts.publish`, asked at most ONCE per task — the one door everything that
+ * leaves the machine goes through: the review primitives (`remote_push`, `remote_open`) and an
+ * agent's Git tools (`git_push`, `open_merge_request`) alike, so a task asked once is asked once
+ * whichever of them publishes first.
+ *
+ * A refusal is thrown as a {@link PublishRefusal}: a sentence for a person, nothing pushed.
+ */
+export interface PublishAuthorizerOptions {
+  publish: PublishMode;
+  /** Absent ⇒ nobody can be asked, and `ask` refuses with a sentence. */
+  confirmPublish?: (request: PublishRequest) => Promise<PublishAnswer>;
+  grantProject?: () => void;
+  /** Already answered for this task, by something this authorizer did not see — a row already pushed, an earlier turn. */
+  answered?: () => boolean;
+  /** Told when a person says yes, so a later authorizer for the same task can know (`answered`). */
+  onGranted?: () => void;
+}
+
+export class PublishRefusal extends Error {}
+
+export class PublishAuthorizer {
+  private granted = false;
+
+  constructor(private readonly options: PublishAuthorizerOptions) {}
+
+  /** Refuse, or return once the task may publish. `request` is built only when somebody is asked. */
+  async authorize(request: () => Promise<PublishRequest>): Promise<void> {
+    const mode = this.options.publish;
+    if (mode === "allow") return;
+    if (mode === "deny") {
+      throw new PublishRefusal("this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed");
+    }
+    if (this.granted || this.options.answered?.() === true) return;
+    if (this.options.confirmPublish === undefined) {
+      throw new PublishRefusal(
+        "publishing needs a person's say-so and nobody can be asked here — grant it with functions.review_artifacts.publish: \"allow\", or run where the question can be answered",
+      );
+    }
+    const answer = await this.options.confirmPublish(await request());
+    if (answer === "no") throw new PublishRefusal("publishing was declined — nothing was pushed");
+    if (answer === "always") this.options.grantProject?.();
+    this.granted = true;
+    this.options.onGranted?.();
+  }
 }
 
 /** What adopting the forge's history did — what the gate's settled line says. */
@@ -128,6 +181,10 @@ export interface RemoteOptions {
   confirmPublish?: (request: PublishRequest) => Promise<PublishAnswer>;
   /** Make `always` durable: write `functions.review_artifacts.publish = "allow"` into the project's settings. */
   grantProject?: () => void;
+  /** Answered for this task elsewhere — see {@link PublishAuthorizerOptions.answered}. */
+  publishAnswered?: () => boolean;
+  /** Told when a person says yes — see {@link PublishAuthorizerOptions.onGranted}. */
+  onPublishGranted?: () => void;
 }
 
 /** A failure a person reads. Thrown inside a primitive, returned as the function's `error`. */
@@ -158,10 +215,21 @@ function remoteArg(inputs: FunctionInputs): { config: Record<string, unknown>; k
 const arg = (inputs: FunctionInputs, name: string): unknown => inputs[name] ?? record(inputs["config"])[name];
 
 export class RemotePrimitives {
-  /** Granted for the life of this run. The durable half is a row that has already been pushed. */
-  private granted = false;
+  /**
+   * The publish question, for the life of this run — shared with the run's Git tools, so a task asked
+   * once is asked once. The durable half is a row that has already been pushed.
+   */
+  readonly publishing: PublishAuthorizer;
 
-  constructor(private readonly options: RemoteOptions) {}
+  constructor(private readonly options: RemoteOptions) {
+    this.publishing = new PublishAuthorizer({
+      publish: options.publish,
+      ...(options.confirmPublish !== undefined ? { confirmPublish: options.confirmPublish } : {}),
+      ...(options.grantProject !== undefined ? { grantProject: options.grantProject } : {}),
+      answered: () => options.handles.forTask(options.taskId).some((r) => r.pushedHead !== undefined) || options.publishAnswered?.() === true,
+      ...(options.onPublishGranted !== undefined ? { onGranted: options.onPublishGranted } : {}),
+    });
+  }
 
   private git(dir: string): Git {
     return new Git({ exec: this.options.exec, repoDir: dir, ...(this.options.execEnv !== undefined ? { execEnv: this.options.execEnv } : {}) });
@@ -257,33 +325,25 @@ export class RemotePrimitives {
    * a restart, which is what makes "once per task" true of a review that takes a week.
    */
   private async authorizePublish(row: RemoteHandleRow, dir: string, provider: ForgeProvider): Promise<void> {
-    const mode = this.options.publish;
-    if (mode === "allow") return;
-    if (mode === "deny") {
-      throw new RemoteRefusal("this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed");
+    try {
+      await this.publishing.authorize(async () => {
+        const identity = await this.git(dir).identity();
+        const who = await provider.whoami().catch(() => undefined);
+        return {
+          taskId: this.options.taskId,
+          provider: row.provider,
+          to: `${row.remote} · ${row.host}/${row.project}`,
+          host: row.host,
+          project: row.project,
+          branch: row.branch,
+          target: row.target,
+          commitsAs: identity.name !== undefined ? `${identity.name} (git config)` : "whoever git config names",
+          ...(who !== undefined ? { openedBy: `@${who.login}` } : {}),
+        };
+      });
+    } catch (e) {
+      throw e instanceof PublishRefusal ? new RemoteRefusal(e.message) : e;
     }
-    if (this.granted || this.options.handles.forTask(this.options.taskId).some((r) => r.pushedHead !== undefined)) return;
-    if (this.options.confirmPublish === undefined) {
-      throw new RemoteRefusal(
-        "publishing needs a person's say-so and nobody can be asked here — grant it with functions.review_artifacts.publish: \"allow\", or run where the question can be answered",
-      );
-    }
-    const identity = await this.git(dir).identity();
-    const who = await provider.whoami().catch(() => undefined);
-    const answer = await this.options.confirmPublish({
-      taskId: this.options.taskId,
-      provider: row.provider,
-      to: `${row.remote} · ${row.host}/${row.project}`,
-      host: row.host,
-      project: row.project,
-      branch: row.branch,
-      target: row.target,
-      commitsAs: identity.name !== undefined ? `${identity.name} (git config)` : "whoever git config names",
-      ...(who !== undefined ? { openedBy: `@${who.login}` } : {}),
-    });
-    if (answer === "no") throw new RemoteRefusal("publishing was declined — nothing was pushed");
-    if (answer === "always") this.options.grantProject?.();
-    this.granted = true;
   }
 
   /** Where the pushed tree comes from: the named workspace, else the task's worktree. */

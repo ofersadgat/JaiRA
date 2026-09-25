@@ -391,8 +391,9 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       // The nine a conversation has always held, then the eight of decision 0005, served since its
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
       // The shell is HELD and not on the list: `"bash": "deny"` with no command that allows anything
-      // is a shell with nothing to run, and it is withheld — `deny` at the gate.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "web_fetch", "web_search", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      // is a shell with nothing to run, and it is withheld — `deny` at the gate. The Git tools of
+      // decision 0010 follow the web tools; `wait_git_event` is held and not listed, not served yet.
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "git_checks", "open_merge_request", "git_comment", "git_merge", "close_merge_request", "git_push", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -404,6 +405,15 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           bash: "deny",
           web_fetch: "allow",
           web_search: "allow",
+          list_merge_requests: "allow",
+          read_merge_request: "allow",
+          git_checks: "allow",
+          wait_git_event: "allow",
+          open_merge_request: "deny",
+          git_comment: "deny",
+          git_merge: "deny",
+          close_merge_request: "deny",
+          git_push: "deny",
           list_workflows: "allow",
           start_task: "deny",
           move_task: "deny",

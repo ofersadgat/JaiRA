@@ -14,13 +14,21 @@
  * A pull request is called a merge request everywhere above this file.
  */
 import {
+  ciStateOf,
   remoteHandleId,
+  type CiConclusion,
+  type CiRun,
+  type CiStatus,
   type ForgeAnchor,
+  type ForgeBranch,
   type ForgeComment,
   type ForgeIdentity,
+  type ForgeNote,
   type ForgeProvider,
   type ForgeReview,
   type ForgeThread,
+  type MergeRequestQuery,
+  type MergeRequestSummary,
   type OpenRequest,
   type Probe,
   type ProbeCursor,
@@ -33,6 +41,7 @@ import {
   asText,
   expectStatus,
   ForgeError,
+  limitOf,
   retryAfterOf,
   type ForgeHttp,
   type ForgeProviderOptions,
@@ -384,5 +393,166 @@ export class GitHubProvider implements ForgeProvider {
 
   async close(handle: RemoteHandle): Promise<void> {
     expectStatus(await this.call("PATCH", this.pull(handle), { state: "closed" }), [200], `closing ${handle.id}`);
+  }
+
+  // --- what the Git tools and the repository watcher read (decision 0010) ---------------------------
+
+  /**
+   * A list, page after page, following the `Link: rel="next"` GitHub sets — until `enough` says so,
+   * or {@link MAX_PAGES} pages, past which a list is not something anybody is reading.
+   */
+  private async listed(path: string, what: string, enough: (rows: unknown[], page: unknown[]) => boolean = () => false): Promise<unknown[]> {
+    const out: unknown[] = [];
+    let url: string | undefined = `${this.rest}${path}`;
+    for (let i = 0; i < MAX_PAGES && url !== undefined; i++) {
+      const response = expectStatus(await this.http({ method: "GET", url, headers: this.headers() }), [200], what);
+      const page = asList(response.body);
+      out.push(...page);
+      if (page.length === 0 || enough(out, page)) break;
+      url = nextLink(response.headers["link"]);
+    }
+    return out;
+  }
+
+  private summaryOf(pull: Record<string, unknown>): MergeRequestSummary {
+    const head = asRecord(pull["head"]);
+    const merged = asText(pull["merged_at"]).length > 0;
+    const description = asText(pull["body"]);
+    return {
+      number: Number(pull["number"]),
+      title: asText(pull["title"]),
+      state: merged ? "merged" : asText(pull["state"]) === "closed" ? "closed" : "open",
+      draft: pull["draft"] === true,
+      author: asText(asRecord(pull["user"])["login"]),
+      sourceBranch: asText(head["ref"]),
+      targetBranch: asText(asRecord(pull["base"])["ref"]),
+      head: asText(head["sha"]),
+      updatedAt: asText(pull["updated_at"]),
+      url: asText(pull["html_url"]),
+      ...(description.length > 0 ? { description } : {}),
+    };
+  }
+
+  /**
+   * `GET /repos/{project}/pulls`, newest update first.
+   *
+   * GitHub filters by state, head and base; it has no author filter and no "merged" state (a merged
+   * pull request is a `closed` one with a `merged_at`), and no "updated since" — so those three are
+   * applied here, and the list is sorted by update so the walk can stop at the first row older than
+   * `updatedSince`.
+   */
+  async listMergeRequests(project: string, query: MergeRequestQuery = {}): Promise<MergeRequestSummary[]> {
+    const limit = limitOf(query.limit);
+    const state = query.state ?? "open";
+    const filtering = state === "merged" || query.author !== undefined;
+    const params = new URLSearchParams({ state: state === "merged" ? "closed" : state, sort: "updated", direction: "desc", per_page: String(filtering ? 100 : limit) });
+    // `head` is `owner:branch`, as in `open`: the project's own branches.
+    if (query.sourceBranch !== undefined) params.set("head", `${project.split("/")[0]!}:${query.sourceBranch}`);
+    if (query.targetBranch !== undefined) params.set("base", query.targetBranch);
+    const since = query.updatedSince;
+    const keep = (summary: MergeRequestSummary): boolean =>
+      (state !== "merged" || summary.state === "merged") &&
+      (query.author === undefined || summary.author.toLowerCase() === query.author.toLowerCase()) &&
+      (since === undefined || summary.updatedAt > since);
+    const rows = await this.listed(`/repos/${project}/pulls?${params.toString()}`, `listing the pull requests of ${project}`, (all, page) => {
+      const last = this.summaryOf(asRecord(page[page.length - 1]));
+      return (since !== undefined && last.updatedAt <= since) || all.map((row) => this.summaryOf(asRecord(row))).filter(keep).length >= limit;
+    });
+    return rows.map((row) => this.summaryOf(asRecord(row))).filter(keep).slice(0, limit);
+  }
+
+  async mergeRequest(project: string, number: number): Promise<MergeRequestSummary> {
+    const response = await this.call("GET", this.pull({ project, number }));
+    if (response.status === 404) throw new ForgeError(`${project} has no pull request #${number} this token can see`, 404);
+    return this.summaryOf(asRecord(expectStatus(response, [200], `reading ${project}#${number}`).body));
+  }
+
+  /**
+   * Check runs AND commit statuses, because a repository reports CI through either or both — Actions
+   * and most apps through check runs, older integrations through the combined status. The combined
+   * status's own `state` is not read: with no statuses at all it says `pending`, which is a lie about
+   * a repository that has only check runs.
+   */
+  async checks(project: string, ref: string): Promise<CiStatus> {
+    const at = `/repos/${project}/commits/${encodeURIComponent(ref)}`;
+    const [runsResponse, statusResponse] = await Promise.all([this.call("GET", `${at}/check-runs?per_page=100`), this.call("GET", `${at}/status?per_page=100`)]);
+    const runsBody = asRecord(expectStatus(runsResponse, [200], `reading the check runs of ${ref}`).body);
+    const statusBody = asRecord(expectStatus(statusResponse, [200], `reading the commit status of ${ref}`).body);
+    const runs: CiRun[] = [];
+    let sha = asText(statusBody["sha"]);
+    for (const entry of asList(runsBody["check_runs"])) {
+      const run = asRecord(entry);
+      if (sha.length === 0) sha = asText(run["head_sha"]);
+      const status = asText(run["status"]);
+      const url = asText(run["html_url"]) || asText(run["details_url"]);
+      runs.push({
+        name: asText(run["name"]),
+        status: status === "completed" ? "completed" : status === "in_progress" ? "running" : "queued",
+        ...(status === "completed" ? { conclusion: githubConclusion(asText(run["conclusion"])) } : {}),
+        ...(url.length > 0 ? { url } : {}),
+      });
+    }
+    for (const entry of asList(statusBody["statuses"])) {
+      const status = asRecord(entry);
+      const state = asText(status["state"]);
+      const url = asText(status["target_url"]);
+      runs.push({
+        name: asText(status["context"]),
+        status: state === "pending" ? "running" : "completed",
+        ...(state === "pending" ? {} : { conclusion: state === "success" ? ("success" as const) : ("failure" as const) }),
+        ...(url.length > 0 ? { url } : {}),
+      });
+    }
+    return { ref, ...(sha.length > 0 ? { sha } : {}), state: ciStateOf(runs), runs };
+  }
+
+  async branches(project: string): Promise<ForgeBranch[]> {
+    const rows = await this.listed(`/repos/${project}/branches?per_page=100`, `listing the branches of ${project}`);
+    return rows.map((row) => ({ name: asText(asRecord(row)["name"]), head: asText(asRecord(asRecord(row)["commit"])["sha"]) }));
+  }
+
+  /**
+   * The read, flattened. A reply needs the thread's GraphQL id, which only the read has — REST knows
+   * a review thread only as the comment that started it — so this is one query, not a REST walk.
+   */
+  async comments(handle: RemoteHandle, options: { since?: string } = {}): Promise<ForgeNote[]> {
+    const state = await this.read(handle);
+    const notes: ForgeNote[] = [
+      ...state.threads.flatMap((thread) =>
+        thread.comments.map((c) => ({ id: c.id, threadId: thread.id, who: c.who, body: c.body, at: c.at, ...(thread.anchor !== undefined ? { anchor: thread.anchor } : {}), own: c.own })),
+      ),
+      ...state.comments.map((c) => ({ id: c.id, who: c.who, body: c.body, at: c.at, own: c.own })),
+    ];
+    return notes.filter((note) => options.since === undefined || note.at > options.since).sort((a, b) => a.at.localeCompare(b.at));
+  }
+}
+
+/** Ten pages of a hundred: past that a list is not something anybody is reading. */
+const MAX_PAGES = 10;
+
+/** The `rel="next"` url of a `Link` header, when there is one. */
+function nextLink(link: string | undefined): string | undefined {
+  for (const part of (link ?? "").split(",")) {
+    const match = /<([^>]+)>\s*;\s*rel="next"/.exec(part);
+    if (match !== null) return match[1];
+  }
+  return undefined;
+}
+
+/** A check run's conclusion, in JaiRA's five words. */
+function githubConclusion(conclusion: string): CiConclusion {
+  switch (conclusion) {
+    case "success":
+      return "success";
+    case "cancelled":
+      return "cancelled";
+    case "skipped":
+      return "skipped";
+    case "neutral":
+    case "stale":
+      return "neutral";
+    default:
+      // failure, timed_out, action_required, startup_failure — each a run that did not pass.
+      return "failure";
   }
 }

@@ -90,6 +90,9 @@ import {
   registerWebTools,
   registerWorkflowTools,
   noWorkflowHost,
+  registerGitTools,
+  workspaceGitHost,
+  PublishAuthorizer,
   type ArtifactStore,
   type ExecObserver,
   defaultExecutorTree,
@@ -551,6 +554,21 @@ function buildRunEnvironment(
     ...(projectDir !== undefined ? { projectDir } : {}),
     baseDir: jairaBasePaths().baseDir,
   });
+  // The Git tools (decision 0010 §1), over the call's workspace — else the project — and the forge its
+  // remote picks. Nobody can be asked from here, so `publish: "ask"` refuses a push with a sentence;
+  // a durable run re-registers them with its terminal (`wireRemotes`).
+  registerGitTools(
+    registry,
+    workspaceGitHost({
+      taskId: "cli",
+      workspaceRoot: projectDir ?? process.cwd(),
+      exec,
+      execEnv: config.execEnvironment,
+      integrations: config.integrations,
+      secrets,
+      publishing: new PublishAuthorizer({ publish: config.functions.review_artifacts.publish }),
+    }),
+  );
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.

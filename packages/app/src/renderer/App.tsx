@@ -2653,6 +2653,7 @@ export default function App(): JSX.Element {
                     weights={weightsChecks}
                     oauth={forgeOAuth}
                     mcp={mcp}
+                    onOpenTools={() => actions.setSection("tools")}
                   />
                 ) : null}
                 {state.section === "models" ? (

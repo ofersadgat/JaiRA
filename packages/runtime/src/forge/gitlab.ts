@@ -14,19 +14,26 @@
  */
 import {
   remoteHandleId,
+  type CiConclusion,
+  type CiRun,
+  type CiStatus,
   type ForgeAnchor,
+  type ForgeBranch,
   type ForgeComment,
   type ForgeIdentity,
+  type ForgeNote,
   type ForgeProvider,
   type ForgeReview,
   type ForgeThread,
+  type MergeRequestQuery,
+  type MergeRequestSummary,
   type OpenRequest,
   type Probe,
   type ProbeCursor,
   type RemoteHandle,
   type RemoteState,
 } from "@jaira/shared";
-import { asList, asRecord, asText, expectStatus, ForgeError, type ForgeProviderOptions, type ForgeResponse } from "./http";
+import { asList, asRecord, asText, expectStatus, ForgeError, limitOf, type ForgeProviderOptions, type ForgeResponse } from "./http";
 
 /** GitLab's access levels: Developer is the first that can push, which is what "write access" means here. */
 const DEVELOPER = 30;
@@ -320,6 +327,154 @@ export class GitLabProvider implements ForgeProvider {
   async close(handle: RemoteHandle): Promise<void> {
     expectStatus(await this.call("PUT", this.mr(handle), { state_event: "close" }), [200], `closing ${handle.id}`);
   }
+
+  // --- what the Git tools and the repository watcher read (decision 0010) ---------------------------
+
+  private summaryOf(mr: Record<string, unknown>): MergeRequestSummary {
+    const state = asText(mr["state"]);
+    const description = asText(mr["description"]);
+    return {
+      number: Number(mr["iid"]),
+      title: asText(mr["title"]),
+      // `locked` is an open request mid-merge; it is still open to anybody reading it.
+      state: state === "merged" ? "merged" : state === "closed" ? "closed" : "open",
+      draft: mr["draft"] === true || mr["work_in_progress"] === true,
+      author: asText(asRecord(mr["author"])["username"]),
+      sourceBranch: asText(mr["source_branch"]),
+      targetBranch: asText(mr["target_branch"]),
+      head: asText(mr["sha"]),
+      updatedAt: asText(mr["updated_at"]),
+      url: asText(mr["web_url"]),
+      ...(description.length > 0 ? { description } : {}),
+    };
+  }
+
+  /** `GET /projects/:id/merge_requests` — every filter is the forge's own, so one page is the answer. */
+  async listMergeRequests(project: string, query: MergeRequestQuery = {}): Promise<MergeRequestSummary[]> {
+    const limit = limitOf(query.limit);
+    const state = query.state ?? "open";
+    const params = new URLSearchParams({ state: state === "open" ? "opened" : state, order_by: "updated_at", sort: "desc", per_page: String(limit) });
+    if (query.author !== undefined) params.set("author_username", query.author);
+    if (query.sourceBranch !== undefined) params.set("source_branch", query.sourceBranch);
+    if (query.targetBranch !== undefined) params.set("target_branch", query.targetBranch);
+    if (query.updatedSince !== undefined) params.set("updated_after", query.updatedSince);
+    const response = expectStatus(
+      await this.call("GET", `/projects/${encodeURIComponent(project)}/merge_requests?${params.toString()}`),
+      [200],
+      `listing the merge requests of ${project}`,
+    );
+    // `updated_after` is INCLUSIVE (see `probe`); "since" here means strictly after.
+    return asList(response.body)
+      .map((row) => this.summaryOf(asRecord(row)))
+      .filter((summary) => query.updatedSince === undefined || summary.updatedAt > query.updatedSince)
+      .slice(0, limit);
+  }
+
+  async mergeRequest(project: string, number: number): Promise<MergeRequestSummary> {
+    const response = await this.call("GET", this.mr({ project, number }));
+    if (response.status === 404) throw new ForgeError(`${project} has no merge request !${number} this token can see`, 404);
+    return this.summaryOf(asRecord(expectStatus(response, [200], `reading ${project}!${number}`).body));
+  }
+
+  /**
+   * The newest pipeline for the ref, and its jobs. A ref that looks like a commit is asked as `sha`,
+   * anything else as `ref` (a branch or tag). The overall state is the PIPELINE's — it already
+   * weighs `allow_failure` and a manual job, which the jobs one by one cannot.
+   */
+  async checks(project: string, ref: string): Promise<CiStatus> {
+    const at = `/projects/${encodeURIComponent(project)}/pipelines`;
+    const key = /^[0-9a-f]{7,40}$/i.test(ref) ? "sha" : "ref";
+    const listed = expectStatus(
+      await this.call("GET", `${at}?${key}=${encodeURIComponent(ref)}&order_by=id&sort=desc&per_page=1`),
+      [200],
+      `reading the pipelines of ${ref}`,
+    );
+    const pipeline = asRecord(asList(listed.body)[0]);
+    if (Object.keys(pipeline).length === 0) return { ref, state: "none", runs: [] };
+    const id = Number(pipeline["id"]);
+    const jobs = await this.pages(`${at}/${id}/jobs`, `reading the jobs of pipeline ${id}`);
+    const runs: CiRun[] = jobs.map((entry) => {
+      const job = asRecord(entry);
+      const status = asText(job["status"]);
+      const finished = ["success", "failed", "canceled", "skipped", "manual"].includes(status);
+      const url = asText(job["web_url"]);
+      const stage = asText(job["stage"]);
+      return {
+        name: asText(job["name"]),
+        status: finished ? "completed" : status === "running" ? "running" : "queued",
+        ...(finished ? { conclusion: gitlabConclusion(status) } : {}),
+        ...(url.length > 0 ? { url } : {}),
+        ...(stage.length > 0 ? { stage } : {}),
+      };
+    });
+    const sha = asText(pipeline["sha"]);
+    return {
+      ref,
+      ...(sha.length > 0 ? { sha } : {}),
+      state: gitlabPipelineState(asText(pipeline["status"])),
+      runs,
+      pipeline: { id, url: asText(pipeline["web_url"]) },
+    };
+  }
+
+  async branches(project: string): Promise<ForgeBranch[]> {
+    const rows = await this.pages(`/projects/${encodeURIComponent(project)}/repository/branches`, `listing the branches of ${project}`);
+    return rows.map((row) => ({ name: asText(asRecord(row)["name"]), head: asText(asRecord(asRecord(row)["commit"])["id"]) }));
+  }
+
+  /**
+   * The discussions, flattened — the same reading `read` makes of them (a lone note with no position
+   * is a general comment; everything else is a thread), without the member lookups a settlement
+   * needs and a list of what was said does not.
+   */
+  async comments(handle: RemoteHandle, options: { since?: string } = {}): Promise<ForgeNote[]> {
+    const [me, discussions] = await Promise.all([this.whoami(), this.pages(`${this.mr(handle)}/discussions`, `reading the discussions of ${handle.id}`)]);
+    const notes: ForgeNote[] = [];
+    for (const entry of discussions) {
+      const discussion = asRecord(entry);
+      const spoken = asList(discussion["notes"]).map(asRecord).filter((note) => note["system"] !== true);
+      if (spoken.length === 0) continue;
+      const anchor = anchorOf(asRecord(spoken[0]!["position"]));
+      const threaded = !(discussion["individual_note"] === true && anchor === undefined);
+      for (const note of spoken) {
+        const who = asText(asRecord(note["author"])["username"]);
+        notes.push({
+          id: String(note["id"]),
+          ...(threaded ? { threadId: asText(discussion["id"]) } : {}),
+          who,
+          body: asText(note["body"]),
+          at: asText(note["created_at"]),
+          ...(anchor !== undefined ? { anchor } : {}),
+          own: who === me.login,
+        });
+      }
+    }
+    return notes.filter((note) => options.since === undefined || note.at > options.since).sort((a, b) => a.at.localeCompare(b.at));
+  }
+}
+
+/** A finished job's status, in JaiRA's five words. */
+function gitlabConclusion(status: string): CiConclusion {
+  switch (status) {
+    case "success":
+      return "success";
+    case "canceled":
+      return "cancelled";
+    case "skipped":
+      return "skipped";
+    case "manual":
+      // Waiting for somebody to press play: it did not run, and nothing is waiting on it to.
+      return "neutral";
+    default:
+      return "failure";
+  }
+}
+
+/** A pipeline's status as the overall state. A manual pipeline has nothing left that runs by itself. */
+function gitlabPipelineState(status: string): CiStatus["state"] {
+  if (status === "success" || status === "skipped" || status === "manual") return "success";
+  if (status === "failed" || status === "canceled") return "failure";
+  return "pending";
 }
 
 /** A diff note's position, in JaiRA's words. A line that exists after the change is an `after` anchor. */

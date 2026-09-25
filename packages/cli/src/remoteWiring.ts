@@ -30,8 +30,10 @@ import {
   RemoteWatcher,
   SecretResolver,
   forgeForHost,
+  registerGitTools,
   registerRemoteFunctions,
   reviewWithRemote,
+  workspaceGitHost,
   type Exec,
   type ForgeHttp,
   type PublishAnswer,
@@ -58,15 +60,15 @@ export interface CliRemoteOptions {
 async function askAtTerminal(terminal: NonNullable<CliRemoteOptions["terminal"]>, request: PublishRequest): Promise<PublishAnswer> {
   const forge = FORGE_LABELS[request.provider];
   terminal.output.write(
-    `\nPush this review to ${forge.name} and open a ${forge.request}?\n` +
+    `\n${request.question ?? `Push this review to ${forge.name} and open a ${forge.request}?`}\n` +
       `  to                 ${request.to}\n` +
-      `  branch             ${request.branch} → ${request.target}\n` +
+      `  branch             ${request.branch === request.target ? request.branch : `${request.branch} → ${request.target}`}\n` +
       `  commits as         ${request.commitsAs}\n` +
       (request.openedBy !== undefined ? `  request opened by  ${request.openedBy} (the ${forge.name} connection's token)\n` : ""),
   );
   const rl = createInterface({ input: terminal.input, output: terminal.output as NodeJS.WritableStream });
   try {
-    const answer = (await rl.question("  [y]es  [a]lways for this project  [N]o, review here only: ")).trim().toLowerCase();
+    const answer = (await rl.question(`  [y]es  [a]lways for this project  [N]o${request.question !== undefined ? "" : ", review here only"}: `)).trim().toLowerCase();
     return answer === "y" || answer === "yes" ? "once" : answer === "a" || answer === "always" ? "always" : "no";
   } finally {
     rl.close();
@@ -158,6 +160,23 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
     ...(terminal !== undefined ? { confirmPublish: (request: PublishRequest) => askAtTerminal(terminal, request) } : {}),
     grantProject: () => grantProject(project, options.log),
   });
+
+  // The Git tools (decision 0010 §1), again — `buildRunEnvironment` registered them over the project
+  // with nobody to ask. A durable run has the task's workspace and a terminal, and they share the
+  // primitives' publish question, so a task asked once is asked once.
+  registerGitTools(
+    registry,
+    workspaceGitHost({
+      taskId,
+      workspaceRoot: workspace.root,
+      exec,
+      execEnv: config.execEnvironment,
+      integrations: config.integrations,
+      secrets,
+      ...(options.http !== undefined ? { http: options.http } : {}),
+      publishing: primitives.publishing,
+    }),
+  );
 
   // The gate's second door, around whatever answers the gate here.
   const answering = registry.functions.get(REVIEW_ARTIFACTS);

@@ -206,6 +206,9 @@ import {
   type AgentOutcomeObserver,
   checkForges,
   registerRemoteFunctions,
+  PublishAuthorizer,
+  registerGitTools,
+  workspaceGitHost,
   reviewWithRemote,
   RemoteEventHub,
   RemoteWatcher,
@@ -3786,6 +3789,22 @@ export class AppService {
     // The workflow tools (decision 0005 §3), over this task's own conversation: a dynamic workflow's
     // root runs its conversation AS a run, so the opening turn of a session reaches them here.
     registerWorkflowTools(registry, this.workflowHostFor(open, taskId));
+    // The Git tools (decision 0010 §1), over this task's workspace and the forge its remote picks. Their
+    // publish question is the remote primitives' own (registered below), so a task asked once by
+    // either is asked once.
+    registerGitTools(
+      registry,
+      workspaceGitHost({
+        taskId,
+        workspaceRoot: workspace.root,
+        exec,
+        execEnv: config.execEnvironment,
+        integrations: config.integrations,
+        secrets: this.secretResolver(open),
+        ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+        publishing: { authorize: (request) => remotePrimitives.publishing.authorize(request) },
+      }),
+    );
 
     // The run's half of `ToolSpec.alwaysGranted` — the chat path gets it inside `planAgentTools`,
     // and a run resolves `environment.tools` through the engine instead, so it has to be folded in
@@ -3881,6 +3900,9 @@ export class AppService {
       // a question a test never answers.
       ...(scripted === undefined ? { confirmPublish: (request: PublishRequest) => this.askToPublish(open, taskId, request) } : {}),
       grantProject: () => this.grantPublish(open),
+      // A yes given in a typed turn of this task (an agent's `git_push`) counts here too, and back.
+      publishAnswered: () => open.publishGranted.has(taskId),
+      onPublishGranted: () => open.publishGranted.add(taskId),
     });
     // The gate's second door (decision 0004 §3). `review_artifacts` is interactive and was routed to
     // the hub above like every component; with a `remote` it ALSO lives on the forge, so this run's
@@ -4888,6 +4910,28 @@ export class AppService {
     // The workflow tools (decision 0005 §3), bound to THIS conversation: a typed turn is how a
     // person steers work, and it is the path both `chat/session` and `chat/control` are held on.
     registerWorkflowTools(registry, this.workflowHostFor(open, request.taskId));
+    // The Git tools (decision 0010 §1), over the workspace this turn reads. A turn has no remote
+    // primitives, so the publish question is asked here — once per task, remembered on the session
+    // and by any row the task's review already pushed.
+    registerGitTools(
+      registry,
+      workspaceGitHost({
+        taskId: request.taskId,
+        workspaceRoot,
+        exec: new NodeExec({ execEnv: config.execEnvironment }),
+        execEnv: config.execEnvironment,
+        integrations: config.integrations,
+        secrets,
+        ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+        publishing: new PublishAuthorizer({
+          publish: config.functions.review_artifacts.publish,
+          ...(fake ? {} : { confirmPublish: (asked: PublishRequest) => this.askToPublish(open, request.taskId, asked) }),
+          grantProject: () => this.grantPublish(open),
+          answered: () => open.publishGranted.has(request.taskId) || project.remotes.forTask(request.taskId).some((row) => row.pushedHead !== undefined),
+          onGranted: () => open.publishGranted.add(request.taskId),
+        }),
+      }),
+    );
     // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
     // amended 2026-09-22) — in a typed turn as in a run. The functions get a registry of their own:
     // this turn's holds tools, and a function is none.
@@ -8431,12 +8475,13 @@ export class AppService {
     const result = await open.hub.ask(
       "confirm_action",
       {
-        prompt: `Push this review to ${forge.name} and open a ${forge.request}?`,
-        confirmLabel: "Push and open",
-        cancelLabel: "Review here only",
+        // An agent's `git_push` / `open_merge_request` (decision 0010) says what IT is asking.
+        prompt: request.question ?? `Push this review to ${forge.name} and open a ${forge.request}?`,
+        confirmLabel: request.confirmLabel ?? "Push and open",
+        cancelLabel: request.question !== undefined ? "Don't publish" : "Review here only",
         details: [
           { label: "to", value: request.to },
-          { label: "branch", value: `${request.branch} → ${request.target}` },
+          { label: "branch", value: request.branch === request.target ? request.branch : `${request.branch} → ${request.target}` },
           { label: "commits as", value: request.commitsAs },
           ...(request.openedBy !== undefined ? [{ label: "request opened by", value: `${request.openedBy} (the ${forge.name} connection's token)` }] : []),
         ],

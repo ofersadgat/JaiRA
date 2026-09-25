@@ -13,9 +13,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { parseConfig, type ConfigView, type ForgeCheck, type PermissionSetsView } from "@jaira/shared";
+import { parseConfig, toolsInCategory, type ConfigView, type ForgeCheck, type PermissionSetsView } from "@jaira/shared";
 import { FunctionsSections } from "../src/renderer/functionsPane";
-import { ForgeRows } from "../src/renderer/integrationsPane";
+import { ForgeRows, ForgeToolsLine, gitToolsSentence } from "../src/renderer/integrationsPane";
 import { LocalServers, WeightsRows } from "../src/renderer/providersPane";
 
 const text = (html: string): string => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
@@ -138,6 +138,28 @@ describe("Connections → Forges", () => {
     const html = text(render(false));
     expect(html).not.toContain("Sign in with");
     expect(html).toContain("Add a token");
+  });
+
+  // Decision 0010 §1, option B: an OPENED row's first line says what uses the connection.
+  it("says nothing about the Git tools on a row at rest", () => {
+    expect(render(true)).not.toContain("Git tool");
+  });
+
+  it("opens with what uses the connection — counted from the vocabulary, plain, and a way to Tools", () => {
+    const git = toolsInCategory("git");
+    expect(git.length).toBe(9);
+    const html = renderToStaticMarkup(createElement(ForgeToolsLine, { onOpenTools: () => undefined }));
+    expect(text(html).trim()).toBe(`Used by ${git.length} Git tools — ${git[0]!.name}, ${git.at(-1)!.name} and seven more, on Tools → Git`);
+    expect(text(html).trim()).toBe("Used by 9 Git tools — list_merge_requests, git_push and seven more, on Tools → Git");
+    // A hint's own line: no card, no tint — and "Tools → Git" is the one thing in it that does anything.
+    expect(html).toMatch(/^<p class="cfg-hint conn-tools-line">/);
+    expect(html).toContain('<button type="button" class="link">Tools → Git</button>');
+    // Without a way there it is words.
+    expect(renderToStaticMarkup(createElement(ForgeToolsLine, {}))).not.toContain("<button");
+  });
+
+  it("counts whatever the git category holds", () => {
+    expect(gitToolsSentence()).toEqual({ count: toolsInCategory("git").length, lead: `Used by ${toolsInCategory("git").length} Git tools — list_merge_requests, git_push and seven more` });
   });
 });
 

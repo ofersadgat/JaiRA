@@ -23,6 +23,7 @@ import {
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
   parseIntegrations,
+  toolsInCategory,
   type ConfigLayer,
   type ConfigView,
   type ForgeCheck,
@@ -75,6 +76,45 @@ export interface IntegrationsPaneProps {
     onCancel: (connection: string) => void;
     onDisconnect: (connection: string) => void;
   };
+  /** Go to Settings → Tools, where the Git tools a connection serves are governed. Absent ⇒ the name is plain text. */
+  onOpenTools?: (() => void) | undefined;
+}
+
+const SMALL_NUMBERS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+
+/**
+ * "Used by 9 Git tools — list_merge_requests, git_push and seven more", DERIVED from the vocabulary
+ * (decision 0010 §1): the count and the two names are the `git` category's, so a tool added there
+ * is counted here without anybody remembering this line.
+ */
+export function gitToolsSentence(): { count: number; lead: string } {
+  const tools = toolsInCategory("git").map((spec) => spec.name);
+  const count = tools.length;
+  if (count === 0) return { count, lead: "Used by no Git tools" };
+  const named = count === 1 ? [tools[0]!] : [tools[0]!, tools[count - 1]!];
+  const rest = count - named.length;
+  const more = rest === 0 ? "" : ` and ${SMALL_NUMBERS[rest] ?? String(rest)} more`;
+  return { count, lead: `Used by ${count} Git tool${count === 1 ? "" : "s"} — ${named.join(rest === 0 ? " and " : ", ")}${more}` };
+}
+
+/**
+ * The first line of an OPENED forge row (decision 0010 §1, option B): what uses this connection, and
+ * where those are governed. Plain — a `cfg-hint`, no border, no tint — and only when the row is open.
+ */
+export function ForgeToolsLine({ onOpenTools }: { onOpenTools?: (() => void) | undefined }): JSX.Element {
+  const { lead } = gitToolsSentence();
+  return (
+    <p className="cfg-hint conn-tools-line">
+      {lead}, on{" "}
+      {onOpenTools !== undefined ? (
+        <button type="button" className="link" onClick={onOpenTools}>
+          Tools → Git
+        </button>
+      ) : (
+        "Tools → Git"
+      )}
+    </p>
+  );
 }
 
 /** What a connection's row should say, from its configuration and what the check observed. */
@@ -200,6 +240,7 @@ function ForgeRow({
   config,
   onSaveToken,
   oauth,
+  onOpenTools,
 }: IntegrationsPaneProps & {
   name: string;
   connection: JairaForgeConnection;
@@ -350,6 +391,7 @@ function ForgeRow({
 
       {open ? (
         <div className="cfg-row-body conn-wide">
+          <ForgeToolsLine onOpenTools={onOpenTools} />
           <SchemaForm
             schema={builtin ? BUILTIN_SCHEMA : CUSTOM_SCHEMA}
             value={connection}

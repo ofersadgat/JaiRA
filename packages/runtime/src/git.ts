@@ -126,13 +126,16 @@ export class Git implements GitRead, GitLifecycle {
       cwd: this.options.repoDir,
       execEnv: this.env,
       timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      ...extra,
+      // Merged, never replaced: a caller adding a variable (`git_push`'s credentials) must not
+      // take the no-prompt rule away with it.
       env: {
         // Never let git stop for a credential prompt: inside a headless run that
         // would hang the task instead of failing it.
         GIT_TERMINAL_PROMPT: "0",
         GCM_INTERACTIVE: "never",
+        ...extra?.env,
       },
-      ...extra,
     };
   }
 

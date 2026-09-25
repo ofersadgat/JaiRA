@@ -66,6 +66,8 @@ export interface ConnectionsPageProps {
   oauth?: IntegrationsPaneProps["oauth"];
   /** The MCP servers' state and tools, and what other tools on this machine run. Absent ⇒ the section is not drawn. */
   mcp?: McpData | undefined;
+  /** Go to Settings → Tools — an opened forge row's "on Tools → Git". */
+  onOpenTools?: (() => void) | undefined;
 }
 
 export function ConnectionsPage(props: ConnectionsPageProps): JSX.Element {
@@ -144,6 +146,7 @@ export function ConnectionsPage(props: ConnectionsPageProps): JSX.Element {
           onSave={props.onSave}
           onSaveToken={props.onSaveToken}
           {...(props.oauth !== undefined ? { oauth: props.oauth } : {})}
+          onOpenTools={props.onOpenTools}
         />
       </SettingsSection>
     </div>

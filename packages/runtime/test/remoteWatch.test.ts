@@ -94,6 +94,21 @@ class ScriptedForge implements ForgeProvider {
   async reply(): Promise<void> {}
   async merge(): Promise<void> {}
   async close(): Promise<void> {}
+  async listMergeRequests(): Promise<never> {
+    throw new Error("not scripted");
+  }
+  async mergeRequest(): Promise<never> {
+    throw new Error("not scripted");
+  }
+  async checks(): Promise<never> {
+    throw new Error("not scripted");
+  }
+  async branches(): Promise<never> {
+    throw new Error("not scripted");
+  }
+  async comments(): Promise<never> {
+    throw new Error("not scripted");
+  }
 }
 
 let clock: ManualClock;

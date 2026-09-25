@@ -427,6 +427,104 @@ export interface RemoteState {
   comments: ForgeComment[];
 }
 
+// --- what the Git tools and the repository watcher read (decision 0010) ------------------------------
+
+/**
+ * One merge request as a LIST shows it — any request on the project, not only one JaiRA opened.
+ *
+ * The fields a person scans a list by, and the ones a later call needs to reach the request again
+ * (`number`) or to tell that it moved (`head`, `updatedAt`). Threads and reviews are a `read()`.
+ */
+export interface MergeRequestSummary {
+  number: number;
+  title: string;
+  state: "open" | "merged" | "closed";
+  draft: boolean;
+  /** Who opened it — the forge's login. */
+  author: string;
+  sourceBranch: string;
+  targetBranch: string;
+  /** The source branch's head as the forge last reported it. */
+  head: string;
+  updatedAt: string;
+  url: string;
+  /** The request's description, when the forge sent one. */
+  description?: string;
+}
+
+/** What `listMergeRequests` narrows by. Every field is optional; nothing means the open ones. */
+export interface MergeRequestQuery {
+  /** `open` when absent. */
+  state?: "open" | "closed" | "merged" | "all";
+  /** The login of who opened it. */
+  author?: string;
+  sourceBranch?: string;
+  targetBranch?: string;
+  /** An ISO time: only requests updated after it. */
+  updatedSince?: string;
+  /** At most this many, newest update first. 20 when absent; at most 100. */
+  limit?: number;
+}
+
+/** How far a CI run has got. */
+export type CiRunStatus = "queued" | "running" | "completed";
+
+/** How a finished run ended — each forge's words, folded into these. */
+export type CiConclusion = "success" | "failure" | "cancelled" | "skipped" | "neutral";
+
+/** One CI run of a commit: a GitHub check run or commit status, a GitLab job. */
+export interface CiRun {
+  name: string;
+  status: CiRunStatus;
+  /** Present once `completed`. */
+  conclusion?: CiConclusion;
+  url?: string;
+  /** GitLab's stage; absent on GitHub. */
+  stage?: string;
+}
+
+/**
+ * The CI state of a branch or commit, as one answer: every run, and what they come to.
+ *
+ * `state` is `none` when nothing ran for the ref at all, `pending` while anything has not finished,
+ * `failure` when anything finished badly (failed, cancelled, timed out), and `success` otherwise.
+ */
+export interface CiStatus {
+  /** What was asked about: a branch name or a commit. */
+  ref: string;
+  /** The commit the runs belong to, when the forge said. */
+  sha?: string;
+  state: "none" | "pending" | "success" | "failure";
+  runs: CiRun[];
+  /** GitLab: the pipeline read. */
+  pipeline?: { id: number; url: string };
+}
+
+/** One branch on the forge. */
+export interface ForgeBranch {
+  name: string;
+  head: string;
+}
+
+/**
+ * One comment on a merge request, FLAT — what arrived, where it sits, and who wrote it.
+ *
+ * The flat shape of what `read()` returns threaded: a watcher asking "what was said since" wants a
+ * list, and a reply wants the thread's id, which is here.
+ */
+export interface ForgeNote {
+  id: string;
+  /** The thread it is in — what `reply` takes. Absent for a general comment the forge does not thread. */
+  threadId?: string;
+  who: string;
+  body: string;
+  at: string;
+  /** Where in the diff, for an inline comment. */
+  anchor?: ForgeAnchor;
+  /** Written by the token's own account. */
+  own: boolean;
+}
+
 /**
  * What a probe remembers between ticks — persisted on the `remote_handles` row, so a weekend with
  * the app closed costs one probe and loses nothing.
@@ -466,6 +564,43 @@ export interface ForgeProvider {
   reply(handle: RemoteHandle, threadId: string, body: string, resolve?: boolean): Promise<void>;
   merge(handle: RemoteHandle): Promise<void>;
   close(handle: RemoteHandle): Promise<void>;
+
+  // What the Git tools and the repository watcher read (decision 0010). Every request on the
+  // project, not only the ones JaiRA opened — so these take the project, where the calls above take
+  // a handle JaiRA already holds.
+
+  /** The project's merge requests, newest update first. */
+  listMergeRequests(project: string, query?: MergeRequestQuery): Promise<MergeRequestSummary[]>;
+  /** One merge request by its number — what a handle is made from when only the number is known. */
+  mergeRequest(project: string, number: number): Promise<MergeRequestSummary>;
+  /** The CI state of a branch or a commit. */
+  checks(project: string, ref: string): Promise<CiStatus>;
+  /** Every branch and its head. */
+  branches(project: string): Promise<ForgeBranch[]>;
+  /** The comments on one merge request, flat and in order — only those written after `since`, when given. */
+  comments(handle: RemoteHandle, options?: { since?: string }): Promise<ForgeNote[]>;
+}
+
+/** A request's handle, from its summary on the project — what the calls that take a handle need. */
+export function handleOfSummary(provider: ForgeProviderKind, host: string, project: string, summary: MergeRequestSummary): RemoteHandle {
+  return {
+    id: remoteHandleId(provider, host, project, summary.number),
+    provider,
+    host,
+    project,
+    branch: summary.sourceBranch,
+    target: summary.targetBranch,
+    number: summary.number,
+    url: summary.url,
+    head: summary.head,
+  };
+}
+
+/** What a finished run's conclusions come to — {@link CiStatus.state}. */
+export function ciStateOf(runs: readonly CiRun[]): CiStatus["state"] {
+  if (runs.length === 0) return "none";
+  if (runs.some((run) => run.status !== "completed")) return "pending";
+  return runs.some((run) => run.conclusion === "failure" || run.conclusion === "cancelled") ? "failure" : "success";
 }
 
 /** What a connection's check found — a {@link ProbeResult}'s sibling, with who the token is. */

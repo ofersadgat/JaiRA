@@ -34,7 +34,7 @@
  */
 
 /** The groups a permission menu shows. Hard-coded: these are a taxonomy, not data. */
-export type ToolCategoryId = "files" | "execution" | "web" | "tasks" | "mcp";
+export type ToolCategoryId = "files" | "execution" | "web" | "git" | "tasks" | "mcp";
 
 export interface ToolCategory {
   id: ToolCategoryId;
@@ -47,6 +47,8 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "files", label: "File permissions", hint: "reading, searching and changing files in the workspace" },
   { id: "execution", label: "Execution", hint: "running commands on this machine" },
   { id: "web", label: "Web", hint: "reaching the network" },
+  // Decision 0010 §1: the repository's forge, reached through the connection signed in on Connections.
+  { id: "git", label: "Git", hint: "the repository's forge, through the connection signed in on Connections" },
   // The workflow tools of decision 0005 §3 — all of what `chat_control/*` holds, and part of `chat/*`.
   { id: "tasks", label: "Tasks & workflows", hint: "starting, moving and answering tasks" },
   { id: "mcp", label: "MCP", hint: "tools served by connected MCP servers" },
@@ -103,8 +105,8 @@ export interface ToolSpec {
    * Its MODE still travels — a mode for a name nothing calls is inert — so the day the tool is
    * implemented, deleting this mark is the whole change.
    *
-   * The workflow tools of decision 0005 §3 carried it until step 6 built them. Nothing carries it
-   * today; the mechanism stays for the next tool that is named before it is served.
+   * The workflow tools of decision 0005 §3 carried it until step 6 built them. `wait_git_event`
+   * (decision 0010 §1) carries it now, until the event hub that serves it is built.
    */
   unserved?: true;
 }
@@ -191,6 +193,25 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "web",
     hint: "search the web",
   },
+  // The Git tools (decision 0010 §1): the forge of the workspace's own git remote, through the
+  // connection signed in for its host (`runtime/gitTools.ts`). A `git_` prefix only where the bare name
+  // is too generic. The readers first, then what leaves the machine, in the decision's order.
+  { name: "list_merge_requests", label: "list_merge_requests", category: "git", hint: "this repository's merge requests, by state, author, branch" },
+  { name: "read_merge_request", label: "read_merge_request", category: "git", hint: "one merge request: description, state, threads, approvals, checks" },
+  { name: "git_checks", label: "git_checks", category: "git", hint: "the CI pipeline or check runs of a branch or commit" },
+  {
+    name: "wait_git_event",
+    label: "wait_git_event",
+    category: "git",
+    hint: "wait for an event on the remote (a comment, checks finishing, a push), or its timeout",
+    // Served by the event hub, which a later step of decision 0010 builds (§2–3).
+    unserved: true,
+  },
+  { name: "open_merge_request", label: "open_merge_request", category: "git", hint: "push the branch and open (or update) its merge request" },
+  { name: "git_comment", label: "git_comment", category: "git", hint: "comment on a merge request, reply in a thread, resolve it" },
+  { name: "git_merge", label: "git_merge", category: "git", hint: "merge a merge request" },
+  { name: "close_merge_request", label: "close_merge_request", category: "git", hint: "close a merge request without merging" },
+  { name: "git_push", label: "git_push", category: "git", hint: "push the current branch with the connection's credentials" },
   // The workflow tools (decision 0005 §3): the host's own operations, offered to a conversation.
   // `chat_control/*` holds nothing else; `chat/*` holds them beside the project's tools. Served since
   // step 6 (`runtime/workflowTools.ts`, over the host the app lends) — the `unserved` mark they

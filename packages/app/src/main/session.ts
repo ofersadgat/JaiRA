@@ -181,6 +181,13 @@ export class ProjectSession {
    */
   readonly chatTurns = new Map<string, Set<AbortController>>();
   /**
+   * The tasks a person has let publish while this session is open — `functions.review_artifacts.publish`
+   * answered yes (decision 0010 §1). A run and every typed turn of a task build their own publish
+   * question, and this is what makes "asked once per task" true across them. The durable half is a
+   * `remote_handles` row already pushed.
+   */
+  readonly publishGranted = new Set<string>();
+  /**
    * The scripted rules a run was started with, by task — for a model call the run's OWN executor
    * cannot make. A gate's follow-up questions are asked by the host while the engine waits on the
    * gate, so the call is built here; under a scripted run it has to answer from the same script,

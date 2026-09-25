@@ -1,0 +1,281 @@
+{
+  "_source": "BUILT from GitLab's documented response shapes (docs.gitlab.com/api: merge requests list with state/author_username/source_branch/updated_after/order_by, create merge request, pipelines list by ref and sha, pipeline jobs, repository branches with x-next-page) for the reads and writes decision 0010's Git tools and repository watcher make. Field names and nesting follow the docs; iids, usernames, shas and times are invented. The project is the one the recorded fixtures use (gitlab-org/gitlab-runner).",
+  "fixtures": [
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests",
+        "query": { "order_by": "updated_at", "sort": "desc", "state": "opened" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "iid": 7440,
+            "title": "Sign in with a device code",
+            "state": "opened",
+            "draft": false,
+            "author": { "id": 501, "username": "mara" },
+            "source_branch": "feature/login",
+            "target_branch": "main",
+            "sha": "cccc000000000000000000000000000000000001",
+            "updated_at": "2026-09-20T10:00:00.000Z",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7440",
+            "description": "Adds the device flow."
+          },
+          {
+            "iid": 7439,
+            "title": "Draft: tidy the help text",
+            "state": "opened",
+            "draft": true,
+            "author": { "id": 502, "username": "dev" },
+            "source_branch": "docs/help",
+            "target_branch": "main",
+            "sha": "cccc000000000000000000000000000000000002",
+            "updated_at": "2026-09-19T10:00:00.000Z",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7439",
+            "description": ""
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests",
+        "query": { "order_by": "updated_at", "sort": "desc", "state": "opened", "updated_after": "2026-09-19T10:00:00.000Z" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "iid": 7440,
+            "title": "Sign in with a device code",
+            "state": "opened",
+            "draft": false,
+            "author": { "id": 501, "username": "mara" },
+            "source_branch": "feature/login",
+            "target_branch": "main",
+            "sha": "cccc000000000000000000000000000000000001",
+            "updated_at": "2026-09-20T10:00:00.000Z",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7440",
+            "description": "Adds the device flow."
+          },
+          {
+            "iid": 7439,
+            "title": "Draft: tidy the help text",
+            "state": "opened",
+            "draft": true,
+            "author": { "id": 502, "username": "dev" },
+            "source_branch": "docs/help",
+            "target_branch": "main",
+            "sha": "cccc000000000000000000000000000000000002",
+            "updated_at": "2026-09-19T10:00:00.000Z",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7439",
+            "description": ""
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests",
+        "query": { "order_by": "updated_at", "sort": "desc", "state": "merged", "author_username": "mara" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "iid": 7438,
+            "title": "Merged work",
+            "state": "merged",
+            "work_in_progress": false,
+            "author": { "id": 501, "username": "mara" },
+            "source_branch": "feature/merged",
+            "target_branch": "main",
+            "sha": "cccc000000000000000000000000000000000003",
+            "updated_at": "2026-09-18T09:00:00.000Z",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7438",
+            "description": "Done."
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests",
+        "queryLike": { "source_branch": "^task/" }
+      },
+      "response": { "status": 200, "headers": {}, "body": [] }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests",
+        "bodyLike": { "source_branch": "^task/" }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": 990002,
+          "iid": 7441,
+          "title": "Revise the second line",
+          "state": "opened",
+          "draft": false,
+          "author": { "id": 900, "username": "jaira-bot" },
+          "source_branch": "task/t-1",
+          "target_branch": "main",
+          "sha": "2222222222222222222222222222222222222222",
+          "updated_at": "2026-09-25T10:00:00.000Z",
+          "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7441"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/404"
+      },
+      "response": { "status": 404, "headers": {}, "body": { "message": "404 Not found" } }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines",
+        "query": { "ref": "feature/login", "order_by": "id", "sort": "desc" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "id": 9001,
+            "iid": 81,
+            "sha": "cccc000000000000000000000000000000000001",
+            "ref": "feature/login",
+            "status": "running",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/pipelines/9001"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines/9001/jobs"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          { "id": 1, "name": "build", "stage": "build", "status": "success", "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/1" },
+          { "id": 2, "name": "test", "stage": "test", "status": "running", "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/2" },
+          { "id": 3, "name": "deploy", "stage": "deploy", "status": "manual", "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/3" }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines",
+        "query": { "ref": "main", "order_by": "id", "sort": "desc" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "id": 9002,
+            "sha": "cccc000000000000000000000000000000000009",
+            "ref": "main",
+            "status": "failed",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/pipelines/9002"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines/9002/jobs"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          { "id": 4, "name": "build", "stage": "build", "status": "success", "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/4" },
+          { "id": 5, "name": "test", "stage": "test", "status": "failed", "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/5" }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines",
+        "query": { "sha": "dddddddddddddddddddddddddddddddddddddddd" }
+      },
+      "response": { "status": 200, "headers": {}, "body": [] }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines",
+        "query": { "sha": "8eee49006c0d827d27228bac5ec8078d86e3354e" }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "id": 9002,
+            "sha": "8eee49006c0d827d27228bac5ec8078d86e3354e",
+            "ref": "renovate/gitlab.com-gitlab-org-fleeting-fleeting-artifact-digest",
+            "status": "failed",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/pipelines/9002"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines",
+        "queryLike": { "ref": "^task/" }
+      },
+      "response": { "status": 200, "headers": {}, "body": [] }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/repository/branches",
+        "query": { "page": "1" }
+      },
+      "response": {
+        "status": 200,
+        "headers": { "x-next-page": "2" },
+        "body": [
+          { "name": "main", "commit": { "id": "cccc000000000000000000000000000000000009" } },
+          { "name": "feature/login", "commit": { "id": "cccc000000000000000000000000000000000001" } }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/repository/branches",
+        "query": { "page": "2" }
+      },
+      "response": {
+        "status": 200,
+        "headers": { "x-next-page": "" },
+        "body": [{ "name": "release/1.0", "commit": { "id": "cccc000000000000000000000000000000000010" } }]
+      }
+    }
+  ]
+}

@@ -65,6 +65,22 @@ export class NoForgeConnection extends Error {
  * no request — so a caller that needs a provider gets one that can do everything, or a reason.
  */
 export function forgeForHost(integrations: JairaIntegrationsConfig, host: string, options: ForgeOptions): ForgeProvider {
+  return forgeAccess(integrations, host, options).provider;
+}
+
+/**
+ * What {@link forgeForHost} finds, with the token's VALUE beside the provider — for the one caller
+ * that hands the token to something other than the provider: `git_push`, which gives it to git
+ * (decision 0010 §1). Held in memory for the call and never written anywhere.
+ */
+export interface ForgeAccess {
+  name: string;
+  connection: JairaForgeConnection;
+  provider: ForgeProvider;
+  token: string;
+}
+
+export function forgeAccess(integrations: JairaIntegrationsConfig, host: string, options: ForgeOptions): ForgeAccess {
   const found = connectionForHost(integrations, host);
   if (found === undefined) {
     throw new NoForgeConnection(`no connection is set up for ${host} — add one under Settings → Connections → Forges`);
@@ -77,7 +93,7 @@ export function forgeForHost(integrations: JairaIntegrationsConfig, host: string
   if (hit === undefined) {
     throw new NoForgeConnection(`the ${name} connection's token ${connection.credential} is not stored anywhere JaiRA looks`);
   }
-  return forgeProvider(connection, hit.value, options);
+  return { name, connection, provider: forgeProvider(connection, hit.value, options), token: hit.value };
 }
 
 /** What a token needs, said once per provider — the `fix` line of a refused one. */
