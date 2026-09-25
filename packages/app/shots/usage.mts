@@ -66,6 +66,34 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 1500));
     await app.shot("chat-composer");
 
+    // A popover is drawn over everything — the top bar too — even in a window too short for it: its
+    // corners and middle are the popover's own pixels, and it stays inside the window.
+    const onTop = `(() => {
+      const f = document.querySelector("body > .um-float");
+      if (!f) return "no popover in the body";
+      const r = f.getBoundingClientRect();
+      const points = [[r.left + 12, r.top + 6], [r.right - 12, r.top + 6], [r.left + r.width / 2, r.top + r.height / 2], [r.left + 12, r.bottom - 6], [r.right - 12, r.bottom - 6]];
+      const covered = points.filter(([x, y]) => !f.contains(document.elementFromPoint(x, y))).length;
+      return JSON.stringify({ top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), window: [innerWidth, innerHeight], covered });
+    })()`;
+    await app.resize(1280, 560);
+    await new Promise((r) => setTimeout(r, 500));
+    await app.evaluate(`document.querySelector(".um-num")?.click()`);
+    await app.until(`!!document.querySelector("body > .um-float .um-acctpop")`, "the account popover to open");
+    await new Promise((r) => setTimeout(r, 300));
+    console.log(`account popover: ${await app.evaluate<string>(onTop)}`);
+    await app.shot("chat-account-popover");
+    await app.press("Escape", 27);
+    // The context ring is drawn only once a conversation is open.
+    if (await app.evaluate<boolean>(`!!document.querySelector(".um-meter")`)) {
+      await app.evaluate(`document.querySelector(".um-meter").click()`);
+      await app.until(`!!document.querySelector("body > .um-float .um-pop-context")`, "the context popover to open");
+      await new Promise((r) => setTimeout(r, 300));
+      console.log(`context popover: ${await app.evaluate<string>(onTop)}`);
+      await app.shot("chat-context-popover");
+      await app.press("Escape", 27);
+    }
+
     await app.clickText("Settings");
     const page = (label: string): string =>
       `(() => { const li = [...document.querySelectorAll(".sections > li")].find((e) => e.textContent.trim() === ${JSON.stringify(label)}); if (li) li.click(); return !!li; })()`;
@@ -74,6 +102,12 @@ async function main(): Promise<void> {
     await app.until(`document.querySelector(".set-title")?.textContent === "Connections"`, "Connections to draw");
     await new Promise((r) => setTimeout(r, 1200));
     await app.shot("connections", ".set-page");
+    await app.evaluate(`document.querySelector(".um-c-ringbtn")?.click()`);
+    await app.until(`!!document.querySelector("body > .um-float .um-acctpop")`, "a sign-in card's popover to open");
+    await new Promise((r) => setTimeout(r, 300));
+    console.log(`sign-in card popover: ${await app.evaluate<string>(onTop)}`);
+    await app.shot("connections-popover");
+    await app.press("Escape", 27);
     await app.evaluate(page("Runs"));
     await app.until(`document.querySelector(".set-title")?.textContent === "Runs"`, "Runs to draw");
     await new Promise((r) => setTimeout(r, 900));

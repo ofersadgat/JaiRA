@@ -7830,6 +7830,8 @@ export class AppService {
     // A workflow whose executor just came back to life should stop showing an error, so this is a
     // reason to re-lint the authoring surface.
     for (const result of results) this.lastProbes.set(result.name, result);
+    // A login that was not there before — signed in here or in a terminal — has its usage read now.
+    this.limits.noticeAccounts();
     this.publish({ type: "store:invalidate", scope: "workflows" });
     return results;
   }
@@ -7856,7 +7858,11 @@ export class AppService {
         execEnv: config.execEnvironment,
         abortSignal: controller.signal,
       });
-      if (outcome.ok) this.signInRefusals.delete(name);
+      if (outcome.ok) {
+        this.signInRefusals.delete(name);
+        // Read even when it is the same login as before: the check below reads it.
+        this.limits.signedIn(accountOfRoute(name));
+      }
       return outcome;
     } finally {
       this.signIns.delete(name);

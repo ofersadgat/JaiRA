@@ -16167,7 +16167,11 @@ button.link.cfg-login-add-sub {
 .um-num:hover, .um-num.on { background: var(--fill-ghost-hover); }
 .um-num.um-t-accent { color: var(--dim); }
 
-/* The popovers: the chip's own card, laid out in sections. */
+/* The popovers: the chip's own card, laid out in sections. Each is drawn in `.um-float`, straight in
+   the body and fixed (usageMeters `Floating`), so nothing it sits in clips it or paints over it — the
+   top bar included. The card inside keeps its look and scrolls when the window is short. */
+.um-float { position: fixed; z-index: 90; display: flex; flex-direction: column; }
+.um-float > .cx-pop { position: relative; inset: auto; max-height: inherit; overflow-y: auto; }
 .um-pop { padding: 0; min-width: 0; }
 .um-pop-context { left: auto; right: -40px; width: 380px; max-width: min(380px, 86vw); }
 .um-acctpop { width: 370px; max-width: min(370px, 86vw); }

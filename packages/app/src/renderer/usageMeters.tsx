@@ -17,7 +17,8 @@
  * Render functions (SHELL's standing rule): everything arrives as props or from the limits store, so
  * each state is one static render. Numbers are written for a person by `@jaira/shared`'s formatters.
  */
-import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   contextFill,
   creditPercent,
@@ -46,14 +47,25 @@ import { accountFor, actOnWaiting, refreshAccount, useLimits, useLimitsWatch, us
 
 // --- the pieces everything here is drawn from -----------------------------------------------
 
+interface Pop {
+  open: boolean;
+  setOpen: (v: boolean | ((was: boolean) => boolean)) => void;
+  /** The button's wrapper — what the popover is placed against. */
+  ref: React.RefObject<HTMLDivElement | null>;
+  /** The popover itself, which is not inside `ref` (see {@link Floating}). */
+  pop: React.RefObject<HTMLDivElement | null>;
+}
+
 /** Open on a click, closed by a click elsewhere or Escape — the composer chips' own behaviour. */
-function usePop(startOpen = false): { open: boolean; setOpen: (v: boolean | ((was: boolean) => boolean)) => void; ref: React.RefObject<HTMLDivElement | null> } {
+function usePop(startOpen = false): Pop {
   const [open, setOpen] = useState(startOpen);
   const ref = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent): void => {
-      if (ref.current !== null && !ref.current.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (ref.current !== null && !ref.current.contains(target) && !(pop.current?.contains(target) ?? false)) setOpen(false);
     };
     const esc = (event: KeyboardEvent): void => {
       if (event.key === "Escape") setOpen(false);
@@ -65,7 +77,63 @@ function usePop(startOpen = false): { open: boolean; setOpen: (v: boolean | ((wa
       document.removeEventListener("keydown", esc);
     };
   }, [open]);
-  return { open, setOpen, ref };
+  return { open, setOpen, ref, pop };
+}
+
+/** Room kept between a popover and its button, and between a popover and the window's edge. */
+const POP_GAP = 8;
+const POP_EDGE = 4;
+
+/**
+ * A popover drawn over EVERYTHING — the window's top bar, a side panel, whatever holds its button.
+ *
+ * In `document.body` and fixed, for the context menu's reason (menu.tsx): a popover inside its
+ * button's wrapper is clipped by every `overflow` around it and painted under every stacking context
+ * above it, and the composer's came up UNDER the top bar. It opens above its button — its left edges
+ * or its right edges lined up, as `align` says — or below when there is more room there, is kept
+ * inside the window, and follows the button when anything scrolls or the window resizes. With no
+ * document (a static render) it stays where it is written.
+ */
+function Floating({ at, align, children }: { at: Pop; align: "left" | "right"; children: ReactNode }): JSX.Element {
+  const [placed, setPlaced] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
+  const [, setMoved] = useState(0);
+  const { ref: anchor, pop } = at;
+  useLayoutEffect(() => {
+    const a = anchor.current?.getBoundingClientRect();
+    const box = pop.current?.getBoundingClientRect();
+    if (a === undefined || box === undefined) return;
+    const above = a.top - POP_GAP - POP_EDGE;
+    const below = window.innerHeight - a.bottom - POP_GAP - POP_EDGE;
+    const up = box.height <= above || above >= below;
+    const maxHeight = Math.max(120, up ? above : below);
+    const height = Math.min(box.height, maxHeight);
+    const top = up ? a.top - POP_GAP - height : a.bottom + POP_GAP;
+    const want = align === "left" ? a.left : a.right - box.width;
+    const left = Math.max(POP_EDGE, Math.min(want, window.innerWidth - box.width - POP_EDGE));
+    // Every render, converging: the same place again is the same object, so it settles at once.
+    setPlaced((was) => (was !== null && Math.abs(was.left - left) < 0.5 && Math.abs(was.top - top) < 0.5 && was.maxHeight === maxHeight ? was : { left, top, maxHeight }));
+  });
+  useEffect(() => {
+    const move = (): void => setMoved((n) => n + 1);
+    window.addEventListener("scroll", move, true);
+    window.addEventListener("resize", move);
+    return () => {
+      window.removeEventListener("scroll", move, true);
+      window.removeEventListener("resize", move);
+    };
+  }, []);
+  if (typeof document === "undefined") return <>{children}</>;
+  return createPortal(
+    <div
+      className="um-float"
+      ref={pop}
+      // Measured before it is seen: the first frame is laid out hidden, then placed.
+      style={placed === null ? { visibility: "hidden", left: 0, top: 0 } : { left: placed.left, top: placed.top, maxHeight: placed.maxHeight }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
 }
 
 /** A ring `pct` of the way round, in a tone; an empty dashed ring when there is no figure. */
@@ -123,7 +191,8 @@ export function ContextMeter({
   onCompact?: ((focus?: string) => void) | undefined;
   startOpen?: boolean | undefined;
 }): JSX.Element {
-  const { open, setOpen, ref } = usePop(startOpen === true);
+  const pop = usePop(startOpen === true);
+  const { open, setOpen, ref } = pop;
   const fill = context ? contextFill(context, route) : null;
   const tone = context ? toneOfContext(fill) : "none";
   const text = context === null || context === undefined ? null : fill === null ? formatTokens(context.used, true) : fill >= 80 ? `${round(fill)}%` : null;
@@ -140,12 +209,14 @@ export function ContextMeter({
         {text !== null ? <span className={`um-meter-text um-t-${tone}`}>{text}</span> : null}
       </button>
       {open ? (
-        <div className="cx-pop um-pop um-pop-context">
-          <div className="cx-pop-head">
-            <span className="cx-pop-title">Context</span>
+        <Floating at={pop} align="right">
+          <div className="cx-pop um-pop um-pop-context">
+            <div className="cx-pop-head">
+              <span className="cx-pop-title">Context</span>
+            </div>
+            <ContextDetail context={context} route={route} busy={busy} onCompact={onCompact} />
           </div>
-          <ContextDetail context={context} route={route} busy={busy} onCompact={onCompact} />
-        </div>
+        </Floating>
       ) : null}
     </div>
   );
@@ -508,7 +579,8 @@ export function AllowanceNumber({
   const mode = useUsageFigures();
   const now = useNow();
   const account = accountFor(limits, route);
-  const { open, setOpen, ref } = usePop(startOpen === true);
+  const pop = usePop(startOpen === true);
+  const { open, setOpen, ref } = pop;
   if (account === undefined || mode === "off") return null;
   const figure = figureOf(account, { model, cost, now });
   return (
@@ -516,7 +588,11 @@ export function AllowanceNumber({
       <button type="button" className={`um-num ${figureClass(figure, mode)}${open ? " on" : ""}`} aria-expanded={open} title={figure.title} onClick={() => setOpen((v) => !v)}>
         <FigureFace figure={figure} mode={mode} />
       </button>
-      {open ? <AccountPopover account={account} model={model} cost={cost} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} /> : null}
+      {open ? (
+        <Floating at={pop} align="left">
+          <AccountPopover account={account} model={model} cost={cost} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} />
+        </Floating>
+      ) : null}
     </div>
   );
 }
@@ -890,7 +966,8 @@ export function AccountAllowance({ account, plan, startOpen }: { account: LimitA
   const limits = useLimits();
   const mode = useUsageFigures();
   const now = useNow();
-  const { open, setOpen, ref } = usePop(startOpen === true);
+  const pop = usePop(startOpen === true);
+  const { open, setOpen, ref } = pop;
   const week = account?.reading !== null && account?.reading !== undefined ? weeklyWindow(account.reading) : undefined;
   const spent = week !== undefined && windowStatus(week) === "exhausted";
   const pct = week === undefined ? null : spent ? 100 : week.usedPercent;
@@ -905,7 +982,11 @@ export function AccountAllowance({ account, plan, startOpen }: { account: LimitA
             <button type="button" className={`um-c-ringbtn um-t-${tone}${open ? " on" : ""}`} aria-expanded={open} title={week === undefined ? "No weekly reading yet — click for every window" : `Weekly window, ${pct === null ? "no figure" : `${round(pct)}% used`} — click for every window`} onClick={() => setOpen((v) => !v)}>
               <FigureFace figure={figure} mode={mode} />
             </button>
-            {open ? <AccountPopover account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" /> : null}
+            {open ? (
+              <Floating at={pop} align="right">
+                <AccountPopover account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" />
+              </Floating>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -929,7 +1010,8 @@ export function KeyUsage({ route }: { route: string }): JSX.Element | null {
   const limits = useLimits();
   const mode = useUsageFigures();
   const now = useNow();
-  const { open, setOpen, ref } = usePop(false);
+  const pop = usePop(false);
+  const { open, setOpen, ref } = pop;
   const account = accountFor(limits, route);
   if (account === undefined || account.kind === "subscription" || mode === "off") return null;
   const credit = account.kind === "credit" && account.credit !== undefined;
@@ -943,7 +1025,11 @@ export function KeyUsage({ route }: { route: string }): JSX.Element | null {
           <button type="button" className={`um-c-ringbtn ${figureClass(figure, credit ? mode : "number")}${open ? " on" : ""}`} aria-expanded={open} title={`${figure.title} — click for more`} onClick={() => setOpen((v) => !v)}>
             <FigureFace figure={figure} mode={credit ? mode : "number"} />
           </button>
-          {open ? <AccountPopover account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" /> : null}
+          {open ? (
+            <Floating at={pop} align="right">
+              <AccountPopover account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" />
+            </Floating>
+          ) : null}
         </div>
         {credit ? null : <span className="um-k-when">in the last 7 days</span>}
       </div>

@@ -60,6 +60,43 @@ describe("the board in the app", () => {
     second.close();
   });
 
+  it("reads an account at once when its login is new, and not again for one it has seen, across a restart too", async () => {
+    const file = join(dir, "limits.json");
+    let who: string | undefined;
+    const options = {
+      file,
+      publish: () => undefined,
+      claudeCommand: () => undefined,
+      probes: () => [{ name: "claude-cli", ...(who !== undefined ? { accounts: [{ label: who, active: true }] } : {}) }],
+      routes: () => ["claude-cli"],
+      refresh: false,
+    };
+    const asked: string[] = [];
+    const offer = (s: LimitsService): void => void s.board.offerRefresh("claude", async () => (asked.push(who ?? "-"), spent()));
+    const first = new LimitsService(options);
+    offer(first);
+    first.noticeAccounts(); // nobody signed in: nothing to read
+    who = "me@example.com";
+    first.noticeAccounts();
+    first.noticeAccounts(); // the same login again
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asked).toEqual(["me@example.com"]);
+    expect(first.board.state("claude").reading?.windows[0]?.id).toBe("five_hour");
+    first.close();
+
+    const second = new LimitsService(options);
+    offer(second);
+    second.noticeAccounts(); // seen before the restart
+    who = "you@example.com";
+    second.noticeAccounts(); // somebody else's login
+    await new Promise((r) => setTimeout(r, 0)); // one refresh at a time: a second joins the first
+    second.signedIn("claude"); // the same login signed in again is read again
+    second.noticeAccounts();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asked).toEqual(["me@example.com", "you@example.com", "you@example.com"]);
+    second.close();
+  });
+
   it("tells the renderer when anything changes", async () => {
     const pushes: PushMessage[] = [];
     const service = new LimitsService({ file: join(dir, "l.json"), publish: (m) => void pushes.push(m), claudeCommand: () => undefined, probes: () => [], routes: () => [], refresh: false });

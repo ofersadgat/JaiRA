@@ -7,14 +7,15 @@
  * renderer when anything changes, and it knows who each account is from the sign-in probes.
  *
  * Every call the app makes through the session layers reports to it (`SessionStores.limits`), so it
- * fills by itself as conversations run; the renderer's meters watch it, which is the only time it
- * refreshes on its own.
+ * fills by itself as conversations run. It refreshes on its own while the renderer's meters watch
+ * it, and once for an account it has not seen before (`noticeAccounts`).
  *
  * An API key is MONEY rather than windows (usage-readings contract, "API keys"). What each call on a
  * key cost is kept here, per account, for seven days — the board holds percents and no provider says
  * what a key has spent — and OpenRouter, the one provider that says how much credit there is, is
  * refreshed into a credit. A refusal for an empty balance is remembered until a call goes through.
  */
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createLimitsBoard, type Disposable, type LimitsBoard, type LimitState, type PositionLimits } from "@declarative-ai/exec";
@@ -48,6 +49,8 @@ interface Stored {
   credit?: Record<string, CreditFigures>;
   /** When a call on the account was last refused for an empty balance. */
   refused?: Record<string, string>;
+  /** Who each account was when last seen — see {@link LimitsService.noticeAccounts}. */
+  seen?: Record<string, string>;
 }
 
 /** How long spend is kept, and what "the last seven days" means — rolling, not a calendar week. */
@@ -68,12 +71,14 @@ export class LimitsService {
   private readonly spend = new Map<string, Array<[number, number]>>();
   private readonly credit = new Map<string, CreditFigures>();
   private readonly refused = new Map<string, string>();
+  private readonly seen = new Map<string, string>();
 
   constructor(private readonly options: LimitsServiceOptions) {
     const stored = this.load();
     for (const [k, rows] of Object.entries(stored.spend ?? {})) this.spend.set(k, rows);
     for (const [k, c] of Object.entries(stored.credit ?? {})) this.credit.set(k, c);
     for (const [k, at] of Object.entries(stored.refused ?? {})) this.refused.set(k, at);
+    for (const [k, who] of Object.entries(stored.seen ?? {})) this.seen.set(k, who);
     this.board = createLimitsBoard({ initial: Object.entries(stored.accounts ?? {}), ...(options.now !== undefined ? { now: options.now } : {}) });
     this.position = { limits: this.board, accountOf: accountOfRoute, spent: (account, _route, costUsd) => this.spent(account, costUsd) };
     // Listening, not watching: persisting and forwarding changes must not start the refresh timer.
@@ -175,6 +180,38 @@ export class LimitsService {
     return { accounts, routeAccounts };
   }
 
+  /**
+   * The sign-ins or the keys may have changed: read at once every account that is NEW — a login that
+   * was not there, somebody else's login, an OpenRouter key put in — rather than showing nothing, or
+   * the last login's figures, until the first reply or a Refresh. An account seen before, across a
+   * restart too, is left to the board's own rules; one that went away has nothing to read.
+   */
+  noticeAccounts(): void {
+    for (const [key, who] of this.identities()) {
+      if (this.seen.get(key) === who) continue;
+      this.seen.set(key, who);
+      this.changed();
+      void this.board.refresh(key).catch(() => undefined);
+    }
+  }
+
+  /** A sign-in just succeeded on this account: the next {@link noticeAccounts} reads it, even when it is the same login again. */
+  signedIn(account: string): void {
+    this.seen.delete(account);
+  }
+
+  /** Who each account is now: its login, or which OpenRouter key (a hash of it — never the key). */
+  private identities(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const probe of this.options.probes()) {
+      const login = probe.accounts?.find((a) => a.active);
+      if (login !== undefined) out.set(accountOfRoute(probe.name), login.label);
+    }
+    const openRouter = this.options.openRouterKey?.();
+    if (openRouter !== undefined) out.set("openrouter", createHash("sha256").update(openRouter).digest("hex").slice(0, 16));
+    return out;
+  }
+
   /** A person pressed Refresh. */
   async refresh(account: string): Promise<LimitsView> {
     await this.board.refresh(account);
@@ -241,6 +278,7 @@ export class LimitsService {
       spend: Object.fromEntries([...this.spend].map(([k, rows]) => [k, rows.filter(([at]) => now - at < SPEND_WINDOW_MS)])),
       credit: Object.fromEntries(this.credit),
       refused: Object.fromEntries(this.refused),
+      seen: Object.fromEntries(this.seen),
     };
     try {
       mkdirSync(dirname(this.options.file), { recursive: true });
