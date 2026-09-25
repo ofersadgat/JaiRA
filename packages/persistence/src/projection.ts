@@ -61,6 +61,23 @@ interface MutableNode extends Omit<InstanceNode, "children"> {
   children: MutableNode[];
 }
 
+/**
+ * Settle one call's view on the node. A single operation IS its one call. A call of an operation LIST
+ * (hw SPEC §7.1d, the rows carry `index`) is kept at its index in `operationCalls`, and `operation`
+ * stays the one view every other reader asks — this call's status, and what the list has cost so far.
+ */
+function settleCall(node: MutableNode, index: number | undefined, view: OperationView): void {
+  if (index === undefined) {
+    node.operation = view;
+    return;
+  }
+  const calls = (node.operationCalls ??= []);
+  calls[index] = view;
+  const costs = calls.map((call) => call?.costUsd).filter((cost): cost is number => cost !== undefined);
+  const { costUsd: _own, ...rest } = view;
+  node.operation = { ...rest, ...(costs.length > 0 ? { costUsd: costs.reduce((sum, cost) => sum + cost, 0) } : {}) };
+}
+
 export interface ProjectedRun {
   /** Instance roots (normally one — the workflow root). */
   instances: InstanceNode[];
@@ -203,7 +220,7 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         const node = byId.get(event.instanceId);
         if (!node) break;
         const interactive = event.op === "function" && shape?.[event.stateId]?.interactive === true;
-        node.operation = { kind: event.op, status: "running" };
+        settleCall(node, event.index, { kind: event.op, status: "running" });
         if (interactive) node.status = "waiting_for_user";
         break;
       }
@@ -236,19 +253,21 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         const op: OperationView = { kind: event.op, status: "completed" };
         const cost = event.metrics?.costUsd;
         if (typeof cost === "number") op.costUsd = cost;
-        node.operation = op;
+        settleCall(node, event.index, op);
         if (node.status === "waiting_for_user") node.status = "running";
         break;
       }
       case "operation.failed": {
         const node = byId.get(event.instanceId);
         if (!node) break;
-        node.operation = {
+        settleCall(node, event.index, {
           kind: event.op,
           status: "failed",
           reason: event.failure.reason,
           ...(event.failure.classification !== undefined ? { classification: event.failure.classification } : {}),
-        };
+          // A failed call of a LIST still spent money, and the list's cost is summed over its calls.
+          ...(event.index !== undefined && typeof event.metrics?.costUsd === "number" ? { costUsd: event.metrics.costUsd } : {}),
+        });
         if (node.status === "waiting_for_user") node.status = "running";
         break;
       }
@@ -335,6 +354,13 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         node.endedAt = at;
         if (event.failure !== undefined && node.operation !== undefined) {
           node.operation = { ...node.operation, status: "failed", reason: event.failure.reason };
+          // The call of a list that was still running is the one the failure ended.
+          const calls = node.operationCalls ?? [];
+          for (let i = calls.length - 1; i >= 0; i--) {
+            if (calls[i]?.status !== "running") continue;
+            calls[i] = { ...calls[i]!, status: "failed", reason: event.failure.reason };
+            break;
+          }
         }
         break;
       }

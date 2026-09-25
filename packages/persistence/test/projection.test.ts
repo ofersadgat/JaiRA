@@ -689,3 +689,63 @@ describe("a person's move in the tree (decision 0005)", () => {
     expect(projectRun(ruled, SHAPE, ruled.map((_, i) => 1000 + i)).instances[0]!.status).toBe("completed");
   });
 });
+
+/**
+ * An operation LIST (hw SPEC §7.1d): the rows carry each call's `index`. Each call is shown on its
+ * own, and `operation` stays the one view every other reader asks — the latest call's status, and
+ * what the list has cost so far.
+ */
+describe("an operation list", () => {
+  const metrics = (costUsd: number) => ({ durationMs: 1, costUsd, costSource: "table" as const });
+  const call = (type: "operation.started" | "operation.completed", index: number, op: "prompt" | "function", costUsd?: number): EngineEvent =>
+    ({ type, instanceId: "1", stateId: "s", op, index, ...(costUsd !== undefined ? { metrics: metrics(costUsd) } : {}) }) as EngineEvent;
+
+  it("shows each call, in order, with the list's cost summed", () => {
+    const events: EngineEvent[] = [
+      entered("1", "s"),
+      call("operation.started", 0, "prompt"),
+      call("operation.completed", 0, "prompt", 0.02),
+      call("operation.started", 1, "function"),
+    ];
+    const node = projectRun(events).instances[0]!;
+    expect(node.operationCalls).toEqual([
+      { kind: "prompt", status: "completed", costUsd: 0.02 },
+      { kind: "function", status: "running" },
+    ]);
+    expect(node.operation).toEqual({ kind: "function", status: "running", costUsd: 0.02 });
+  });
+
+  it("marks the call a failure ended, and counts what a failed call spent", () => {
+    const events: EngineEvent[] = [
+      entered("1", "s"),
+      call("operation.started", 0, "prompt"),
+      call("operation.completed", 0, "prompt", 0.01),
+      call("operation.started", 1, "prompt"),
+      { type: "operation.failed", instanceId: "1", stateId: "s", op: "prompt", index: 1, failure: { classification: "permanent", reason: "boom" }, metrics: metrics(0.03) },
+      terminated("1", "s", "error"),
+    ];
+    const node = projectRun(events).instances[0]!;
+    expect(node.operationCalls!.map((c) => c.status)).toEqual(["completed", "failed"]);
+    expect(node.operation).toMatchObject({ status: "failed", reason: "boom" });
+    expect(node.operation!.costUsd).toBeCloseTo(0.04);
+  });
+
+  it("marks the call still running when the instance ends in failure", () => {
+    const events: EngineEvent[] = [
+      entered("1", "s"),
+      call("operation.started", 0, "prompt"),
+      call("operation.completed", 0, "prompt"),
+      call("operation.started", 1, "prompt"),
+      { type: "instance.terminated", instanceId: "1", stateId: "s", outcome: "error", failure: { classification: "permanent", reason: "gone" } } as EngineEvent,
+    ];
+    expect(projectRun(events).instances[0]!.operationCalls!.map((c) => [c.status, c.reason])).toEqual([
+      ["completed", undefined],
+      ["failed", "gone"],
+    ]);
+  });
+
+  it("leaves a single operation without per-call views", () => {
+    const events: EngineEvent[] = [entered("1", "s"), opStarted("1", "s", "prompt")];
+    expect(projectRun(events).instances[0]!.operationCalls).toBeUndefined();
+  });
+});

@@ -113,7 +113,17 @@ export interface InstanceNode {
   status: InstanceStatus;
   /** Transitions taken so far (SPEC §3.4) — every one, not just a loop's passes. */
   index: number;
+  /**
+   * The state's operation as ONE view — for an operation LIST (hw SPEC §7.1d), the call running or
+   * most recently settled, with `costUsd` summed over every call so far. What every reader that asks
+   * "is this state running, did it fail, what did it cost" wants, list or not.
+   */
   operation?: OperationView;
+  /**
+   * Each call of an operation LIST, by its `index` — present only for a list, whose journal rows
+   * carry one. A call that has not started yet has no entry.
+   */
+  operationCalls?: OperationView[];
   /**
    * True once a sequence reset cleared this instance (DESIGN §4.2): history is
    * preserved, but it no longer contributes to the active path or to

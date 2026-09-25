@@ -115,6 +115,12 @@ function ValueRows({ value, onOpen }: { value: unknown; onOpen: (name: string, v
   return <PanelRow name="value" value={previewOf(value)} mono onClick={() => onOpen("value", value)} />;
 }
 
+/** One call of an operation list as a row: "prompt · completed · $0.012". */
+function callLine(call: NonNullable<InstanceNode["operation"]>): string {
+  const cost = call.costUsd !== undefined && call.costUsd > 0 ? ` · $${call.costUsd.toFixed(call.costUsd < 0.1 ? 3 : 2)}` : "";
+  return `${call.kind} · ${call.status}${cost}`;
+}
+
 /** "3m 12s" — how long something took, in the two largest units. */
 export function tookOf(start: number, end: number | undefined, now = Date.now()): string {
   const ms = Math.max(0, (end ?? now) - start);
@@ -360,7 +366,16 @@ export function StepCard({
       <PanelSection title="How it ran">
         <PanelRow name="status" value={node.superseded ? `${node.status} · superseded` : node.status} />
         <PanelRow name="took" value={tookOf(node.startedAt, node.endedAt)} title={new Date(node.startedAt).toLocaleString()} />
-        {node.operation !== undefined ? <PanelRow name="operation" value={node.operation.kind} /> : null}
+        {node.operationCalls !== undefined ? (
+          // An operation LIST (hw SPEC §7.1d): each call, in the order it ran.
+          node.operationCalls.map((call, i) =>
+            call === undefined ? null : (
+              <PanelRow key={i} name={`call ${i + 1}`} value={callLine(call)} title={call.status === "failed" ? call.reason : undefined} />
+            ),
+          )
+        ) : node.operation !== undefined ? (
+          <PanelRow name="operation" value={node.operation.kind} />
+        ) : null}
         {node.operation?.status === "failed" && node.operation.reason !== undefined ? <PanelRow name="why" value={node.operation.reason} /> : null}
         {cost > 0 ? <PanelRow name="cost" value={`$${cost.toFixed(cost < 0.1 ? 3 : 2)}`} /> : null}
         {ran.length > 0 ? <PanelRow name="sessions" value={ran.length} title={ran.map((one) => one.sessionId).join("\n")} /> : null}
