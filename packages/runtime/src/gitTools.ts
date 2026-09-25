@@ -1,7 +1,8 @@
 /**
  * The Git tools (decision 0010 §1): `list_merge_requests`, `read_merge_request`, `git_checks`,
  * `open_merge_request`, `git_comment`, `git_merge`, `close_merge_request`, `git_push` — and
- * `wait_git_event`, which is named in the vocabulary and served by the event hub a later step builds.
+ * `wait_git_event`, which waits on the project's event hub (`./eventHub`) for what the repository
+ * watcher (`./repoWatch`) sees happen on the remote, where a host lends one ({@link GitEventWaits}).
  *
  * ## Which forge
  *
@@ -29,9 +30,15 @@
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
 import {
+  EVENT_NAMES,
+  EVENT_SPECS,
   FORGE_LABELS,
   handleOfSummary,
+  parseDuration,
   parseRemoteUrl,
+  type EventDelivery,
+  type EventFilter,
+  type EventName,
   type ForgeAnchor,
   type JairaIntegrationsConfig,
   type MergeRequestQuery,
@@ -39,6 +46,7 @@ import {
   type RemoteHandle,
   type RemoteLocation,
 } from "@jaira/shared";
+import { checkEventWait, WAIT_DEFAULT_MS, WAIT_MAX_MS } from "./eventHub";
 import type { Exec } from "./exec";
 import { forgeAccess, NoForgeConnection, type ForgeAccess, type ForgeHttp } from "./forge";
 import { Git } from "./git";
@@ -55,7 +63,19 @@ export const GIT_TOOL_NAMES = [
   "git_merge",
   "close_merge_request",
   "git_push",
+  "wait_git_event",
 ] as const;
+
+/**
+ * What serves `wait_git_event`: the event hub of the task's project, over the repository watcher.
+ * Bound to the task by whoever lends it, so the tool never names one.
+ */
+export interface GitEventWaits {
+  /** The event, or `undefined` when `timeoutMs` passed (or the call was stopped) first. */
+  wait(name: EventName, filter: EventFilter | undefined, timeoutMs: number, signal?: AbortSignal): Promise<EventDelivery | undefined>;
+  /** Why this event cannot be waited on here — switched off in Settings — or `undefined` when it can. */
+  refuse?(name: EventName): string | undefined;
+}
 
 /** What serves the tools: a workspace's git, the connections, and the publish question. */
 export interface GitToolHost {
@@ -73,6 +93,8 @@ export interface GitToolHost {
   forge(host: string): ForgeAccess;
   /** `functions.review_artifacts.publish`. Throws {@link PublishRefusal}; `request` is built only when somebody is asked. */
   authorizePublish(request: () => Promise<PublishRequest>): Promise<void>;
+  /** The event hub `wait_git_event` waits on. Absent: no repository watcher runs here, and the tool says so. */
+  readonly events?: GitEventWaits;
 }
 
 /** What {@link workspaceGitHost} is built from — what the review primitives are built from. */
@@ -86,6 +108,8 @@ export interface WorkspaceGitOptions {
   http?: ForgeHttp;
   /** The run's publish question — `RemotePrimitives.publishing` where a run has them, so both ask once. */
   publishing: Pick<PublishAuthorizer, "authorize">;
+  /** What `wait_git_event` waits on. Absent: it answers that nothing watches the repository here. */
+  events?: GitEventWaits;
 }
 
 /** The host a run or a typed turn lends the tools. */
@@ -97,6 +121,7 @@ export function workspaceGitHost(options: WorkspaceGitOptions): GitToolHost {
     git: (dir) => new Git({ exec: options.exec, repoDir: dir, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}) }),
     forge: (host) => forgeAccess(options.integrations, host, { secrets: options.secrets, ...(options.http !== undefined ? { http: options.http } : {}) }),
     authorizePublish: (request) => options.publishing.authorize(request),
+    ...(options.events !== undefined ? { events: options.events } : {}),
   };
 }
 
@@ -138,7 +163,7 @@ const REMOTE_PROPERTY = {
 
 const NUMBER_PROPERTY = { number: { type: "integer", minimum: 1, description: "The merge request's number (GitLab's !iid, GitHub's #number)." } } as const;
 
-/** The eight served tools over one host, by name. */
+/** The nine Git tools over one host, by name. */
 export function createGitTools(host: GitToolHost): Record<string, Tool> {
   /** The workspace's repository and the forge its remote picks — or a refusal. */
   const reach = async (args: Record<string, unknown>, ctx: ExecServices | undefined): Promise<Reached> => {
@@ -476,7 +501,64 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
         return { ok: true, repository: repository(at), branch, head };
       },
     ),
+
+    wait_git_event: tool(
+      "wait_git_event",
+      {
+        description: `Wait for something to happen on this project's git remotes — ${GIT_EVENT_NAMES.join(", ")} — and get it: the event's name, what it carries (the branch and commits of a push, the merge request, the new comments, the failed checks) and when it was seen. Narrow it with \`filter\` (\`branch\`, \`remote\`, \`author\`, \`source_branch\`, \`target_branch\`, each a glob or a list, as the event takes them). Events that arrived since this task's first wait on the same event are kept for it, oldest first. Answers \`nothing\` when \`timeout\` passes first (10 minutes when absent, at most an hour); a longer wait is a workflow's \`on_event\`, not a tool call.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            event: { type: "string", enum: [...GIT_EVENT_NAMES], description: "Which event." },
+            filter: { type: "object", description: "Only an event whose fields match: { branch: 'release/*' }, { author: 'mara' } — the keys each event takes." },
+            timeout: {
+              type: ["integer", "string"],
+              description: "How long to wait: seconds, or a duration like '90s', '10m', '1h'. 10 minutes when absent; at most 1 hour.",
+            },
+          },
+          required: ["event"],
+        } as unknown as Tool["inputSchema"],
+        readOnly: true,
+      },
+      async (args, ctx) => {
+        // The same door as every Git tool: a workspace whose remote is on a forge with a connection —
+        // with none, nothing is watched, so nothing would ever arrive.
+        await reach({}, ctx);
+        const checked = checkEventWait(args["event"], args["filter"], "wait_git_event");
+        if ("error" in checked) throw new GitToolRefusal(checked.error);
+        if (EVENT_SPECS[checked.name].group !== "git") throw new GitToolRefusal(`wait_git_event waits for the remote's events — ${checked.name} is JaiRA's own; a workflow waits for it with on_event`);
+        const events = host.events;
+        if (events === undefined) throw new GitToolRefusal("wait_git_event is not served here — no repository watcher runs in this process, so nothing would ever arrive");
+        const off = events.refuse?.(checked.name);
+        if (off !== undefined) throw new GitToolRefusal(off);
+        const timeoutMs = timeoutOf(args["timeout"]);
+        const delivery = await events.wait(checked.name, checked.filter, timeoutMs, ctx?.abortSignal);
+        return delivery ?? { nothing: `no ${checked.name} within ${durationText(timeoutMs)}` };
+      },
+    ),
   };
+}
+
+/** The events `wait_git_event` offers: the remote's. */
+const GIT_EVENT_NAMES: readonly EventName[] = EVENT_NAMES.filter((name) => EVENT_SPECS[name].group === "git");
+
+/** `wait_git_event`'s timeout: seconds or a duration, 10 minutes when absent, never past an hour. */
+function timeoutOf(value: unknown): number {
+  let ms: number | undefined;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) ms = value * 1000;
+  else if (typeof value === "string") ms = /^\d+$/.test(value.trim()) ? Number(value) * 1000 : parseDuration(value);
+  if (ms === undefined || ms <= 0) {
+    if (value !== undefined) throw new GitToolRefusal("`timeout` is a number of seconds or a duration like '10m' — at most '1h'");
+    return WAIT_DEFAULT_MS;
+  }
+  return Math.min(ms, WAIT_MAX_MS);
+}
+
+/** A wait's length as a person writes one: `10m`, `1h`, `90s`. */
+function durationText(ms: number): string {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`;
+  return `${Math.round(ms / 1000)}s`;
 }
 
 /**
@@ -502,7 +584,7 @@ export function pushCredentials(access: Pick<ForgeAccess, "token" | "connection"
   return env;
 }
 
-/** Register the eight served Git tools — over `host`, or over {@link noGitToolHost} where there is none. */
+/** Register the nine Git tools — over `host`, or over {@link noGitToolHost} where there is none. */
 export function registerGitTools(registry: { tools: Map<string, Tool> }, host: GitToolHost = noGitToolHost()): void {
   for (const [name, tool] of Object.entries(createGitTools(host))) registry.tools.set(name, tool);
 }

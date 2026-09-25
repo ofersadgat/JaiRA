@@ -19,7 +19,7 @@ import type { FSWatcher } from "node:fs";
 import type { DirectedTransitions } from "@declarative-ai/hw";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
-import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub, RemoteEventHub, UserEventHub } from "@jaira/runtime";
+import type { ApprovalHub, ApprovalRequest, EventHub, InteractionHub, QuestionHub, RemoteEventHub, UserEventHub } from "@jaira/runtime";
 import type { SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
 import type { FastForwardRun } from "./fastForward";
@@ -103,6 +103,7 @@ export interface ProjectSessionOptions {
   questions: QuestionHub;
   userEvents: UserEventHub;
   remoteEvents: RemoteEventHub;
+  events: EventHub;
 }
 
 /**
@@ -279,6 +280,13 @@ export class ProjectSession {
    */
   readonly remoteEvents: RemoteEventHub;
   /**
+   * Transitions — and agents — waiting for something to HAPPEN (`on_event`, `wait_git_event`,
+   * decision 0010 §3): a push, a merge request, a task finishing. The sixth channel; what answers it
+   * is the repository watcher, or another task of this project ending. Per session, so a task only
+   * ever hears its own project's events.
+   */
+  readonly events: EventHub;
+  /**
    * The live turn each running task is streaming — main's copy of the renderer's `liveTurn`, held
    * where navigation cannot lose it and served back over `session:live`. See {@link LiveTurnLog}.
    */
@@ -307,6 +315,7 @@ export class ProjectSession {
     this.questions = options.questions;
     this.userEvents = options.userEvents;
     this.remoteEvents = options.remoteEvents;
+    this.events = options.events;
   }
 
   get dir(): string {
@@ -334,6 +343,14 @@ export class ProjectSession {
     for (const request of [...this.hub.list(), ...this.userEvents.list()]) {
       if (request.taskId !== undefined && this.live.has(request.taskId)) this.suspendedAtClose.add(request.taskId);
     }
+    // A rule waiting on the world is waiting too — on the forge (`on_remote_event`) or for an event
+    // (`on_event`) — and closing the app is not the world answering. Resumed on the next open, its
+    // guard is armed again: the forge's row keeps its cursor, and the event hub's durable starts keep
+    // what the watcher catches up on as having arrived while it waited. An AGENT's `wait_git_event`
+    // is not this: its turn is cut like any other work in flight.
+    for (const request of [...this.remoteEvents.list(), ...this.events.list().filter((r) => r.waiter === "guard")]) {
+      if (this.live.has(request.taskId)) this.suspendedAtClose.add(request.taskId);
+    }
     // ABANDONED, not settled — the default, and stated here because it is the whole of what makes a
     // gate durable. The promise has to settle or the engine never unwinds and the database never
     // closes; that is a fact about this process and not an answer to the question, so the row stays
@@ -349,6 +366,9 @@ export class ProjectSession {
     // The same for a wait on the forge: this process cannot hear the answer any more. The request's
     // row keeps its window and its cursor, so a resumed task picks the wait up where it was.
     this.remoteEvents.declineAll();
+    // An event wait is NOT answered: an answer would let the rules behind it fire on a world that
+    // did not change. The runs' aborts below withdraw the waits; the durable starts stay.
+    this.events.close();
     // A sync in flight is one of the live runs below, so aborting it needs nothing special here. What
     // does go is the proposal it was about to produce, which belongs to a project that is going away.
     this.syncTask = undefined;

@@ -10,9 +10,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Tool } from "@declarative-ai/exec";
-import { parseIntegrations, type JairaIntegrationsConfig } from "@jaira/shared";
+import { parseIntegrations, type JairaEvent, type JairaIntegrationsConfig } from "@jaira/shared";
 import { NodeExec, type Exec, type ExecOptions } from "../src/exec";
-import { createGitTools, GIT_TOOL_NAMES, noGitToolHost, pushCredentials, workspaceGitHost } from "../src/gitTools";
+import { createGitTools, GIT_TOOL_NAMES, noGitToolHost, pushCredentials, workspaceGitHost, type GitEventWaits } from "../src/gitTools";
+import { EventHub } from "../src/eventHub";
 import { PublishAuthorizer, type PublishAnswer, type PublishRequest } from "../src/remote";
 import { SecretResolver } from "../src/secrets";
 import { replayForge, type Replay } from "./forgeReplay";
@@ -48,6 +49,7 @@ interface Setup {
   integrations?: JairaIntegrationsConfig;
   env?: Record<string, string>;
   root?: string;
+  events?: GitEventWaits;
 }
 
 function tools(setup: Setup = {}): Record<string, Tool> {
@@ -59,6 +61,7 @@ function tools(setup: Setup = {}): Record<string, Tool> {
       integrations: setup.integrations ?? parseIntegrations(undefined),
       secrets: new SecretResolver({ env: setup.env ?? { GITLAB_TOKEN: "good" } }),
       http: replay.http,
+      ...(setup.events !== undefined ? { events: setup.events } : {}),
       publishing: new PublishAuthorizer({
         publish: setup.publish ?? "allow",
         ...(setup.answer !== undefined
@@ -114,9 +117,56 @@ describe("which forge answers", () => {
     }
   });
 
-  it("does not name wait_git_event among what it serves — the event hub will", () => {
+  it("serves all nine, wait_git_event among them", () => {
     expect(Object.keys(tools())).toEqual([...GIT_TOOL_NAMES]);
-    expect(Object.keys(tools())).not.toContain("wait_git_event");
+    expect(GIT_TOOL_NAMES).toHaveLength(9);
+    expect(tools()["wait_git_event"]!.readOnly).toBe(true);
+  });
+});
+
+describe("wait_git_event", () => {
+  const push = (branch: string) =>
+    ({ name: "git.push", payload: { remote: "origin", connection: "gitlab", host: "gitlab.com", repository: "gitlab-org/gitlab-runner", branch, before: "a", after: "b", commits: [] } }) as JairaEvent;
+
+  /** The hub of the task's project, bound to the task the way a host lends it. */
+  const waits = (hub: EventHub, refuse?: (name: string) => string | undefined): GitEventWaits => ({
+    wait: (name, filter, timeoutMs, signal) => hub.wait("t-1", name, filter, { waiter: "tool", timeoutMs, ...(signal !== undefined ? { signal } : {}) }),
+    ...(refuse !== undefined ? { refuse } : {}),
+  });
+
+  it("answers with the event that arrives, filtered as asked", async () => {
+    const hub = new EventHub();
+    const answer = call(tools({ events: waits(hub) }), "wait_git_event", { event: "git.push", filter: { branch: "release/*" }, timeout: 30 });
+    for (let i = 0; i < 20 && hub.list().length === 0; i++) await new Promise((r) => setTimeout(r, 25));
+    expect(hub.list()).toMatchObject([{ taskId: "t-1", waiter: "tool", name: "git.push", filter: { branch: "release/*" } }]);
+    hub.deliver(push("main"));
+    hub.deliver(push("release/2.0"));
+    expect(await answer).toMatchObject({ name: "git.push", payload: { branch: "release/2.0" }, at: expect.any(String) });
+    // What did not match is kept for the next wait, oldest first.
+    expect(await call(tools({ events: waits(hub) }), "wait_git_event", { event: "git.push" })).toMatchObject({ payload: { branch: "main" } });
+  });
+
+  it("answers nothing when the timeout passes first", async () => {
+    const hub = new EventHub();
+    expect(await call(tools({ events: waits(hub) }), "wait_git_event", { event: "git.merge_request.comments", timeout: "1s" })).toEqual({ nothing: "no git.merge_request.comments within 1s" });
+    expect(hub.list()).toEqual([]);
+  });
+
+  it("refuses what cannot be waited on, in a sentence", async () => {
+    const set = tools({ events: waits(new EventHub(), (name) => (name === "git.checks.failed" ? "git.checks.failed is switched off for this project — Settings → Events" : undefined)) });
+    expect((await call(set, "wait_git_event", { event: "git.pull" }))["error"]).toMatch(/^wait_git_event: "git.pull" is not an event — it is one of git.push, /);
+    expect(await call(set, "wait_git_event", { event: "git.push", filter: { source_branch: "x" } })).toEqual({
+      error: "wait_git_event('git.push'): 'source_branch' is not a filter git.push takes — it takes branch, remote, author",
+    });
+    expect((await call(set, "wait_git_event", { event: "task.finished" }))["error"]).toMatch(/^wait_git_event waits for the remote's events — task.finished is JaiRA's own/);
+    expect(await call(set, "wait_git_event", { event: "git.checks.failed" })).toEqual({ error: "git.checks.failed is switched off for this project — Settings → Events" });
+    expect(await call(set, "wait_git_event", { event: "git.push", timeout: "soon" })).toEqual({ error: "`timeout` is a number of seconds or a duration like '10m' — at most '1h'" });
+  });
+
+  it("says so where no repository watcher runs", async () => {
+    expect(await call(tools(), "wait_git_event", { event: "git.push" })).toEqual({
+      error: "wait_git_event is not served here — no repository watcher runs in this process, so nothing would ever arrive",
+    });
   });
 });
 

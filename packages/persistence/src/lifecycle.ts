@@ -492,6 +492,7 @@ export function deleteTask(project: Project, taskId: string): void {
     // The ROW goes; the merge request does not. Deleting a task is a local act, and closing a request
     // on somebody's forge because a card was removed would be an outward one nobody asked for.
     project.db.prepare(`DELETE FROM remote_handles WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM event_waits WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM task_runtime WHERE task_id = ?`).run(taskId);
   })();
   // The task's journal files, for the reason `prune` deletes a run's: with the file as the truth, a

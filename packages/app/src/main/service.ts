@@ -211,6 +211,12 @@ import {
   workspaceGitHost,
   reviewWithRemote,
   RemoteEventHub,
+  EventHub,
+  RepositoryWatcher,
+  projectRemotes,
+  type EventWaitRequest,
+  type GitEventWaits,
+  type RepoWatchTarget,
   RemoteWatcher,
   PollingSource,
   forgeForHost,
@@ -346,6 +352,13 @@ import {
   hiddenRules,
   isComponentName,
   isStartableStatus,
+  EVENT_NAMES,
+  EVENT_SPECS,
+  enabledEvents,
+  isEventEnabled,
+  type EventDelivery,
+  type EventName,
+  type JairaEvent,
   isTextMime,
   changesetOf,
   changesetInputOf,
@@ -1432,7 +1445,7 @@ export class AppService {
       // Keyed by the directory it actually opened, so pointing `JAIRA_PROJECT` at the root finds
       // this session rather than opening a second handle on the same file.
       const key = sessionKey(project.paths.projectDir);
-      const session = new ProjectSession({ key, kind: role, project, ...this.hubsFor(key) });
+      const session = new ProjectSession({ key, kind: role, project, ...this.hubsFor(key, project) });
       this.sessions.set(key, session);
       return session;
     } catch (e) {
@@ -1467,7 +1480,10 @@ export class AppService {
    * Built per session rather than once, so a gate in one project cannot be answered by a request id
    * minted in another — and so closing a project rejects only its own parked calls.
    */
-  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub; remoteEvents: RemoteEventHub } {
+  private hubsFor(
+    key: string,
+    project: Project,
+  ): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub; remoteEvents: RemoteEventHub; events: EventHub } {
     const hub = new InteractionHub({
       onRequest: (request) => this.publishInteraction(key, request),
       onResolved: (requestId, fate) => {
@@ -1549,7 +1565,123 @@ export class AppService {
     });
     // A wait on the forge shows nothing here; what it needs from this process is a probe, now.
     const remoteEvents = new RemoteEventHub({ onWaiting: () => this.kickRemotes() });
-    return { hub, approvals, questions, userEvents, remoteEvents };
+    // Waits for something to happen (decision 0010 §3). A wait shows nothing here either; what it
+    // needs is a repository watcher looking — built on first need, and a no-op when nothing is on.
+    const events = new EventHub({ waits: project.eventWaits, onWaiting: () => this.kickRepoWatch(false) });
+    return { hub, approvals, questions, userEvents, remoteEvents, events };
+  }
+
+  // --- events: the repository watcher and the event hubs (decision 0010 §2–3) ----------------
+
+  private repoWatch?: RepositoryWatcher;
+  /** Remotes already reported as not watchable — each said once per process, not once a minute. */
+  private readonly skippedRemotes = new Set<string>();
+
+  /**
+   * Every remote of every open project that has a `git.*` event switched on, with those events.
+   *
+   * The remotes are the project's own `.git/config` (decision 0010 §2: nothing about where is typed);
+   * each one's host picks its connection, and a remote with none is skipped — said once in the log,
+   * since switching an event on for it cannot make anything arrive until somebody signs in.
+   */
+  private async repoWatchTargets(): Promise<RepoWatchTarget[]> {
+    const out: RepoWatchTarget[] = [];
+    for (const session of [...this.sessions.values()]) {
+      const config = session.project.config;
+      if (!gitEventsOn(config)) continue;
+      let remotes: Awaited<ReturnType<typeof projectRemotes>>;
+      try {
+        const git = new Git({ exec: new NodeExec({ execEnv: config.execEnvironment }), repoDir: session.project.paths.projectDir, execEnv: config.execEnvironment });
+        remotes = await projectRemotes(git, config.integrations);
+      } catch (e) {
+        this.log({ level: "warn", source: "runtime", message: `could not read the git remotes of ${session.project.paths.projectDir}: ${(e as Error).message}`, project: session.key });
+        continue;
+      }
+      if (this.sessions.get(session.key) !== session) continue;
+      for (const remote of remotes) {
+        const events = enabledEvents(config, remote.name);
+        if (events.length === 0) continue;
+        if (remote.connection === undefined) {
+          const said = JSON.stringify([session.key, remote.name, remote.host]);
+          if (!this.skippedRemotes.has(said)) {
+            this.skippedRemotes.add(said);
+            this.log({ level: "info", source: "runtime", message: `not watching ${remote.name} (${remote.host}/${remote.repository}) for events: no connection for ${remote.host} — sign in on Connections`, project: session.key });
+          }
+          continue;
+        }
+        out.push({
+          project: session.key,
+          remote: remote.name,
+          host: remote.host,
+          repository: remote.repository,
+          connection: remote.connection,
+          events,
+          store: session.project.repoWatch,
+          provider: () => this.forgeFor(session, remote.host),
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Look at the watched remotes NOW, and re-read which there are: a project opened, a setting or a
+   * secret was written, the machine woke, the window came back. Also where the watcher is BUILT, on
+   * first need — a service with no event switched on anywhere never makes one.
+   *
+   * `look: false` only re-reads the remotes, looking at none already watched: what a wait beginning
+   * asks, since every armed `on_event` rule begins one and a look per rule would spend the forge's
+   * budget on nothing new.
+   */
+  kickRepoWatch(look = true): void {
+    if (this.closed) return;
+    if (this.repoWatch === undefined) {
+      if (![...this.sessions.values()].some((session) => gitEventsOn(session.project.config))) return;
+      this.repoWatch = new RepositoryWatcher({
+        targets: () => this.repoWatchTargets(),
+        onEvent: (project, event) => void this.deliverEvent(project, event),
+        onError: (target, error) =>
+          this.log({ level: "warn", source: "runtime", message: `could not look at ${target.remote} (${target.host}/${target.repository}) for events: ${error.message}`, project: target.project }),
+        live: (target) => this.sessions.get(target.project)?.project.repoWatch === target.store,
+      });
+    }
+    void (look ? this.repoWatch.kick() : this.repoWatch.refresh());
+  }
+
+  /**
+   * An event happened for a project — from its repository watcher, or a task of it ending. Handed to
+   * that project's hub, which queues it for every task listening for its name. `from` is the task a
+   * `task.*` event is about, which does not hear its own. Returns how many tasks it reached.
+   */
+  deliverEvent(project: string, event: JairaEvent | EventDelivery, from?: string): number {
+    const session = this.sessions.get(project) ?? this.sessionOf(project);
+    if (session === undefined) return 0;
+    return session.events.deliver(event, from !== undefined ? { from } : {});
+  }
+
+  /** The event waits in progress in a project — every task's `on_event` rules and agents' `wait_git_event`. */
+  eventWaits(project?: string): EventWaitRequest[] {
+    return this.session(project).events.list();
+  }
+
+  /** What `wait_git_event` waits on, for one task: its project's hub, and the Settings switch. */
+  private gitEventWaits(open: ProjectSession, taskId: string): GitEventWaits {
+    return {
+      wait: (name, filter, timeoutMs, signal) => {
+        this.kickRepoWatch(false);
+        return open.events.wait(taskId, name, filter, { waiter: "tool", timeoutMs, ...(signal !== undefined ? { signal } : {}) });
+      },
+      refuse: (name) => (eventSwitchedOn(open.project.config, name) ? undefined : `${name} is switched off for this project, so nothing watches for it — switch it on in Settings → Events`),
+    };
+  }
+
+  /** A task's run ended: tell the tasks listening (`task.finished` / `task.failed`), when that event is on. */
+  private taskEnded(open: ProjectSession, taskId: string, status: string, workflow: string | undefined): void {
+    const name = status === "completed" ? "task.finished" : status === "failed" ? "task.failed" : undefined;
+    if (name === undefined || !isEventEnabled(open.project.config, name)) return;
+    const task = open.project.tasks.tryRead(taskId);
+    const payload = { task_id: taskId, title: task?.title ?? taskId, workflow: workflow ?? task?.workflow ?? "", status: status as "completed" | "failed" };
+    open.events.deliver({ name, payload } as JairaEvent, { from: taskId });
   }
 
   // --- watching merge requests (decision 0004) ---------------------------------
@@ -1845,7 +1977,7 @@ export class AppService {
     // `loadBundle` behind every view consult it. Idempotent, so opening a second project costs
     // nothing; `rebuild` is what a later approval or a changed file needs.
     await prepareUserModules(project.paths, { searchPath: project.config.workflows.path });
-    const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key) });
+    const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key, project) });
     this.sessions.set(key, session);
     this.log({
       level: "info",
@@ -1858,6 +1990,9 @@ export class AppService {
     // Requests still awaited from the process before this one: closed for a weekend is the normal
     // case, so the first thing an open project does is ask what happened while nobody was running.
     if (project.remotes.awaiting().length > 0) this.kickRemotes();
+    // The same for the repository watcher (decision 0010 §2): what happened on this project's remotes
+    // while nobody was looking is compared now — the latest state only — if anything is switched on.
+    this.kickRepoWatch();
     if (project.recovered.length > 0) {
       this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       // Not awaited: the agent's files are on disk and are not going anywhere, while the window
@@ -2160,6 +2295,7 @@ export class AppService {
     this.limits.close();
     this.waiting.close();
     this.remoteWatcher?.dispose();
+    this.repoWatch?.dispose();
     // A sign-in still polling ends as canceled; a renewal timer set for later is nobody's now.
     for (const waiting of this.forgeSignIns.values()) waiting.controller.abort();
     if (this.forgeRenewal !== undefined) clearTimeout(this.forgeRenewal);
@@ -2236,6 +2372,8 @@ export class AppService {
     // The resumes the open started, settled before the close unwinds what they started.
     await session.resuming;
     await session.close();
+    // Its remotes are nobody's to watch now.
+    this.kickRepoWatch();
   }
 
   /**
@@ -3803,6 +3941,7 @@ export class AppService {
         secrets: this.secretResolver(open),
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
         publishing: { authorize: (request) => remotePrimitives.publishing.authorize(request) },
+        events: this.gitEventWaits(open, taskId),
       }),
     );
 
@@ -3877,6 +4016,8 @@ export class AppService {
     open.userEvents.register(registry, taskId);
     // Its sibling on the forge, for every run for the same reason: it is called from a guard.
     open.remoteEvents.register(registry, taskId, project.remotes);
+    // And `on_event` (decision 0010 §3), for every run for the same reason.
+    open.events.register(registry, taskId);
 
     // The remote primitives (decision 0004 §2), for every run for the reason `on_user_event` is: they
     // cost five map entries, and a workflow that reaches for one should find it whatever else it is
@@ -4218,6 +4359,11 @@ export class AppService {
               : {}),
         });
         this.publishFor(open, { type: "run:finished", taskId, status });
+        // Its event waits are over unless the close SUSPENDED it (decision 0010 §3): a suspended task
+        // keeps its queues' starts so its resume hears what arrived meanwhile. And the tasks
+        // listening for this one ending hear it.
+        if (suspended === undefined) open.events.forgetTask(taskId);
+        this.taskEnded(open, taskId, status, started.meta.workflow);
         // Refused mid-turn because the account ran out: the run keeps its place (a resume retries the
         // failed state) and waits for the reset — tried again then while its box is checked, which
         // starts the way the `limits.retryOnReset` setting says.
@@ -4258,6 +4404,8 @@ export class AppService {
           failure: { classification: "permanent", reason: (e as Error).message },
         });
         this.publishFor(open, { type: "run:finished", taskId, status: "failed" });
+        open.events.forgetTask(taskId);
+        this.taskEnded(open, taskId, "failed", started.meta.workflow);
         this.settleWaiters(open, taskId);
       } finally {
         // Give up the claim and close any child still recorded as running, so the
@@ -4930,6 +5078,7 @@ export class AppService {
           answered: () => open.publishGranted.has(request.taskId) || project.remotes.forTask(request.taskId).some((row) => row.pushedHead !== undefined),
           onGranted: () => open.publishGranted.add(request.taskId),
         }),
+        events: this.gitEventWaits(open, request.taskId),
       }),
     );
     // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
@@ -7831,6 +7980,8 @@ export class AppService {
     // settings screen was showing about availability described the configuration BEFORE this, so it
     // is re-observed rather than left to be corrected by hand.
     if (this.options.probeOnStart === true) this.kickAvailability();
+    // An event switched on or off, a branch glob, a connection: which remotes are watched for what.
+    this.kickRepoWatch();
     return this.readConfig(request.project);
   }
 
@@ -8529,6 +8680,8 @@ export class AppService {
     // more: its mark goes, and the refresh token that renewed it with it.
     const mark = this.readSettings().forgeSignIns?.[request.name];
     if (mark !== undefined && mark.source === sourceOfTarget(request.target)) this.dropForgeMark(request.name, mark);
+    // A token for a watched remote's connection: look again now rather than at the backed-off next try.
+    this.kickRepoWatch();
     return written;
   }
 
@@ -10887,6 +11040,21 @@ function targetOfSource(source: SecretSource): SecretTargetOf | undefined {
   return undefined;
 }
 type JairaConfigOf = ReturnType<typeof parseConfig>;
+
+/**
+ * Whether an event is on anywhere in a project — `enabled`, or a remote's own switch. The remote-less
+ * question `isEventEnabled` answers is `enabled` alone, and a person who switched an event on for
+ * `origin` only has switched it on.
+ */
+function eventSwitchedOn(config: Pick<JairaConfigOf, "events">, name: EventName): boolean {
+  const setting = config.events[name];
+  return setting !== undefined && (setting.enabled || Object.values(setting.remotes ?? {}).some((on) => on));
+}
+
+/** Whether any `git.*` event is on in a project — the whole of "is there anything to watch". */
+function gitEventsOn(config: Pick<JairaConfigOf, "events">): boolean {
+  return EVENT_NAMES.some((name) => EVENT_SPECS[name].group === "git" && eventSwitchedOn(config, name));
+}
 
 /** Read a JSON document, or null when the file is absent. A malformed one is still an error. */
 function readJsonIfPresent(file: string): JsonValue | null {

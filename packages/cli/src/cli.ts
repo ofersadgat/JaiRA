@@ -117,6 +117,7 @@ import {
   sdkCredential,
   registerChangesetFunctions,
   UserEventHub,
+  registerUnservedEvents,
   registerCommandFunction,
   registerGenericAgents,
   REVIEW_ARTIFACTS,
@@ -603,6 +604,11 @@ function buildRunEnvironment(
    * optional human step nobody took.
    */
   new UserEventHub().register(registry);
+  // `on_event` (decision 0010 §3) resolves here too, and a run that reaches one fails saying the CLI
+  // runs no repository watcher. Never answered `false` for being unattended: that is the one thing
+  // an event wait must not do. `wait_git_event` answers the same through the Git tools, which are
+  // lent no event hub here.
+  registerUnservedEvents(registry, "by the CLI");
   // The changeset application step and its status helper (CHANGESETS.md §4.2), same as the app.
   registerChangesetFunctions(registry);
   // The workflow's OWN TypeScript functions (SPEC §7.5). Merged rather than wrapped — a resolved

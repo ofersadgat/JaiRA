@@ -392,8 +392,8 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
       // The shell is HELD and not on the list: `"bash": "deny"` with no command that allows anything
       // is a shell with nothing to run, and it is withheld — `deny` at the gate. The Git tools of
-      // decision 0010 follow the web tools; `wait_git_event` is held and not listed, not served yet.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "git_checks", "open_merge_request", "git_comment", "git_merge", "close_merge_request", "git_push", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      // decision 0010 follow the web tools, `wait_git_event` among them since the event hub serves it.
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "git_checks", "wait_git_event", "open_merge_request", "git_comment", "git_merge", "close_merge_request", "git_push", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",

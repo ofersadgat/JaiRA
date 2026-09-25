@@ -47,7 +47,7 @@ const WORKFLOW_TOOLS = ["list_workflows", "start_task", "move_task", "list_tasks
 /**
  * The Git tools (decision 0010 §1), with the decision's table of modes — not the frozen functions':
  * the readers are allowed wherever a set lets anything look, and what leaves the machine is asked,
- * judged or refused by how far the set trusts the agent. `wait_git_event` is named and not yet served.
+ * judged or refused by how far the set trusts the agent.
  */
 const GIT_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
   list_merge_requests: { "ask-first": "ask", auto: "allow", full: "allow", "read-only": "allow" },
@@ -80,11 +80,10 @@ describe("the chat bucket is the four presets, written down", () => {
       ...Object.fromEntries(Object.entries(GIT_TOOLS).map(([name, modes]) => [name, modes[file]!])),
     });
     // Every line is HELD — a preset never unticked anything, and a permission set's line is its tick —
-    // including a tool named and not yet served, whose mode is inert until it is.
+    // including any tool named and not yet served, whose mode is inert until it is.
     expect(heldTools(permissionSet).sort()).toEqual([...CONVERSATION_TOOLS, ...TOOL_SPECS.filter((s) => s.unserved === true).map((s) => s.name)].sort());
-    // …and what is not served yet is held without being handed to anybody.
-    expect(offeredTools(permissionSet)).not.toContain("wait_git_event");
-    for (const name of Object.keys(GIT_TOOLS).filter((tool) => tool !== "wait_git_event")) expect(offeredTools(permissionSet), name).toContain(name);
+    // …and every Git tool is handed on, wait_git_event among them since the event hub serves it.
+    for (const name of Object.keys(GIT_TOOLS)) expect(offeredTools(permissionSet), name).toContain(name);
     // …with nobody's implementation chosen, because a preset never chose one.
     expect(toolImplementations(permissionSet)).toEqual({});
     // "A name the preset has never heard of gets its strictest" is what `other` says.

@@ -937,13 +937,20 @@ void app.whenReady().then(async () => {
   // all; a window left for a while is one whose person is about to read a stale strip. Five minutes
   // is the threshold the decision names — a glance at another app should not cost a request.
   // Starting is covered by the service: opening a project with requests still awaited probes at once.
-  powerMonitor.on("resume", () => service.kickRemotes());
+  // The repository watcher (decision 0010 §2) at the same two moments, for the same reason.
+  powerMonitor.on("resume", () => {
+    service.kickRemotes();
+    service.kickRepoWatch();
+  });
   let leftAt: number | undefined;
   app.on("browser-window-blur", () => {
     leftAt = Date.now();
   });
   app.on("browser-window-focus", () => {
-    if (leftAt !== undefined && Date.now() - leftAt >= 5 * 60_000) service.kickRemotes();
+    if (leftAt !== undefined && Date.now() - leftAt >= 5 * 60_000) {
+      service.kickRemotes();
+      service.kickRepoWatch();
+    }
     leftAt = undefined;
   });
 

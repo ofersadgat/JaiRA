@@ -43,6 +43,7 @@ export * from "./unifiedDiff";
 export * from "./grammars";
 export * from "./userEvents";
 export * from "./events";
+export * from "./repoWatch";
 export * from "./adopt";
 export * from "./connect";
 export * from "./move";

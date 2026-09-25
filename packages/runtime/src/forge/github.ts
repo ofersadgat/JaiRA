@@ -21,6 +21,7 @@ import {
   type CiStatus,
   type ForgeAnchor,
   type ForgeBranch,
+  type ForgeCommit,
   type ForgeComment,
   type ForgeIdentity,
   type ForgeNote,
@@ -524,6 +525,27 @@ export class GitHubProvider implements ForgeProvider {
       ...state.comments.map((c) => ({ id: c.id, who: c.who, body: c.body, at: c.at, own: c.own })),
     ];
     return notes.filter((note) => options.since === undefined || note.at > options.since).sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  /**
+   * `GET /repos/{project}/compare/{base}...{head}` — its `commits` are oldest first, up to 250, which
+   * is more than a push event needs to be useful. With no base, the one head commit.
+   */
+  async compare(project: string, base: string | undefined, head: string): Promise<ForgeCommit[]> {
+    const commitOf = (entry: unknown): ForgeCommit => {
+      const row = asRecord(entry);
+      const commit = asRecord(row["commit"]);
+      return {
+        sha: asText(row["sha"]),
+        message: asText(commit["message"]),
+        author: asText(asRecord(row["author"])["login"]) || asText(asRecord(commit["author"])["name"]),
+      };
+    };
+    if (base === undefined) {
+      return [commitOf(expectStatus(await this.call("GET", `/repos/${project}/commits/${encodeURIComponent(head)}`), [200], `reading ${head.slice(0, 7)}`).body)];
+    }
+    const response = expectStatus(await this.call("GET", `/repos/${project}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`), [200], `comparing ${base.slice(0, 7)}...${head.slice(0, 7)}`);
+    return asList(asRecord(response.body)["commits"]).map(commitOf);
   }
 }
 

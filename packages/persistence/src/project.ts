@@ -39,6 +39,7 @@ import { CommandLog } from "./commandLog";
 import { JobStore, type JobRow } from "./jobs";
 import { InteractionStore } from "./interactions";
 import { RemoteHandleStore } from "./remoteHandles";
+import { EventWaitStore, RepoWatchStore } from "./repoWatch";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
@@ -77,6 +78,10 @@ export interface Project {
   interactions: InteractionStore;
   /** The merge requests tasks have opened, and what each has already heard (decision 0004). */
   remotes: RemoteHandleStore;
+  /** What the repository watcher last saw of each of this project's remotes (decision 0010 §2). */
+  repoWatch: RepoWatchStore;
+  /** When each task's guards first waited on each event name (decision 0010 §3). */
+  eventWaits: EventWaitStore;
   /** What `config.storage` did to this connection — see {@link applyStorage}. Empty when everything
    *  is in the database, which is the default. */
   storage: ShadowReport;
@@ -417,6 +422,8 @@ function openAt(
     jobs,
     interactions: new InteractionStore(db),
     remotes: new RemoteHandleStore(db),
+    repoWatch: new RepoWatchStore(db),
+    eventWaits: new EventWaitStore(db),
     recovered,
     orphans,
     storage,

@@ -579,6 +579,21 @@ export interface ForgeProvider {
   branches(project: string): Promise<ForgeBranch[]>;
   /** The comments on one merge request, flat and in order — only those written after `since`, when given. */
   comments(handle: RemoteHandle, options?: { since?: string }): Promise<ForgeNote[]>;
+  /**
+   * The commits in `base..head`, oldest first — what a push brought (the forges' compare). With no
+   * `base` (a branch new to the watcher), the head commit alone. Optional: a push read from a
+   * provider without it carries no commits.
+   */
+  compare?(project: string, base: string | undefined, head: string): Promise<ForgeCommit[]>;
+}
+
+/** One commit, as a push event carries it. */
+export interface ForgeCommit {
+  sha: string;
+  /** The whole message. */
+  message: string;
+  /** The forge's login for the author when it knows one, else the commit's author name. */
+  author: string;
 }
 
 /** A request's handle, from its summary on the project — what the calls that take a handle need. */

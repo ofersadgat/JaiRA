@@ -486,6 +486,43 @@ export const MIGRATIONS: Migration[] = [
     // Which version each stretch of the journal ran under is in the journal (`workflow.version`).
     run: (db) => addColumn(db, "task_runtime", "document_id", "TEXT"),
   },
+  {
+    version: 20,
+    note: "the repository watcher remembers what it last saw of each remote, and a task where its event waits began",
+    // Decision 0010 §2–3. Events are a DIFFERENCE between two looks at a remote, so the last look is
+    // kept: a cursor per (remote, repository) — where the next "updated since" starts, and which kinds
+    // have had their baseline — and the last seen state of each merge request, branch and branch
+    // head's checks. Keyed by the repository as well as the remote's name, so a remote re-pointed at
+    // another repository starts from a baseline instead of diffing two repositories. The project is
+    // the database itself (one per project). `event_waits` is when a task's guards first waited on
+    // an event name: the hub queues from then on, and a task the close suspended must still count
+    // what the watcher catches up on after the next start as having arrived while it waited.
+    sql: `
+      CREATE TABLE IF NOT EXISTS repo_watch_cursors (
+        remote      TEXT NOT NULL,
+        repository  TEXT NOT NULL,
+        cursor_json TEXT NOT NULL DEFAULT '{}',
+        last_error  TEXT,
+        updated_at  INTEGER NOT NULL,
+        PRIMARY KEY (remote, repository)
+      );
+      CREATE TABLE IF NOT EXISTS repo_watch_seen (
+        remote      TEXT NOT NULL,
+        repository  TEXT NOT NULL,
+        kind        TEXT NOT NULL CHECK (kind IN ('merge_request', 'branch', 'checks')),
+        key         TEXT NOT NULL,
+        state_json  TEXT NOT NULL,
+        updated_at  INTEGER NOT NULL,
+        PRIMARY KEY (remote, repository, kind, key)
+      );
+      CREATE TABLE IF NOT EXISTS event_waits (
+        task_id TEXT NOT NULL,
+        name    TEXT NOT NULL,
+        since   INTEGER NOT NULL,
+        PRIMARY KEY (task_id, name)
+      );
+    `,
+  },
 ];
 
 /**

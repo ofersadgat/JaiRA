@@ -105,8 +105,8 @@ export interface ToolSpec {
    * Its MODE still travels — a mode for a name nothing calls is inert — so the day the tool is
    * implemented, deleting this mark is the whole change.
    *
-   * The workflow tools of decision 0005 §3 carried it until step 6 built them. `wait_git_event`
-   * (decision 0010 §1) carries it now, until the event hub that serves it is built.
+   * The workflow tools of decision 0005 §3 carried it until step 6 built them, and `wait_git_event`
+   * (decision 0010 §1) until the event hub that serves it was built. Nothing carries it today.
    */
   unserved?: true;
 }
@@ -199,14 +199,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   { name: "list_merge_requests", label: "list_merge_requests", category: "git", hint: "this repository's merge requests, by state, author, branch" },
   { name: "read_merge_request", label: "read_merge_request", category: "git", hint: "one merge request: description, state, threads, approvals, checks" },
   { name: "git_checks", label: "git_checks", category: "git", hint: "the CI pipeline or check runs of a branch or commit" },
-  {
-    name: "wait_git_event",
-    label: "wait_git_event",
-    category: "git",
-    hint: "wait for an event on the remote (a comment, checks finishing, a push), or its timeout",
-    // Served by the event hub, which a later step of decision 0010 builds (§2–3).
-    unserved: true,
-  },
+  // Served by the event hub over the repository watcher (decision 0010 §2–3, `runtime/eventHub.ts`).
+  { name: "wait_git_event", label: "wait_git_event", category: "git", hint: "wait for an event on the remote (a comment, checks finishing, a push), or its timeout" },
   { name: "open_merge_request", label: "open_merge_request", category: "git", hint: "push the branch and open (or update) its merge request" },
   { name: "git_comment", label: "git_comment", category: "git", hint: "comment on a merge request, reply in a thread, resolve it" },
   { name: "git_merge", label: "git_merge", category: "git", hint: "merge a merge request" },

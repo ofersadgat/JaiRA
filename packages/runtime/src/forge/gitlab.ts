@@ -19,6 +19,7 @@ import {
   type CiStatus,
   type ForgeAnchor,
   type ForgeBranch,
+  type ForgeCommit,
   type ForgeComment,
   type ForgeIdentity,
   type ForgeNote,
@@ -450,6 +451,33 @@ export class GitLabProvider implements ForgeProvider {
       }
     }
     return notes.filter((note) => options.since === undefined || note.at > options.since).sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  /**
+   * `GET /projects/:id/repository/compare?from=&to=` — sorted oldest first here by committed date
+   * (the head last), rather than trusting an order the API does not document. With no base, the one
+   * head commit.
+   */
+  async compare(project: string, base: string | undefined, head: string): Promise<ForgeCommit[]> {
+    const at = `/projects/${encodeURIComponent(project)}/repository`;
+    const commitOf = (entry: unknown): ForgeCommit & { when: string } => {
+      const row = asRecord(entry);
+      return { sha: asText(row["id"]), message: asText(row["message"]) || asText(row["title"]), author: asText(row["author_name"]), when: asText(row["committed_date"]) || asText(row["created_at"]) };
+    };
+    const strip = ({ sha, message, author }: ForgeCommit & { when: string }): ForgeCommit => ({ sha, message, author });
+    if (base === undefined) {
+      return [strip(commitOf(expectStatus(await this.call("GET", `${at}/commits/${encodeURIComponent(head)}`), [200], `reading ${head.slice(0, 7)}`).body))];
+    }
+    const response = expectStatus(
+      await this.call("GET", `${at}/compare?${new URLSearchParams({ from: base, to: head }).toString()}`),
+      [200],
+      `comparing ${base.slice(0, 7)}...${head.slice(0, 7)}`,
+    );
+    const commits = asList(asRecord(response.body)["commits"]).map(commitOf);
+    commits.sort((a, b) => a.when.localeCompare(b.when));
+    const last = commits.findIndex((commit) => commit.sha === head);
+    if (last >= 0) commits.push(...commits.splice(last, 1));
+    return commits.map(strip);
   }
 }
 

@@ -249,8 +249,8 @@ describe("JAIRA_TOOLS — the gateable set", () => {
     // themselves: the two that only look are readers, the six that steer work are not.
     expect([...writers, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS, ...GIT_TOOL_NAMES].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
     for (const name of WORKFLOW_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(name === "list_workflows" || name === "list_tasks");
-    // The Git tools (decision 0010 §1) likewise: the three that read are readers.
-    for (const name of GIT_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["list_merge_requests", "read_merge_request", "git_checks"].includes(name));
+    // The Git tools (decision 0010 §1) likewise: the three that read, and the wait, are readers.
+    for (const name of GIT_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["list_merge_requests", "read_merge_request", "git_checks", "wait_git_event"].includes(name));
   });
 
   it("names every tool JaiRA registers — the set is the WHOLE gateable one", () => {
