@@ -315,6 +315,9 @@ function OpenPreset({ open, ...props }: PresetTabsProps & { open: PresetTab }): 
       marks={open.origin === "here"}
       onChange={(next) => props.onDraft(name, next)}
       lead={modelLead(draft, props.locked, (next) => props.onDraft(name, next))}
+      // The preset resolves in main as a run would — to the model it would pick on this machine — and
+      // Reasoning offers that model's levels (decision 0009).
+      levelsFor={name}
       section={props.section}
       onSection={props.onSection}
       footer={

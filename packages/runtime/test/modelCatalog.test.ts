@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ModelInfo, type CatalogSource, type ModelInfoInterface } from "@declarative-ai/llm";
 import type { ProbeResult } from "@jaira/shared";
@@ -40,6 +43,25 @@ describe("catalogSources — what this machine asks, in merge order", () => {
   it("leaves out an agent whose check failed, and claude-code when the SDK's binary cannot be found", () => {
     const planned = catalogSources({ executors: [ok("claude-code"), { ...ok("codex-cli"), status: "failed" }] }, { sdkClaude: () => undefined });
     expect(names(planned)).toEqual(["openrouter-models", "openrouter-native-mirrors"]);
+  });
+
+  it("the embedded source's fingerprint moves when a weights file arrives or changes at its path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "jaira-weights-"));
+    try {
+      const file = join(dir, "qwen.gguf");
+      const print = (): string =>
+        catalogSources({ executors: [], models: { routes: { embedded: { weights: { "qwen3-8b-q4": { modelPath: file } } } } } }, { sdkClaude: () => undefined }).find(
+          (p) => p.source.name === "embedded-models",
+        )!.fingerprint;
+      const missing = print();
+      writeFileSync(file, "GGUF");
+      const arrived = print();
+      expect(arrived).not.toBe(missing);
+      writeFileSync(file, "GGUF, a larger file");
+      expect(print()).not.toBe(arrived);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("an agent's fingerprint moves with its version and its sign-in", () => {
@@ -153,6 +175,24 @@ describe("CatalogRefresher — asks again only when it should", () => {
     release();
     await Promise.all([first, second]);
     expect(slow.asked).toBe(2); // the first pass, and one follow-up for fingerprint "3"
+  });
+
+  it("reports each source's last outcome, the failure's reason included", async () => {
+    let now = 5000;
+    const refresher = new CatalogRefresher(() => memoryStore(), { table: new ModelInfo([]), now: () => now++ });
+    const good = counting("codex-cli-models", () => [row("a"), row("b")]);
+    const bad = counting("anthropic-models", () => {
+      throw new Error("HTTP 401");
+    });
+    await refresher.refresh([
+      { source: good, fingerprint: "1" },
+      { source: bad, fingerprint: "1" },
+    ]);
+    expect(refresher.status()).toEqual([
+      { name: "codex-cli-models", at: 5001, tookMs: 1, ok: true, fetched: 2, applied: 2, models: ["codex-cli/a", "codex-cli/b"] },
+      { name: "anthropic-models", at: 5001, tookMs: 1, ok: false, fetched: 0, applied: 0, error: "HTTP 401", models: [] },
+    ]);
+    expect(refresher.refreshing).toBe(false);
   });
 
   it("loads what earlier refreshes kept over the table", () => {

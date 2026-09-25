@@ -15,11 +15,15 @@ import {
   SIMPLE_FIELDS,
   type ConversationForm,
   type OperationFieldsForm,
+  type ReasoningForm,
   type SessionForm,
   type JsonField,
   type SimpleField,
 } from "./operationForm";
 import { NO_ISSUES, fieldClass, markFor, type FormIssues } from "./issues";
+import { reasoningSchemaOf } from "./llmConfigForm";
+import { levelsFooter, useModelParameters } from "./modelParameters";
+import { SchemaForm } from "./schemaForm/SchemaForm";
 import { LinkInput, LinkToggle } from "./links";
 import { useReadOnly, useRunReading } from "./reading";
 import { ReadValue } from "./readValue";
@@ -276,6 +280,26 @@ function ConversationControl({
  * `function`, a function operation has no `prompt`. An `environment` block shows both, because it is
  * a defaults layer and may legitimately supply either.
  */
+/** The form's reasoning text as the value SchemaForm edits: a level, and a budget when it reads as a number. */
+function reasoningValueOf(form: ReasoningForm): Record<string, unknown> {
+  const budget = form.budgetTokens.trim();
+  return {
+    ...(form.effort !== "" ? { effort: form.effort } : {}),
+    ...(budget !== "" ? { budgetTokens: Number.isFinite(Number(budget)) ? Number(budget) : budget } : {}),
+  };
+}
+
+/** SchemaForm's value back as the form's text — what the form serialises from. */
+function reasoningFormOf(value: unknown): ReasoningForm {
+  const bag = value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const effort = bag["effort"];
+  const budget = bag["budgetTokens"];
+  return {
+    effort: typeof effort === "string" ? effort : "",
+    budgetTokens: typeof budget === "number" || typeof budget === "string" ? String(budget) : "",
+  };
+}
+
 export function OperationFieldsEditor({
   form,
   show,
@@ -305,6 +329,10 @@ export function OperationFieldsEditor({
   const readOnly = useReadOnly();
   const reading = useRunReading();
   const toolsFieldData = useToolsFieldData();
+  // What this block's model takes for reasoning (decision 0009) — its levels, and a budget only where
+  // it takes one. A model inherited from the `environment` rather than named here is not known here.
+  const namedModel = form.fields["model"]?.trim();
+  const thinking = useModelParameters(namedModel === "" ? undefined : namedModel);
   const setField = (name: string, value: string): void =>
     onChange({ ...form, fields: { ...form.fields, [name]: value } });
   const setJson = (name: string, value: string): void =>
@@ -449,27 +477,17 @@ export function OperationFieldsEditor({
         {JSON_FIELDS.filter((spec) => spec.group === "model").map((spec) => (
           <JsonFieldControl key={spec.name} spec={spec} form={form} onChange={setJson} />
         ))}
-        <label className="field">
+        <div className="field">
           <span>Reasoning</span>
-          <div className="row-controls">
-            <select
-              value={form.reasoning.effort}
-              onChange={(e) => onChange({ ...form, reasoning: { ...form.reasoning, effort: e.target.value } })}
-            >
-              <option value="">effort…</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-            </select>
-            <input
-              value={form.reasoning.budgetTokens}
-              inputMode="decimal"
-              placeholder="budget tokens"
-              spellCheck={false}
-              onChange={(e) => onChange({ ...form, reasoning: { ...form.reasoning, budgetTokens: e.target.value } })}
-            />
-          </div>
-        </label>
+          {/* The model's own levels and budget, drawn by SchemaForm from its schema — not a list kept here. */}
+          <SchemaForm
+            schema={reasoningSchemaOf(thinking)}
+            value={reasoningValueOf(form.reasoning)}
+            onChange={(next) => onChange({ ...form, reasoning: reasoningFormOf(next) })}
+            ctx={{ path: path === undefined ? "reasoning" : `${path}.reasoning`, disabled: readOnly, reading: readOnly }}
+          />
+          {readOnly ? null : <p className="cfg-hint">{levelsFooter(thinking)}</p>}
+        </div>
       </details>
       )}
     </div>

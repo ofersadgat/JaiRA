@@ -24,6 +24,7 @@ import {
   type JairaOperationNode,
   type ProbeResult,
 } from "@jaira/shared/browser";
+import { CatalogSection, useCatalogStatus } from "./catalogPane";
 import { ExecutorRoutes, ExecutorTree } from "./executorTreePane";
 import { ModelDefaults, configWriter } from "./configPane";
 import { Disclosure } from "./controls";
@@ -52,6 +53,8 @@ export interface ModelsPaneProps {
 
 export function ModelsPane(props: ModelsPaneProps): JSX.Element {
   const { config, executors, availability, busy, layer, editable } = props;
+  // The catalog, read once: the Catalog section draws it, and a preset candidate's box suggests its models.
+  const catalog = useCatalogStatus(availability.checkedAt);
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
 
   const layerDoc = config[layer];
@@ -75,7 +78,18 @@ export function ModelsPane(props: ModelsPaneProps): JSX.Element {
         )}
       </SettingsSection>
 
-      <PresetsGroup config={config} locked={locked} layer={layer} lookup={candidateLookupOf(availability)} onSave={props.onSaveModels} />
+      <PresetsGroup
+        config={config}
+        locked={locked}
+        layer={layer}
+        lookup={candidateLookupOf(availability)}
+        catalogIds={catalog.view?.modelIds ?? []}
+        onSave={props.onSaveModels}
+      />
+
+      {/* What this machine's routes say they serve (decision 0009): a refresh follows every
+          availability check, so the section re-reads when the check's time moves. */}
+      <CatalogSection catalog={catalog} />
 
       <SettingsSection
         id="advanced"
@@ -123,13 +137,12 @@ function presetsOf(doc: unknown): PresetDocs {
 
 /**
  * The model ids a candidate's box suggests: every candidate a preset in view already names, then the
- * current families — suggestions only, the box takes any id.
+ * models the catalog knows, newest first (decision 0009 — no list kept here) — suggestions only, the
+ * box takes any id.
  */
-const MODEL_SUGGESTIONS = ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
-
-function suggestionsOf(...docs: PresetDocs[]): string[] {
+function suggestionsOf(catalogIds: readonly string[], ...docs: PresetDocs[]): string[] {
   const named = docs.flatMap((doc) => Object.values(doc).flatMap((preset) => candidatesInDraft(preset["model"])));
-  return [...new Set([...named, ...MODEL_SUGGESTIONS].filter((id) => id.trim().length > 0))];
+  return [...new Set([...named, ...catalogIds].filter((id) => id.trim().length > 0))];
 }
 
 /** A layer as words in a sentence — "Shared (all projects)" → "shared", "This project" → "this project". */
@@ -149,12 +162,15 @@ function PresetsGroup({
   locked,
   layer,
   lookup,
+  catalogIds,
   onSave,
 }: {
   config: ConfigView;
   locked: boolean;
   layer: ConfigLayer;
   lookup: CandidateLookup;
+  /** The models the catalog knows, newest first — the candidate boxes' suggestions. */
+  catalogIds: readonly string[];
   onSave: (fields: ModelPatch, layer: ConfigLayer) => void;
 }): JSX.Element {
   const builtIn = presetsOf(config.system);
@@ -178,7 +194,7 @@ function PresetsGroup({
         originLabel={LAYER_LABELS[other]}
         layerWord={layerWordOf(layer)}
         lookup={lookup}
-        suggestions={suggestionsOf(effective, builtIn)}
+        suggestions={suggestionsOf(catalogIds, effective, builtIn)}
         onWrite={(name, value) => onSave({ [`presets.${name}`]: value }, layer)}
       />
     </SettingsSection>

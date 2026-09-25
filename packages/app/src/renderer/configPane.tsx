@@ -278,6 +278,7 @@ export function ModelDefaults({ effective, locked, set, toggle }: Writer): JSX.E
         <Field label="Call settings" hint={summariseLlmConfig(knobs as LlmConfigDoc)} wide>
           <LlmConfigForm
             value={knobs as LlmConfigDoc}
+            levelsFor={model === "" ? undefined : model}
             disabled={locked}
             onChange={(next) => {
               // The model is written by the field above and merged back here, so editing a knob cannot

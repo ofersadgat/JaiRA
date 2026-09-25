@@ -470,7 +470,8 @@ export interface ChatPlanView {
   available: {
     routes: string[];
     tools: ToolChoice[];
-    models: Array<{ id: string; input: string[]; output: string[] }>;
+    /** `levels`: the model's reasoning levels in a few words (`low–max`, `no thinking level`), when known. */
+    models: Array<{ id: string; input: string[]; output: string[]; levels?: string }>;
     /**
      * Every permission set on this project's search path, references followed — what the Permissions card's
      * rows and its bucket picker are drawn from (decision 0007 §5). Absent from a plan built before

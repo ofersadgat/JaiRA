@@ -272,6 +272,10 @@ import {
   knownModels,
   CatalogRefresher,
   catalogSources,
+  catalogStatusView,
+  reasoningViewOf,
+  resolvePresetCall,
+  type PlannedSource,
   JAIRA_TOOLS,
   usableRouteKeys,
   newRegistry,
@@ -415,6 +419,9 @@ import {
   isMoveQuestion,
   type TaskActivity,
   type NextMove,
+  presetModelOf,
+  type CatalogStatusView,
+  type ModelParametersView,
 } from "@jaira/shared";
 import { Diagnostics, stackDetail } from "./diagnostics";
 import { WorkerTypeCheck } from "./tsCheck";
@@ -1254,6 +1261,79 @@ export class AppService {
     if (this.closed) return undefined;
     this.catalogStore ??= modelStoreAt(jairaBasePaths(this.baseDir).dbFile, { create });
     return this.catalogStore;
+  }
+
+  /** This configuration's catalog sources, from the last executor check. */
+  private plannedCatalogSources(fetchText?: FetchText): PlannedSource[] {
+    const config = this.effectiveConfig();
+    return catalogSources(
+      { models: config.models, agents: config.agents, secrets: this.secretResolver(), executors: this.availability.executors },
+      fetchText !== undefined ? { fetchText } : {},
+    );
+  }
+
+  /** The Catalog section: every source this machine could ask, and how its last asking went. */
+  catalogStatus(): CatalogStatusView {
+    return catalogStatusView({
+      status: this.catalog.status(),
+      planned: this.plannedCatalogSources(),
+      executors: this.availability.executors,
+      refreshing: this.catalog.refreshing,
+    });
+  }
+
+  /** Ask every source again now, whatever their age — the Catalog section's Refresh — and answer once done. */
+  async refreshCatalogNow(): Promise<CatalogStatusView> {
+    const opt = this.options.refreshCatalog;
+    const fetchText = typeof opt === "object" ? opt.fetchText : undefined;
+    const report = await this.catalog.refresh(this.plannedCatalogSources(fetchText), { force: true });
+    if (report !== undefined && report.changed.length > 0) this.publish({ type: "store:invalidate", scope: "availability" });
+    return this.catalogStatus();
+  }
+
+  /**
+   * What a model field runs as on this machine, and what that model takes for reasoning (decision 0009).
+   *
+   * A PRESET resolves exactly as a run's call would — its candidates, its rule, this machine's
+   * availability, each account's allowance — so the levels offered are the levels of the model that
+   * would actually answer. A bare id resolves to the route that would serve it; a prefixed id is itself.
+   */
+  modelParameters(request: { model: string; project?: string }): ModelParametersView {
+    const config = this.sessionOf(request.project)?.project.config ?? this.effectiveConfig();
+    const secrets = this.secretResolver();
+    const presets = (config.models.presets ?? {}) as Record<string, Record<string, JsonValue>>;
+    const available = this.modelAvailabilityFor(config, secrets);
+    const resolution = resolvePresetCall({ model: request.model }, {
+      presets,
+      available,
+      left: (model: string, route: string) => {
+        const reading = this.limits.board.state(accountOfRoute(route)).reading;
+        return reading === null ? null : remainingPercent(reading, model);
+      },
+    }, undefined);
+    if ("refused" in resolution) return { requested: request.model, refused: resolution.refused };
+    const chosen = typeof resolution.config["model"] === "string" ? resolution.config["model"] : request.model;
+    const where = available(chosen);
+    const key = !where.available ? undefined : chosen.startsWith(`${where.route}/`) ? chosen : `${where.route}/${chosen}`;
+    const view: ModelParametersView = {
+      requested: request.model,
+      ...(key !== undefined ? { resolved: key } : { refused: (where as { why: string }).why }),
+      // Unresolvable here still says what the model takes, by its id on any route.
+      ...reasoningViewOf(key ?? `unrouted/${chosen}`, this.availability.executors),
+    };
+    const preset = presetModelOf(presets[request.model]);
+    if (preset !== undefined && key !== undefined) {
+      const candidates = typeof preset === "string" ? [preset] : preset.candidates;
+      // Why each candidate ahead of the chosen one was passed over — unavailable, or (under most-left)
+      // available with less allowance left. Never "not available" for one that is.
+      const passed = candidates.slice(0, Math.max(0, candidates.indexOf(chosen))).map((c) => {
+        const there = available(c);
+        return there.available ? `${c} has less allowance left` : `${c} is not available here (${there.why})`;
+      });
+      const rule = typeof preset === "string" ? "its model" : preset.choose === "most-left" ? "the candidate with the most allowance left" : "the first candidate available here";
+      view.via = `${request.model} resolves to ${key} on this machine — ${rule}` + (passed.length > 0 ? `; ${passed.join(", ")}` : "");
+    }
+    return view;
   }
 
   /**
@@ -8053,6 +8133,9 @@ export class AppService {
    * the route's own probe is decided from, so the list and the route's line cannot disagree.
    */
   checkWeights(request?: { weights?: Record<string, { modelPath: string }> }): EmbeddedWeightsReport {
+    // A person checking weights has usually just put a file in place — the catalog's embedded source
+    // is re-asked when a file's size or time moved (its fingerprint), so a pass now reads its header.
+    this.kickCatalog();
     return checkEmbeddedWeights(request?.weights ?? this.effectiveConfig().models.routes?.embedded?.weights);
   }
 

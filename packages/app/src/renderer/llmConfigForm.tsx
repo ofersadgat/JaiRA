@@ -21,7 +21,11 @@
  *    form refuses to produce one: turning reasoning on retires the sampling knobs, and says why.
  */
 import { useId, useMemo, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { REASONING_EFFORTS, type ModelParametersView } from "@jaira/shared/browser";
 import { Field, FieldGrid, NumInput, SelectInput, TextArea, TextInput } from "./controls";
+import { levelsFooter, useModelParameters } from "./modelParameters";
+import { SchemaForm } from "./schemaForm/SchemaForm";
+import type { Schema } from "./schemaForm/types";
 
 /** The config as a plain document — what a preset or an executor's `models.config` holds. */
 export type LlmConfigDoc = Record<string, unknown>;
@@ -35,13 +39,23 @@ export type LlmConfigDoc = Record<string, unknown>;
  */
 const SAMPLING_KEYS = ["temperature", "topP", "topK", "presencePenalty", "frequencyPenalty"] as const;
 
-const EFFORTS: Array<[string, string]> = [
-  ["— inherit", ""],
-  ["low", "low"],
-  ["medium", "medium"],
-  ["high", "high"],
-  ["xhigh", "xhigh"],
-];
+/**
+ * The `reasoning` object's schema for SchemaForm: the resolved model's own (its levels as an `enum`
+ * with their descriptions, a budget only where it takes one), or — for a model nothing describes — the
+ * usual levels as SUGGESTIONS and a budget, since what it takes is not known.
+ */
+export function reasoningSchemaOf(view: ModelParametersView | undefined): Schema {
+  const own = view?.reasoningSchema;
+  if (own !== null && typeof own === "object" && !Array.isArray(own) && view?.levels !== undefined) return own as Schema;
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      effort: { type: "string", examples: [...REASONING_EFFORTS], description: "A level rather than a number of tokens. A model that tops out lower clamps rather than refusing." },
+      budgetTokens: { type: "integer", minimum: 1, description: "A token ceiling on the thinking itself, for the models that take one." },
+    },
+  };
+}
 
 /**
  * The categories, their fields, and how each summarises itself when collapsed. `model` is drawn only
@@ -247,7 +261,14 @@ export function LlmConfigForm({
   unframed = false,
   marks = true,
   lead,
+  levelsFor,
 }: {
+  /**
+   * Whose reasoning levels the Reasoning section offers: a model id, or a PRESET's name — which main
+   * resolves to the model it would pick on this machine (decision 0009). Absent ⇒ the config's own
+   * `model`, and with none, the usual levels as suggestions.
+   */
+  levelsFor?: string | undefined;
   value: LlmConfigDoc;
   onChange: (next: LlmConfigDoc) => void;
   disabled?: boolean;
@@ -289,6 +310,8 @@ export function LlmConfigForm({
   const panelId = useId();
   const reasoning = reasoningOf(value);
   const reasoningOn = reasoning !== undefined;
+  const ownModel = typeof value["model"] === "string" ? (value["model"] as string) : undefined;
+  const thinking = useModelParameters(levelsFor ?? ownModel);
 
   /** Write one key. `undefined` REMOVES it, which is how a box goes back to inheriting. */
   const set = (key: string, next: unknown): void => {
@@ -431,41 +454,32 @@ export function LlmConfigForm({
 
         {active === "reasoning" ? (
           <div className="cfg-stack">
-            <Field
-              label="Effort"
-              param="reasoning.effort"
-              hint="A level rather than a number of tokens, so it means the same thing across providers. A provider that tops out lower clamps rather than refusing."
-              set={here(reasoning?.effort)}
-            >
-              <SelectInput
-                value={reasoning?.effort ?? ""}
-                options={EFFORTS}
-                disabled={disabled}
-                onChange={(v) => {
-                  const next = { ...(reasoning ?? {}) };
-                  if (v === "") delete next.effort;
-                  else next.effort = v;
-                  set("reasoning", Object.keys(next).length === 0 ? undefined : next);
-                }}
-              />
-            </Field>
-            <Field
-              label="Thinking budget"
-              param="reasoning.budgetTokens"
-              hint="A token ceiling on the thinking itself, for the models that take one instead of a level."
-              set={here(reasoning?.budgetTokens)}
-            >
-              <NumInput
-                value={reasoning?.budgetTokens}
-                disabled={disabled}
-                onChange={(n) => {
-                  const next = { ...(reasoning ?? {}) };
-                  if (n === undefined) delete next.budgetTokens;
-                  else next.budgetTokens = n;
-                  set("reasoning", Object.keys(next).length === 0 ? undefined : next);
-                }}
-              />
-            </Field>
+            {/* What the model this configuration resolves to takes (decision 0009): its levels, with
+                their source's descriptions, and a budget only where it takes one — drawn by SchemaForm
+                from that model's own `reasoning` schema rather than from a list kept here. */}
+            {here(reasoning) ? (
+              <span className="cfg-field-head">
+                <span className="cfg-set" title="set in the layer you are editing">
+                  set here
+                </span>
+              </span>
+            ) : null}
+            <SchemaForm
+              schema={reasoningSchemaOf(thinking)}
+              value={reasoning ?? {}}
+              onChange={(next) => {
+                const doc = (next ?? {}) as Record<string, unknown>;
+                set("reasoning", Object.keys(doc).length === 0 ? undefined : doc);
+              }}
+              ctx={{ path: "reasoning", disabled }}
+            />
+            {thinking?.via !== undefined ? <p className="cfg-hint">{thinking.via}</p> : null}
+            {thinking?.resolved !== undefined && thinking.reasoning === false ? (
+              <p className="cfg-hint">{thinking.resolved} takes no reasoning request, so nothing set here is sent.</p>
+            ) : thinking?.resolved !== undefined && thinking.budget === false ? (
+              <p className="cfg-hint">No thinking budget: {thinking.resolved} takes a level only.</p>
+            ) : null}
+            <p className="cfg-hint">{levelsFooter(thinking)}</p>
             {reasoningOn && SAMPLING_KEYS.some((k) => value[k] !== undefined) ? (
               <div className="notice warn">
                 This configuration also sets{" "}

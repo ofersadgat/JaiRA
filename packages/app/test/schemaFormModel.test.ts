@@ -96,8 +96,15 @@ describe("what a value starts as", () => {
 describe("the control a value is typed into", () => {
   it("is a choice box for an enum, one that insists, and for examples, one that only suggests", () => {
     expect(leafControlOf({ type: "string", enum: ["a"] })).toBe("choice");
-    expect(suggestionsOf({ type: "string", enum: ["a", "b"] })).toEqual({ values: ["a", "b"], strict: true });
-    expect(suggestionsOf({ type: "string", examples: ["memory"] })).toEqual({ values: ["memory"], strict: false });
+    expect(suggestionsOf({ type: "string", enum: ["a", "b"] })).toEqual({ values: ["a", "b"], strict: true, labels: {} });
+    expect(suggestionsOf({ type: "string", examples: ["memory"] })).toEqual({ values: ["memory"], strict: false, labels: {} });
+  });
+
+  it("labels an enum's options with its `enumDescriptions`, aligned by position (decision 0009)", () => {
+    // A model's reasoning levels carry their source's own words — codex describes every level.
+    expect(
+      suggestionsOf({ enum: ["low", "high", "ultra"], enumDescriptions: ["Fast responses", "", "Maximum reasoning with automatic task delegation"] }).labels,
+    ).toEqual({ low: "Fast responses", ultra: "Maximum reasoning with automatic task delegation" });
   });
 
   it("is a box with room for content with a media type, and a lenient box for no type at all", () => {

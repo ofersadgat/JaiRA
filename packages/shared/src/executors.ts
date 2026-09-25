@@ -208,6 +208,7 @@ export interface AgentAccount {
  */
 import type { JairaOperationNode } from "./executorTree";
 import type { ForgeCheck } from "./forge";
+import type { JsonValue } from "@declarative-ai/json";
 
 export interface AvailabilitySnapshot {
   /** Provider routes, keyed in `MODEL_ROUTE_KEYS` order. */
@@ -341,3 +342,86 @@ export const SECRET_TARGET_LABELS: Record<SecretTarget, string> = {
   "project-env-local": "this project's .jaira/.env.local",
   "base-env-local": "the shared root's .env.local",
 };
+
+// --- the model catalog, as the renderer reads it (decision 0009) -------------------------------------
+
+/** One reasoning level a model takes, with what its source says it means when it says. */
+export interface ModelLevel {
+  level: string;
+  description?: string;
+}
+
+/**
+ * What a model field would run as on this machine, and what that model takes for reasoning — the
+ * Thinking chip's options, the effort fields' schema. `model:parameters` answers it.
+ *
+ * A PRESET resolves to the model it would pick here (its candidates, its rule, this machine's
+ * availability); a bare id to the route that would serve it; a prefixed id is itself.
+ */
+export interface ModelParametersView {
+  /** What was asked about: a model id, bare or prefixed, or a preset's name. */
+  requested: string;
+  /** The `{route}/{model}` it runs as here, when it resolves. */
+  resolved?: string;
+  /** How it got there, for a person — set when a preset chose. */
+  via?: string;
+  /** Why it resolves to nothing here. */
+  refused?: string;
+  /** Whether it takes a reasoning request; absent ⇒ unknown. */
+  reasoning?: boolean;
+  /** The levels it takes, ascending; absent ⇒ unknown (any may be asked; the call lowers one it lacks). */
+  levels?: ModelLevel[];
+  /** The level it thinks at when none is asked for, when its source says. */
+  defaultLevel?: string;
+  /** The thinking budget it takes — its range, `false` for none; absent ⇒ unknown. */
+  budget?: { minimum?: number; maximum?: number } | false;
+  /** The `reasoning` part of its parameters schema, for SchemaForm to draw — absent when unknown. */
+  reasoningSchema?: JsonValue;
+  /** Where the levels come from, for a person: `claude 2.1.142`, `codex 0.147.0`, `Anthropic's model list`… */
+  from?: string;
+}
+
+/** One model a catalog source reported, as its Catalog row lists it. */
+export interface CatalogModelView {
+  id: string;
+  /** Its levels in a few words — `low–ultra, default low`, `no thinking level`. */
+  levels?: string;
+  /** What an alias resolves to — `→ gpt-5.6-sol`. */
+  alias?: string;
+  hidden?: boolean;
+}
+
+/** One catalog source's row. */
+export interface CatalogSourceView {
+  name: string;
+  state: "ok" | "failed" | "not configured" | "not asked yet";
+  /** What it asks, for a person — `the installed claude for its model menu`. */
+  asks: string;
+  /** The binary's version it asked, for an agent. */
+  version?: string;
+  /** When it was last asked (ms), and when it will be asked again unless something changes first. */
+  at?: number;
+  nextAt?: number;
+  /** What else re-asks it — `the key changes`, `the agent is updated or signs in as someone else`. */
+  changesWith?: string;
+  fetched?: number;
+  error?: string;
+  /** What to do about a failure, in one line. */
+  fix?: string;
+  models: CatalogModelView[];
+}
+
+/** The Catalog section: every source this machine could ask, and how its last asking went. */
+export interface CatalogStatusView {
+  refreshing: boolean;
+  /** The last pass: when, and how long it took. */
+  lastAt?: number;
+  tookMs?: number;
+  sources: CatalogSourceView[];
+  /**
+   * The bare ids of the models the catalog knows on the native routes (`claude-opus-5-5`,
+   * `gpt-5.6-terra`), newest first — what a preset candidate's box suggests. Read from the table, so
+   * the snapshot's models are here before any refresh has run.
+   */
+  modelIds: string[];
+}

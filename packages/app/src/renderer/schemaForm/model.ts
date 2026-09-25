@@ -371,11 +371,22 @@ export function leafControlOf(schema: Schema): LeafControl {
  *
  * `enum` insists. `examples` — JSON Schema's own word for "common answers" — suggests, and any text
  * is accepted, which is what a `fill_form` enum with `custom: true` becomes.
+ *
+ * `enumDescriptions` — the annotation that says what each `enum` value means, aligned by position (a
+ * model's reasoning levels carry their source's descriptions, decision 0009) — becomes each option's
+ * label, so the list says what `ultra` buys and not only its name.
  */
-export function suggestionsOf(schema: Schema): { values: string[]; strict: boolean } {
+export function suggestionsOf(schema: Schema): { values: string[]; strict: boolean; labels: Record<string, string> } {
   const strict = Array.isArray(schema["enum"]);
   const raw = (strict ? schema["enum"] : schema["examples"]) as unknown[] | undefined;
-  return { values: (raw ?? []).map((v) => (typeof v === "string" ? v : JSON.stringify(v))), strict };
+  const values = (raw ?? []).map((v) => (typeof v === "string" ? v : JSON.stringify(v)));
+  const said = strict && Array.isArray(schema["enumDescriptions"]) ? (schema["enumDescriptions"] as unknown[]) : [];
+  const labels: Record<string, string> = {};
+  values.forEach((v, i) => {
+    const text = said[i];
+    if (typeof text === "string" && text.length > 0) labels[v] = text;
+  });
+  return { values, strict, labels };
 }
 
 /**

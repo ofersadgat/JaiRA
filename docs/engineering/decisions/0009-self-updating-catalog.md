@@ -206,8 +206,12 @@ As built (2026-09-24):
 - **The CLI** loads the store at process start (`loadCatalogFrom`), read-only.
 - **`AHEAD_OF_CATALOG` is deleted.** `knownModels` is the catalog, minus rows a source marked
   unavailable.
-- **Not yet built:** the Models page's Refresh button, and a refresh when downloaded weights land.
-  Both belong with the settings UI.
+- **Weights put in place later.** JaiRA does not download weights; a person puts a GGUF at the
+  configured path. The embedded source's fingerprint carries each file's size and modification time, so
+  a file arriving or changing is an input that changed, and the next pass (Check weights kicks one)
+  reads its header.
+- **Preset candidates are suggested from the catalog** (`CatalogStatusView.modelIds`: the native
+  routes' ids, newest first), not from a list kept in the Models page.
 
 ### 5. What reads the schema
 
@@ -236,6 +240,41 @@ As built (2026-09-24):
   levels. Which levels a given model takes comes from its schema, never from this list.
 - **The UI.** The composer, `llmConfigForm` and `operationFields` draw effort through SchemaForm from the
   chosen model's schema. The four hand-coded lists and `AHEAD_OF_CATALOG` are deleted.
+
+**The UI as built (2026-09-25).** Mockup and rulings: https://claude.ai/artifact/LFwG6qRiQQSUs4YHf37cQ7.
+The person's rulings:
+- A preset offers the levels of the model it RESOLVES to on this machine.
+- A level shows its source's own description when the source gives one.
+- The Catalog rows were left to me.
+
+- **`model:parameters`** answers every control for a model field. A preset resolves exactly as a run's
+  call does (`resolvePresetCall` with this machine's availability and allowance), a bare id resolves to
+  its route, and the answer carries levels, descriptions, the default, the budget range, the
+  `reasoning` schema, and where it all came from.
+  - An agent running a model its own list lacks (`claude-cli/claude-opus-5-5`) is described by that
+    model's API row: `ModelInfo.describedBy`, upstream. The call is fitted from that row too.
+  - Descriptions travel as `enumDescriptions`, which SchemaForm turns into datalist labels.
+- **Thinking chip.** It offers the model's levels, tags the default, and uses the source's description
+  or else JaiRA's hint. The footer reads "levels from claude 2.1.142". A model with no levels shows "—".
+- **Preset / call settings / operation editor.** Each is a SchemaForm over the resolved model's
+  `reasoning` schema, followed by:
+  - the resolution line: "coder resolves to codex-cli/gpt-5.6-terra on this machine — the candidate
+    with the most allowance left; claude-opus-5-5 has less allowance left"
+  - a no-budget note where it applies
+  - the footer
+- **Model picker.** An agent route lists the binary's own menu first, each with its levels, then
+  "also by id — any Anthropic model".
+- **Settings → Models → Catalog.** One row per source (ok / failed / not asked yet / not configured)
+  showing:
+  - what it asked, and the agent's version
+  - when it was asked, and when it will be asked again and what else re-asks it
+  - on failure, the error and a fix line
+  - a chevron that opens the models it reported, with their levels and aliases
+
+  Refresh asks every source now. The section polls while a pass runs.
+- **Found on the way:** `.set-field`'s columns overrode the narrow-container stacking `.cfg-field` has,
+  so any settings field in a narrow pane squeezed its name to 21px. It now stacks too.
+- Pictures: `packages/app/shots/model-levels.mts`.
 
 ### 6. Codex reasoning works
 

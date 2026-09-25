@@ -17,9 +17,11 @@ import type { BaselineFile, Changeset } from "./changeset";
 import type { Choice, ComponentConfig } from "./components";
 import type {
   AvailabilitySnapshot,
+  CatalogStatusView,
   EmbeddedWeightsReport,
   ExecutorInfo,
   LocalServerDiscovery,
+  ModelParametersView,
   ProbeResult,
   SecretTarget,
   SignInOutcome,
@@ -1991,6 +1993,15 @@ export interface IpcContract {
    */
   "availability:refresh": { request: { recheck?: boolean } | void; response: AvailabilitySnapshot };
   /**
+   * What a model field runs as here and what it takes for reasoning (decision 0009): a preset resolves
+   * to the model it would pick on this machine, a bare id to its route. `project` picks whose config.
+   */
+  "model:parameters": { request: { model: string; project?: string }; response: ModelParametersView };
+  /** The Catalog section: every source this machine could ask, and how its last asking went. */
+  "catalog:status": { request: void; response: CatalogStatusView };
+  /** Ask every source again now, whatever their age — the Catalog section's Refresh. Answers once done. */
+  "catalog:refresh": { request: void; response: CatalogStatusView };
+  /**
    * What the limits board knows about every account's allowance, and which account each route spends
    * (usage-readings contract). Machine-wide, like availability. Changes arrive as `limits:changed`.
    */
@@ -2305,6 +2316,9 @@ export const IPC_CHANNELS = [
   "forge:signIns",
   "forge:signOut",
   "availability:refresh",
+  "model:parameters",
+  "catalog:status",
+  "catalog:refresh",
   "limits:read",
   "limits:refresh",
   "limits:watch",

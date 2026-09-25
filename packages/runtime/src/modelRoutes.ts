@@ -25,6 +25,7 @@
  */
 import { existsSync, statSync } from "node:fs";
 import { keyForModel, ModelInfo } from "@declarative-ai/llm";
+import { levelsSummary } from "./modelLevels";
 import type { EmbeddedModelConfig, LocalServerConfig, ModelRouterOptions } from "@declarative-ai/llm";
 import { AGENT_DEFAULT_MODEL, AgentApiExecutor, type AgentQuery } from "@declarative-ai/agents-api";
 import { AgentCliExecutor, AgentCodexExecutor, type ConnectMcpServer, type SpawnProcess, type StartMcpBridge } from "@declarative-ai/agents-cli";
@@ -821,18 +822,28 @@ export interface KnownModel {
   /** What it can be GIVEN and what it can PRODUCE — what the picker filters on. */
   input: string[];
   output: string[];
+  /** An AGENT's row: its reasoning levels in a few words (`low–max`), the hint its own menu shows. */
+  levels?: string;
 }
+
+/** The provider routes — every other route in the catalog is an agent's. */
+const PROVIDER_ROUTES: ReadonlySet<string> = new Set(["anthropic", "openai", "openrouter", "local", "embedded"]);
 
 export function knownModels(): KnownModel[] {
   return ModelInfo.instance
     .list()
     .filter((row) => row.available !== false)
-    .map((row) => ({
-      id: keyForModel(row),
-      // Defaulted rather than left empty: every model takes text and answers with it, and a filter
-      // over an absent field would hide a row for saying nothing rather than for being unable.
-      input: [...(row.modalities?.input ?? ["text"])],
-      output: [...(row.modalities?.output ?? ["text"])],
-    }))
+    .map((row) => {
+      const id = keyForModel(row);
+      const levels = PROVIDER_ROUTES.has(row.route) ? undefined : levelsSummary(id);
+      return {
+        id,
+        // Defaulted rather than left empty: every model takes text and answers with it, and a filter
+        // over an absent field would hide a row for saying nothing rather than for being unable.
+        input: [...(row.modalities?.input ?? ["text"])],
+        output: [...(row.modalities?.output ?? ["text"])],
+        ...(levels !== undefined ? { levels } : {}),
+      };
+    })
     .sort((a, b) => a.id.localeCompare(b.id));
 }

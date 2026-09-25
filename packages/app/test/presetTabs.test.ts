@@ -241,7 +241,8 @@ describe("the editor, drawn", () => {
 
     expect(html.replace(/<[^>]+>/g, "")).toContain("inherited from Shared (all projects). Saving a change copies it into");
     // No Override here: Save is the copy. Nothing of this layer's to remove yet.
-    const buttons = Array.from(html.matchAll(/<button(?![^>]*role="tab")[^>]*>(.*?)<\/button>/gs)).map((m) => m[1]);
+    // The pane's ACTIONS — not its tabs, and not the set/not-set switches SchemaForm draws beside each field.
+    const buttons = Array.from(html.matchAll(/<button(?![^>]*role="(?:tab|switch)")[^>]*>(.*?)<\/button>/gs)).map((m) => m[1]);
     expect(buttons).toEqual(["Save", "Revert"]);
     expect(html).not.toContain("Override here");
   });

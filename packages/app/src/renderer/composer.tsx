@@ -109,6 +109,7 @@ import { BrandIcon, Icon } from "./icons";
 import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow, useAway } from "./permissionSetRows";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import { AllowanceNumber, ContextMeter, ModelWindow, RouteLeft, SpentNotice, useSpent } from "./usageMeters";
+import { levelsFooter, useModelParameters } from "./modelParameters";
 import type { ContextReading } from "@jaira/shared/browser";
 import type { Schema } from "./schemaForm/types";
 
@@ -223,6 +224,7 @@ function Opt({
   on,
   icon,
   name,
+  tag,
   hint,
   title,
   onPick,
@@ -230,6 +232,8 @@ function Opt({
   on: boolean;
   icon?: Parameters<typeof Icon>[0]["name"];
   name: string;
+  /** A word after the name — `default` on the level a model thinks at unasked. */
+  tag?: string;
   hint?: string;
   title?: string;
   onPick: () => void;
@@ -242,7 +246,10 @@ function Opt({
         </span>
       ) : null}
       <span className="cx-opt-text">
-        <span className="cx-opt-name ellip">{name}</span>
+        <span className="cx-opt-name ellip">
+          {name}
+          {tag !== undefined ? <span className="cx-opt-tag">{tag}</span> : null}
+        </span>
         {hint !== undefined ? <span className="cx-opt-hint ellip">{hint}</span> : null}
       </span>
       {on ? <span className="cx-opt-tick">✓</span> : null}
@@ -255,7 +262,12 @@ interface PickModel {
   id: string;
   input: string[];
   output: string[];
+  /** An agent's own row: its reasoning levels in a few words (`low–max`). */
+  levels?: string;
 }
+
+/** Whose models an agent route borrows, as a person names them — the divider's words. */
+const VENDOR_NAMES: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI" };
 
 /**
  * The tier between route and model, when a route HAS one.
@@ -422,6 +434,14 @@ function RouteCascade({
   const shown = group !== undefined && groups.includes(group) ? group : groups[0];
   // A route with groups shows that one's models; a route without goes straight to models.
   const leaves = groups.length === 0 ? inRoute : inRoute.filter((m) => tierOf(m.id).group === shown);
+  // An AGENT's own menu — what the binary said it runs (decision 0009) — first, each with its levels;
+  // its `default` row only lends the default button its levels. The provider's list stays below: the
+  // binary runs any of its vendor's models by id, not only the ones its menu names.
+  const ownRows = borrows === undefined ? [] : matching.filter((m) => tierOf(m.id).route === route);
+  const ownDefault = ownRows.find((m) => tierOf(m.id).leaf === "default");
+  const own = ownRows.filter((m) => m !== ownDefault);
+  const ownIds = new Set(own.map((m) => m.id));
+  const borrowed = leaves.filter((m) => !ownIds.has(m.id));
 
   // Every route the machine can reach, plus any a known model names. A route with no catalog rows —
   // an agent that picks its own weights — still belongs here, because choosing it IS the choice.
@@ -514,16 +534,32 @@ function RouteCascade({
               <span className="cx-tick">{current === `${route}/default` ? "✓" : ""}</span>
               <span className="cx-opt-text">
                 <span className="cx-opt-name ellip">default</span>
-                <span className="cx-opt-hint ellip">whatever the CLI picks</span>
+                <span className="cx-opt-hint ellip">
+                  {ownDefault?.levels !== undefined ? `the CLI's pick · ${ownDefault.levels}` : "whatever the CLI picks"}
+                </span>
               </span>
             </button>
+          ) : null}
+          {own.map((m) => (
+            <button key={m.id} type="button" className={m.id === current ? "on live" : undefined} onClick={() => onPick(m.id)}>
+              <span className="cx-tick">{m.id === current ? "✓" : ""}</span>
+              <span className="cx-opt-text">
+                <span className="cx-opt-name ellip">{tierOf(m.id).leaf}</span>
+                {m.levels !== undefined ? <span className="cx-opt-hint ellip">{m.levels}</span> : null}
+              </span>
+            </button>
+          ))}
+          {own.length > 0 && borrowed.length > 0 ? (
+            <div className="cx-divider">
+              <span className="cx-origin">also by id — any {VENDOR_NAMES[borrows ?? ""] ?? borrows} model</span>
+            </div>
           ) : null}
           {leaves.length === 0 && ROUTE_BORROWS[route] === undefined ? (
             <span className="cx-hint">
               {"this route picks its own model"}
             </span>
           ) : (
-            leaves.map((m) => (
+            borrowed.map((m) => (
               <button key={m.id} type="button" className={m.id === current ? "on live" : undefined} onClick={() => onPick(m.id)}>
                 <span className="cx-tick">{m.id === current ? "✓" : ""}</span>
                 <span className="cx-opt-text">
@@ -970,6 +1006,8 @@ export function Composer({
   // reads, and whether a message sent now waits for a reset (usage-readings contract).
   const route = routeOf(effective.model ?? "") || undefined;
   const spent = useSpent(route);
+  // What the model in force takes for reasoning — the Thinking chip's levels.
+  const thinking = useModelParameters(effective.model);
 
   /** Whether Enter does anything right now — see {@link joinable} for the two hosts that say no. */
   const canSend = disabled === undefined && (busy !== true || joinable === true);
@@ -1177,24 +1215,34 @@ export function Composer({
               icon="think"
               label="Thinking"
               startOpen={startOpen?.card === "Thinking"}
-              value={effective.reasoning}
+              // "—" for a model that takes no level: a level shown there would be one nothing sends.
+              value={thinking?.reasoning === false ? "—" : effective.reasoning}
               origin={origin.reasoning}
               from={plan?.from}
               onReset={() => clear("reasoning")}
             >
-              <div className="cx-opts">
-                {REASONING_EFFORTS.map((effort) => (
-                  <Opt
-                    key={effort}
-                    on={settings.reasoning?.effort === effort}
-                    icon="think"
-                    name={effort}
-                    hint={EFFORT_HINTS[effort]}
-                    onPick={() => set({ reasoning: { effort: effort as ReasoningEffort } })}
-                  />
-                ))}
-              </div>
-              <p className="cx-hint">A model that tops out lower clamps rather than refusing.</p>
+              {thinking?.reasoning === false ? (
+                <p className="cx-hint">this model takes no thinking level</p>
+              ) : (
+                <>
+                  {/* The levels THIS model takes (decision 0009) — every level only while they are not known.
+                      A source's own description of a level beats JaiRA's short one (ruling of 2026-09-24). */}
+                  <div className="cx-opts">
+                    {(thinking?.levels ?? REASONING_EFFORTS.map((level) => ({ level, description: undefined }))).map(({ level, description }) => (
+                      <Opt
+                        key={level}
+                        on={settings.reasoning?.effort === level}
+                        icon="think"
+                        name={level}
+                        {...(level === thinking?.defaultLevel ? { tag: "default" } : {})}
+                        hint={description ?? EFFORT_HINTS[level]}
+                        onPick={() => set({ reasoning: { effort: level as ReasoningEffort } })}
+                      />
+                    ))}
+                  </div>
+                  <p className="cx-hint">{levelsFooter(thinking)}</p>
+                </>
+              )}
             </Chip>
 
             <Chip

@@ -7604,6 +7604,34 @@ button.cfg-login-add:hover:not(:disabled) {
   padding-left: 30px;
 }
 
+/* Settings → Models → Catalog (decision 0009): the heading's refresh, a row's count, and the models
+   an opened row lists — id, levels, and a tag for one its source hides. */
+.catalog-aside {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.catalog-count {
+  margin-right: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.catalog-models {
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  gap: 3px 18px;
+  align-items: baseline;
+}
+.catalog-model {
+  display: contents;
+}
+.catalog-hidden {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: 600 calc(var(--size-data) * 0.76) / 1.45 var(--font-data);
+  color: var(--tok-hint);
+}
+
 /* --- the four states ---
    A pill rather than a checkbox, because a checkbox can only say on or off: an unavailable provider
    rendered as a ticked box is how this screen came to claim four working providers on a machine
@@ -11466,6 +11494,17 @@ fieldset.reading {
 .cx-opts button.on .cx-opt-hint {
   color: var(--dim);
 }
+/* A word after an option's name — `default` on the level a model thinks at unasked (decision 0009). */
+.cx-opt-tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  font: 600 calc(var(--size-data) * 0.76) / 1.45 var(--font-data);
+  color: var(--accent);
+  vertical-align: 1px;
+}
 /* The tick sits at the END, so the names all start at the same x and the column reads as a list. */
 .cx-opt-tick {
   margin-left: auto;
@@ -11721,6 +11760,12 @@ fieldset.reading {
   width: 10px;
   color: var(--ok);
   font-size: calc(var(--size-app) * 11 / 12.5);
+}
+/* Between an agent's own menu and the vendor models it also runs by id (decision 0009). */
+.cx-divider {
+  margin: 6px 7px 2px;
+  padding: 7px 0 1px;
+  border-top: 1px solid var(--line);
 }
 .cx-col-last .cx-opt-name {
   font-family: var(--font-data);
@@ -15614,6 +15659,15 @@ fieldset.reading {
   grid-template-columns: minmax(0, 1fr) minmax(170px, 17rem);
   gap: 10px 32px;
   padding: 13px 16px;
+}
+/* …and in a narrow container it stacks, as `.cfg-field` does. Without this the rule above — later,
+   and as specific — beat that container query, so a settings field in a narrow pane (a preset's
+   Reasoning, 357px) kept its 17rem control and squeezed its name to 21px, a letter per line. */
+@container (max-width: 380px) {
+  .set-field {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
 }
 .cfg-fields > .set-field + .set-field {
   border-top: 1px solid var(--line);

@@ -739,14 +739,14 @@ function Leaf({
     case "choice": {
       // A box that suggests. `enum` insists on its values, and the validator is what says so; `examples`
       // only offers them. Either way the box takes typing, which a `<select>` never could.
-      const { values } = suggestionsOf(schema);
+      const { values, labels } = suggestionsOf(schema);
       const listId = `${id}-choices`;
       return (
         <>
           <TextInput value={typeof value === "string" ? value : jsonTextOf(value)} mono list={listId} disabled={disabled} onChange={onChange} />
           <datalist id={listId}>
             {values.map((option) => (
-              <option key={option} value={option} />
+              <option key={option} value={option} {...(labels[option] !== undefined ? { label: labels[option] } : {})} />
             ))}
           </datalist>
         </>

@@ -246,10 +246,10 @@ const service = new AppService({
   // keep honest, and a user who should never have to press a button to find out that the provider
   // the screen shows as enabled has no key behind it.
   probeOnStart: true,
-  // The two capabilities the service cannot have itself: a file manager and a directory dialog are
   // …and keeps its model catalog current the same way: what each reachable route says it serves,
   // asked after those checks and hourly, and saved for the next start (decision 0009).
   refreshCatalog: true,
+  // The two capabilities the service cannot have itself: a file manager and a directory dialog are
   // both Electron's, and the service stays Electron-free so it remains testable headlessly.
   reveal: (file: string) => shell.showItemInFolder(file),
   // A forge sign-in's page (the device flow's verification URL). Only http(s): the URL came from the
@@ -527,6 +527,9 @@ const handlers: Record<IpcChannel, Handler> = {
   "forge:signIns": (() => service.pendingForgeSignIns()) as Handler,
   "forge:signOut": ((request: { connection: string }) => service.signOutForge(request.connection)) as Handler,
   "availability:refresh": ((request: { recheck?: boolean } | undefined) => service.refreshAvailability(request ?? {})) as Handler,
+  "model:parameters": ((request: Parameters<typeof service.modelParameters>[0]) => service.modelParameters(request)) as Handler,
+  "catalog:status": (() => service.catalogStatus()) as Handler,
+  "catalog:refresh": (() => service.refreshCatalogNow()) as Handler,
   "limits:read": (() => service.readLimits()) as Handler,
   "limits:refresh": ((request: { account: string }) => service.refreshLimits(request.account)) as Handler,
   "limits:watch": ((request: { watching: boolean }) => service.watchLimits(request.watching)) as Handler,
