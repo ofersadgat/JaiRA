@@ -216,13 +216,14 @@ As built:
   with no copy of the root — and the line says so ("Use Shared's steps" takes it away); editing its
   event, filter or name ignores Shared's rule there and adds a project rule of the same name. Shared's
   lines are editable on a project page now.
-- **Migration** (`persistence` `eventsMigration.ts`, at every open of a project and of the shared root):
-  a copy in the old shape — Shared's and a project's own lines — is rewritten into the new one, each
-  automation's state written before the root, the original kept under
-  `<system>/logs/events-migration-<stamp>/`; a line it cannot take apart is left and named. The
-  person's real data (2026-09-25): `~/.jaira/workflows` holds `feature*` and `plan` only, and the one
-  project JaiRA knows (`C:\UbuntuCode\JaiRA`) has an empty `.jaira/workflows` — no `system/events` in
-  either — so the migration had nothing to do there.
+- **Migration — written, then removed.** `persistence` `eventsMigration.ts` rewrote a copy in the old
+  shape (Shared's, and a project's own lines) into the new one at every open, states before the root,
+  the original kept under `<system>/logs/events-migration-<stamp>/`, with a dry run and tests. The
+  person's real data (checked read-only, 2026-09-25): `~/.jaira/workflows` holds `feature*` and `plan`
+  only, and the one project JaiRA knows (`C:\UbuntuCode\JaiRA`) has an empty `.jaira/workflows` — no
+  `system/events` anywhere — so, by the standing rule, the commit after the one that added it takes it
+  away again. Reverting that commit brings it back for any copy in the old shape written since; a line
+  left in the old shape does not load (its step states are gone) and the editor shows it as raw.
 - **Signing** (`signComment`, `isJairaComment` in `@jaira/shared` `forge.ts`): every comment and reply
   JaiRA posts — `git_comment` (comments and thread replies), `remote_comment`, the review gate's thread
   replies after a revise round, its notes and closing line when a person answers in JaiRA, and the
