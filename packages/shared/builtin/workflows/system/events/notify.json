@@ -1,0 +1,37 @@
+{
+  "label": "Post a notice",
+  "description": "A step of an events automation: posts `text` as a notice — written to the log, and pushed to the window — naming `event` when it is given. It asks nothing of anyone. `event` is handed on unchanged so the next step can read it (`.children.<this step>.output.event`). Every input is optional so a mount can be wired by its line's own `inputs` alone; a notice with no `text` fails at run time.",
+  "inputs": {
+    "text": {
+      "schema": {
+        "type": "string"
+      },
+      "optional": true,
+      "description": "What the notice says."
+    },
+    "event": {
+      "schema": {},
+      "optional": true,
+      "description": "The event the automation fired on — `.event` — which the notice names. Unconstrained: `.event` is typed by nothing a checker can see."
+    }
+  },
+  "outputs": {
+    "event": {
+      "schema": {},
+      "binding": ".inputs.event",
+      "description": "The event this step was handed, for the next step."
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "function": "notify",
+    "input": {
+      "text": {
+        "binding": ".inputs.text"
+      },
+      "event": {
+        "binding": ".inputs.event"
+      }
+    }
+  }
+}

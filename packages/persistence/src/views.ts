@@ -16,6 +16,7 @@ import type { Project } from "./project";
 import type { TaskRuntimeRow } from "./runtime";
 import { holdingOf } from "./lifecycle";
 import { connectUndoStands } from "./connectUndo";
+import { EVENTS_TASK, EVENTS_WORKFLOW } from "./eventsWorkflow";
 import { workflowLoadOptions } from "./workflowRefs";
 import {
   activePathOf,
@@ -62,8 +63,21 @@ export function taskSummaries(project: Project): TaskSummary[] {
     const above = meta.origin?.taskId ?? meta.parentTaskId;
     if (above !== undefined) under.set(above, (under.get(above) ?? 0) + 1);
   }
+  // The events task a started task names, when the one that started it has since been replaced (the
+  // supervisor restarts it as a new task): the line still goes somewhere, and it is where events live now.
+  let currentEvents: string | null | undefined;
+  const eventsNow = (): string | undefined => {
+    if (currentEvents === undefined) {
+      currentEvents = project.tasks.list().filter((m) => m.system === EVENTS_TASK && m.workflow === EVENTS_WORKFLOW).at(-1)?.id ?? null;
+    }
+    return currentEvents ?? undefined;
+  };
   return project.runtime.list().map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
+    const startedBy =
+      meta?.startedBy === undefined || project.runtime.get(meta.startedBy.fromTask) !== undefined
+        ? meta?.startedBy
+        : { ...meta.startedBy, fromTask: eventsNow() ?? meta.startedBy.fromTask };
     const origin = taskOriginOf(project, row, meta);
     const waitingFor = meta !== undefined ? holdingOf(project, meta) : [];
     // The request the task is parked on, when it is parked on one — the oldest, if there are several.
@@ -77,6 +91,8 @@ export function taskSummaries(project: Project): TaskSummary[] {
       ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
       ...(meta?.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
       ...(origin !== undefined ? { origin } : {}),
+      ...(startedBy !== undefined ? { startedBy } : {}),
+      ...(meta?.system !== undefined ? { system: meta.system } : {}),
       ...(waitingFor.length > 0 ? { waitingFor } : {}),
       ...((under.get(row.taskId) ?? 0) > 0 ? { controls: under.get(row.taskId)! } : {}),
       ...(awaited !== undefined ? { inReview: { provider: awaited.provider, number: awaited.number!, url: awaited.url! } } : {}),

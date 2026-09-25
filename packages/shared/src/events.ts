@@ -457,3 +457,44 @@ export function matchesEventFilter(event: JairaEvent, filter: EventFilter | unde
   }
   return true;
 }
+
+// --- saying what happened -------------------------------------------------------------------------
+
+/** A merge request's number as its forge writes it: `#42` on GitHub, `!42` elsewhere. */
+function requestNumber(payload: { host?: unknown }, number: number): string {
+  return `${typeof payload.host === "string" && /(^|\.)github\./i.test(payload.host) ? "#" : "!"}${number}`;
+}
+
+/**
+ * What happened, in one short line — what a task the events task started says it came from
+ * ("started by events · git.push a1b2c3d on main"). The event's name leads, so the line reads the
+ * same whichever event it was; the rest is the one or two facts a person would look for first.
+ */
+export function eventSummary(event: { name: string; payload?: unknown }): string {
+  if (!isEventName(event.name)) return event.name;
+  const payload = (event.payload ?? {}) as Record<string, unknown>;
+  const short = (sha: unknown): string => (typeof sha === "string" ? sha.slice(0, 7) : "");
+  const request = payload["merge_request"] as Partial<EventMergeRequest> | undefined;
+  const plural = (n: number): string => `${n} comment${n === 1 ? "" : "s"}`;
+  const words = ((): string => {
+    switch (event.name) {
+      case "git.push":
+        return `${short(payload["after"])} on ${String(payload["branch"] ?? "")}`;
+      case "git.merge_request.opened":
+      case "git.merge_request.updated":
+      case "git.merge_request.merged":
+      case "git.merge_request.closed":
+        return request?.number === undefined ? "" : `${requestNumber(payload, request.number)}${request.author !== undefined ? ` by ${request.author}` : ""}`;
+      case "git.merge_request.comments": {
+        const count = Array.isArray(payload["comments"]) ? payload["comments"].length : 0;
+        return request?.number === undefined ? plural(count) : `${requestNumber(payload, request.number)} · ${plural(count)}`;
+      }
+      case "git.checks.failed":
+        return `${short(payload["sha"])} on ${String(payload["ref"] ?? "")}`;
+      case "task.finished":
+      case "task.failed":
+        return typeof payload["title"] === "string" ? `"${payload["title"]}"` : "";
+    }
+  })().trim();
+  return words.length > 0 ? `${event.name} ${words}` : event.name;
+}

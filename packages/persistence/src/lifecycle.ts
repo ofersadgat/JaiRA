@@ -9,7 +9,7 @@ import { ApprovalRequired, approvalRefusalMessage, FAST_FORWARD_ENDED_EVENT, FAS
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { loadPermissionFunction, loadWorkflowBundle, permissionFunctionRefsOf } from "./permissionSets";
-import { newTaskId, isStartableStatus, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
+import { newTaskId, isStartableStatus, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStartedBy, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } from "./documents";
 import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
@@ -46,6 +46,10 @@ export interface CreateTaskInput {
    * document's root id, and the task pins the document's latest version each time it loads.
    */
   documentId?: string;
+  /** What started this task, when the events task did — see `TaskMeta.startedBy`. */
+  startedBy?: TaskStartedBy;
+  /** A task JaiRA keeps for itself — see `TaskMeta.system`. */
+  system?: TaskMeta["system"];
   id?: string;
 }
 
@@ -71,6 +75,8 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
     ...(input.origin !== undefined ? { origin: input.origin } : {}),
     ...(input.split !== undefined && input.split.length > 0 ? { split: input.split } : {}),
     ...(input.dependsOn !== undefined && input.dependsOn.length > 0 ? { dependsOn: input.dependsOn } : {}),
+    ...(input.startedBy !== undefined ? { startedBy: input.startedBy } : {}),
+    ...(input.system !== undefined ? { system: input.system } : {}),
   };
   if (project.runtime.get(meta.id)) throw refusal(log, `task '${meta.id}' already exists`, { taskId: meta.id });
   project.tasks.write(meta);

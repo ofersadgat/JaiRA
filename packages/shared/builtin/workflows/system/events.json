@@ -1,0 +1,7 @@
+{
+  "label": "Events",
+  "description": "Waits for events and starts tasks. Run as one task named `events` per project, and one in Shared, whenever this workflow has at least one automation; it runs unattended and may only start tasks and post notices. An automation is a named state-level transition into an `\"async\": true` child naming a step state: `{ \"name\": \"push_main\", \"when\": \"on_event('git.push', { branch: 'main' })\", \"to\": \"push_main\", \"inputs\": { \"event\": \".event\", \"workflow\": { \"text\": \"feature/review\" }, \"inputs\": { \"$literal\": { \"issue\": { \"$binding\": \".event.payload.commits[0].message\" } } } } }` with the child `\"push_main\": { \"state\": \"system/events/start\", \"async\": true }`. A second step is that child's own `{ \"when\": \"true\", \"to\": \"push_main_2\" }` into `\"push_main_2\": { \"state\": \"system/events/notify\", \"async\": true, \"inputs\": { \"event\": \".children.push_main.output.event\", \"text\": { \"text\": \"…\" } } }`. Shared's copy is `{ \"$ref\": \"$SYSTEM/workflows/system/events\", \"transitions\": [ … ], \"children\": { … } }`, both lists spelled out. A project's copy keeps Shared's automations: `{ \"$ref\": \"$BASE/workflows/system/events\", \"transitions\": [ …its own lines, { \"$ref\": \"...filter($BASE/workflows/system/events.transitions, (t) => !['ignored'].includes(t.name))\" } ], \"children\": { \"$ref\": \"$BASE/workflows/system/events.children\", …its own children } }`.",
+  "sequence": [],
+  "transitions": [],
+  "children": {}
+}

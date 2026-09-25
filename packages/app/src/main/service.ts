@@ -171,6 +171,8 @@ import {
   migrateUserSettings,
   modelStoreAt,
   type ModelStore,
+  EVENTS_TASK,
+  EVENTS_WORKFLOW,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -343,6 +345,12 @@ import {
   type PolicyAuditEntry,
   type QuestionRequest,
   type SyncEdit,
+  registerEventsTaskFunctions,
+  START_TASK,
+  NOTIFY,
+  ON_EVENT,
+  type EventsTaskNotice,
+  type EventsTaskStart,
 } from "@jaira/runtime";
 import {
   ARTIFACT_SCHEME,
@@ -356,6 +364,7 @@ import {
   EVENT_SPECS,
   enabledEvents,
   isEventEnabled,
+  eventSummary,
   type EventDelivery,
   type EventName,
   type JairaEvent,
@@ -480,6 +489,7 @@ import { WaitingQueue } from "./waiting";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITING } from "./session";
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
+import { EventsSupervisor } from "./eventsSupervisor";
 import { arrivedAt, fastForwardView, labelOfTarget, leftKeyOf, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
 import {
   noteFastForwardEnd,
@@ -557,6 +567,7 @@ import type {
   PruneRequest,
   PruneResult,
   PushMessage,
+  EventsNotice,
   MoveWorkflowRequest,
   ReadFileRequest,
   ReadUriRequest,
@@ -652,6 +663,11 @@ export interface AppServiceOptions {
   watchDebounceMs?: number;
   /** Set false to skip watching `.jaira/workflows/` (tests that don't need it). */
   watchWorkflows?: boolean;
+  /**
+   * How long after the events task ENDED on its own (completed, or failed) a new one is started, ms
+   * (decision 0010 §4). A pause, so a task that fails at once is not restarted in a tight loop.
+   */
+  eventsRestartDelayMs?: number;
   /**
    * The OS keychain, injected by the Electron main process.
    *
@@ -1140,6 +1156,17 @@ export interface StartRunRequest extends Omit<StartTaskRequest, "fake"> {
   fake?: JsonValue | FakeRule[];
 }
 
+/** How many of the events tasks' notices the service keeps in memory (`AppService.notices`). */
+const NOTICES_KEPT = 100;
+
+/** The functions an events task's run may call (decision 0010 §4): its two steps, and the wait its rules make. */
+const EVENTS_FUNCTIONS: ReadonlySet<string> = new Set([START_TASK, NOTIFY, ON_EVENT]);
+
+/** Drop every function an events task may not call from its run's registry. */
+function restrictToEventsFunctions(registry: ReturnType<typeof newRegistry>): void {
+  for (const name of [...registry.functions.keys()]) if (!EVENTS_FUNCTIONS.has(name)) registry.functions.delete(name);
+}
+
 export class AppService {
   /**
    * The open projects, by {@link sessionKey}.
@@ -1447,6 +1474,8 @@ export class AppService {
       const key = sessionKey(project.paths.projectDir);
       const session = new ProjectSession({ key, kind: role, project, ...this.hubsFor(key, project) });
       this.sessions.set(key, session);
+      // Shared's own events task (decision 0010 §4), on the root's first open.
+      void this.superviseEvents(session);
       return session;
     } catch (e) {
       const message = (e as Error).message;
@@ -1677,11 +1706,159 @@ export class AppService {
 
   /** A task's run ended: tell the tasks listening (`task.finished` / `task.failed`), when that event is on. */
   private taskEnded(open: ProjectSession, taskId: string, status: string, workflow: string | undefined): void {
+    this.eventsRunEnded(open, taskId, status);
     const name = status === "completed" ? "task.finished" : status === "failed" ? "task.failed" : undefined;
     if (name === undefined || !isEventEnabled(open.project.config, name)) return;
     const task = open.project.tasks.tryRead(taskId);
     const payload = { task_id: taskId, title: task?.title ?? taskId, workflow: workflow ?? task?.workflow ?? "", status: status as "completed" | "failed" };
     open.events.deliver({ name, payload } as JairaEvent, { from: taskId });
+  }
+
+  // --- the events task (decision 0010 §4) --------------------------------------------------------
+  //
+  // One task of `system/events` per open project and one in Shared, kept running by
+  // `EventsSupervisor` while that workflow has automations. Its run is built with ONLY `start_task`
+  // and `notify` (and `on_event`, every run's) — see `eventsCapabilities` and the marker check in
+  // `startRun` — so every path that starts or resumes it gets the same registry.
+
+  /** How the service's own verbs name a session: the shared root by its role, a project by its directory. */
+  private refOfSession(session: ProjectSession): string {
+    return session.kind === "shared" ? SHARED_SESSION : session.dir;
+  }
+
+  private readonly eventsSupervisor = new EventsSupervisor({
+    isOpen: (session) => !this.closed && !session.closing && this.sessions.get(session.key) === session,
+    startTask: (session, taskId) => this.startTask({ taskId, project: this.refOfSession(session) }),
+    resumeTask: (session, taskId) => this.resumeTask({ taskId, project: this.refOfSession(session) }),
+    cancelTask: (session, taskId) => void this.cancelTaskIn(session, taskId),
+    deleteTask: (session, taskId) => this.deleteTask(taskId, this.refOfSession(session)),
+    invalidate: (session) => {
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(session, { type: "store:invalidate", scope: "board" });
+    },
+    log: (entry) => this.log(entry),
+  });
+  /** Each session's supervision, one ask at a time: an ask arriving mid-way runs after the one before. */
+  private readonly eventsSupervision = new Map<string, Promise<void>>();
+  private eventsKick?: ReturnType<typeof setTimeout>;
+  private readonly eventsRestart = new Map<string, ReturnType<typeof setTimeout>>();
+  /** What the events tasks have posted (`notify`), oldest first, the last {@link NOTICES_KEPT}. */
+  private readonly postedNotices: EventsNotice[] = [];
+
+  /** Bring every open project's events task — and Shared's — in line with its events workflow, now. */
+  async superviseEventsTasks(): Promise<void> {
+    this.wakeSharedEvents();
+    await Promise.all([...this.sessions.values()].map((session) => this.superviseEvents(session)));
+  }
+
+  private superviseEvents(session: ProjectSession): Promise<void> {
+    const before = this.eventsSupervision.get(session.key) ?? Promise.resolve();
+    const next = before
+      .then(() => this.eventsSupervisor.supervise(session))
+      .catch((e: unknown) => this.log({ level: "error", source: "events", message: `supervising the events task failed: ${(e as Error).message}`, project: session.key, ...stackDetail(e) }));
+    this.eventsSupervision.set(session.key, next);
+    return next;
+  }
+
+  /** A workflow file was written somewhere — any layer's `system/events` changes what projects below it run. */
+  private kickEventsSupervisor(): void {
+    if (this.closed) return;
+    clearTimeout(this.eventsKick);
+    this.eventsKick = setTimeout(() => void this.superviseEventsTasks(), this.options.watchDebounceMs ?? 150);
+    this.eventsKick.unref?.();
+  }
+
+  /**
+   * Shared runs an events task of its own when ITS copy of the workflow is there to have automations —
+   * so the shared root is opened for it then, and only then: a machine with no Shared copy never opens
+   * the root to find nothing (the built-in has no automations). Its first open supervises it.
+   */
+  private wakeSharedEvents(): void {
+    if (this.closed || [...this.sessions.values()].some((session) => session.kind === "shared")) return;
+    const base = jairaBasePaths(this.baseDir).workflowsDir;
+    if ([".json", ".yaml", ".yml"].some((ext) => existsSync(join(base, `${EVENTS_WORKFLOW}${ext}`)))) this.roleSession("shared");
+  }
+
+  /**
+   * The events task's run ended on its own — completed, or failed on something nothing handled: a new
+   * one after a pause (so a task that fails at once is not restarted in a tight loop). A run that was
+   * STOPPED — by a person, by the supervisor, by the app closing — is not restarted here.
+   */
+  private eventsRunEnded(open: ProjectSession, taskId: string, status: string): void {
+    if (status !== "completed" && status !== "failed") return;
+    if (this.closed || open.closing || open.project.tasks.tryRead(taskId)?.system !== EVENTS_TASK) return;
+    clearTimeout(this.eventsRestart.get(open.key));
+    // Called while the run is still winding down (its claim goes in its `finally`), so the ask waits for
+    // it to let go — a task still `live` is one the supervisor leaves alone.
+    const ended = open.live.get(taskId)?.done ?? Promise.resolve();
+    const timer = setTimeout(() => {
+      this.eventsRestart.delete(open.key);
+      void ended.then(() => {
+        if (this.sessions.get(open.key) === open && !open.closing) void this.superviseEvents(open);
+      });
+    }, this.options.eventsRestartDelayMs ?? 5_000);
+    timer.unref?.();
+    this.eventsRestart.set(open.key, timer);
+  }
+
+  /** What the events task's run may call: `start_task` and `notify`, over this project, and nothing else. */
+  private eventsCapabilities(open: ProjectSession, taskId: string): (registry: ReturnType<typeof newRegistry>) => void {
+    return (registry) =>
+      registerEventsTaskFunctions(registry, {
+        startTask: (request) => this.startFromEvents(open, taskId, request),
+        notify: (notice) => this.postNotice(open, taskId, notice),
+      });
+  }
+
+  /**
+   * `start_task`: make a task in the events task's own project, record where it came from, start it,
+   * and answer as soon as its run has started. A task that was made and could not start is answered
+   * with why — and left, queued, where a person can see it and its origin.
+   */
+  private async startFromEvents(open: ProjectSession, fromTask: string, request: EventsTaskStart): Promise<{ task_id: string; error?: string }> {
+    const summary = request.event !== undefined ? eventSummary(request.event) : "";
+    const inputs = request.inputs ?? {};
+    const meta = createTask(open.project, {
+      title: request.title ?? request.workflow,
+      workflow: request.workflow,
+      ...(Object.keys(inputs).length > 0
+        ? { inputs, inputProvenance: Object.fromEntries(Object.keys(inputs).map((name) => [name, { via: "bound" as const }])) }
+        : {}),
+      startedBy: { by: "events", fromTask, event: request.event?.name ?? "", summary },
+    });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    try {
+      await this.startTask({ taskId: meta.id, project: this.refOfSession(open) });
+      this.log({ level: "info", source: "events", message: `started ${request.workflow} (${meta.id})${summary.length > 0 ? ` · ${summary}` : ""}`, project: open.key, taskId: fromTask });
+      return { task_id: meta.id };
+    } catch (e) {
+      const reason = (e as Error).message;
+      this.log({ level: "warn", source: "events", message: `made ${meta.id} (${request.workflow}) for the events task, but it could not start: ${reason}`, project: open.key, taskId: meta.id });
+      return { task_id: meta.id, error: reason };
+    }
+  }
+
+  /** `notify`: a notice, kept for the process, pushed, and written to the log. */
+  private postNotice(open: ProjectSession, fromTask: string, notice: EventsTaskNotice): void {
+    const summary = notice.event !== undefined ? eventSummary(notice.event) : undefined;
+    const posted: EventsNotice = {
+      project: open.dir,
+      taskId: fromTask,
+      text: notice.text,
+      at: Date.now(),
+      ...(notice.event !== undefined ? { event: notice.event.name } : {}),
+      ...(summary !== undefined ? { summary } : {}),
+    };
+    this.postedNotices.push(posted);
+    if (this.postedNotices.length > NOTICES_KEPT) this.postedNotices.shift();
+    this.log({ level: "info", source: "events", message: notice.text, project: open.key, taskId: fromTask, ...(summary !== undefined ? { detail: { event: summary } } : {}) });
+    this.publish({ type: "notice:posted", notice: posted });
+  }
+
+  /** The notices the events tasks posted in this process, oldest first. */
+  notices(): EventsNotice[] {
+    return [...this.postedNotices];
   }
 
   // --- watching merge requests (decision 0004) ---------------------------------
@@ -2004,6 +2181,9 @@ export class AppService {
     // a close that arrives while this is still going waits for it — a resume that started after
     // the close began would be a run with no session and a database on its way out.
     session.resuming = this.resumeSuspended(session).then(() => this.finishOpenConnects(session));
+    // Then its events task (decision 0010 §4) — after the resumes, which may already have resumed it.
+    void session.resuming.then(() => this.superviseEvents(session));
+    this.wakeSharedEvents();
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
     if (this.options.probeOnStart === true) this.kickAvailability();
@@ -2076,6 +2256,7 @@ export class AppService {
       ...(opened.length > 0 || forgotten.length > 0 ? { detail: { opened, forgotten } } : {}),
     });
     if (forgotten.length > 0) this.writeSettings({ projects: this.readSettings().projects.filter((dir) => !forgotten.includes(dir)) });
+    this.wakeSharedEvents();
     return { opened, forgotten };
   }
 
@@ -2296,6 +2477,7 @@ export class AppService {
     this.waiting.close();
     this.remoteWatcher?.dispose();
     this.repoWatch?.dispose();
+    clearTimeout(this.eventsKick);
     // A sign-in still polling ends as canceled; a renewal timer set for later is nobody's now.
     for (const waiting of this.forgeSignIns.values()) waiting.controller.abort();
     if (this.forgeRenewal !== undefined) clearTimeout(this.forgeRenewal);
@@ -2369,8 +2551,13 @@ export class AppService {
     this.log({ level: "info", source: "project", message: `closing ${session.project.paths.projectDir}`, project: key });
     this.sessions.delete(key);
     for (const [requestId, owner] of [...this.requestOwner]) if (owner === key) this.requestOwner.delete(requestId);
-    // The resumes the open started, settled before the close unwinds what they started.
+    // The resumes the open started, settled before the close unwinds what they started — and the
+    // events task's supervision, which may be starting one.
     await session.resuming;
+    clearTimeout(this.eventsRestart.get(key));
+    this.eventsRestart.delete(key);
+    await this.eventsSupervision.get(key);
+    this.eventsSupervision.delete(key);
     await session.close();
     // Its remotes are nobody's to watch now.
     this.kickRepoWatch();
@@ -2447,6 +2634,8 @@ export class AppService {
 
   private publish(message: PushMessage): void {
     this.options.publish?.(message);
+    // Every workflow write says so here — the one place all of them pass (decision 0010 §4).
+    if (message.type === "store:invalidate" && message.scope === "workflows") this.kickEventsSupervisor();
   }
 
   /**
@@ -3823,9 +4012,13 @@ export class AppService {
     };
     const exec = new NodeExec({ execEnv: config.execEnvironment, observer });
 
-    if (opts.capabilities !== undefined) {
+    // The events task (decision 0010 §4) is recognised by its marker, not by its caller, so a start, a
+    // resume and a supervisor's restart all build it the same way: `start_task` and `notify`, nothing else.
+    const eventsTask = project.tasks.tryRead(taskId)?.system === EVENTS_TASK;
+    const capabilities = opts.capabilities ?? (eventsTask ? this.eventsCapabilities(open, taskId) : undefined);
+    if (capabilities !== undefined) {
       // A caller that states what the run may call gets THAT and nothing else — see `capabilities`.
-      opts.capabilities(registry);
+      capabilities(registry);
     } else {
       // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
       // reaches one with a `claude-code` function op.
@@ -3999,7 +4192,9 @@ export class AppService {
 
     // Every interactive function the bundle names that the script didn't answer
     // is routed to the renderer.
-    for (const name of functionNamesOf(started.bundle)) {
+    // Not for the events task: it runs unattended, so a component its workflow names is refused at the
+    // call (nothing registered) rather than parked on a person nobody asked to watch it.
+    for (const name of eventsTask ? [] : functionNamesOf(started.bundle)) {
       open.interactive.add(name);
       // The task is named at REGISTRATION, so every request this run parks carries it. The service
       // used to label a request with whichever run came first in its live map — right only while
@@ -4076,6 +4271,9 @@ export class AppService {
         ),
       );
     }
+    // The events task calls what its capabilities gave it and `on_event`, and nothing every other run
+    // is lent above — no forge primitive, no wait on a person's gesture (decision 0010 §4).
+    if (eventsTask) restrictToEventsFunctions(registry);
 
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
     if (fakeRules !== undefined) open.fakeRules.set(taskId, fakeRules);

@@ -5,7 +5,7 @@
  * directly"), so every one of them must survive an IPC round-trip as JSON.
  */
 import type { ContextReading, JsonValue } from "@declarative-ai/json";
-import type { TaskStatus } from "./task";
+import type { TaskStartedBy, TaskStatus } from "./task";
 import type { InputProvenance } from "./adopt";
 import type { FastForwardView, SettledByView } from "./fastForward";
 import type { WorkflowOutcome } from "./workflowTools";
@@ -278,6 +278,8 @@ export interface BoardCard {
   inReview?: InReview;
   /** How a fan-out made this task, when one did — the word the card's origin line uses. */
   origin?: TaskOrigin;
+  /** What started it, when the events task did — the card's "started by events · …" line. See {@link TaskSummary.startedBy}. */
+  startedBy?: TaskStartedBy;
   /**
    * The task this card files BENEATH (decision 0005 §2): an adopted task, under the task that
    * adopted it. A board draws it indented under that card when both are in one column — the root
@@ -1187,6 +1189,13 @@ export interface TaskSummary {
   parentTaskId?: string;
   /** Present when this task is a FORK of {@link parentTaskId} — a copy cut at a point, not a re-run. */
   origin?: TaskOrigin;
+  /**
+   * What started it, when the events task did (decision 0010 §4): the card's "started by events · …"
+   * line. `fromTask` names the project's CURRENT events task when the one that started it was replaced.
+   */
+  startedBy?: TaskStartedBy;
+  /** A task JaiRA keeps for itself — `events`, the project's events task. See `TaskMeta.system`. */
+  system?: "events";
   /** The dependencies still unfinished — non-empty means the task is holding. See {@link Holding}. */
   waitingFor?: Holding[];
   /**

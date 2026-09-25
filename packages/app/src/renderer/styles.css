@@ -4065,6 +4065,32 @@ button.crumb-sep.open {
   flex: 1;
   min-width: 0;
 }
+/* What STARTED the task, when the events task did (decision 0010 §4): "started by events · git.push
+   a1b2c3d on main", under the meta line, in its voice. The mark is the one accent; a click selects
+   the events task. */
+.card-origin {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 4px;
+  color: var(--dim);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 0.84);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.card-origin .ellip {
+  flex: 1;
+  min-width: 0;
+}
+.card-origin svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.card-origin-link:hover {
+  color: var(--text);
+}
 /* The far end of that line — `approve`, `gate`, `18 min ago`. Never the status word: the trailing
    pill says that, and saying it twice on one card is what the pill replaced. */
 .card-status {

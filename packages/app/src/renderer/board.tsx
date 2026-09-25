@@ -171,6 +171,7 @@ export function Tile({
   title,
   trailing,
   meta,
+  origin,
   selected,
   tip,
   children,
@@ -191,6 +192,8 @@ export function Tile({
   trailing?: ReactNode;
   /** The footer under the rule — where a card says what it is, having said what it is called. */
   meta?: ReactNode;
+  /** Under the footer: what STARTED the card's task, when something other than a person did (`OriginLine`). */
+  origin?: ReactNode;
   selected?: boolean;
   tip?: string;
   /** Anything between the head and the footer. The run board puts its call arguments here. */
@@ -246,6 +249,46 @@ export function Tile({
       </div>
       {children}
       {meta !== undefined ? <div className="card-meta">{meta}</div> : null}
+      {origin}
+    </div>
+  );
+}
+
+/** The words of a card's origin line — `started by events · git.push a1b2c3d on main` — or none. */
+export function originLineOf(card: Pick<BoardCard, "startedBy">): string | undefined {
+  const by = card.startedBy;
+  if (by === undefined) return undefined;
+  return by.summary.length > 0 ? `started by events · ${by.summary}` : "started by events";
+}
+
+/**
+ * "started by events · git.push a1b2c3d on main" (decision 0010 §4): a task the events task started
+ * says so, small, in the card's meta voice, under its meta line. Clicking it selects the events task —
+ * and only that: the click stops here, so the card under it is not selected on the way.
+ */
+export function OriginLine({ card, onGo }: { card: Pick<BoardCard, "startedBy">; onGo?: ((taskId: string, e: ReactMouseEvent) => void) | undefined }): JSX.Element | null {
+  const words = originLineOf(card);
+  if (words === undefined || card.startedBy === undefined) return null;
+  const events = card.startedBy.fromTask;
+  return (
+    <div
+      className={`card-origin${onGo !== undefined ? " card-origin-link" : ""}`}
+      title={onGo !== undefined ? "Started by the events task — click to select it" : "Started by the events task"}
+      {...(onGo !== undefined
+        ? {
+            onClick: (e: ReactMouseEvent) => {
+              e.stopPropagation();
+              onGo(events, e);
+            },
+          }
+        : {})}
+    >
+      <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 3v6a3 3 0 0 0 3 3h7" />
+        <path d="M6 21v-6" />
+        <path d="m13 9 3 3-3 3" />
+      </svg>
+      <span className="ellip">{words}</span>
     </div>
   );
 }
@@ -650,8 +693,11 @@ export function Card({
   child = false,
   onUndo,
   onMove,
+  onOrigin,
 }: {
   card: BoardCard;
+  /** The origin line was clicked: select the events task it names (decision 0010 §4). */
+  onOrigin?: ((taskId: string, e: ReactMouseEvent) => void) | undefined;
   /**
    * A NEXT-TRANSITION chip was pressed (decision 0005, the rulings of 2026-09-22): take that move.
    * Absent where the board moves nothing — the chips are not drawn at all there.
@@ -739,6 +785,7 @@ export function Card({
       onDrill={onDrill}
       onMenu={onMenu}
       child={child}
+      {...(card.startedBy !== undefined ? { origin: <OriginLine card={card} onGo={onOrigin} /> } : {})}
       {...(onMove !== undefined && (card.next ?? []).length > 0 ? { children: <NextChips moves={card.next!} onMove={onMove} /> } : {})}
       {...(onDragStart !== undefined
         ? {
@@ -1009,6 +1056,7 @@ export function Board({
                     card={card}
                     selected={isSelected(card)}
                     onSelect={(e) => onSelectTask(card.taskId, e)}
+                    onOrigin={(taskId, e) => onSelectTask(taskId, e)}
                     {...(drill !== undefined ? { onDrill: drill } : {})}
                     {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
                     child={card.under !== undefined && column.cards.some((other) => other.taskId === card.under)}
@@ -1108,6 +1156,7 @@ function Tray({
               card={card}
               selected={selectedSet !== undefined ? selectedSet.has(card.taskId) : card.taskId === selected}
               onSelect={(e) => onSelectTask(card.taskId, e)}
+              onOrigin={(taskId, e) => onSelectTask(taskId, e)}
               {...(onOpenTask !== undefined ? { onDrill: () => onOpenTask(card) } : {})}
               {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
             />

@@ -59,6 +59,7 @@ export * from "./remoteWatch";
 export * from "./remoteReview";
 export * from "./remoteEvents";
 export * from "./eventHub";
+export * from "./eventsTask";
 export * from "./repoWatch";
 export * from "./executors";
 export * from "./agentOutcome";

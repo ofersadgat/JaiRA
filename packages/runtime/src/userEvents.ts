@@ -59,6 +59,7 @@ import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { MOVE_EVENTS, ON_USER_EVENT, type UserEventRequest } from "@jaira/shared";
 import { registerPermissionFunctionSignatures } from "./permissionFunctions";
 import { EventHub } from "./eventHub";
+import { registerEventsTaskFunctions } from "./eventsTask";
 import { RemoteEventHub } from "./remoteEvents";
 
 // The vocabulary lives in `@jaira/shared` — persistence hands the document to the loader, the
@@ -338,6 +339,9 @@ export function hostCalleeSignatures(): ReadonlyMap<string, EntrySignature> {
   new RemoteEventHub().register(probe, undefined, undefined);
   // `on_event`, the third: something that happened on a remote or in JaiRA (decision 0010 §3).
   new EventHub().register(probe, undefined);
+  // `start_task` and `notify`, the events task's two step functions (decision 0010 §4): declared here so
+  // `system/events/start` and `/notify` load anywhere; only the events task's run registers them to act.
+  registerEventsTaskFunctions(probe);
   // `smart` and `approve_tool_call` — what a permission set line names as a function, and what a permission
   // function calls to ask the person. Resolvable by name for the same reason (decision 0007).
   registerPermissionFunctionSignatures(probe);

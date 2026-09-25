@@ -2630,6 +2630,26 @@ export type PushMessage =
   | { type: "limits:changed"; view: LimitsView }
   /** The waiting messages and runs changed — one was added, sent, dropped or rescheduled. Machine-wide. */
   | { type: "waiting:changed"; items: WaitingItem[] }
+  /** An events task posted a notice (decision 0010 §4, `notify`). Also written to the log. */
+  | { type: "notice:posted"; notice: EventsNotice }
+
+/**
+ * A notice an events task's `notify` step posted: something an automation wanted a person to know,
+ * asking nothing of them. Kept in memory for the process (`AppService.notices`) and written to the log.
+ */
+export interface EventsNotice {
+  /** The project it was posted in, as the service names it. */
+  project: string;
+  /** The events task that posted it. */
+  taskId: string;
+  text: string;
+  /** Epoch ms. */
+  at: number;
+  /** The event's name, when the step was handed one. */
+  event?: string;
+  /** What happened, in a line — `eventSummary`. */
+  summary?: string;
+}
 
 /** What {@link IpcContract}'s `shell:saveFile` is handed. */
 export interface SaveFileRequest {

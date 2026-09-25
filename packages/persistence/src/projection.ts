@@ -35,6 +35,7 @@ import type {
   PathStep,
   TaskHeading,
   TaskOrigin,
+  TaskStartedBy,
   TaskStatus,
 } from "@jaira/shared";
 import type { StoredEvent } from "./eventLog";
@@ -549,6 +550,8 @@ export interface TaskProjection {
   run: ProjectedRun;
   /** How a fan-out made this task, when one did (decision 0003) — what files a mount task in its parent's column. */
   origin?: TaskOrigin;
+  /** What started it, when the events task did (decision 0010 §4). */
+  startedBy?: TaskStartedBy;
   /** The dependencies still unfinished — non-empty means the task is holding. */
   waitingFor?: Holding[];
   /** A merge request the task is waiting on (decision 0004). */
@@ -591,6 +594,7 @@ function cardOf(
     ...(heading !== undefined ? { heading } : {}),
     ...(task.origin !== undefined ? { origin: task.origin } : {}),
     ...(task.origin?.kind === "adopt" ? { under: task.origin.taskId } : {}),
+    ...(task.startedBy !== undefined ? { startedBy: task.startedBy } : {}),
     ...(task.waitingFor !== undefined && task.waitingFor.length > 0 ? { waitingFor: task.waitingFor } : {}),
     ...(task.inReview !== undefined ? { inReview: task.inReview } : {}),
     ...(task.undoable === true ? { undoable: true as const } : {}),

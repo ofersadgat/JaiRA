@@ -77,7 +77,28 @@ export interface TaskMeta {
    * nor used (`@jaira/persistence` `connectUndo.ts`).
    */
   connectUndo?: StoredConnectUndo;
+  /**
+   * What STARTED this task, when something other than a person did (decision 0010 §4): the events
+   * task, because of an event. Kept apart from {@link origin}, which says where a COPY came from.
+   */
+  startedBy?: TaskStartedBy;
+  /**
+   * A task JaiRA keeps for itself rather than one a person made: `events` is a project's events task
+   * (decision 0010 §4), found by this marker and its workflow, and supervised — never started by hand.
+   */
+  system?: "events";
   createdAt: string; // ISO 8601
+}
+
+/** Where a task the events task started came from — see {@link TaskMeta.startedBy}. */
+export interface TaskStartedBy {
+  by: "events";
+  /** The events task that started it. */
+  fromTask: string;
+  /** The event's name (`git.push`), or empty when the step was handed none. */
+  event: string;
+  /** What happened, in a line: "git.push a1b2c3d on main" — see `eventSummary`. */
+  summary: string;
 }
 
 /** One list a task is split on — see {@link TaskMeta.split}. */

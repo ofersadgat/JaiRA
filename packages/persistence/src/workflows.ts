@@ -27,7 +27,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
 import { parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
-import { baseAsProjectPaths, componentConfigIssues, parseJsonText, type JairaPaths } from "@jaira/shared";
+import { baseAsProjectPaths, componentConfigIssues, isEventEnabled, isEventName, parseJsonText, type JairaConfig, type JairaPaths } from "@jaira/shared";
 import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
 import type { LintIssue, StatePermissionSetIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry, WorkflowLayer, WritableLayer } from "@jaira/shared";
 import type { Project } from "./project";
@@ -111,6 +111,11 @@ function labelOf(raw: unknown): string | undefined {
 export interface BrowseOptions {
   /** The registry a run would use, so `functionRef`s are resolved while linting. */
   functions?: ReadonlyMap<string, FunctionCapabilities>;
+  /**
+   * The effective `events` settings (decision 0010 §2): an `on_event` guard on an event switched off
+   * there never fires, and says so. Absent: not checked. A project's browse reads its own config.
+   */
+  events?: Pick<JairaConfig, "events">;
 }
 
 /**
@@ -136,6 +141,8 @@ export interface LayerSource {
   paths: JairaPaths;
   searchPath?: readonly string[] | undefined;
   tasks: TaskIndex;
+  /** The effective `events` settings the lint checks `on_event` guards against — see {@link BrowseOptions.events}. */
+  events?: Pick<JairaConfig, "events">;
 }
 
 /**
@@ -171,6 +178,7 @@ export function projectSource(project: Project): LayerSource {
     paths: project.paths,
     searchPath: project.config.workflows.path,
     tasks: tasksOf(project),
+    events: project.config,
   };
 }
 
@@ -194,6 +202,7 @@ export function baseSource(baseDir: string, project?: Project): LayerSource {
     layer: "base",
     paths,
     tasks: project === undefined ? EMPTY_TASKS : tasksOf(project),
+    ...(project !== undefined ? { events: project.config } : {}),
   };
 }
 
@@ -204,7 +213,8 @@ export function baseSource(baseDir: string, project?: Project): LayerSource {
  * file-watch event.
  */
 export function browseSource(source: LayerSource, options: BrowseOptions = {}): WorkflowBrowser {
-  return browseLayers(source.paths, source.layers, source.searchPath, source.tasks, options);
+  const events = options.events ?? source.events;
+  return browseLayers(source.paths, source.layers, source.searchPath, source.tasks, { ...options, ...(events !== undefined ? { events } : {}) });
 }
 
 /** Browse and lint the project's live `workflows/` directory. */
@@ -415,6 +425,11 @@ function browseLayers(
       seenPermissionSetIssues.add(key);
       issues.push({ stateId: issue.stateId, path: issue.path, message: issue.message, severity: issue.severity });
     }
+    // A guard waiting on an event Settings switched off waits forever (decision 0010 §3). Read from the
+    // LOADED states, so a line a `$ref` expression spliced in from another layer is checked too.
+    if (options.events !== undefined) {
+      for (const id of states) issues.push(...switchedOffEventGuards(id, bundle.states[id], options.events));
+    }
     const inClosure = Object.fromEntries(states.map((id) => [id, effective[id]]));
     for (const { severity, ...issue } of componentConfigIssues(inClosure)) {
       issues.push({ ...issue, severity: severity ?? "error" });
@@ -483,6 +498,37 @@ function browseLayers(
 
   const unreachable = [...byStateId.keys()].filter((id) => !covered.has(id)).sort();
   return { workflows, files: fileEntries, unreachable };
+}
+
+/** `on_event('git.push'` — the event a guard waits on, where it names one literally. */
+const ON_EVENT_CALL = /\bon_event\(\s*(['"])([^'"]+)\1/g;
+
+/**
+ * Every `on_event('<name>')` in one state's guards — its own transitions and its mounts' — whose event
+ * the effective Settings switch off: a warning, because the rule never fires until the event is on.
+ */
+export function switchedOffEventGuards(stateId: string, state: unknown, config: Pick<JairaConfig, "events">): LintIssue[] {
+  const out: LintIssue[] = [];
+  const check = (when: unknown, path: string): void => {
+    if (typeof when !== "string") return;
+    for (const match of when.matchAll(ON_EVENT_CALL)) {
+      const name = match[2]!;
+      if (!isEventName(name) || isEventEnabled(config, name)) continue;
+      out.push({ stateId, path, message: `${name} is switched off in Settings → Tools → Events, so this never fires`, severity: "warning" });
+    }
+  };
+  const rules = (list: unknown, at: string): void => {
+    if (!Array.isArray(list)) return;
+    list.forEach((rule, i) => check((rule as { when?: unknown } | null)?.when, `${at}${i}.when`));
+  };
+  const def = state as { transitions?: unknown; children?: unknown } | undefined;
+  rules(def?.transitions, "transitions.");
+  if (def?.children !== null && typeof def?.children === "object" && !Array.isArray(def.children)) {
+    for (const [key, mount] of Object.entries(def.children as Record<string, unknown>)) {
+      rules((mount as { transitions?: unknown } | null)?.transitions, `children.${key}.transitions.`);
+    }
+  }
+  return out;
 }
 
 /** Errors only, across every workflow — the "can I run anything?" question. */
