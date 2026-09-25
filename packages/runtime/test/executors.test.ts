@@ -341,7 +341,8 @@ describe("probeExecutor", () => {
 
     // Whether the SDK happens to be installed here is not the point — that it ANSWERED is.
     expect(["ok", "failed"]).toContain(result.status);
-    expect(result.detail).toContain("@anthropic-ai/claude-agent-sdk");
+    // Installed, it goes on to the key, which this machine may or may not have.
+    expect(result.detail).toMatch(/@anthropic-ai\/claude-agent-sdk|the SDK is installed/);
     expect(exec.calls).toEqual([]);
   });
 

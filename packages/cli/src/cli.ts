@@ -111,6 +111,7 @@ import {
   enabledAdapters,
   enabledGenericAgents,
   registerAgentRuntimes,
+  sdkCredential,
   registerChangesetFunctions,
   UserEventHub,
   registerCommandFunction,
@@ -545,6 +546,11 @@ function buildRunEnvironment(
   // The workflow tools need the app (it holds the conversation and the hubs): here they RESOLVE, so a
   // state that holds them loads and runs, and every call answers that the CLI does not serve them.
   registerWorkflowTools(registry, noWorkflowHost("by the CLI"));
+  // The secret chain: the provider routes' keys, the SDK agent's key, the MCP servers' secrets.
+  const secrets = new SecretResolver({
+    ...(projectDir !== undefined ? { projectDir } : {}),
+    baseDir: jairaBasePaths().baseDir,
+  });
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.
@@ -554,6 +560,7 @@ function buildRunEnvironment(
     execEnv: config.execEnvironment,
     adapters: enabledAdapters(config.agents),
     startBridge,
+    sdkCredential: () => sdkCredential(config.agents.claudeCode?.credential, secrets),
     ...(files?.observer !== undefined ? { observer: files.observer } : {}),
     ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
     ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
@@ -601,10 +608,6 @@ function buildRunEnvironment(
   // How prompt states reach whatever answers them — the provider routes with their credentials
   // resolved, the named presets a state selects with `configRef`, and the agent executors a model
   // prefix can name. A scripted run gets none of it: the fake answers everything.
-  const secrets = new SecretResolver({
-    ...(projectDir !== undefined ? { projectDir } : {}),
-    baseDir: jairaBasePaths().baseDir,
-  });
   const scripted = wiring.fakeRules !== undefined;
   const presets = config.models.presets;
   // The DEFAULT executor, resolved — the same tree the app builds, so a workflow behaves the
@@ -623,6 +626,7 @@ function buildRunEnvironment(
             execEnv: config.execEnvironment,
             exec,
             startBridge,
+            sdkCredential: () => sdkCredential(config.agents.claudeCode?.credential, secrets),
             ...(files?.observer !== undefined ? { observer: files.observer } : {}),
             // The same servers the app hands its agents, looked up through the same chain.
             mcpServers: resolveMcpServers(config.mcp, (name) => secrets.lookup(name)?.value).servers,

@@ -242,6 +242,7 @@ import {
   executeWorkflow,
   gateCapabilities,
   registerAgentRuntimes,
+  sdkCredential,
   registerCommandFunction,
   registerGenericAgents,
   registerTools,
@@ -3695,6 +3696,7 @@ export class AppService {
         startBridge: this.startBridge,
         onOutcome: this.onAgentOutcome,
         adapters: enabledAdapters(config.agents),
+        sdkCredential: () => sdkCredential(config.agents.claudeCode?.credential, this.secretResolver(open)),
         ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
         ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
         ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
@@ -10706,6 +10708,7 @@ export class AppService {
         ...(opts.observer !== undefined ? { observer: opts.observer } : {}),
         startBridge: this.startBridge,
         onOutcome: this.onAgentOutcome,
+        sdkCredential: () => sdkCredential(config.agents.claudeCode?.credential, opts.secrets ?? this.secretResolver()),
         mcpServers: this.mcpServersFor(config, opts.secrets ?? this.secretResolver()),
       }),
       // The presets, and what choosing a preset's model asks: which models this machine can run — every

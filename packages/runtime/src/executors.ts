@@ -43,6 +43,7 @@ import { AGENT_GENERIC_CLI } from "./genericAgent";
 import type { Exec } from "./exec";
 import type { ExecEnv } from "./paths";
 import { SecretResolver } from "./secrets";
+import { SDK_KEY_NAMES } from "./sdkCredential";
 
 // The wire shapes live in `shared` so the renderer can name them; the behaviour lives here.
 export type { ExecutorInfo, ExecutorKind, ProbeResult, ProbeStatus } from "@jaira/shared";
@@ -401,9 +402,6 @@ async function checkSignIn(command: string, check: SignInCheck, options: ProbeOp
   }
 }
 
-/** The variables the in-process SDK will read a key from if config names none. */
-const SDK_KEY_NAMES = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
-
 /**
  * Is ANY of these set, anywhere in the chain? The un-named fallback the SDK itself would find.
  *
@@ -411,7 +409,7 @@ const SDK_KEY_NAMES = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
  * environment, and reading `process.env` beside it would bypass the injected environment a test
  * resolver exists to provide.
  */
-function hasAnyKey(secrets: SecretResolver | undefined, names: string[]): boolean {
+function hasAnyKey(secrets: SecretResolver | undefined, names: readonly string[]): boolean {
   return secrets !== undefined
     ? names.some((name) => secrets.describe(name) !== undefined)
     : names.some((name) => process.env[name] !== undefined);

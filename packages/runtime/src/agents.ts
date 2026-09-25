@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { runtimeFunction, type CapabilityRegistry, type RuntimeCapabilities } from "@declarative-ai/exec";
 import { createClaudeCodeFunction, type AgentQuery, type ClaudeCodeFunctionOptions } from "@declarative-ai/agents-api";
+import { sdkCredential, sdkQueryOnKey, type SdkCredential } from "./sdkCredential";
 import {
   createCliAgentFunction,
   createCodexAgentFunction,
@@ -234,6 +235,12 @@ export interface AgentRuntimeOptions {
   adapters?: Array<"sdk" | "cli" | "codex">;
   /** Extra options forwarded to the SDK adapter (tool injection, native renames). */
   sdk?: Omit<ClaudeCodeFunctionOptions, "query">;
+  /**
+   * The key the SDK adapter runs on, asked per call (`sdkCredential`). Absent ⇒ read from this
+   * process's environment alone. Ignored under a supplied {@link AgentRuntimeOptions.query}, which
+   * replaces the transport the key is for.
+   */
+  sdkCredential?: () => SdkCredential;
   /** Path to the CLI binary (default: `claude` on PATH). */
   cliCommand?: string;
   /**
@@ -318,7 +325,7 @@ export function registerAgentRuntimes(
     const sdk = createClaudeCodeFunction({
       ...sdkOptions,
       ...claudeWrapper(AGENT_SDK),
-      ...(options.query !== undefined ? { query: options.query } : {}),
+      query: options.query ?? sdkQueryOnKey(options.sdkCredential ?? (() => sdkCredential(undefined, undefined))),
     });
     registry.functions.set(AGENT_SDK, runtimeFunction(observeAgentRun(AGENT_SDK, sdk.run as never, options.onOutcome), sdk.capabilities) as never);
   }

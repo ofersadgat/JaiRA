@@ -51,7 +51,29 @@ const COMMERCIAL_USE_EXCEPTIONS: ReadonlySet<string> = new Set([
   "GPL-3.0-or-later WITH GCC-exception-3.1",
 ]);
 
-type Expr = { kind: "id"; id: string } | { kind: "with"; id: string; exception: string } | { kind: "and" | "or"; parts: Expr[] };
+/**
+ * Packages whose license is not an SPDX expression but has been read, and allows shipping. Keyed by
+ * name AND the exact `license` string the package states, so a package that changes its license is
+ * refused again until someone reads the new one.
+ *
+ * The Claude Agent SDK and its per-platform binary are Anthropic's, all rights reserved, "subject to
+ * the Legal Agreements" (their LICENSE.md). Those agreements put the SDK under Anthropic's Commercial
+ * Terms "including when you use it to power products and services that you make available to your
+ * own customers and end users" (https://code.claude.com/docs/en/agent-sdk/overview, "License and
+ * terms", read 2026-09-25) — shipping it is contemplated, on conditions JaiRA keeps elsewhere: the
+ * binary unmodified, each person on their own API key and never a Claude subscription
+ * (`runtime/src/sdkCredential.ts`), and the route not called "Claude Code" (`EXECUTOR_TITLES`).
+ */
+const READ_PACKAGE_LICENSES: ReadonlyMap<string, string> = new Map([
+  ["@anthropic-ai/claude-agent-sdk", "SEE LICENSE IN README.md"],
+  // The SDK's `optionalDependencies`, one per platform; win32-x64's string was read, the rest are
+  // assumed to match it, and any that does not is refused on the machine that installs it.
+  ...["linux-x64", "linux-arm64", "linux-x64-musl", "linux-arm64-musl", "darwin-x64", "darwin-arm64", "win32-x64", "win32-arm64"].map(
+    (platform) => [`@anthropic-ai/claude-agent-sdk-${platform}`, "SEE LICENSE IN LICENSE.md"] as const,
+  ),
+]);
+
+type Expr ={ kind: "id"; id: string } | { kind: "with"; id: string; exception: string } | { kind: "and" | "or"; parts: Expr[] };
 
 function tokenize(expression: string): string[] {
   return expression.replace(/[()]/g, (paren) => ` ${paren} `).split(/\s+/).filter((token) => token.length > 0);
@@ -116,8 +138,10 @@ function allowed(expr: Expr): boolean {
   }
 }
 
-/** Null when the license allows commercial use, else why not. */
-export function commercialUseProblem(license: string): string | null {
+/** Null when the license allows commercial use, else why not. `name` is the package it belongs to,
+ *  for the few whose license was read by hand ({@link READ_PACKAGE_LICENSES}). */
+export function commercialUseProblem(license: string, name?: string): string | null {
+  if (name !== undefined && READ_PACKAGE_LICENSES.get(name) === license) return null;
   let expr: Expr;
   try {
     expr = parseSpdxExpression(license);

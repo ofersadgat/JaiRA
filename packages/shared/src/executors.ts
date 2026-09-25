@@ -92,6 +92,18 @@ export const EXECUTOR_KINDS: Record<ExecutorKind, ExecutorKindSpec> = {
   },
 };
 
+/**
+ * What the settings screen calls each built-in executor. The registry name (`claude-code`) stays the
+ * id a state and a model prefix use; this is only the word a person reads. Not "Claude Code" for the
+ * SDK route: Anthropic's Agent SDK branding guidelines refuse that name for an SDK integration and
+ * offer "Claude" in a menu already labeled Agents.
+ */
+export const EXECUTOR_TITLES: Readonly<Record<string, string>> = {
+  "claude-code": "Claude",
+  "claude-cli": "Claude (cli)",
+  "codex-cli": "Codex (cli)",
+};
+
 /** Which link of the secret chain supplied a credential. */
 export type SecretSource =
   | "keychain"

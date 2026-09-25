@@ -411,6 +411,12 @@ describe("commercial use", () => {
     expect(commercialUseProblem("(MIT OR")).not.toBeNull();
   });
 
+  it("allows a hand-read license only for its own package and only as it was read", () => {
+    expect(commercialUseProblem("SEE LICENSE IN README.md", "@anthropic-ai/claude-agent-sdk")).toBeNull();
+    expect(commercialUseProblem("SEE LICENSE IN README.md", "some-other-package")).not.toBeNull();
+    expect(commercialUseProblem("SEE LICENSE IN LICENSE.md", "@anthropic-ai/claude-agent-sdk")).not.toBeNull();
+  });
+
   it("allows every license the app ships — each package it bundles or installs, and each hand-written notice", async () => {
     // The dependency walk reaches every package the two bundles hold (checked against a built manifest
     // on 2026-09-24: the only entries it lacked were the config's, which are gated on `main`/`window`);
@@ -425,7 +431,7 @@ describe("commercial use", () => {
     });
     expect(manifest.entries.length).toBeGreaterThan(300);
     const problems = manifest.entries.flatMap((entry) => {
-      const problem = commercialUseProblem(entry.license);
+      const problem = commercialUseProblem(entry.license, entry.name);
       return problem === null ? [] : [`${entry.name}${entry.version !== null ? `@${entry.version}` : ""}: ${problem}`];
     });
     expect(problems).toEqual([]);

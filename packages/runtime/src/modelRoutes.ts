@@ -52,6 +52,7 @@ import {
   type WeightsFileCheck,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
+import { sdkCredential, sdkQueryOnKey, type SdkCredential } from "./sdkCredential";
 import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
 import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, permissionSetViewOf, withAgentPermissionSet } from "./agentTools";
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
@@ -201,6 +202,8 @@ export interface AgentRouteOptions {
   connectMcpServer?: ConnectMcpServer;
   /** Hears every agent call's outcome — the same observer {@link AgentRuntimeOptions.onOutcome} is. */
   onOutcome?: AgentOutcomeObserver;
+  /** The key the SDK route runs on — the same option {@link AgentRuntimeOptions.sdkCredential} is. */
+  sdkCredential?: () => SdkCredential;
   /**
    * The configured MCP servers that are on, their secrets looked up (`resolveMcpServers`) — handed to
    * claude and codex on every call, less a server the call's permission set refuses outright
@@ -247,7 +250,10 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
       AGENT_SDK,
       withAgentPermissionSet(
         CLAUDE_TOOLS,
-        new AgentApiExecutor({ ...(query !== undefined ? { query } : {}), ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}) }),
+        new AgentApiExecutor({
+          query: query ?? sdkQueryOnKey(options.sdkCredential ?? (() => sdkCredential(undefined, undefined))),
+          ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}),
+        }),
         { label: AGENT_SDK },
       ),
     );
