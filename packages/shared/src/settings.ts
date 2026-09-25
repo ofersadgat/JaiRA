@@ -140,6 +140,15 @@ export interface JairaUiState {
    * somebody started before this existed: it is a mark to clear, not a claim about the past.
    */
   seen: Record<string, number>;
+  /**
+   * The event notices this viewer has dismissed — or opened — by notice id (`EventsNotice.id`), each
+   * to the time the notice was posted. The inbox strip shows the newest notice NOT in here.
+   *
+   * A set rather than a mark like {@link seen}: notices are dismissed one at a time, newest first,
+   * so "everything before this" would take the older unread ones with it. Kept to the notices main
+   * still holds whenever one is added (`withNoticeRead`), so it never outgrows the backlog.
+   */
+  noticesRead: Record<string, number>;
 }
 
 export interface JairaSettings {
@@ -711,7 +720,7 @@ export function parseLogPolicy(raw: unknown): LogPolicy {
 
 /** No layout remembered yet — every control opens at its own default. */
 export function defaultUiState(): JairaUiState {
-  return { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} };
+  return { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {}, noticesRead: {} };
 }
 
 /**
@@ -807,6 +816,9 @@ function parseUiState(raw: unknown): JairaUiState {
     // Finite and positive, like a pane size: this is compared against a task's `updatedAt`, and a
     // NaN or a negative from a hand-edited file would mark a row read forever or never.
     if (typeof at === "number" && Number.isFinite(at) && at > 0) ui.seen[taskId] = at;
+  }
+  for (const [id, at] of Object.entries(objectOf(doc["noticesRead"]))) {
+    if (typeof at === "number" && Number.isFinite(at) && at > 0) ui.noticesRead[id] = at;
   }
   return ui;
 }

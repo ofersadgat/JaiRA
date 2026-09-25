@@ -371,6 +371,7 @@ import {
   enabledEvents,
   isEventEnabled,
   eventSummary,
+  eventRef,
   signComment,
   type StartingState,
   type EventDelivery,
@@ -1900,19 +1901,34 @@ export class AppService {
     if (into !== undefined) this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: into });
   }
 
-  /** `notify`: a notice, kept for the process, pushed, and written to the log. */
+  /**
+   * `notify`: a notice, kept for the process, pushed, and written to the log.
+   *
+   * Kept in MEMORY only, on purpose: the durable record of it is the `notify` call in the events
+   * task's journal, which its conversation draws, and a notice is only ever posted while JaiRA is
+   * open. So a restart starts the strip empty rather than keeping a second copy of the journal.
+   */
   private postNotice(open: ProjectSession, fromTask: string, given: EventsTaskNotice, caller: EventsTaskCaller): void {
-    // The event the calling automation was entered with, when the call did not name one.
-    const event = given.event ?? (caller.instanceId !== undefined ? callingStateOf(open.project, fromTask, caller.instanceId)?.event : undefined);
+    // Who called — the automation's firing, read off the journal — and the event it was entered with,
+    // when the call did not name one.
+    const at = caller.instanceId !== undefined ? callingStateOf(open.project, fromTask, caller.instanceId) : undefined;
+    const event = given.event ?? at?.event;
     const notice: EventsTaskNotice = { ...given, ...(event !== undefined ? { event } : {}) };
     const summary = notice.event !== undefined ? eventSummary(notice.event) : undefined;
+    const ref = notice.event !== undefined ? eventRef(notice.event) : undefined;
+    const now = Date.now();
     const posted: EventsNotice = {
-      project: open.dir,
+      id: caller.instanceId !== undefined ? `${fromTask}/${caller.instanceId}/${caller.call}` : `${fromTask}@${now}`,
+      // As the service's own verbs name the session, so a click can select the task in it.
+      project: this.refOfSession(open),
       taskId: fromTask,
       text: notice.text,
-      at: Date.now(),
+      at: now,
       ...(notice.event !== undefined ? { event: notice.event.name } : {}),
       ...(summary !== undefined ? { summary } : {}),
+      ...(ref !== undefined ? { ref } : {}),
+      ...(caller.instanceId !== undefined ? { instanceId: caller.instanceId, call: caller.call } : {}),
+      ...(at !== undefined ? { stateId: at.stateId, key: at.key } : {}),
     };
     this.postedNotices.push(posted);
     if (this.postedNotices.length > NOTICES_KEPT) this.postedNotices.shift();

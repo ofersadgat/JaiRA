@@ -65,7 +65,7 @@ describe("user settings", () => {
   it("defaults to an empty layout, with no project open", () => {
     // The window's own state belongs to the person at this machine, not the checkout. How the app
     // LOOKS is not here any more — it is the layered configuration's `appearance` block.
-    expect(service.readSettings()).toEqual({ ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, projects: [], logging: defaultLogPolicy() });
+    expect(service.readSettings()).toEqual({ ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {}, noticesRead: {} }, projects: [], logging: defaultLogPolicy() });
   });
 
   it("persists a change and reads it back", () => {
@@ -79,7 +79,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "user-settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, projects: [], logging: defaultLogPolicy() });
+    expect(service.readSettings()).toEqual({ ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {}, noticesRead: {} }, projects: [], logging: defaultLogPolicy() });
   });
 
   it("reads a hand-edited project list without throwing any of it away", () => {
@@ -110,19 +110,20 @@ describe("user settings", () => {
       shut: { "run.states": ["r1:i1:0"] },
       unfolded: { "files.folders": ["project:.jaira/workflows"] },
       seen: { "t-1": 1_700_000_000_000 },
+      noticesRead: { "t-2/i-1/1": 1_700_000_000_000 },
     };
     expect(service.writeSettings({ ui })).toMatchObject({ ui });
     expect(service.readSettings().ui).toEqual(ui);
 
     // Replaced, not merged: the renderer holds the live copy and sends all of it, which is what
     // makes forgetting a pane possible at all — a deep merge would leave every id ever stored.
-    const later = { panes: { "tasks.panel": 420 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} };
+    const later = { panes: { "tasks.panel": 420 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {}, noticesRead: {} };
     service.writeSettings({ ui: later });
     expect(service.readSettings().ui).toEqual(later);
   });
 
   it("keeps the layout out of the way of the other preferences", () => {
-    service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} } });
+    service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {}, noticesRead: {} } });
     expect(service.writeSettings({ logging: { minLevel: "warn", overrides: [] } }).ui.panes["files.tree"]).toBe(310);
     expect(service.readSettings().logging.minLevel).toBe("warn");
   });
@@ -142,6 +143,8 @@ describe("user settings", () => {
           unfolded: { "bad.tree": 7, "files.folders": ["x", "x"] },
           // A read mark that is not a time, one that is before the epoch, and one that is real.
           seen: { "t-bad": "yesterday", "t-negative": -5, "t-1": 1_700_000_000_000 },
+          // The same for a read notice.
+          noticesRead: { "n-bad": "now", "n-1": 1_700_000_000_000 },
         },
       }),
       "utf8",
@@ -157,6 +160,7 @@ describe("user settings", () => {
       shut: { "run.states": ["a", "b"] },
       unfolded: { "files.folders": ["x"] },
       seen: { "t-1": 1_700_000_000_000 },
+      noticesRead: { "n-1": 1_700_000_000_000 },
     });
   });
 });
@@ -324,7 +328,7 @@ describe("remembering the projects that were open", () => {
   });
 
   it("leaves the rest of the preferences alone", async () => {
-    service.writeSettings({ logging: { minLevel: "warn", overrides: [] }, ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} } });
+    service.writeSettings({ logging: { minLevel: "warn", overrides: [] }, ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {}, noticesRead: {} } });
     await service.open(dir);
 
     // The list is written by main while the renderer owns the layout — a project open must not cost

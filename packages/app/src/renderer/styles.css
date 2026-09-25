@@ -1293,6 +1293,63 @@ button.side-twist:hover:not(:disabled) {
   font-size: calc(var(--size-data) * 0.875);
 }
 
+/* An event notice (decision 0010 §4): the newest unread one, at the strip's right end after a
+   spacer. Quiet — the dim voice, no pill colour — because it asks nothing of anyone, and it is not
+   in the "Awaiting you" count. Two buttons side by side, the item and its ×, each reset here from
+   the global `button` rule. */
+.strip-notice {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+}
+.strip-notice > button.strip-notice-open {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--control-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--dim);
+  text-align: left;
+}
+.strip-notice > button.strip-notice-open:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  border-color: transparent;
+  color: var(--text);
+}
+.strip-notice .strip-bell {
+  flex: none;
+  font-size: 0.95em;
+}
+.strip-notice .strip-notice-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  color: var(--text);
+}
+.strip-notice .strip-notice-meta {
+  flex: none;
+  font-size: calc(var(--size-data) * 0.8);
+}
+.strip-notice .strip-notice-more {
+  flex: none;
+}
+.strip-notice > button.strip-dismiss {
+  flex: none;
+  padding: 0 6px;
+  font-size: 1.05em;
+  line-height: 1.3;
+}
+
 /* --- the file tree ---
    Both layer roots, one after the other. Which copy of a state you are about to edit is its
    position here, which is what replaced the layer picker. */

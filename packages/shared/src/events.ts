@@ -498,3 +498,30 @@ export function eventSummary(event: { name: string; payload?: unknown }): string
   })().trim();
   return words.length > 0 ? `${event.name} ${words}` : event.name;
 }
+
+/**
+ * The one mark that says WHICH happening it was — a commit's short sha, or a request's `!42` / `#42` —
+ * or nothing for an event that has neither (a task's end). What a notice in the inbox strip puts
+ * after the event's name ("git.checks.failed a1b2c3d · 2 m"), where {@link eventSummary}'s whole line
+ * would not fit.
+ */
+export function eventRef(event: { name: string; payload?: unknown }): string | undefined {
+  if (!isEventName(event.name)) return undefined;
+  const payload = (event.payload ?? {}) as Record<string, unknown>;
+  const short = (sha: unknown): string | undefined => (typeof sha === "string" && sha.length > 0 ? sha.slice(0, 7) : undefined);
+  const request = payload["merge_request"] as Partial<EventMergeRequest> | undefined;
+  switch (event.name) {
+    case "git.push":
+      return short(payload["after"]);
+    case "git.checks.failed":
+      return short(payload["sha"]);
+    case "git.merge_request.opened":
+    case "git.merge_request.updated":
+    case "git.merge_request.merged":
+    case "git.merge_request.closed":
+    case "git.merge_request.comments":
+      return typeof request?.number === "number" ? requestNumber(payload, request.number) : undefined;
+    default:
+      return undefined;
+  }
+}

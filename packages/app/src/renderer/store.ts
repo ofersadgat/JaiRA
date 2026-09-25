@@ -73,7 +73,9 @@ import type {
   WorkflowSource,
   RendererEdit,
   PathWrite,
+  EventsNotice,
 } from "@jaira/shared/browser";
+import { withNoticeRead } from "./noticesModel";
 import {
   clearedAbove,
   withPaths,
@@ -2446,8 +2448,10 @@ export function useApp() {
        *  - **`atState`** — the state whose panel the click came from, so the transcript opens at
        *    THIS state's instance rather than at the deepest one the task reached. See
        *    {@link refreshSession}.
+       *  - **`atInstance`** — one RUN of that state, when the click knows which: an event notice
+       *    opens the events task at the automation's firing that posted it, not the newest firing.
        */
-      select: (taskId: string | null, project?: string, atState?: string | null) => {
+      select: (taskId: string | null, project?: string, atState?: string | null, atInstance?: string | null) => {
         // Named, then the task's OWN project where a list knows it, then whatever the last selection
         // resolved to, then the owner of the open file — NOT the focused project, which with no
         // checkout open is none and makes every read that follows throw. See `projectOfTask` for why
@@ -2491,7 +2495,7 @@ export function useApp() {
         });
         void refreshDetail(taskId, at).then((detail) => seedTrail(detail, from));
         void refreshConversation(taskId, at);
-        void refreshSession(taskId, null, at, from);
+        void refreshSession(taskId, atInstance ?? null, at, from);
       },
 
       /**
@@ -3488,6 +3492,16 @@ export function useApp() {
        */
       markSeenAll: (marks: readonly { taskId: string; at: number }[]) => {
         const next = withSeenAll(ref.current.settings.ui, marks);
+        if (next !== ref.current.settings.ui) setUi(next);
+      },
+
+      /**
+       * An event notice read — dismissed with ×, or opened. Per viewer, in the ui state, so a reload
+       * or another window does not bring it back; `backlog` is what main still holds, which bounds
+       * the marks kept (`withNoticeRead`).
+       */
+      readNotice: (notice: Pick<EventsNotice, "id" | "at">, backlog: readonly Pick<EventsNotice, "id">[]) => {
+        const next = withNoticeRead(ref.current.settings.ui, notice, backlog);
         if (next !== ref.current.settings.ui) setUi(next);
       },
 

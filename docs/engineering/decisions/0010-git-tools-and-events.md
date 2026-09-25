@@ -242,4 +242,13 @@ As built:
   decide a change) where before they were shown and ignored; JaiRA's signed comments still never do,
   and a revise round's "last word is JaiRA's" test reads the marker. Comments JaiRA posted before
   signing read as the person's.
-- Still open: `notify` notices have no surface beyond the log and `notice:posted`.
+- **Notices** (the mockup "Event notices", option A): the newest unread notice sits at the inbox
+  strip's right end after a spacer — 🔔, the project chip, the text, "<event> <sha or !n> · <age>",
+  "+N" for the older unread ones, × — outside the "Awaiting you" count (`inboxStrip.tsx`,
+  `noticesModel.ts`, `noticesStore.ts`). A click opens the events task at the firing that called
+  `notify` (`select(taskId, project, stateId, instanceId)`) and reads it; × reads it and the next
+  unread takes its place. Read is per viewer in the ui state (`noticesRead`, by notice id
+  `<task>/<instance>/<call>`, kept to what main holds). The window reads the backlog once
+  (`notices:list`) and follows `notice:posted`. Main keeps notices in MEMORY only: a restart starts
+  the strip empty; the durable record is the `notify` call in the events task's journal, which its
+  conversation draws — rebuilding the backlog from the journal was not done.

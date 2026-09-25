@@ -497,6 +497,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "permissionSets:write": ((request: Parameters<typeof service.writePermissionSetSettings>[0]) => service.writePermissionSetSettings(request)) as Handler,
   "permissionSets:reset": ((request: Parameters<typeof service.resetPermissionSetSettings>[0]) => service.resetPermissionSetSettings(request)) as Handler,
   "events:status": ((request: Parameters<typeof service.readEventStatus>[0]) => service.readEventStatus(request)) as Handler,
+  "notices:list": (() => service.notices()) as Handler,
   "file:create": ((request: Parameters<typeof service.createFile>[0]) => service.createFile(request)) as Handler,
   "file:rename": ((request: Parameters<typeof service.renameFile>[0]) => service.renameFile(request)) as Handler,
   "file:delete": ((request: Parameters<typeof service.deleteFile>[0]) => service.deleteFile(request)) as Handler,

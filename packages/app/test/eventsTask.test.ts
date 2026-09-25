@@ -305,7 +305,7 @@ describe("an automation, end to end", () => {
 
     // Call 2 ran — the notice names the event its state was entered with — while the started task still runs.
     const notice = await until(() => service.notices()[0], "the notice");
-    expect(notice).toMatchObject({ project: dir, taskId: events.taskId, text: "started feature/review", event: "git.push", summary: "git.push a1b2c3d on main" });
+    expect(notice).toMatchObject({ project: dir, taskId: events.taskId, text: "started feature/review", event: "git.push", summary: "git.push a1b2c3d on main", ref: "a1b2c3d" });
     expect(pushes.some((m) => m.type === "notice:posted")).toBe(true);
     await until(() => service.listTasks().find((t) => t.taskId === started.taskId)?.status === "running", "the started task to be running");
 
@@ -313,6 +313,9 @@ describe("an automation, end to end", () => {
     const detail = service.taskDetail(events.taskId);
     const firing = flattenInstances(detail.instances).find((node) => node.childKey === "push_main")!;
     expect(firing.operationCalls?.map((call) => call.status)).toEqual(["completed", "completed"]);
+    // The notice says where it came from — that firing, call 1 of its list — which is where a click on
+    // it in the inbox strip opens the events task; and that is also what names it.
+    expect(notice).toMatchObject({ id: `${events.taskId}/${firing.instanceId}/1`, instanceId: firing.instanceId, call: 1, key: "push_main", stateId: automationStateIdOf("push_main") });
     expect(firing.children.map((node) => [node.instanceId, node.made])).toEqual([[started.taskId, { taskId: started.taskId, kind: "started" }]]);
     // … and in its conversation, a line at the automation that opens the task.
     const line = service.conversation(events.taskId).turns.find((turn) => turn.kind === "made");

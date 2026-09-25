@@ -82,6 +82,9 @@ import {
 } from "./pill";
 import { PointerMenus } from "./pointerMenu";
 import { projectName } from "./projects";
+import { InboxStrip } from "./inboxStrip";
+import { noticeToShow } from "./noticesModel";
+import { useNotices } from "./noticesStore";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
 import { MessageTypeContext, type MessageTypeStore } from "./messageTypes";
 import {
@@ -152,7 +155,7 @@ import {
   shutOf,
   unfoldedOf,
 } from "./uiState";
-import { publishUsageFigures } from "./limitsStore";
+import { publishUsageFigures, useNow } from "./limitsStore";
 import { History, NewTask, NewTaskForm } from "./widgets";
 import { invoke, subscribe, useApp, type SettingsSection, type View } from "./store";
 
@@ -362,103 +365,6 @@ function SettingsIcon({ name }: { name: SettingsIconName }): JSX.Element {
         <path key={d} d={d} />
       ))}
     </svg>
-  );
-}
-
-/**
- * The approvals strip.
- *
- * Command approvals come first: an agent's tool loop is blocked until one is answered, whereas a
- * workflow gate is a state politely waiting. Both live here rather than in a sidebar, because this
- * is the only surface in the app that is genuinely interrupt-driven.
- */
-function InboxStrip({
-  pending,
-  approvals,
-  questions,
-  projects,
-  hues,
-  onSelect,
-}: {
-  pending: PendingInteraction[];
-  approvals: PendingApproval[];
-  questions: PendingQuestion[];
-  projects: ProjectSummary[];
-  /** Directory → the colour that project wears everywhere else. See `hueOf`. */
-  hues: Readonly<Record<string, string>>;
-  onSelect: (taskId: string, project: string) => void;
-}): JSX.Element | null {
-  const total = pending.length + approvals.length + questions.length;
-  if (total === 0) return null;
-  // The strip's own list is cross-project (`pendingApprovals()` flat-maps every session), so a row
-  // has to say WHOSE task it is — and hand that project back with the click. Selecting on the task
-  // id alone read the id against whichever project was focused. See SHELL.md §2.4.
-  // The published label and hue when the project is still listed; the basename and the grey when it
-  // is not, which is what a request outliving its session by a tick looks like.
-  const chipOf = (project: string): { label: string; hue: string } => {
-    const found = projects.find((p) => p.project === project);
-    return {
-      label: found?.label ?? projectName(project),
-      hue: hues[project] ?? "var(--p0)",
-    };
-  };
-  const shown = [
-    // Questions first: the agent addressed the person directly, and its loop is parked on the reply.
-    ...questions.slice(0, 2).map((item) => ({
-      key: item.requestId,
-      badge: "badge-waiting_for_user",
-      glyph: "❓",
-      text: item.questions[0]?.question ?? "the agent has a question",
-      title: item.questions.map((q) => q.question).join(" · "),
-      taskId: item.taskId,
-      project: item.project,
-    })),
-    ...approvals.slice(0, 2).map((item) => ({
-      key: item.requestId,
-      badge: "badge-blocked",
-      glyph: "⛔",
-      text: item.command ?? item.tool,
-      title: item.reason ?? "",
-      taskId: item.taskId,
-      project: item.project,
-    })),
-    ...pending.slice(0, 2).map((item) => ({
-      key: item.requestId,
-      badge: "badge-waiting_for_user",
-      glyph: "⏸",
-      text: item.config?.prompt ?? item.component,
-      title: item.component,
-      taskId: item.taskId as string | undefined,
-      project: item.project,
-    })),
-  ].slice(0, 3);
-  return (
-    <footer className="strip">
-      {/* App voice, sentence case. It was an uppercase warn-coloured label, which made the strip
-          shout the same thing whether one thing was waiting or nine — the COUNT beside it is what
-          varies, so the count is the coloured part. */}
-      <span className="strip-label app-title">Awaiting you</span>
-      <Pill kind="waiting" n={total} title={`${total} waiting on you`} />
-      {shown.map((item) => {
-        const chip = chipOf(item.project);
-        return (
-          <span
-            key={item.key}
-            className="strip-item"
-            title={item.title}
-            onClick={() => (item.taskId ? onSelect(item.taskId, item.project) : undefined)}
-          >
-            {/* The project's hue, the same one its sidebar row and its address crumb carry — which is
-                how a row here is tied back to somewhere without spelling out a path. */}
-            <span className="chip strip-project" style={{ "--hue": chip.hue } as CSSProperties}>
-              {chip.label}
-            </span>
-            <span className="ellip data-text">{item.text}</span>
-          </span>
-        );
-      })}
-      {total > shown.length ? <span className="more app-secondary">+{total - shown.length} more</span> : null}
-    </footer>
   );
 }
 
@@ -749,6 +655,16 @@ export default function App(): JSX.Element {
   const projectHues = useMemo(
     () => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])),
     [state.projects],
+  );
+  /**
+   * The event notice the inbox strip shows at its right end — the newest this viewer has not read,
+   * from a project this window has open (or Shared) — and the clock its age is read against.
+   */
+  const notices = useNotices();
+  const noticeNow = useNow(30_000);
+  const shownNotice = useMemo(
+    () => noticeToShow(notices, state.settings.ui.noticesRead, (project) => project === SHARED_SESSION || state.projects.some((p) => p.project === project)),
+    [notices, state.settings.ui.noticesRead, state.projects],
   );
   /**
    * Directory → what to call it, for the same surfaces.
@@ -2850,6 +2766,16 @@ export default function App(): JSX.Element {
             actions.setView("tasks");
             actions.select(taskId, project);
           }}
+          notice={shownNotice}
+          now={noticeNow}
+          // The events task, opened at the automation's firing that called `notify` — the card
+          // origin line's gesture (decision 0010 §4). Opening is looking: it is read after.
+          onOpenNotice={(notice) => {
+            actions.setView("tasks");
+            actions.select(notice.taskId, notice.project, notice.stateId ?? null, notice.instanceId ?? null);
+            actions.readNotice(notice, notices);
+          }}
+          onDismissNotice={(notice) => actions.readNotice(notice, notices)}
         />
       </div>
 

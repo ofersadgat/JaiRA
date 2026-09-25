@@ -2102,6 +2102,11 @@ export interface IpcContract {
    * the repository watcher stands with it, and what has arrived per event. Read-only; asks no forge.
    */
   "events:status": { request: { project?: ProjectRef }; response: EventsStatusView };
+  /**
+   * The notices the events tasks posted in this process, oldest first — the backlog a window reads
+   * once before following `notice:posted`. Machine-wide: every open project's, and Shared's.
+   */
+  "notices:list": { request: void; response: EventsNotice[] };
   /** Create a plain file or a directory under a layer root, addressed by path. */
   "file:create": { request: CreateFileRequest; response: { file: string } };
   /** Rename or move a file or directory within a layer root. Refuses when it would break referrers. */
@@ -2294,6 +2299,7 @@ export const IPC_CHANNELS = [
   "permissionSets:write",
   "permissionSets:reset",
   "events:status",
+  "notices:list",
   "file:create",
   "file:rename",
   "file:delete",
@@ -2643,10 +2649,20 @@ export type PushMessage =
 
 /**
  * A notice an events task's `notify` step posted: something an automation wanted a person to know,
- * asking nothing of them. Kept in memory for the process (`AppService.notices`) and written to the log.
+ * asking nothing of them. Kept in memory for the process (`AppService.notices`, `notices:list`) and
+ * written to the log; the durable record of it is the `notify` call in the events task's journal,
+ * which its conversation draws.
+ *
+ * Drawn at the inbox strip's right end, outside the "Awaiting you" count (`noticesModel.ts`).
  */
 export interface EventsNotice {
-  /** The project it was posted in, as the service names it. */
+  /**
+   * Which notice: the events task, the calling instance (the automation's firing) and which call of
+   * its list — `<task>/<instance>/<call>` — so the same call is the same notice however often it is
+   * read. `<task>@<at>` for a call no engine dispatched.
+   */
+  id: string;
+  /** The project it was posted in, as the service names it — `"shared"` for Shared's events task. */
   project: string;
   /** The events task that posted it. */
   taskId: string;
@@ -2657,6 +2673,16 @@ export interface EventsNotice {
   event?: string;
   /** What happened, in a line — `eventSummary`. */
   summary?: string;
+  /** Which happening: a short sha or a request's `!42` — `eventRef`. */
+  ref?: string;
+  /** The automation's firing that called `notify` — where its conversation opens. */
+  instanceId?: string;
+  /** That firing's state (`system/events/<automation>`). */
+  stateId?: string;
+  /** The automation: the firing's child key under the events root. */
+  key?: string;
+  /** Which call of the automation's list it was: 0 for the first. */
+  call?: number;
 }
 
 /** What {@link IpcContract}'s `shell:saveFile` is handed. */
