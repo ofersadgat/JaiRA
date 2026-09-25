@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0010-git-tools-and-events
 type: decision
-status: accepted
+status: built
 updated: 2026-09-25
 decides_for: [engineering/units/tool-policy, engineering/units/remote-review]
 ---
@@ -141,3 +141,22 @@ What the research found the engine lacks (2026-09-25):
 2. The repository watcher, its table, `on_event`, `wait_git_event` (§2–3).
 3. The events task: built-in workflow, supervisor, the unattended permission set, task origin (§4).
 4. Settings: Events, Automations, the Connections line; the board's origin line.
+
+## Built (2026-09-25)
+
+- declarative-ai fc7b899: transition `name`; `.event` in a rule's own `inputs`; `HostCapabilities.listens`
+  (a listening wait does not stop the rule list — on `on_event` only); guards armed while async
+  children run; a state-level rule whose async target chain still runs is skipped; `$ref` expressions.
+- 5d2fb68f the nine Git tools and five forge reads; 0724d31b + 44255a4f the event vocabulary, the
+  `events` block (paths as key lists: event names have dots); 772f1350 the repository watcher
+  (migration 20), the per-project event hub, `on_event`, `wait_git_event`; 7c92fc93 the events task
+  (`system/events` + the step states `system/events/start` / `notify`, `start_task` / `notify`,
+  `TaskMeta.system = "events"`, `startedBy`, the supervisor, the lint, the board line); e747abc4
+  Settings → Tools → Events and Automations, `events:status`.
+- Spellings as built: a rule's inputs use `{ "text": … }`, `{ "json": … }` and
+  `{ "$literal": { … { "$binding": ".event.payload.x" } … } }`; a later step reads
+  `.children.<prev>.output.event`; a `$BASE` miss does not fall back, so Shared's copy
+  (`{ "$ref": "$SYSTEM/workflows/system/events", "transitions", "children" }`) is written first.
+- Open: `notify` notices have no surface yet (pushed as `notice:posted`, logged); a started task does
+  not record which rule fired; comments by the connection's own account never fire
+  `git.merge_request.comments`; Shared's lines are edited on Shared, not from a project page.
