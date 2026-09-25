@@ -174,13 +174,14 @@ export function fieldAppliesTo(field: { kinds?: readonly string[] }, kind: "prom
 // shapes are restated in plain terms instead of imported from `llm` and `hw`.
 
 /**
- * How hard the model should think.
+ * How hard the model should think — `llm`'s `REASONING_EFFORTS`, restated, in ascending order.
  *
- * `xhigh` is above `high` and exists because a transport we drive has a tier the three-value
- * vocabulary cannot name. A provider that tops out lower CLAMPS rather than refusing, since asking
- * for more thought than a model offers is satisfied by giving it all of it.
+ * The union of what every route names (decision 0009): `none`/`minimal` from OpenAI and OpenRouter,
+ * `max` from Claude and codex, `ultra` from codex. Which levels a GIVEN model takes is its catalog
+ * row's business; a call asking for more than the model offers is clamped to its top level before it
+ * is sent, since asking for more thought than a model has is satisfied by giving it all of it.
  */
-export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+export const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 /** An effort LEVEL and/or a token BUDGET — models differ in which they accept, so both are carried. */

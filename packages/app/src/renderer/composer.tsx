@@ -195,10 +195,14 @@ function repoint(route: string, model: string, models: readonly PickModel[]): st
 
 /** What each thinking level buys, so the word is not the only thing to go on. */
 const EFFORT_HINTS: Record<string, string> = {
+  none: "no reasoning at all",
+  minimal: "barely any",
   low: "quickest, least deliberation",
   medium: "a balance",
   high: "works the problem",
-  xhigh: "deepest — slowest and dearest",
+  xhigh: "deeper — slower and dearer",
+  max: "as deep as the model goes",
+  ultra: "max, and hands parts off",
 };
 
 /** What granting each tool actually lets the model do. */

@@ -83,15 +83,21 @@ whose property names are **`LlmCallConfig` fields**, not wire names:
 - `temperature`, `topP`, `topK`, `stopSequences`, `seed`, `maxOutputTokens`
 - `reasoning: { effort, budgetTokens }`
 
-Each source's names are translated once, when its rows are imported (`SAMPLING_PARAM_NAMES` is already
-that mapping). Because the names match, the schema validates the config an author writes, and
+Each source's names are translated once, when its rows are imported (`WIRE_PARAMETER_NAMES`, built as
+`parametersFromNames`). Because the names match, the schema validates the config an author writes, and
 SchemaForm draws the call settings straight from it.
+
+`response_format` and `structured_outputs` are not call parameters. They move to their own row field,
+`structuredOutput: "schema" | "object" | false`, which is what the structured-output profile is
+derived from (`profileForCaps`).
 
 - **A listed property is accepted,** and its schema says what it may be. For example
   `reasoning.effort: { enum: [...], default: "high" }`, or `maxOutputTokens: { maximum: 128000 }`.
 - **An unlisted property is not accepted** (`additionalProperties: false`).
 - **`{}` means accepted, values unknown.** This is all a name-only source (OpenRouter's
-  `supported_parameters`, a local server) can say.
+  `supported_parameters`, a local server) can say. An effort whose levels are unknown is
+  `{ type: "string", examples: [...] }`: SchemaForm offers the usual levels as suggestions without the
+  schema claiming the model takes all of them.
 - **`required` holds mandatory parameters.** For example, OpenRouter's `reasoning.mandatory`.
 - **Absent `parameters` means unknown.** The row accepts everything, as an unknown row does today.
 
@@ -154,7 +160,19 @@ offline seed.
     (haiku through the CLI, a local server).
   - An out-of-range value is a plan finding.
 - **Clamping.** An effort above the model's top level takes the highest level listed at or below the
-  request, as `ReasoningSpec` already promises.
+  request, as `ReasoningSpec` already promises. `fitReasoning` is the one place this happens: it clamps
+  a level, turns a budget into a level for a model with no budget (and back), and drops a request the
+  model takes none of, returning the notes the plan reports.
+- **Anthropic's thinking mode follows the schema.** A model whose schema takes `budgetTokens` gets
+  `thinking: {type: "enabled", budgetTokens}`. One that takes only levels gets
+  `thinking: {type: "adaptive"}` plus `effort`. Measured from Anthropic's `/v1/models` on 2026-09-24:
+  - Every Claude from 4.7 on is adaptive-only, so the budget the adapter always sent asked for a mode
+    those models don't have.
+  - 4.6 takes both modes.
+  - 4.5 and Haiku 4.5 take only a budget.
+
+  A model with no schema keeps the old behaviour: a budget on Anthropic, and a level clamped to
+  `low`–`high` elsewhere.
 - **The effort vocabulary.** `REASONING_EFFORTS` is the ORDER used for clamping. It widens to
   `none < minimal < low < medium < high < xhigh < max < ultra`, which covers OpenRouter's and codex's
   levels. Which levels a given model takes comes from its schema, never from this list.
