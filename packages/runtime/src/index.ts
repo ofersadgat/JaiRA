@@ -24,6 +24,7 @@ export * from "./syncWorkflow";
 export * from "./paths";
 export * from "./exec";
 export * from "./git";
+export * from "./gitRemotes";
 export * from "./command";
 export * from "./policy";
 // A run's policy, one recipe for the app and the CLI alike.

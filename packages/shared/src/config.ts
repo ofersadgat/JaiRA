@@ -26,6 +26,7 @@ import { parseFunctionRule, type JairaOperationNode, type JairaPromptNode } from
 import { defaultMcp, parseMcp, type JairaMcpConfig } from "./mcp";
 import { candidatesOf, parsePresetModel, presetNameRefusal } from "./presetModels";
 import { defaultAppearanceConfig, parseAppearanceConfig, type JairaAppearanceConfig } from "./appearanceConfig";
+import { EVENT_NAMES, EVENT_SPECS, isEventName, type EventName } from "./events";
 
 /**
  * How each provider route is REACHED, and the named presets.
@@ -328,6 +329,8 @@ export interface JairaConfig {
    * the fourth layer, `personal-settings.json`, which is where the old preferences file's look went.
    */
   appearance: JairaAppearanceConfig;
+  /** Which events fire, per event (decision 0010 §2, `./events`) — every one off until a layer says on. */
+  events: JairaEventsConfig;
 }
 
 /**
@@ -644,6 +647,7 @@ export function defaultConfig(): JairaConfig {
     functions: defaultFunctions(),
     mcp: defaultMcp(),
     appearance: defaultAppearanceConfig(),
+    events: {},
   };
 }
 
@@ -1293,6 +1297,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     functions: parseFunctions(cfg["functions"]),
     mcp: parseMcp(cfg["mcp"]),
     appearance: parseAppearanceConfig(cfg["appearance"]),
+    events: parseEvents(cfg["events"]),
   };
 }
 
@@ -1320,6 +1325,99 @@ function parseFiles(raw: unknown): JairaFilesConfig {
       return entry.trim();
     }),
   };
+}
+
+/**
+ * One event's settings (decision 0010 §2).
+ *
+ * `enabled` is the answer for every remote; `remotes` overrides it for a remote by name, either way —
+ * `{ enabled: true, remotes: { mirror: false } }` watches every remote but the mirror, and
+ * `{ enabled: false, remotes: { origin: true } }` watches origin alone. Nothing here says WHERE: the
+ * remotes are the project's own `.git/config`'s, each picking its connection by host.
+ */
+export interface JairaEventSetting {
+  /** Off unless a layer says on. */
+  enabled: boolean;
+  /**
+   * Branch globs, for the `git.*` events only: a push's branch, the branch checks ran for, a merge
+   * request's TARGET branch. Absent means every branch. Replaces a weaker layer's list, never adds to it.
+   */
+  branches?: string[];
+  /** Per remote name, on or off — over `enabled`. For the `git.*` events only. */
+  remotes?: Record<string, boolean>;
+}
+
+/** The `events` block: only the events a layer stated; an event not here is off. */
+export type JairaEventsConfig = Partial<Record<EventName, JairaEventSetting>>;
+
+/**
+ * Parse the `events` block. Strict like every block here: an event name mistyped is an automation
+ * that never fires and never says why, so it is refused naming the events there are; and `branches`
+ * and `remotes` on a `task.*` event are refused rather than ignored, since JaiRA's own events have
+ * neither.
+ */
+function parseEvents(raw: unknown): JairaEventsConfig {
+  if (raw === undefined) return {};
+  const block = plainObject(raw, "config.events");
+  const out: JairaEventsConfig = {};
+  for (const [name, value] of Object.entries(block)) {
+    if (!isEventName(name)) {
+      throw new Error(`config.events["${name}"] is not an event — the events are ${EVENT_NAMES.join(", ")}`);
+    }
+    const where = `config.events["${name}"]`;
+    const entry = plainObject(value, where);
+    const git = EVENT_SPECS[name].group === "git";
+    allowedFields(entry, git ? ["enabled", "branches", "remotes"] : ["enabled"], where);
+    const enabled = entry["enabled"];
+    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error(`${where}.enabled must be true or false`);
+    const setting: JairaEventSetting = { enabled: enabled ?? false };
+    if (entry["branches"] !== undefined) {
+      const branches = entry["branches"];
+      if (!Array.isArray(branches) || branches.length === 0) {
+        throw new Error(`${where}.branches must be a non-empty array of branch globs — leave it out for every branch`);
+      }
+      setting.branches = branches.map((branch, i) => {
+        if (typeof branch !== "string" || branch.trim().length === 0) throw new Error(`${where}.branches[${i}] must be a non-empty string`);
+        return branch.trim();
+      });
+    }
+    if (entry["remotes"] !== undefined) {
+      const remotes: Record<string, boolean> = {};
+      for (const [remote, on] of Object.entries(plainObject(entry["remotes"], `${where}.remotes`))) {
+        if (typeof on !== "boolean") throw new Error(`${where}.remotes.${remote} must be true or false`);
+        remotes[remote] = on;
+      }
+      setting.remotes = remotes;
+    }
+    out[name] = setting;
+  }
+  return out;
+}
+
+/** An event switched on for a remote, and the branches it is limited to (absent: every branch). */
+export interface EnabledEvent {
+  name: EventName;
+  branches?: string[];
+}
+
+/**
+ * Whether an event is on — for a `git.*` event, on the remote named (its `remotes` entry, else
+ * `enabled`); for a `task.*` event, `enabled` alone. Whether the remote has a signed-in connection is
+ * not this function's question: a remote with none is not watched at all.
+ */
+export function isEventEnabled(config: Pick<JairaConfig, "events">, name: EventName, remote?: string): boolean {
+  const setting = config.events[name];
+  if (setting === undefined) return false;
+  const override = remote === undefined ? undefined : setting.remotes?.[remote];
+  return override ?? setting.enabled;
+}
+
+/** The `git.*` events on for one remote, in {@link EVENT_NAMES}' order, each with its branch globs. */
+export function enabledEvents(config: Pick<JairaConfig, "events">, remote: string): EnabledEvent[] {
+  return EVENT_NAMES.filter((name) => EVENT_SPECS[name].group === "git" && isEventEnabled(config, name, remote)).map((name) => {
+    const branches = config.events[name]?.branches;
+    return branches === undefined ? { name } : { name, branches: [...branches] };
+  });
 }
 
 /**
