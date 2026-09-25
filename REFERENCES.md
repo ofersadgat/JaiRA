@@ -176,6 +176,27 @@ composition semantics for the format, not two.
 
 `a.operation` → `b.operation` → `a.operation` is a load error naming the cycle.
 
+### 4.2a Expressions over references (decision 0010)
+
+A `{ "$ref": … }` whose string is not a path — it holds a parenthesis, a bracket, a quote, an
+operator, a comma or whitespace, none of which a path contains — is an EXPRESSION evaluated at load
+over the documents it names: "the other layer's, changed". The reference spellings inside it
+resolve exactly as a path `$ref` does; arrow lambdas (`(t) => …`) are applied by `filter`, `map`,
+`find`, `some`, `every`, `reduce`; `includes` is `contains`; a leading-dot read is refused (nothing has
+run). A leading `...` on a `$ref` that is an item of a list splices the list it produces into that
+list:
+
+```jsonc
+"transitions": [
+  { "name": "release_push", "when": "on_event('git.push', { branch: 'release/*' })", "to": "release_build" },
+  { "$ref": "...filter($BASE/workflows/system/events.transitions, (t) => !['push_main'].includes(t.name))" }
+]
+```
+
+That is how a project's events task keeps Shared's automations but ignores one: its own lines
+first, then Shared's minus `push_main`. The full grammar is the engine's SPEC §5.4; a transition's
+`name` (what the filter reads) is SPEC §5.2.
+
 ### 4.3 What a reference resolves *to*
 
 By file type:
