@@ -179,6 +179,18 @@ CREATE TABLE IF NOT EXISTS module_approvals (
   mac         TEXT NOT NULL,
   approved_at INTEGER NOT NULL
 );
+
+-- The model catalog as this machine last learned it (decision 0009): one row per \`{route}/{model}\`,
+-- the whole catalog row as JSON, written by a refresh from what each route reports about itself and
+-- loaded over the shipped snapshot at startup. Only the BASE root's database is asked, like
+-- module_approvals — models are a fact about the machine, not about one project's history.
+CREATE TABLE IF NOT EXISTS models (
+  key          TEXT PRIMARY KEY,  -- \`{route}/{model}\`
+  route        TEXT NOT NULL,
+  row          TEXT NOT NULL,     -- JSON: a ModelInfoInterface
+  source       TEXT,              -- which source last wrote it
+  refreshed_at INTEGER NOT NULL
+);
 `;
 
 /**

@@ -71,3 +71,5 @@ export * from "./userEvents";
 export * from "./userFunctions";
 // Refreshing an account's allowance without spending a turn (usage readings).
 export * from "./limitsRefresh";
+// The model catalog kept current by this machine (decision 0009).
+export * from "./modelCatalog";

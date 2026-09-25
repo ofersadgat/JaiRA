@@ -246,6 +246,9 @@ const service = new AppService({
   // the screen shows as enabled has no key behind it.
   probeOnStart: true,
   // The two capabilities the service cannot have itself: a file manager and a directory dialog are
+  // …and keeps its model catalog current the same way: what each reachable route says it serves,
+  // asked after those checks and hourly, and saved for the next start (decision 0009).
+  refreshCatalog: true,
   // both Electron's, and the service stays Electron-free so it remains testable headlessly.
   reveal: (file: string) => shell.showItemInFolder(file),
   // A forge sign-in's page (the device flow's verification URL). Only http(s): the URL came from the

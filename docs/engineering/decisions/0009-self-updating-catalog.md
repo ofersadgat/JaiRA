@@ -178,6 +178,37 @@ first-launch and offline seed.
   - on a Refresh on the Models page
 - **Nothing blocks.** A call reads whatever the table holds.
 
+As built (2026-09-24):
+
+- **The store.** `modelStoreAt` in `@jaira/persistence` opens the base root's database on its own handle,
+  as the module approvals do. Reading with `create: false` never creates a `~/.jaira` that doesn't
+  exist; the first refresh with something to keep does.
+- **What is asked.** `catalogSources` in `@jaira/runtime` builds this machine's sources from config and
+  the last executor check:
+  - OpenRouter, always.
+  - Anthropic's list, when the anthropic route's key resolves through the secret chain.
+  - `claude-cli` (the configured binary), `claude-code` (the SDK's bundled one, `sdkClaudeBinary`) and
+    `codex-cli`, each only once its check passed.
+  - The `local` server's `/models`: its rows are free and their parameters unknown.
+  - The `embedded` weights' GGUF headers.
+
+  Each source carries a FINGERPRINT of what its answer depends on: the key's hash (never the key), the
+  agent's command, `--version` and sign-in, the local URL, the weights paths.
+- **When.** `CatalogRefresher` asks a source again when its fingerprint changed, when its answer is a
+  day old (an hour after a failure), or when Re-check forces it. Requests that arrive during a pass
+  collapse into one follow-up with the latest inputs. It saves only the rows the pass changed.
+- **The app.** `AppService` does this only with `refreshCatalog` (set by the app, never by tests):
+  - It loads the store at construction.
+  - It kicks a refresh at the end of every availability pass (startup, project open, config writes,
+    sign-in), which is how a key or sign-in change reaches the catalog, and hourly on a timer.
+  - Re-check (`refreshAvailability({recheck: true})`) forces every source.
+  - A pass that changed rows publishes the `availability` invalidate.
+- **The CLI** loads the store at process start (`loadCatalogFrom`), read-only.
+- **`AHEAD_OF_CATALOG` is deleted.** `knownModels` is the catalog, minus rows a source marked
+  unavailable.
+- **Not yet built:** the Models page's Refresh button, and a refresh when downloaded weights land.
+  Both belong with the settings UI.
+
 ### 5. What reads the schema
 
 - **Parameter checks.** `ModelInfo.paramAcceptance`, the single gate that both the plan and the call use,

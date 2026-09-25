@@ -805,15 +805,15 @@ export function retargetRoute(
 /**
  * Every model that can be used, as `{route}/{model}` ids.
  *
- * The catalog, not a guess and not "what this project happens to name". `ModelInfo` ships a committed
- * snapshot of routes, prices and capabilities, so the answer to "what could I switch to" already
- * exists — an earlier version of this listed only the ids the open workflow mentioned, which made the
- * picker a mirror of the file you were already reading rather than a menu of choices.
+ * The catalog, not a guess and not "what this project happens to name". `ModelInfo` starts from the
+ * committed snapshot and is kept current by this machine (`CatalogRefresher`, decision 0009) from what
+ * each route reports — so a model a provider or an agent names today is listed without a release, and
+ * no hand-kept list sits beside it. An earlier version listed only the ids the open workflow mentioned,
+ * which made the picker a mirror of the file you were already reading rather than a menu of choices.
  *
- * AGENT routes are added on top, because they are not in the catalog and could not be: `claude-cli`
- * and `claude-code` name a program on this machine that picks its own weights, so there is no row of
- * prices to publish for them. They still belong beside `anthropic` as peers — the reader is choosing
- * who answers, and "the CLI on my subscription" and "the API" are two different answers to that.
+ * AGENT routes have rows of their own (`claude-cli/…`, `codex-cli/…`: what the binary says it runs),
+ * beside the provider rows the composer still offers for them. A row a source marked unavailable
+ * (codex's hidden models) is not a choice and is left out.
  */
 export interface KnownModel {
   /** The `{route}/{model}` id, as a state would write it. */
@@ -824,27 +824,15 @@ export interface KnownModel {
 }
 
 export function knownModels(): KnownModel[] {
-  const listed = ModelInfo.instance.list().map((row) => ({
-    id: keyForModel(row),
-    // Defaulted rather than left empty: every model takes text and answers with it, and a filter
-    // over an absent field would hide a row for saying nothing rather than for being unable.
-    input: [...(row.modalities?.input ?? ["text"])],
-    output: [...(row.modalities?.output ?? ["text"])],
-  }));
-  const ids = new Set(listed.map((m) => m.id));
-  return [...listed, ...AHEAD_OF_CATALOG.filter((m) => !ids.has(m.id))].sort((a, b) => a.id.localeCompare(b.id));
+  return ModelInfo.instance
+    .list()
+    .filter((row) => row.available !== false)
+    .map((row) => ({
+      id: keyForModel(row),
+      // Defaulted rather than left empty: every model takes text and answers with it, and a filter
+      // over an absent field would hide a row for saying nothing rather than for being unable.
+      input: [...(row.modalities?.input ?? ["text"])],
+      output: [...(row.modalities?.output ?? ["text"])],
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
-
-/**
- * Models the built-in presets name (`builtin/settings.json`) that the catalog snapshot does not list
- * yet. The catalog is upstream's and is regenerated there; until it catches up, a preset's candidate
- * should still be a model the picker offers. Routing never needed this — a bare id routes by its
- * family (`vendorOfModel`) — only the list of choices did. Once the catalog lists one, its row is used instead.
- */
-const AHEAD_OF_CATALOG: KnownModel[] = [
-  { id: "anthropic/claude-opus-5-5", input: ["text", "image"], output: ["text"] },
-  { id: "anthropic/claude-fable-5-1", input: ["text", "image"], output: ["text"] },
-  { id: "openai/gpt-5.6-luna", input: ["text", "image"], output: ["text"] },
-  { id: "openai/gpt-5.6-terra", input: ["text", "image"], output: ["text"] },
-  { id: "openai/gpt-5.6-sol", input: ["text", "image"], output: ["text"] },
-];

@@ -42,6 +42,7 @@ import {
 import { hostFunction, type ExecServices, type FunctionInputs, type MemoCache, type RecordRef } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
+import type { FetchText } from "@declarative-ai/llm";
 import {
   baseFileTree,
   baseSource,
@@ -168,6 +169,8 @@ import {
   policyAuditRow,
   recordHostRow,
   migrateUserSettings,
+  modelStoreAt,
+  type ModelStore,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -267,6 +270,8 @@ import {
   type McpBridgeHost,
   type StartMcpBridge,
   knownModels,
+  CatalogRefresher,
+  catalogSources,
   JAIRA_TOOLS,
   usableRouteKeys,
   newRegistry,
@@ -670,6 +675,15 @@ export interface AppServiceOptions {
    * always available, and the snapshot is always readable — this only decides who triggers them.
    */
   probeOnStart?: boolean;
+  /**
+   * Keep the model catalog current by itself (decision 0009): load what was learned before at
+   * construction, then ask every reachable route what it serves after each availability pass and once
+   * an hour, re-asking a source only when its inputs changed or its answer is a day old.
+   *
+   * Opt-in for the same reason as {@link probeOnStart}: a refresh reaches the network and starts agent
+   * binaries, which the app wants and a test that calls `refreshAvailability` must not get unasked.
+   */
+  refreshCatalog?: boolean | { fetchText?: FetchText };
   /**
    * How a forge is reached (decision 0004 §1). Absent ⇒ the platform `fetch`; a test passes a replay,
    * so checking a connection never leaves the process.
@@ -1214,6 +1228,64 @@ export class AppService {
     // wait for someone to open Settings and press a button, which meant the app's own idea of what
     // was available was whatever it had assumed — everything — until a run failed to prove otherwise.
     if (options.probeOnStart === true) this.kickAvailability();
+    // What earlier refreshes learned about the models this machine can reach, over the snapshot the
+    // build shipped with — BEFORE anything asks a model question, so the first run already sees it.
+    if (options.refreshCatalog !== undefined && options.refreshCatalog !== false) {
+      this.catalog.loadStored();
+      this.catalogTimer = setInterval(() => this.kickCatalog(), 60 * 60 * 1000);
+      this.catalogTimer.unref?.();
+    }
+  }
+
+  /**
+   * The model catalog, kept current by this machine (decision 0009, `CatalogRefresher`).
+   *
+   * Its rows are kept in the BASE root's database — models are about the machine — and the store is
+   * opened lazily: reading at startup never creates a root that does not exist yet, and the first
+   * refresh with something to keep does.
+   */
+  private readonly catalog = new CatalogRefresher(({ create }) => this.modelStore(create));
+  private catalogStore?: ModelStore;
+  private catalogTimer?: ReturnType<typeof setInterval>;
+  /** A person pressed Re-check: the next catalog pass asks every source regardless of age. */
+  private catalogForced = false;
+
+  private modelStore(create: boolean): ModelStore | undefined {
+    if (this.closed) return undefined;
+    this.catalogStore ??= modelStoreAt(jairaBasePaths(this.baseDir).dbFile, { create });
+    return this.catalogStore;
+  }
+
+  /**
+   * Ask the routes this configuration reaches what they serve, without waiting — see
+   * {@link AppServiceOptions.refreshCatalog}. The sources come from the LAST availability check,
+   * because an agent is only worth asking once it answered, and its version and sign-in are what its
+   * answer depends on.
+   */
+  private kickCatalog(): void {
+    const opt = this.options.refreshCatalog;
+    if (opt === undefined || opt === false || this.closed) return;
+    const force = this.catalogForced;
+    this.catalogForced = false;
+    const config = this.effectiveConfig();
+    const sources = catalogSources(
+      { models: config.models, agents: config.agents, secrets: this.secretResolver(), executors: this.availability.executors },
+      typeof opt === "object" && opt.fetchText !== undefined ? { fetchText: opt.fetchText } : {},
+    );
+    void this.catalog
+      .refresh(sources, { force })
+      .then((report) => {
+        if (report === undefined) return;
+        for (const s of report.bySource.filter((s) => s.skipped)) {
+          this.log({ level: "warn", source: "app", message: `the model catalog could not be refreshed from ${s.name}: ${s.error ?? s.problems?.join("; ") ?? "no usable rows"}` });
+        }
+        // The settings screens re-read what they show; a composer re-asks its plan on its own.
+        if (report.changed.length > 0) this.publish({ type: "store:invalidate", scope: "availability" });
+      })
+      .catch((e: unknown) => {
+        // A catalog refresh is never the reason anything else fails: the table stands as it was.
+        this.log({ level: "warn", source: "app", message: `the model catalog refresh failed: ${(e as Error).message}` });
+      });
   }
 
   /**
@@ -2007,6 +2079,9 @@ export class AppService {
     // A sign-in still polling ends as canceled; a renewal timer set for later is nobody's now.
     for (const waiting of this.forgeSignIns.values()) waiting.controller.abort();
     if (this.forgeRenewal !== undefined) clearTimeout(this.forgeRenewal);
+    if (this.catalogTimer !== undefined) clearInterval(this.catalogTimer);
+    this.catalogStore?.close();
+    this.catalogStore = undefined;
     // Hand the log back, but only if it is still OURS. The sink is process-global, so a second
     // service constructed after this one has already replaced it — resetting unconditionally would
     // silence a service that is still running on behalf of the one shutting down.
@@ -7689,6 +7764,9 @@ export class AppService {
     // A person pressing Re-check is saying something changed that no check can see — most often that
     // they signed an agent in again — so the refusals a run observed are theirs to clear.
     if (opts.recheck === true) this.signInRefusals.clear();
+    // …and a re-check asks every route for its models again too, however recently they answered:
+    // a person pressing it has just loaded a model into a local server, or updated an agent.
+    if (opts.recheck === true) this.catalogForced = true;
     if (this.availabilityRun !== undefined) {
       // `catch` rather than `then`: a pass that THREW must still be followed by the one that was
       // asked for, or one failed socket connect strands every later request behind it forever.
@@ -7743,6 +7821,9 @@ export class AppService {
     });
     this.availability = { routes, executors, forges, tree, configured, checkedAt: Date.now() };
     this.publish({ type: "store:invalidate", scope: "availability" });
+    // What each reachable route serves, now that it is known which answer — a source whose inputs
+    // did not change and whose answer is under a day old is not asked again (`CatalogRefresher`).
+    this.kickCatalog();
     return this.availability;
   }
 

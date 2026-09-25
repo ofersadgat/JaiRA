@@ -1,5 +1,8 @@
 /** Process entry point for the `jaira` CLI. */
 import { pathToFileURL } from "node:url";
+import { modelStoreAt } from "@jaira/persistence";
+import { loadCatalogFrom } from "@jaira/runtime";
+import { jairaBasePaths } from "@jaira/shared";
 import { runCli } from "./cli";
 
 // Source maps are enabled in `bin/jaira.js`, which loads this bundle — NOT here. The flag only
@@ -7,6 +10,7 @@ import { runCli } from "./cli";
 // statement executes. See `packages/app/entry.cjs` for the measurement behind that.
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  loadStoredCatalog();
   const abort = new AbortController();
   const onSigint = (): void => abort.abort();
   process.once("SIGINT", onSigint);
@@ -23,6 +27,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     });
   } finally {
     process.removeListener("SIGINT", onSigint);
+  }
+}
+
+/**
+ * The model catalog as the app last learned it (decision 0009), over the snapshot this build shipped.
+ * Read only — the CLI does not refresh it — and never the reason a command fails: a root that does not
+ * exist yet, or a table that will not open, leaves the snapshot as it is.
+ */
+function loadStoredCatalog(): void {
+  let store: ReturnType<typeof modelStoreAt>;
+  try {
+    store = modelStoreAt(jairaBasePaths().dbFile);
+    loadCatalogFrom(store);
+  } catch {
+    // the snapshot stands
+  } finally {
+    store?.close();
   }
 }
 
