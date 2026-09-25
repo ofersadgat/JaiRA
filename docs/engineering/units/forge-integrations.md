@@ -33,10 +33,11 @@ It deliberately does not own:
 
 ```text
 forge:signIn {connection}
-  └─ integrations.oauth.<provider>.clientId?  ── none ──▶ {ok:false, reason, fix}   (no request is made)
+  └─ the connection's oauthClientId, else JaiRA's own on its public host?  ── none ──▶ {ok:false, reason, fix}   (no request is made)
   └─ POST {web}/login/device/code | /oauth/authorize_device   (client_id, scope; form-encoded)
-  └─ answer {ok:true, pending:{userCode, verificationUri, verificationUriComplete?, expiresAt}}
-     and open verificationUriComplete ?? verificationUri in the browser
+  └─ answer {ok:true, pending:{userCode, verificationUri, expiresAt}}
+     and open verificationUri in the browser — never verification_uri_complete: gitlab.com says
+     "Device successfully authorized" through it and then answers the poll invalid_grant
         └─ every interval: POST {web}/login/oauth/access_token | /oauth/token  (grant_type=…:device_code)
              authorization_pending → wait   slow_down → interval + 5 s (or GitHub's own, if longer)
              expired_token | clock past expiresAt → expired      access_denied → denied
@@ -47,7 +48,7 @@ forge:signIn {connection}
                  → availability pass (the check names the account) → push forge:signInFinished
 ```
 
-- The app: a layer's `integrations.oauth.<provider>`, else JaiRA's own on its public host (`oauthAppFor`, `BUILTIN_OAUTH_APPS`: GitHub App 5053987 on github.com, a GitLab application on gitlab.com). Client IDs only — no secret is shipped or sent. A self-hosted host with no app named is refused before anything is asked.
+- The app: the connection's `oauthClientId`, else JaiRA's own on its public host (`oauthClientIdFor`, `BUILTIN_OAUTH_APPS`: GitHub App 5053987 on github.com, a GitLab application on gitlab.com). Per connection because an app is registered on one host: a self-hosted instance's app means nothing to gitlab.com. Client IDs only — no secret is shipped or sent. A self-hosted host with no app named is refused before anything is asked. A renewal goes through the same connection's app, found by the mark's host.
 - Scopes are fixed per provider: GitHub `repo read:org` (a GitHub App ignores scopes; what its token may do is the app's permissions, in the repositories it is INSTALLED on), GitLab `api` (`DEVICE_FLOW_SCOPES`) — JaiRA's GitLab app does not allow `read_user`, and a scope an app lacks refuses the whole request.
 - The web root is `https://<host>`, or a connection's `apiUrl` with `/api/v4` or `/api/v3` taken off, so a forge behind a path prefix works.
 - A connection naming no `credential` gets `<NAME>_TOKEN` written into the configuration layer that defines it, as a pasted token's name would be.
@@ -68,7 +69,7 @@ forge:signIn {connection}
 
 | # | Invariant | Asserted by |
 | --- | --- | --- |
-| 1 | No OAuth app configured answers `ok: false` naming `integrations.oauth.<provider>.clientId`, and makes no request | `forgeSignIn.test.ts` "says an OAuth app's client id is needed…" |
+| 1 | No OAuth app configured answers `ok: false` naming `integrations.forges.<name>.oauthClientId`, and makes no request; a connection's own app is asked on its host only | `forgeSignIn.test.ts` "says an OAuth app's client id is needed…", "signs in to a self-hosted instance through the app the connection names…" |
 | 2 | A second start while one waits answers with the same code: one device-code request, one browser window | `forgeSignIn.test.ts` "answers with the code, opens the page…" |
 | 3 | A pending poll waits the interval before every request; `slow_down` adds five seconds for every later poll | `deviceFlow.test.ts` "waits the interval before every poll…", "slows down by five seconds…" |
 | 4 | GitLab's `400 authorization_pending` reads as pending, not as a failure | `deviceFlow.test.ts` "reads GitLab's pending as pending…" |
@@ -83,16 +84,16 @@ forge:signIn {connection}
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| No `integrations.oauth.<provider>.clientId` | `forge:signIn` answers `{ok:false, reason, fix}` | set the client id, or paste a token | the reason and the fix beside Sign in |
+| A self-hosted connection with no `oauthClientId` | `forge:signIn` answers `{ok:false, reason, fix}` | set the connection's sign-in app, or paste a token | the reason and the fix beside Sign in |
 | The GitHub app has device flow off, or the forge does not know the client id | the start answers `ok: false` naming the box to tick or the setting to check | fix the app or the setting | the reason beside Sign in |
 | Nobody types the code in time | `forge:signInFinished` `{code:"expired"}` | sign in again | a new code is needed |
 | The network drops for three polls in a row | `{code:"failed"}` naming the host | sign in again | the reason |
 | The app closes mid-sign-in | the poll is aborted; `{code:"canceled"}` is pushed to a window that is going away | sign in again after restart | nothing waits |
 | No keychain here | the token goes to `<base>/.env.local`; a token in a project's `.jaira/.env.local` under the same name is found first | remove the project's copy | the check names the other token, `via: "token"` |
 | A renewal fails (refresh token revoked, app deleted) | logged at `warn`; the old token stays | sign in again | the check reports the token refused with "sign in again" |
-| A self-hosted GitLab needs its own app | one `clientId` per provider serves every host of that provider | set the instance's app id in the layer that uses it | — |
 
 ## What migrates
 
 - GitLab requests now send `Authorization: Bearer` instead of `PRIVATE-TOKEN`; personal access tokens keep working, and the recorded fixtures' header matches moved with it.
-- `integrations.oauth` is new and absent by default; `forgeSignIns` is new and absent until a sign-in. Nothing reads an older form.
+- `forgeSignIns` is new and absent until a sign-in. Nothing reads an older form.
+- 2026-09-25: the provider-wide `integrations.oauth.<provider>.clientId` became each connection's `oauthClientId` — one id per provider made a self-hosted instance's app the one gitlab.com was asked with. No settings held the old block; it is now refused as not a setting.

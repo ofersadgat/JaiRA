@@ -125,11 +125,11 @@ afterEach(async () => {
 });
 
 const withApps = (): void => {
-  service.writeConfig({ layer: "base", config: { integrations: { oauth: { gitlab: { clientId: "gl-app" }, github: { clientId: "Iv1.app" } } } } });
+  service.writeConfig({ layer: "base", config: { integrations: { forges: { gitlab: { oauthClientId: "gl-app" }, github: { oauthClientId: "Iv1.app" } } } } });
 };
 
 describe("starting a sign-in", () => {
-  it("signs in to gitlab.com and github.com through JaiRA's own apps when no layer names one — client IDs only", async () => {
+  it("signs in to gitlab.com and github.com through JaiRA's own apps when no connection names one — client IDs only", async () => {
     holding = [];
     await service.signInForge("gitlab");
     await service.signInForge("github");
@@ -143,16 +143,28 @@ describe("starting a sign-in", () => {
   it("says an OAuth app's client id is needed for a self-hosted instance, and where to set it — and asks the forge nothing", async () => {
     service.writeConfig({ layer: "base", config: { integrations: { forges: { work: { provider: "gitlab", host: "git.example.org", credential: "WORK_TOKEN" } } } } });
     const start = await service.signInForge("work");
-    expect(start).toMatchObject({ ok: false, reason: expect.stringMatching(/git\.example\.org .*needs an OAuth app registered there/), fix: expect.stringContaining("integrations.oauth.gitlab.clientId") });
+    expect(start).toMatchObject({ ok: false, reason: expect.stringMatching(/git\.example\.org .*needs an OAuth app registered there/), fix: expect.stringContaining("integrations.forges.work.oauthClientId") });
     expect(seen).toEqual([]);
     expect(opened).toEqual([]);
+  });
+
+  it("signs in to a self-hosted instance through the app the connection names, and leaves gitlab.com on JaiRA's", async () => {
+    service.writeConfig({
+      layer: "base",
+      config: { integrations: { forges: { work: { provider: "gitlab", host: "git.example.org", credential: "WORK_TOKEN", oauthClientId: "work-app" } } } },
+    });
+    holding = [];
+    await service.signInForge("work");
+    await service.signInForge("gitlab");
+    expect(seen.find((r) => r.url === "https://git.example.org/oauth/authorize_device")?.form).toEqual({ client_id: "work-app", scope: "api" });
+    expect(seen.find((r) => r.url === "https://gitlab.com/oauth/authorize_device")?.form).toEqual({ client_id: BUILTIN_OAUTH_APPS.gitlab.clientId, scope: "api" });
   });
 
   it("refuses a connection that does not exist", async () => {
     await expect(service.signInForge("bitbucket")).rejects.toThrow(/unknown forge connection 'bitbucket'/);
   });
 
-  it("answers with the code, opens the page with the code already in it, and lists the sign-in as waiting", async () => {
+  it("answers with the code, opens the page to type it on, and lists the sign-in as waiting", async () => {
     withApps();
     holding = [];
     const start = await service.signInForge("gitlab");
@@ -164,12 +176,12 @@ describe("starting a sign-in", () => {
         host: "gitlab.com",
         userCode: "WDJB-MJHT",
         verificationUri: "https://gitlab.com/device",
-        verificationUriComplete: "https://gitlab.com/device?user_code=WDJB-MJHT",
         expiresAt: now + 900_000,
         startedAt: now,
       },
     });
-    expect(opened).toEqual(["https://gitlab.com/device?user_code=WDJB-MJHT"]);
+    // The plain page, though the forge offered one with the code in it.
+    expect(opened).toEqual(["https://gitlab.com/device"]);
     expect(seen[0]).toMatchObject({ url: "https://gitlab.com/oauth/authorize_device", form: { client_id: "gl-app", scope: "api" } });
     expect(service.pendingForgeSignIns().map((p) => p.userCode)).toEqual(["WDJB-MJHT"]);
 

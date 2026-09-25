@@ -47,31 +47,23 @@ export interface JairaForgeConnection {
    * a different port, which the git remote's host alone cannot say.
    */
   apiUrl?: string;
+  /**
+   * The client ID of the OAuth app a sign-in through the browser goes through (RFC 8628's device
+   * flow) — an app registered on THIS host, which is why it is the connection's and not the
+   * provider's: an app on a self-hosted GitLab means nothing to gitlab.com.
+   *
+   * Only the ID: a device flow is a PUBLIC client — one that cannot keep a secret, which a desktop
+   * app is — so there is no secret to name. On GitHub the app has "Enable Device Flow" ticked; on
+   * GitLab it is not confidential and allows `api`. Absent, gitlab.com and github.com use JaiRA's own
+   * apps ({@link BUILTIN_OAUTH_APPS}) and any other host cannot sign in through the browser —
+   * {@link oauthClientIdFor} says which is used.
+   */
+  oauthClientId?: string;
 }
 
 export interface JairaIntegrationsConfig {
   /** Connections by NAME — a name and not the host, because a host has dots and a config path splits on them. */
   forges: Record<string, JairaForgeConnection>;
-  /**
-   * The OAuth apps a person signs in to a forge through, by provider — see {@link JairaForgeOAuthApp}.
-   *
-   * Empty by default: JaiRA's own apps ({@link BUILTIN_OAUTH_APPS}) answer for gitlab.com and
-   * github.com without being written here. A layer names one for a self-hosted instance, or to use an
-   * app of its own on the public hosts — {@link oauthAppFor} says which is used.
-   */
-  oauth: Partial<Record<ForgeProviderKind, JairaForgeOAuthApp>>;
-}
-
-/**
- * An OAuth app registered on a forge, used for the device authorization grant (RFC 8628).
- *
- * Only the client ID: the device flow is for a PUBLIC client — one that cannot keep a secret, which a
- * desktop app is — so there is no secret to name. On GitHub the app has "Enable Device Flow" ticked;
- * on GitLab it is not confidential. One per provider: a self-hosted GitLab is asked with the same id,
- * so an instance with an app of its own needs that app's id here, in the layer that uses the instance.
- */
-export interface JairaForgeOAuthApp {
-  clientId: string;
 }
 
 /**
@@ -83,21 +75,20 @@ export interface JairaForgeOAuthApp {
  * on, and carries its permissions rather than scopes. GitLab's allows `api`, which is what JaiRA asks.
  * Each is registered on its public host and means nothing to a self-hosted instance.
  */
-export const BUILTIN_OAUTH_APPS: Record<ForgeProviderKind, JairaForgeOAuthApp & { host: string }> = {
+export const BUILTIN_OAUTH_APPS: Record<ForgeProviderKind, { host: string; clientId: string }> = {
   github: { host: "github.com", clientId: "Iv23liJYmSQiRIpe6dPS" },
   gitlab: { host: "gitlab.com", clientId: "3324ddfef98706458b7a650cc4c26e8f406c9c486bc46679fc06c24c6a26c963" },
 };
 
 /**
- * The OAuth app a sign-in to this connection uses: the one a layer names for its provider, else
- * JaiRA's own when the connection is the public host that app is registered on. Absent ⇒ none, and
- * a sign-in says what to set.
+ * The client ID a sign-in to this connection goes through: the one the connection names, else
+ * JaiRA's own when the connection is the public host that app is registered on. Absent ⇒ none, and a
+ * sign-in says what to set.
  */
-export function oauthAppFor(integrations: Pick<JairaIntegrationsConfig, "oauth">, connection: { provider: ForgeProviderKind; host: string }): JairaForgeOAuthApp | undefined {
-  const named = integrations.oauth[connection.provider];
-  if (named !== undefined) return named;
+export function oauthClientIdFor(connection: Pick<JairaForgeConnection, "provider" | "host" | "oauthClientId">): string | undefined {
+  if (connection.oauthClientId !== undefined) return connection.oauthClientId;
   const builtIn = BUILTIN_OAUTH_APPS[connection.provider];
-  return connection.host === builtIn.host ? { clientId: builtIn.clientId } : undefined;
+  return connection.host === builtIn.host ? builtIn.clientId : undefined;
 }
 
 /** The window the decision names; what `functions.review_artifacts.settleAfter` is when nobody set it. */
@@ -117,7 +108,7 @@ export const BUILTIN_FORGES: Record<string, JairaForgeConnection> = {
 };
 
 export function defaultIntegrations(): JairaIntegrationsConfig {
-  return { forges: structuredClone(BUILTIN_FORGES), oauth: {} };
+  return { forges: structuredClone(BUILTIN_FORGES) };
 }
 
 /** What `functions.review_artifacts.publish` may be set to — see {@link PUBLISH_MODE_LABELS}. */
@@ -151,7 +142,7 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
   if (block["review"] !== undefined) {
     throw new Error("config.integrations.review has moved: the quiet window after a comment is functions.review_artifacts.settleAfter");
   }
-  onlyFields(block, ["forges", "oauth"], "config.integrations");
+  onlyFields(block, ["forges"], "config.integrations");
 
   if (block["forges"] !== undefined) {
     for (const [name, entry] of Object.entries(objectAt(block["forges"], "config.integrations.forges"))) {
@@ -160,7 +151,7 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
         throw new Error(`${where}: a connection's name is letters, digits, '-' and '_' — the host goes in its 'host' field`);
       }
       const spec = objectAt(entry, where);
-      onlyFields(spec, ["provider", "host", "credential", "enabled", "apiUrl"], where);
+      onlyFields(spec, ["provider", "host", "credential", "enabled", "apiUrl", "oauthClientId"], where);
       const merged = { ...(out.forges[name] ?? {}), ...spec } as Record<string, unknown>;
 
       const provider = merged["provider"];
@@ -182,12 +173,17 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
       if (apiUrl !== undefined && (typeof apiUrl !== "string" || !/^https?:\/\/\S+$/.test(apiUrl))) {
         throw new Error(`${where}.apiUrl must be an http(s) URL`);
       }
+      const clientId = merged["oauthClientId"];
+      if (clientId !== undefined && (typeof clientId !== "string" || !/^\S+$/.test(clientId))) {
+        throw new Error(`${where}.oauthClientId must be the OAuth app's client ID — one word, no spaces`);
+      }
       out.forges[name] = {
         provider: provider as ForgeProviderKind,
         host,
         ...(credential !== undefined ? { credential: credential as string } : {}),
         ...(merged["enabled"] === false ? { enabled: false } : {}),
         ...(apiUrl !== undefined ? { apiUrl: (apiUrl as string).replace(/\/+$/, "") } : {}),
+        ...(clientId !== undefined ? { oauthClientId: clientId as string } : {}),
       };
     }
   }
@@ -205,21 +201,6 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
     byHost.set(connection.host, name);
   }
 
-  if (block["oauth"] !== undefined) {
-    for (const [provider, entry] of Object.entries(objectAt(block["oauth"], "config.integrations.oauth"))) {
-      const where = `config.integrations.oauth.${provider}`;
-      if (!(FORGE_PROVIDERS as readonly string[]).includes(provider)) {
-        throw new Error(`${where}: an OAuth app is keyed by its provider — one of ${FORGE_PROVIDERS.join(", ")}`);
-      }
-      const app = objectAt(entry, where);
-      onlyFields(app, ["clientId"], where);
-      const clientId = app["clientId"];
-      if (typeof clientId !== "string" || !/^\S+$/.test(clientId)) {
-        throw new Error(`${where}.clientId must be the OAuth app's client ID — one word, no spaces`);
-      }
-      out.oauth[provider as ForgeProviderKind] = { clientId };
-    }
-  }
   return out;
 }
 
@@ -527,10 +508,13 @@ export interface ForgeSignInPending {
   host: string;
   /** What the person types on the page — `WDJB-MJHT`. Shown as the forge sent it. */
   userCode: string;
-  /** The page to type it on. Opened in the browser when the sign-in starts. */
+  /**
+   * The page to type it on. Opened in the browser when the sign-in starts — the plain page, never
+   * RFC 8628's `verification_uri_complete` with the code already in it: approving through that link
+   * on gitlab.com says "Device successfully authorized" and then refuses the token (`invalid_grant`),
+   * while the same code typed on the plain page signs in (measured 2026-09-25, JaiRA's app and glab's).
+   */
   verificationUri: string;
-  /** The same page with the code already in it, where the forge offers one (GitLab does). */
-  verificationUriComplete?: string;
   /** Epoch ms after which the code is dead, and the sign-in ends as `expired`. */
   expiresAt: number;
   /** Epoch ms the sign-in started. */

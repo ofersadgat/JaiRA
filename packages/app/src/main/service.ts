@@ -406,7 +406,7 @@ import {
   type ModuleApproval,
   LEFT_EVENT,
   questionKeyOf,
-  oauthAppFor,
+  oauthClientIdFor,
   isMoveQuestion,
   type TaskActivity,
   type NextMove,
@@ -8000,16 +8000,15 @@ export class AppService {
   }
 
   private async startForgeSignIn(name: string): Promise<ForgeSignInStart> {
-    const config = this.effectiveConfig();
     const connection = this.forgeConnection(name);
     if (connection.enabled === false) return { ok: false, reason: `the ${name} connection is turned off`, fix: "turn it on, then sign in" };
-    const app = oauthAppFor(config.integrations, connection);
-    if (app === undefined) return { ok: false, ...oauthAppNeeded(connection.provider, connection.host) };
-    const endpoints = deviceFlowEndpoints(connection);
+    const clientId = oauthClientIdFor(connection);
+    if (clientId === undefined) return { ok: false, ...oauthAppNeeded(name, connection.provider, connection.host) };
+    const endpoints = deviceFlowEndpoints(name, connection);
     const clock = this.options.forgeClock ?? {};
     let authorization: DeviceAuthorization;
     try {
-      authorization = await requestDeviceCode(endpoints, app.clientId, { http: this.options.forgeHttp ?? fetchForgeHttp, ...(clock.now !== undefined ? { now: clock.now } : {}) });
+      authorization = await requestDeviceCode(endpoints, clientId, { http: this.options.forgeHttp ?? fetchForgeHttp, ...(clock.now !== undefined ? { now: clock.now } : {}) });
     } catch (e) {
       this.log({ level: "warn", source: "config", message: `forge sign-in to ${connection.host} could not start: ${(e as Error).message}` });
       return { ok: false, reason: (e as Error).message };
@@ -8020,15 +8019,14 @@ export class AppService {
       host: connection.host,
       userCode: authorization.userCode,
       verificationUri: authorization.verificationUri,
-      ...(authorization.verificationUriComplete !== undefined ? { verificationUriComplete: authorization.verificationUriComplete } : {}),
       expiresAt: authorization.expiresAt,
       startedAt: (clock.now ?? Date.now)(),
     };
     const controller = new AbortController();
     this.forgeSignIns.set(name, { pending, controller });
-    // The page with the code already in it where the forge offers one: one less thing to type.
-    this.options.openExternal?.(pending.verificationUriComplete ?? pending.verificationUri);
-    void this.finishForgeSignIn(name, connection, endpoints, app.clientId, authorization, controller.signal);
+    // The plain page, where the person types the code shown beside Sign in — see `ForgeSignInPending`.
+    this.options.openExternal?.(pending.verificationUri);
+    void this.finishForgeSignIn(name, connection, endpoints, clientId, authorization, controller.signal);
     return { ok: true, pending };
   }
 
@@ -8204,13 +8202,14 @@ export class AppService {
     const config = this.effectiveConfig();
     const secrets = this.secretResolver();
     for (const [credential, mark] of due) {
-      const app = oauthAppFor(config.integrations, mark);
+      // Renewed through the app the token came from — the connection's, which the mark finds by host.
+      const [name, connection] = Object.entries(config.integrations.forges).find(([, c]) => c.provider === mark.provider && c.host === mark.host) ?? [];
+      const clientId = connection !== undefined ? oauthClientIdFor(connection) : undefined;
       const refresh = secrets.lookup(mark.refreshCredential!);
       const target = targetOfSource(mark.source);
-      if (app === undefined || refresh === undefined || target === undefined) continue;
-      const connection = Object.values(config.integrations.forges).find((c) => c.provider === mark.provider && c.host === mark.host) ?? mark;
+      if (name === undefined || connection === undefined || clientId === undefined || refresh === undefined || target === undefined) continue;
       try {
-        const token = await refreshDeviceToken(deviceFlowEndpoints(connection), app.clientId, refresh.value, {
+        const token = await refreshDeviceToken(deviceFlowEndpoints(name, connection), clientId, refresh.value, {
           http: this.options.forgeHttp ?? fetchForgeHttp,
           ...(this.options.forgeClock?.now !== undefined ? { now: this.options.forgeClock.now } : {}),
         });

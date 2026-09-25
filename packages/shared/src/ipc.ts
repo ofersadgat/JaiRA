@@ -1970,7 +1970,7 @@ export interface IpcContract {
    * `forge:signInFinished` push; on success the token is stored where a pasted one would be (the
    * connection's `credential`, keychain first), marked as OAuth, and availability is re-checked, so the
    * connection's check names the account. A second start while one waits answers with the one waiting.
-   * No OAuth app configured (`integrations.oauth.<provider>.clientId`) is an `ok: false` answer.
+   * No OAuth app for the connection (its `oauthClientId`, or JaiRA's own on a public host) is an `ok: false` answer.
    */
   "forge:signIn": { request: { connection: string }; response: ForgeSignInStart };
   /** Give up on a forge sign-in still waiting; it ends as `canceled`. Nothing waiting is not an error. */

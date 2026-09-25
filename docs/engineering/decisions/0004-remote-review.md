@@ -570,8 +570,9 @@ the rest):
   `integrations.oauth.<provider>.clientId`. With none, Sign in answers why and where to set it.
   *Superseded the same day:* JaiRA registered its own apps — a GitLab application on gitlab.com and
   GitHub App 5053987 on github.com — and ships their client IDs (`BUILTIN_OAUTH_APPS`), never their
-  secrets: a device flow is a public client. A layer's `integrations.oauth` still wins, and is what a
-  self-hosted instance needs. GitLab's app allows `api` but not `read_user`, so JaiRA asks for `api` alone.
+  secrets: a device flow is a public client. A connection's own `oauthClientId` still wins, and is
+  what a self-hosted instance needs (per connection since 2026-09-25; it was a provider-wide
+  `integrations.oauth`, which asked gitlab.com with a self-hosted instance's app). GitLab's app allows `api` but not `read_user`, so JaiRA asks for `api` alone.
 - **The device flow, not a redirect.** It needs no listener on this machine; the forge shows the
   page, the person types the code, and main polls (`slow_down` adds five seconds; GitHub answers a
   pending poll `200`, GitLab `400`, so the body's `error` is read before the status).

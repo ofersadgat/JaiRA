@@ -104,8 +104,20 @@ const API_URL: Schema = {
     "Only for a host whose API is not where its kind puts it — behind a path prefix, or on another port. Empty is right for gitlab.com, github.com, a self-hosted GitLab and a GitHub Enterprise Server.",
 };
 
+/**
+ * The OAuth app "Sign in with …" goes through — an app registered on THIS connection's host, which is
+ * why it is set per connection. Only needed for a self-hosted host, or to use an app of your own.
+ */
+const OAUTH_CLIENT_ID: Schema = {
+  type: "string",
+  title: "sign-in app",
+  minLength: 1,
+  description:
+    "The client ID of an OAuth app registered on this host, for signing in through the browser. On GitLab: a non-confidential application with the api scope. On GitHub: an OAuth app with “Enable Device Flow” ticked. Unset on gitlab.com and github.com uses JaiRA's own app; unset anywhere else, paste a token instead.",
+};
+
 /** A built-in connection's host and kind are what it IS; only how it is reached can change. */
-const BUILTIN_SCHEMA: Schema = { type: "object", properties: { credential: CREDENTIAL, apiUrl: API_URL } };
+const BUILTIN_SCHEMA: Schema = { type: "object", properties: { credential: CREDENTIAL, apiUrl: API_URL, oauthClientId: OAUTH_CLIENT_ID } };
 
 const HOST: Schema = {
   type: "string",
@@ -123,7 +135,7 @@ const PROVIDER: Schema = {
 
 const CUSTOM_SCHEMA: Schema = {
   type: "object",
-  properties: { provider: PROVIDER, host: HOST, credential: CREDENTIAL, apiUrl: API_URL },
+  properties: { provider: PROVIDER, host: HOST, credential: CREDENTIAL, apiUrl: API_URL, oauthClientId: OAUTH_CLIENT_ID },
   required: ["provider", "host"],
 };
 
@@ -143,30 +155,6 @@ const NEW_SCHEMA: Schema = {
   required: ["name", "provider", "host", "credential"],
 };
 
-/**
- * The OAuth apps a sign-in through the browser uses, per forge — `integrations.oauth`. Absent is the
- * ordinary case: JaiRA's own apps answer for gitlab.com and github.com. A layer names one for a
- * self-hosted instance, or to sign in through an app of its own. Only the raw document reached this
- * before it went (2026-09-23).
- */
-const OAUTH_APPS_SCHEMA: Schema = {
-  type: "object",
-  properties: Object.fromEntries(
-    FORGE_PROVIDERS.map((provider) => [
-      provider,
-      {
-        type: "object",
-        title: `${FORGE_LABELS[provider].name} sign-in app`,
-        description: `The OAuth app a sign-in to ${FORGE_LABELS[provider].name} goes through — for a self-hosted instance, or an app of your own. Unset uses JaiRA's own app on the public host.`,
-        properties: {
-          clientId: { type: "string", title: "client ID", description: "The app's client ID. A device-flow sign-in is a public client, so there is no secret to name." },
-        },
-        required: ["clientId"],
-      },
-    ]),
-  ),
-};
-
 /** The forges, as the card of Connections → Forges: one row per connection, then "Another host". */
 export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
   const { config, layer, busy, editable, checks, onSave } = props;
@@ -182,7 +170,6 @@ export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
   const { set, stated } = layerWriter(doc, layer, onSave);
 
   return (
-    <>
     <ul className="cfg-rows">
       {Object.entries(forges).filter(([name]) => !onlyStated || stated(`integrations.forges.${name}`)).map(([name, connection]) => (
         <ForgeRow
@@ -198,13 +185,6 @@ export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
       ))}
       {onlyStated ? null : <AddHost forges={forges} locked={locked} set={set} />}
     </ul>
-    <SchemaForm
-      schema={OAUTH_APPS_SCHEMA}
-      value={(effective["integrations"] as { oauth?: unknown } | undefined)?.oauth}
-      onChange={(next) => set("integrations.oauth", next)}
-      ctx={{ path: "integrations.oauth", disabled: locked, isSet: stated, setAt: set }}
-    />
-    </>
   );
 }
 

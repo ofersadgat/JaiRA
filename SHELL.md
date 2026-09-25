@@ -1349,8 +1349,8 @@ the usual ports answered — Ollama 11434, LM Studio 1234, llama.cpp 8080, vLLM 
 1337 — with `Use` on one that answers and `in use` on the one the route points at
 (`LocalServers`); Embedded weights are rows with their file found or missing
 (`WeightsRows`). A forge offers `Sign in with GitHub` / `Sign in with GitLab` (the OAuth
-device flow, which needs `integrations.oauth.<provider>.clientId`) or `or paste a
-token`.
+device flow, through JaiRA's own app on gitlab.com and github.com and through the app a
+connection names in its `sign-in app` field anywhere else) or `or paste a token`.
 
 **Tools: the permission sets, then the functions two ways round.** First the
 permission sets pane as it was. Then "Functions an agent calls": a function ×

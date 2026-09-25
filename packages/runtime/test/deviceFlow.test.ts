@@ -20,8 +20,8 @@ import {
   type ForgeResponse,
 } from "../src/forge";
 
-const GITHUB = deviceFlowEndpoints({ provider: "github", host: "github.com" });
-const GITLAB = deviceFlowEndpoints({ provider: "gitlab", host: "gitlab.com" });
+const GITHUB = deviceFlowEndpoints("github", { provider: "github", host: "github.com" });
+const GITLAB = deviceFlowEndpoints("gitlab", { provider: "gitlab", host: "gitlab.com" });
 
 /** A forge that answers each request with the next scripted response — or throws, for a dropped network. */
 function scripted(answers: Array<ForgeResponse | Error>): { http: ForgeHttp; seen: ForgeRequest[] } {
@@ -71,15 +71,15 @@ describe("where a forge's device flow lives", () => {
   });
 
   it("takes a self-hosted forge's path prefix from its apiUrl", () => {
-    expect(deviceFlowEndpoints({ provider: "gitlab", host: "git.example.org", apiUrl: "https://git.example.org/gitlab/api/v4" }).tokenUrl).toBe("https://git.example.org/gitlab/oauth/token");
-    expect(deviceFlowEndpoints({ provider: "github", host: "ghe.example.org", apiUrl: "https://ghe.example.org/api/v3" }).deviceCodeUrl).toBe("https://ghe.example.org/login/device/code");
-    expect(deviceFlowEndpoints({ provider: "gitlab", host: "git.example.org:8443" }).web).toBe("https://git.example.org:8443");
+    expect(deviceFlowEndpoints("work", { provider: "gitlab", host: "git.example.org", apiUrl: "https://git.example.org/gitlab/api/v4" }).tokenUrl).toBe("https://git.example.org/gitlab/oauth/token");
+    expect(deviceFlowEndpoints("work", { provider: "github", host: "ghe.example.org", apiUrl: "https://ghe.example.org/api/v3" }).deviceCodeUrl).toBe("https://ghe.example.org/login/device/code");
+    expect(deviceFlowEndpoints("work", { provider: "gitlab", host: "git.example.org:8443" }).web).toBe("https://git.example.org:8443");
   });
 
   it("says what to set, and where, when a self-hosted instance has no OAuth app", () => {
-    const { reason, fix } = oauthAppNeeded("github", "ghe.example.org");
+    const { reason, fix } = oauthAppNeeded("work", "github", "ghe.example.org");
     expect(reason).toMatch(/ghe\.example\.org .*needs an OAuth app registered there — JaiRA's own GitHub app is registered on github\.com only/);
-    expect(fix).toContain("integrations.oauth.github.clientId");
+    expect(fix).toContain("integrations.forges.work.oauthClientId");
     expect(fix).toMatch(/paste a token instead/);
   });
 });
@@ -96,12 +96,12 @@ describe("asking for a code", () => {
     expect(forge.seen[0]!.headers["Accept"]).toBe("application/json");
   });
 
-  it("keeps GitLab's page with the code already in it", async () => {
+  it("keeps the plain page and not GitLab's page with the code in it, which gitlab.com refuses the token after", async () => {
     const forge = scripted([
       ok({ device_code: "d", user_code: "ABCD", verification_uri: "https://gitlab.com/oauth/device", verification_uri_complete: "https://gitlab.com/oauth/device?user_code=ABCD", expires_in: 300, interval: 5 }),
     ]);
     const code = await requestDeviceCode(GITLAB, "app", { http: forge.http, now: () => 0 });
-    expect(code.verificationUriComplete).toBe("https://gitlab.com/oauth/device?user_code=ABCD");
+    expect(code).toEqual({ deviceCode: "d", userCode: "ABCD", verificationUri: "https://gitlab.com/oauth/device", expiresAt: 300_000, intervalMs: 5_000 });
   });
 
   it("says the app has device flow turned off, naming the box to tick", async () => {
@@ -114,7 +114,7 @@ describe("asking for a code", () => {
   it("says a client id the forge does not know is the setting to check", async () => {
     const forge = scripted([ok({ error: "invalid_client", error_description: "Client authentication failed" }, 401)]);
     const refused = await requestDeviceCode(GITLAB, "nope", { http: forge.http }).catch((e: unknown) => e);
-    expect((refused as Error).message).toMatch(/does not accept the client ID nope for this sign-in — check integrations\.oauth\.gitlab\.clientId/);
+    expect((refused as Error).message).toMatch(/does not accept the client ID nope for this sign-in — check integrations\.forges\.gitlab\.oauthClientId/);
   });
 
   it("says an unreachable forge is unreachable", async () => {

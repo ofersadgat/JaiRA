@@ -8,7 +8,9 @@ import { describe, expect, it } from "vitest";
 import { defaultConfig, mergeConfigDocuments, parseConfig } from "../src/config";
 import {
   BUILTIN_FORGES,
+  BUILTIN_OAUTH_APPS,
   connectionForHost,
+  oauthClientIdFor,
   parseDuration,
   parseIntegrations,
   parseRemoteUrl,
@@ -108,24 +110,28 @@ describe("the integrations block", () => {
   });
 });
 
-describe("the OAuth apps a forge sign-in uses", () => {
-  it("names none by default — JaiRA has no registered app to ship", () => {
-    expect(parseIntegrations(undefined).oauth).toEqual({});
-  });
-
-  it("reads a client id per provider, and layers like the rest", () => {
+describe("the OAuth app a forge sign-in uses", () => {
+  it("is the connection's own: a self-hosted host's app is not asked on the public one", () => {
     const merged = mergeConfigDocuments(
-      { integrations: { oauth: { github: { clientId: "Iv1.base" }, gitlab: { clientId: "gl-base" } } } },
-      { integrations: { oauth: { gitlab: { clientId: "gl-work" } } } },
+      { integrations: { forges: { work: { provider: "gitlab", host: "git.example.org", oauthClientId: "gl-base" } } } },
+      { integrations: { forges: { work: { oauthClientId: "gl-work" } } } },
     );
-    expect(parseConfig(merged).integrations.oauth).toEqual({ github: { clientId: "Iv1.base" }, gitlab: { clientId: "gl-work" } });
+    const { forges } = parseConfig(merged).integrations;
+    expect(forges["work"]?.oauthClientId).toBe("gl-work");
+    expect(oauthClientIdFor(forges["work"]!)).toBe("gl-work");
+    expect(oauthClientIdFor(forges["gitlab"]!)).toBe(BUILTIN_OAUTH_APPS.gitlab.clientId);
   });
 
-  it("refuses a provider that does not exist, a field that is not one, and a client id that is not one word", () => {
-    expect(() => parseIntegrations({ oauth: { bitbucket: { clientId: "x" } } })).toThrow(/keyed by its provider — one of gitlab, github/);
-    expect(() => parseIntegrations({ oauth: { github: { clientId: "x", clientSecret: "y" } } })).toThrow(/clientSecret is not a setting/);
-    expect(() => parseIntegrations({ oauth: { github: { clientId: "two words" } } })).toThrow(/client ID — one word, no spaces/);
-    expect(() => parseIntegrations({ oauth: { github: {} } })).toThrow(/clientId must be/);
+  it("is JaiRA's own on the public hosts only, unless the connection names another", () => {
+    expect(oauthClientIdFor({ provider: "github", host: "github.com" })).toBe(BUILTIN_OAUTH_APPS.github.clientId);
+    expect(oauthClientIdFor({ provider: "github", host: "github.com", oauthClientId: "Iv1.mine" })).toBe("Iv1.mine");
+    expect(oauthClientIdFor({ provider: "github", host: "ghe.example.org" })).toBeUndefined();
+  });
+
+  it("refuses a client id that is not one word, and the provider-wide block it replaced", () => {
+    expect(() => parseIntegrations({ forges: { gitlab: { oauthClientId: "two words" } } })).toThrow(/oauthClientId must be the OAuth app's client ID — one word, no spaces/);
+    expect(() => parseIntegrations({ forges: { gitlab: { oauthClientId: "" } } })).toThrow(/oauthClientId must be/);
+    expect(() => parseIntegrations({ oauth: { gitlab: { clientId: "x" } } })).toThrow(/config\.integrations\.oauth is not a setting/);
   });
 });
 

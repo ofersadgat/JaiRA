@@ -48,24 +48,32 @@ export interface DeviceFlowEndpoints {
   deviceCodeUrl: string;
   tokenUrl: string;
   scope: string;
+  /** Where the client ID is set, for a refusal that says what to check. */
+  clientIdSetting: string;
 }
 
 /**
- * The device flow's endpoints for a connection.
+ * The device flow's endpoints for a connection, named `name` in settings.
  *
  * They hang off the forge's web root, which is the host — except where a connection names an
  * `apiUrl` because the forge sits behind a path prefix; then the web root is that URL without its
  * API suffix (`/api/v4`, `/api/v3`), which is where the prefix is.
  */
-export function deviceFlowEndpoints(connection: Pick<JairaForgeConnection, "provider" | "host" | "apiUrl">): DeviceFlowEndpoints {
+export function deviceFlowEndpoints(name: string, connection: Pick<JairaForgeConnection, "provider" | "host" | "apiUrl">): DeviceFlowEndpoints {
   const { provider } = connection;
+  const clientIdSetting = clientIdSettingOf(name);
   let web = `https://${connection.host}`;
   if (connection.apiUrl !== undefined && connection.apiUrl !== "https://api.github.com") {
     web = connection.apiUrl.replace(/\/+$/, "").replace(provider === "gitlab" ? /\/api\/v4$/ : /\/api\/v3$/, "");
   }
   return provider === "github"
-    ? { provider, web, deviceCodeUrl: `${web}/login/device/code`, tokenUrl: `${web}/login/oauth/access_token`, scope: DEVICE_FLOW_SCOPES.github }
-    : { provider, web, deviceCodeUrl: `${web}/oauth/authorize_device`, tokenUrl: `${web}/oauth/token`, scope: DEVICE_FLOW_SCOPES.gitlab };
+    ? { provider, web, deviceCodeUrl: `${web}/login/device/code`, tokenUrl: `${web}/login/oauth/access_token`, scope: DEVICE_FLOW_SCOPES.github, clientIdSetting }
+    : { provider, web, deviceCodeUrl: `${web}/oauth/authorize_device`, tokenUrl: `${web}/oauth/token`, scope: DEVICE_FLOW_SCOPES.gitlab, clientIdSetting };
+}
+
+/** Where a connection's sign-in app is set. */
+function clientIdSettingOf(name: string): string {
+  return `integrations.forges.${name}.oauthClientId`;
 }
 
 /** A code the forge handed out, and what polling for its token needs. */
@@ -74,8 +82,8 @@ export interface DeviceAuthorization {
   deviceCode: string;
   /** What the person types. */
   userCode: string;
+  /** The page to type it on. A `verification_uri_complete` is not kept — see `ForgeSignInPending`. */
   verificationUri: string;
-  verificationUriComplete?: string;
   /** Epoch ms. */
   expiresAt: number;
   /** How long to wait between polls, as the forge first said (RFC 8628: 5 s when it says nothing). */
@@ -127,14 +135,14 @@ const HEADERS = { Accept: "application/json", "User-Agent": "jaira" };
 
 /**
  * Why no sign-in can start: the connection is a self-hosted instance JaiRA's own apps are not
- * registered on, and no layer names one for it. Said with where to name one.
+ * registered on, and the connection names no app of its own. Said with where to name one.
  */
-export function oauthAppNeeded(provider: ForgeProviderKind, host: string): { reason: string; fix: string } {
+export function oauthAppNeeded(name: string, provider: ForgeProviderKind, host: string): { reason: string; fix: string } {
   const label = provider === "github" ? "GitHub" : "GitLab";
   const app = provider === "github" ? "an OAuth app with “Enable Device Flow” ticked" : "a non-confidential application with the api scope";
   return {
     reason: `Signing in to ${host} through the browser needs an OAuth app registered there — JaiRA's own ${label} app is registered on ${provider === "github" ? "github.com" : "gitlab.com"} only.`,
-    fix: `register ${app} on ${label}, then set integrations.oauth.${provider}.clientId in settings.json (Settings → settings.json) — or paste a token instead`,
+    fix: `register ${app} on ${host}, then put its client ID in the connection's “sign-in app” (${clientIdSettingOf(name)}) — or paste a token instead`,
   };
 }
 
@@ -156,12 +164,10 @@ export async function requestDeviceCode(endpoints: DeviceFlowEndpoints, clientId
   }
   const expiresIn = typeof body["expires_in"] === "number" && body["expires_in"] > 0 ? body["expires_in"] : 900;
   const interval = typeof body["interval"] === "number" && body["interval"] > 0 ? body["interval"] : DEFAULT_INTERVAL_S;
-  const complete = asText(body["verification_uri_complete"]);
   return {
     deviceCode,
     userCode,
     verificationUri,
-    ...(complete !== "" ? { verificationUriComplete: complete } : {}),
     expiresAt: now() + expiresIn * 1_000,
     intervalMs: interval * 1_000,
   };
@@ -290,7 +296,7 @@ function refusalOf(endpoints: DeviceFlowEndpoints, clientId: string, response: F
   const body = asRecord(response.body);
   const error = asText(body["error"]);
   const forge = label(endpoints);
-  const setting = `integrations.oauth.${endpoints.provider}.clientId`;
+  const setting = endpoints.clientIdSetting;
   switch (error) {
     case "device_flow_disabled":
       return `the OAuth app ${clientId} does not have device flow turned on — tick “Enable Device Flow” in its settings on ${forge}`;
