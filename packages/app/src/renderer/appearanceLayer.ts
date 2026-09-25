@@ -12,9 +12,11 @@
  */
 import {
   defaultAppearanceConfig,
+  pathKeys,
   statingLayer,
   withPaths,
   type ConfigLayer,
+  type ConfigPath,
   type ConfigView,
   type JairaAppearanceConfig,
   type PathWrite,
@@ -33,7 +35,7 @@ export function lookOf(config: ConfigView | null): JairaAppearanceConfig {
  * show, or the personal layer when none does. Writing the page's layer instead could land a flip
  * under a stronger layer that says otherwise, which reads as a switch that does nothing.
  */
-export function targetLayerOf(config: ConfigView | null, path: string): ConfigLayer {
+export function targetLayerOf(config: ConfigView | null, path: ConfigPath): ConfigLayer {
   if (config === null) return "you";
   const from = statingLayer(config, path);
   return from === "built in" ? "you" : from;
@@ -89,7 +91,10 @@ export function rendererWrites(layerDoc: unknown, edits: readonly RendererEdit[]
 export function lookWith(look: JairaAppearanceConfig, writes: readonly PathWrite[]): JairaAppearanceConfig {
   // Only statements: a removal's answer is whatever the layers below say, which is main's to work out.
   // Nor the renderer choices, which a layer writes as partial lines that only the merge completes.
-  const stated = writes.filter(([path, value]) => value !== undefined && path.startsWith("appearance.") && !path.startsWith("appearance.renderers"));
+  const stated = writes.filter(([path, value]) => {
+    const [block, field] = pathKeys(path);
+    return value !== undefined && block === "appearance" && field !== undefined && field !== "renderers";
+  });
   if (stated.length === 0) return look;
   const next = withPaths({ appearance: look }, stated.map(([path, value]) => [path, value] as const));
   return next["appearance"] as JairaAppearanceConfig;

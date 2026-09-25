@@ -42,10 +42,21 @@ export function inheritedDoc(view: ConfigView, layer: ConfigLayer): Record<strin
   return merged !== null && typeof merged === "object" && !Array.isArray(merged) ? (merged as Record<string, unknown>) : {};
 }
 
-/** The value at a dotted path of a document, or `undefined` where any step is missing. */
-export function valueAtPath(doc: unknown, path: string): unknown {
+/**
+ * A place in a settings document: a dotted path (`appearance.palette`), or its keys as a list, for a
+ * key that has dots of its own — an event name (`events`, `git.push`, `enabled`), a remote, a host.
+ */
+export type ConfigPath = string | readonly string[];
+
+/** The keys of a {@link ConfigPath}, in order. */
+export function pathKeys(path: ConfigPath): readonly string[] {
+  return typeof path === "string" ? path.split(".") : path;
+}
+
+/** The value at a path of a document, or `undefined` where any step is missing. */
+export function valueAtPath(doc: unknown, path: ConfigPath): unknown {
   let cursor: unknown = doc;
-  for (const part of path.split(".")) {
+  for (const part of pathKeys(path)) {
     if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return undefined;
     cursor = (cursor as Record<string, unknown>)[part];
   }
@@ -53,7 +64,7 @@ export function valueAtPath(doc: unknown, path: string): unknown {
 }
 
 /** Whether a document says anything at a dotted path — `null` counts, since `null` is a statement. */
-export function statesPath(doc: unknown, path: string): boolean {
+export function statesPath(doc: unknown, path: ConfigPath): boolean {
   return valueAtPath(doc, path) !== undefined;
 }
 
@@ -62,7 +73,7 @@ export function statesPath(doc: unknown, path: string): boolean {
  * or {@link BUILT_IN_SOURCE} when none does and the value is what ships: the built-in document's, or
  * the parser's default.
  */
-export function statingLayer(view: ConfigView, path: string, below?: ConfigLayer): ConfigSource {
+export function statingLayer(view: ConfigView, path: ConfigPath, below?: ConfigLayer): ConfigSource {
   const candidates = below === undefined ? [...CONFIG_LAYERS] : layersBelow(below);
   for (const layer of candidates.reverse()) {
     if (statesPath(view[layer], path)) return layer;
@@ -76,7 +87,7 @@ export function layersAbove(layer: ConfigLayer): ConfigLayer[] {
 }
 
 /** One path of a layer's document and its new value — `undefined` removes it, and it inherits again. */
-export type PathWrite = readonly [path: string, value: unknown];
+export type PathWrite = readonly [path: ConfigPath, value: unknown];
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -87,7 +98,7 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> => valu
 export function withPaths(doc: unknown, writes: readonly PathWrite[]): Record<string, unknown> {
   const next = structuredClone(isPlainRecord(doc) ? doc : {});
   for (const [path, value] of writes) {
-    const parts = path.split(".");
+    const parts = pathKeys(path);
     const chain: Array<{ parent: Record<string, unknown>; key: string }> = [];
     let cursor = next;
     for (const part of parts.slice(0, -1)) {
@@ -115,17 +126,17 @@ export function withPaths(doc: unknown, writes: readonly PathWrite[]): Record<st
 const ADDITIVE_PATHS = ["files.hidden", "agents.genericCli"];
 
 /**
- * Every leaf path `after` states differently from `before` — objects are walked, anything else (a
- * list, a scalar, `null`) is one value. A path `after` no longer states is not a change here: taking a
- * statement out is how a layer inherits, and it never reaches past its own document.
+ * Every leaf path `after` states differently from `before`, as its keys — objects are walked, anything
+ * else (a list, a scalar, `null`) is one value. A path `after` no longer states is not a change here:
+ * taking a statement out is how a layer inherits, and it never reaches past its own document.
  */
-export function statedChanges(before: unknown, after: unknown, prefix = ""): string[] {
+export function statedChanges(before: unknown, after: unknown, prefix: readonly string[] = []): string[][] {
   if (isPlainRecord(after)) {
     const under = isPlainRecord(before) ? before : {};
-    return Object.entries(after).flatMap(([key, value]) => statedChanges(under[key], value, prefix === "" ? key : `${prefix}.${key}`));
+    return Object.entries(after).flatMap(([key, value]) => statedChanges(under[key], value, [...prefix, key]));
   }
-  if (after === undefined || prefix === "") return [];
-  return JSON.stringify(before) === JSON.stringify(after) ? [] : [prefix];
+  if (after === undefined || prefix.length === 0) return [];
+  return JSON.stringify(before) === JSON.stringify(after) ? [] : [[...prefix]];
 }
 
 /**
@@ -139,26 +150,28 @@ export function statedChanges(before: unknown, after: unknown, prefix = ""): str
  * layers whose documents change are returned, weakest first.
  */
 export function clearedAbove(view: ConfigView, layer: ConfigLayer, next: unknown): Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> {
-  const changed = statedChanges(view[layer], next).filter((path) => !ADDITIVE_PATHS.some((additive) => path === additive || path.startsWith(`${additive}.`)));
+  const changed = statedChanges(view[layer], next).filter(
+    (keys) => !ADDITIVE_PATHS.some((additive) => pathKeys(additive).every((key, i) => keys[i] === key)),
+  );
   if (changed.length === 0) return [];
   const out: Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> = [];
   for (const above of layersAbove(layer)) {
     const doc = view[above];
     if (!isPlainRecord(doc)) continue;
-    const removals = new Set<string>();
-    for (const path of changed) {
-      const parts = path.split(".");
+    // Keyed by the JSON of the keys: a key may hold dots of its own.
+    const removals = new Map<string, readonly string[]>();
+    for (const parts of changed) {
       for (let depth = 1; depth <= parts.length; depth++) {
-        const at = parts.slice(0, depth).join(".");
+        const at = parts.slice(0, depth);
         const value = valueAtPath(doc, at);
         if (value === undefined) break;
         if (depth === parts.length || !isPlainRecord(value)) {
-          removals.add(at);
+          removals.set(JSON.stringify(at), at);
           break;
         }
       }
     }
-    if (removals.size > 0) out.push({ layer: above, doc: withPaths(doc, [...removals].map((path) => [path, undefined] as const)) });
+    if (removals.size > 0) out.push({ layer: above, doc: withPaths(doc, [...removals.values()].map((path) => [path, undefined] as const)) });
   }
   return out;
 }
@@ -167,7 +180,7 @@ export function clearedAbove(view: ConfigView, layer: ConfigLayer, next: unknown
  * What `path` would be if `layer` said nothing, and where that comes from — the weaker layers' value,
  * or the shipped default (`undefined` for a key with none, such as a model left to the state).
  */
-export function inheritedValue(view: ConfigView, path: string, layer: ConfigLayer): { value: unknown; from: ConfigSource } {
+export function inheritedValue(view: ConfigView, path: ConfigPath, layer: ConfigLayer): { value: unknown; from: ConfigSource } {
   const from = statingLayer(view, path, layer);
   return {
     value:
