@@ -66,7 +66,7 @@ import { Segmented, SettingsPage } from "./settingsLayout";
 import { SettingsLayerContext, SettingsRowsContext } from "./controls";
 import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSections";
 import { LicensesPane } from "./licensesPane";
-import { lookOf, pinnedValue } from "./appearanceLayer";
+import { lookOf } from "./appearanceLayer";
 import { useSystemDark } from "./appearance";
 import { FilesTreeSection } from "./filesTreePane";
 import {
@@ -544,6 +544,9 @@ export default function App(): JSX.Element {
    * (a server just picked is the one in use), never continuously.
    */
   const [localServers, setLocalServers] = useState<LocalServerProbe[] | undefined>(undefined);
+  /** Bumped by Scan again, which asks the ports now; true while that ask is out. */
+  const [localScan, setLocalScan] = useState(0);
+  const [scanningLocal, setScanningLocal] = useState(false);
   const [weightsChecks, setWeightsChecks] = useState<EmbeddedWeightsReport | undefined>(undefined);
   const onConnections = state.view === "settings" && state.section === "connections";
   /** The MCP servers' state and tools, and what other tools here run — Connections, and Tools' MCP groups. */
@@ -551,10 +554,13 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (!onConnections) return;
     let live = true;
-    void invoke("model:probeLocal", undefined).then(
-      (found) => live && setLocalServers(found.servers),
-      () => live && setLocalServers(undefined),
-    );
+    setScanningLocal(true);
+    void invoke("model:probeLocal", undefined)
+      .then(
+        (found) => live && setLocalServers(found.servers),
+        () => live && setLocalServers(undefined),
+      )
+      .finally(() => live && setScanningLocal(false));
     void invoke("model:checkWeights", undefined).then(
       (report) => live && setWeightsChecks(report),
       () => live && setWeightsChecks(undefined),
@@ -562,7 +568,7 @@ export default function App(): JSX.Element {
     return () => {
       live = false;
     };
-  }, [onConnections, state.availability.checkedAt, state.config]);
+  }, [onConnections, state.availability.checkedAt, state.config, localScan]);
   /**
    * Signing in to a forge through the browser (OAuth device flow): the code the person types there
    * while main polls, and why the last one did not work. Main tells us when it is over — after the
@@ -1522,7 +1528,7 @@ export default function App(): JSX.Element {
     onResume: (taskId: string) => void actions.resumeTask(taskId, state.selectedProject ?? undefined),
     onRewind: (taskId: string, seq: number) => void actions.rewindTask(taskId, seq, state.selectedProject ?? undefined),
     onFork: (taskId: string, seq: number) => void actions.forkTask(taskId, seq, state.selectedProject ?? undefined),
-    onSaveConfig: actions.saveConfig,
+    onSaveConfig: (layer, doc) => actions.saveConfigFile(layer, doc),
     validateSchema: actions.validateSchema,
     stateSlots: actions.stateSlots,
     readState: actions.readState,
@@ -2637,6 +2643,13 @@ export default function App(): JSX.Element {
                     onCancelSignIn={(name) => void actions.cancelSignIn(name)}
                     onSignOut={(name) => void actions.signOut(name)}
                     localServers={localServers}
+                    // The ports now, and the local route's own check — which is what turns its row
+                    // from "not reachable" to ready, and refreshes the catalog's local models.
+                    onScanLocal={() => {
+                      setLocalScan((n) => n + 1);
+                      void actions.recheckAvailability();
+                    }}
+                    scanningLocal={scanningLocal || state.rechecking}
                     weights={weightsChecks}
                     oauth={forgeOAuth}
                     mcp={mcp}
@@ -2727,12 +2740,12 @@ export default function App(): JSX.Element {
                     conversation={look.conversation}
                     editors={look.editors}
                     renderers={look.renderers}
-                    busy={state.busy}
-                    // Every change lands in the layer the page's switch shows, and each row's switch
-                    // pins what it shows there or takes it out (`appearanceLayer.ts`).
+                    busy={state.busy || !(state.configLayer !== "project" || state.at !== null)}
+                    // Every change lands in the layer the page's switch shows and is taken out of the
+                    // stronger ones, so it shows (`clearedAbove`); a row's ↺ takes this layer's out.
                     layered={{
                       stated: (path) => statesPath(state.config?.[state.configLayer], path),
-                      pin: (paths, on) => void actions.writeLook(paths.map((path) => [path, on ? pinnedValue(look, path) : undefined] as const), state.configLayer),
+                      inherit: (paths) => void actions.writeLook(paths.map((path) => [path, undefined] as const), state.configLayer),
                       locked: state.busy || !(state.configLayer !== "project" || state.at !== null),
                     }}
                     onChange={(patchTo) => void actions.setAppearance(patchTo, state.configLayer)}

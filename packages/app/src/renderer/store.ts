@@ -72,8 +72,11 @@ import type {
   WritableLayer,
   WorkflowSource,
   RendererEdit,
+  PathWrite,
 } from "@jaira/shared/browser";
 import {
+  clearedAbove,
+  withPaths,
   CONFIG_JSON,
   defaultLogPolicy,
   isTextMime,
@@ -119,7 +122,7 @@ import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflo
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
 import { applyAppearance, useSystemDark } from "./appearance";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
-import { lookOf, lookWith, rendererWrites, targetLayerOf, withPaths, type PathWrite } from "./appearanceLayer";
+import { lookOf, lookWith, rendererWrites, targetLayerOf } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pill";
@@ -3401,9 +3404,12 @@ export function useApp() {
         if (current === null || writes.length === 0) return;
         const into = layer ?? targetLayerOf(current, writes[0]![0]);
         const doc = withPaths(current[into], writes);
+        // Worked out BEFORE the window moves: the stronger layers are read from what they said.
+        const above = clearedAbove(current, into, doc);
         const effective = { ...(current.effective as Record<string, unknown>), appearance: lookWith(lookOf(current), writes) } as unknown as JsonValue;
-        patch({ config: { ...current, [into]: doc as JsonValue, effective } });
-        await actions.saveConfig(into, doc);
+        const moved = Object.fromEntries(above.map((write) => [write.layer, write.doc as JsonValue]));
+        patch({ config: { ...current, ...moved, [into]: doc as JsonValue, effective } });
+        await actions.saveConfigFile(into, doc, above);
       },
 
       /** Switch the mode — light, dark or the system's. See {@link writeLook} for where it lands. */
@@ -3718,15 +3724,27 @@ export function useApp() {
       // --- configuration ----------------------------------------------------
 
       /**
-       * Replace one configuration layer. Main validates before writing, so a rejected save leaves
-       * the file untouched and the message names the offending field.
+       * A settings page's change to one layer — the person's rule (2026-09-25): written to the layer
+       * the page is editing, and taken out of every STRONGER layer that states the same setting, so
+       * what was picked is what shows (`clearedAbove`). Main validates each write before it lands,
+       * so a rejected save leaves the file untouched and the message names the offending field.
        */
       saveConfig: async (layer: ConfigLayer, config: unknown) => {
+        const view = ref.current.config;
+        await actionsRef.current.saveConfigFile(layer, config, view === null ? [] : clearedAbove(view, layer, config));
+      },
+
+      /**
+       * Replace one configuration layer's document as it is — the Files view's `settings.json` editor,
+       * where a person writes one file and nothing else should move — then any `also` writes.
+       */
+      saveConfigFile: async (layer: ConfigLayer, config: unknown, also: ReadonlyArray<{ layer: ConfigLayer; doc: unknown }> = []) => {
         patch({ busy: true, error: null });
         try {
           // The project named whatever the layer: it is where a project write lands, and for the
           // other two it is which project's view the answer is read back for.
-          const next = await invoke("config:write", { layer, config: config as never, ...inLayer("project") });
+          let next = await invoke("config:write", { layer, config: config as never, ...inLayer("project") });
+          for (const write of also) next = await invoke("config:write", { layer: write.layer, config: write.doc as never, ...inLayer("project") });
           patch({ config: next, busy: false });
           await refreshConfig();
           // `settings.json` is the one editor that does not save through `saveDoc` — it writes a

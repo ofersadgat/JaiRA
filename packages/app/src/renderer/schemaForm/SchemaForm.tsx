@@ -54,24 +54,6 @@ import { presentationFor } from "./presentation";
 import { widgetFor } from "./registry";
 import type { Schema, SchemaFormContext } from "./types";
 
-/** A seed with nothing in it yet: an empty string, or an object of nothing but those. */
-function isBlank(value: unknown): boolean {
-  if (value === "") return true;
-  return isRecord(value) && Object.keys(value).length > 0 && Object.values(value).every(isBlank);
-}
-
-/** What `seed` (the value at `root`) holds at the dotted path `at`, or undefined. */
-function valueUnder(seed: unknown, root: string, at: string): unknown {
-  if (at === root) return seed;
-  if (!at.startsWith(`${root}.`)) return undefined;
-  let cursor = seed;
-  for (const part of at.slice(root.length + 1).split(".")) {
-    if (!isRecord(cursor)) return undefined;
-    cursor = cursor[part];
-  }
-  return cursor;
-}
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -94,7 +76,6 @@ function errorAt(ctx: SchemaFormContext, path: string): string | undefined {
 /** What a switched-off member says where its control would be. */
 function unsetNoteOf(ctx: SchemaFormContext, path: string, schema: Schema, value: unknown): string {
   if (ctx.unsetNote !== undefined) return ctx.unsetNote(path, schema, value);
-  if (ctx.isSet !== undefined) return value !== undefined ? `not set here — inherits ${shortText(value)}` : "not set";
   if (schema["default"] !== undefined) return `not set — the default applies: ${shortText(schema["default"])}`;
   return "not set";
 }
@@ -302,12 +283,11 @@ function Member({
   const offered = options !== undefined && options.length > 0;
   const sourced = offered ? ctx.sources!.picked(path) : undefined;
   const settled = ctx.provenance?.(path);
-  // A layered row switched on with nothing to pin and nothing typed yet — an empty box, an app with
-  // no client ID — is on HERE and written nowhere: every write to a layer is validated before it
-  // lands, and an empty value is what a validator refuses. The first thing typed is the first write.
-  const [armed, setArmed] = useState<unknown>(undefined);
-  const pending = armed !== undefined && ctx.isSet !== undefined && !ctx.isSet(path) ? armed : undefined;
-  const on = reading || required || sourced !== undefined ? true : ctx.isSet !== undefined ? ctx.isSet(path) || pending !== undefined : value !== undefined;
+  // A LAYERED form (Settings) has no switch (the person's rule, 2026-09-25): every member shows what is
+  // in effect and edits it, and a ↺ takes this layer's statement out again. The switch is for a form
+  // whose "not set" is a value of its own — a run's optional input.
+  const layered = ctx.isSet !== undefined && !reading;
+  const on = reading || required || sourced !== undefined || layered ? true : value !== undefined;
   // The cycle guard has to see a reference this member expands ITSELF — a union's branch is handed on
   // without it, and a schema that refers to itself through a union would otherwise never stop.
   const ref = typeof declared["$ref"] === "string" ? (declared["$ref"] as string) : undefined;
@@ -318,10 +298,6 @@ function Member({
   const body = shapes === undefined ? declared : branchesOf(node, root, false)![index]!;
   const baseCtx: SchemaFormContext =
     shapes !== undefined && ref !== undefined ? { ...ctx, path, refs: [...seen, ref] } : { ...ctx, path };
-  // Under a pending row, the members its seed holds count as set, so a seeded app's client ID is one
-  // box to type in rather than a second switch to find.
-  const bodyCtx: SchemaFormContext =
-    pending === undefined ? baseCtx : { ...baseCtx, isSet: (at) => ctx.isSet!(at) || valueUnder(pending, path, at) !== undefined };
   const pres =
     ctx.labels === "keys"
       ? { label: name, ...(typeof node["description"] === "string" ? { tooltip: node["description"] as string } : {}) }
@@ -335,39 +311,20 @@ function Member({
       param={ctx.labels === "keys" || ctx.hidePaths === true ? undefined : path}
       {...(pres.tooltip !== undefined ? { hint: pres.tooltip } : {})}
       error={on && sourced === undefined ? errorAt(ctx, path) : undefined}
-      // Switched off, the row says what it inherits and is otherwise disabled — see `Field.toggle`.
+      // Switched off, the row says it is left out and is otherwise disabled.
       off={!on}
+      {...(layered && sourced === undefined ? { layer: { stated: ctx.isSet!(path), disabled, onInherit: () => onSet(undefined) } } : {})}
       // A nested object or list is a form of its own: it goes under the name, across the row.
       wide={isComposite(held, root)}
       lead={
-        !required && !reading && sourced === undefined ? (
-          // In a layered form this switch IS the "set here" mark — it says whether this layer states
-          // the value — so the tag is not drawn beside it as well.
+        !required && !reading && !layered && sourced === undefined ? (
           <Switch
             on={on}
-            label={
-              ctx.isSet !== undefined
-                ? on
-                  ? `${name} is set here — switch off to inherit it`
-                  : `set ${name} here`
-                : on
-                  ? `leave ${name} out`
-                  : `set ${name}`
-            }
+            label={on ? `leave ${name} out` : `set ${name}`}
             disabled={disabled}
             // On: the value it already shows — an inherited one is pinned as it stands — or a fresh
             // one, which is the declared default when there is one. Off: not set at all.
-            onChange={(next) => {
-              if (!next) {
-                setArmed(undefined);
-                // A pending row was never written, so there is nothing to remove.
-                if (pending === undefined) onSet(undefined);
-                return;
-              }
-              const fresh = value !== undefined ? value : seedFor(declared, root);
-              if (ctx.setAt !== undefined && value === undefined && isBlank(fresh)) setArmed(fresh);
-              else onSet(fresh);
-            }}
+            onChange={(next) => onSet(next ? (value !== undefined ? value : seedFor(declared, root)) : undefined)}
           />
         ) : undefined
       }
@@ -433,7 +390,7 @@ function Member({
       ) : !on ? (
         <div className="sf-absent">{unsetNoteOf(ctx, path, node, value)}</div>
       ) : (
-        <SchemaForm schema={body} value={value ?? pending} onChange={onSet} ctx={bodyCtx} containerType={node["$type"] as string | undefined} />
+        <SchemaForm schema={body} value={value} onChange={onSet} ctx={baseCtx} containerType={node["$type"] as string | undefined} />
       )}
     </Field>
   );

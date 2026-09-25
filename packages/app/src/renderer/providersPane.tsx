@@ -96,6 +96,13 @@ export interface ProvidersPaneProps {
   onSignOut: (name: string) => void;
   /** What answered on the usual local ports, when the page last asked. Absent ⇒ not asked yet. */
   localServers?: LocalServerProbe[] | undefined;
+  /**
+   * Ask the usual ports again now, and re-check the local route — a server started after the page
+   * opened is otherwise only found by the page-wide Re-check (the person, 2026-09-25).
+   */
+  onScanLocal?: (() => void) | undefined;
+  /** A scan is in flight. */
+  scanningLocal?: boolean | undefined;
   /** Whether each embedded model's weights file is there, and whether the loader is. Absent ⇒ not checked yet. */
   weights?: EmbeddedWeightsReport | undefined;
 }
@@ -381,6 +388,8 @@ function ProviderRow({
   onCancelSignIn,
   onSignOut,
   localServers,
+  onScanLocal,
+  scanningLocal,
   weights,
 }: ProvidersPaneProps & {
   spec: ProviderSpec;
@@ -533,7 +542,7 @@ function ProviderRow({
           the usual ports, and the weights with whether each file is there. */}
       {spec.id === "local" && localServers !== undefined ? (
         <div className="conn-wide">
-          <LocalServers found={localServers} locked={locked} onUse={(baseURL) => write({ baseURL })} />
+          <LocalServers found={localServers} locked={locked} scanning={scanningLocal === true} onScan={onScanLocal} onUse={(baseURL) => write({ baseURL })} />
         </div>
       ) : null}
       {spec.id === "embedded" ? (
@@ -854,14 +863,34 @@ function KeyEntry({
  * The OpenAI-compatible servers answering on the usual local ports, asked when the page opens and on
  * Re-check. The one the route points at says so; any other that answers is one click from being it.
  */
-export function LocalServers({ found, locked, onUse }: { found: LocalServerProbe[]; locked: boolean; onUse: (baseURL: string) => void }): JSX.Element {
+export function LocalServers({
+  found,
+  locked,
+  scanning = false,
+  onScan,
+  onUse,
+}: {
+  found: LocalServerProbe[];
+  locked: boolean;
+  scanning?: boolean;
+  /** Ask again now. Absent (a still picture) draws no button. */
+  onScan?: (() => void) | undefined;
+  onUse: (baseURL: string) => void;
+}): JSX.Element {
   return (
     <div className="conn-probe">
       <div className="conn-probe-head">
         <span>
           Asked the usual ports for a model list (<code>GET /v1/models</code>)
         </span>
-        <span>when this page opens, and on Re-check</span>
+        <span className="conn-probe-when">
+          {scanning ? "asking now…" : "when this page opens"}
+          {onScan !== undefined ? (
+            <button type="button" className="ghost" disabled={scanning} title="Ask the usual ports again — for a server started since" onClick={onScan}>
+              Scan again
+            </button>
+          ) : null}
+        </span>
       </div>
       {found.map((server) => {
         const inUse = server.inUse;

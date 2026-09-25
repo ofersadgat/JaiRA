@@ -99,18 +99,39 @@ export function permissionSetLayersOf(layer: ConfigLayer, layers: readonly Workf
 }
 
 /**
- * The rail, as the tab rail takes it. With nowhere to write there are no `+` rows and no dots: the
- * dot means "the layer you are editing states it", and that layer states nothing.
+ * Which buckets of the rail are open, and how to open or close one — an accordion (the person's
+ * note, 2026-09-25). The host opens the bucket a set is chosen in; the rest is the person's clicks.
  */
-export function permissionSetRailItems(ats: readonly PermissionSetAt[], writesTo: WritableLayer | undefined, drafts: PermissionSetDrafts): RailItem[] {
+export interface RailFolds {
+  open: ReadonlySet<string>;
+  onFold: (bucket: string) => void;
+}
+
+/**
+ * The rail, as the tab rail takes it. With nowhere to write there are no `+` rows and no dots: the
+ * dot means "the layer you are editing states it", and that layer states nothing. With `folds`, each
+ * bucket is a fold; a closed one lists nothing under it, a bucket inside it included.
+ */
+export function permissionSetRailItems(
+  ats: readonly PermissionSetAt[],
+  writesTo: WritableLayer | undefined,
+  drafts: PermissionSetDrafts,
+  folds?: RailFolds,
+): RailItem[] {
   const writable = writesTo !== undefined;
   const items: RailItem[] = [];
+  const isOpen = (path: string): boolean => folds === undefined || folds.open.has(path);
+  const closed: string[] = [];
   for (const { bucket, permissionSets } of permissionSetRailOf(ats)) {
+    if (closed.some((path) => bucket.path.startsWith(`${path}/`))) continue;
+    const open = isOpen(bucket.path);
+    if (!open) closed.push(bucket.path);
     items.push({
       id: `bucket:${bucket.path}`,
       summary: null,
       indent: bucket.depth,
       title: bucket.path,
+      ...(folds !== undefined ? { fold: { open, onFold: () => folds.onFold(bucket.path) } } : {}),
       heading: (
         <>
           <span className="cx-chip-icon">
@@ -121,6 +142,7 @@ export function permissionSetRailItems(ats: readonly PermissionSetAt[], writesTo
         </>
       ),
     });
+    if (!open) continue;
     for (const at of permissionSets) {
       // A copy says so beside its name, in the words its head's pill uses — the bucket's own pill
       // names the layer that DEFINES the bucket, which for a copy of what ships is still built in.
@@ -234,6 +256,9 @@ export interface PermissionSetsViewProps {
   startMode?: { subject: string; open: "menu" | "function" } | undefined;
   /** The configured MCP servers as the tools probe last found them — the card's MCP groups. */
   mcp?: readonly McpServerStatus[] | undefined;
+  /** The rail's buckets as an accordion. Absent (a still picture) draws every bucket open. */
+  openBuckets?: ReadonlySet<string> | undefined;
+  onBucket?: ((bucket: string) => void) | undefined;
 }
 
 export function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element {
@@ -248,7 +273,12 @@ export function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element 
         <div className="llm-config set-config">
           <TabRail
             label="Permission sets"
-            items={permissionSetRailItems(ats, props.writesTo, props.drafts)}
+            items={permissionSetRailItems(
+              ats,
+              props.writesTo,
+              props.drafts,
+              props.openBuckets !== undefined && props.onBucket !== undefined ? { open: props.openBuckets, onFold: props.onBucket } : undefined,
+            )}
             selected={tabOfChoice(open !== undefined ? { permissionSet: open.id } : adding ? props.choice : undefined)}
             onSelect={(id) => props.onChoice(choiceOfTab(id))}
           />
@@ -597,6 +627,10 @@ export function PermissionSetsPane({
    * without asking again, for as long as the page is open.
    */
   const [sentTo, setSentTo] = useState<Readonly<Record<string, WritableLayer>>>({});
+  /** The rail's open buckets — see {@link RailFolds}. */
+  const [openBuckets, setOpenBuckets] = useState<ReadonlySet<string>>(new Set());
+  /** The bucket the chosen set was last opened in, so choosing one opens its bucket once, not always. */
+  const [opened, setOpened] = useState<string | undefined>(undefined);
 
   const load = useCallback(
     (): Promise<void> =>
@@ -632,6 +666,13 @@ export function PermissionSetsPane({
   const resolved = resolvePermissionSetChoice(ats, chosenId, pending);
   const choice: PermissionSetChoiceOf | undefined = wanted === "bucket" || (wanted !== undefined && "newIn" in wanted) ? wanted : resolved !== undefined ? { permissionSet: resolved } : undefined;
   if (pending !== null && ats.some((at) => at.id === pending)) setPending(null);
+  // The bucket of what is on screen — and every bucket above it — opens when the choice moves there.
+  const holding = choice === undefined || choice === "bucket" ? undefined : "newIn" in choice ? choice.newIn : ats.find((at) => at.id === choice.permissionSet)?.bucket;
+  if (holding !== undefined && holding !== opened) {
+    setOpened(holding);
+    const parts = holding.split("/");
+    setOpenBuckets((current) => new Set([...current, ...parts.map((_, i) => parts.slice(0, i + 1).join("/"))]));
+  }
 
   const dropDraft = (at: WorkflowLayer, id: string): void =>
     setDrafts((current) => {
@@ -696,6 +737,15 @@ export function PermissionSetsPane({
       locked={busy || writing}
       problem={problem}
       mcp={mcp}
+      openBuckets={openBuckets}
+      onBucket={(bucket) =>
+        setOpenBuckets((current) => {
+          const next = new Set(current);
+          if (next.has(bucket)) next.delete(bucket);
+          else next.add(bucket);
+          return next;
+        })
+      }
       onSave={(id, permissionSet) => {
         if (writesTo === undefined) return;
         run(

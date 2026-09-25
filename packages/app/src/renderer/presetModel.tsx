@@ -165,8 +165,8 @@ export function PresetModelSection({
       <Field
         label="Model"
         param="model"
-        hint="Which model a state that picks this preset runs on — chosen when its conversation starts, and kept for the rest of it. Off, the state's own model answers, or the default."
-        toggle={{ on: value !== undefined, disabled, onChange: (on) => (on ? undefined : onChange(undefined)) }}
+        hint="Which model a state that picks this preset runs on — chosen when its conversation starts, and kept for the rest of it. With none, the state's own model answers, or the default."
+        layer={{ stated: value !== undefined, disabled, label: "Name no model — the state's own answers", onInherit: () => onChange(undefined) }}
         error={problem}
         wide
       >

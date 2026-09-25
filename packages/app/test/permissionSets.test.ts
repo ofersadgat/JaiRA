@@ -106,6 +106,23 @@ describe("the rail", () => {
     ]);
   });
 
+  it("folds a closed bucket to its heading, a bucket inside it included, and flips one on its heading", () => {
+    const nested: PermissionSetRecord = { id: "feature/impl/reads", bucket: "feature/impl", name: "reads", files: [{ layer: "project", file: "x", format: "json", decl: SHIPPED }] };
+    const flipped: string[] = [];
+    const items = permissionSetRailItems(permissionSetsAt([...records, nested], "project"), "project", {}, { open: new Set(["chat"]), onFold: (bucket) => flipped.push(bucket) });
+    expect(items.map((item) => item.id)).toEqual([
+      "bucket:chat",
+      "permissionSet:chat/read-only",
+      "permissionSet:chat/full",
+      "new:chat",
+      "bucket:feature",
+      "+bucket",
+    ]);
+    expect(items.find((item) => item.id === "bucket:chat")?.fold?.open).toBe(true);
+    items.find((item) => item.id === "bucket:feature")?.fold?.onFold();
+    expect(flipped).toEqual(["feature"]);
+  });
+
   it("offers no + rows where nothing can be written — the personal layer holds no permission sets", () => {
     const items = permissionSetRailItems(permissionSetsAt(records, "project"), undefined, {});
     expect(items.some((item) => item.id.startsWith("new:") || item.id === "+bucket")).toBe(false);

@@ -407,7 +407,7 @@ export function FilesTreeView(props: FilesTreeViewProps): JSX.Element {
           label="Hidden in the tree"
           param="files.hidden"
           hint="Later rules win, so a !pattern puts back something an earlier rule hid. A folder that matches takes its contents with it."
-          toggle={{ on: own !== null, disabled: busy, onChange: (on) => (on ? undefined : onWrite(layer, withHidden(doc, []))) }}
+          layer={{ stated: own !== null, disabled: busy, label: `Take out the rules ${LAYER_WORDS[here].says} adds`, onInherit: () => onWrite(layer, withHidden(doc, [])) }}
         >
           <span className="hid-own app-secondary">
             {own === null || own.length === 0 ? `${LAYER_WORDS[here].says} adds nothing` : `${LAYER_WORDS[here].says} adds ${plural(own.length, "rule")}`}

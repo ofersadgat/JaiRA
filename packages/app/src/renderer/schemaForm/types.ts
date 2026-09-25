@@ -70,8 +70,8 @@ export interface SchemaFormContext {
    * True when the layer being edited states this value itself, rather than inheriting it.
    *
    * Its presence is what makes a form LAYERED: every member is optional there (a layer requires
-   * nothing — the merge does), and a member's on/off switch reads this rather than whether the merged
-   * value happens to hold something.
+   * nothing — the merge does), a member has no on/off switch (it shows what is in effect and edits it),
+   * and this draws the ↺ that takes the layer's own statement out again.
    */
   isSet?: (path: string) => boolean;
   /**

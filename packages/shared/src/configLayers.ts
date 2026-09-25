@@ -70,6 +70,99 @@ export function statingLayer(view: ConfigView, path: string, below?: ConfigLayer
   return BUILT_IN_SOURCE;
 }
 
+/** The layers stronger than `layer`, weakest first. */
+export function layersAbove(layer: ConfigLayer): ConfigLayer[] {
+  return CONFIG_LAYERS.slice(CONFIG_LAYERS.indexOf(layer) + 1);
+}
+
+/** One path of a layer's document and its new value — `undefined` removes it, and it inherits again. */
+export type PathWrite = readonly [path: string, value: unknown];
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * A layer's document with some paths written. A container a removal empties goes with it, so an
+ * untouched section leaves no trace in a file people read.
+ */
+export function withPaths(doc: unknown, writes: readonly PathWrite[]): Record<string, unknown> {
+  const next = structuredClone(isPlainRecord(doc) ? doc : {});
+  for (const [path, value] of writes) {
+    const parts = path.split(".");
+    const chain: Array<{ parent: Record<string, unknown>; key: string }> = [];
+    let cursor = next;
+    for (const part of parts.slice(0, -1)) {
+      const held = cursor[part];
+      cursor[part] = isPlainRecord(held) ? { ...held } : {};
+      chain.push({ parent: cursor, key: part });
+      cursor = cursor[part] as Record<string, unknown>;
+    }
+    const leaf = parts[parts.length - 1]!;
+    if (value === undefined) delete cursor[leaf];
+    else cursor[leaf] = value;
+    for (const { parent, key } of chain.reverse()) {
+      const block = parent[key];
+      if (isPlainRecord(block) && Object.keys(block).length === 0) delete parent[key];
+    }
+  }
+  return next;
+}
+
+/**
+ * Keys a stronger layer ADDS to rather than replaces (`mergeConfigDocuments`): `files.hidden` appends
+ * layer by layer and `agents.genericCli` merges by name, so a weaker layer's change to them is not
+ * shadowed by a stronger one and nothing there is taken out.
+ */
+const ADDITIVE_PATHS = ["files.hidden", "agents.genericCli"];
+
+/**
+ * Every leaf path `after` states differently from `before` — objects are walked, anything else (a
+ * list, a scalar, `null`) is one value. A path `after` no longer states is not a change here: taking a
+ * statement out is how a layer inherits, and it never reaches past its own document.
+ */
+export function statedChanges(before: unknown, after: unknown, prefix = ""): string[] {
+  if (isPlainRecord(after)) {
+    const under = isPlainRecord(before) ? before : {};
+    return Object.entries(after).flatMap(([key, value]) => statedChanges(under[key], value, prefix === "" ? key : `${prefix}.${key}`));
+  }
+  if (after === undefined || prefix === "") return [];
+  return JSON.stringify(before) === JSON.stringify(after) ? [] : [prefix];
+}
+
+/**
+ * The stronger layers' documents once a change to `layer` is made to SHOW — the person's rule for
+ * Settings (2026-09-25): a change is written to the layer the page is editing, and every stronger
+ * layer that states the same setting has it taken out, so what was picked is what the window uses.
+ *
+ * `next` is `layer`'s whole new document; only what it newly states is carried up. A stronger layer
+ * that holds something that is not an object at a parent of a changed path (a `null` where a block
+ * would be) loses that parent, since it would cover the change as surely as the path itself. Only the
+ * layers whose documents change are returned, weakest first.
+ */
+export function clearedAbove(view: ConfigView, layer: ConfigLayer, next: unknown): Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> {
+  const changed = statedChanges(view[layer], next).filter((path) => !ADDITIVE_PATHS.some((additive) => path === additive || path.startsWith(`${additive}.`)));
+  if (changed.length === 0) return [];
+  const out: Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> = [];
+  for (const above of layersAbove(layer)) {
+    const doc = view[above];
+    if (!isPlainRecord(doc)) continue;
+    const removals = new Set<string>();
+    for (const path of changed) {
+      const parts = path.split(".");
+      for (let depth = 1; depth <= parts.length; depth++) {
+        const at = parts.slice(0, depth).join(".");
+        const value = valueAtPath(doc, at);
+        if (value === undefined) break;
+        if (depth === parts.length || !isPlainRecord(value)) {
+          removals.add(at);
+          break;
+        }
+      }
+    }
+    if (removals.size > 0) out.push({ layer: above, doc: withPaths(doc, [...removals].map((path) => [path, undefined] as const)) });
+  }
+  return out;
+}
+
 /**
  * What `path` would be if `layer` said nothing, and where that comes from — the weaker layers' value,
  * or the shipped default (`undefined` for a key with none, such as a model left to the state).

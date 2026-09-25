@@ -59,6 +59,9 @@ export interface ConnectionsPageProps {
   onCancelSignIn: (name: string) => void;
   onSignOut: (name: string) => void;
   localServers?: LocalServerProbe[] | undefined;
+  /** Ask the usual local ports again, now — see `ProvidersPaneProps.onScanLocal`. */
+  onScanLocal?: (() => void) | undefined;
+  scanningLocal?: boolean | undefined;
   weights?: EmbeddedWeightsReport | undefined;
   oauth?: IntegrationsPaneProps["oauth"];
   /** The MCP servers' state and tools, and what other tools on this machine run. Absent ⇒ the section is not drawn. */
@@ -86,6 +89,8 @@ export function ConnectionsPage(props: ConnectionsPageProps): JSX.Element {
     onCancelSignIn: props.onCancelSignIn,
     onSignOut: props.onSignOut,
     localServers: props.localServers,
+    onScanLocal: props.onScanLocal,
+    scanningLocal: props.scanningLocal,
     weights: props.weights,
   };
   return (

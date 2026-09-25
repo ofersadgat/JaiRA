@@ -10869,10 +10869,13 @@ fieldset.reading {
   flex: none;
   align-self: center;
   color: var(--dim);
+  /* The glyph is a DOWN chevron (icons.tsx): turned to point right while folded, itself when open.
+     Rotating it on open instead drew folded as down and open as left. */
+  transform: rotate(-90deg);
   transition: transform 120ms ease-out;
 }
 .lh-chev.open {
-  transform: rotate(90deg);
+  transform: none;
 }
 .lh-ico {
   flex: none;
@@ -14447,7 +14450,9 @@ fieldset.reading {
   align-items: center;
   cursor: default;
 }
-/* Out of the permission-set: a red minus, at the very start of the line. */
+/* Out of the permission-set: a minus in an outlined ring at the very start of the line — the + ring's
+   twin, quiet until pointed at, when it turns the colour of what it does. A filled red disc on every
+   line shouted the one action nobody came to the page for (the person, 2026-09-25). */
 .set-minus {
   flex: none;
   display: inline-grid;
@@ -14456,19 +14461,31 @@ fieldset.reading {
   height: 17px;
   margin: 0 2px 0 4px;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--tok-hint);
   border-radius: 50%;
-  background: var(--bad);
+  background: none;
   box-shadow: none;
-  color: #fff;
-  font: 700 13px/1 var(--font-app);
+  color: var(--tok-hint);
+  font: 600 13px/1 var(--font-app);
   cursor: pointer;
 }
 .set-minus span {
   margin-top: -2px;
 }
-.set-minus:hover {
-  filter: brightness(1.08);
+.set-minus:hover:not(:disabled) {
+  border-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+}
+/* A permission set LISTS what it holds, so every line is "on" — the composer's granted wash would
+   light the whole card (the person, 2026-09-25). Here a line is plain, and only the pointer lifts it. */
+.set-card .cx-tool.on,
+.set-config .cx-tool.on {
+  background: none;
+}
+.set-card .cx-tool.on:hover,
+.set-config .cx-tool.on:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 /* A command GROUP's minus sits in the head, before the fold, and takes the program with it. */
 .cx-cat.cx-sub > .cx-cat-head > .set-minus {
@@ -14520,6 +14537,29 @@ fieldset.reading {
 }
 .set-rail-label .cx-src {
   margin-left: auto;
+}
+/* A bucket that folds: the heading is a button, a chevron before the folder that turns when open. */
+button.set-rail-fold {
+  width: 100%;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+  cursor: pointer;
+}
+button.set-rail-fold:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.set-rail-chev {
+  display: inline-block;
+  width: 8px;
+  color: var(--tok-hint);
+  transition: transform 0.12s ease;
+}
+.set-rail-fold[aria-expanded="true"] .set-rail-chev {
+  transform: rotate(90deg);
 }
 /* The path, then where its value comes from — one line, the pills after the name. */
 .set-config .llm-detail-title {
@@ -15699,15 +15739,6 @@ fieldset.reading {
 .set-field.off > .cfg-field-say .cfg-label {
   color: var(--dim);
 }
-/* The same for a layered Appearance row, and for a section that is one setting (Mode, Theme, File
-   types): the switch before the name stays live, what it governs is shown and cannot be reached. */
-.set-row.off > .set-row-line > .set-ctl,
-.set-section.off > .set-section-body {
-  opacity: 0.5;
-}
-.set-row.off .set-name > span {
-  color: var(--dim);
-}
 
 /* ---- the Just you view (round 5, 2026-09-23) ----
    Under the lead, "What you changed | Every row". A row the personal layer states says what it
@@ -15984,6 +16015,16 @@ button.link.cfg-login-add-sub {
   background: var(--panel-2);
   color: var(--dim);
   font-size: calc(var(--size-app) * 10.5 / 12.5);
+  align-items: center;
+}
+.conn-probe-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.conn-probe-when button {
+  padding: 1px 8px;
+  font-size: inherit;
 }
 .conn-probe-row,
 .conn-weights-row {

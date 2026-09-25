@@ -5,8 +5,8 @@
  * run and the run-behaviour blocks; Data & history draws where artifacts land and how records are
  * stored.
  *
- * Every row has a SWITCH that says whether this layer states it — "use a switch to enable/disable a
- * row". Off, the row shows what it inherits and cannot be edited; on, it pins the value it shows.
+ * Every row shows the value in effect and edits it (a change is written to this layer and taken out
+ * of the stronger ones — `saveConfig`); a ↺ beside a row this layer states takes it out again.
  *
  * One block gets a bespoke control rather than the generic renderer: the exec environment is
  * `"windows" | { wsl }`, a discriminated union spelled as a string or an object, which no
@@ -24,12 +24,12 @@ import {
   type ConfigLayer,
   type ConfigView,
 } from "@jaira/shared/browser";
-import { Chip, Field, FieldGrid, NumInput, SelectInput, TextInput } from "./controls";
+import { Chip, Field, FieldGrid, NumInput, SelectInput, TextInput, type LayerState } from "./controls";
 import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 import { SettingsSection } from "./settingsLayout";
-import { withPaths } from "./appearanceLayer";
+import { withPaths } from "@jaira/shared/browser";
 
 export interface ConfigPaneProps {
   config: ConfigView | null;
@@ -71,21 +71,10 @@ export function layerWriter(
   return { set, stated };
 }
 
-/** The value at a dotted path of a document, or undefined. */
-function valueAt(doc: Record<string, unknown>, path: string): unknown {
-  let cursor: unknown = doc;
-  for (const part of path.split(".")) {
-    if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return undefined;
-    cursor = (cursor as Record<string, unknown>)[part];
-  }
-  return cursor;
-}
-
 /**
  * What every section here writes through: the layer's own document, the merged one it inherits from,
- * and a row's switch for one path — on while this layer states it. Switching it on pins the value the
- * row shows (the one it inherits), so nothing changes until it is edited; switching it off removes it,
- * and the row inherits again. With nothing to pin, the row is simply enabled (see `Field`).
+ * and a row's place in the layer for one path — its ↺ while this layer states it, which removes it so
+ * the row inherits again (see `Field.layer`).
  */
 export function configWriter(
   config: ConfigView,
@@ -96,18 +85,8 @@ export function configWriter(
   const doc = config[layer] as Record<string, unknown> | null;
   const effective = config.effective as Record<string, unknown>;
   const { set, stated } = layerWriter(doc, layer, onSave);
-  const toggle = (path: string, seed?: unknown): { on: boolean; onChange: (on: boolean) => void; disabled: boolean } => ({
-    on: stated(path),
-    disabled: locked,
-    onChange: (on) => {
-      if (!on) set(path, undefined);
-      else {
-        const current = seed ?? valueAt(effective, path);
-        if (current !== undefined) set(path, current);
-      }
-    },
-  });
-  return { effective, locked, stated, set, toggle };
+  const layerOf = (path: string): LayerState => ({ stated: stated(path), disabled: locked, onInherit: () => set(path, undefined) });
+  return { effective, locked, stated, set, layer: layerOf };
 }
 
 /**
@@ -135,11 +114,11 @@ export interface Writer {
   locked: boolean;
   stated: (path: string) => boolean;
   set: (path: string, value: unknown) => void;
-  toggle: (path: string, seed?: unknown) => { on: boolean; onChange: (on: boolean) => void; disabled: boolean };
+  layer: (path: string) => LayerState;
 }
 
 /** Where a produced file lands — a template, offered as presets plus the variables it may use. */
-export function Artifacts({ effective, locked, set, toggle }: Writer): JSX.Element {
+export function Artifacts({ effective, locked, set, layer }: Writer): JSX.Element {
   const artifacts = (effective["artifacts"] ?? {}) as Record<string, unknown>;
   const destination = typeof artifacts["destination"] === "string" ? (artifacts["destination"] as string) : "";
 
@@ -155,7 +134,7 @@ export function Artifacts({ effective, locked, set, toggle }: Writer): JSX.Eleme
           param="artifacts.destination"
           hint="Pick one, or write a template of your own."
           wide
-          toggle={toggle("artifacts.destination", destination === "" ? ARTIFACT_DESTINATIONS[0]!.value : destination)}
+          layer={layer("artifacts.destination")}
         >
           <div className="cfg-stack">
             <div className="cfg-chips">
@@ -187,7 +166,7 @@ export function Artifacts({ effective, locked, set, toggle }: Writer): JSX.Eleme
           label="Artifact directory"
           param="artifacts.dir"
           hint="What $ARTIFACT_DIR expands to, inside the root's system/ directory."
-          toggle={toggle("artifacts.dir")}
+          layer={layer("artifacts.dir")}
         >
           <TextInput
             value={typeof artifacts["dir"] === "string" ? (artifacts["dir"] as string) : ""}
@@ -201,7 +180,7 @@ export function Artifacts({ effective, locked, set, toggle }: Writer): JSX.Eleme
           label="Keep inline below"
           param="artifacts.inlineMaxBytes"
           hint="Content smaller than this rides along in bindings and prompts rather than being read back. Larger is fewer reads and bigger prompts."
-          toggle={toggle("artifacts.inlineMaxBytes")}
+          layer={layer("artifacts.inlineMaxBytes")}
         >
           <NumInput
             value={typeof artifacts["inlineMaxBytes"] === "number" ? (artifacts["inlineMaxBytes"] as number) : undefined}
@@ -214,7 +193,7 @@ export function Artifacts({ effective, locked, set, toggle }: Writer): JSX.Eleme
           label="Ask above"
           param="artifacts.askAboveBytes"
           hint="Producing an artifact bigger than this many bytes asks you first. There is no ceiling on size — this is a question, not a refusal; 0 turns it off."
-          toggle={toggle("artifacts.askAboveBytes")}
+          layer={layer("artifacts.askAboveBytes")}
         >
           <NumInput
             value={typeof artifacts["askAboveBytes"] === "number" ? (artifacts["askAboveBytes"] as number) : undefined}
@@ -244,7 +223,7 @@ const DEFAULT_ENVIRONMENT = "executors.default.prompt.defaults";
  * `args`, and a project-wide default for any of those is not a default — it is a state's whole
  * operation, applied to every state that never asked for one.
  */
-export function ModelDefaults({ effective, locked, set, toggle }: Writer): JSX.Element {
+export function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.Element {
   const executors = (effective["executors"] ?? {}) as Record<string, unknown>;
   const prompt = ((executors["default"] as Record<string, unknown> | undefined)?.["prompt"] ?? {}) as Record<string, unknown>;
   const defaults = (prompt["defaults"] ?? {}) as Record<string, unknown>;
@@ -263,7 +242,7 @@ export function ModelDefaults({ effective, locked, set, toggle }: Writer): JSX.E
           label="Default model"
           param={`${DEFAULT_ENVIRONMENT}.model`}
           hint="A model id, or a preset's name — 'coder' means the model coder chooses. A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state."
-          toggle={toggle(`${DEFAULT_ENVIRONMENT}.model`)}
+          layer={layer(`${DEFAULT_ENVIRONMENT}.model`)}
         >
           <TextInput
             value={model}
@@ -330,7 +309,7 @@ function PresetOptions({ id, presets }: { id: string; presets: readonly string[]
  * would offer a `wsl` box on a value that is sometimes a bare string, and writing to it would produce
  * a document the parser refuses.
  */
-export function ExecEnvironment({ effective, locked, stated, set, toggle }: Writer): JSX.Element {
+export function ExecEnvironment({ effective, locked, set, layer }: Writer): JSX.Element {
   const value = effective["execEnvironment"];
   const distro = value !== null && typeof value === "object" ? String((value as { wsl?: string }).wsl ?? "") : "";
 
@@ -341,7 +320,7 @@ export function ExecEnvironment({ effective, locked, stated, set, toggle }: Writ
       info="Natively, or inside a WSL distro — which is where git and every agent then run too. Deliberately not Windows git against \\wsl$, which is slow and permission-fragile."
     >
       <FieldGrid>
-        <Field label="Environment" param="execEnvironment" hint="Naming a distro runs everything inside it." toggle={toggle("execEnvironment", value ?? "windows")}>
+        <Field label="Environment" param="execEnvironment" hint="Naming a distro runs everything inside it." layer={layer("execEnvironment")}>
           <SelectInput
             value={distro === "" ? "windows" : "wsl"}
             options={[
@@ -353,8 +332,8 @@ export function ExecEnvironment({ effective, locked, stated, set, toggle }: Writ
           />
         </Field>
         {distro !== "" || (typeof value === "object" && value !== null) ? (
-          // The same key as the row above, so it follows that row's switch rather than having its own.
-          <Field label="Distro" param="execEnvironment.wsl" hint="As `wsl -l` lists it." off={!stated("execEnvironment")}>
+          // The same key as the row above, so its ↺ is that row's.
+          <Field label="Distro" param="execEnvironment.wsl" hint="As `wsl -l` lists it.">
             <TextInput value={distro} mono placeholder="Ubuntu" disabled={locked} onChange={(v) => set("execEnvironment", { wsl: v })} />
           </Field>
         ) : null}

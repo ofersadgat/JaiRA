@@ -104,6 +104,42 @@ export function useLayerRow(
   return { hidden: at.onlyStated && !here, instead };
 }
 
+/**
+ * What a setting goes back to if the layer being edited stops stating it — "Back to Zinc, from
+ * Shared" — the ↺'s label. `format` spells a value the way its row does.
+ */
+export function useInheritLabel(paths: readonly string[] | undefined, format?: (value: unknown, path: string) => string): string {
+  const at = useContext(SettingsLayerContext);
+  const path = paths?.[0];
+  if (at === null || at.view === null || path === undefined) return "Take this out of this layer, so it inherits";
+  const { value, from } = inheritedValue(at.view, path, at.layer);
+  const words = value === undefined ? "not set" : format !== undefined ? format(value, path) : shortValue(value, path);
+  return `Back to ${words}, from ${SOURCE_WORDS[from]}`;
+}
+
+/**
+ * A setting's place in the layer a Settings page edits — the person's rule (2026-09-25): no switch.
+ * The control always shows what is in effect and always edits it (a change is written to this layer
+ * and taken out of the stronger ones, `clearedAbove`); `stated` draws the ↺ that takes the layer's
+ * own statement out again, so the setting inherits.
+ */
+export interface LayerState {
+  stated: boolean;
+  onInherit: () => void;
+  disabled?: boolean | undefined;
+  /** What the ↺ says, where "Back to <what the layers below say>" is not what taking it out does. */
+  label?: string | undefined;
+}
+
+/** ↺ beside a setting the layer being edited states: take it out, so it inherits. */
+export function InheritButton({ label, onInherit, disabled }: { label: string; onInherit: () => void; disabled?: boolean | undefined }): JSX.Element {
+  return (
+    <button type="button" className="set-icon set-reset" title={label} aria-label={label} disabled={disabled} onClick={onInherit}>
+      ↺
+    </button>
+  );
+}
+
 /** The first sentence of a hint, and the rest — the split a settings row draws. */
 export function splitHint(hint: string): { first: string; rest: string } {
   const at = hint.search(/[.!?](\s|$)/);
@@ -130,7 +166,7 @@ export function Field({
   param,
   hint,
   set = false,
-  toggle,
+  layer,
   off = false,
   wide = false,
   lead,
@@ -143,13 +179,9 @@ export function Field({
   param?: string | undefined;
   hint?: ReactNode;
   set?: boolean;
-  /**
-   * The row's own on/off SWITCH — the person's rule for settings (2026-09-23): "use a switch to
-   * enable/disable a row". On, this layer states the value and the control edits it; off, the row is
-   * disabled and shows what it inherits. Replaces the `set here` mark, which only said which it was.
-   */
-  toggle?: { on: boolean; onChange: (on: boolean) => void; disabled?: boolean | undefined } | undefined;
-  /** The row is switched off by a switch its caller drew itself (`lead`) — see {@link toggle}. */
+  /** A setting the page's layer may state — the ↺ that takes it out. See {@link LayerState}. */
+  layer?: LayerState | undefined;
+  /** The row is switched off by a switch its caller drew itself (`lead`) — an optional input left out. */
   off?: boolean;
   /** The control is a list or a form of its own: it goes UNDER the name, across the row. */
   wide?: boolean;
@@ -164,30 +196,12 @@ export function Field({
   children: ReactNode;
 }): JSX.Element | null {
   const row = useContext(SettingsRowsContext);
-  // Switched on with nothing to write yet — an empty model box, say — the row stays enabled until
-  // something is typed, rather than writing an empty value that would read back as "not set".
-  const [armed, setArmed] = useState(false);
-  const on = toggle !== undefined ? toggle.on || armed : !off;
-  const disabled = !on;
-  // The Just you view (`SettingsLayerContext`): the row's switch says whether the layer states it —
-  // a toggle, or the schema form's own switch before the name — and the key it writes says so
-  // otherwise.
-  const layered = useLayerRow(param !== undefined ? [param] : undefined, toggle !== undefined ? toggle.on || armed : lead !== undefined ? !off : undefined);
+  const disabled = off;
+  // The Just you view (`SettingsLayerContext`): whether the layer states the row — its own answer, or
+  // the key it writes.
+  const layered = useLayerRow(param !== undefined ? [param] : undefined, layer?.stated);
+  const inherit = useInheritLabel(param !== undefined ? [param] : undefined);
   if (layered.hidden) return null;
-  const leading =
-    toggle !== undefined ? (
-      <Switch
-        on={on}
-        label={on ? `${label} is set here — switch off to inherit it` : `set ${label} here`}
-        disabled={toggle.disabled}
-        onChange={(next) => {
-          setArmed(next);
-          toggle.onChange(next);
-        }}
-      />
-    ) : (
-      lead
-    );
   // On a settings page: one sentence under the name, and the rest — with the key it writes — behind
   // an ⓘ, which is what keeps a page of forty settings readable (t3code's rule: about one line each).
   const split = row && typeof hint === "string" ? splitHint(hint) : undefined;
@@ -196,9 +210,10 @@ export function Field({
     <div className={`cfg-field${row ? " set-field" : ""}${wide ? " wide" : ""}${disabled ? " off" : ""}${error !== undefined ? " bad" : ""}`}>
       <div className="cfg-field-say">
         <span className="cfg-field-head">
-          {leading}
+          {lead}
           <span className={`cfg-label${mono ? " mono" : ""}`}>{label}</span>
-          {set && toggle === undefined ? <span className="cfg-set" title="set in the layer you are editing">set here</span> : null}
+          {layer?.stated === true ? <InheritButton label={layer.label ?? inherit} onInherit={layer.onInherit} disabled={layer.disabled} /> : null}
+          {set && layer === undefined ? <span className="cfg-set" title="set in the layer you are editing">set here</span> : null}
           {after}
           {more.length > 0 ? (
             <span className="set-icon set-info" title={more} aria-label={more} role="img">

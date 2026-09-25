@@ -1,7 +1,8 @@
 /**
  * Settings → Appearance: how JaiRA looks (SHELL.md §6) — a LAYERED page since 2026-09-23, like every
  * other: the look is the `appearance` block of the settings, stated by the shared root, a project, or
- * "Just you" over both, and each row has the switch that says whether the layer being edited states it.
+ * "Just you" over both. Every control shows the look in effect and changes it; a ↺ beside a row the
+ * page's layer states takes that out again (the person's rule, 2026-09-25 — no on/off switch).
  *
  * Built from `settingsLayout.tsx` — the row-and-card shape the person picked from t3code on
  * 2026-09-23 — as six sections, each one a place the sidebar's accordion can jump to, and the Files
@@ -32,7 +33,6 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import {
   PALETTES,
-  PALETTE_SURFACE,
   SIZE_LIMITS,
   surfaceOf,
   type Appearance,
@@ -433,13 +433,13 @@ const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
 
 /**
  * How the Appearance rows sit in the layers — handed in by the caller, which knows the layer being
- * edited and how to write it. Absent draws the rows as plain controls, with no switch.
+ * edited and how to write it. Absent draws the rows as plain controls, with no ↺.
  */
 export interface AppearanceLayering {
   /** Whether the layer being edited states a path (`appearance.palette`, …). */
   stated: (path: string) => boolean;
-  /** Switch rows on (pin what they show into the layer) or off (take them out, so they inherit). */
-  pin: (paths: readonly string[], on: boolean) => void;
+  /** Take paths out of the layer being edited, so they inherit again. */
+  inherit: (paths: readonly string[]) => void;
   /** Nothing on the page may be changed — a write in flight, or a layer that cannot be written. */
   locked: boolean;
 }
@@ -534,17 +534,15 @@ export function AppearancePane({
   const systemDark = useSystemDark();
   const shown: JairaTheme = theme === "system" ? (systemDark ? "dark" : "light") : theme;
   const surface = surfaceOf(appearance);
-  const own = PALETTE_SURFACE[appearance.palette];
   const card = PALETTE_CARDS[appearance.palette];
-  const backTo = (what: string): string => `Back to ${card.label}'s own: ${what}`;
   // One row's place in the layers, from the `appearance.*` fields it writes.
   const layer = (...fields: string[]): RowLayer | undefined => {
     if (layered === undefined) return undefined;
     const paths = fields.map((field) => `appearance.${field}`);
     return {
       paths,
-      on: paths.some((path) => layered.stated(path)),
-      onChange: (on) => layered.pin(paths, on),
+      stated: paths.some((path) => layered.stated(path)),
+      onInherit: () => layered.inherit(paths),
       disabled: layered.locked,
       format: lookWords,
     };
@@ -572,21 +570,18 @@ export function AppearancePane({
           name="Lane colours"
           description="Tint each column its own colour, so a step of the workflow is recognisable at a glance."
           layer={layer("laneColors")}
-          reset={appearance.laneColors !== null ? { label: backTo(own.laneColors ? "on" : "off"), onReset: () => onChange({ laneColors: null }), disabled: busy } : undefined}
           control={<Switch on={surface.laneColors} label="Lane colours" disabled={busy} onChange={(laneColors) => onChange({ laneColors })} />}
         />
         <SettingsRow
           name="Columns"
           description="A box around each column's cards, or a rule under its heading."
           layer={layer("buckets")}
-          reset={appearance.buckets !== null ? { label: backTo(own.buckets), onReset: () => onChange({ buckets: null }), disabled: busy } : undefined}
           control={<Segmented label="Columns" value={surface.buckets} options={BUCKET_CHOICES} disabled={busy} onChange={(buckets) => onChange({ buckets })} />}
         />
         <SettingsRow
           name="Status wash"
           description="Colour a whole card by what it is doing — running, waiting or failed. Finished cards fade."
           layer={layer("statusWash")}
-          reset={appearance.statusWash !== null ? { label: backTo(own.statusWash ? "on" : "off"), onReset: () => onChange({ statusWash: null }), disabled: busy } : undefined}
           control={<Switch on={surface.statusWash} label="Status wash" disabled={busy} onChange={(statusWash) => onChange({ statusWash })} />}
         />
         <SettingsRow name="Preview" description={`What tasks look like in ${card.label}, with the options above.`} full>
@@ -600,7 +595,6 @@ export function AppearancePane({
           description="A fan-out whose elements ran one after another: down the page in the order they ran, or side by side as a band."
           info="A band is two columns, or tabs from three elements up — the way elements that ran at the same time are always drawn."
           layer={layer("conversation.sequentialBatches")}
-          reset={conversation.sequentialBatches !== "stacked" ? { label: "Back to one after another", onReset: () => onConversation({ sequentialBatches: "stacked" }), disabled: busy } : undefined}
           control={
             <Segmented
               label="Batches that ran in turn"
@@ -619,7 +613,6 @@ export function AppearancePane({
           description="How much of an account is used, after the model chip and in Connections: as a number, a ring, both, or not at all."
           info="A subscription shows the percent of its tightest window; an API key whose provider reports its credit, what is spent; any other key, what the conversation cost. The ring draws the same share, so either one alone says it. The conversation's own ring, at the composer's right, is not this setting."
           layer={layer("conversation.usageFigures")}
-          reset={conversation.usageFigures !== "number" ? { label: "Back to the number", onReset: () => onConversation({ usageFigures: "number" }), disabled: busy } : undefined}
           control={
             <Segmented
               label="Usage figures"
@@ -647,11 +640,6 @@ export function AppearancePane({
             </>
           }
           layer={layer("appFamily", "sizeApp")}
-          reset={
-            appearance.appFamily.length > 0 || appearance.sizeApp !== SIZE_LIMITS.sizeApp.default
-              ? { label: `Back to ${SHIPPED_APP_FAMILY}, ${SIZE_LIMITS.sizeApp.default} px`, onReset: () => onChange({ appFamily: [], sizeApp: SIZE_LIMITS.sizeApp.default }), disabled: busy }
-              : undefined
-          }
           control={
             <div className="set-font">
               <FamilyStack
@@ -678,11 +666,6 @@ export function AppearancePane({
             </>
           }
           layer={layer("dataFamily", "sizeData")}
-          reset={
-            appearance.dataFamily.length > 0 || appearance.sizeData !== SIZE_LIMITS.sizeData.default
-              ? { label: `Back to ${SHIPPED_DATA_FAMILY}, ${SIZE_LIMITS.sizeData.default} px`, onReset: () => onChange({ dataFamily: [], sizeData: SIZE_LIMITS.sizeData.default }), disabled: busy }
-              : undefined
-          }
           control={
             <div className="set-font">
               <FamilyStack
@@ -705,7 +688,6 @@ export function AppearancePane({
           name="Editor size"
           description="Editors follow the data font until you give them a size of their own."
           layer={layer("advanced", "sizeEditor")}
-          reset={appearance.advanced ? { label: "Back to following the data font", onReset: () => onChange({ advanced: false }), disabled: busy } : undefined}
           control={
             <>
               {appearance.advanced ? (

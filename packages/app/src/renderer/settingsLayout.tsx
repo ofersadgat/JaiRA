@@ -16,14 +16,14 @@
  * A render function for each, with no opinion about where it sits
  * ([[ui-components-are-render-functions]]): the page decides the order, the row decides nothing.
  *
- * A row or a section that one layer may or may not state takes a {@link RowLayer}: the switch before
- * its name (on, this layer states it and the control edits it; off, the control shows what it
- * inherits and cannot be changed — `Field.toggle`'s rule), and its part in the "Just you" view
- * (`useLayerRow`): not drawn under "What you changed" unless the layer states it, and on the
- * personal layer the line saying what it replaces.
+ * A row or a section that one layer may or may not state takes a {@link RowLayer}. There is no switch
+ * (the person's rule, 2026-09-25): the control shows what is in effect and always edits it, and a ↺
+ * beside the name, while the page's layer states it, takes that out so it inherits. It also has its
+ * part in the "Just you" view (`useLayerRow`): not drawn under "What you changed" unless the layer
+ * states it, and on the personal layer the line saying what it replaces.
  */
 import type { JSX, ReactNode } from "react";
-import { Switch, SettingsLayerContext, useLayerRow } from "./controls";
+import { InheritButton, SettingsLayerContext, useInheritLabel, useLayerRow } from "./controls";
 
 /** A Settings page: its title, whose settings these are, and its sections. */
 export function SettingsPage({
@@ -71,30 +71,24 @@ export function SettingsPage({
 
 /**
  * A row's (or a section's) place in the layers: the config paths it writes, whether the layer being
- * edited states them, and what switching that changes.
+ * edited states them, and how to take them out again.
  */
 export interface RowLayer {
   /** The config paths the row writes, the first stated one being what its "instead of" line reports. */
   paths: readonly string[];
-  /** The layer being edited states it. */
-  on: boolean;
-  /** On: this layer states it (the value shown is pinned). Off: it is removed, and inherits again. */
-  onChange: (on: boolean) => void;
+  /** The layer being edited states it — the ↺ is drawn. */
+  stated: boolean;
+  /** Take the row's paths out of the layer being edited, so it inherits again. */
+  onInherit: () => void;
   disabled?: boolean | undefined;
-  /** How the row spells a value, for the "instead of" line — a palette's name rather than its id. */
+  /** How the row spells a value, for the "instead of" line and the ↺ — a palette's name rather than its id. */
   format?: ((value: unknown, path: string) => string) | undefined;
 }
 
-/** The switch before a layered row's or section's name. */
-function LayerSwitch({ name, layer }: { name: string; layer: RowLayer }): JSX.Element {
-  return (
-    <Switch
-      on={layer.on}
-      label={layer.on ? `${name} is set here — switch off to inherit it` : `set ${name} here`}
-      {...(layer.disabled !== undefined ? { disabled: layer.disabled } : {})}
-      onChange={layer.onChange}
-    />
-  );
+/** ↺ beside a layered row's or section's name, while the page's layer states it. */
+function LayerInherit({ layer }: { layer: RowLayer }): JSX.Element | null {
+  const label = useInheritLabel(layer.paths, layer.format);
+  return layer.stated ? <InheritButton label={label} onInherit={layer.onInherit} disabled={layer.disabled} /> : null;
 }
 
 /**
@@ -131,19 +125,19 @@ export function SettingsSection({
   layer?: RowLayer | undefined;
   children: ReactNode;
 }): JSX.Element | null {
-  const layered = useLayerRow(layer?.paths, layer?.on, layer?.format);
+  const layered = useLayerRow(layer?.paths, layer?.stated, layer?.format);
   if (layer !== undefined && layered.hidden) return null;
   const body = plain ? children : <div className="set-group">{children}</div>;
   return (
     <section
-      className={`set-section${wide ? " wide" : ""}${layer !== undefined ? (layer.on ? " set-stated" : " off") : ""}`}
+      className={`set-section${wide ? " wide" : ""}${layer?.stated === true ? " set-stated" : ""}`}
       data-part={id}
       data-part-label={title}
     >
       <div className="set-section-title" role="heading" aria-level={2}>
         <span className="set-section-name">
-          {layer !== undefined ? <LayerSwitch name={title} layer={layer} /> : null}
           {title}
+          {layer !== undefined ? <LayerInherit layer={layer} /> : null}
           {info !== undefined ? (
             <span className="set-icon set-info" title={info} aria-label={info} role="img">
               ⓘ
@@ -159,9 +153,7 @@ export function SettingsSection({
       ) : (
         // Stated or not, what is inside is this one setting's content, not rows of the page.
         <SettingsLayerContext.Provider value={null}>
-          <div className="set-section-body" {...(layer.on ? {} : { inert: true })}>
-            {body}
-          </div>
+          <div className="set-section-body">{body}</div>
         </SettingsLayerContext.Provider>
       )}
     </section>
@@ -197,18 +189,17 @@ export function SettingsRow({
   layer?: RowLayer | undefined;
   children?: ReactNode;
 }): JSX.Element | null {
-  const layered = useLayerRow(layer?.paths, layer?.on, layer?.format);
+  const layered = useLayerRow(layer?.paths, layer?.stated, layer?.format);
   // A full-width row with no setting of its own — a preview — belongs to its section: it is drawn
   // whenever the section is.
   if (layered.hidden && (layer !== undefined || !full)) return null;
-  const off = layer !== undefined && !layer.on;
   return (
-    <div className={`set-row${full ? " full" : ""}${off ? " off" : ""}`}>
+    <div className={`set-row${full ? " full" : ""}`}>
       <div className="set-row-line">
         <div className="set-row-say">
           <div className="set-name" role="heading" aria-level={3}>
-            {layer !== undefined ? <LayerSwitch name={typeof name === "string" ? name : "this"} layer={layer} /> : null}
             <span>{name}</span>
+            {layer !== undefined ? <LayerInherit layer={layer} /> : null}
             {reset !== undefined ? <ResetButton {...reset} /> : null}
             {info !== undefined ? (
               <span className="set-icon set-info" title={info} aria-label={info} role="img">
@@ -220,9 +211,7 @@ export function SettingsRow({
           {layered.instead !== undefined ? <p className="set-desc set-instead">{layered.instead}</p> : null}
         </div>
         {control !== undefined && !full ? (
-          <div className="set-ctl" {...(off ? { inert: true } : {})}>
-            {control}
-          </div>
+          <div className="set-ctl">{control}</div>
         ) : null}
       </div>
       {children}

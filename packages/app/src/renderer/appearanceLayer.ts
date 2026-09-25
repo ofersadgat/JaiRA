@@ -11,14 +11,13 @@
  * does to one layer's own entry, and which layer a change made OUTSIDE Settings lands in.
  */
 import {
-  EDITOR_KINDS,
-  EDITOR_KNOBS,
   defaultAppearanceConfig,
   statingLayer,
-  valueAtPath,
+  withPaths,
   type ConfigLayer,
   type ConfigView,
   type JairaAppearanceConfig,
+  type PathWrite,
   type RendererEdit,
 } from "@jaira/shared/browser";
 
@@ -26,36 +25,6 @@ import {
 export function lookOf(config: ConfigView | null): JairaAppearanceConfig {
   const block = (config?.effective as { appearance?: JairaAppearanceConfig } | undefined)?.appearance;
   return block ?? defaultAppearanceConfig();
-}
-
-/** One path of a layer's document and its new value — `undefined` removes it, and it inherits again. */
-export type PathWrite = readonly [path: string, value: unknown];
-
-/**
- * A layer's document with some paths written. A container a removal empties goes with it, so an
- * untouched section leaves no trace in a file people read.
- */
-export function withPaths(doc: unknown, writes: readonly PathWrite[]): Record<string, unknown> {
-  const next = structuredClone(doc !== null && typeof doc === "object" && !Array.isArray(doc) ? doc : {}) as Record<string, unknown>;
-  for (const [path, value] of writes) {
-    const parts = path.split(".");
-    const chain: Array<{ parent: Record<string, unknown>; key: string }> = [];
-    let cursor = next;
-    for (const part of parts.slice(0, -1)) {
-      const held = cursor[part];
-      cursor[part] = held !== null && typeof held === "object" && !Array.isArray(held) ? { ...(held as object) } : {};
-      chain.push({ parent: cursor, key: part });
-      cursor = cursor[part] as Record<string, unknown>;
-    }
-    const leaf = parts[parts.length - 1]!;
-    if (value === undefined) delete cursor[leaf];
-    else cursor[leaf] = value;
-    for (const { parent, key } of chain.reverse()) {
-      const block = parent[key];
-      if (block !== null && typeof block === "object" && !Array.isArray(block) && Object.keys(block).length === 0) delete parent[key];
-    }
-  }
-  return next;
 }
 
 /**
@@ -114,20 +83,6 @@ export function rendererWrites(layerDoc: unknown, edits: readonly RendererEdit[]
   // has none, but a MIME type may), so the whole block is written as one value.
   const block = Object.fromEntries(Object.entries(entries).filter((entry): entry is [string, Record<string, unknown>] => entry[1] !== undefined));
   return [["appearance.renderers", Object.keys(block).length > 0 ? block : undefined]];
-}
-
-/**
- * What switching a row ON pins into the layer: the value the row shows — the effective one — at
- * `path`. The editors are pinned knob by knob only where a surface honours the knob (`EDITOR_KNOBS`):
- * the effective look carries every knob for every surface, and the layer refuses the ones that do
- * not apply.
- */
-export function pinnedValue(look: JairaAppearanceConfig, path: string): unknown {
-  const value = valueAtPath({ appearance: look }, path);
-  if (path !== "appearance.editors") return value;
-  return Object.fromEntries(
-    EDITOR_KINDS.map((kind) => [kind, Object.fromEntries(EDITOR_KNOBS[kind].map((knob) => [knob, look.editors[kind][knob]]))]),
-  );
 }
 
 /** The effective look with some writes applied at once — the window moves on the click, not the round trip. */

@@ -1,10 +1,11 @@
 /**
  * The look read from, and written to, the layered configuration (`appearanceLayer.ts`): a change is a
- * few paths of ONE layer's document, never the merged one, and what a row pins is what it shows.
+ * few paths of ONE layer's document, never the merged one, and it is taken out of the stronger layers
+ * so it shows.
  */
 import { describe, expect, it } from "vitest";
-import { defaultAppearanceConfig, mergeConfigLayers, parseConfig, type ConfigView } from "@jaira/shared";
-import { lookOf, pinnedValue, rendererWrites, targetLayerOf, withPaths } from "../src/renderer/appearanceLayer";
+import { clearedAbove, defaultAppearanceConfig, mergeConfigLayers, parseConfig, statedChanges, withPaths, type ConfigView } from "@jaira/shared";
+import { lookOf, rendererWrites, targetLayerOf } from "../src/renderer/appearanceLayer";
 
 function view(docs: { base?: unknown; project?: unknown; you?: unknown }): ConfigView {
   return {
@@ -43,15 +44,37 @@ describe("writing a layer's document", () => {
     // Nobody states it: it is the person's own.
     expect(targetLayerOf(view({}), "appearance.mode")).toBe("you");
   });
+});
 
-  it("pins what a row shows, and only the editor knobs a surface honours", () => {
-    const look = defaultAppearanceConfig();
-    expect(pinnedValue(look, "appearance.palette")).toBe(look.palette);
-    expect(pinnedValue(look, "appearance.laneColors")).toBeNull();
-    const editors = pinnedValue(look, "appearance.editors") as Record<string, Record<string, unknown>>;
-    expect(Object.keys(editors["json"]!).sort()).toEqual(["lineHeight", "tabSize", "wrap"]);
-    // And the layer it writes is one the parser accepts.
-    expect(() => parseConfig({ appearance: { editors } })).not.toThrow();
+describe("a change made on one layer's page (the person's rule, 2026-09-25)", () => {
+  it("is taken out of every stronger layer that states it, so it shows", () => {
+    // The bug it fixes: a theme picked on Shared snapped back to the personal layer's.
+    const layered = view({
+      base: { appearance: { palette: "ink" } },
+      project: { appearance: { palette: "classic", mode: "dark" } },
+      you: { appearance: { palette: "pastel-rail", buckets: "box" }, memo: { enabled: true } },
+    });
+    const next = withPaths(layered.base, [["appearance.palette", "zinc"]]);
+    expect(clearedAbove(layered, "base", next)).toEqual([
+      { layer: "project", doc: { appearance: { mode: "dark" } } },
+      { layer: "you", doc: { appearance: { buckets: "box" }, memo: { enabled: true } } },
+    ]);
+    // Nothing stronger than the personal layer, and nothing it did not change.
+    expect(clearedAbove(layered, "you", withPaths(layered.you, [["appearance.palette", "zinc"]]))).toEqual([]);
+    expect(clearedAbove(layered, "base", layered.base)).toEqual([]);
+  });
+
+  it("never reaches past its own document when it takes a statement out", () => {
+    const layered = view({ base: { appearance: { palette: "ink" } }, you: { appearance: { palette: "zinc" } } });
+    expect(clearedAbove(layered, "base", withPaths(layered.base, [["appearance.palette", undefined]]))).toEqual([]);
+  });
+
+  it("takes out a stronger parent that is not a block, and leaves the lists layers add to", () => {
+    // Built by hand: the parser would refuse the `null`, and only the layers' own documents matter here.
+    const layered = { ...view({}), base: {}, you: { executors: { reviewer: null }, files: { hidden: ["dist"] } } } as unknown as ConfigView;
+    const next = { executors: { reviewer: { model: "sonnet" } }, files: { hidden: ["build"] } };
+    expect(statedChanges(layered.base, next)).toEqual(["executors.reviewer.model", "files.hidden"]);
+    expect(clearedAbove(layered, "base", next)).toEqual([{ layer: "you", doc: { files: { hidden: ["dist"] } } }]);
   });
 });
 

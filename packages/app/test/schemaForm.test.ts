@@ -190,14 +190,19 @@ describe("a form somebody fills in", () => {
     expect(html).toContain("+ add key");
   });
 
-  it("reads a LAYER's switch from what the layer states, and names what a switched-off field inherits", () => {
+  it("draws a LAYER's members with no switch — what is in effect, editable, and a ↺ where the layer states it", () => {
     const settings: Schema = { type: "object", properties: { enabled: { type: "boolean" }, path: { type: "string" } } };
     const html = draw(settings, { enabled: true, path: "workflows" }, { path: "memo", isSet: (p) => p === "memo.enabled" });
-    expect(html).toContain('aria-label="enabled is set here — switch off to inherit it"');
-    expect(html).toContain('aria-label="set path here"');
-    // The switch IS the mark: the "set here" tag is not drawn beside it as well.
+    // No on/off switch on either member (the person's rule, 2026-09-25).
+    expect(html).not.toContain("is set here");
+    expect(html).not.toContain("set path here");
+    expect(html).not.toContain("inherits workflows");
+    // The inherited value is a live control showing what is in effect.
+    expect(html).toContain('value="workflows"');
+    // One ↺, on the member the layer states.
+    expect(html.match(/set-reset/g)).toHaveLength(1);
+    expect(html.indexOf("set-reset")).toBeLessThan(html.indexOf(">path<"));
     expect(html).not.toContain("cfg-set");
-    expect(html).toContain("not set here — inherits workflows");
   });
 
   it("marks how a recorded value was settled, after its type — and says nothing where nothing was recorded", () => {

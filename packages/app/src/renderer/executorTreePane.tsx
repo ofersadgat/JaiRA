@@ -33,7 +33,7 @@ import {
   type JairaProviderNode,
   type JairaRouterNode,
 } from "@jaira/shared/browser";
-import { Disclosure, Field, FieldGrid, Level, SelectInput, TextArea, TextInput } from "./controls";
+import { Disclosure, Field, FieldGrid, Level, SelectInput, TextArea, TextInput, type LayerState } from "./controls";
 import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 
@@ -116,19 +116,11 @@ export function ExecutorRoutes({ resolved, overlay, locked, onOverlay }: Omit<Ex
 }
 
 /**
- * A row's switch over one overlay path (`Field.toggle`): on while the overlay pins it. On pins what
- * the row shows — the derived value — so nothing changes until it is edited; off unpins it, and the
- * tree derives it again.
+ * A row's place over one overlay path (`Field.layer`): its ↺ while the overlay pins it, which unpins
+ * it so the tree derives it again. Editing the row pins what was typed.
  */
-function toggleOf(ctx: Ctx, path: string, current: unknown): { on: boolean; onChange: (on: boolean) => void; disabled: boolean } {
-  return {
-    on: ctx.pinned(path),
-    disabled: ctx.locked,
-    onChange: (on) => {
-      if (!on) ctx.set(path, undefined);
-      else if (current !== undefined) ctx.set(path, current);
-    },
-  };
+function layerOf(ctx: Ctx, path: string): LayerState {
+  return { stated: ctx.pinned(path), disabled: ctx.locked, onInherit: () => ctx.set(path, undefined) };
 }
 
 /** What this level IS, and which upstream class it builds. */
@@ -172,7 +164,7 @@ function FunctionNode({
         param="function.rules"
         hint="Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract. Empty means everything the workflow registers."
         wide
-        toggle={toggleOf(ctx, "function.rules", rules.length > 0 ? rules : undefined)}
+        layer={layerOf(ctx, "function.rules")}
       >
         <RuleList rules={rules} known={known} disabled={ctx.locked} onChange={setRules} />
       </Field>
@@ -346,7 +338,7 @@ function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; 
             label="Default model"
             param={`${path}.defaults.model`}
             hint="A bare id routes to whatever serves that family below; prefix it to insist on one route. Empty leaves the choice to the state. The same block as Settings → Models → Defaults."
-            toggle={toggleOf(ctx, `${path}.defaults.model`, node.defaults?.["model"])}
+            layer={layerOf(ctx, `${path}.defaults.model`)}
           >
             <TextInput
               value={typeof node.defaults?.["model"] === "string" ? (node.defaults["model"] as string) : ""}
@@ -450,7 +442,7 @@ function LeafNode({ node, path, ctx }: { node: JairaProviderNode | JairaAgentNod
           label="Model"
           param={`${path}.model`}
           hint="As it knows it — bare, because the route's own name is already the prefix. Empty means the runtime's own default."
-          toggle={toggleOf(ctx, `${path}.model`, node.model)}
+          layer={layerOf(ctx, `${path}.model`)}
         >
           <TextInput
             value={node.model ?? ""}
@@ -464,7 +456,7 @@ function LeafNode({ node, path, ctx }: { node: JairaProviderNode | JairaAgentNod
           label="May only run"
           param={`${path}.allow`}
           hint="One pattern per line. 'opus' restricts a model; 'openrouter/*' restricts a provider. A state asking for anything else is refused before it runs."
-          toggle={toggleOf(ctx, `${path}.allow`, node.allow)}
+          layer={layerOf(ctx, `${path}.allow`)}
         >
           <TextArea
             value={(node.allow ?? []).join("\n")}

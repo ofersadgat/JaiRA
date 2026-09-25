@@ -383,9 +383,15 @@ describe("the Model section", () => {
     expect(html).not.toContain("picked now");
   });
 
-  it("is switched off when the preset states no model, and summarised as not set", () => {
+  it("stays editable when the preset states no model, with a ↺ only once it states one, and is summarised as not set", () => {
     const html = renderToStaticMarkup(createElement(PresetModelSection, { value: undefined, onChange: () => undefined, disabled: false, lookup, suggestions: [] }));
-    expect(html).toContain('class="cfg-field wide off"');
+    expect(html).toContain('class="cfg-field wide"');
+    expect(html).toContain("+ another model");
+    expect(html).not.toContain("set-reset");
+    const named = renderToStaticMarkup(
+      createElement(PresetModelSection, { value: { candidates: ["claude-sonnet-5"], choose: "first-available" }, onChange: () => undefined, disabled: false, lookup, suggestions: [] }),
+    );
+    expect(named).toContain("Name no model — the state&#x27;s own answers");
     expect(presetModelLine(undefined)).toBe("not set");
   });
 

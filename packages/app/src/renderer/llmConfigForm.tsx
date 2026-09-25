@@ -130,6 +130,11 @@ export interface RailItem {
    * rail's order, takes no focus and is skipped by the arrows — `label` and `summary` are unused.
    */
   heading?: ReactNode;
+  /**
+   * A heading that FOLDS what is under it — a bucket in the permission-set rail: `open` says whether
+   * it is, and `onFold` flips it. Drawn as a button with a chevron; still not a tab.
+   */
+  fold?: { open: boolean; onFold: () => void } | undefined;
   /** How many steps in this row hangs — a bucket inside a bucket, and what it holds. */
   indent?: number;
 }
@@ -197,9 +202,27 @@ export function TabRail({
     <nav className={`llm-rail${className ? ` ${className}` : ""}`} role="tablist" aria-label={label} aria-orientation="vertical" onKeyDown={onKeyDown}>
       {items.map((item) =>
         item.heading !== undefined ? (
-          <div key={item.id} role="presentation" className={`set-rail-label${item.className ? ` ${item.className}` : ""}`} title={item.title} {...hang(item)}>
-            {item.heading}
-          </div>
+          item.fold !== undefined ? (
+            <button
+              key={item.id}
+              type="button"
+              tabIndex={-1}
+              className={`set-rail-label set-rail-fold${item.className ? ` ${item.className}` : ""}`}
+              aria-expanded={item.fold.open}
+              title={item.title}
+              {...hang(item)}
+              onClick={item.fold.onFold}
+            >
+              <span className="set-rail-chev" aria-hidden="true">
+                ›
+              </span>
+              {item.heading}
+            </button>
+          ) : (
+            <div key={item.id} role="presentation" className={`set-rail-label${item.className ? ` ${item.className}` : ""}`} title={item.title} {...hang(item)}>
+              {item.heading}
+            </div>
+          )
         ) : (
           <button
             key={item.id}
