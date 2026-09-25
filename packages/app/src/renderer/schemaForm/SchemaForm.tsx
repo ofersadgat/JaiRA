@@ -54,6 +54,24 @@ import { presentationFor } from "./presentation";
 import { widgetFor } from "./registry";
 import type { Schema, SchemaFormContext } from "./types";
 
+/** A seed with nothing in it yet: an empty string, or an object of nothing but those. */
+function isBlank(value: unknown): boolean {
+  if (value === "") return true;
+  return isRecord(value) && Object.keys(value).length > 0 && Object.values(value).every(isBlank);
+}
+
+/** What `seed` (the value at `root`) holds at the dotted path `at`, or undefined. */
+function valueUnder(seed: unknown, root: string, at: string): unknown {
+  if (at === root) return seed;
+  if (!at.startsWith(`${root}.`)) return undefined;
+  let cursor = seed;
+  for (const part of at.slice(root.length + 1).split(".")) {
+    if (!isRecord(cursor)) return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -284,7 +302,12 @@ function Member({
   const offered = options !== undefined && options.length > 0;
   const sourced = offered ? ctx.sources!.picked(path) : undefined;
   const settled = ctx.provenance?.(path);
-  const on = reading || required || sourced !== undefined ? true : ctx.isSet !== undefined ? ctx.isSet(path) : value !== undefined;
+  // A layered row switched on with nothing to pin and nothing typed yet — an empty box, an app with
+  // no client ID — is on HERE and written nowhere: every write to a layer is validated before it
+  // lands, and an empty value is what a validator refuses. The first thing typed is the first write.
+  const [armed, setArmed] = useState<unknown>(undefined);
+  const pending = armed !== undefined && ctx.isSet !== undefined && !ctx.isSet(path) ? armed : undefined;
+  const on = reading || required || sourced !== undefined ? true : ctx.isSet !== undefined ? ctx.isSet(path) || pending !== undefined : value !== undefined;
   // The cycle guard has to see a reference this member expands ITSELF — a union's branch is handed on
   // without it, and a schema that refers to itself through a union would otherwise never stop.
   const ref = typeof declared["$ref"] === "string" ? (declared["$ref"] as string) : undefined;
@@ -293,8 +316,12 @@ function Member({
 
   const held = shapes === undefined ? node : shapes[index]!;
   const body = shapes === undefined ? declared : branchesOf(node, root, false)![index]!;
-  const bodyCtx: SchemaFormContext =
+  const baseCtx: SchemaFormContext =
     shapes !== undefined && ref !== undefined ? { ...ctx, path, refs: [...seen, ref] } : { ...ctx, path };
+  // Under a pending row, the members its seed holds count as set, so a seeded app's client ID is one
+  // box to type in rather than a second switch to find.
+  const bodyCtx: SchemaFormContext =
+    pending === undefined ? baseCtx : { ...baseCtx, isSet: (at) => ctx.isSet!(at) || valueUnder(pending, path, at) !== undefined };
   const pres =
     ctx.labels === "keys"
       ? { label: name, ...(typeof node["description"] === "string" ? { tooltip: node["description"] as string } : {}) }
@@ -330,7 +357,17 @@ function Member({
             disabled={disabled}
             // On: the value it already shows — an inherited one is pinned as it stands — or a fresh
             // one, which is the declared default when there is one. Off: not set at all.
-            onChange={(next) => onSet(next ? (value !== undefined ? value : seedFor(declared, root)) : undefined)}
+            onChange={(next) => {
+              if (!next) {
+                setArmed(undefined);
+                // A pending row was never written, so there is nothing to remove.
+                if (pending === undefined) onSet(undefined);
+                return;
+              }
+              const fresh = value !== undefined ? value : seedFor(declared, root);
+              if (ctx.setAt !== undefined && value === undefined && isBlank(fresh)) setArmed(fresh);
+              else onSet(fresh);
+            }}
           />
         ) : undefined
       }
@@ -396,7 +433,7 @@ function Member({
       ) : !on ? (
         <div className="sf-absent">{unsetNoteOf(ctx, path, node, value)}</div>
       ) : (
-        <SchemaForm schema={body} value={value} onChange={onSet} ctx={bodyCtx} containerType={node["$type"] as string | undefined} />
+        <SchemaForm schema={body} value={value ?? pending} onChange={onSet} ctx={bodyCtx} containerType={node["$type"] as string | undefined} />
       )}
     </Field>
   );
