@@ -116,22 +116,49 @@ The route part of the key widens from `ModelRoute` to any route name, so there a
 
 ### 3. One refresher per route, beside its transport
 
-Each refresher answers `refresh(): Promise<ModelInfoInterface[]>` for its route. It lives next to the
-code that runs the route, since that code knows how to reach it:
+Each refresher is a `CatalogSource` (`fetchRows(): Promise<ModelInfoInterface[]>`) for its route. It
+lives next to the code that runs the route, since that code knows how to reach it:
 
-- `openrouter`, `anthropic` and `openai` refreshers live in `llm`.
-- The `claude` refresher lives in `agents-api` and uses the route's own binary, the same one the call
-  would run.
-- The `codex` refresher lives in `agents-cli`.
-- `local` and `embedded` refreshers live in JaiRA's runtime, around the existing
-  `discoverLocalServers` and `catalogRowForGguf`.
+- **In `llm`:**
+  - `makeOpenRouterSources` is two sources over one fetch: OpenRouter's own rows, and `nativeMirrors`,
+    its `anthropic/*` and `openai/*` rows restated as the native routes.
+  - `makeAnthropicModelsSource` reads `/v1/models`.
+- **In `agents-cli`:**
+  - `claudeModelsSource` reads claude's `initialize` answer from the binary the route runs: the
+    installed `claude` for `claude-cli`, the SDK's bundled one for `claude-code`.
+  - `codexModelsSource` reads `app-server`'s `model/list`.
+  - Both refreshers sit beside the usage probe that makes the same no-prompt exchange.
+- **In JaiRA's runtime:** `local` and `embedded`, around the existing `discoverLocalServers` and
+  `catalogRowForGguf`.
+
+As built (2026-09-24):
+
+- **No OpenAI `/v1/models` source.** It returns ids only, TTS, Whisper and image models among them, and
+  OpenRouter's `openai/*` mirrors carry strictly more: prices, levels, context.
+- **Sources MERGE rather than replace.** A row's fields come from whichever source states them, in the
+  order the sources run.
+  - The mirrors FILL (`CatalogSource.fills`): they refresh a row's prices and supply what it lacks, and
+    never overwrite what Anthropic's own list said. A refresh that cannot reach Anthropic keeps its
+    capabilities.
+  - OpenRouter states every rate it charges. So a cached read with no write is recorded as a write of
+    0, which is how OpenAI's caching works, instead of Anthropic's 1.25× default.
+- **Rates are optional on a row.** An agent row, or a model a provider lists before any price source
+  does, is priced by the row with the same `canonicalId` that has rates (`ModelInfo.pricedRow`).
+  - The native route wins over OpenRouter's relay.
+  - A `local` row prices nothing but itself.
+  - `canonicalIdFor` drops a snapshot date and claude's `[1m]` mark, so `claude-cli/claude-opus-5[1m]`
+    and `anthropic/claude-haiku-4-5-20251001` join their API rows.
+- **An agent's reasoning is fitted too.** `AgentExecutor` fits the call's request against the agent's
+  row, as the API path does, so a level above what `claude` or codex reported is clamped before the
+  binary could refuse it.
 
 `refreshModelCatalog` keeps its rule: a source that fails to fetch, parse or validate is skipped, and
 the rows it wrote before stand.
 
-**The Anthropic docs scrape is deleted.** `update:model-info` runs the same public refreshers
-(OpenRouter) to regenerate the committed snapshot. That snapshot is now only the first-launch and
-offline seed.
+**The Anthropic docs scrape is deleted, and so is the hand-written seed** (`CORE_SEED_MODELS`).
+`update:model-info` runs the provider sources (OpenRouter, and Anthropic's list when
+`ANTHROPIC_API_KEY` is set) over the current snapshot to regenerate it. That snapshot is now only the
+first-launch and offline seed.
 
 ### 4. JaiRA keeps the table in the database and refreshes it
 
