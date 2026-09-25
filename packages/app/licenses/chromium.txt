@@ -1,0 +1,5 @@
+Chromium and its third-party components
+
+Electron embeds Chromium, Node.js and the libraries they are built from. Their notices are too large
+to repeat here (several megabytes of HTML); every Electron build ships them beside its executable as
+LICENSES.chromium.html. Under `npm run app` that file is node_modules/electron/dist/LICENSES.chromium.html.

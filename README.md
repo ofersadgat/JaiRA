@@ -221,8 +221,3 @@ against both binaries are `JAIRA_LIVE_AGENT=1 npx vitest run packages/runtime/te
 > switched, and the app and the tests can run at the same time. `npm install`
 > fetches both (`npm run abi` to redo it by hand). If one is missing, the first DB
 > open says so and names that command.
-
-## License
-
-JaiRA is licensed under the [GNU General Public License v3.0](LICENSE). The
-sibling `declarative-ai` library is MIT-licensed.

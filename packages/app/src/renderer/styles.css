@@ -14599,6 +14599,130 @@ fieldset.reading {
 }
 
 /* =================================================================================================
+ * SETTINGS → LICENSES (`licensesPane.tsx`): one card of third-party notices, a row per package that
+ * opens onto its text. t3code's open-source licenses panel, in this page's row metrics (13px × 16px)
+ * and tokens only, so it reads in every palette and both modes.
+ * ================================================================================================= */
+.lic-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.lic-count {
+  font-size: calc(var(--size-app) * 0.96);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--dim);
+}
+.lic-search {
+  width: 13rem;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(var(--size-app) * 0.96);
+}
+.lic-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.lic-row + .lic-row {
+  border-top: 1px solid var(--line);
+}
+.lic-line {
+  display: flex;
+  align-items: center;
+}
+.lic-line:hover {
+  background: var(--fill-ghost-hover);
+}
+/* The whole line opens the notice. The bare `button` rule centres and pads; this is a row, not a button. */
+.lic-toggle {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lic-toggle:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+}
+.lic-chevron {
+  flex: none;
+  width: 10px;
+  color: var(--dim);
+  transition: transform 0.15s ease;
+}
+.lic-row.open .lic-chevron {
+  transform: rotate(90deg);
+}
+.lic-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 550;
+}
+.lic-version {
+  flex: none;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-app) * 0.9);
+  color: var(--dim);
+}
+.lic-meta {
+  flex: none;
+  max-width: 45%;
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: calc(var(--size-app) * 0.94);
+  color: var(--dim);
+}
+.lic-source {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 12px;
+  border-radius: 5px;
+  color: var(--dim);
+  text-decoration: none;
+}
+.lic-source:hover {
+  background: var(--fill-ghost-hover);
+  color: var(--text);
+}
+/* No width cap: license files are hard-wrapped near 80 columns already, and a cap near that width
+   wrapped them a second time (the padding counts against it). The card's width is the limit. */
+.lic-notice {
+  margin: 0;
+  padding: 2px 16px 16px 34px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: calc(var(--size-app) * 0.9) / 1.55 var(--font-data);
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+}
+.lic-empty {
+  margin: 0;
+  padding: 18px 16px;
+  color: var(--dim);
+}
+
+/* =================================================================================================
  * THE WINDOW'S PALETTES, and the board's three surface options (Settings → Appearance → Theme).
  *
  * Picked by the person on 2026-09-23 from the palette study: classic (everything above this line,

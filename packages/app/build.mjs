@@ -8,7 +8,8 @@
  */
 import { build } from "esbuild";
 import { existsSync } from "node:fs";
-import { cp, rm } from "node:fs/promises";
+import { cp, rm, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const outdir = "dist";
@@ -24,6 +25,7 @@ await Promise.all(
     "tsProjectWorker.cjs.map",
     "mcpBridgeWorker.cjs",
     "mcpBridgeWorker.cjs.map",
+    "main-modules.json",
   ].map((f) => rm(`${outdir}/${f}`, { force: true }).catch(() => {})),
 );
 
@@ -53,7 +55,24 @@ const common = {
   // ESM, which esbuild folds into a CJS bundle cleanly. Same alias the CLI's build.mjs carries.
   alias: { "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
   define: { "process.env.NODE_ENV": '"production"' },
+  // What each bundle read, for the third-party notice manifest — see `bundled` below.
+  metafile: true,
 };
+
+/**
+ * Every file the four bundles below read, as absolute paths: `dist/main-modules.json`, which the
+ * renderer build's license plugin (`licenses/thirdPartyLicenses.ts`) reads to tag the packages in
+ * them `main`. This build runs first and is a different bundler, so the list is handed over on disk.
+ * A metafile input is relative to the working directory; one in a namespace (`<define:…>`,
+ * `(disabled):fs`) is not a file, and neither is an external, which never appears as an input.
+ */
+const bundled = new Set();
+function record(result) {
+  for (const input of Object.keys(result.metafile?.inputs ?? {})) {
+    if (/^[\w-]*:|^<|^\(/.test(input)) continue;
+    bundled.add(resolve(input));
+  }
+}
 
 /**
  * `import.meta.url` for the MAIN bundle, which is CJS and so has no `import.meta` of its own.
@@ -70,15 +89,15 @@ const importMetaUrl = {
   banner: { js: 'const __jairaImportMetaUrl = require("node:url").pathToFileURL(__filename).href;' },
 };
 
-await build({
+record(await build({
   ...common,
   ...importMetaUrl,
   entryPoints: { main: "src/main/index.ts" },
   outdir,
   outExtension: { ".js": ".cjs" },
-});
+}));
 
-await build({
+record(await build({
   ...common,
   entryPoints: { preload: "src/main/preload.ts" },
   outdir,
@@ -89,30 +108,30 @@ await build({
   // all), so the warning describes code that is not in the output. Silenced here and only here: the
   // main and worker bundles below keep the code and get a real URL instead.
   logOverride: { "empty-import-meta": "silent" },
-});
+}));
 
 // The type-check worker: its own bundle because `new Worker(file)` needs a file. It lands beside
 // main.cjs, which is what `tsCheck.ts` resolves it against, and it keeps `typescript` external for
 // exactly the reason the note above gives — a bundled compiler cannot find its own `lib.*.d.ts`.
-await build({
+record(await build({
   ...common,
   entryPoints: { tsProjectWorker: "src/main/tsProjectWorker.ts" },
   outdir,
   outExtension: { ".js": ".cjs" },
   // As for the preload: `paths.ts` is parsed on the way to a constant and shaken out entirely.
   logOverride: { "empty-import-meta": "silent" },
-});
+}));
 
 // The MCP bridge worker: the one listener every CLI agent run registers on, kept off the main loop
 // (see `mcpBridgeWorker.ts` upstream). Loaded by path, so it is its own entry, resolved through the
 // package's export rather than a hand-written path into `node_modules` — beside main.cjs, which is
 // where `service.ts` looks for it.
-await build({
+record(await build({
   ...common,
   entryPoints: { mcpBridgeWorker: fileURLToPath(import.meta.resolve("@declarative-ai/agents-cli/mcpBridgeWorker")) },
   outdir,
   outExtension: { ".js": ".cjs" },
-});
+}));
 
 // The built-in layer (`$SYSTEM`, decision 0006) — see the same step in `packages/cli/build.mjs`. It
 // lands beside main.cjs, which is where `defaultBuiltInDir` looks from inside this bundle, under
@@ -127,4 +146,6 @@ const builtIn = fileURLToPath(new URL("../shared/builtin", import.meta.url));
 await rm(`${outdir}/builtin`, { recursive: true, force: true });
 if (existsSync(builtIn)) await cp(builtIn, `${outdir}/builtin`, { recursive: true });
 
-console.log("built dist/main.cjs, dist/preload.cjs, dist/tsProjectWorker.cjs, dist/mcpBridgeWorker.cjs and dist/builtin/");
+await writeFile(`${outdir}/main-modules.json`, `${JSON.stringify([...bundled].sort())}\n`, "utf8");
+
+console.log("built dist/main.cjs, dist/preload.cjs, dist/tsProjectWorker.cjs, dist/mcpBridgeWorker.cjs, dist/builtin/ and dist/main-modules.json");

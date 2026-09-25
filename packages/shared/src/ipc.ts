@@ -2155,6 +2155,12 @@ export interface IpcContract {
   "executor:probe": { request: { name?: string } | void; response: ProbeResult[] };
   "secret:capabilities": { request: void; response: SecretCapabilities };
   "secret:set": { request: SetSecretRequest; response: { name: string; target: SecretTarget } };
+  /**
+   * The build's third-party notice manifest (`dist/renderer/third-party-licenses.json`), parsed but
+   * NOT checked: the Licenses page decodes it (`decodeThirdPartyLicenseManifest`) and shows what a
+   * refusal says. Refused when the renderer was built without it.
+   */
+  "licenses:read": { request: void; response: unknown };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2306,6 +2312,7 @@ export const IPC_CHANNELS = [
   "waiting:act",
   "secret:capabilities",
   "secret:set",
+  "licenses:read",
 ] as const satisfies readonly IpcChannel[];
 
 /**

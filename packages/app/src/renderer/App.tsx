@@ -65,6 +65,7 @@ import { useSettingsParts } from "./settingsParts";
 import { Segmented, SettingsPage } from "./settingsLayout";
 import { SettingsLayerContext, SettingsRowsContext } from "./controls";
 import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSections";
+import { LicensesPane } from "./licensesPane";
 import { lookOf, pinnedValue } from "./appearanceLayer";
 import { useSystemDark } from "./appearance";
 import { FilesTreeSection } from "./filesTreePane";
@@ -216,6 +217,14 @@ function SettingsFrame({
   children: ReactNode;
 }): JSX.Element {
   const meta = SECTIONS.find((s) => s.id === section);
+  // A page with no setting on it (Licenses) has no layer to switch and no "Just you" rows to pick.
+  if (meta?.layered === false) {
+    return (
+      <SettingsPage title={meta.label} lead={lead}>
+        {children}
+      </SettingsPage>
+    );
+  }
   return (
     <SettingsPage
       title={meta?.label ?? "Settings"}
@@ -237,6 +246,7 @@ function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: s
   const meta = SECTIONS.find((s) => s.id === section);
   if (meta === undefined) return undefined;
   const purpose = meta.purpose;
+  if (!meta.layered) return purpose;
   if (layer === "you") {
     return (
       <>
@@ -326,8 +336,9 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
 
 /**
  * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models and
- * Tools borrow its model and tool; the other four are its own: a disc half filled (how a thing looks),
- * a plug (what it connects to), a play mark (a run), stacked disks (stored). The pages themselves, in
+ * Tools borrow its model and tool; the other five are its own: a disc half filled (how a thing looks),
+ * a plug (what it connects to), a play mark (a run), stacked disks (stored), a page of text with its
+ * corner folded (a notice). The pages themselves, in
  * the sidebar's one list, are `settingsSections.ts`.
  */
 const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
@@ -337,6 +348,7 @@ const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
   tools: ["M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"],
   runs: ["M7 4.5v15l12-7.5Z"],
   data: ["M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z", "M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6", "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"],
+  licenses: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z", "M14 3v5h5", "M9 13h6", "M9 17h6"],
 };
 
 function SettingsIcon({ name }: { name: SettingsIconName }): JSX.Element {
@@ -2677,6 +2689,7 @@ export default function App(): JSX.Element {
                     />
                   </>
                 ) : null}
+                {state.section === "licenses" ? <LicensesPane /> : null}
                 {state.section === "runs" ? (
                   <RunsPane
                     config={state.config}

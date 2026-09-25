@@ -7,7 +7,8 @@
  * LAYER: every page now has the same switch, `Just you | This project | Shared`, and which of them
  * you are editing is the switch's to say, not the sidebar's. The order is the order a person sets
  * things up in: how it looks, what it can reach, which model answers, what the tools may do, how a
- * run behaves, and what it leaves behind.
+ * run behaves, and what it leaves behind. Licenses comes last and is the one page that is not layered:
+ * it lists what JaiRA is built from, and nothing on it is a setting.
  *
  * Pure data, so the list is testable without drawing the sidebar.
  */
@@ -15,7 +16,7 @@ import type { ConfigLayer } from "@jaira/shared/browser";
 import type { SettingsSection } from "./store";
 
 /** The glyph each page wears in the sidebar — `App.tsx` draws them. */
-export type SettingsIconName = "appearance" | "connections" | "models" | "tools" | "runs" | "data";
+export type SettingsIconName = "appearance" | "connections" | "models" | "tools" | "runs" | "data" | "licenses";
 
 export interface SettingsPageMeta {
   id: SettingsSection;
@@ -23,15 +24,24 @@ export interface SettingsPageMeta {
   icon: SettingsIconName;
   /** The lead's first clause: what the page is for. */
   purpose: string;
+  /** False for a page that holds no setting: no layer switch, and its lead is its purpose alone. */
+  layered: boolean;
 }
 
 export const SECTIONS: readonly SettingsPageMeta[] = [
-  { id: "appearance", label: "Appearance", icon: "appearance", purpose: "How JaiRA looks." },
-  { id: "connections", label: "Connections", icon: "connections", purpose: "What JaiRA can reach, and as whom." },
-  { id: "models", label: "Models", icon: "models", purpose: "What answers a state that names nothing, and how." },
-  { id: "tools", label: "Tools", icon: "tools", purpose: "What an agent may do, and every function a run can call." },
-  { id: "runs", label: "Runs", icon: "runs", purpose: "How a run behaves while it is going." },
-  { id: "data", label: "Data & history", icon: "data", purpose: "Where runs keep what they produce, and how much there is." },
+  { id: "appearance", label: "Appearance", icon: "appearance", purpose: "How JaiRA looks.", layered: true },
+  { id: "connections", label: "Connections", icon: "connections", purpose: "What JaiRA can reach, and as whom.", layered: true },
+  { id: "models", label: "Models", icon: "models", purpose: "What answers a state that names nothing, and how.", layered: true },
+  { id: "tools", label: "Tools", icon: "tools", purpose: "What an agent may do, and every function a run can call.", layered: true },
+  { id: "runs", label: "Runs", icon: "runs", purpose: "How a run behaves while it is going.", layered: true },
+  { id: "data", label: "Data & history", icon: "data", purpose: "Where runs keep what they produce, and how much there is.", layered: true },
+  {
+    id: "licenses",
+    label: "Licenses",
+    icon: "licenses",
+    purpose: "The open-source software JaiRA is built from, and the notices its licenses ask to be shown.",
+    layered: false,
+  },
 ];
 
 /**

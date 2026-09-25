@@ -1,0 +1,85 @@
+{
+  "customNotices": [
+    {
+      "name": "Electron",
+      "license": "MIT",
+      "bundles": [
+        "runtime"
+      ],
+      "includeInBundles": [
+        "main"
+      ],
+      "sourceUrl": "https://github.com/electron/electron",
+      "noticeFiles": [
+        "../../../node_modules/electron/LICENSE",
+        "chromium.txt"
+      ]
+    },
+    {
+      "name": "DM Sans",
+      "license": "OFL-1.1",
+      "bundles": [
+        "assets"
+      ],
+      "includeInBundles": [
+        "window"
+      ],
+      "sourceUrl": "https://github.com/googlefonts/dm-fonts",
+      "noticeFile": "../src/renderer/fonts/OFL.txt"
+    },
+    {
+      "name": "JetBrains Mono",
+      "license": "OFL-1.1",
+      "bundles": [
+        "assets"
+      ],
+      "includeInBundles": [
+        "window"
+      ],
+      "sourceUrl": "https://github.com/JetBrains/JetBrainsMono",
+      "noticeFile": "../src/renderer/fonts/OFL.txt"
+    },
+    {
+      "name": "Monokai Light",
+      "license": "MIT",
+      "bundles": [
+        "window"
+      ],
+      "sourceUrl": "https://github.com/anoff/vscode-monokai-light",
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": [
+            "Copyright (c) Andreas Offenhäuser"
+          ],
+          "preamble": [
+            "The editor theme Monokai Light (src/renderer/themes/monokaiLight.ts) is the settings array of themes/Monokai Light.tmTheme from github.com/anoff/vscode-monokai-light, converted to JSON. The project declares the MIT license in its package.json and README; it ships no LICENSE file, so the text below is the MIT template with its author's name."
+          ]
+        }
+      ]
+    }
+  ],
+  "packageOverrides": [
+    {
+      "repositoryUrl": "https://github.com/steveukx/git-js",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": [
+          "Copyright (c) 2025 Steve King"
+        ]
+      }
+    },
+    {
+      "repositoryUrl": "https://github.com/pnpm/reflink",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": [
+          "Copyright (c) pnpm contributors"
+        ],
+        "preamble": [
+          "@reflink/reflink and its platform binaries declare the MIT license in package.json and name no author; neither the packages nor github.com/pnpm/reflink ship a LICENSE file."
+        ]
+      }
+    }
+  ]
+}

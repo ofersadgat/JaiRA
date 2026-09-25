@@ -7,7 +7,7 @@
  * surface testable headlessly.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeTheme, powerMonitor, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
@@ -18,6 +18,7 @@ import {
   PUSH_CHANNEL,
   resolveTheme,
   takeHomeFlag,
+  THIRD_PARTY_LICENSES_FILE_NAME,
   type JairaAppearanceConfig,
   type IpcChannel,
   type PushMessage,
@@ -533,7 +534,20 @@ const handlers: Record<IpcChannel, Handler> = {
   "waiting:act": ((request: Parameters<typeof service.actOnWaiting>[0]) => service.actOnWaiting(request)) as Handler,
   "secret:capabilities": (() => service.secretCapabilities()) as Handler,
   "secret:set": ((request: Parameters<typeof service.setSecret>[0]) => service.setSecret(request)) as Handler,
+  "licenses:read": (() => readLicenseManifest()) as Handler,
 };
+
+/**
+ * The Licenses page's manifest, written beside the renderer by its build (`licenses/thirdPartyLicenses.ts`).
+ * Read on each ask rather than kept: the page is opened rarely, and the file is half a megabyte.
+ */
+async function readLicenseManifest(): Promise<unknown> {
+  const file = join(DIST, "renderer", THIRD_PARTY_LICENSES_FILE_NAME);
+  if (!existsSync(file)) {
+    throw new Error(`The renderer was built without its license manifest (${file}). Rebuild the app: npm run app:build.`);
+  }
+  return JSON.parse(await readFile(file, "utf8")) as unknown;
+}
 
 function registerIpc(): void {
   for (const channel of IPC_CHANNELS) {
@@ -712,6 +726,15 @@ async function createWindow(): Promise<BrowserWindow> {
    */
   win.webContents.on("did-finish-load", () => {
     rendererAlive = true;
+  });
+  /**
+   * A link with `target="_blank"` — a package's source on the Licenses page, a review's forge page —
+   * goes to the person's browser. Electron's default opens it in a second, frameless app window with
+   * no way back; nothing in the app asks for one. Only http(s), for the reason `openExternal` gives.
+   */
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(() => undefined);
+    return { action: "deny" };
   });
   win.webContents.on("render-process-gone", (_event, details) => {
     // BEFORE the report: the report is a log entry, a log entry is a push, and the frame it would be

@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { thirdPartyLicensesPlugin } from "./licenses/thirdPartyLicenses";
 
 /** This checkout's own packages, by name. */
 const local = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
@@ -12,7 +13,18 @@ const local = (rel: string): string => fileURLToPath(new URL(rel, import.meta.ur
 export default defineConfig({
   root: "src/renderer",
   base: "./",
-  plugins: [react()],
+  plugins: [
+    react(),
+    // The Licenses page's manifest, `dist/renderer/third-party-licenses.json`: this build's chunks
+    // (`window`), the main build's inputs (`main`, listed by build.mjs, which runs first), and
+    // whatever else the app's production dependencies install (`installed`) — see the plugin.
+    thirdPartyLicensesPlugin({
+      bundleName: "window",
+      configFile: new URL("./licenses/config.json", import.meta.url),
+      packageManifests: [{ bundle: "installed", path: new URL("./package.json", import.meta.url), fallback: true }],
+      moduleLists: [{ bundle: "main", file: new URL("./dist/main-modules.json", import.meta.url) }],
+    }),
+  ],
   resolve: {
     // The same aliases `vitest.config.ts` carries, and for the same reason. The workspace junctions
     // live in the repository root's `node_modules` and point at the MAIN checkout's packages — so
