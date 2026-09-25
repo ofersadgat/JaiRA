@@ -58,6 +58,13 @@ export interface StateShape {
 /** The workflow shape a projection reads: state id → shape. */
 export type WorkflowShape = Record<string, StateShape>;
 
+/**
+ * Deferred calls that LISTEN for something to happen rather than ask a person (runtime `eventHub.ts`,
+ * `HostCapabilities.listens`): their `call.waiting` does not make an instance `waiting_for_user`.
+ * Named here because the journal row names the call and nothing else about it.
+ */
+export const LISTENING_CALLS: ReadonlySet<string> = new Set(["on_event"]);
+
 interface MutableNode extends Omit<InstanceNode, "children"> {
   children: MutableNode[];
 }
@@ -223,6 +230,8 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         const interactive = event.op === "function" && shape?.[event.stateId]?.interactive === true;
         settleCall(node, event.index, { kind: event.op, status: "running" });
         if (interactive) node.status = "waiting_for_user";
+        // Known NOT to ask anyone: the shape is there and says so. Without a shape nothing is claimed.
+        else if (event.op === "function" && shape?.[event.stateId] !== undefined) node.plainCall = true;
         break;
       }
       /**
@@ -281,6 +290,9 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
       case "call.waiting": {
         const node = byId.get(event.instanceId);
         if (!node) break;
+        // A rule LISTENING for something to happen (`on_event`) waits on the world, not on a person:
+        // the instance stays `running` — an events task at rest is listening, not waiting for you.
+        if (LISTENING_CALLS.has(event.call)) break;
         waitingCalls.set(event.instanceId, (waitingCalls.get(event.instanceId) ?? new Set()).add(event.operationId));
         if (node.status === "running") node.status = "waiting_for_user";
         break;

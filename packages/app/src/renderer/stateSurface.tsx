@@ -51,11 +51,13 @@ import { Icon, type PATHS } from "./icons";
  *
  * `conversation` is a prompt operation: a model was called and said things. `computed` is a state
  * with no operation at all, whose every output is an expression over values it was handed.
- * `asked` is a function operation, which is how a component is put in front of a person. `waiting`
+ * `asked` is a function operation, which is how a component is put in front of a person — unless
+ * the workflow's shape says its functions ask nobody anything (`InstanceNode.plainCall`), and then it
+ * is `called`: a call, drawn as what it ran and what came back (an events automation). `waiting`
  * is a transition parked on a gesture (`on_user_event`) — not an instance at all, which is why this
  * is a kind rather than a property of a node.
  */
-export type SurfaceKind = "conversation" | "computed" | "asked" | "waiting";
+export type SurfaceKind = "conversation" | "computed" | "called" | "asked" | "waiting";
 
 /**
  * How loudly the header speaks — see the note above on why this is derived and never chosen.
@@ -67,6 +69,7 @@ export type HeaderTone = "accent" | "amber" | "red" | undefined;
 /** The verb each kind's heading opens with. A `conversation` has none — it is the unmarked case. */
 const KIND_WORD: Record<Exclude<SurfaceKind, "conversation">, string> = {
   computed: "computed",
+  called: "called",
   asked: "asked of you",
   waiting: "waiting on you",
 };
@@ -74,6 +77,7 @@ const KIND_WORD: Record<Exclude<SurfaceKind, "conversation">, string> = {
 /** One glyph per kind — only ever drawn beside {@link KIND_WORD}, never alone. */
 const KIND_ICON: Record<Exclude<SurfaceKind, "conversation">, keyof typeof PATHS> = {
   computed: "sigma",
+  called: "sigma",
   asked: "comment",
   waiting: "clock",
 };
@@ -99,7 +103,10 @@ const KIND_ICON: Record<Exclude<SurfaceKind, "conversation">, keyof typeof PATHS
 export function surfaceKindOf(node: InstanceNode): SurfaceKind | undefined {
   if (node.children.length > 0) return undefined;
   if (node.operation === undefined) return "computed";
-  return node.operation.kind === "function" ? "asked" : "conversation";
+  if (node.operation.kind !== "function") return "conversation";
+  // A function the workflow's shape says asks nobody anything — an events automation's `notify` and
+  // `start_task` — is a CALL: what it ran, drawn as the calls a computed state made, never a gate.
+  return node.plainCall === true ? "called" : "asked";
 }
 
 /**

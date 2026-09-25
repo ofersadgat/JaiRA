@@ -106,18 +106,22 @@ describe("start_task", () => {
 });
 
 describe("notify", () => {
-  it("posts the text — its event read by the host off the calling state when the call names none", async () => {
+  it("posts the text — its event read by the host off the calling state when the call names none — and answers what it told", async () => {
     const { notices, call } = rig();
-    expect((await call(NOTIFY, { text: " deployed " }, SITE)).value).toEqual({});
-    expect((await call(NOTIFY, { text: "again", event: push as never })).value).toEqual({});
+    expect((await call(NOTIFY, { text: " deployed " }, SITE)).value).toEqual({ text: "deployed" });
+    expect((await call(NOTIFY, { text: "again", event: push as never })).value).toEqual({ text: "again", event: "git.push a1b2c3d on main" });
     expect(notices).toEqual([
       { notice: { text: "deployed" }, caller: { instanceId: "i-1", call: 1 } },
       { notice: { text: "again", event: push }, caller: { call: 0 } },
     ]);
     expect((await call(NOTIFY, { text: "" })).error?.reason).toMatch(/'text'/);
   });
-});
 
+  it("answers with the event the HOST read off the calling state", async () => {
+    const { call } = rig({ notify: (notice) => ({ ...notice, event: push }) });
+    expect((await call(NOTIFY, { text: "deployed" }, SITE)).value).toEqual({ text: "deployed", event: "git.push a1b2c3d on main" });
+  });
+});
 
 describe("eventSummary", () => {
   it("says what happened in a line, the event's name first", () => {

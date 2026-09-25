@@ -133,9 +133,28 @@ async function main(): Promise<void> {
     await app.shot(`strip-dismissed-${theme}`, ".strip");
 
     // The click: the events task, opened at the firing that told.
+    const opened = await app.evaluate<string>(`document.querySelector(".strip-notice")?.dataset.notice ?? ""`);
+    const firing = (await app.ipc<Array<{ id: string; instanceId?: string }>>("notices:list")).find((n) => n.id === opened)?.instanceId ?? "";
     await app.evaluate(`(() => { document.querySelector(".strip-notice-open")?.click(); return true; })()`);
-    await sleep(2500);
+    await sleep(3000);
     spoke.push(`${theme}: after the click the notice is ${JSON.stringify(await app.evaluate<string>(noticeSays))}`);
+    // What the conversation says — no gate cards, no "waiting for you", one entered row per firing,
+    // and the firing the notice came from on screen.
+    spoke.push(
+      `${theme}: conversation ${await app.evaluate<string>(`(() => {
+        const convo = document.querySelector(".pv-convo");
+        if (!convo) return "(no conversation)";
+        const text = convo.innerText;
+        const rows = [...convo.querySelectorAll(".sb-note")].map((r) => r.innerText.replace(/\\s+/g, " ").trim());
+        const told = [...convo.querySelectorAll(".ss-told")].map((r) => r.innerText.replace(/\\s+/g, " ").trim());
+        const bar = document.querySelector(".run-doing")?.innerText.replace(/\\s+/g, " ").trim() ?? "(no bar)";
+        const row = convo.querySelector('[data-entered="${firing}"]');
+        const box = row?.closest(".sb-scroll, .pv-convo, [class*=scroll]")?.getBoundingClientRect();
+        const r = row?.getBoundingClientRect();
+        const landed = r && box ? (r.top >= box.top - 2 && r.top < box.bottom) : false;
+        return JSON.stringify({ askedOfYou: /asked of you/i.test(text), waitingForYou: /waiting for you/i.test(text + bar), bar, rows, told, landedOnFiring: landed });
+      })()`)}`,
+    );
     await app.shot(`opened-${theme}`);
     await app.preferTheme(theme === "light" ? "dark" : "light");
     // Closed the way a person closes it, so the service suspends the events task for the next start

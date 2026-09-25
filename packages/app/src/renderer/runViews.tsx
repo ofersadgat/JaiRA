@@ -16,6 +16,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { actOnWaiting, useWaiting } from "./limitsStore";
 import { WaitingLine } from "./usageMeters";
 import type { ContextReading } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
 import type {
   ChatPlanView,
   ChatSettings,
@@ -448,6 +449,8 @@ function WaitingOn({ request, onDeliver }: { request: PendingUserEvent; onDelive
  * document gets the document's readings and not a line of JSON.
  */
 function CallBlock({ call }: { call: ReadCall }): JSX.Element {
+  const told = toldOf(call);
+  if (told !== undefined) return <ToldLine told={told} />;
   const args = Object.entries(call.args);
   return (
     <div className="ss-call">
@@ -476,6 +479,33 @@ function CallBlock({ call }: { call: ReadCall }): JSX.Element {
         <ValueView value={call.result} label="returned" />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * An events automation's `notify` call, settled: what it told the person, and what about — the
+ * notice the inbox strip showed. One line, because it asked nothing and answered nothing: the call's
+ * answer is `{ text, event? }`, the event in a line (`eventSummary`). Falls back to the arguments for
+ * a record written before `notify` answered anything. A failed `notify` is not a told line.
+ */
+export function toldOf(call: ReadCall): { text: string; about?: string } | undefined {
+  if (call.name !== "notify" || call.error !== undefined || call.status !== "completed") return undefined;
+  const result = call.result !== null && typeof call.result === "object" && !Array.isArray(call.result) ? (call.result as Record<string, JsonValue>) : {};
+  const text = typeof result["text"] === "string" ? result["text"] : typeof call.args["text"] === "string" ? call.args["text"] : undefined;
+  if (text === undefined) return undefined;
+  return { text, ...(typeof result["event"] === "string" ? { about: result["event"] } : {}) };
+}
+
+function ToldLine({ told }: { told: { text: string; about?: string } }): JSX.Element {
+  return (
+    <p className="ss-told">
+      <span className="ss-told-bell" aria-hidden="true">
+        🔔
+      </span>
+      <span className="ss-told-verb">told you:</span>
+      <span className="ss-told-text">{told.text}</span>
+      {told.about !== undefined ? <span className="ss-told-about data-faint">· {told.about}</span> : null}
+    </p>
   );
 }
 
@@ -1640,6 +1670,24 @@ export function RunActivity({
             the person who does not want to wait for either. */}
         <button type="button" className="danger" onClick={onStop}>
           Force stop
+        </button>
+      </div>
+    );
+  }
+
+  // Parked only on the WORLD — its rules listening for events (`on_event`), nothing of its own running
+  // and nobody asked — which is an events task at rest: quiet, and never "waiting for you".
+  const listening = !waiting && detail.status === "running" && (detail.listening?.length ?? 0) > 0 && node?.operation?.status !== "running" && node?.status !== "waiting_for_user";
+  if (listening) {
+    return (
+      <div className="run-doing listening">
+        <span className="run-doing-mark" aria-hidden="true" />
+        <span className="ellip">
+          Listening for <b>{detail.listening!.join(", ")}</b>
+        </span>
+        <span className="grow" />
+        <button type="button" className="quiet" onClick={onStop}>
+          Stop
         </button>
       </div>
     );

@@ -29,7 +29,7 @@
 import { hostFunction, type CapabilityRegistry, type ExecServices, type FunctionInputs, type FunctionResult, type HostCapabilities, type InlineFamily, type ResolvedValue, type Signature } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
-import { isEventName, type EventDelivery } from "@jaira/shared";
+import { eventSummary, isEventName, type EventDelivery } from "@jaira/shared";
 
 export const START_TASK = "start_task";
 export const NOTIFY = "notify";
@@ -68,7 +68,8 @@ export interface EventsTaskCaller {
  */
 export interface EventsTaskHost {
   startTask(request: EventsTaskStart, caller: EventsTaskCaller): Promise<{ task_id: string; error?: string }>;
-  notify(notice: EventsTaskNotice, caller: EventsTaskCaller): void;
+  /** Post it. Answers the notice as posted — with the event the host read off the calling state — or nothing. */
+  notify(notice: EventsTaskNotice, caller: EventsTaskCaller): EventsTaskNotice | void;
 }
 
 export const START_TASK_SIGNATURE: Signature<InlineFamily> = {
@@ -95,7 +96,12 @@ export const NOTIFY_SIGNATURE: Signature<InlineFamily> = {
     text: { kind: "text", schema: { type: "string" } },
     event: { kind: "json", optional: true },
   },
-  output: { name: "posted", kind: "json", schema: { type: "object" } },
+  // What was told: the text, and the event it was about in a line (`eventSummary`) when there was one.
+  output: {
+    name: "posted",
+    kind: "json",
+    schema: { type: "object", properties: { text: { type: "string" }, event: { type: "string" } }, required: ["text"] },
+  },
 };
 
 /** Outward-facing and not repeatable: a replayed `start_task` would start a second task. */
@@ -172,8 +178,9 @@ export function registerEventsTaskFunctions(registry: CapabilityRegistry<Workflo
         const text = inputs["text"];
         if (typeof text !== "string" || text.trim().length === 0) return refuse(`${NOTIFY}: 'text' says what the notice is`);
         const event = eventOf(inputs["event"]);
-        host.notify({ text: text.trim(), ...(event !== undefined ? { event } : {}) }, callerOf(ctx));
-        return { value: {} as unknown as ResolvedValue };
+        const asked: EventsTaskNotice = { text: text.trim(), ...(event !== undefined ? { event } : {}) };
+        const posted = host.notify(asked, callerOf(ctx)) ?? asked;
+        return { value: { text: posted.text, ...(posted.event !== undefined ? { event: eventSummary(posted.event) } : {}) } as unknown as ResolvedValue };
       },
       CAPABILITIES,
       { signature: NOTIFY_SIGNATURE },

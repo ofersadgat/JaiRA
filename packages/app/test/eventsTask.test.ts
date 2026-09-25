@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EVENTS_WORKFLOW, flattenInstances, initProject, openProject } from "@jaira/persistence";
+import { DEFAULT_STALE_MS, EVENTS_WORKFLOW, flattenInstances, initProject, openProject } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import { automationStateIdOf, automationStateOf, jairaBasePaths, type AutomationStep, type JairaEvent, type PushMessage, type TaskSummary } from "@jaira/shared";
@@ -182,6 +182,30 @@ describe("the events task's supervisor", () => {
     expect((await until(listening, "the interrupted events task to listen again")).taskId).toBe(taskId);
   });
 
+  it("is resumed after the app was KILLED — its row left `running` and its heartbeat still fresh at the next open", async () => {
+    writeWorkflowFiles(workflowsDir, eventsCopy(automation("push_main", "{ branch: 'main' }", "feature/review")));
+    await service.superviseEventsTasks();
+    const { taskId } = await until(listening, "the events task to listen");
+    await service.close();
+    // What a kill leaves behind, which a close never does: the row `running`, and the dead process's
+    // claim in the job table with a heartbeat young enough that the open-time sweep takes it for live.
+    const killed = openProject(dir, { baseDir: testHome() });
+    try {
+      killed.runtime.setStatus(taskId, "running", Date.now());
+      killed.jobs.claimRun({ taskId, ownerToken: "the-killed-process", nowMs: Date.now() - (DEFAULT_STALE_MS - 3_000) });
+    } finally {
+      killed.close();
+    }
+    await start();
+    // Left alone while the claim still looks live — a CLI run would be — then, once it has gone stale,
+    // marked interrupted and resumed: the same task, listening again, and an event fires it.
+    expect(theEventsTask()?.status).toBe("running");
+    expect(service.eventWaits()).toEqual([]);
+    expect((await until(listening, "the events task to be resumed once the claim went stale")).taskId).toBe(taskId);
+    service.deliverEvent(dir, push("main", "a1b2c3d4e5f6", "after the kill"));
+    await until(() => service.notices()[0], "the automation to fire after the resume");
+  });
+
   it("restarts on a new version when its workflow is written — a new task, the old one gone", async () => {
     writeWorkflowFiles(workflowsDir, eventsCopy(automation("push_main", "{ branch: 'main' }", "feature/review")));
     await service.superviseEventsTasks();
@@ -330,6 +354,12 @@ describe("an automation, end to end", () => {
     // And the events task is listening again, for the next one — a second firing is occurrence 1.
     await until(() => (listening() !== undefined && service.eventWaits().some((w) => w.taskId === events.taskId) ? true : undefined), "the line to re-arm");
     expect(service.listTasks().filter((t) => t.origin?.kind === "started")).toHaveLength(1);
+    // A call, not a question: the automation's functions ask nobody anything. And at rest the task is
+    // LISTENING — its root running, not waiting for a person — for what its rules name.
+    const rested = service.taskDetail(events.taskId);
+    expect(flattenInstances(rested.instances).find((n) => n.instanceId === firing.instanceId)?.plainCall).toBe(true);
+    expect(rested.instances[0]?.status).toBe("running");
+    expect(rested.listening).toEqual(["git.push"]);
     service.deliverEvent(dir, push("main", "b2c3d4e5f6a7", "Second"));
     const second = await until(() => service.listTasks().find((t) => t.origin?.kind === "started" && t.taskId !== started.taskId), "the second started task");
     expect(readMeta(second.taskId).origin).toMatchObject({ key: "push_main", occurrence: 1, index: 0 });

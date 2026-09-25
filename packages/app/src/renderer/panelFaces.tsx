@@ -267,6 +267,8 @@ function TaskConversation({ host, detail, project }: { host: PanelHost; detail: 
         parent={detail.instances[0]}
         detail={detail}
         context={host.context}
+        // Where a click asked it to land — an event notice opens the events task at its firing.
+        {...(host.context.landing != null && host.context.landing.taskId === detail.taskId ? { focus: { instance: host.context.landing.instance, at: host.context.landing.at } } : {})}
         onOpenSidechain={(node, call, name) =>
           host.onStack((was) =>
             push(was, {

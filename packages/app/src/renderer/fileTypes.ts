@@ -213,6 +213,12 @@ export interface FileSurfaceContext {
   records: Record<string, OperationRecordView>;
   session: SessionView | null;
   sessionInstance: string | null;
+  /**
+   * Where a click asked the task's conversation to LAND: one run of one state — an event notice's
+   * `notify` firing. Set by `select` when it is handed an instance, and a stamp (`at`) so the same ask
+   * twice scrolls twice; the conversation serves it once (`SessionBandsView`'s focus effect).
+   */
+  landing?: { taskId: string; instance: string; at: number } | null | undefined;
   /** The answer being written right now, when there is one — text and thinking tails, every stream item. */
   liveTurn: {
     sessionId?: string;

@@ -1752,6 +1752,16 @@ export class AppService {
       this.publishFor(session, { type: "store:invalidate", scope: "board" });
     },
     log: (entry) => this.log(entry),
+    // The same slot a restart after a run's end uses: one pending look per session.
+    recheck: (session, afterMs) => {
+      clearTimeout(this.eventsRestart.get(session.key));
+      const timer = setTimeout(() => {
+        this.eventsRestart.delete(session.key);
+        if (this.sessions.get(session.key) === session && !session.closing) void this.superviseEvents(session);
+      }, afterMs);
+      timer.unref?.();
+      this.eventsRestart.set(session.key, timer);
+    },
   });
   /** Each session's supervision, one ask at a time: an ask arriving mid-way runs after the one before. */
   private readonly eventsSupervision = new Map<string, Promise<void>>();
@@ -1908,7 +1918,7 @@ export class AppService {
    * task's journal, which its conversation draws, and a notice is only ever posted while JaiRA is
    * open. So a restart starts the strip empty rather than keeping a second copy of the journal.
    */
-  private postNotice(open: ProjectSession, fromTask: string, given: EventsTaskNotice, caller: EventsTaskCaller): void {
+  private postNotice(open: ProjectSession, fromTask: string, given: EventsTaskNotice, caller: EventsTaskCaller): EventsTaskNotice {
     // Who called — the automation's firing, read off the journal — and the event it was entered with,
     // when the call did not name one.
     const at = caller.instanceId !== undefined ? callingStateOf(open.project, fromTask, caller.instanceId) : undefined;
@@ -1934,6 +1944,8 @@ export class AppService {
     if (this.postedNotices.length > NOTICES_KEPT) this.postedNotices.shift();
     this.log({ level: "info", source: "events", message: notice.text, project: open.key, taskId: fromTask, ...(summary !== undefined ? { detail: { event: summary } } : {}) });
     this.publish({ type: "notice:posted", notice: posted });
+    // What `notify` answers — the event named, so its record says what the notice was about.
+    return notice;
   }
 
   /** The notices the events tasks posted in this process, oldest first. */
@@ -3732,7 +3744,13 @@ export class AppService {
     // The fast-forward is a mode this process holds (decision 0005 §4), not a fact in the journal, so
     // it is stamped here — the strip reads it off the detail it already has.
     const forward = open.fastForwards.get(taskId);
-    const detail = forward !== undefined && forward.end === undefined ? { ...viewed, fastForward: fastForwardView(forward) } : viewed;
+    // So is what its rules are listening for: the hub's live waits, not a journal fact.
+    const listening = [...new Set(open.events.list().filter((wait) => wait.taskId === taskId && wait.waiter === "guard").map((wait) => wait.name as string))];
+    const detail = {
+      ...viewed,
+      ...(forward !== undefined && forward.end === undefined ? { fastForward: fastForwardView(forward) } : {}),
+      ...(listening.length > 0 ? { listening } : {}),
+    };
     // Folded in HERE rather than fetched separately, because the one surface that needs it — the
     // activity strip's verb — already has the detail and would otherwise draw a button before
     // knowing what it does. Computed only for a task that could actually start: for anything else

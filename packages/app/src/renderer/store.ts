@@ -521,6 +521,12 @@ export interface AppState {
   /** Which instance the viewer is showing. Null ⇒ the task's most recent. */
   sessionInstance: string | null;
   /**
+   * Where a click asked the task's conversation to LAND: one run of one state — an event notice's
+   * `notify` firing. Set by `select` when it is handed an instance, and a stamp (`at`) so the same ask
+   * twice scrolls twice; the conversation serves it once (`SessionBandsView`'s focus effect).
+   */
+  landing: { taskId: string; instance: string; at: number } | null;
+  /**
    * Transcripts by instance id, for the composite view — several cards can be open at once.
    *
    * Beside {@link session} rather than replacing it: that one is "the conversation being read",
@@ -855,6 +861,7 @@ const EMPTY: AppState = {
   records: {},
   session: null,
   sessionInstance: null,
+  landing: null,
   sessions: {},
   logs: [],
   logsLoading: false,
@@ -2482,6 +2489,7 @@ export function useApp() {
           taskWorkflowRun: null,
           stream: [],
           sessions: {},
+          landing: taskId !== null && atInstance !== undefined && atInstance !== null ? { taskId, instance: atInstance, at: Date.now() } : null,
           // A trail names one task's instances (see `trail.ts`), so arriving at another task starts
           // a new one rather than extending this.
           trail: [],

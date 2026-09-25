@@ -125,6 +125,13 @@ export interface InstanceNode {
    */
   operationCalls?: OperationView[];
   /**
+   * The state's FUNCTION operation asks nobody anything — the workflow's shape was known and none of
+   * its functions is interactive (an events automation's `start_task` / `notify`, a helper). Such a
+   * state is a call, not a question: its conversation draws what it ran, never a gate. Absent when
+   * the shape was not known, which keeps the old reading (a function operation is asked of you).
+   */
+  plainCall?: boolean;
+  /**
    * True once a sequence reset cleared this instance (DESIGN §4.2): history is
    * preserved, but it no longer contributes to the active path or to
    * `children.<key>` resolution.
@@ -453,6 +460,13 @@ export interface TaskDetail {
    * fast-forward. Absent the moment it arrives, is skipped, fails or is stopped.
    */
   fastForward?: FastForwardView;
+  /**
+   * The events this task's rules are LISTENING for right now (`on_event` guards armed on its
+   * project's hub), by name, in the order they were armed — what the activity strip says of a task
+   * parked only on the world: "Listening for git.push, task.failed", never "waiting for you". Live
+   * only, like {@link fastForward}; absent when nothing listens.
+   */
+  listening?: string[];
 }
 
 /**

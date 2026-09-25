@@ -307,11 +307,17 @@ export class RuntimeStore {
    * left alone and only genuinely abandoned ones are recovered. Absent, the old
    * assume-crashed behaviour stands, which is still right for a caller that has no
    * job store (a test, a one-shot read).
+   *
+   * `only` narrows it to one task: a row still `running` that no process drives any more, found
+   * AFTER open — the events supervisor's case, a task whose previous process was killed less than a
+   * heartbeat before this one opened, so the open-time sweep still took it for live.
    */
-  recoverInterrupted(nowMs: number, isLive?: (taskId: string) => boolean): string[] {
-    const running = this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running'`).all() as Array<{
-      task_id: string;
-    }>;
+  recoverInterrupted(nowMs: number, isLive?: (taskId: string) => boolean, only?: string): string[] {
+    const running = (
+      only === undefined
+        ? this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running'`).all()
+        : this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running' AND task_id = ?`).all(only)
+    ) as Array<{ task_id: string }>;
     const ids = running.map((r) => r.task_id).filter((id) => isLive === undefined || !isLive(id));
     const recover = this.db.transaction(() => {
       for (const id of ids) {

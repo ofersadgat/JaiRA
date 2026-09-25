@@ -757,7 +757,22 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
     seen.add(key);
     out.push({ seq: turn.seq, at: turn.at, kind: blocked ? "blocked" : "failure", ...named, path, text });
   }
-  return groupNeverEntered(out.sort((a, b) => a.at - b.at || a.seq - b.seq));
+  return groupNeverEntered(dropEchoedTransitions(out.sort((a, b) => a.at - b.at || a.seq - b.seq)));
+}
+
+/**
+ * One row per move. A rule that fires INTO a child records the transition and then the child's entry,
+ * and both notes name the same place — "entered plan_failed plan_failed" over "entered plan_failed",
+ * every firing of an events automation twice. The entry is the row kept: it is the one that opens the
+ * lane and that a bookmark lands on (`data-entered`). A transition with no entry after it (to a
+ * `terminate.*` pseudo-state, or one that was blocked) still has its own row.
+ */
+export function dropEchoedTransitions(notes: readonly BandNote[]): BandNote[] {
+  return notes.filter((note, i) => {
+    if (note.kind !== "transition") return true;
+    const next = notes[i + 1];
+    return !(next !== undefined && next.kind === "entered" && next.path === note.path);
+  });
 }
 
 /** The mount a path sits in: `feature/ui` → `feature`, `ui` → the root. */

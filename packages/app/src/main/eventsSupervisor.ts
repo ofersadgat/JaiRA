@@ -12,13 +12,17 @@
  *  - the task pinned an older version → it is stopped, deleted, and a new one started on the new version
  *    — a task pins its workflow at its first start (DESIGN §5.3), so a new version is a new task;
  *  - stopped by a restart (interrupted, or canceled) → resumed, keeping what it waited on;
+ *  - left `running` by a process that was KILLED (no close wrote its suspension) → once no process
+ *    drives it — no run here, no fresh heartbeat in the job table — marked interrupted, as the open-time
+ *    sweep marks any such task, and resumed. A heartbeat still fresh is looked at again once it would
+ *    have gone stale: a killed process stops beating, a live one (a CLI run) keeps its task;
  *  - ended (completed, failed) → replaced by a fresh one: resuming a failed chain would retry the step
  *    that failed, and the next one after it, forever.
  *
  * The task runs UNATTENDED. What it may call is restricted where its run is built (the service's
  * `startRun`, by the marker), so every path that starts or resumes it gets the same registry.
  */
-import { createTask, EVENTS_TASK, EVENTS_WORKFLOW, eventsTaskOf, readEventsWorkflow, type EventsWorkflowReading, type Project } from "@jaira/persistence";
+import { createTask, DEFAULT_STALE_MS, EVENTS_TASK, EVENTS_WORKFLOW, eventsTaskOf, readEventsWorkflow, type EventsWorkflowReading, type Project } from "@jaira/persistence";
 import type { LogEntry } from "@jaira/shared";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -34,6 +38,9 @@ export interface EventsSupervisorDeps {
   deleteTask(session: ProjectSession, taskId: string): Promise<unknown>;
   invalidate(session: ProjectSession): void;
   log(entry: Omit<LogEntry, "id" | "at">): void;
+  /** Ask again for this session in `afterMs` — once a claim another process held would have gone stale. */
+  recheck(session: ProjectSession, afterMs: number): void;
+  now?(): number;
 }
 
 /** Whether any layer this project searches holds a `system/events` file — none: nothing to supervise. */
@@ -100,6 +107,18 @@ export class EventsSupervisor {
       case "canceled":
         await this.act(session, task.id, `resumed the events task (${linesSaid(reading.lines)})`, () => this.deps.resumeTask(session, task.id));
         return;
+      case "running": {
+        // Nothing HERE drives it (`live` is false). Another process might: its heartbeat says so.
+        const now = this.deps.now?.() ?? Date.now();
+        const claim = project.jobs.liveRunJob(task.id, now);
+        if (claim !== undefined) {
+          this.deps.recheck(session, Math.max(250, claim.heartbeatAt + DEFAULT_STALE_MS - now + 250));
+          return;
+        }
+        project.runtime.recoverInterrupted(now, undefined, task.id);
+        await this.act(session, task.id, `resumed the events task, left running by a process that ended (${linesSaid(reading.lines)})`, () => this.deps.resumeTask(session, task.id));
+        return;
+      }
       case "completed":
       case "failed":
         this.say(session, row.status === "failed" ? "warn" : "info", `the events task ${row.status === "failed" ? "failed" : "ended"}: starting a new one`, task.id);

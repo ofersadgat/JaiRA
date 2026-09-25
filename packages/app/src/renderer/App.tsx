@@ -1387,6 +1387,7 @@ export default function App(): JSX.Element {
     records: state.records,
     session: state.session,
     sessionInstance: state.sessionInstance,
+    landing: state.landing,
     liveTurn: state.liveTurn,
     onShowSession: actions.showSession,
     waiting: waiting ? { component: waiting.config?.prompt ?? waiting.component } : undefined,

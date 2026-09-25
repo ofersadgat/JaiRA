@@ -252,3 +252,11 @@ As built:
   (`notices:list`) and follows `notice:posted`. Main keeps notices in MEMORY only: a restart starts
   the strip empty; the durable record is the `notify` call in the events task's journal, which its
   conversation draws — rebuilding the backlog from the journal was not done.
+- **The events conversation**: an automation's calls are CALLS, not questions — the projection marks
+  a function state whose shape says nothing in it is interactive (`InstanceNode.plainCall`), drawn as
+  the `called` kind; a settled `notify` is one line, "🔔 told you: <text> · <event>", from its answer
+  `{ text, event? }`. `on_event`'s `call.waiting` does not make an instance `waiting_for_user`
+  (`LISTENING_CALLS`); the strip says "Listening for …" from `TaskDetail.listening` (the hub's live
+  guard waits). A transition into a child that the entry right after it names is one row. A `running`
+  events task no process drives (the app was killed) is marked interrupted and resumed, once any
+  heartbeat left in the job table has gone stale.

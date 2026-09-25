@@ -7,9 +7,12 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { defaultUiState, eventRef, type EventsNotice, type PendingInteraction, type ProjectSummary } from "@jaira/shared/browser";
+import { defaultUiState, eventRef, type EventsNotice, type InstanceNode, type PendingInteraction, type ProjectSummary } from "@jaira/shared/browser";
 import { awaitingCount, noticeAge, noticeMeta, noticeToShow, unreadNotices, withNoticeRead, type ShownNotice } from "../src/renderer/noticesModel";
 import { InboxStrip } from "../src/renderer/inboxStrip";
+import { surfaceKindOf } from "../src/renderer/stateSurface";
+import { toldOf } from "../src/renderer/runViews";
+import { dropEchoedTransitions, type BandNote } from "../src/renderer/sessionBands";
 
 const NOW = 1_800_000_000_000;
 const MIN = 60_000;
@@ -137,5 +140,31 @@ describe("the strip", () => {
     expect(html).not.toContain("Awaiting you");
     expect(html).not.toContain("pill-n");
     expect(html).not.toContain("strip-notice-more");
+  });
+});
+
+describe("in the events conversation", () => {
+  const node = (patch: Partial<InstanceNode> = {}): InstanceNode => ({ instanceId: "i1", stateId: "system/events/deploy_done", status: "completed", index: 0, superseded: false, startedAt: 0, children: [], operation: { kind: "function", status: "completed" }, ...patch });
+
+  it("a function the shape says asks nobody is a CALL, not a question; without a shape it still reads as asked", () => {
+    expect(surfaceKindOf(node({ plainCall: true }))).toBe("called");
+    expect(surfaceKindOf(node())).toBe("asked");
+  });
+
+  it("a settled notify is one told line — its answer's text and event, else its argument", () => {
+    const call = { name: "notify", ref: "notify", kind: "function", args: { text: "Deploy finished" }, status: "completed" };
+    expect(toldOf({ ...call, result: { text: "Deploy finished", event: 'task.finished "Deploy 0.14.1"' } })).toEqual({ text: "Deploy finished", about: 'task.finished "Deploy 0.14.1"' });
+    expect(toldOf({ ...call, result: {} })).toEqual({ text: "Deploy finished" });
+    expect(toldOf({ ...call, status: "failed", error: { reason: "x" } })).toBeUndefined();
+    expect(toldOf({ ...call, name: "start_task" })).toBeUndefined();
+  });
+
+  it("one row per firing: a transition into a child that the entry right after it names is not drawn twice", () => {
+    const notes: BandNote[] = [
+      { seq: 1, at: 0, kind: "transition", path: "plan_failed", text: "plan_failed" },
+      { seq: 2, at: 0, kind: "entered", path: "plan_failed", instanceId: "i2", text: "" },
+      { seq: 3, at: 0, kind: "transition", path: "terminate.success", text: "terminate.success" },
+    ];
+    expect(dropEchoedTransitions(notes).map((n) => n.seq)).toEqual([2, 3]);
   });
 });
