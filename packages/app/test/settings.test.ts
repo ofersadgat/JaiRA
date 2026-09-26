@@ -680,7 +680,13 @@ describe("workflow authoring", () => {
  * API key and no `claude` installed showed four healthy providers and three healthy executors, and
  * the first run then failed with a message the screen had had every chance to give first.
  */
-describe("availability", () => {
+/**
+ * These run the REAL checks — each pass starts the agent binaries this machine has and knocks on the
+ * local servers — because what they assert is what the checks conclude. A pass takes as long as
+ * starting `claude` takes, which on a machine running the whole suite at once is seconds, and a test
+ * here runs up to three passes back to back: the default five-second budget was a coin toss.
+ */
+describe("availability", { timeout: 30_000 }, () => {
   beforeEach(async () => {
     await service.open(dir);
   });

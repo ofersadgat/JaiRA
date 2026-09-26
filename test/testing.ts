@@ -84,3 +84,24 @@ export function shippedLayer(): void {
   setBuiltInDir(undefined);
   onTestFinished(() => setBuiltInDir(floor));
 }
+
+/**
+ * Wait until `ready()` holds — for a test that needs work the code under test runs UNAWAITED (a
+ * workflow reaching its first wait, a recovery behind `open`) to have happened.
+ *
+ * A fixed wait — fifty turns of the event loop, twenty milliseconds — is a guess at how long that
+ * work takes, and a full parallel run of the suite is exactly when the guess loses: every such test
+ * passed alone and failed a different one of them on each full run. This waits for the fact the
+ * assertion is about instead, so a slow machine makes it slower and never wrong. `what` names the
+ * fact for the failure, which is then a real one: it did not happen within `timeoutMs`.
+ *
+ * Only for something that WILL become true. That something did NOT happen cannot be waited for — a
+ * test asserting an absence still has to pick a moment to look.
+ */
+export async function eventually(ready: () => boolean, what = "the condition", timeoutMs = 4_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`waited ${timeoutMs}ms for ${what}, and it did not happen`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}

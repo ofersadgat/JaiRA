@@ -9,6 +9,7 @@
  * environment and never on the command line.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eventually } from "@jaira/testing";
 import type { Tool } from "@declarative-ai/exec";
 import { isJairaComment, parseIntegrations, signComment, type JairaEvent, type JairaIntegrationsConfig } from "@jaira/shared";
 import { NodeExec, type Exec, type ExecOptions } from "../src/exec";
@@ -140,7 +141,7 @@ describe("wait_git_event", () => {
   it("answers with the event that arrives, filtered as asked", async () => {
     const hub = new EventHub();
     const answer = call(tools({ events: waits(hub) }), "wait_git_event", { event: "git.push", filter: { branch: "release/*" }, timeout: 30 });
-    for (let i = 0; i < 20 && hub.list().length === 0; i++) await new Promise((r) => setTimeout(r, 25));
+    await eventually(() => hub.list().length > 0, "the tool to register its wait");
     expect(hub.list()).toMatchObject([{ taskId: "t-1", waiter: "tool", name: "git.push", filter: { branch: "release/*" } }]);
     hub.deliver(push("main"));
     hub.deliver(push("release/2.0"));

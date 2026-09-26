@@ -9,6 +9,7 @@
  */
 import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { eventually } from "@jaira/testing";
 import { loadBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { ON_USER_EVENT, TASK_DRAG } from "@jaira/shared";
@@ -68,16 +69,12 @@ function harness() {
   return { hub, requests, run };
 }
 
-/** Let the engine reach its wait — the round has to run before there is anything to answer. */
-async function settled(): Promise<void> {
-  for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
-}
 
 describe("a guard that waits on a gesture", () => {
   it("parks with the destination its rule names", async () => {
     const { hub, requests, run } = harness();
     const result = run(5);
-    await settled();
+    await eventually(() => requests.length > 0, "the gesture to be offered");
 
     expect(requests).toHaveLength(1);
     expect(requests[0]!.event).toBe(TASK_DRAG);
@@ -98,7 +95,7 @@ describe("a guard that waits on a gesture", () => {
       done = true;
       return r;
     });
-    await settled();
+    await eventually(() => requests.length > 0, "the gesture to be offered");
     expect(done).toBe(false);
     expect(requests).toHaveLength(1);
 
@@ -118,7 +115,7 @@ describe("a guard that waits on a gesture", () => {
   it("takes the transition when the gesture is delivered", async () => {
     const { hub, requests, run } = harness();
     const result = run(5);
-    await settled();
+    await eventually(() => requests.length > 0, "the gesture to be offered");
 
     expect(hub.matching(TASK_DRAG, "task-7")).toHaveLength(1);
     expect(hub.deliver(requests[0]!.requestId)).toBe(true);
@@ -245,7 +242,7 @@ describe("a wait the run no longer needs is withdrawn", () => {
       registry,
       prompt: buildPromptExecutor({ fakeRules: [] }),
     });
-    await settled();
+    await eventually(() => hub.list().length > 0, "the wait to be registered");
     expect(hub.list()).toHaveLength(1);
 
     expect(statusOfResult(await result)).toBe("failed");
@@ -398,11 +395,11 @@ describe("the documented board (WORKFLOWS.md §12.2)", () => {
     const result = run(4);
 
     // Triage runs, then the board offers the first move — and only that one.
-    await settled();
+    await eventually(() => requests.length > 0, "the gesture to be offered");
     expect(requests.map((r) => r.options.to_state)).toEqual(["in_review"]);
 
     hub.deliver(requests[0]!.requestId);
-    await settled();
+    await eventually(() => requests.length > 1, "the second offer");
     // The card is in `in_review` now, and the offer that moved it is NOT re-made: `.run.cursor` has
     // moved on. What is on offer is the next column.
     expect(requests.map((r) => r.options.to_state)).toEqual(["in_review", "done"]);
@@ -482,7 +479,7 @@ describe("hand-advancing a task between phases (the feature workflow's shape)", 
 
   it("offers the NEXT phase as a drop target once the first one finishes", async () => {
     const { hub, requests, run } = board(true);
-    await settled();
+    await eventually(() => requests.length > 0, "the gesture to be offered");
 
     expect(requests).toHaveLength(1);
     expect(requests[0]!.event).toBe(TASK_DRAG);
@@ -496,7 +493,7 @@ describe("hand-advancing a task between phases (the feature workflow's shape)", 
 
   it("moves the task when the card is dragged, and the run then finishes", async () => {
     const { hub, requests, run } = board(true);
-    await settled();
+    await eventually(() => requests.length > 0, "the gesture to be offered");
     expect(hub.deliver(requests[0]!.requestId)).toBe(true);
     expect(statusOfResult(await run)).toBe("completed");
     expect(hub.list()).toHaveLength(0);
@@ -515,7 +512,7 @@ describe("a published move answers the wait that was offering it (decision 0005)
   it("answers a wait of EITHER event for that task and that state — `task_drag` and `task_move` are one vocabulary", async () => {
     const { hub, requests, run } = harness();
     const result = run(3);
-    await settled();
+    await eventually(() => requests.length > 0, "the gesture to be offered");
     expect(requests.map((r) => [r.event, r.options.to_state])).toEqual([[TASK_DRAG, "deploy"]]);
 
     // Not this task, and not this state: nothing was waiting on either, and nothing is disturbed.

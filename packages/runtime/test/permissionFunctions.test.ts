@@ -9,6 +9,7 @@
  * runner stub says exactly what is being held.
  */
 import { describe, expect, it } from "vitest";
+import { eventually } from "@jaira/testing";
 import { PermissionLedger, isPermissionDenied, withPermission } from "@declarative-ai/permissions";
 import { loadBundle } from "@declarative-ai/hw";
 import type { ExecServices, FunctionInputs, Tool } from "@declarative-ai/exec";
@@ -109,7 +110,7 @@ describe("a function decides a tool call before anybody is asked", () => {
       },
     });
     const pending = call({ path: "notes.md", content: "x" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(asked).toHaveLength(1);
     expect(asked[0]!.reason).toBe(`the function 'judge' could not decide: 'judge' returned "maybe", which is not allow or deny`);
     hub.decide(asked[0]!.requestId, "deny");
@@ -119,7 +120,7 @@ describe("a function decides a tool call before anybody is asked", () => {
   it("puts such a call to the person when nothing here can run a function — never lets it through", async () => {
     const { call, asked, hub } = gated({ write_file: { function: "judge" } }, "write_file");
     const pending = call({ path: "notes.md", content: "x" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(asked[0]!.reason).toBe("the function 'judge' could not decide: nothing here can run the function 'judge'");
     hub.decide(asked[0]!.requestId, "allow");
     await pending;
@@ -154,7 +155,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
     // A built-in ask (a push) is stricter than a function on `bash`: the function is not asked about it.
     const { call, asked, hub, decided } = gated({ bash: { function: "judge" }, other: "deny" }, "bash", { run: allowIf(() => true) });
     const pending = call({ command: "cargo check && git push origin main" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(decided.map((r) => r.part?.text)).toEqual(["cargo check"]);
     expect(asked).toHaveLength(1);
     expect(asked[0]!.parts!.parts.map((p) => ({ text: p.text, verdict: p.verdict, source: p.decidedBy.source, fn: p.decidedBy.function }))).toEqual([
@@ -178,7 +179,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
     expect(isPermissionDenied((await call({ command: "cat .jaira/settings.json" })) as never)).toBe(true);
     // A line the parser cannot read asks a PERSON, whatever a function would say about the parts it can see.
     const pending = call({ command: "cargo check && $TOOL --run" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(asked).toHaveLength(1);
     expect(asked[0]!.parts!.parts.map((p) => `${p.text}:${p.verdict}:${p.decidedBy.source}`)).toEqual(["cargo check:allowed:function", "$TOOL --run:asks:parser"]);
     hub.decide(asked[0]!.requestId, "deny");
@@ -189,7 +190,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   it("keeps the part a function answered off what the run remembers", async () => {
     const { call, asked, hub } = gated({ bash: { function: "judge" }, "git commit": "ask", other: "deny" }, "bash", { run: allowIf(() => true) });
     const pending = call({ command: "cargo check && git commit -m wip" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => asked.length > 0, "the gate to ask a person");
     hub.decide(asked[0]!.requestId, "allow", "workflow-run", []);
     await pending;
     expect(hub.grants("t1").list()).toEqual({ "git commit": "allow" });
@@ -244,7 +245,7 @@ describe("the approval prompt is a FUNCTION a function can call", () => {
     const registry = newRegistry();
     const { hub, parked } = approvalPromptOn(registry);
     const pending = runnerOver(registry)(APPROVAL_PROMPT_FUNCTION, REQUEST);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => parked.length > 0, "the approval prompt to park");
     expect(parked).toHaveLength(1);
     expect(parked[0]).toMatchObject({ component: APPROVAL_PROMPT_FUNCTION, taskId: "t1", inputs: { request: REQUEST } });
     hub.submit(parked[0]!.requestId, { decision: "allow" });
@@ -255,7 +256,7 @@ describe("the approval prompt is a FUNCTION a function can call", () => {
     const registry = newRegistry();
     const { hub, parked } = approvalPromptOn(registry);
     const pending = runnerOver(registry)(APPROVAL_PROMPT_FUNCTION, REQUEST);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => parked.length > 0, "the approval prompt to park");
     hub.submit(parked[0]!.requestId, { decision: "deny" });
     expect(await pending).toBe("deny");
   });
@@ -272,7 +273,7 @@ describe("the approval prompt is a FUNCTION a function can call", () => {
     hub.seed("t1", APPROVAL_PROMPT_FUNCTION, { decision: "allow", about: approvalRequestKey(REQUEST) });
     const other = { ...REQUEST, input: { command: "rm -rf dist" }, line: "rm -rf dist" };
     const pending = runnerOver(registry)(APPROVAL_PROMPT_FUNCTION, other);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => parked.length > 0, "the approval prompt to park");
     expect(parked).toHaveLength(1);
     hub.submit(parked[0]!.requestId, { decision: "deny" });
     expect(await pending).toBe("deny");
@@ -282,7 +283,7 @@ describe("the approval prompt is a FUNCTION a function can call", () => {
     const registry = newRegistry();
     const { hub, parked } = approvalPromptOn(registry);
     const pending = runnerOver(registry)(APPROVAL_PROMPT_FUNCTION, REQUEST);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => parked.length > 0, "the approval prompt to park");
     hub.reject(parked[0]!.requestId, "the window closed");
     await expect(pending).rejects.toThrow(/approve_tool_call' failed/);
   });
@@ -317,7 +318,7 @@ describe("`smart`, the function JaiRA ships", () => {
     for (const answer of ["allow", "deny"] as const) {
       const { run, hub, parked } = setup({ verdict: "unsure", reason: "publishing is irreversible" });
       const pending = run(SMART_FUNCTION, REQUEST);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await eventually(() => parked.length > 0, "the approval prompt to park");
       expect(parked).toHaveLength(1);
       expect(parked[0]!.inputs).toEqual({ request: REQUEST, prompt: "smart is unsure — publishing is irreversible" });
       hub.submit(parked[0]!.requestId, { decision: answer });
@@ -328,7 +329,7 @@ describe("`smart`, the function JaiRA ships", () => {
   it("treats a judge that failed, or said something else, as unsure — and asks", async () => {
     const { run, hub, parked } = setup({ verdict: "probably" });
     const pending = run(SMART_FUNCTION, REQUEST);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await eventually(() => parked.length > 0, "the approval prompt to park");
     expect(parked).toHaveLength(1);
     hub.submit(parked[0]!.requestId, { decision: "deny" });
     expect(await pending).toBe("deny");

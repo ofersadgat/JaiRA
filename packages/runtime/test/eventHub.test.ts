@@ -7,6 +7,7 @@
  * a restart for a task that resumes.
  */
 import { describe, expect, it } from "vitest";
+import { eventually } from "@jaira/testing";
 import { loadBundle } from "@declarative-ai/hw";
 import type { EventName, EventWaitPort, JairaEvent } from "@jaira/shared";
 import { buildPromptExecutor, executeWorkflow, newRegistry, statusOfResult } from "../src/wiring";
@@ -15,6 +16,11 @@ import { checkEventWait, EVENT_CAPABILITIES, EventHub, ON_EVENT, RECENT_MS, regi
 
 const HOST_FUNCTIONS = hostCalleeSignatures();
 
+/**
+ * A moment to look for what must NOT have happened — a rule that did not fire. An absence has no
+ * condition to wait for, so this is a fixed number of turns; waits for something that WILL happen use
+ * `eventually`, since a fixed wait for those is a guess a loaded machine loses.
+ */
 const settled = async (): Promise<void> => {
   for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
 };
@@ -73,7 +79,7 @@ describe("on_event", () => {
 
   it("parks the rule until a matching event arrives, and the rule reads what it resolved to", async () => {
     const { hub, run, entered } = harness("on_event('git.push', { branch: 'main' }).payload.after === 'abc'");
-    await settled();
+    await eventually(() => hub.list().length > 0, "the rule to park on git.push");
     expect(hub.list()).toMatchObject([{ taskId: "task-7", waiter: "guard", name: "git.push", filter: { branch: "main" } }]);
     // Another branch: not this rule's. It waits on.
     hub.deliver(push("release/2.0", "abc"));
@@ -87,7 +93,7 @@ describe("on_event", () => {
 
   it("is NOT answered for being unattended — a hub with nobody listening parks all the same, and closing it answers nothing", async () => {
     const { hub, run, entered, abort } = harness("on_event('task.finished')");
-    await settled();
+    await eventually(() => hub.list().length > 0, "the rule to park on task.finished");
     expect(hub.list()).toHaveLength(1);
     hub.close();
     await settled();

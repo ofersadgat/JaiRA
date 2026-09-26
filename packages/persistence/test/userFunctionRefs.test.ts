@@ -75,7 +75,12 @@ describe("userFunctionRefsOf", () => {
   });
 });
 
-describe("resolving a pinned task's functions", () => {
+/**
+ * These load the TypeScript compiler and type-check real modules — a second alone, and several
+ * seconds on a machine running the whole suite at once, which the default five-second budget does not
+ * cover. A slower machine should make them slower, never fail them.
+ */
+describe("resolving a pinned task's functions", { timeout: 30_000 }, () => {
   let dir: string;
   let base: string;
   let project: Project | undefined;

@@ -6,6 +6,7 @@
  * that answers `false` and a cancel that withdraws it.
  */
 import { describe, expect, it } from "vitest";
+import { eventually } from "@jaira/testing";
 import { loadBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { buildPromptExecutor, executeWorkflow, newRegistry, statusOfResult } from "../src/wiring";
@@ -15,9 +16,8 @@ import { MemoryHandles } from "./remoteRig";
 
 const HOST_FUNCTIONS = hostCalleeSignatures();
 
-const settled = async (): Promise<void> => {
-  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
-};
+/** The run has reached its wait: the rule's call is registered with the hub. */
+const parked = (hub: { list(): readonly unknown[] }): Promise<void> => eventually(() => hub.list().length > 0, "the run to park on the remote event");
 
 const files = (guard: string) => ({
   "publish.json": {
@@ -63,7 +63,7 @@ describe("on_remote_event", () => {
 
   it("parks the state, marks the request AWAITED — which is all the poller needs — and carries settle_after onto the row", async () => {
     const { hub, handles, waiting } = harness();
-    await settled();
+    await parked(hub);
     expect(waiting).toMatchObject([{ taskId: "task-7", key: "review" }]);
     expect(hub.list()).toHaveLength(1);
     expect(handles.get("task-7", "review")).toMatchObject({ awaiting: true, settleAfterMs: 300_000 });
@@ -73,7 +73,7 @@ describe("on_remote_event", () => {
 
   it("resolves with the settlement, which a guard reads like any value", async () => {
     const { hub, run, entered } = harness();
-    await settled();
+    await parked(hub);
     const settlement = { decision: "approve", decisions: [], settled_by: { via: "remote", who: "mara", act: "merged" }, remote: { number: 41 } } as unknown as JsonValue;
     expect(hub.deliver("task-7", "review", settlement)).toBe(true);
     expect(statusOfResult(await run)).toBe("completed");
@@ -83,7 +83,7 @@ describe("on_remote_event", () => {
 
   it("takes the other rule for another decision — the same wait, read twice, asked once", async () => {
     const { hub, run, entered, waiting } = harness();
-    await settled();
+    await parked(hub);
     // Delivered with the head it was settled AT, as the service does: the first rule reads it and
     // says no, and the second — a separate call to the engine — hears the same answer rather than
     // parking a wait for an event that has already happened.
@@ -116,7 +116,7 @@ describe("on_remote_event", () => {
 
   it("is withdrawn when the process stops listening, and the row stops being polled", async () => {
     const { hub, handles, resolved, waiting, run } = harness();
-    await settled();
+    await parked(hub);
     hub.declineAll();
     expect(hub.list()).toEqual([]);
     expect(resolved).toEqual([waiting[0]!.requestId]);
