@@ -1336,7 +1336,7 @@ function parseFiles(raw: unknown): JairaFilesConfig {
  * remotes are the project's own `.git/config`'s, each picking its connection by host.
  */
 export interface JairaEventSetting {
-  /** Off unless a layer says on. */
+  /** On: the built-in layer switches every event on, and a layer turns one off. Absent in every layer is off. */
   enabled: boolean;
   /**
    * Branch globs, for the `git.*` events only: a push's branch, the branch checks ran for, a merge
@@ -1347,7 +1347,7 @@ export interface JairaEventSetting {
   remotes?: Record<string, boolean>;
 }
 
-/** The `events` block: only the events a layer stated; an event not here is off. */
+/** The `events` block: only the events a layer stated (the built-in layer states every one, on); an event not here is off. */
 export type JairaEventsConfig = Partial<Record<EventName, JairaEventSetting>>;
 
 /**

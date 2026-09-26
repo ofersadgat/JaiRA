@@ -63,7 +63,9 @@ Shared line never fires twice for one project's push.
 
 **Which events.** The `events` block of `settings.json`, layered like every setting (Built in < Shared
 < This project < Just you): per event, on/off, a branch glob list where it applies, and per remote
-on/off. Off is the default. A remote with no signed-in connection cannot be switched on.
+on/off. On is the default (the person, 2026-09-25: "events should be on by default"): the built-in
+layer's `settings.json` switches every event on, and a layer above turns one off. A remote with no
+signed-in connection cannot be switched on.
 
 **Delivery is polling** (decision 0004: no push channel reaches a desktop app) — per project per
 remote, 60 s while JaiRA is open and something is switched on. A repository watcher keeps, per

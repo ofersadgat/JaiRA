@@ -8,7 +8,7 @@
  * ONE state whose operation is a list of `start_task` / `notify` calls — found through the layers by
  * its id, so a project's own copy of that one file changes that automation for that project alone.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -161,6 +161,10 @@ describe("the events workflow", () => {
   });
 
   it("the lint names a line whose event Settings switch off", () => {
+    // Every event ships switched on (the built-in layer), so this project turns git.push off.
+    const settings = join(dir, ".jaira", "settings.json");
+    const stated = existsSync(settings) ? (JSON.parse(readFileSync(settings, "utf8")) as Record<string, unknown>) : {};
+    writeFileSync(settings, JSON.stringify({ ...stated, events: { "git.push": { enabled: false } } }), "utf8");
     write(own(), `${EVENTS_WORKFLOW}.json`, { $ref: `$SYSTEM/workflows/${EVENTS_WORKFLOW}`, transitions: [push.line], children: push.children });
     write(own(), `${EVENTS_WORKFLOW}/push_main.json`, push.state);
     const issues = browseWorkflows(open()).workflows.find((w) => w.rootId === EVENTS_WORKFLOW)?.issues ?? [];

@@ -416,7 +416,8 @@ describe("an automation, end to end", () => {
     writeWorkflowFiles(workflowsDir, eventsCopy(automation("push_main", "{ branch: 'main' }", "feature/review")));
     const issuesOf = () => service.browseWorkflows(dir).workflows.find((w) => w.rootId === EVENTS_WORKFLOW)?.issues ?? [];
     expect(issuesOf().filter((i) => /switched off/.test(i.message))).toEqual([]);
-    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: {} } as JsonValue });
+    // On by default (the built-in layer); the project turns it off.
+    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.push": { enabled: false } } } as JsonValue });
     expect(issuesOf()).toContainEqual(
       expect.objectContaining({ stateId: EVENTS_WORKFLOW, path: "transitions.0.when", severity: "warning", message: "git.push is switched off in Settings → Tools → Events, so this never fires" }),
     );

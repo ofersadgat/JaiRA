@@ -22,5 +22,16 @@
   },
   "functions": {
     "smart": { "model": "simple" }
+  },
+  "events": {
+    "git.push": { "enabled": true },
+    "git.merge_request.opened": { "enabled": true },
+    "git.merge_request.updated": { "enabled": true },
+    "git.merge_request.comments": { "enabled": true },
+    "git.merge_request.merged": { "enabled": true },
+    "git.merge_request.closed": { "enabled": true },
+    "git.checks.failed": { "enabled": true },
+    "task.finished": { "enabled": true },
+    "task.failed": { "enabled": true }
   }
 }

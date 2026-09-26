@@ -7,7 +7,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  EVENT_NAMES,
   chooseFirstAvailable,
+  isEventEnabled,
   keptCandidate,
   mergeConfigLayers,
   modelAvailability,
@@ -41,6 +43,14 @@ describe("the built-in settings layer", () => {
     expect(config.functions.smart.model).toBe("simple");
     // No default model: what a state that names nothing runs on stays the machine's business.
     expect(config.executors["default"]).toBeUndefined();
+  });
+
+  it("switches every event on, so a layer above only ever turns one off", () => {
+    const config = parseConfig(JSON.parse(readFileSync(BUILT_IN, "utf8")));
+    for (const name of EVENT_NAMES) expect(isEventEnabled(config, name, "origin"), name).toBe(true);
+    const off = parseConfig(mergeConfigLayers([JSON.parse(readFileSync(BUILT_IN, "utf8")), { events: { "git.push": { enabled: false } } }]) ?? {});
+    expect(isEventEnabled(off, "git.push", "origin")).toBe(false);
+    expect(isEventEnabled(off, "task.failed")).toBe(true);
   });
 
   it("merges weakest first, each layer over the one below, key by key", () => {
