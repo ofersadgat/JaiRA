@@ -23,7 +23,7 @@
  * never as "allow".
  */
 import type { TextSpan } from "@jaira/shared";
-import { EMBEDDERS, type EmbedderSpec } from "./shellTables";
+import { EMBEDDERS, isHarmlessVariable, isShellLocalName, type EmbedderSpec } from "./shellTables";
 
 export type CommandDialect = "posix" | "powershell";
 
@@ -43,6 +43,11 @@ export interface ParsedCommand {
   subcommand?: string;
   /** Flags in order, long and short, without values (`--hard`, `-C`, `-rf`). */
   flags: string[];
+  /**
+   * The flags written before the subcommand — the program's own options, as against the
+   * subcommand's (`git -c k=v grep -c x`: `-c` is git's, the second `-c` is grep's count).
+   */
+  leadingFlags?: string[];
   /** Non-flag arguments, excluding the subcommand. */
   args: string[];
   /** Every token as parsed, for auditing and messages. */
@@ -59,6 +64,12 @@ export interface ParsedCommand {
   words?: CommandWord[];
   /** Index into {@link tokens} of the program word (after any `VAR=value`). */
   programIndex?: number;
+  /**
+   * The variables set for this command, by name: its own leading `VAR=value` words and those of an
+   * embedder it was opened from (`env GIT_EXTERNAL_DIFF=x git diff`). A variable can change what a
+   * program runs, so a part that sets one the tables do not know to be harmless is not vouched for.
+   */
+  sets?: string[];
   /**
    * True when WHAT RUNS is decided at run time — the program or its subcommand is a
    * variable or a substitution (`$CMD --hard`, `git $(cat x)`). Never allowed without asking.
@@ -456,6 +467,9 @@ const isFlag = (token: string): boolean => token.startsWith("-") && token !== "-
 const isAssignment = (token: string, dialect: CommandDialect): boolean =>
   dialect === "posix" ? /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(token) : /^[A-Za-z_][A-Za-z0-9_]*=|^\$[\w:]+=/.test(token);
 
+/** The variable an assignment word sets: `FOO=1` → `FOO`, `PATH+=x` → `PATH`, `$env:Path=x` → `$env:Path`. */
+export const variableOf = (token: string): string => token.slice(0, token.indexOf("=")).replace(/\+$/, "");
+
 const wordOf = (token: Token): CommandWord => ({
   value: token.value,
   span: { start: token.start, end: token.end },
@@ -468,12 +482,14 @@ function commandOf(words: Token[], start: number, via: string[]): ParsedCommand 
   const rest = words.slice(start + 1);
   const flags = rest.filter((t) => isFlag(t.value)).map((t) => t.value);
   const nonFlags: Token[] = [];
+  const leading: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const token = rest[i]!;
     if (!isFlag(token.value)) {
       nonFlags.push(token);
       continue;
     }
+    if (nonFlags.length === 0) leading.push(token.value);
     // `git -C <dir> reset` / `-c key=value`: a flag that consumes the next token,
     // which must not be mistaken for the subcommand.
     if (/^-(C|c|C=|c=)$/.test(token.value) || token.value === "--work-tree" || token.value === "--git-dir") {
@@ -482,10 +498,14 @@ function commandOf(words: Token[], start: number, via: string[]): ParsedCommand 
   }
   const [subcommand, ...args] = nonFlags;
   const dynamic = words[start]!.dynamic === true || subcommand?.dynamic === true;
+  // Every word before the program was skipped as an assignment (`argv`), so each one names a variable.
+  const sets = words.slice(0, start).map((t) => variableOf(t.value));
   return {
     program,
+    ...(sets.length > 0 ? { sets } : {}),
     ...(subcommand !== undefined ? { subcommand: subcommand.value.toLowerCase() } : {}),
     flags,
+    ...(leading.length > 0 ? { leadingFlags: leading } : {}),
     args: args.map((t) => t.value),
     tokens: words.map((t) => t.value),
     ...(via.length > 0 ? { via } : {}),
@@ -554,6 +574,13 @@ function openEmbedder(spec: EmbedderSpec, words: Token[], start: number, dialect
     // Skip the embedder's own flags and assignments, then re-parse from the first real word. The
     // remainder is kept INTACT: filtering flags out here would silently drop the inner command's own
     // (`env FOO=1 git reset --hard` must not lose `--hard`, or policy stops seeing a destructive reset).
+    // The assignments it skips are set for everything it runs, so they travel with what it opens.
+    const sets: string[] = [];
+    const setting = (opened: Walk): Walk => {
+      if (sets.length === 0) return opened;
+      for (const request of opened.requests) if (request.kind === "command") request.command.sets = [...sets, ...(request.command.sets ?? [])];
+      return opened;
+    };
     while (at < rest.length) {
       const token = rest[at]!.value;
       if (spec.lineFlags?.includes(token) === true && rest[at + 1] !== undefined) {
@@ -569,6 +596,7 @@ function openEmbedder(spec: EmbedderSpec, words: Token[], start: number, dialect
         continue;
       }
       if (isAssignment(token, dialect)) {
+        sets.push(variableOf(token));
         at++;
         continue;
       }
@@ -581,7 +609,7 @@ function openEmbedder(spec: EmbedderSpec, words: Token[], start: number, dialect
       if (stop >= 0) hidden = hidden.slice(0, stop);
     }
     if (hidden.length === 0) return undefined;
-    const opened = spec.line === true ? lineOf(joined(hidden), inner, dialect) : argv(hidden, dialect, inner, depth + 1);
+    const opened = setting(spec.line === true ? lineOf(joined(hidden), inner, dialect) : argv(hidden, dialect, inner, depth + 1));
     if (opened.requests.length === 0 && opened.unparsed === undefined) return undefined;
     return spec.keep === true ? { ...opened, requests: [own(), ...opened.requests] } : opened;
   }
@@ -640,7 +668,14 @@ function argv(words: Token[], dialect: CommandDialect, via: string[], depth: num
   // Skip leading `VAR=value` assignments (`FOO=1 git push`).
   let start = 0;
   while (start < words.length && isAssignment(words[start]!.value, dialect)) start++;
-  if (start >= words.length) return { requests: [] };
+  if (start >= words.length) {
+    // Nothing but assignments: `PATH=/tmp/x; git status` sets the variable for the rest of the line.
+    // Not exported: a shell-local name (`x=1`) reaches no program; `PATH` is in every environment already.
+    const sets = words.map((t) => variableOf(t.value)).filter((name) => !isHarmlessVariable(name) && !isShellLocalName(name));
+    if (sets.length === 0) return { requests: [] };
+    const reason = `sets ${sets.join(", ")} for what runs after it`;
+    return { requests: [{ kind: "unparsed", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason, ...(via.length > 0 ? { via } : {}) }] };
+  }
   if (depth > MAX_DEPTH) {
     return { requests: [{ kind: "unparsed", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason: "nested too deeply to follow" }], unparsed: "nested too deeply to follow" };
   }

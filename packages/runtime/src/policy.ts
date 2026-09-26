@@ -37,8 +37,9 @@
  */
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { describeCommand, takeApart, type CommandDialect, type ParsedCommand } from "./command";
-import { SHELL_SUBJECT, classifyRequest, lookUp, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
+import { SHELL_SUBJECT, classifyRequest, lookUp, packageScriptOf, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
+import { filePackages, scriptRunsOf, shellWord, type PackageReader, type ScriptRun } from "./packageScripts";
 import {
   DEFAULT_ASK_ABOVE_BYTES,
   INLINE_PERMISSION_SET,
@@ -58,6 +59,10 @@ import {
   modeFunction,
   modeWord,
   permissionSetFunctions,
+  shellSubjects,
+  toolModes,
+  RESERVED_MCP_SERVERS,
+  TOOL_SPEC_BY_NAME,
   type CommandApproval,
   type CommandPart,
   type CommandPartDecider,
@@ -70,7 +75,7 @@ import {
   type PermissionSetMode,
 } from "@jaira/shared";
 // Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
-import { standardOfAnyNative } from "./agentTools";
+import { declaredNative, standardOfAnyNative } from "./agentTools";
 import { partScopeFor, scopeNarrowingFor } from "./tools";
 import { mcpCallOf } from "./mcpServers";
 
@@ -313,6 +318,24 @@ export interface DecideCommandOptions {
   /** What a relative place resolves against for {@link scopeOf}: the workspace, then the call's own `cwd`, then each `cd` on the line. */
   root?: string | undefined;
   cwd?: string | undefined;
+  /**
+   * How a line's packages are read — so `npm run lint`, `npm -w app test` are judged by the lines
+   * their scripts run ({@link scriptRunsOf}; `filePackages` in the app). Absent, or with no directory
+   * to start from, a named script is `script`.
+   */
+  packages?: PackageReader | undefined;
+  /** How many scripts deep this line is (`npm test` running `npm run build`); past {@link MAX_SCRIPT_DEPTH} a script is `script` again. */
+  scriptDepth?: number | undefined;
+}
+
+const MAX_SCRIPT_DEPTH = 4;
+
+/** The packages a part runs a script in, and the lines it runs in each, when it names a package script that can be read. */
+function scriptRunsFor(part: ClassifiedPart, here: string | undefined, options: DecideCommandOptions): ScriptRun[] | undefined {
+  if (options.packages === undefined || here === undefined || part.command === undefined || part.unmodelled !== undefined) return undefined;
+  if ((options.scriptDepth ?? 0) >= MAX_SCRIPT_DEPTH) return undefined;
+  const call = packageScriptOf(part.command);
+  return call === undefined ? undefined : scriptRunsOf(options.packages, call, here);
 }
 
 /** Programs that move the directory the REST of the line runs in. */
@@ -454,6 +477,20 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
   for (const request of taken.requests) {
     const classified = classifyRequest(request, dialect);
     if (classified === undefined) continue;
+    // `npm run lint` is what its script runs: each part of those lines, judged in the runner's place.
+    const runs = scriptRunsFor(classified, here, options);
+    if (runs !== undefined) {
+      const through = line.slice(classified.span.start, classified.span.end);
+      for (const run of runs) for (const scriptLine of run.lines) {
+        const inner = decideCommand(policy, scriptLine, "posix", { ...options, cwd: run.dir, root: run.dir, scriptDepth: (options.scriptDepth ?? 0) + 1 });
+        for (const part of inner.parts.parts) {
+          const { within: _within, ...rest } = part;
+          parts.push({ ...rest, span: classified.span, matched: classified.matched, via: [...(classified.via ?? []), through, ...(part.via ?? [])] });
+          commands.push(classified.command);
+        }
+      }
+      continue;
+    }
     // `find docs -exec rm {} +` removes under `docs`: `{}` stands for the places the find walks.
     if (classified.command?.program === "find" && classified.via?.at(-1) !== "find") findRoots = classified.paths.length > 0 ? classified.paths : ["."];
     else if (classified.via?.at(-1) === "find" && classified.paths.includes("{}")) classified.paths = classified.paths.flatMap((p) => (p === "{}" ? findRoots : [p]));
@@ -775,6 +812,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         permissionSet: judging?.permissionSet,
         permissionSetSource: judging?.source,
         grants: options.grants,
+        packages: filePackages,
         scopeOf: partScopeFor(authored?.scopes, options.workspaceRoot, options.scopes),
         ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
@@ -1024,4 +1062,52 @@ export function decideMcpCall(tool: string, permissionSet: PermissionSet, source
 export function describeDecision(decision: CommandDecision): string {
   const what = decision.command !== undefined ? describeCommand(decision.command) : "an unparsable command";
   return `${what} — ${decision.reason}`;
+}
+
+// --- would a permission set let this call through? -------------------------------------------------
+
+/**
+ * Whether `permissionSet` lets a call run with nobody asked — `true` only for `allow`, so a line that
+ * asks, a function it is put to, and a refusal are all `false`. `undefined` for a call no map holds at
+ * all: an agent's own bookkeeping (`TodoWrite`, `ToolSearch`), which runs under any of them.
+ *
+ * The call is judged as the gate would judge it: a standard tool by its line, an agent's built-in as
+ * the standard tool it is (`Read` is `read_file`; `Task` and `Agent` have none and are `other`), a
+ * tool of an MCP server by its server's lines, and a shell line taken apart and every part judged
+ * with the project's built-ins (`decideCommand`) — a package script by the line it runs, where `where`
+ * says which directory the call ran in and how to read a `package.json`. What the work summary calls a CHANGE is a call
+ * `chat/read-only` does not allow (`workSummary.ts`).
+ */
+export function allowsCall(
+  policy: JairaPolicy,
+  permissionSet: PermissionSet,
+  name: string,
+  args: unknown,
+  dialect: CommandDialect,
+  where: { root?: string | undefined; packages?: PackageReader | undefined } = {},
+): boolean | undefined {
+  const mcp = parseMcpSubject(name);
+  if (mcp !== undefined && !RESERVED_MCP_SERVERS.includes(mcp.server)) return mcpModeOf(permissionSet, name)?.mode === "allow";
+  const bare = mcp?.tool ?? name;
+  const standard = TOOL_SPEC_BY_NAME.has(bare) ? bare : declaredNative(bare);
+  if (standard === undefined) return undefined;
+  const own = (subject: string): PermissionSetMode | undefined => (Object.hasOwn(permissionSet.entries, subject) ? permissionSet.entries[subject]!.mode : undefined);
+  if (standard === null) return (permissionSet.other ?? "ask") === "allow";
+  if (standard !== SHELL_SUBJECT) return (own(standard) ?? permissionSet.other ?? "ask") === "allow";
+  const line = lineOfCall(args);
+  if (line === undefined) return false;
+  const judging: ShellPermissionSet = { entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) }, ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}) };
+  const cwd = args !== null && typeof args === "object" && typeof (args as Record<string, unknown>)["cwd"] === "string" ? ((args as Record<string, unknown>)["cwd"] as string) : undefined;
+  return decideCommand(policy, line, dialect, { permissionSet: judging, root: where.root, cwd, packages: where.packages }).action === "allow";
+}
+
+/** The line a shell call runs: its command string, or an argv (codex's `shell`) joined as a shell would read it. */
+function lineOfCall(args: unknown): string | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const input = args as Record<string, unknown>;
+  const line = commandOf(input);
+  if (line !== undefined) return line;
+  const argv = input["command"];
+  if (!Array.isArray(argv) || argv.length === 0 || !argv.every((word): word is string => typeof word === "string")) return undefined;
+  return argv.map(shellWord).join(" ");
 }

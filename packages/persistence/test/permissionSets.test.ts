@@ -6,18 +6,24 @@
  * SAME resolver and the same layers every other reference uses, and that the load path, the lint
  * surface and the snapshot agree about the result.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { shippedLayer, testHome } from "@jaira/testing";
-import { PERMISSION_SET_MARKERS } from "@jaira/shared";
+import { PERMISSION_SET_MARKERS, subjectKindOf } from "@jaira/shared";
 import { environmentOf as callEnvironmentOf, loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
 import { listPermissionSets, loadWorkflowBundle, readPermissionSets } from "../src/permissionSets";
 import { browseWorkflows } from "../src/workflows";
 import { workflowLoadOptions } from "../src/workflowRefs";
+
+/** The shipped `chat/read-only`, as its file says. */
+const SHIPPED_READ_ONLY = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as Record<string, string>;
+/** A map's command subjects (`git status`, `vitest`, `npm test -u`). */
+const commandLinesOf = (map: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(map).filter(([subject]) => subjectKindOf(subject) === "command"));
 
 let dir: string;
 let project: Project;
@@ -390,10 +396,10 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     expect(environmentOf("plan")).toEqual({
       // The nine a conversation has always held, then the eight of decision 0005, served since its
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
-      // The shell is HELD and not on the list: `"bash": "deny"` with no command that allows anything
-      // is a shell with nothing to run, and it is withheld — `deny` at the gate. The Git tools of
-      // decision 0010 follow the web tools, `wait_git_event` among them since the event hub serves it.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "git_checks", "wait_git_event", "open_merge_request", "git_comment", "git_merge", "close_merge_request", "git_push", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      // The shell is on the list: `"bash": "deny"`, but the commands that only read (`git status`,
+      // `npm test`, …) allow, so it is a shell with those to run, each line judged by the map. The Git
+      // tools of decision 0010 follow the web tools, `wait_git_event` among them since the event hub serves it.
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "git_checks", "wait_git_event", "open_merge_request", "git_comment", "git_merge", "close_merge_request", "git_push", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -402,7 +408,8 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           edit: "deny",
           write_file: "deny",
           show_artifact: "allow",
-          bash: "deny",
+          // Offered, so the gate asks and every line is judged by `subjects` below: the file's `deny` stands for any command it does not name.
+          bash: "ask",
           web_fetch: "allow",
           web_search: "allow",
           list_merge_requests: "allow",
@@ -426,7 +433,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
         },
         implementations: {},
         other: "deny",
-        subjects: { bash: "deny" },
+        subjects: { bash: "deny", ...commandLinesOf(SHIPPED_READ_ONLY) },
         // Beside `subjects`: the file they came from, which is what an approval names.
         source: "$/permission-sets/chat/read-only",
         functions: {},

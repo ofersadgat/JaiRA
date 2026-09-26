@@ -164,7 +164,9 @@ describe("a line is judged part by part, against the permission set", () => {
       "git commit": "ask",
       "git rm": "deny",
       "git tag --force": "deny",
+      "git tag -f": "deny",
       "git tag": "allow",
+      "git log --output": "deny",
       other: "deny",
     }).permissionSet,
   )!;
@@ -246,9 +248,36 @@ describe("a line is judged part by part, against the permission set", () => {
     [
       "sort < in.txt >> out.log 2>&1",
       "require_approval",
-      ["«sort» sort asks by permissionSet:bash ~sort~", "«< in.txt» read_file allowed by permissionSet:read_file ~<~", "«>> out.log» write_file asks by permissionSet:write_file ~>>~"],
+      ["«sort» read_file allowed by permissionSet:read_file ~sort~", "«< in.txt» read_file allowed by permissionSet:read_file ~<~", "«>> out.log» write_file asks by permissionSet:write_file ~>>~"],
     ],
     ["curl https://example.com/x", "require_approval", ["«curl https://example.com/x» web_fetch asks by permissionSet:web_fetch ~curl~"]],
+    // A one-letter flag's entry names it inside a cluster, and with its value joined on.
+    ["git tag v1 -af", "deny", ["«git tag v1 -af» git tag -f denied by permissionSet:git tag -f ~git tag~-af~"]],
+    ["git tag -n5", "allow", ["«git tag -n5» git tag allowed by permissionSet:git tag ~git tag~"]],
+    // A long flag's entry names the flag with its value joined on, too.
+    ["git log --output=x.patch", "deny", ["«git log --output=x.patch» git log --output denied by permissionSet:git log --output ~git log --output=x.patch~"]],
+    // A variable that can change what a program runs is not vouched for — before the command, through
+    // an embedder, exported, or set alone for the rest of the line. Colour, locale, CI and a loop's own
+    // lower-case names are not such a variable.
+    ["GIT_EXTERNAL_DIFF=./x git log", "require_approval", ["«GIT_EXTERNAL_DIFF=./x git log» git log asks by parser ~git~"]],
+    ["env NODE_OPTIONS=--require=./x.js git log", "require_approval", ["«git log» git log asks by parser ~git~"]],
+    ["export PATH=/tmp/x; git log", "require_approval", ["«export PATH=/tmp/x» export asks by parser ~export~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["PATH=/tmp/x; git log", "require_approval", ["«PATH=/tmp/x» bash asks by parser ~PATH=/tmp/x~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["printf -v GIT_DIR x; hash -p /tmp/git git", "require_approval", ["«printf -v GIT_DIR x» printf asks by parser ~printf~", "«hash -p /tmp/git git» hash asks by parser ~hash~"]],
+    ["CI=1 NO_COLOR=1 LC_ALL=C git log", "allow", ["«CI=1 NO_COLOR=1 LC_ALL=C git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["x=1; read -r line && export NO_COLOR=1 && cat a.txt", "allow", ["«cat a.txt» read_file allowed by permissionSet:read_file ~cat~"]],
+    // Utilities that read what they are given are the reading tool; `sort -o` writes.
+    [
+      "diff a.txt b.txt; stat a.txt; file a.txt; jq .x a.json",
+      "allow",
+      [
+        "«diff a.txt b.txt» read_file allowed by permissionSet:read_file ~diff~",
+        "«stat a.txt» read_file allowed by permissionSet:read_file ~stat~",
+        "«file a.txt» read_file allowed by permissionSet:read_file ~file~",
+        "«jq .x a.json» read_file allowed by permissionSet:read_file ~jq~",
+      ],
+    ],
+    ["sort -o out.txt in.txt", "require_approval", ["«sort -o out.txt in.txt» write_file asks by permissionSet:write_file ~sort~"]],
   ])("%s ⇒ %s", (line, action, parts) => {
     expect(judged(line)).toEqual({ action, parts });
   });
@@ -515,5 +544,31 @@ describe("policyCanEscalate", () => {
     expect(policyCanEscalate({})).toBe(true);
     // With them off the project says nothing that asks; what a state's permission set asks is gated with the state.
     expect(policyCanEscalate({ builtins: false })).toBe(false);
+  });
+});
+
+/**
+ * A package script is judged by the lines it runs (decision 0007, amended 2026-09-26): its parts stand
+ * in the runner's place on the line, each saying which runner it was reached through.
+ */
+describe("a package script, judged by what it runs", () => {
+  const permissionSet = shellPermissionSetOf(parsePermissionSet({ read_file: "allow", bash: "deny", eslint: "allow", "eslint --fix": "deny", vitest: "allow", other: "deny" }).permissionSet)!;
+  const repo = { dir: "/repo", scripts: { pretest: "eslint .", test: "vitest run", "lint:fix": "eslint --fix ." } };
+  const packages = { at: (dir: string) => (dir === "/repo" ? repo : undefined), workspacesOf: () => [] };
+  const decide = (line: string) => decideCommand({}, line, "posix", { permissionSet, root: "/repo", packages });
+
+  it("puts the pre script and the script where the runner stood", () => {
+    const decision = decide("npm test && cat a.txt");
+    expect(decision.action).toBe("allow");
+    expect(decision.parts.parts.map((p) => [p.text, p.subject, p.via, "npm test && cat a.txt".slice(p.span.start, p.span.end)])).toEqual([
+      ["eslint .", "eslint", ["npm test"], "npm test"],
+      ["vitest run", "vitest", ["npm test"], "npm test"],
+      ["cat a.txt", "read_file", undefined, "cat a.txt"],
+    ]);
+  });
+
+  it("refuses the runner when its script writes, and leaves a script it cannot read to `script`", () => {
+    expect(decide("npm run lint:fix").action).toBe("deny");
+    expect(decideCommand({}, "npm test", "posix", { permissionSet, root: "/repo" }).parts.parts.map((p) => p.subject)).toEqual(["script"]);
   });
 });

@@ -68,8 +68,41 @@ describe("phases", () => {
     expect(phasesOf(waiting, { merge: false, dropIdle: true })).toHaveLength(1);
   });
 
-  it("calls a part that ran more than it read Checked", () => {
-    expect(phasesOf([think(0), bash("npm test", 1), bash("npm run lint", 2), read("a.ts", 3)], { merge: false, dropIdle: true })[0]!.name).toBe("Checked");
+  it("calls running what changes nothing Explored the first time and Checked the second", () => {
+    const names = (entries: WorkEntry[]) => phasesOf(entries, { merge: false, dropIdle: true }).map((p) => p.name);
+    expect(names([think(0), bash("npm test", 1), bash("npm run lint", 2), read("a.ts", 3)])).toEqual(["Explored"]);
+    // The same file read again — another part of it is still the file — and the same line run again.
+    expect(names([think(0), read("a.ts", 1), bash("npm test", 2), think(3), bash("npm  test", 4), call("Read", "file_path", "a.ts", 5)])).toEqual(["Explored", "Checked"]);
+    // More new than again is still exploring.
+    expect(names([think(0), read("a.ts", 1), think(2), read("a.ts", 3), read("b.ts", 4), read("c.ts", 5)])).toEqual(["Explored", "Explored"]);
+  });
+
+  it("calls a part that did again what had failed, and got through, Fixed — whatever made the difference", () => {
+    const names = (entries: WorkEntry[]) => phasesOf(entries, { merge: false, dropIdle: true }).map((p) => p.name);
+    // No edit between: a script, or the world, may have fixed it. Fixed outranks Changed.
+    expect(names([think(0), bash("npm test", 1, false), think(2), bash("npm run setup", 3), bash("npm test", 4)])).toEqual(["Explored", "Fixed"]);
+    expect(names([think(0), bash("npm test", 1, false), think(2), edit("a.ts", 3), bash("npm test", 4)])).toEqual(["Explored", "Fixed"]);
+    // Still running is not yet through; failing again is not fixed.
+    const running: WorkEntry = { kind: "tool", name: "Bash", summary: "npm test", args: { command: "npm test" }, at: t0 + 3000 };
+    expect(names([think(0), bash("npm test", 1, false), think(2), running])).toEqual(["Explored", "Checked"]);
+    expect(names([think(0), bash("npm test", 1, false), think(2), bash("npm test", 3, false)])).toEqual(["Explored", "Checked"]);
+    // What failed once and passed since is not failing any more.
+    expect(names([think(0), bash("npm test", 1, false), bash("npm test", 2), think(3), bash("npm test", 4)])).toEqual(["Fixed", "Checked"]);
+  });
+
+  it("calls a part Changed by what the read-only permission set says of its calls", () => {
+    const verdicts = (entry: { name: string; args?: unknown }): boolean | null | undefined => {
+      if (entry.name === "TodoWrite") return null;
+      const command = (entry.args as { command?: string } | undefined)?.command;
+      return command === undefined ? entry.name === "Read" : !/^git (commit|push)/.test(command);
+    };
+    const names = (entries: WorkEntry[], judged = true) => phasesOf(entries, { merge: false, dropIdle: true, ...(judged ? { verdicts } : {}) }).map((p) => p.name);
+    expect(names([think(0), bash("git commit -m x", 1)])).toEqual(["Changed"]);
+    expect(names([think(0), bash("git status", 1)])).toEqual(["Explored"]);
+    // Before the set has answered — or where nothing asks — a call that edits is a change and nothing else is.
+    expect(names([think(0), bash("git commit -m x", 1)], false)).toEqual(["Explored"]);
+    // A call no set holds is bookkeeping: it is neither new nor again.
+    expect(names([think(0), read("a.ts", 1), think(2), read("a.ts", 3), call("TodoWrite", "todos", "x", 4), call("TodoWrite", "todos", "y", 5)])).toEqual(["Explored", "Checked"]);
   });
 });
 
@@ -155,8 +188,9 @@ describe("in the transcript", () => {
     const working = [...stretch.slice(0, 12), { kind: "tool", name: "Bash", summary: "npx vitest run", args: { command: "npx vitest run" }, at: t0 + 55_000 } as WorkEntry];
     const three = draw(working, { phases: true, rows: 3, thinking: true, notes: "hide-groups" }, true);
     expect(three).toContain("ws-phase current");
-    // The phase in progress says what it is doing, not what it did.
-    expect(three).toContain("Fixing");
+    // The phase in progress says what it is doing, not what it did — and the tests it is running again
+    // have not passed yet, so it is changing until they do, and fixed after.
+    expect(three).toContain("Changing");
     expect(three).not.toContain(">Fixed<");
     expect(draw([...stretch, answer])).toContain(">Fixed<");
     expect(three).toContain("Running ");

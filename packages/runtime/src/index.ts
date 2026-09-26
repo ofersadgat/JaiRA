@@ -27,6 +27,7 @@ export * from "./git";
 export * from "./gitRemotes";
 export * from "./command";
 export * from "./policy";
+export * from "./packageScripts";
 // A run's policy, one recipe for the app and the CLI alike.
 export * from "./runPolicy";
 export * from "./approval";

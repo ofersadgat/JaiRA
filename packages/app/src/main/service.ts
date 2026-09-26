@@ -309,6 +309,9 @@ import {
   parseFakeRules,
   policyCanEscalate,
   projectPolicy,
+  allowsCall,
+  dialectFor,
+  filePackages,
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
@@ -416,6 +419,7 @@ import {
   sessionKey,
   JAIRA_DIR_NAME,
   SHARED_SESSION,
+  READ_ONLY_PERMISSION_SET,
   FORGE_LABELS,
   SECRET_SOURCE_LABELS,
   resultOfSettlement,
@@ -633,6 +637,7 @@ import type {
   WriteFileRequest,
   SavePermissionSetRequest,
   WritePermissionSetRequest,
+  JudgeReadOnlyRequest,
   WritePermissionSetResult,
   ResetPermissionSetRequest,
   PermissionSetsView,
@@ -10133,6 +10138,29 @@ export class AppService {
       tools: AppService.gateableTools(),
       layers: permissionSetLayers(paths).map((layer) => layer.layer),
     };
+  }
+
+  /**
+   * Which of these calls the project's `chat/read-only` lets through with nobody asked, by call id —
+   * `null` for a call no permission set holds (`allowsCall`). What the work summary calls a CHANGE is a
+   * call it does not let through (`workSummary.ts`), so this is read through every layer, the way a
+   * state naming `$/permission-sets/chat/read-only` would read it: a project that adds `make check` to
+   * its read-only set sees `make check` counted as checking, not changing.
+   */
+  judgeReadOnly(request: JudgeReadOnlyRequest): Record<string, boolean | null> {
+    const paths = this.permissionSetPaths(request.project);
+    const choice = readPermissionSets(paths).find((candidate) => candidate.id === READ_ONLY_PERMISSION_SET);
+    const out: Record<string, boolean | null> = {};
+    if (choice === undefined) return out;
+    const permissionSet = parsePermissionSet(choice.decl).permissionSet;
+    const config = (request.project !== undefined && request.project !== SHARED_SESSION ? this.sessionOf(request.project)?.project.config : undefined) ?? this.effectiveConfig();
+    const policy = projectPolicy(config);
+    const dialect = dialectFor(config.execEnvironment);
+    for (const call of request.calls) {
+      // Claude's own `Bash` is a POSIX shell wherever it runs; JaiRA's and codex's run the project's.
+      out[call.id] = allowsCall(policy, permissionSet, call.name, call.args, call.name === "Bash" ? "posix" : dialect, { root: paths.projectDir, packages: filePackages }) ?? null;
+    }
+    return out;
   }
 
   /**

@@ -14,7 +14,7 @@
  * without a window.
  */
 import { toolDisplayOf } from "@jaira/shared/browser";
-import { iconOf, type ThoughtEntry, type WorkEntry, type WorkIconName } from "./transcript";
+import { iconOf, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";
 
 // --- kinds ---------------------------------------------------------------------------------------
 
@@ -299,6 +299,54 @@ function summaryOf(entry: WorkEntry): string {
   return "";
 }
 
+// --- what a call did -------------------------------------------------------------------------------
+
+/**
+ * What the project's read-only permission set says of a call (`permissionSets:judgeReadOnly`): `true`
+ * it lets it through, `false` it does not, `null` no permission set holds it at all (an agent's
+ * bookkeeping — `TodoWrite`). `undefined` while the answer has not come, or where nothing asks.
+ */
+export type ReadOnlyVerdicts = (entry: ToolEntry) => boolean | null | undefined;
+
+/** What a verdict is asked and kept under: the call's name and input — two identical calls are one question. */
+export function verdictKeyOf(entry: ToolEntry): string {
+  return `${entry.name}\u0000${JSON.stringify(entry.args ?? null)}`;
+}
+
+/**
+ * A CHANGE: a call the read-only permission set does not let through — an edit, a command that is not
+ * one of the reading ones, a sub-agent. Until the set has answered, a call that edits is one and
+ * nothing else is.
+ */
+export function isChange(entry: WorkEntry, verdicts?: ReadOnlyVerdicts): boolean {
+  if (entry.kind === "writing") return kindOf(entry) === "write";
+  if (entry.kind !== "tool") return false;
+  const said = verdicts?.(entry);
+  return said === undefined ? kindOf(entry) === "write" : said === false;
+}
+
+/** The line a command call ran: its `command`, an argv joined, or the line it was summarised by. */
+function commandLineOf(entry: ToolEntry): string {
+  const args = entry.args;
+  if (args !== null && typeof args === "object" && !Array.isArray(args)) {
+    const command = (args as Record<string, unknown>)["command"];
+    if (typeof command === "string") return command;
+    if (Array.isArray(command) && command.every((word) => typeof word === "string")) return command.join(" ");
+  }
+  return entry.summary;
+}
+
+/**
+ * The ACTION a call is, for "has it done this before": the file a read reads (another part of it is
+ * still the same file), the line a command runs, else the tool and its whole input.
+ */
+export function actionOf(entry: ToolEntry): string {
+  const kind = kindOf(entry);
+  if (kind === "read") return `read\u0000${pathOf(entry)}`;
+  if (kind === "run") return `run\u0000${commandLineOf(entry).replace(/\s+/g, " ").trim()}`;
+  return `${entry.name}\u0000${JSON.stringify(entry.args ?? null)}`;
+}
+
 // --- phases (5) ----------------------------------------------------------------------------------
 
 /** What a phase did — four fixed names; the reasoning that would say more is usually withheld. */
@@ -315,10 +363,17 @@ export interface WorkPhase {
 
 /**
  * The stretch cut at each thought, and each piece named by the first rule that fits:
- *  - Fixed: it edits a file, and an earlier piece had a failed call;
- *  - Changed: it edits a file;
- *  - Checked: it ran more commands than it read or searched;
- *  - Explored: anything else.
+ *  - Fixed: it did again, and this time it went through, an action that had failed earlier in the
+ *    stretch — the tests that failed now pass. Whatever made the difference is not traced: a script
+ *    can fix as well as an edit can;
+ *  - Changed: a CHANGE — a call the read-only permission set does not let through ({@link isChange});
+ *  - Checked: of its calls that change nothing, at least as many repeat an earlier action as are new
+ *    ({@link actionOf}) — a file read again, the tests run again;
+ *  - Explored: anything else — reading, searching, running what changes nothing for the first time.
+ * A call no permission set holds (`null` — an agent's bookkeeping) counts toward none of them. While
+ * a call is still running it is not yet through, so a phase re-running what failed reads Checking or
+ * Changing until the answer comes, and Fixed after.
+ *
  * With `dropIdle`, a piece whose only lines are rate limits and system notes is left out — it did no
  * work anybody asked for, and its lines are still in "Every step". Even when it is the only piece:
  * then there is no phase at all, only the foot.
@@ -327,19 +382,36 @@ export interface WorkPhase {
  * that would tell them apart, and it is off. After dropping, so a dropped piece between two of one
  * name does not keep them apart.
  */
-export function phasesOf(entries: readonly WorkEntry[], options: { merge: boolean; dropIdle: boolean }): WorkPhase[] {
+export function phasesOf(entries: readonly WorkEntry[], options: { merge: boolean; dropIdle: boolean; verdicts?: ReadOnlyVerdicts | undefined }): WorkPhase[] {
   const cut: number[][] = [];
   entries.forEach((entry, i) => {
     if (entry.kind === "thought" || cut.length === 0) cut.push([]);
     cut[cut.length - 1]!.push(i);
   });
-  let failedBefore = false;
+  // Every action done so far in the stretch, and those whose latest run failed.
+  const done = new Set<string>();
+  const failing = new Set<string>();
   const named = cut.map((indices): WorkPhase => {
-    const kinds = indices.map((i) => kindOf(entries[i]!));
-    const count = (kind: WorkKind): number => kinds.filter((k) => k === kind).length;
-    const name: PhaseName =
-      failedBefore && count("write") > 0 ? "Fixed" : count("write") > 0 ? "Changed" : count("run") > count("read") + count("search") ? "Checked" : "Explored";
-    failedBefore = failedBefore || indices.some((i) => failed(entries[i]!));
+    let fixed = false;
+    let changed = false;
+    let again = 0;
+    let fresh = 0;
+    for (const i of indices) {
+      const entry = entries[i]!;
+      if (entry.kind === "writing") changed ||= isChange(entry, options.verdicts);
+      if (entry.kind !== "tool") continue;
+      const action = actionOf(entry);
+      if (failing.has(action) && entry.ok === true) fixed = true;
+      if (isChange(entry, options.verdicts)) changed = true;
+      else if (options.verdicts?.(entry) !== null) {
+        if (done.has(action)) again++;
+        else fresh++;
+      }
+      done.add(action);
+      if (entry.ok === false) failing.add(action);
+      else if (entry.ok === true) failing.delete(action);
+    }
+    const name: PhaseName = fixed ? "Fixed" : changed ? "Changed" : again > 0 && again >= fresh ? "Checked" : "Explored";
     return { name, indices };
   });
   const shown = options.dropIdle ? named.filter((phase) => !isIdle(entries, phase.indices)) : named;

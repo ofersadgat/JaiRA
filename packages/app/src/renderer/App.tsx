@@ -66,7 +66,7 @@ import { Segmented, SettingsPage } from "./settingsLayout";
 import { SettingsLayerContext, SettingsRowsContext } from "./controls";
 import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSections";
 import { Icon } from "./icons";
-import { WorkLookContext } from "./workSummaryView";
+import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "./workSummaryView";
 import { LicensesPane } from "./licensesPane";
 import { lookOf } from "./appearanceLayer";
 import { useSystemDark } from "./appearance";
@@ -559,6 +559,18 @@ export default function App(): JSX.Element {
     },
   };
   const permissionSetsProject = state.at;
+  /**
+   * What names a phase of work Changed (`workSummary.ts`): the read-only permission set of the project
+   * the window stands on — the shared root's at the root — asked once per call and remembered until
+   * the window stands somewhere else or a permission set changes.
+   */
+  const readOnlyJudge = useMemo(
+    () => readOnlyJudgeOf((calls) => invoke("permissionSets:judgeReadOnly", { project: permissionSetsProject ?? SHARED_SESSION, calls })),
+    [permissionSetsProject],
+  );
+  // A permission set saved from Settings publishes a `workflows` change: what read-only answered is asked again. (An edit made
+  // outside the app to `permission-sets/` is not watched; it is read on the next window move or reload.)
+  useEffect(() => subscribe((message) => void (message.type === "store:invalidate" && message.scope === "workflows" && forgetReadOnly(readOnlyJudge))), [readOnlyJudge]);
   const permissionSetsChannel = useMemo<PermissionSetsChannel>(() => {
     // At the root the window names the shared root rather than nothing: with several projects open,
     // nothing named is a refusal, and with one it would read that project instead of the root.
@@ -2227,6 +2239,7 @@ export default function App(): JSX.Element {
     {/* How the work between two messages is summarised, in every conversation in the window —
         Appearance → Conversation. A context because every transcript reads it, however deep. */}
     <WorkLookContext.Provider value={workLook}>
+    <ReadOnlyJudgeContext.Provider value={readOnlyJudge}>
     <div
       className="app"
       style={{ "--sidebar": `${sidebarShut ? SIDEBAR_RAIL : sidebarWidth}px` } as CSSProperties}
@@ -2903,6 +2916,7 @@ export default function App(): JSX.Element {
         </div>
       ) : null}
     </div>
+    </ReadOnlyJudgeContext.Provider>
     </WorkLookContext.Provider>
     </ToolsFieldProvider>
     </MessageTypeContext.Provider>

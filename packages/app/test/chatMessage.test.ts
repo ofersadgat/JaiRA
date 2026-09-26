@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, chatInstanceIdOf, isChatInstance } from "@jaira/runtime";
-import { READ_ONLY_PRESET_TOOLS, type ChatSettings, type InstanceNode, type PushMessage, type PermissionMode, type PermissionSetDecl } from "@jaira/shared";
+import { READ_ONLY_PRESET_TOOLS, subjectKindOf, type ChatSettings, type InstanceNode, type PushMessage, type PermissionMode, type PermissionSetDecl } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
@@ -141,10 +141,13 @@ describe("the settings a message would run under", () => {
     // The same map as the lowered fields a state's declaration arrives as is the same permission set: read FROM the shipped file rather
     // than derived, because the file is what the match is against and the modes it gives the workflow
     // tools (decision 0005 step 6) are its own — `READ_ONLY_PRESET_TOOLS` predates them.
+    // Its command lines (`git status`, `npm test`) arrive where lowering writes them, in `subjects`.
     const readOnly = shipped("chat/read-only") as Record<string, PermissionMode>;
-    expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: { ...readOnly }, other: "deny" } })).toBe("read-only");
+    const subjects = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subject === "bash" || subjectKindOf(subject) === "command"));
+    const toolLines = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subjectKindOf(subject) !== "command"));
+    expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: toolLines, other: "deny", subjects } })).toBe("read-only");
     // A map naming three of the seventeen is not that permission set — it is a map with the rest unticked.
-    expect(posture({ tools: ["read_file", "bash", "write_file"], permissions: { tools: { ...readOnly }, other: "deny" } })).toBe("custom");
+    expect(posture({ tools: ["read_file", "bash", "write_file"], permissions: { tools: toolLines, other: "deny", subjects } })).toBe("custom");
 
     // The card opens on the bucket whose permission set the map is, and the label is that bucket's.
     expect(planned({ permissionSet: shipped("chat/read-only") }).available.bucket).toBe("chat");

@@ -25,7 +25,7 @@ import {
   type PermissionSet,
   type PermissionSetMode,
 } from "@jaira/shared";
-import type { CommandDialect, CommandWord, ParsedCommand, ShellRequest } from "./command";
+import { variableOf, type CommandDialect, type CommandWord, type ParsedCommand, type ShellRequest } from "./command";
 import {
   EMBEDDERS,
   NO_REQUEST,
@@ -35,6 +35,12 @@ import {
   SCRIPT_EXTENSIONS,
   SCRIPT_INTERPRETERS,
   SCRIPT_RUNNERS,
+  VARIABLE_SETTERS,
+  CONFIGURING_OPTIONS,
+  PACKAGE_SCRIPT_RUNNERS,
+  isHarmlessVariable,
+  isShellLocalName,
+  type PackageScriptRunner,
   type UtilitySpec,
 } from "./shellTables";
 
@@ -139,6 +145,45 @@ function utilityOf(program: string, dialect: CommandDialect): UtilitySpec | unde
   return dialect === "powershell" ? (own(POWERSHELL_UTILITIES) ?? own(POSIX_UTILITIES)) : own(POSIX_UTILITIES);
 }
 
+/** The variables a variable-setting builtin sets that are not harmless (`export PATH=…`, `read GIT_DIR`) — see {@link VARIABLE_SETTERS}. */
+function unsafeSetsOf(command: ParsedCommand): string[] {
+  const spec = Object.hasOwn(VARIABLE_SETTERS, command.program) ? VARIABLE_SETTERS[command.program]! : undefined;
+  if (spec === undefined) return [];
+  const words = command.words ?? [];
+  const after = words.slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  let names: string[];
+  if ("flag" in spec) {
+    const at = after.indexOf(spec.flag);
+    if (at < 0) return [];
+    if (spec.always === true) return [after[at + 1] ?? spec.flag];
+    names = after[at + 1] !== undefined ? [after[at + 1]!] : [];
+  } else {
+    const operands = after.filter((w) => !isFlag(w));
+    names = spec.names === "operands" ? operands : operands.filter((w) => /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(w)).map(variableOf);
+  }
+  // What is exported reaches every program after it, whatever its name. What is not reaches one only
+  // if it was in the environment already — and those are upper case (`PATH`, `GIT_DIR`), where a
+  // loop's `read -r line` is not.
+  const exported = command.program === "export" || ((command.program === "declare" || command.program === "typeset") && after.some((w) => /^-[a-zA-Z]*x/.test(w)));
+  return names.filter((name) => !isHarmlessVariable(name) && (exported || !isShellLocalName(name)));
+}
+
+/**
+ * The part a command is, before it is judged: {@link classifyCommand}, and not vouched for when it sets
+ * a variable that changes what runs, or is given one of its own {@link CONFIGURING_OPTIONS}.
+ */
+function classifyWithSets(command: ParsedCommand, span: TextSpan, dialect: CommandDialect): ClassifiedPart {
+  const part = classifyCommand(command, span, dialect);
+  if (part.unmodelled !== undefined) return part;
+  const setting = (command.sets ?? []).filter((name) => !isHarmlessVariable(name));
+  const own = Object.hasOwn(CONFIGURING_OPTIONS, command.program) ? CONFIGURING_OPTIONS[command.program]! : [];
+  const configuring = (command.leadingFlags ?? []).filter((flag) => own.some((option) => (option.endsWith("=") ? flag.startsWith(option) : flag === option || flag.startsWith(`${option}=`))));
+  if (setting.length === 0 && configuring.length === 0) return part;
+  const { noRequest: _noRequest, ...rest } = part;
+  const why = setting.length > 0 ? `it sets ${setting.join(", ")}, which can change what it runs` : `${configuring.join(", ")} changes what ${command.program} runs`;
+  return { ...rest, unmodelled: why };
+}
+
 function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: CommandDialect): ClassifiedPart {
   const words = command.words ?? [];
   const programWord = words[command.programIndex ?? 0];
@@ -158,6 +203,10 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   }
 
   if (NO_REQUEST[dialect].includes(program)) {
+    const setting = dialect === "posix" ? unsafeSetsOf(command) : [];
+    if (setting.length > 0) {
+      return { ...base, kind: "command", subject: program, matched: programSpan, widths: [], unmodelled: `it sets ${setting.join(", ")}, which can change what runs after it` };
+    }
     return { ...base, kind: "command", subject: program, matched: programSpan, widths: [], noRequest: true, paths: operandsOf(command).map((w) => w.value) };
   }
 
@@ -237,7 +286,7 @@ export function classifyRequest(request: ShellRequest, dialect: CommandDialect):
     const tool = request.direction === "read" ? "read_file" : "write_file";
     return { kind: "redirect", subject: tool, tool, span: request.span, matched: [{ ...request.opSpan }], paths: [request.target], widths: [tool], ...(request.via !== undefined ? { via: request.via } : {}) };
   }
-  return classifyCommand(request.command, request.span, dialect);
+  return classifyWithSets(request.command, request.span, dialect);
 }
 
 // --- the permission set, as the shell reads it ---------------------------------------
@@ -323,6 +372,21 @@ function commandEntriesOf(permissionSet: ShellPermissionSet): CommandEntry[] {
   return out;
 }
 
+/**
+ * Whether a flag an entry names is the flag a command was given — or the entry that refuses it is a
+ * spelling away from never matching:
+ *  - the same word;
+ *  - a long flag with its value joined on: `git diff --output` names `--output=patch.diff`;
+ *  - a one-letter flag inside a cluster of short ones, or with its value joined on: `git push -f`
+ *    names `-fu`, `git grep -O` names `-Ovim`. Where an allowing and a refusing entry then both
+ *    match, they are equally specific and the stricter wins (`matchCommandEntry`).
+ */
+const flagMatches = (named: string, given: string): boolean => {
+  if (given === named) return true;
+  if (named.startsWith("--")) return !named.includes("=") && given.startsWith(`${named}=`);
+  return /^-[A-Za-z0-9]$/.test(named) && /^-[^-]{2,}/.test(given) && given.slice(1).includes(named[1]!);
+};
+
 /** The most specific command entry that matches: program, then its subcommand words as a prefix, then every flag it names. */
 function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
   const operands = operandsOf(command).filter((w) => w.dynamic !== true);
@@ -332,12 +396,12 @@ function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCom
   for (const entry of commandEntriesOf(permissionSet)) {
     if (entry.program !== command.program) continue;
     if (!entry.subs.every((s, i) => subs[i]?.value.toLowerCase() === s)) continue;
-    if (!entry.flags.every((f) => command.flags.includes(f))) continue;
+    if (!entry.flags.every((f) => command.flags.some((g) => flagMatches(f, g)))) continue;
     const score = entry.subs.length * 2 + entry.flags.length;
     if (best !== undefined && (score < best.score || (score === best.score && MODE_RANK(entry.mode) <= MODE_RANK(best.entry.mode)))) continue;
     const all = command.words ?? [];
     const program = all[command.programIndex ?? 0];
-    const flagWords = entry.flags.flatMap((f) => all.find((w) => w.value === f) ?? []);
+    const flagWords = entry.flags.flatMap((f) => all.find((w) => flagMatches(f, w.value)) ?? []);
     best = { entry, score, words: [...(program !== undefined ? [program] : []), ...subs.slice(0, entry.subs.length), ...flagWords] };
   }
   return best;
@@ -368,4 +432,214 @@ export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart):
   if (direct !== undefined) return answer(direct, subject, false);
   if (permissionSet.other !== undefined) return answer(permissionSet.other, OTHER_SUBJECT, false);
   return { mode: "ask", specific: false };
+}
+
+
+// --- a package's script, by name ---------------------------------------------------------------------
+
+/** The workspaces a line picks: by name, name glob or path; every one; the root beside them; less those taken back. */
+export interface WorkspacePicks {
+  picked: string[];
+  all: boolean;
+  root: boolean;
+  excluded: string[];
+}
+
+/** A package manager asked to run a script — which script, with what, and in which package. */
+export interface PackageScriptCall {
+  name: string;
+  /** The words passed on to the script (`npm run lint -- --max-warnings 0` → `["--max-warnings", "0"]`). */
+  args: string[];
+  /** Where the package is found from, as written, when the manager was told (`npm --prefix app test`). */
+  prefix?: string;
+  /** The workspaces picked, when any were. */
+  workspaces?: WorkspacePicks;
+  /** A picked package without the script is passed over rather than an error (`--if-present`, `pnpm -r`). */
+  ifPresent: boolean;
+}
+
+/**
+ * The script a package manager is asked to run: its name, the words passed on to it, and which
+ * package it runs in — the nearest, one found from a `--prefix`, or the workspaces a line picks:
+ * npm's `-w`/`--workspaces`, pnpm's `--filter`/`-r`/`-w`, yarn's `workspace <name>`,
+ * `workspaces run` and `workspaces foreach`. npm reads its own flags anywhere before `--`, so
+ * `npm run build -w app` picks as `npm -w app run build` does. `undefined` when the line names no
+ * script, or gives the manager something this does not read — a flag of its own it does not model
+ * (`--script-shell`), a pick by what a package depends on (`pnpm --filter app...`), a pick by git
+ * history (`--since`): what runs then cannot be read off the files.
+ */
+export function packageScriptOf(command: ParsedCommand): PackageScriptCall | undefined {
+  const runner = Object.hasOwn(PACKAGE_SCRIPT_RUNNERS, command.program) ? PACKAGE_SCRIPT_RUNNERS[command.program]! : undefined;
+  if (runner === undefined || command.dynamic === true) return undefined;
+  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  return command.program === "yarn" ? yarnScriptOf(runner, words) : managerScriptOf(runner, words);
+}
+
+/** A pick as a manager spells it, read into {@link WorkspacePicks}; `false` for one this does not read. */
+function addPick(runner: PackageScriptRunner, picks: WorkspacePicks, value: string): boolean {
+  if (runner.unreadPicks?.some((marker) => value.includes(marker)) === true) return false;
+  const negated = value.startsWith("!");
+  // pnpm's `{packages/app}` is a directory, written so it cannot be mistaken for a name.
+  const bare = (negated ? value.slice(1) : value).replace(/^\{(.*)\}$/, "$1");
+  if (bare === "") return false;
+  (negated ? picks.excluded : picks.picked).push(bare);
+  return true;
+}
+
+/** npm and pnpm: flags anywhere before `--` (pnpm's after the script's name are the script's), and the script's name among the words. */
+function managerScriptOf(runner: PackageScriptRunner, words: readonly string[]): PackageScriptCall | undefined {
+  const cut = words.indexOf("--");
+  const head = cut < 0 ? words : words.slice(0, cut);
+  const tail = cut < 0 ? [] : words.slice(cut + 1);
+  const nameOf = (positionals: readonly string[]): { name: string; used: number } | undefined => {
+    const first = positionals[0];
+    if (first === undefined) return undefined;
+    if (runner.run.includes(first)) return positionals[1] !== undefined ? { name: positionals[1], used: 2 } : undefined;
+    if (Object.hasOwn(runner.named, first)) return { name: runner.named[first]!, used: 1 };
+    if (runner.bare !== undefined && !runner.bare.includes(first)) return { name: first, used: 1 };
+    return undefined;
+  };
+  const positionals: string[] = [];
+  const passed: string[] = [];
+  const picks: WorkspacePicks = { picked: [], all: false, root: false, excluded: [] };
+  let rootOnly = false;
+  let prefix: string | undefined;
+  let ifPresent = false;
+  const has = (list: readonly string[] | undefined, flag: string): boolean => list?.includes(flag) === true;
+  for (let i = 0; i < head.length; i++) {
+    const word = head[i]!;
+    const named = nameOf(positionals) !== undefined;
+    if (!isFlag(word)) {
+      (named ? passed : positionals).push(word);
+      continue;
+    }
+    // pnpm and yarn hand everything after the script's name to the script; npm keeps flags for itself.
+    if (named && runner.passesArgs) {
+      passed.push(word);
+      continue;
+    }
+    const eq = word.startsWith("--") ? word.indexOf("=") : -1;
+    const flag = eq > 0 ? word.slice(0, eq) : word;
+    const inline = eq > 0 ? word.slice(eq + 1) : undefined;
+    const value = (): string | undefined => {
+      const v = inline ?? head[++i];
+      return v === undefined || isFlag(v) ? undefined : v;
+    };
+    const on = inline !== "false";
+    if (has(runner.quiet, flag)) continue;
+    if (has(runner.quietValued, flag)) {
+      if (value() === undefined) return undefined;
+      continue;
+    }
+    if (has(runner.ifPresent, flag)) ifPresent = on;
+    else if (has(runner.workspace, flag)) {
+      const v = value();
+      if (v === undefined || !addPick(runner, picks, v)) return undefined;
+    } else if (has(runner.allWorkspaces, flag)) {
+      if (inline !== undefined && inline !== "true" && inline !== "false") return undefined;
+      picks.all = on;
+    } else if (has(runner.includeRoot, flag)) picks.root = on;
+    else if (has(runner.rootOnly, flag)) rootOnly = on;
+    else if (has(runner.prefix, flag)) {
+      const v = value();
+      if (v === undefined) return undefined;
+      prefix = v;
+    } else return undefined;
+  }
+  const found = nameOf(positionals);
+  if (found === undefined) return undefined;
+  if (rootOnly) {
+    picks.root = true;
+    picks.all = false;
+    picks.picked = [];
+  }
+  const picking = picks.picked.length > 0 || picks.all || rootOnly;
+  return {
+    name: found.name,
+    args: [...positionals.slice(found.used), ...passed, ...tail],
+    ...(prefix !== undefined ? { prefix } : {}),
+    ...(picking ? { workspaces: picks } : {}),
+    // Several workspaces picked, pnpm passes over the ones without the script; one asked for by name, it fails.
+    ifPresent: ifPresent || (picking && runner.skipsMissing === true && (picks.all || picks.picked.length !== 1 || /[*?]/.test(picks.picked[0]!))),
+  };
+}
+
+/** `yarn foreach`'s own flags: those that take a value, and those that change nothing about what runs. */
+const FOREACH_VALUED = ["-j", "--jobs"];
+const FOREACH_QUIET = ["-p", "--parallel", "-i", "--interlaced", "-v", "--verbose", "-t", "--topological", "--topological-dev", "--no-private"];
+
+/**
+ * yarn: `workspace <name> <script>`, classic's `workspaces run <script>`, Berry's
+ * `workspaces foreach [-A] [--include g] [--exclude g] run <script>` — subcommands rather than flags —
+ * then the script as any yarn line names one. `--cwd <dir>` may come first.
+ */
+function yarnScriptOf(runner: PackageScriptRunner, words: readonly string[]): PackageScriptCall | undefined {
+  let at = 0;
+  let prefix: string | undefined;
+  while (words[at] !== undefined && isFlag(words[at]!)) {
+    const word = words[at]!;
+    if (runner.quiet.includes(word)) at++;
+    else if (runner.prefix?.includes(word) === true && words[at + 1] !== undefined) {
+      prefix = words[at + 1];
+      at += 2;
+    } else if (word.startsWith("--cwd=")) {
+      prefix = word.slice("--cwd=".length);
+      at++;
+    } else return undefined;
+  }
+  // A `--cwd` before the subcommand, and another after it, is two answers to one question.
+  const withPrefix = (call: PackageScriptCall | undefined): PackageScriptCall | undefined => {
+    if (call === undefined || prefix === undefined) return call;
+    return call.prefix !== undefined ? undefined : { ...call, prefix };
+  };
+  const first = words[at];
+  if (first === "workspace") {
+    const name = words[at + 1];
+    if (name === undefined || isFlag(name)) return undefined;
+    const inner = managerScriptOf(runner, words.slice(at + 2));
+    if (inner === undefined || inner.workspaces !== undefined) return undefined;
+    return withPrefix({ ...inner, workspaces: { picked: [name], all: false, root: false, excluded: [] }, ifPresent: false });
+  }
+  if (first === "workspaces") {
+    const verb = words[at + 1];
+    if (verb === "run") {
+      const inner = managerScriptOf(runner, words.slice(at + 1));
+      if (inner === undefined || inner.workspaces !== undefined) return undefined;
+      return withPrefix({ ...inner, workspaces: { picked: [], all: true, root: false, excluded: [] }, ifPresent: false });
+    }
+    if (verb !== "foreach") return undefined;
+    const picks: WorkspacePicks = { picked: [], all: false, root: false, excluded: [] };
+    let i = at + 2;
+    for (; i < words.length && isFlag(words[i]!); i++) {
+      const word = words[i]!;
+      const eq = word.startsWith("--") ? word.indexOf("=") : -1;
+      const flag = eq > 0 ? word.slice(0, eq) : word;
+      const value = (): string | undefined => (eq > 0 ? word.slice(eq + 1) : words[++i]);
+      if (flag === "-A" || flag === "--all" || flag === "-W" || flag === "--worktree") {
+        // The whole project — the root is one of its workspaces.
+        picks.all = true;
+        picks.root = true;
+      } else if (flag === "-R" || flag === "--recursive") {
+        // This workspace and what it depends on: not read, so every workspace, which judges more, never less.
+        picks.all = true;
+        picks.root = true;
+      } else if (flag === "--include" || flag === "--exclude") {
+        const v = value();
+        if (v === undefined) return undefined;
+        (flag === "--include" ? picks.picked : picks.excluded).push(v);
+      } else if (FOREACH_VALUED.includes(flag)) {
+        if (value() === undefined) return undefined;
+      } else if (!FOREACH_QUIET.includes(flag)) return undefined;
+    }
+    // `--include` narrows whatever `-A` named to the workspaces it matches.
+    if (picks.picked.length > 0) {
+      picks.all = false;
+      picks.root = false;
+    } else picks.all = true;
+    const inner = managerScriptOf(runner, words.slice(i));
+    if (inner === undefined || inner.workspaces !== undefined) return undefined;
+    // `foreach run` passes over a workspace without the script.
+    return withPrefix({ ...inner, workspaces: picks, ifPresent: true });
+  }
+  return withPrefix(managerScriptOf(runner, words.slice(at)));
 }

@@ -17,7 +17,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type JSX, type
 import type { WorkNotes, WorkRows } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { Popover, useHoverCard } from "./popover";
-import type { WorkEntry } from "./transcript";
+import type { ToolEntry, WorkEntry } from "./transcript";
 import {
   allOf,
   chipsOf,
@@ -31,7 +31,9 @@ import {
   countOf,
   thoughtLineOf,
   windowOf,
+  verdictKeyOf,
   ACTIVE_NAME,
+  type ReadOnlyVerdicts,
   type Said,
   type WorkChip,
   type WorkRun,
@@ -48,6 +50,83 @@ export interface WorkLook {
 export const DEFAULT_WORK_LOOK: WorkLook = { phases: true, rows: 3, thinking: true, notes: "hide-groups" };
 /** Provided by the shell from `appearance.conversation`; the default wherever nothing provides it. */
 export const WorkLookContext = createContext<WorkLook>(DEFAULT_WORK_LOOK);
+
+/**
+ * Where a phase's name learns which calls CHANGED something: the project's read-only permission set,
+ * asked once per distinct call and remembered (`permissionSets:judgeReadOnly`, {@link isChange}).
+ * Provided by the shell for the project it stands on, the Appearance preview's sample calls included;
+ * where nothing provides it (a test's markup), a call that edits is a change and nothing else is.
+ */
+export interface ReadOnlyJudge {
+  /** Answers, by {@link verdictKeyOf} — for the permission set as it was when they were asked. */
+  known: Map<string, boolean | null>;
+  asking: Set<string>;
+  /** Asked, and the asking failed: not asked again until the set changes. */
+  failed: Set<string>;
+  /** Moves each time the set changes, so an answer asked of the old one is not kept. */
+  generation: number;
+  heard: Set<() => void>;
+  ask: (calls: Array<{ id: string; name: string; args: unknown }>) => Promise<Record<string, boolean | null>>;
+}
+export function readOnlyJudgeOf(ask: ReadOnlyJudge["ask"]): ReadOnlyJudge {
+  return { known: new Map(), asking: new Set(), failed: new Set(), generation: 0, heard: new Set(), ask };
+}
+/**
+ * The permission sets changed: every answer is asked again. Remembered only so the conversation does
+ * not ask main about every call on every streaming update — each answer reads the set's layered files
+ * from disk — and never past a change to what it answered.
+ */
+export function forgetReadOnly(judge: ReadOnlyJudge): void {
+  judge.generation++;
+  judge.known.clear();
+  judge.asking.clear();
+  judge.failed.clear();
+  for (const hear of judge.heard) hear();
+}
+export const ReadOnlyJudgeContext = createContext<ReadOnlyJudge | undefined>(undefined);
+
+/** What the read-only set says of each call in `entries`, asking for the ones it has not been asked about; and a count that moves when an answer lands. */
+function useReadOnlyVerdicts(entries: readonly WorkEntry[]): { verdicts: ReadOnlyVerdicts | undefined; heard: number } {
+  const judge = useContext(ReadOnlyJudgeContext);
+  const [heard, setHeard] = useState(0);
+  useEffect(() => {
+    if (judge === undefined) return;
+    const hear = (): void => setHeard((n) => n + 1);
+    judge.heard.add(hear);
+    return () => void judge.heard.delete(hear);
+  }, [judge]);
+  useEffect(() => {
+    if (judge === undefined) return;
+    const wanted = new Map<string, ToolEntry>();
+    for (const entry of entries) {
+      if (entry.kind !== "tool") continue;
+      const key = verdictKeyOf(entry);
+      if (!judge.known.has(key) && !judge.asking.has(key) && !judge.failed.has(key)) wanted.set(key, entry);
+    }
+    if (wanted.size === 0) return;
+    const generation = judge.generation;
+    for (const key of wanted.keys()) judge.asking.add(key);
+    void judge
+      .ask([...wanted].map(([id, entry]) => ({ id, name: entry.name, args: entry.args ?? null })))
+      .then(
+        (said) => {
+          if (judge.generation !== generation) return;
+          for (const [key, verdict] of Object.entries(said)) judge.known.set(key, verdict);
+        },
+        () => {
+          if (judge.generation === generation) for (const key of wanted.keys()) judge.failed.add(key);
+        },
+      )
+      .finally(() => {
+        if (judge.generation !== generation) return;
+        for (const key of wanted.keys()) judge.asking.delete(key);
+        for (const hear of judge.heard) hear();
+      });
+    // `heard`: after the set changes, what was answered is asked again.
+  }, [entries, judge, heard]);
+  const verdicts = useMemo<ReadOnlyVerdicts | undefined>(() => (judge === undefined ? undefined : (entry) => judge.known.get(verdictKeyOf(entry))), [judge]);
+  return { verdicts, heard };
+}
 
 function Pulse(): JSX.Element {
   return (
@@ -234,11 +313,14 @@ export function WorkSummary({
   const now = useNow(working);
   const all = useMemo(() => entries.map((_, i) => i), [entries]);
   const dropIdle = look.notes !== "show";
+  const { verdicts, heard } = useReadOnlyVerdicts(entries);
   const phases = useMemo(() => {
-    if (look.phases) return phasesOf(entries, { merge: !look.thinking, dropIdle });
+    if (look.phases) return phasesOf(entries, { merge: !look.thinking, dropIdle, verdicts });
     // Without phases the stretch is the one group, and the same rule applies to it.
     return dropIdle && isIdle(entries, all) ? [] : [{ name: undefined, indices: all }];
-  }, [entries, look.phases, look.thinking, dropIdle, all]);
+    // `heard` moves when the read-only set answers, and a phase's name may move with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, look.phases, look.thinking, dropIdle, all, verdicts, heard]);
   /** What the summary counts: everything, or — hiding them — all but the rate limits and notes. */
   const counted = (indices: readonly number[]): number[] => (look.notes === "hide" ? indices.filter((i) => !isQuiet(entries[i]!)) : [...indices]);
   // The phase in progress: the one holding the running call — or, between calls, the last one.

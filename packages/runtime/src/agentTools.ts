@@ -150,6 +150,20 @@ export function standardOfAnyNative(native: string): string | undefined {
   return undefined;
 }
 
+/**
+ * What a native name is under any declared agent: the standard tool it stands for, `null` for one
+ * declared with none (`Task`, `Agent` — `other`), `undefined` for one no agent declares.
+ */
+export function declaredNative(native: string): string | null | undefined {
+  let declared: null | undefined;
+  for (const declaration of ALL_DECLARATIONS) {
+    const standard = standardOfNative(declaration, native);
+    if (typeof standard === "string") return standard;
+    if (standard === null) declared = null;
+  }
+  return declared;
+}
+
 // --- the permission set, as a call sees it ---------------------------------------------
 
 /**

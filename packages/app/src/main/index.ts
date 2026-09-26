@@ -495,6 +495,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "file:write": ((request: Parameters<typeof service.writeFile>[0]) => service.writeFile(request)) as Handler,
   "permissionSet:save": ((request: Parameters<typeof service.savePermissionSet>[0]) => service.savePermissionSet(request)) as Handler,
   "permissionSets:read": ((request: Parameters<typeof service.readPermissionSetSettings>[0]) => service.readPermissionSetSettings(request)) as Handler,
+  "permissionSets:judgeReadOnly": ((request: Parameters<typeof service.judgeReadOnly>[0]) => service.judgeReadOnly(request)) as Handler,
   "permissionSets:write": ((request: Parameters<typeof service.writePermissionSetSettings>[0]) => service.writePermissionSetSettings(request)) as Handler,
   "permissionSets:reset": ((request: Parameters<typeof service.resetPermissionSetSettings>[0]) => service.resetPermissionSetSettings(request)) as Handler,
   "events:status": ((request: Parameters<typeof service.readEventStatus>[0]) => service.readEventStatus(request)) as Handler,

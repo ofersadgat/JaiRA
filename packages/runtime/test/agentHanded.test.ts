@@ -112,11 +112,13 @@ describe("a shell the permission set denies, MEASURED in a run", () => {
     expect(handed.shell).toEqual({});
   });
 
-  it("hands the SHIPPED `chat/read-only` no shell", async () => {
+  it("hands the SHIPPED `chat/read-only` a shell for the commands that only read, judged by the map", async () => {
     const decl = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as unknown;
     const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet(decl).permissionSet));
+    // Claude's own `Bash` is gone; ours is served, and `git status` and `cat` run where `rm` and a script do not.
     expect(handed.removed).toContain("Bash");
-    expect(handed.tools["bash"]).toEqual({ reachable: false, via: [] });
+    expect(handed.tools["bash"]).toEqual({ reachable: true, via: ["app"] });
+    expect(handed.shell).toEqual({ command: "allow", read: "allow", write: "deny", script: "deny" });
   });
 
   it("judges a \"no shell but these commands\" map's lines BY THE MAP, where the project's policy would have run them", async () => {

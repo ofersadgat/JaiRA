@@ -184,6 +184,63 @@ export const POSIX_UTILITIES: Readonly<Record<string, UtilitySpec>> = {
   },
   curl: FETCH,
   wget: FETCH,
+  // Utilities that read the files they are given and print — the reading tool, like `cat`.
+  diff: { tool: "read_file", paths: "all", valueFlags: ["-U", "-C", "--unified", "--context", "-x", "--exclude", "-X", "--exclude-from", "-I", "--ignore-matching-lines", "-L", "--label"] },
+  stat: { tool: "read_file", paths: "all", valueFlags: ["-c", "-f", "--format", "--printf"] },
+  file: { tool: "read_file", paths: "all", valueFlags: ["-m", "--magic-file", "-F", "--separator"] },
+  jq: { tool: "read_file", paths: "after-first", valueFlags: ["--arg", "--argjson", "--slurpfile", "--rawfile", "--indent", "-L"], patternFlags: ["-f", "--from-file"] },
+  // `sort -o out` writes `out`: the value is not a `valueFlag`, so it is one of the places, and the whole part is the writing tool.
+  sort: { tool: "read_file", paths: "all", valueFlags: ["-k", "--key", "-t", "--field-separator", "-S", "--buffer-size", "-T", "--temporary-directory"], when: [{ flag: "^-o|^--output", tool: "write_file" }] },
+};
+
+/**
+ * Variables a line may set without changing what a program runs — colour, locale, time zone, CI.
+ * Any other (`PATH`, `LD_PRELOAD`, `GIT_EXTERNAL_DIFF`, `NODE_OPTIONS`) can make an allowed program run
+ * something else, so a part that sets one is not vouched for and asks.
+ */
+export const HARMLESS_VARIABLES: readonly string[] = ["CI", "NO_COLOR", "FORCE_COLOR", "TZ", "LANG", "LANGUAGE", "TERM", "COLUMNS", "LINES"];
+
+/**
+ * Whether setting `name` leaves what runs as it was: {@link HARMLESS_VARIABLES} and the `LC_*` locale
+ * family. PowerShell's `$env:Name` is the same variable, spelled in any case; any other PowerShell
+ * variable is not one this table knows.
+ */
+export function isHarmlessVariable(name: string): boolean {
+  const env = /^\$env:(.+)$/i.exec(name);
+  if (name.startsWith("$") && env === null) return false;
+  const key = env !== null ? env[1]!.toUpperCase() : name;
+  return HARMLESS_VARIABLES.includes(key) || /^LC_[A-Z_]+$/.test(key);
+}
+
+/**
+ * A program's own options that change what it runs — `git -c diff.external=./x diff`, `--config-env`,
+ * `--exec-path=<dir>` — written before its subcommand. A part that has one is not vouched for: no line
+ * about the subcommand can say what it will do. A name ending in `=` is that option with a value
+ * (`git --exec-path` alone only prints where git lives).
+ */
+export const CONFIGURING_OPTIONS: Readonly<Record<string, readonly string[]>> = { git: ["-c", "--config-env", "--exec-path="] };
+
+/** A name no program's environment carries by convention: lower case (`line`, `f`) — a shell's own, until it is exported. */
+export const isShellLocalName = (name: string): boolean => /^[a-z_][a-z0-9_]*$/.test(name);
+
+/**
+ * Builtins that set a variable, and which of their words name it. They change nothing outside the
+ * shell, and are {@link NO_REQUEST} — unless the variable is one that changes what runs next
+ * (`export PATH=/tmp/x; git status`), which makes them a part the parser cannot vouch for.
+ *  - `assignments`: every `NAME=value` operand (`export`, `declare`, `local`);
+ *  - `operands`: every operand is a name (`read NAME`);
+ *  - `flag`: the word after the flag is a name (`printf -v NAME`);
+ *  - `always`: with the flag present, whatever it names (`hash -p /x/git git` points a command elsewhere).
+ */
+export const VARIABLE_SETTERS: Readonly<Record<string, { names: "assignments" | "operands" } | { flag: string; always?: boolean }>> = {
+  export: { names: "assignments" },
+  declare: { names: "assignments" },
+  typeset: { names: "assignments" },
+  local: { names: "assignments" },
+  readonly: { names: "assignments" },
+  read: { names: "operands" },
+  printf: { flag: "-v" },
+  hash: { flag: "-p", always: true },
 };
 
 const PS_PATH_PARAMS = ["-path", "-literalpath", "-lp", "-destination", "-filepath", "-outfile", "-inputobject"];
@@ -332,3 +389,85 @@ export const SCRIPT_RUNNERS: ReadonlyArray<{ program: string; subcommands?: stri
 
 /** File extensions that make a bare word a script (`build.sh`), as against a program on the PATH. */
 export const SCRIPT_EXTENSIONS: readonly string[] = [".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".php", ".ps1", ".bat", ".cmd"];
+
+/** How a package manager names a script out of `package.json` — see {@link PACKAGE_SCRIPT_RUNNERS}. */
+export interface PackageScriptRunner {
+  /** Subcommands after which the next word is the script (`npm run lint`). */
+  run: string[];
+  /** Subcommands that are a script's own name (`npm test`, `npm t` → `test`). */
+  named: Record<string, string>;
+  /** Any other first word is a script of that name, when the package has one and it is not one of these (`pnpm lint`). */
+  bare?: string[];
+  /** Words after the script name go to the script (`pnpm test -u`), where npm keeps them for itself until `--`. */
+  passesArgs: boolean;
+  /** The manager's own flags that change nothing about what runs. Any other flag of its own makes the line one nobody can read off the script. */
+  quiet: string[];
+  /** The manager's own flags that change nothing about what runs and take a value (`pnpm --workspace-concurrency 4`). */
+  quietValued?: string[];
+  /**
+   * Flags whose value picks workspaces — repeatable (`npm -w a -w packages/b`, `pnpm --filter a`): by
+   * name, by a name glob, by a path or a folder above them; `!` before one takes it back.
+   */
+  workspace?: string[];
+  /** Selectors of that value this does not read, which pick by what a package depends on (pnpm's `a...`, `^...`, `[origin/main]`). */
+  unreadPicks?: string[];
+  /** Flags that pick every workspace (`npm --workspaces`). */
+  allWorkspaces?: string[];
+  /** Flags that add the workspace root to the workspaces picked (`npm -ws --include-workspace-root`). */
+  includeRoot?: string[];
+  /** Flags that run the script in the workspace root, wherever the line runs (`pnpm -w lint`). */
+  rootOnly?: string[];
+  /** Flags whose value is the directory the package is found from (`npm --prefix app`). */
+  prefix?: string[];
+  /** Flags that pass over a picked package without the script, where it would otherwise be an error. */
+  ifPresent?: string[];
+  /** Several workspaces picked pass over one without the script unasked (`pnpm -r test`). */
+  skipsMissing?: boolean;
+}
+
+const MANAGER_BUILTINS = [
+  "add", "audit", "bin", "cache", "config", "create", "dedupe", "deploy", "dlx", "env", "exec", "fetch", "global", "help", "i", "import", "info",
+  "init", "install", "licenses", "link", "list", "login", "logout", "ls", "node", "npm", "outdated", "owner", "pack", "patch", "plugin", "prune",
+  "publish", "rebuild", "remove", "rm", "root", "server", "set", "setup", "store", "tag", "unlink", "up", "update", "upgrade", "version", "whoami",
+  "why", "workspace", "workspaces",
+];
+
+/**
+ * Package managers that run a script out of `package.json` by its name. `npm run lint` is judged by
+ * the line the script runs — with its `pre` and `post` scripts, and the words passed on to it — so a
+ * `"lint": "eslint ."` reads what it reads and a `"lint": "eslint --fix ."` writes what it writes.
+ * Workspaces are followed: `npm -w @app/cli run build`, `pnpm --filter @app/cli build` and
+ * `yarn workspace @app/cli build` are the build script of the workspace named `@app/cli`, in its own
+ * directory. yarn's `workspace` and `workspaces` commands are read by `commandParts.ts` itself, since
+ * they are subcommands rather than flags.
+ */
+export const PACKAGE_SCRIPT_RUNNERS: Readonly<Record<string, PackageScriptRunner>> = {
+  npm: {
+    run: ["run", "run-script", "rum", "urn"],
+    named: { test: "test", t: "test", tst: "test", start: "start", stop: "stop", restart: "restart" },
+    passesArgs: false,
+    quiet: ["--silent", "-s", "--quiet", "-q"],
+    workspace: ["-w", "--workspace"],
+    allWorkspaces: ["-ws", "--workspaces"],
+    includeRoot: ["-iwr", "--include-workspace-root"],
+    prefix: ["-C", "--prefix"],
+    ifPresent: ["--if-present"],
+  },
+  pnpm: {
+    run: ["run", "run-script"],
+    named: { test: "test", t: "test", start: "start" },
+    bare: MANAGER_BUILTINS,
+    passesArgs: true,
+    quiet: ["--silent", "-s", "--parallel", "--stream", "--no-bail", "--bail", "--sort", "--no-sort", "--reverse", "--aggregate-output"],
+    quietValued: ["--workspace-concurrency", "--reporter", "--loglevel"],
+    workspace: ["--filter", "-F", "--filter-prod"],
+    unreadPicks: ["...", "^", "["],
+    allWorkspaces: ["-r", "--recursive"],
+    includeRoot: ["--include-workspace-root"],
+    rootOnly: ["-w", "--workspace-root"],
+    prefix: ["-C", "--dir"],
+    ifPresent: ["--if-present"],
+    skipsMissing: true,
+  },
+  yarn: { run: ["run"], named: { test: "test", start: "start" }, bare: MANAGER_BUILTINS, passesArgs: true, quiet: ["--silent", "-s"], prefix: ["--cwd"] },
+};

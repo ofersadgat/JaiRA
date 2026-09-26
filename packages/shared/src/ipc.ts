@@ -1080,6 +1080,17 @@ export interface WritePermissionSetRequest {
   permissionSet: PermissionSetDecl;
 }
 
+/** The permission set the work summary judges a change by: a call it does not let through is one (`workSummary.ts`). */
+export const READ_ONLY_PERMISSION_SET = "chat/read-only";
+
+/** Judge tool calls against the project's {@link READ_ONLY_PERMISSION_SET}, read through every layer. */
+export interface JudgeReadOnlyRequest {
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
+  /** Each call as it was recorded: the name the agent called and its input. `id` is the caller's, returned as the key. */
+  calls: Array<{ id: string; name: string; args: unknown }>;
+}
+
 export interface WritePermissionSetResult {
   /** The file written, as a person reads it. */
   file: string;
@@ -2111,6 +2122,8 @@ export interface IpcContract {
   "permissionSets:write": { request: WritePermissionSetRequest; response: WritePermissionSetResult };
   /** Delete a layer's override of a permission set — see {@link ResetPermissionSetRequest}. */
   "permissionSets:reset": { request: ResetPermissionSetRequest; response: { file: string } };
+  /** Whether each call is one the project's read-only set lets through, by id; `null` where no set holds it — see {@link JudgeReadOnlyRequest}. */
+  "permissionSets:judgeReadOnly": { request: JudgeReadOnlyRequest; response: Record<string, boolean | null> };
   /**
    * What Settings → Tools → Events shows (decision 0010 §2): the project's git remotes from its own
    * `.git/config` — or the shared root's, with no project named — each with its connection and how
@@ -2313,6 +2326,7 @@ export const IPC_CHANNELS = [
   "permissionSets:read",
   "permissionSets:write",
   "permissionSets:reset",
+  "permissionSets:judgeReadOnly",
   "events:status",
   "notices:list",
   "file:create",
