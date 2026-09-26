@@ -11,6 +11,12 @@
       "planner": {
         "model": { "candidates": ["claude-fable-5-1", "gpt-5.6-sol"], "choose": "most-left" },
         "reasoning": { "effort": "high" }
+      },
+      "agent": {
+        "model": {
+          "candidates": ["claude-code/default", "claude-cli/default", "codex-cli/default", "opencode/default"],
+          "choose": "first-available"
+        }
       }
     }
   },

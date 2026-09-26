@@ -455,12 +455,12 @@ describe("the built-in settings layer", () => {
     expect(project.config.functions.smart.model).toBe("quick");
   });
 
-  it("gives a project with no settings at all the presets that ship — simple, coder, planner — and the judge on simple", () => {
+  it("gives a project with no settings at all the presets that ship — simple, coder, planner, agent — and the judge on simple", () => {
     // The REAL layer: `packages/shared/builtin/`, as a project that never wrote a settings file sees it.
     rmSync(join(dir, ".jaira", "settings.json"), { force: true });
     project = openProject(dir, { baseDir: base });
     const presets = presetsOf(project);
-    expect(Object.keys(presets).sort()).toEqual(["coder", "planner", "simple"]);
+    expect(Object.keys(presets).sort()).toEqual(["agent", "coder", "planner", "simple"]);
     expect(presets["simple"]!["model"]).toEqual({ candidates: ["claude-haiku-4-5", "gpt-5.6-luna"], choose: "first-available" });
     expect(presets["coder"]).toEqual({
       model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "most-left" },
@@ -469,6 +469,11 @@ describe("the built-in settings layer", () => {
     expect(presets["planner"]).toEqual({
       model: { candidates: ["claude-fable-5-1", "gpt-5.6-sol"], choose: "most-left" },
       reasoning: { effort: "high" },
+    });
+    // What a workflow script's `agent()` runs on: a coding agent, the first this machine has — Claude
+    // Code (SDK, then CLI), then Codex, then an OpenCode CLI configured under that name.
+    expect(presets["agent"]).toEqual({
+      model: { candidates: ["claude-code/default", "claude-cli/default", "codex-cli/default", "opencode/default"], choose: "first-available" },
     });
     expect(project.config.functions.smart.model).toBe("simple");
   });

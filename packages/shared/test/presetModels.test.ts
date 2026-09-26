@@ -33,9 +33,9 @@ const ROUTES: Record<string, JairaPromptNode> = {
 };
 
 describe("the built-in settings layer", () => {
-  it("ships a document the strict parser accepts, with simple, coder and planner and the judge on simple", () => {
+  it("ships a document the strict parser accepts, with simple, coder, planner and agent and the judge on simple", () => {
     const config = parseConfig(JSON.parse(readFileSync(BUILT_IN, "utf8")));
-    expect(Object.keys(config.models.presets ?? {}).sort()).toEqual(["coder", "planner", "simple"]);
+    expect(Object.keys(config.models.presets ?? {}).sort()).toEqual(["agent", "coder", "planner", "simple"]);
     expect(config.models.presets!["coder"]!["reasoning"]).toEqual({ effort: "high" });
     expect(config.models.presets!["planner"]!["reasoning"]).toEqual({ effort: "high" });
     expect(config.functions.smart.model).toBe("simple");

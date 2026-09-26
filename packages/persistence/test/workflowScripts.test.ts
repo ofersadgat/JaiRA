@@ -11,9 +11,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ExecResult, JsonValue, ResolvedValue } from "@declarative-ai/exec";
 import { moduleHash, validateBundle } from "@declarative-ai/hw";
-import { buildPromptExecutor, executeWorkflow, newRegistry, statusOfResult } from "@jaira/runtime";
-import { testHome } from "@jaira/testing";
+import { buildPromptExecutor, executeWorkflow, newRegistry, statusOfResult, withPresetModels } from "@jaira/runtime";
+import { shippedLayer, testHome } from "@jaira/testing";
 import {
   browseWorkflows,
   canonicalModulePath,
@@ -75,7 +76,12 @@ afterEach(() => {
   rmSync(base, { recursive: true, force: true });
 });
 
-describe("a workflow script in a project", () => {
+/**
+ * These load the TypeScript compiler and type-check real modules — a second alone, and several
+ * seconds on a machine running the whole suite at once, which the default five-second budget does not
+ * cover. A slower machine should make them slower, never fail them.
+ */
+describe("a workflow script in a project", { timeout: 30_000 }, () => {
   it("is listed as the workflow it is, under the script a person edits — and a helper beside it is not", async () => {
     const p = await open();
     const browser = browseWorkflows(p);
@@ -117,6 +123,38 @@ describe("a workflow script in a project", () => {
     const ran = await run();
     expect(statusOfResult(ran)).toBe("completed");
     expect((ran as { value?: unknown }).value).toEqual({ line: "hello, ADA" });
+  });
+
+  it("runs agent() under the built-in agent preset — the first coding agent this machine has", async () => {
+    // The presets JaiRA really ships, not the empty built-in layer every other test runs on.
+    shippedLayer();
+    const p = await open();
+    writeFileSync(join(p.paths.workflowsDir, "fix.ts"), `export const meta = { name: "Fix" };
+export default async function fix() { return await agent("fix the build"); }
+`, "utf8");
+    const bundle = loadWorkflowBundle(readWorkflowFiles(p.paths.workflowsDir), "fix", workflowLoadOptions(p.paths));
+    // The model each call reached the executor with — after the preset chose.
+    const seen: string[] = [];
+    const leaf = {
+      capabilities: { memoizable: true },
+      metrics: { merge: (a: unknown) => a },
+      start: (op: { config?: { model?: string } }) => {
+        seen.push(op.config?.model ?? "");
+        return { events: [], result: Promise.resolve({ value: "fixed", metrics: { durationMs: 0 } } as unknown as ExecResult<ResolvedValue>), cancel: async () => undefined };
+      },
+    };
+    // A machine with Codex and nothing else: both Claude Code routes are passed over.
+    const available = (model: string) => (model === "codex-cli/default" ? { available: true as const, route: "codex-cli" } : { available: false as const, why: "not set up here" });
+    const presets = p.config.models.presets as Record<string, Record<string, JsonValue>>;
+    const result = await executeWorkflow({
+      bundle,
+      inputs: {},
+      registry: newRegistry(),
+      prompt: withPresetModels({ presets, available }, undefined, leaf as never) as never,
+      scripts: scriptModuleOptions()!,
+    });
+    expect(statusOfResult(result)).toBe("completed");
+    expect(seen).toEqual(["codex-cli/default"]);
   });
 
   it("recompiles when a file it read changes, and reuses the compile while none has", async () => {

@@ -344,16 +344,31 @@ export interface PrepareUserModulesOptions {
 }
 
 /**
- * What a run hands the engine for a workflow SCRIPT's imports (hw `EngineConfig.scripts`): the search
- * path they resolve along, the `$`-roots, and the approval gate the symbol index applies — so a
- * script's imported module runs exactly when a function module in the same file would. A fresh vfs,
- * because the run reads what is on disk now. `undefined` when this process built no pair: a script
- * then imports no code.
+ * The preset a workflow script's `agent()` runs under (hw SCRIPTS.md §9: `agent()` is `llm()` under
+ * the host's agent layer). What "an agent" means here is a coding agent, the first this machine has:
+ * the built-in `agent` preset lists the Claude Code routes, Codex and OpenCode, `first-available`. A
+ * preset rather than a fixed route, so a person can reorder or replace it in Settings like any other.
+ */
+export const AGENT_PRESET = "agent";
+
+/**
+ * What a run hands the engine for a workflow SCRIPT (hw `EngineConfig.scripts`): for its imports, the
+ * search path they resolve along, the `$`-roots, and the approval gate the symbol index applies — so a
+ * script's imported module runs exactly when a function module in the same file would; and the layer
+ * every `agent()` call starts from, {@link AGENT_PRESET}. A fresh vfs, because the run reads what is on
+ * disk now. `undefined` when this process built no pair: a script then imports no code.
  */
 export function scriptModuleOptions(): ScriptModuleOptions | undefined {
   const modules = current;
   if (modules === undefined) return undefined;
-  return { vfs: nodeVfs(), requirePath: modules.requirePath, roots: modules.roots, approved: modules.approved };
+  return {
+    vfs: nodeVfs(),
+    requirePath: modules.requirePath,
+    roots: modules.roots,
+    approved: modules.approved,
+    // A config knob, written flat as an operation's knobs are — `OperationFields` types none of them.
+    agent: { configRef: AGENT_PRESET } as ScriptModuleOptions["agent"],
+  };
 }
 
 /** The pair, if this process built it. Sync, because `workflowLoadOptions` is. */

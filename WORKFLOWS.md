@@ -285,6 +285,11 @@ export default async function greet(who: string) {
 - Code a script IMPORTS (`$/lib/shout` above) runs in JaiRA's process, so it
   is approved and frozen exactly as a function module is (§9.1). The script's
   own code is part of the workflow, like an embedded body, and needs no approval.
+- `agent()` runs under the built-in `agent` preset: the first coding agent this
+  machine has — `claude-code`, `claude-cli`, `codex-cli`, then a generic CLI
+  agent named `opencode` (`agents.genericCli`). Edit the preset in Settings to
+  reorder or replace them; `agent(p, { agentType: "coder" })` picks another
+  preset, and `{ model }` a model outright. `llm()` uses the state's own model.
 - Compiling needs the TypeScript compiler JaiRA loads at startup; a process
   that did not load it (a bare library caller) sees no scripts.
 
