@@ -171,8 +171,9 @@ const EMPTY_STACKS: Record<PanelRoom, PanelStack> = { files: EMPTY_STACK, tasks:
 
 /**
  * The layer switch at a settings page's top-right corner — always there, on every page, whatever the
- * page's lead runs to (the person's rulings, 2026-09-23): `Just you | This project | Shared (all
- * projects)`, strongest first. When the checks last ran is Connections' to say, on the section it is
+ * page's lead runs to (the person's rulings, 2026-09-23): `Just you | <project> | Shared (all
+ * projects)`, strongest first — the project's segment wears the open project's NAME (2026-09-25), so
+ * the switch says whose settings a write changes. When the checks last ran is Connections' to say, on the section it is
  * about.
  *
  * One component rather than a picker in each pane, and it is where the no-project rule lives. With
@@ -182,16 +183,17 @@ const EMPTY_STACKS: Record<PanelRoom, PanelStack> = { files: EMPTY_STACK, tasks:
  */
 function SettingsHeader({
   layer,
-  hasProject,
+  project,
   busy,
   onLayer,
 }: {
   layer: ConfigLayer;
-  hasProject: boolean;
+  /** The open project's name, or null with none open. */
+  project: string | null;
   busy: boolean;
   onLayer: (layer: ConfigLayer) => void;
 }): JSX.Element {
-  return <LayerPicker value={layer} layers={settingsLayersFor(hasProject)} onChange={onLayer} disabled={busy} />;
+  return <LayerPicker value={layer} layers={settingsLayersFor(project !== null)} projectName={project ?? undefined} onChange={onLayer} disabled={busy} />;
 }
 
 /** The Just you view's two readings: only what the personal layer states, or every row. */
@@ -2189,6 +2191,13 @@ export default function App(): JSX.Element {
         theme={resolveTheme(look.mode, systemDark)}
         onTheme={actions.setTheme}
         onChooseProject={(mode) => void actions.chooseProject(mode)}
+        // The ⚙ on a project's row: stand on it, and open Settings on ITS layer — the shared root's
+        // own row edits Shared, whose file it is.
+        onProjectSettings={(p) => {
+          actions.standOn(p.project);
+          actions.setConfigLayer(p.kind === "shared" ? "base" : "project");
+          actions.setView("settings");
+        }}
       />
 
       {/* No divider on a collapsed sidebar: the rail is a fixed strip of glyphs, and a handle that
@@ -2556,7 +2565,7 @@ export default function App(): JSX.Element {
                 <SettingsFrame
                   section={state.section}
                   lead={settingsLeadOf(state.section, state.configLayer, state.at)}
-                  aside={<SettingsHeader layer={state.configLayer} hasProject={state.at !== null} busy={state.busy} onLayer={actions.setConfigLayer} />}
+                  aside={<SettingsHeader layer={state.configLayer} project={state.at === null ? null : (shownProjects.find((p) => p.project === state.at)?.label ?? projectName(state.at))} busy={state.busy} onLayer={actions.setConfigLayer} />}
                   layer={state.configLayer}
                   justYou={justYou}
                   onJustYou={setJustYou}

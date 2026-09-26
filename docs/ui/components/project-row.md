@@ -29,6 +29,7 @@ A project's line in the sidebar: a 7px dot in the project's colour, the folder's
 - **Name.** The folder's own name, or `~/.jaira` for the shared root. Closed it is `.data-secondary` in `--dim`; open it is `.data-title`, bold in `--text`. It never changes case or face.
 - **Parent folder.** On the open row only, the name of the folder the project sits in, in `.data-faint`, right-aligned against the pills. It tells two checkouts of the same repository apart.
 - **Counts.** A row of [status-pill](status-pill.md)s for everything in the project: 96px of room closed, 62px open.
+- **Settings.** A 20px `⚙` after the pills, drawn only while the pointer is on the row or the row holds the keyboard, and taking no width otherwise. It opens Settings on that project's layer.
 - **Twisty.** `▸` in `--dim` at the far end of a closed row. It is a mark, not a control: the whole row opens.
 - **Open band.** The open project's section runs full bleed on `--panel` with a 1px `--line` rule above and below, no corners, and 4px of space outside each rule. Its room rows hang 12px in behind a 1px `--rule` line, and the band takes the column's spare height so a drawer inside it scrolls.
 - **Spacing.** A closed row has 5px above and below its name; the open row has 8px above and 6px below.
@@ -48,7 +49,8 @@ A project's line in the sidebar: a 7px dot in the project's colour, the folder's
 
 | On | Does | Feedback |
 | --- | --- | --- |
-| Pointer over the row | Nothing | Ground `--fill-ghost-hover`; tooltip is the project's full path |
+| Pointer over the row | Nothing | Ground `--fill-ghost-hover`; tooltip is the project's full path; the `⚙` appears at the right end |
+| Click the `⚙` | Stands the window on that project and opens Settings on its layer (`Shared (all projects)` for the shared root's row) | The Settings page, its layer switch on the segment named for the project |
 | Click a closed project | Stands the window on that project, in the room it was already showing | The row opens into the band with its rooms, any other open project closes, and the address bar's head changes |
 | Click the open project | Returns the window to the root | The band closes back into a row, and the root rows show every project's work |
 | Click the pills | Marks every ended task in the project as seen | Flat pills leave; live pills stay |

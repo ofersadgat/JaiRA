@@ -198,6 +198,7 @@ export function Sidebar({
   theme,
   onTheme,
   onChooseProject,
+  onProjectSettings,
 }: {
   /** The rows nested under the OPEN project. Empty when the address is standing at the root. */
   views: readonly SidebarView[];
@@ -245,6 +246,11 @@ export function Sidebar({
   theme: "light" | "dark";
   onTheme: (theme: "light" | "dark") => void;
   onChooseProject: (mode: "open" | "init") => void;
+  /**
+   * The ⚙ on a project's row: that project's settings. Shown only while the row is under the pointer
+   * (or the button has focus) — it is a door out of the project, not something the row is about.
+   */
+  onProjectSettings: (project: SidebarProject) => void;
 }): JSX.Element {
   /**
    * One nav row.
@@ -376,6 +382,14 @@ export function Sidebar({
               </span>
             </button>
             <Pills counts={p.counts} budget={open ? OPEN_PILL_BUDGET : ROW_PILL_BUDGET} onClear={p.onSeen} />
+            <button
+              className="side-act side-project-settings"
+              title={`${p.label}'s settings`}
+              aria-label={`Settings for ${p.label}`}
+              onClick={() => onProjectSettings(p)}
+            >
+              ⚙
+            </button>
             {open ? null : <span className="side-twist is-mark">▸</span>}
           </div>
           {open ? <div className="side-views">{views.map((v) => rowOf(v, true, "project"))}</div> : null}

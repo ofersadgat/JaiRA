@@ -25,25 +25,30 @@ const LAYER_TITLES: Record<WorkflowLayer | ConfigLayer, string> = {
  * The configuration's three writable layers by default — Just you, This project, Shared — in the
  * order they win. A pane that holds something JaiRA SHIPS passes `layers` with `system` in it and
  * gets the read-only segment — "Built in" (decision 0006) — and a caller with no project open leaves
- * `project` out, which is what used to be a sentence in place of the switch.
+ * `project` out, which is what used to be a sentence in place of the switch. `projectName` puts the
+ * project's own name on its segment instead of "This project", so the switch says WHOSE settings a
+ * write changes.
  */
 export function LayerPicker<L extends WorkflowLayer | ConfigLayer = ConfigLayer>({
   value,
   onChange,
   disabled,
   layers,
+  projectName,
 }: {
   value: L;
   onChange: (layer: L) => void;
   disabled?: boolean;
   /** The segments, in order. Absent ⇒ the three writable layers. */
   layers?: readonly L[];
+  /** The open project's name, for its segment. Absent ⇒ "This project". */
+  projectName?: string | undefined;
 }): JSX.Element {
   return (
     <div className="layer-picker" role="group" aria-label="Configuration layer">
       {(layers ?? (["you", "project", "base"] as L[])).map((layer) => (
-        <button key={layer} className={value === layer ? "layer-on" : "ghost"} onClick={() => onChange(layer)} disabled={disabled} title={LAYER_TITLES[layer]}>
-          {layer === "system" ? BUILT_IN_LABEL : LAYER_LABELS[layer as ConfigLayer]}
+        <button key={layer} className={value === layer ? "layer-on" : "ghost"} onClick={() => onChange(layer)} disabled={disabled} title={layer === "project" && projectName !== undefined ? `${projectName} only` : LAYER_TITLES[layer]}>
+          {layer === "system" ? BUILT_IN_LABEL : layer === "project" && projectName !== undefined ? projectName : LAYER_LABELS[layer as ConfigLayer]}
         </button>
       ))}
     </div>

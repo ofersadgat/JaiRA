@@ -1038,6 +1038,15 @@ code {
 .side-section.open > .side-project-row > .side-hit {
   padding: 8px 0 6px 8px;
 }
+/* The project's ⚙, at the row's right end: there only while the row is under the pointer or has the
+   keyboard, so a column of projects is not a column of gears — and it takes no width until then. */
+.side-project-settings {
+  display: none;
+}
+.side-project-row:hover > .side-project-settings,
+.side-project-row:focus-within > .side-project-settings {
+  display: grid;
+}
 /* The project's HUE, as a dot (see `hueOf`). Seven pixels of colour rather than a coloured name: the
    name is data and must not be recoloured, and a mark beside it is what the address bar's head crumb
    and the rail's tile can repeat without repeating the string. */
