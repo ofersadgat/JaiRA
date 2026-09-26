@@ -28,7 +28,8 @@ import { GateSurface, type EditorServices } from "./components";
 import { ConfigPanel, type ConfigPanelServices } from "./configPanel";
 import type { FileSurfaceContext } from "./fileTypes";
 import { Icon } from "./icons";
-import { pop, push, selectStep, type PanelEntry, type PanelStack } from "./panelStack";
+import { EVENTS_STATE_ID } from "./automationsModel";
+import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "./panelStack";
 import {
   ChangesView,
   HeldView,
@@ -123,7 +124,16 @@ export interface PanelHost {
 
   /** The New-task form, as a panel. */
   newTask: ReactNode;
+
+  /**
+   * The events task's automations — Settings' Automations editor, for the task's project (or Shared's).
+   * What its Configuration tab draws, under the name "Automations", in place of the workflow's.
+   */
+  automationsOf: (project: string | undefined, onOpenConversation: () => void) => ReactNode;
 }
+
+/** The events task (decision 0010 §4): the one task whose configuration is its automations. */
+const isEventsTask = (detail: TaskDetail | null): boolean => detail?.workflow === EVENTS_STATE_ID;
 
 /** A tab with its icon filled in from the shared table. */
 const tab = (id: string, label: string, extra: Omit<PanelTabSpec, "id" | "label" | "icon"> = {}): PanelTabSpec => ({ id, label, icon: TAB_ICONS[id] ?? "note", ...extra });
@@ -347,7 +357,7 @@ function taskTabs(host: PanelHost, detail: TaskDetail | null, withConversation: 
     tab("steps", "Steps", steps > 0 ? { count: steps } : {}),
     tab("changes", "Changes", {}),
     tab("outputs", "Outputs", {}),
-    ...(withConversation ? [tab("configuration", "Configuration")] : []),
+    ...(withConversation ? [tab("configuration", isEventsTask(detail) ? "Automations" : "Configuration")] : []),
   ];
 }
 
@@ -385,6 +395,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
           case "outputs":
             return <OutputsView detail={detail} sessions={host.context.sessionHistory} onOpen={(title, value) => pushPreview(host, { title, value })} />;
           case "configuration":
+            if (isEventsTask(detail)) return host.automationsOf(project, () => host.onStack((was) => setTab(was, "conversation")));
             return <ConfigCard host={host} stateId={detail.workflow} taskId={detail.taskId} project={project} />;
         }
       };
@@ -412,6 +423,9 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
             return <ChangesView taskId={detail.taskId} project={project} signal={detail.status} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "held":
             return <HeldView held={host.held} onOpen={(item) => pushPreview(host, item)} onDrop={host.unhold} />;
+          case "configuration":
+            // The conversation is the main view's already, so "open it" has nowhere else to go.
+            return isEventsTask(detail) ? host.automationsOf(project, () => undefined) : null;
         }
       };
       return {
@@ -420,7 +434,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
           ...(detail === null ? [] : taskVerbsOf(host, detail, project, false)),
           ...(host.giveBack !== undefined ? [{ icon: "back" as const, label: "Give the conversation back to the panel", onClick: host.giveBack }] : []),
         ],
-        tabs: [tab("steps", "Steps", detail !== null ? { count: countSteps(detail.instances) } : {}), tab("produced", "Produced"), tab("changes", "Changes"), tab("held", "Held", host.held.length > 0 ? { count: host.held.length } : {})],
+        tabs: [tab("steps", "Steps", detail !== null ? { count: countSteps(detail.instances) } : {}), tab("produced", "Produced"), tab("changes", "Changes"), tab("held", "Held", host.held.length > 0 ? { count: host.held.length } : {}), ...(isEventsTask(detail) ? [tab("configuration", "Automations")] : [])],
         tab: entry.tab,
         body: body(),
         scroll: entry.tab !== "steps" || detail === null,

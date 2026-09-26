@@ -121,6 +121,7 @@ import { FunctionsSections } from "./functionsPane";
 import { EventsSection, useEventStatus } from "./eventsPane";
 import { eventsConfigOf } from "./eventsModel";
 import { AutomationsPane, type AutomationsChannel } from "./automationsPane";
+import { EventsTaskAutomations } from "./eventsTaskPanel";
 import { EVENTS_STATE_ID, eventsTaskOf } from "./automationsModel";
 import { DataPane, RunsPane } from "./settingsPages";
 import { ConnectionsPage } from "./connectionsPane";
@@ -379,6 +380,16 @@ export default function App(): JSX.Element {
    */
   const [settingsBody, setSettingsBody] = useState<HTMLDivElement | null>(null);
   const settingsParts = useSettingsParts(settingsBody, state.section);
+  /**
+   * A section of a Settings page asked for from OUTSIDE Settings — the events task's panel sending a
+   * person to Tools → Events. The page is not drawn yet when it is asked, so it is gone to once it is.
+   */
+  const [partWanted, setPartWanted] = useState<string | null>(null);
+  useEffect(() => {
+    if (partWanted === null || !settingsParts.parts.some((part) => part.id === partWanted)) return;
+    settingsParts.go(partWanted);
+    setPartWanted(null);
+  }, [partWanted, settingsParts]);
   /**
    * The remembered layout — every pane size, fold and collapsed branch in the window.
    *
@@ -1832,6 +1843,33 @@ export default function App(): JSX.Element {
         onDone={() => onStack((was) => (topOf(was)?.kind === "newTask" ? (was.entries.length > 1 ? { ...was, entries: was.entries.slice(0, -1), motion: "pop" } : { ...EMPTY_STACK, motion: "replace" }) : was))}
       />
     ),
+    automationsOf: (project, onOpenConversation) => {
+      const at = project ?? state.at ?? SHARED_SESSION;
+      const shared = at === SHARED_SESSION;
+      // Settings on the task's own layer: standing on its project first, since the project layer is
+      // the one the address is on.
+      const toSettings = (section: SettingsSection, part?: string): void => {
+        if (!shared) actions.standOn(at);
+        actions.setConfigLayer(shared ? "base" : "project");
+        actions.setSection(section);
+        actions.setView("settings");
+        if (part !== undefined) setPartWanted(part);
+      };
+      return (
+        <EventsTaskAutomations
+          project={at}
+          projectName={shared ? "Shared" : (state.projects.find((p) => p.project === at)?.label ?? projectName(at))}
+          busy={state.busy}
+          workflows={state.workflows.map((entry) => ({ id: entry.rootId, label: entry.label }))}
+          forms={state.workflowForms}
+          onWorkflow={actions.pickWorkflow}
+          onOpenConversation={onOpenConversation}
+          onEditFile={(layer) => void actions.openWorkflow(EVENTS_STATE_ID, layer)}
+          onOpenEvents={() => toSettings("tools", "events")}
+          onOpenConnections={() => toSettings("connections")}
+        />
+      );
+    },
   };
   const panelFace = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(panelHost, entry);
   /**

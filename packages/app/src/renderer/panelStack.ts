@@ -24,7 +24,8 @@ export const TASK_TABS = ["conversation", "steps", "changes", "outputs", "config
 export type TaskTab = (typeof TASK_TABS)[number];
 /** Beside a conversation that is in the MAIN view — no conversation tab, so it is never on screen twice. */
 export const CONVO_TABS = ["steps", "produced", "changes", "held"] as const;
-export type ConvoTab = (typeof CONVO_TABS)[number];
+/** …and, beside the events task's conversation, its automations (`configuration`, see `isEventsTask`). */
+export type ConvoTab = (typeof CONVO_TABS)[number] | "configuration";
 /** Beside a plain chat: a chat has no workflow, so no steps. */
 export const CHAT_TABS = ["produced", "changes", "held"] as const;
 export type ChatTab = (typeof CHAT_TABS)[number];

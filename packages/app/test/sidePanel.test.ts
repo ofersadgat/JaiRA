@@ -118,6 +118,7 @@ const host = (patch: Partial<PanelHost> = {}): PanelHost =>
     stepsHeight: 300,
     setStepsHeight: () => undefined,
     newTask: null,
+    automationsOf: () => null,
     ...patch,
   }) as PanelHost;
 
@@ -149,6 +150,12 @@ describe("the conversation's context", () => {
   it("has no Conversation tab — the conversation is in the main view", () => {
     const tabs = faceOf(host(), { kind: "convo", key: "convo:t1", taskId: "t1", tab: "steps" }).tabs!.map((tab) => tab.id);
     expect(tabs).toEqual(["steps", "produced", "changes", "held"]);
+  });
+
+  it("beside the events task's conversation, adds its Automations", () => {
+    const tabs = faceOf(host({ detailOf: () => eventsTask }), { kind: "convo", key: "convo:e1", taskId: "e1", tab: "steps" }).tabs!;
+    expect(tabs.map((tab) => tab.id)).toEqual(["steps", "produced", "changes", "held", "configuration"]);
+    expect(tabs.at(-1)!.label).toBe("Automations");
   });
 
   it("beside a plain chat has no Steps either", () => {
@@ -189,5 +196,33 @@ describe("a re-run with changes", () => {
     expect(html).toContain("Start from");
     expect(html).toContain("the beginning");
     expect(html).toContain("before plan › critique");
+  });
+});
+
+const eventsTask = { taskId: "e1", title: "events", workflow: "system/events", status: "running", createdAt: "2026-09-25T00:00:00Z", instances: [], timeline: [], runs: [] } as unknown as NonNullable<PanelHost["detail"]>;
+
+describe("the events task's face", () => {
+  it("calls its Configuration tab Automations, and draws the Automations editor for the task's project there", () => {
+    const asked: Array<string | undefined> = [];
+    const face = faceOf(
+      host({
+        detail: eventsTask,
+        detailOf: () => eventsTask,
+        automationsOf: (project) => {
+          asked.push(project);
+          return createElement("p", null, "the automations");
+        },
+      }),
+      { kind: "task", key: "task:e1", taskId: "e1", project: "C:/work/app", tab: "configuration" },
+    );
+    expect(face.tabs!.find((tab) => tab.id === "configuration")!.label).toBe("Automations");
+    expect(renderToStaticMarkup(createElement("div", null, face.body))).toContain("the automations");
+    expect(asked).toEqual(["C:/work/app"]);
+  });
+
+  it("leaves any other task's Configuration as it was", () => {
+    const other = { ...eventsTask, workflow: "feature" } as typeof eventsTask;
+    const face = faceOf(host({ detail: other, detailOf: () => other }), { kind: "task", key: "task:e1", taskId: "e1", tab: "steps" });
+    expect(face.tabs!.find((tab) => tab.id === "configuration")!.label).toBe("Configuration");
   });
 });
