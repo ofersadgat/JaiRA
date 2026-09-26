@@ -156,7 +156,7 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
 
   it("draws the hierarchy in the picker: each bucket, what it holds, the layer that defines it, nested ones indented", () => {
     const html = draw({ plan: permissionSetPlan({ permissionSet: ASK_FIRST }), startOpen: { card: "Permissions", buckets: true } });
-    const picker = html.slice(html.indexOf('class="cx-submenu"'), html.indexOf('<span class="cx-origin'));
+    const picker = html.slice(html.indexOf('class="cx-submenu cx-from-head"'), html.indexOf('<span class="cx-origin'));
     expect([...picker.matchAll(/padding-left:(\d+)px[^]*?cx-opt-name ellip">([a-z_]+) <span class="cx-src">([^<]*)</g)].map((m) => [m[2], m[1], m[3]])).toEqual([
       ["chat", "7", "built in"],
       ["chat_control", "7", "built in"],

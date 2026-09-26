@@ -49,6 +49,7 @@ import {
   type RailRow,
   type RailStep,
 } from "./rail";
+import { Overlay } from "./popover";
 import { hiddenExits, type DisplayItem, type VisibleRow } from "./stepCompaction";
 
 /** The trunk is the run itself and is not a state anybody named — drawn in the ordinary rule colour. */
@@ -650,7 +651,7 @@ export function RailedRows({
           </div>
         );
       })}
-      <div className="rail-tip" ref={tip} />
+      <Overlay className="rail-tip" ref={tip} />
     </div>
   );
 }

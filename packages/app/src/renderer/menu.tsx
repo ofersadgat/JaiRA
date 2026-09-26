@@ -14,9 +14,9 @@
  * icons. Both are optional and both are off everywhere else: a menu of verbs gains nothing from a
  * column of pictures.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { Icon, type PATHS } from "./icons";
+import { Popover } from "./popover";
 
 export interface MenuItem {
   label: string;
@@ -89,9 +89,8 @@ export interface MenuAnchor extends MenuPoint {
 /**
  * A menu at a point.
  *
- * Positioned by clamping rather than by measuring: a menu opened near the right or bottom edge would
- * otherwise render off-screen, and the window's own size is the only measurement needed to prevent
- * it. Closes on Escape, on any outside click, and on the scroll that carried its own row away — a
+ * Kept inside the window: a menu opened near the right edge is moved left, one near the bottom opens
+ * upward from the point. Closes on Escape, on any outside click, and on the scroll that carried its own row away — a
  * menu anchored to a row that has scrolled off is pointing at the wrong thing, and a menu closed by
  * some other column scrolling is a menu nobody gets to read.
  */
@@ -139,48 +138,17 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
     };
   }, [onClose, origin]);
 
-  const width = MENU_WIDTH;
   /**
-   * Where it goes: guessed for the first paint, then MEASURED.
-   *
-   * The guess used to be the whole story — item count times a row height — and it was wrong the
-   * first time a menu with a title was opened near the bottom of the window, which hung the last
-   * item off the edge. Adding the title to the arithmetic moved the error rather than removing it:
-   * a row's height is type, padding and whatever the theme's font size currently is, and a number
-   * in this file cannot know any of those.
-   *
-   * So the guess only has to be CLOSE — it stops the first frame appearing somewhere absurd — and
-   * the layout effect below reads the real box and settles it before the browser paints. It runs on
-   * every render and returns the same object when nothing moved, so it converges instead of looping.
+   * A float at the pointer (popover.tsx), which is what settles where it goes and what it is drawn
+   * over. Where: MEASURED, not guessed — a guess of item count times a row height was wrong the first
+   * time a menu with a title opened near the bottom of the window and hung its last item off the
+   * edge, because a row's height is type, padding and the theme's font size, which a number in this
+   * file cannot know. Over what: everything. A fixed element still belongs to the nearest ancestor
+   * STACKING CONTEXT, and CodeMirror gives `.cm-scroller` a `z-index: 0` — so a menu opened inside
+   * an editor painted under the splitter beside it until it was rendered into `<body>`, where no
+   * `overflow` or stacking context around the row can reach it.
    */
-  const guessed = anchor.items.length * (anchor.items.some((i) => i.note !== undefined) ? 40 : 27) + 10;
-  const [placed, setPlaced] = useState<{ left: number; top: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el === null) return;
-    const box = el.getBoundingClientRect();
-    const l = Math.min(anchor.x, Math.max(4, window.innerWidth - box.width - 4));
-    const t = Math.min(anchor.y, Math.max(4, window.innerHeight - box.height - 4));
-    setPlaced((was) =>
-      was !== null && Math.abs(was.left - l) < 0.5 && Math.abs(was.top - t) < 0.5 ? was : { left: l, top: t },
-    );
-  });
-  const left = placed?.left ?? Math.min(anchor.x, Math.max(4, window.innerWidth - width - 4));
-  const top = placed?.top ?? Math.min(anchor.y, Math.max(4, window.innerHeight - guessed - 4));
-
-  /**
-   * Rendered into `document.body`, because `position: fixed` is not enough on its own.
-   *
-   * A fixed element still belongs to the nearest ancestor STACKING CONTEXT, and CodeMirror gives
-   * `.cm-scroller` a `z-index: 0` — so a menu opened on anything inside an editor had its
-   * `z-index: 80` measured against the editor's own layer, and painted underneath the splitter
-   * beside it. Nothing about the menu's own numbers could have fixed that; the only answer is not
-   * to be in there.
-   *
-   * A portal also settles clipping for good: `overflow: hidden` on an ancestor cannot reach it, so
-   * the pane, the scroller and the half no longer have an opinion about where a menu may go.
-   */
-  return createPortal(
+  return (
     /*
      * The menu does not take focus, ever.
      *
@@ -192,7 +160,17 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
      * pasted into nothing. Cancelling the default keeps focus exactly where the right-click left it,
      * which is the only state in which those four mean what they say.
      */
-    <div className="context-menu" role="menu" ref={ref} style={{ left, top, width }} onMouseDown={(e) => e.preventDefault()}>
+    <Popover
+      anchor={{ x: anchor.x, y: anchor.y }}
+      side="below"
+      align="start"
+      gap={0}
+      className="context-menu"
+      role="menu"
+      ref={ref}
+      style={{ width: MENU_WIDTH }}
+      onMouseDown={(e) => e.preventDefault()}
+    >
       {anchor.title !== undefined ? <div className="menu-title">{anchor.title}</div> : null}
       {anchor.items.map((item, i) => (
         <button
@@ -211,8 +189,7 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
           {item.note !== undefined ? <span className="menu-note ellip">{item.note}</span> : null}
         </button>
       ))}
-    </div>,
-    document.body,
+    </Popover>
   );
 }
 

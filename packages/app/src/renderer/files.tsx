@@ -41,6 +41,7 @@ import { CrumbBar, alternatives, runCrumbs, type Crumb } from "./crumbs";
 import { editorPaint } from "./editorThemes";
 import { editorPick, pickPalette, viewerPick, type FileSurfaceContext } from "./fileTypes";
 import { AskDialog, ContextMenu, pointOf, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
+import { Popover, usePopover } from "./popover";
 import { RunModeToggle } from "./runViews";
 import { Splitter } from "./splitter";
 import { taskNameOf, taskNamePending } from "./taskName";
@@ -2005,19 +2006,17 @@ export function FileInspector({ doc }: { doc: FileSource | null }): JSX.Element 
  * of the window.
  */
 export function FactsButton({ children }: { children: React.ReactNode }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const pop = usePopover<HTMLSpanElement>();
+  const { open, setOpen } = pop;
   return (
-    <span className="facts-wrap">
+    <span className="facts-wrap" ref={pop.anchor}>
       <button type="button" className={`sp-icon facts-btn${open ? " on" : ""}`} aria-expanded={open} title="About this" onClick={() => setOpen((v) => !v)}>
         <Icon name="info" />
       </button>
       {open ? (
-        <>
-          <span className="facts-scrim" onClick={() => setOpen(false)} />
-          <div className="facts-pop" role="dialog" aria-label="About this">
-            {children}
-          </div>
-        </>
+        <Popover at={pop} side="below" align="end" className="facts-pop" role="dialog" aria-label="About this">
+          {children}
+        </Popover>
       ) : null}
     </span>
   );

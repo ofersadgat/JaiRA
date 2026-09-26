@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type RefObject } from "react";
 import { FORGE_LABELS, anchorNotes, decisionWordOf, shortQuote, type ForgeProviderKind, type ReviewNote } from "@jaira/shared/browser";
 import { BrandIcon, Icon } from "./icons";
+import { Popover } from "./popover";
 import { forgeName as forgeLabel, repliesOnForge } from "./remoteStrip";
 import { invoke } from "./store";
 
@@ -493,22 +494,17 @@ export function NoteComposer({
     ref.current?.focus();
   }, []);
 
-  const WIDTH = 320;
-  const left = Math.max(8, Math.min(selection.rect.left, window.innerWidth - WIDTH - 8));
-  // Below the selection when there is room, above it when there is not.
-  const below = selection.rect.bottom + 8;
-  const fits = below + 160 < window.innerHeight;
-
+  // Below the selection when there is room, above it when there is not; kept inside the window.
   return (
-    <div
+    <Popover
+      anchor={selection.rect}
+      side="below"
+      align="start"
+      gap={8}
       className="note-composer"
       data-testid="note-composer"
       {...{ [KEEPS_SELECTION]: "" }}
-      style={{
-        left,
-        width: WIDTH,
-        ...(fits ? { top: below } : { bottom: window.innerHeight - selection.rect.top + 8 }),
-      }}
+      style={{ width: 320 }}
       // A click inside must not clear the selection the note is about.
       onMouseDown={(e) => e.preventDefault()}
     >
@@ -540,7 +536,7 @@ export function NoteComposer({
           Cancel
         </button>
       </div>
-    </div>
+    </Popover>
   );
 }
 

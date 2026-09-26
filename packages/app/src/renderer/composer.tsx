@@ -106,7 +106,8 @@ import {
   type Parked,
 } from "./composerPermissionSet";
 import { BrandIcon, Icon } from "./icons";
-import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow, useAway } from "./permissionSetRows";
+import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow } from "./permissionSetRows";
+import { Popover, usePopover } from "./popover";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import { AllowanceNumber, ContextMeter, ModelWindow, RouteLeft, SpentNotice, useSpent } from "./usageMeters";
 import { levelsFooter, useModelParameters } from "./modelParameters";
@@ -337,23 +338,14 @@ function ModalityFilter({
   value: readonly string[];
   onChange: (next: string[]) => void;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const away = (event: MouseEvent): void => {
-      if (box.current !== null && !box.current.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
-  }, [open]);
+  const pop = usePopover();
+  const { open, setOpen } = pop;
 
   const toggle = (mode: string): void =>
     onChange(value.includes(mode) ? value.filter((m) => m !== mode) : [...value, mode]);
 
   return (
-    <div className="cx-filter" ref={box}>
+    <div className="cx-filter" ref={pop.anchor}>
       <button
         type="button"
         className={`cx-filter-btn${value.length > 0 ? " on" : ""}`}
@@ -372,8 +364,10 @@ function ModalityFilter({
           ))
         )}
       </button>
+      {/* Below its button — this one hangs inside a popover that already opened upward, so a second
+          upward menu would land off the top of the panel. */}
       {open ? (
-        <div className="cx-filter-pop">
+        <Popover at={pop} side="below" align="end" className="cx-filter-pop">
           {options.map((mode) => (
             <button key={mode} type="button" className={value.includes(mode) ? "on" : undefined} onClick={() => toggle(mode)}>
               <span className="cx-tick">{value.includes(mode) ? "✓" : ""}</span>
@@ -383,7 +377,7 @@ function ModalityFilter({
               <span className="ellip">{mode}</span>
             </button>
           ))}
-        </div>
+        </Popover>
       ) : null}
     </div>
   );
@@ -601,10 +595,10 @@ function BucketPicker({
   onPick: (path: string) => void;
   startOpen?: boolean | undefined;
 }): JSX.Element {
-  const [open, setOpen] = useState(startOpen === true);
-  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
+  const pop = usePopover({ startOpen: startOpen === true });
+  const { open, setOpen } = pop;
   return (
-    <div className="cx-origin-wrap" ref={box}>
+    <div className="cx-origin-wrap" ref={pop.anchor}>
       <button type="button" className="cx-origin cx-origin-pick cx-bucket" aria-expanded={open} title="Which bucket of permission sets these rows are" onClick={() => setOpen((v) => !v)}>
         <span className="cx-chip-icon">
           <Icon name="folder" />
@@ -613,7 +607,7 @@ function BucketPicker({
         <span className="cx-more">›</span>
       </button>
       {open ? (
-        <div className="cx-submenu">
+        <Popover at={pop} side="below" align="start" className="cx-submenu cx-from-head">
           {buckets.map((row) => (
             <button
               key={row.path}
@@ -637,7 +631,7 @@ function BucketPicker({
               </span>
             </button>
           ))}
-        </div>
+        </Popover>
       ) : null}
     </div>
   );
@@ -667,11 +661,11 @@ function KeepPermissionSet({
   onKeep: (name: string, layer: WritableLayer) => Promise<void>;
   startOpen?: boolean | undefined;
 }): JSX.Element {
-  const [open, setOpen] = useState(startOpen === true);
+  const pop = usePopover({ startOpen: startOpen === true });
+  const { open, setOpen } = pop;
   const [draft, setDraft] = useState<{ name?: string; where?: string }>({});
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
   const where = layers.map((layer) => KEEP_WHERE[layer]);
   const schema: Schema = {
     type: "object",
@@ -704,7 +698,7 @@ function KeepPermissionSet({
     );
   };
   return (
-    <div className="cx-origin-wrap" ref={box}>
+    <div className="cx-origin-wrap" ref={pop.anchor}>
       <button
         type="button"
         className={`cx-set-add${ready ? " ready" : ""}`}
@@ -716,7 +710,7 @@ function KeepPermissionSet({
         +
       </button>
       {open && ready ? (
-        <div className="cx-submenu cx-set-new">
+        <Popover at={pop} side="below" align="end" className="cx-submenu cx-set-new">
           <span className="cx-opt-hint">
             Keep these tools and modes as a permission set in <b>{bucket}</b>
           </span>
@@ -733,7 +727,7 @@ function KeepPermissionSet({
               Add
             </button>
           </div>
-        </div>
+        </Popover>
       ) : null}
     </div>
   );
@@ -779,27 +773,11 @@ function Chip({
   startOpen?: boolean;
   children: ReactNode;
 }): JSX.Element {
-  const [open, setOpen] = useState(startOpen === true);
-  const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const away = (event: MouseEvent): void => {
-      if (box.current !== null && !box.current.contains(event.target as Node)) setOpen(false);
-    };
-    const esc = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
+  const pop = usePopover({ startOpen: startOpen === true });
+  const { open, setOpen } = pop;
 
   return (
-    <div className="cx-chip-wrap" ref={box}>
+    <div className="cx-chip-wrap" ref={pop.anchor}>
       <button
         type="button"
         className={`cx-chip${open ? " on" : ""}${origin === "override" ? " own" : ""}`}
@@ -819,7 +797,7 @@ function Chip({
         <span className="ellip">{value}</span>
       </button>
       {open ? (
-        <div className="cx-pop">
+        <Popover at={pop} side="above" align="start" gap={7} className="cx-pop">
           <div className="cx-pop-head">
             <span className="cx-pop-title">{label}</span>
             {lead}
@@ -832,7 +810,7 @@ function Chip({
             ) : null}
           </div>
           {children}
-        </div>
+        </Popover>
       ) : null}
     </div>
   );
@@ -961,6 +939,8 @@ export function Composer({
   const [files, setFiles] = useState<ComposerFile[]>([]);
   /** The `@` completion: what is being typed after it, where it started, and what matched. */
   const [mention, setMention] = useState<{ at: number; query: string; paths: string[] } | null>(null);
+  /** The box — what the `@` list floats above. */
+  const box = useRef<HTMLTextAreaElement>(null);
   const [dropping, setDropping] = useState(false);
   /**
    * Which categories are unfolded. Local, and starting shut: the menu's job when it opens is to say
@@ -1168,6 +1148,7 @@ export function Composer({
           ) : null}
 
           <textarea
+            ref={box}
             className="cx-text"
             value={draft}
             rows={2}
@@ -1180,14 +1161,16 @@ export function Composer({
             onKeyDown={onKey}
           />
 
+          {/* Above the box it is completing into: a list that pushed the box down would move the words
+              being typed while they are being typed. */}
           {mention !== null && mention.paths.length > 0 ? (
-            <div className="cx-mentions">
+            <Popover anchor={box} side="above" align="start" gap={4} matchWidth className="cx-mentions">
               {mention.paths.slice(0, 8).map((path) => (
                 <button key={path} className="cx-mention ellip" onClick={() => pick(path)}>
                   {path}
                 </button>
               ))}
-            </div>
+            </Popover>
           ) : null}
 
           <div className="cx-foot">

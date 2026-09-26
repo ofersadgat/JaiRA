@@ -58,6 +58,7 @@ import {
   type ValidateSchemaResult,
 } from "@jaira/shared/browser";
 import { EditorActions } from "./editorChrome";
+import { Popover } from "./popover";
 import { editorPaint } from "./editorThemes";
 import { viewTheme } from "./fileTypes";
 import { useRenderChoice } from "./renderChoice";
@@ -78,10 +79,6 @@ const HINT_LIMIT = 72;
 
 /** Most completions listed at once. Beyond this the list is a wall rather than a menu. */
 const MENU_LIMIT = 10;
-
-/** The menu's own box, as the placement maths assumes it. Kept in step with `.completions` in CSS. */
-const MENU_WIDTH = 260;
-const MENU_HEIGHT = 190;
 
 export interface SchemaJsonEditorProps {
   text: string;
@@ -199,11 +196,6 @@ export function SchemaJsonEditor({
   const layer = useRef<HTMLPreElement | null>(null);
   /** A zero-width span rendered at the cursor inside the coloured layer — the dropdown's ruler. */
   const anchor = useRef<HTMLSpanElement | null>(null);
-  /** The whole editor. The menu is positioned against THIS rather than against the scrolling stack,
-   *  which is what keeps `overflow: hidden` on the stack from clipping it. */
-  const root = useRef<HTMLDivElement | null>(null);
-  /** Where the dropdown sits, relative to the editor. Null until the anchor has been measured. */
-  const [menuAt, setMenuAt] = useState<{ left: number; top: number; above: boolean } | null>(null);
   const [result, setResult] = useState<ValidateSchemaResult | null>(null);
   const [cursor, setCursor] = useState(0);
   /** Used only when the host controls neither — see {@link SchemaJsonEditorProps.reference}. */
@@ -316,58 +308,6 @@ export function SchemaJsonEditor({
     return insertion.slice(typed.length);
   }, [context, suggestions, highlighted, text, cursor]);
 
-  /**
-   * Put the dropdown under the caret, by measuring the marker sitting there.
-   *
-   * The marker is inside the coloured layer, which lays text out identically to the textarea — so its
-   * rect IS the caret's position, with no font metrics or mirrored copy involved.
-   *
-   * Two containers are read, and they do different jobs. The STACK decides visibility: a marker
-   * scrolled out of the editor means the caret is off screen, and a menu pointing at a caret nobody
-   * can see is worse than no menu. The ROOT decides coordinates, because the stack clips its overflow
-   * — anchoring to it would cut the list off at the editor's bottom edge, which is exactly where a
-   * caret near the end of a document puts it.
-   */
-  const placeMenu = useCallback(() => {
-    const mark = anchor.current;
-    const stack = mark?.closest(".editor-stack");
-    const box = root.current;
-    if (!mark || !stack || !box) {
-      setMenuAt(null);
-      return;
-    }
-    const markRect = mark.getBoundingClientRect();
-    const stackRect = stack.getBoundingClientRect();
-    if (
-      markRect.bottom < stackRect.top ||
-      markRect.top > stackRect.bottom ||
-      markRect.left < stackRect.left - 1 ||
-      markRect.left > stackRect.right
-    ) {
-      setMenuAt(null);
-      return;
-    }
-    const boxRect = box.getBoundingClientRect();
-    // Flip above the caret when the list would run off the bottom of the window.
-    const above = markRect.bottom + MENU_HEIGHT > window.innerHeight;
-    setMenuAt({
-      left: Math.max(0, Math.min(markRect.left - boxRect.left, boxRect.width - MENU_WIDTH)),
-      top: (above ? markRect.top : markRect.bottom) - boxRect.top,
-      above,
-    });
-  }, []);
-
-  // `useLayoutEffect` so the position is set before the browser paints — measuring in an ordinary
-  // effect would show the menu at its previous spot for one frame, which reads as the menu lagging
-  // the cursor rather than following it.
-  useLayoutEffect(() => {
-    if (suggestions.length === 0) {
-      setMenuAt(null);
-      return;
-    }
-    placeMenu();
-  }, [suggestions, at.line, at.column, text, wrapping, lines, placeMenu]);
-
   // A changed list invalidates the selection: index 3 of the old list is not index 3 of the new one.
   useEffect(() => {
     setHighlighted(0);
@@ -406,16 +346,14 @@ export function SchemaJsonEditor({
     return () => observer.disconnect();
   }, []);
 
-  /** Keep the coloured layer under the text, on both axes — and the dropdown under the caret. */
+  /** Keep the coloured layer under the text, on both axes. The dropdown follows by itself: it is a float anchored to the marker. */
   const syncScroll = useCallback(() => {
     const element = area.current;
     const behind = layer.current;
     if (!element || !behind) return;
     behind.scrollTop = element.scrollTop;
     behind.scrollLeft = element.scrollLeft;
-    // The marker moved with the layer, so anything anchored to it has to be re-measured.
-    placeMenu();
-  }, [placeMenu]);
+  }, []);
 
   /**
    * Replace a span of the document — through the browser's own editing pipeline.
@@ -572,7 +510,7 @@ export function SchemaJsonEditor({
   // `editorPaint`. Null where nothing was said, which leaves the window's own palette standing.
   const paint = editorPaint(viewTheme(mime ?? "application/json", "text", readOnly ? "read" : "write", chosen));
   return (
-    <div className={`file-edit schema-edit${paint === null ? "" : ` ${paint.className}`}`} style={paint?.style} ref={root}>
+    <div className={`file-edit schema-edit${paint === null ? "" : ` ${paint.className}`}`} style={paint?.style}>
       {/* `edit-bar` is the row every editing surface opens with — see `editorChrome`. What is IN it
           differs (a schema picker here, a path and a tab switch on the state form); that it is one
           quiet line of chrome above the text, and never part of the document, does not. */}
@@ -678,11 +616,16 @@ export function SchemaJsonEditor({
         />
       </div>
 
-      {showMarker && menuAt !== null ? (
-          <div
-            className={`completions${menuAt.above ? " above" : ""}`}
-            style={{ left: menuAt.left, top: menuAt.top }}
-          >
+      {/*
+        * Under the caret, by the marker sitting there: the marker is inside the coloured layer, which
+        * lays text out identically to the textarea, so its rect IS the caret's position — no font
+        * metrics, no mirrored copy. A float, so the editor's own `overflow` cannot cut the list off at
+        * its bottom edge, which is exactly where a caret near the end of a document puts it; above the
+        * caret when the window has no room below; hidden while the caret is scrolled out of the editor,
+        * because a menu pointing at a caret nobody can see is worse than no menu.
+        */}
+      {showMarker ? (
+          <Popover anchor={anchor} side="below" align="start" gap={2} className="completions">
             <div className="completions-head sub">
               <span className="ellip">
                 {context !== null && context.path.length > 0 ? `inside ${context.path.join(".")}` : "at the top level"}
@@ -714,7 +657,7 @@ export function SchemaJsonEditor({
           {suggestions.length > MENU_LIMIT ? (
             <div className="completions-more sub">+{suggestions.length - MENU_LIMIT} more — keep typing</div>
           ) : null}
-        </div>
+        </Popover>
       ) : null}
 
 

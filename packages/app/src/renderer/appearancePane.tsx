@@ -30,7 +30,7 @@
  *    shell. A sample string cannot show that a data font is wider than the column.
  *  - **The proportional check is a NOTE, not a block.** It is their app.
  */
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { useMemo, useState, type JSX, type ReactNode } from "react";
 import {
   PALETTES,
   SIZE_LIMITS,
@@ -48,6 +48,7 @@ import {
   type ThemeMode,
 } from "@jaira/shared/browser";
 import { FileTypesPane } from "./fileTypesPane";
+import { Popover, usePopover } from "./popover";
 import { SizeStep } from "./editorKnobs";
 import {
   DEFAULT_APP_STACK,
@@ -120,18 +121,10 @@ function FamilyStack({
   disabled?: boolean;
   onChange: (families: string[]) => void;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
   // A click anywhere else closes it. The menu is a transient choice, not a mode, and leaving it open
   // over the field below is what makes a popover feel stuck.
-  useEffect(() => {
-    if (!open) return undefined;
-    const away = (e: MouseEvent): void => {
-      if (!box.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
-  }, [open]);
+  const pop = usePopover();
+  const { open, setOpen } = pop;
 
   // Always against the CHOSEN list, never against what is shown: adding the first family has to
   // produce a stack of one, not a stack of ours plus theirs.
@@ -141,7 +134,7 @@ function FamilyStack({
   const shown = shownFamilies(families, voice);
   const chosen = families.length > 0;
   return (
-    <div className="face-box" ref={box}>
+    <div className="face-box" ref={pop.anchor}>
       <div className={`face-stack${open ? " open" : ""}`}>
         {shown.map((family, i) => {
           const note = warn?.(family);
@@ -169,8 +162,12 @@ function FamilyStack({
           + add…
         </button>
       </div>
+      {/* It OVERLAYS what is below rather than pushing it down: a menu that reflows the page moves the
+          control you opened it from out from under the pointer. */}
       {open ? (
-        <FaceMenu families={families} ours={ours} fallback={fallback} suggested={suggested} voice={voice} onToggle={toggle} />
+        <Popover at={pop} side="below" align="start" gap={3} matchWidth className="face-menu">
+          <FaceMenu families={families} ours={ours} fallback={fallback} suggested={suggested} voice={voice} onToggle={toggle} />
+        </Popover>
       ) : null}
     </div>
   );
@@ -213,7 +210,7 @@ function FaceMenu({
     setTyped("");
   };
   return (
-    <div className="face-menu">
+    <>
       {/* What the list IS, which is not what it was called: these are the faces worth offering by
           name, and whether each one is on this machine is said on the row itself. A head that read
           "installed" over rows saying "not on this machine" was the menu contradicting itself. */}
@@ -263,7 +260,7 @@ function FaceMenu({
         <span className="face-tick" />
         <span className="app-secondary">always ends with the default stack</span>
       </div>
-    </div>
+    </>
   );
 }
 

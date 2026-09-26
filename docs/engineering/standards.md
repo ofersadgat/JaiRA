@@ -2,7 +2,7 @@
 id: engineering/standards
 type: standing
 status: proposed
-updated: 2026-08-04
+updated: 2026-09-25
 ---
 
 # Code standards
@@ -61,6 +61,19 @@ to, when a name is allowed to be long.
 - (To write: where a test file lives relative to its subject; what may be faked;
   when an integration test is required rather than allowed.)
 
+## UI
+
+- **Nothing floats in place.** A popover, submenu, dropdown, completion list,
+  hover card or tooltip is rendered through `Popover` or `Overlay`
+  (`packages/app/src/renderer/popover.tsx`), which puts it in `<body>`, places
+  it against its anchor, and handles outside-press and Escape. Never
+  `position: absolute` plus a z-index inside the opener: every `overflow`
+  around it clips it and every stacking context above it paints over it, and
+  no z-index can fix either. A float's CSS rule says what it looks like and
+  never where it is. A z-index in `styles.css` is 0–9 (layering inside one
+  component) or a `--z-*` layer token. `packages/app/test/floatLayers.test.ts`
+  enforces this; `packages/app/shots/floats.mts` checks it in the running app.
+
 ## Logging and observability
 
 _To write._ What is journalled versus logged, what a log line owes the operator
@@ -77,3 +90,4 @@ the code.
 | Date | What changed | What forced it |
 | --- | --- | --- |
 | 2026-08-04 | Created with the rules already enforced; the rest left as headings | The docs tree was created |
+| 2026-09-25 | *Nothing floats in place* (UI) | Popovers kept coming up covered or clipped — the latest was the Tools card's mode picker cut off by the category it opened in |

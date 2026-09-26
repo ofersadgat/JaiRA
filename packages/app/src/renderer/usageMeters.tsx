@@ -17,8 +17,7 @@
  * Render functions (SHELL's standing rule): everything arrives as props or from the limits store, so
  * each state is one static render. Numbers are written for a person by `@jaira/shared`'s formatters.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type JSX, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useRef, useState, type JSX, type ReactNode } from "react";
 import {
   contextFill,
   creditPercent,
@@ -43,98 +42,13 @@ import {
   type WaitingItem,
 } from "@jaira/shared/browser";
 import { BrandIcon, Icon } from "./icons";
+import { Popover, useHover, usePopover, type FloatAlign, type PopoverHandle } from "./popover";
 import { accountFor, actOnWaiting, refreshAccount, useLimits, useLimitsWatch, useNow, useUsageFigures } from "./limitsStore";
 
 // --- the pieces everything here is drawn from -----------------------------------------------
 
-interface Pop {
-  open: boolean;
-  setOpen: (v: boolean | ((was: boolean) => boolean)) => void;
-  /** The button's wrapper — what the popover is placed against. */
-  ref: React.RefObject<HTMLDivElement | null>;
-  /** The popover itself, which is not inside `ref` (see {@link Floating}). */
-  pop: React.RefObject<HTMLDivElement | null>;
-}
-
-/** Open on a click, closed by a click elsewhere or Escape — the composer chips' own behaviour. */
-function usePop(startOpen = false): Pop {
-  const [open, setOpen] = useState(startOpen);
-  const ref = useRef<HTMLDivElement>(null);
-  const pop = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (event: MouseEvent): void => {
-      const target = event.target as Node;
-      if (ref.current !== null && !ref.current.contains(target) && !(pop.current?.contains(target) ?? false)) setOpen(false);
-    };
-    const esc = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
-  return { open, setOpen, ref, pop };
-}
-
-/** Room kept between a popover and its button, and between a popover and the window's edge. */
+/** Room between a usage popover and its button — a little more than a menu's, it is a card. */
 const POP_GAP = 8;
-const POP_EDGE = 4;
-
-/**
- * A popover drawn over EVERYTHING — the window's top bar, a side panel, whatever holds its button.
- *
- * In `document.body` and fixed, for the context menu's reason (menu.tsx): a popover inside its
- * button's wrapper is clipped by every `overflow` around it and painted under every stacking context
- * above it, and the composer's came up UNDER the top bar. It opens above its button — its left edges
- * or its right edges lined up, as `align` says — or below when there is more room there, is kept
- * inside the window, and follows the button when anything scrolls or the window resizes. With no
- * document (a static render) it stays where it is written.
- */
-function Floating({ at, align, children }: { at: Pop; align: "left" | "right"; children: ReactNode }): JSX.Element {
-  const [placed, setPlaced] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
-  const [, setMoved] = useState(0);
-  const { ref: anchor, pop } = at;
-  useLayoutEffect(() => {
-    const a = anchor.current?.getBoundingClientRect();
-    const box = pop.current?.getBoundingClientRect();
-    if (a === undefined || box === undefined) return;
-    const above = a.top - POP_GAP - POP_EDGE;
-    const below = window.innerHeight - a.bottom - POP_GAP - POP_EDGE;
-    const up = box.height <= above || above >= below;
-    const maxHeight = Math.max(120, up ? above : below);
-    const height = Math.min(box.height, maxHeight);
-    const top = up ? a.top - POP_GAP - height : a.bottom + POP_GAP;
-    const want = align === "left" ? a.left : a.right - box.width;
-    const left = Math.max(POP_EDGE, Math.min(want, window.innerWidth - box.width - POP_EDGE));
-    // Every render, converging: the same place again is the same object, so it settles at once.
-    setPlaced((was) => (was !== null && Math.abs(was.left - left) < 0.5 && Math.abs(was.top - top) < 0.5 && was.maxHeight === maxHeight ? was : { left, top, maxHeight }));
-  });
-  useEffect(() => {
-    const move = (): void => setMoved((n) => n + 1);
-    window.addEventListener("scroll", move, true);
-    window.addEventListener("resize", move);
-    return () => {
-      window.removeEventListener("scroll", move, true);
-      window.removeEventListener("resize", move);
-    };
-  }, []);
-  if (typeof document === "undefined") return <>{children}</>;
-  return createPortal(
-    <div
-      className="um-float"
-      ref={pop}
-      // Measured before it is seen: the first frame is laid out hidden, then placed.
-      style={placed === null ? { visibility: "hidden", left: 0, top: 0 } : { left: placed.left, top: placed.top, maxHeight: placed.maxHeight }}
-    >
-      {children}
-    </div>,
-    document.body,
-  );
-}
 
 /** A ring `pct` of the way round, in a tone; an empty dashed ring when there is no figure. */
 export function Ring({ pct, tone, size = "md" }: { pct: number | null; tone: string; size?: "sm" | "md" | "lg" }): JSX.Element {
@@ -191,8 +105,8 @@ export function ContextMeter({
   onCompact?: ((focus?: string) => void) | undefined;
   startOpen?: boolean | undefined;
 }): JSX.Element {
-  const pop = usePop(startOpen === true);
-  const { open, setOpen, ref } = pop;
+  const pop = usePopover({ startOpen: startOpen === true });
+  const { open, setOpen } = pop;
   const fill = context ? contextFill(context, route) : null;
   const tone = context ? toneOfContext(fill) : "none";
   const text = context === null || context === undefined ? null : fill === null ? formatTokens(context.used, true) : fill >= 80 ? `${round(fill)}%` : null;
@@ -203,20 +117,18 @@ export function ContextMeter({
         ? `This conversation holds ${formatTokens(context.used)} tokens`
         : `This conversation: ${round(fill)}% of the context (${formatTokens(context.used)} of ${formatTokens(context.window ?? 0)} tokens)`;
   return (
-    <div className="cx-chip-wrap um-wrap" ref={ref}>
+    <div className="cx-chip-wrap um-wrap" ref={pop.anchor}>
       <button type="button" className={`um-meter${open ? " on" : ""}`} aria-expanded={open} title={title} onClick={() => setOpen((v) => !v)}>
         <Ring pct={fill} tone={tone} />
         {text !== null ? <span className={`um-meter-text um-t-${tone}`}>{text}</span> : null}
       </button>
       {open ? (
-        <Floating at={pop} align="right">
-          <div className="cx-pop um-pop um-pop-context">
-            <div className="cx-pop-head">
-              <span className="cx-pop-title">Context</span>
-            </div>
-            <ContextDetail context={context} route={route} busy={busy} onCompact={onCompact} />
+        <Popover at={pop} side="above" align="end" gap={POP_GAP} className="cx-pop um-pop um-pop-context">
+          <div className="cx-pop-head">
+            <span className="cx-pop-title">Context</span>
           </div>
-        </Floating>
+          <ContextDetail context={context} route={route} busy={busy} onCompact={onCompact} />
+        </Popover>
       ) : null}
     </div>
   );
@@ -238,6 +150,8 @@ export function ContextDetail({
   hover?: string | undefined;
 }): JSX.Element {
   const [shown, setShown] = useState<string | undefined>(hover);
+  /** The section — a category's detail flies out to its left, beside the popover. */
+  const section = useRef<HTMLElement>(null);
   const [focusing, setFocusing] = useState(false);
   const [focus, setFocus] = useState("");
   if (context === null || context === undefined) {
@@ -254,7 +168,7 @@ export function ContextDetail({
   const total = window ?? Math.max(context.used, 1);
   const open = parts.find((p) => p.name === shown);
   return (
-    <section className={`um-sec um-${tone}`}>
+    <section className={`um-sec um-${tone}`} ref={section}>
       <div className="um-sec-head">
         <span className="um-sec-title">This conversation</span>
         <span className="um-sec-sub mono ellip">{context.model}</span>
@@ -339,7 +253,7 @@ export function ContextDetail({
               </button>
             ))}
           </div>
-          {open !== undefined && open.parts !== undefined && open.parts.length > 0 ? <PartFlyout part={open} window={window} /> : null}
+          {open !== undefined && open.parts !== undefined && open.parts.length > 0 ? <PartFlyout part={open} window={window} beside={section} /> : null}
         </div>
       ) : null}
     </section>
@@ -347,7 +261,7 @@ export function ContextDetail({
 }
 
 /** One category opened: what it is made of, grouped where the parts are groups. */
-function PartFlyout({ part, window }: { part: ContextPart; window: number | null }): JSX.Element {
+function PartFlyout({ part, window, beside }: { part: ContextPart; window: number | null; beside: React.RefObject<HTMLElement | null> }): JSX.Element {
   const max = Math.max(1, ...(part.parts ?? []).flatMap((p) => [p.tokens, ...(p.parts ?? []).map((q) => q.tokens)]));
   const row = (p: ContextPart): JSX.Element => (
     <div key={`${p.name}:${p.tokens}`} className={`um-fly-row${p.tokens === 0 ? " is-dim" : ""}`}>
@@ -360,7 +274,7 @@ function PartFlyout({ part, window }: { part: ContextPart; window: number | null
     </div>
   );
   return (
-    <div className="um-fly" role="tooltip">
+    <Popover anchor={beside} side="left" align="end" gap={22} className="um-fly" role="tooltip">
       <div className="um-fly-head">
         <span className="um-fly-title">{part.name}</span>
         <span className="um-fly-sub">
@@ -378,22 +292,35 @@ function PartFlyout({ part, window }: { part: ContextPart; window: number | null
           row(p)
         ),
       )}
-    </div>
+    </Popover>
   );
 }
 
 /** On an answer's rail: how full the conversation was after it, with the breakdown on hover. */
-export function TurnContext({ context, before, route }: { context: ContextReading; before?: ContextReading | undefined; route?: string | undefined }): JSX.Element {
+export function TurnContext({
+  context,
+  before,
+  route,
+  startOpen,
+}: {
+  context: ContextReading;
+  before?: ContextReading | undefined;
+  route?: string | undefined;
+  /** The breakdown drawn from the first render — for a still picture. */
+  startOpen?: boolean | undefined;
+}): JSX.Element {
+  const hover = useHover<HTMLSpanElement>();
   const fill = contextFill(context, route);
   const tone = toneOfContext(fill);
   const prior = before !== undefined ? contextFill(before, route) : null;
   const window = context.window;
   const parts = context.breakdown ?? [];
   return (
-    <span className={`um-turn um-${tone}`} tabIndex={0} aria-label={fill === null ? `${formatTokens(context.used)} tokens in context after this reply` : `${round(fill)}% of the context after this reply`}>
+    <span className={`um-turn um-${tone}`} ref={hover.anchor} {...hover.bind} tabIndex={0} aria-label={fill === null ? `${formatTokens(context.used)} tokens in context after this reply` : `${round(fill)}% of the context after this reply`}>
       <Ring pct={fill} tone={tone} size="sm" />
       <span className="um-turn-n">{fill === null ? formatTokens(context.used, true) : `${round(fill)}%`}</span>
-      <span className="um-tip" role="tooltip">
+      {hover.open || startOpen === true ? (
+      <Popover anchor={hover.anchor} side="above" align="end" className="um-tip" role="tooltip">
         <span className="um-tip-head">
           <b className={`um-t-${tone}`}>{fill === null ? formatTokens(context.used, true) : `${round(fill)}%`}</b> after this reply ·{" "}
           {window !== null ? `${formatTokens(context.used)} of ${formatTokens(window)}` : `${formatTokens(context.used)} tokens`}
@@ -414,7 +341,8 @@ export function TurnContext({ context, before, route }: { context: ContextReadin
           </span>
         ) : null}
         <span className="um-tip-row mono">{context.model}</span>
-      </span>
+      </Popover>
+      ) : null}
     </span>
   );
 }
@@ -579,19 +507,17 @@ export function AllowanceNumber({
   const mode = useUsageFigures();
   const now = useNow();
   const account = accountFor(limits, route);
-  const pop = usePop(startOpen === true);
-  const { open, setOpen, ref } = pop;
+  const pop = usePopover({ startOpen: startOpen === true });
+  const { open, setOpen } = pop;
   if (account === undefined || mode === "off") return null;
   const figure = figureOf(account, { model, cost, now });
   return (
-    <div className="cx-chip-wrap um-numwrap" ref={ref}>
+    <div className="cx-chip-wrap um-numwrap" ref={pop.anchor}>
       <button type="button" className={`um-num ${figureClass(figure, mode)}${open ? " on" : ""}`} aria-expanded={open} title={figure.title} onClick={() => setOpen((v) => !v)}>
         <FigureFace figure={figure} mode={mode} />
       </button>
       {open ? (
-        <Floating at={pop} align="left">
-          <AccountPopover account={account} model={model} cost={cost} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} />
-        </Floating>
+        <AccountPopover at={pop} align="start" account={account} model={model} cost={cost} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} />
       ) : null}
     </div>
   );
@@ -647,6 +573,8 @@ function MoneyRows({ account, now }: { account: LimitAccountView; now: number })
 
 /** Every window of one account, when each resets, how old the reading is — and the other accounts. */
 export function AccountPopover({
+  at,
+  align,
   account,
   model,
   cost,
@@ -654,6 +582,9 @@ export function AccountPopover({
   now,
   className,
 }: {
+  /** The button's popover: it opens above the button (below when there is more room there), its `align` edges lined up. */
+  at: PopoverHandle<HTMLElement>;
+  align: FloatAlign;
   account: LimitAccountView;
   model?: string | undefined;
   /** What the open conversation has cost — drawn first for an account that spends money. */
@@ -669,7 +600,7 @@ export function AccountPopover({
   const hasModelWindows = windows.some((w) => w.model !== undefined);
   const week = account.spent7d ?? 0;
   return (
-    <div className={`cx-pop um-pop um-acctpop${className !== undefined ? ` ${className}` : ""}`}>
+    <Popover at={at} side="above" align={align} gap={POP_GAP} className={`cx-pop um-pop um-acctpop${className !== undefined ? ` ${className}` : ""}`}>
       <div className="cx-pop-head">
         <span className="cx-pop-title">Usage</span>
       </div>
@@ -767,7 +698,7 @@ export function AccountPopover({
           </div>
         </section>
       ) : null}
-    </div>
+    </Popover>
   );
 }
 
@@ -966,8 +897,8 @@ export function AccountAllowance({ account, plan, startOpen }: { account: LimitA
   const limits = useLimits();
   const mode = useUsageFigures();
   const now = useNow();
-  const pop = usePop(startOpen === true);
-  const { open, setOpen, ref } = pop;
+  const pop = usePopover({ startOpen: startOpen === true });
+  const { open, setOpen } = pop;
   const week = account?.reading !== null && account?.reading !== undefined ? weeklyWindow(account.reading) : undefined;
   const spent = week !== undefined && windowStatus(week) === "exhausted";
   const pct = week === undefined ? null : spent ? 100 : week.usedPercent;
@@ -978,14 +909,12 @@ export function AccountAllowance({ account, plan, startOpen }: { account: LimitA
       <div className="um-c-line">
         <span className="um-c-plan">{plan}</span>
         {account !== undefined && mode !== "off" ? (
-          <div className="um-c-ringwrap" ref={ref}>
+          <div className="um-c-ringwrap" ref={pop.anchor}>
             <button type="button" className={`um-c-ringbtn um-t-${tone}${open ? " on" : ""}`} aria-expanded={open} title={week === undefined ? "No weekly reading yet — click for every window" : `Weekly window, ${pct === null ? "no figure" : `${round(pct)}% used`} — click for every window`} onClick={() => setOpen((v) => !v)}>
               <FigureFace figure={figure} mode={mode} />
             </button>
             {open ? (
-              <Floating at={pop} align="right">
-                <AccountPopover account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" />
-              </Floating>
+              <AccountPopover at={pop} align="end" account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" />
             ) : null}
           </div>
         ) : null}
@@ -1010,8 +939,8 @@ export function KeyUsage({ route }: { route: string }): JSX.Element | null {
   const limits = useLimits();
   const mode = useUsageFigures();
   const now = useNow();
-  const pop = usePop(false);
-  const { open, setOpen, ref } = pop;
+  const pop = usePopover();
+  const { open, setOpen } = pop;
   const account = accountFor(limits, route);
   if (account === undefined || account.kind === "subscription" || mode === "off") return null;
   const credit = account.kind === "credit" && account.credit !== undefined;
@@ -1021,14 +950,12 @@ export function KeyUsage({ route }: { route: string }): JSX.Element | null {
   return (
     <>
       <div className="um-c-line um-k-line">
-        <div className="um-c-ringwrap" ref={ref}>
+        <div className="um-c-ringwrap" ref={pop.anchor}>
           <button type="button" className={`um-c-ringbtn ${figureClass(figure, credit ? mode : "number")}${open ? " on" : ""}`} aria-expanded={open} title={`${figure.title} — click for more`} onClick={() => setOpen((v) => !v)}>
             <FigureFace figure={figure} mode={credit ? mode : "number"} />
           </button>
           {open ? (
-            <Floating at={pop} align="right">
-              <AccountPopover account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" />
-            </Floating>
+            <AccountPopover at={pop} align="end" account={account} others={limits.accounts.filter((a) => a.key !== account.key)} now={now} className="um-cpop" />
           ) : null}
         </div>
         {credit ? null : <span className="um-k-when">in the last 7 days</span>}

@@ -19,7 +19,7 @@
  *
  * The edits themselves are pure functions of the map, in `composerPermissionSet.ts`.
  */
-import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import {
   PERMISSION_MODES,
   SCRIPT_SUBJECT,
@@ -37,6 +37,7 @@ import {
 } from "@jaira/shared/browser";
 import { groupModeOf, groupSentence, groupSummary, type CommandGroup } from "./composerPermissionSet";
 import { Icon } from "./icons";
+import { Popover, usePopover } from "./popover";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 
@@ -106,22 +107,6 @@ export function RemoveLine({ subject, onRemove }: { subject: string; onRemove: (
   );
 }
 
-/** A popover that closes on an outside click — the shape every dropdown in this menu wants. */
-export function useAway<T extends HTMLElement>(open: boolean, close: () => void): React.RefObject<T | null> {
-  const box = useRef<T | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (event: MouseEvent): void => {
-      if (box.current !== null && !box.current.contains(event.target as Node)) close();
-    };
-    document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
-    // `close` is a fresh closure per render and re-subscribing on each would be churn for nothing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-  return box;
-}
-
 /**
  * The mode control: what happens when this thing is called.
  *
@@ -145,17 +130,14 @@ export function ModePicker({
   /** Drawn open from the first render, on the menu or on the function form — for a still picture. */
   startOpen?: "menu" | "function" | undefined;
 }): JSX.Element {
-  const [open, setOpen] = useState(startOpen !== undefined);
   // The fourth row is not a word but a NAME: picking it asks which function, through the schema form
   // every typed input goes through, and a line that already names one opens on its name.
   const [naming, setNaming] = useState(startOpen === "function");
-  const box = useAway<HTMLDivElement>(open, () => {
-    setOpen(false);
-    setNaming(false);
-  });
+  const pop = usePopover({ startOpen: startOpen !== undefined, onClose: () => setNaming(false) });
+  const { open, setOpen } = pop;
   const meta = mode === undefined ? undefined : modeMeta(mode);
   return (
-    <div className="cx-mode-wrap" ref={box}>
+    <div className="cx-mode-wrap" ref={pop.anchor}>
       <button
         type="button"
         className={`cx-tool-mode ${mode === undefined ? "cx-mode-custom" : `cx-mode-${modeClass(mode)}`}`}
@@ -178,7 +160,7 @@ export function ModePicker({
         <span className="cx-more">›</span>
       </button>
       {open ? (
-        <div className="cx-submenu">
+        <Popover at={pop} side="below" align="end" className="cx-submenu">
           {naming ? (
             <FunctionForm
               initial={modeFunction(mode) ?? SMART_FUNCTION}
@@ -231,7 +213,7 @@ export function ModePicker({
               </button>
             </>
           )}
-        </div>
+        </Popover>
       ) : null}
     </div>
   );
@@ -314,15 +296,15 @@ export function ImplPicker({
   onPick: (next: ToolImplementation) => void;
   readOnly?: boolean | undefined;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
+  const pop = usePopover();
+  const { open, setOpen } = pop;
   const options: Array<{ id: ToolImplementation; label: string; hint: string }> = [
     { id: "app", label: "JaiRA", hint: "our implementation, through the artifact map" },
     { id: "native", label: native, hint: nativeHint ?? "the agent's own — still gated by the mode beside it" },
   ];
   const picked = options.find((o) => o.id === value)!;
   return (
-    <div className="cx-impl-wrap" ref={box}>
+    <div className="cx-impl-wrap" ref={pop.anchor}>
       <button
         type="button"
         className="cx-tool-impl"
@@ -338,7 +320,7 @@ export function ImplPicker({
         <span className="cx-more">›</span>
       </button>
       {open ? (
-        <div className="cx-submenu">
+        <Popover at={pop} side="below" align="end" className="cx-submenu">
           {options.map((option) => (
             <button
               key={option.id}
@@ -357,7 +339,7 @@ export function ImplPicker({
               </span>
             </button>
           ))}
-        </div>
+        </Popover>
       ) : null}
     </div>
   );
@@ -600,16 +582,16 @@ export function AddMenu({
   /** Drawn open from the first render — for a still picture. */
   startOpen?: boolean | undefined;
 }): JSX.Element | null {
-  const [open, setOpen] = useState(startOpen === true);
+  const pop = usePopover({ startOpen: startOpen === true });
+  const { open, setOpen } = pop;
   const [typing, setTyping] = useState(false);
-  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
   if (options.length === 0 && typed === undefined) return null;
   if (typing && typed !== undefined) {
     return <AddLine label={typed.label} example={typed.example} onAdd={typed.onAdd} startOpen onClose={() => setTyping(false)} />;
   }
   return (
     <div className="cx-tool set-add-line">
-      <div className="cx-origin-wrap" ref={box}>
+      <div className="cx-origin-wrap" ref={pop.anchor}>
         <button
           type="button"
           className="set-add"
@@ -626,7 +608,7 @@ export function AddMenu({
           <span className="cx-opt-hint">{label}</span>
         </button>
         {open ? (
-          <div className="cx-submenu">
+          <Popover at={pop} side="below" align="start" className="cx-submenu cx-from-head">
             {options.map((option) => (
               <button
                 key={option.subject}
@@ -665,7 +647,7 @@ export function AddMenu({
                 </span>
               </button>
             ) : null}
-          </div>
+          </Popover>
         ) : null}
       </div>
     </div>

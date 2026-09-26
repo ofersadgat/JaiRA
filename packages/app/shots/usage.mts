@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     // A popover is drawn over everything — the top bar too — even in a window too short for it: its
     // corners and middle are the popover's own pixels, and it stays inside the window.
     const onTop = `(() => {
-      const f = document.querySelector("body > .um-float");
+      const f = document.querySelector("body > .float.um-pop");
       if (!f) return "no popover in the body";
       const r = f.getBoundingClientRect();
       const points = [[r.left + 12, r.top + 6], [r.right - 12, r.top + 6], [r.left + r.width / 2, r.top + r.height / 2], [r.left + 12, r.bottom - 6], [r.right - 12, r.bottom - 6]];
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     await app.resize(1280, 560);
     await new Promise((r) => setTimeout(r, 500));
     await app.evaluate(`document.querySelector(".um-num")?.click()`);
-    await app.until(`!!document.querySelector("body > .um-float .um-acctpop")`, "the account popover to open");
+    await app.until(`!!document.querySelector("body > .float.um-acctpop")`, "the account popover to open");
     await new Promise((r) => setTimeout(r, 300));
     console.log(`account popover: ${await app.evaluate<string>(onTop)}`);
     await app.shot("chat-account-popover");
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     // The context ring is drawn only once a conversation is open.
     if (await app.evaluate<boolean>(`!!document.querySelector(".um-meter")`)) {
       await app.evaluate(`document.querySelector(".um-meter").click()`);
-      await app.until(`!!document.querySelector("body > .um-float .um-pop-context")`, "the context popover to open");
+      await app.until(`!!document.querySelector("body > .float.um-pop-context")`, "the context popover to open");
       await new Promise((r) => setTimeout(r, 300));
       console.log(`context popover: ${await app.evaluate<string>(onTop)}`);
       await app.shot("chat-context-popover");
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 1200));
     await app.shot("connections", ".set-page");
     await app.evaluate(`document.querySelector(".um-c-ringbtn")?.click()`);
-    await app.until(`!!document.querySelector("body > .um-float .um-acctpop")`, "a sign-in card's popover to open");
+    await app.until(`!!document.querySelector("body > .float.um-acctpop")`, "a sign-in card's popover to open");
     await new Promise((r) => setTimeout(r, 300));
     console.log(`sign-in card popover: ${await app.evaluate<string>(onTop)}`);
     await app.shot("connections-popover");

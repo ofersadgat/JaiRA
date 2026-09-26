@@ -204,6 +204,31 @@
      borrowed from t3code, where a terminal follows the code font until it is told not to. Overwritten
      as an inline style by `applyAppearance`; the fallback belongs here so a cold paint has one. */
   --size-editor: var(--size-data);
+  /*
+   * The window's LAYERS, bottom to top — the only z-indexes above 9 in this file. A z-index inside a
+   * component (a sticky head over its rows, a dot over a line) is a small literal and means nothing
+   * outside that component; anything that has to be over the PAGE is one of these, and a float is
+   * never a z-index at all: it is `.float`, portalled to `<body>` by popover.tsx. `floatLayers.test.ts`
+   * holds the file to that.
+   */
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-float: 100;
+  --z-crash: 1000;
+}
+
+/*
+ * Every float — popover, submenu, dropdown, completion list, hover card, tooltip, context menu.
+ *
+ * Rendered straight into `<body>` by `Popover`/`Overlay` (popover.tsx), which places it with inline
+ * `left`/`top`, so no `overflow` around its opener clips it and no stacking context around its opener
+ * paints over it. A float's own rule says what it LOOKS like and never where it is: no `position`, no
+ * inset, no z-index. Floats share one layer; one opened from another comes later in `<body>`, so it is
+ * the one on top.
+ */
+.float {
+  position: fixed;
+  z-index: var(--z-float);
 }
 
 /*
@@ -1488,11 +1513,8 @@ button.side-twist:hover:not(:disabled) {
   font-size: calc(var(--size-app) * 10 / 12.5);
 }
 /* --- context menu ---
-   Fixed rather than absolute: it is anchored to a pointer position in viewport coordinates, and an
-   absolutely-positioned menu inside a scrolling panel would drift the moment the panel scrolled. */
+   A float (see `.float`): placed at the pointer by `Popover`, in `<body>`. */
 .context-menu {
-  position: fixed;
-  z-index: 80;
   display: flex;
   flex-direction: column;
   padding: 5px 0;
@@ -2275,24 +2297,16 @@ button.side-twist:hover:not(:disabled) {
 }
 
 /* --- the completion menu ---
-   Positioned from the caret marker's own measured rect, so it needs no font metrics of its own. */
+   A float anchored to the caret marker's own rect, so it needs no font metrics of its own. */
 .completions {
-  position: absolute;
-  z-index: 4;
   width: 260px;
   max-height: 184px;
   overflow-y: auto;
-  margin-top: 2px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: var(--lift);
   font-size: calc(var(--size-app) * 12 / 12.5);
-}
-/* Flipped above the caret when the editor has no room below it. */
-.completions.above {
-  transform: translateY(-100%);
-  margin-top: -4px;
 }
 .completions-head {
   display: flex;
@@ -5062,16 +5076,9 @@ ol.children li::marker {
 /* What can go in the box. It OVERLAYS what is below rather than pushing it down: a menu that reflows
    the page moves the control you opened it from out from under the pointer. */
 .face-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 3px);
-  left: 0;
-  /* `min-width` beats `max-width` in CSS, so a pane narrower than 230px was a popover hanging out
-     over the edge of it. Sized from the control it belongs to instead, with a floor that is a
-     fraction of the pane rather than an absolute number. */
-  min-width: min(230px, 100%);
-  width: 100%;
-  max-width: 100%;
+  /* As wide as the box it drops from (`matchWidth`), with a floor so a narrow box still gets a
+     readable menu. */
+  min-width: 230px;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--control-radius);
@@ -5805,7 +5812,7 @@ button.layer-on:hover:not(:disabled) {
   background: var(--scrim);
   display: grid;
   place-items: center;
-  z-index: 50;
+  z-index: var(--z-modal);
 }
 .modal {
   background: var(--panel);
@@ -6476,12 +6483,9 @@ button.layer-on:hover:not(:disabled) {
   background-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* Fixed, not absolute: the artifact scrolls inside its own well, and a popover in that flow would
-   ride away from the words it is about. `position: fixed` pins it to the rect the selection
-   reported, which is where the person is looking. */
+/* A float against the rect the selection reported, which is where the person is looking: the
+   artifact scrolls inside its own well, and a box in that flow would ride away from the words. */
 .note-composer {
-  position: fixed;
-  z-index: 60;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -6984,7 +6988,7 @@ button.link.change-path {
 .diff-pane {
   position: fixed;
   inset: 3vh 3vw;
-  z-index: 70;
+  z-index: var(--z-modal);
   display: flex;
   flex-direction: column;
   background: var(--panel);
@@ -7170,9 +7174,7 @@ button.link.change-path {
 .split.primary .split-caret {
   border-left: 1px solid color-mix(in srgb, #fff 35%, transparent);
 }
-.split .cx-submenu.answer-menu {
-  left: 0;
-  right: auto;
+.cx-submenu.answer-menu {
   min-width: 390px;
   max-width: min(460px, 86vw);
 }
@@ -7182,7 +7184,7 @@ button.link.change-path {
   background: var(--line);
 }
 /* A reach reads as a list: tick, name, the sentence under it, all from the left edge. */
-.split .cx-submenu.answer-menu > button {
+.cx-submenu.answer-menu > button {
   justify-content: flex-start;
   align-items: flex-start;
 }
@@ -7266,7 +7268,7 @@ button.link.change-path {
   border-radius: 8px;
   cursor: pointer;
   max-width: 70vw;
-  z-index: 60;
+  z-index: var(--z-toast);
 }
 
 /* --- the configuration surfaces (Providers, Executors) ---------------------
@@ -11474,13 +11476,9 @@ fieldset.reading {
   height: 13px;
 }
 
-/* Opens UPWARD: the composer is pinned to the bottom of the panel, so a menu hanging down would be
-   off-screen every time. */
+/* Opens UPWARD (`side="above"`): the composer is pinned to the bottom of the panel, so a menu hanging
+   down would be off-screen every time. */
 .cx-pop {
-  position: absolute;
-  bottom: calc(100% + 7px);
-  left: 0;
-  z-index: 30;
   /* Wide enough for THREE columns. It was 340px, which fit two — so a route with a middle tier
      rendered its third column outside the popover and read as though it had not populated. */
   min-width: 250px;
@@ -11698,18 +11696,13 @@ fieldset.reading {
   opacity: 0.5;
 }
 
-/* The mode picker for ONE tool. Anchored to its row and floating above the popover's own scroll, so
-   opening it never resizes the panel underneath — the same reason the cascade has a fixed height. */
+/* The mode picker for ONE tool: a float under its button, so opening it never resizes the panel
+   underneath — the same reason the cascade has a fixed height — and nothing the row sits in clips it. */
 .cx-submenu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 3;
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 190px;
-  margin-top: 2px;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -11933,17 +11926,14 @@ fieldset.reading {
 .cx-filter-any {
   font-size: calc(var(--size-app) * 10.5 / 12.5);
 }
-.cx-filter .cx-chip-icon svg {
+.cx-filter .cx-chip-icon svg,
+.cx-filter-pop .cx-chip-icon svg {
   width: 11px;
   height: 11px;
 }
 /* Below its button — this one hangs inside a popover that already opened upward, so a second upward
    menu would land off the top of the panel. */
 .cx-filter-pop {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 40;
   min-width: 128px;
   padding: 3px;
   border: 1px solid var(--line);
@@ -12408,11 +12398,6 @@ fieldset.reading {
 /* `@` completion, above the box it is completing into: a list that pushed the box down would move
    the words being typed while they are being typed. */
 .cx-mentions {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: calc(100% + 4px);
-  z-index: 4;
   display: flex;
   flex-direction: column;
   max-height: 240px;
@@ -13085,7 +13070,7 @@ fieldset.reading {
 /* Over the app, not instead of it — the tree still renders. */
 .crash-banner {
   position: fixed;
-  z-index: 9000;
+  z-index: var(--z-crash);
   left: 50%;
   bottom: 16px;
   transform: translateX(-50%);
@@ -13561,11 +13546,9 @@ fieldset.reading {
   opacity: 1;
 }
 
-/* The lane's name, following the pointer. Fixed rather than absolute so it is not clipped by the
-   scroller the conversation lives in. */
+/* The lane's name, following the pointer: an `Overlay` float, so the scroller the conversation lives
+   in cannot clip it. */
 .rail-tip {
-  position: fixed;
-  z-index: 9;
   pointer-events: none;
   opacity: 0;
   transform: translate(-50%, -150%);
@@ -14395,9 +14378,7 @@ fieldset.reading {
 }
 /* Under the head it hangs from, opening rightward: the head sits at the card's left edge, and the
    mode pickers' right-aligned menu would open off the card. */
-.cx-origin-wrap .cx-submenu {
-  left: 0;
-  right: auto;
+.cx-submenu.cx-from-head {
   min-width: 320px;
 }
 /* The Permissions head names a BUCKET: its glyph and its name, in the title's own weight. */
@@ -16505,13 +16486,10 @@ button.link.cfg-login-add-sub {
 .um-num:hover, .um-num.on { background: var(--fill-ghost-hover); }
 .um-num.um-t-accent { color: var(--dim); }
 
-/* The popovers: the chip's own card, laid out in sections. Each is drawn in `.um-float`, straight in
-   the body and fixed (usageMeters `Floating`), so nothing it sits in clips it or paints over it — the
-   top bar included. The card inside keeps its look and scrolls when the window is short. */
-.um-float { position: fixed; z-index: 90; display: flex; flex-direction: column; }
-.um-float > .cx-pop { position: relative; inset: auto; max-height: inherit; overflow-y: auto; }
+/* The popovers: the chip's own card, laid out in sections — floats (`.float`), so nothing they sit in
+   clips them or paints over them, the top bar included. */
 .um-pop { padding: 0; min-width: 0; }
-.um-pop-context { left: auto; right: -40px; width: 380px; max-width: min(380px, 86vw); }
+.um-pop-context { width: 380px; max-width: min(380px, 86vw); }
 .um-acctpop { width: 370px; max-width: min(370px, 86vw); }
 .um-pop .cx-pop-head { padding: 10px 14px 4px; }
 .um-sec { padding: 10px 14px 12px; display: grid; gap: 8px; position: relative; }
@@ -16553,7 +16531,7 @@ button.link.cfg-login-add-sub {
 .um-cat-pct { font-size: 11px; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
 .um-cat-more { color: var(--dim); }
 .um-fly {
-  position: absolute; right: calc(100% + 22px); bottom: -12px; width: 290px; z-index: 31;
+  width: 290px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 6px 18px rgba(18, 21, 48, 0.12); padding: 10px 12px 12px; display: grid; gap: 4px;
 }
@@ -16603,13 +16581,12 @@ button.link.cfg-login-add-sub {
 .um-turn.um-warn .um-turn-n { color: var(--warn); }
 .um-turn:hover { background: var(--fill-ghost-hover); }
 .um-tip {
-  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: 280px;
-  display: none; gap: 7px; padding: 10px 12px;
+  width: 280px;
+  display: grid; gap: 7px; padding: 10px 12px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   box-shadow: 0 6px 18px rgba(18, 21, 48, 0.14);
   font: calc(var(--size-app) * 12 / 12.5) / 1.4 var(--font-app); color: var(--text); white-space: normal; text-align: left;
 }
-.um-turn:hover .um-tip, .um-turn:focus-visible .um-tip { display: grid; }
 .um-tip-head b { font-family: var(--font-data); }
 .um-tip-row { color: var(--dim); font-size: 11.5px; }
 .um-tip-row.mono { font-family: var(--font-data); font-size: 10.5px; }
@@ -16664,7 +16641,7 @@ button.link.cfg-login-add-sub {
 .um-c-ringbtn.um-t-accent { color: var(--text); }
 .um-rs { font: 400 10.5px/1.3 var(--font-data); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .um-rs.is-spent { color: var(--bad); font-weight: 500; }
-.um-cpop { left: auto; right: -12px; bottom: calc(100% + 8px); width: 330px; }
+.um-cpop { width: 330px; }
 /* The route column carries each account's bar and figure now — dollars for a key — so it is wider. */
 .cx-cascade > .cx-col:first-child { width: 204px; }
 
@@ -17428,16 +17405,7 @@ button.link.cfg-login-add-sub {
   position: relative;
   display: inline-flex;
 }
-.facts-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 29;
-}
 .facts-pop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 30;
   width: 320px;
   max-height: 60vh;
   overflow: auto;

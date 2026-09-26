@@ -12,9 +12,10 @@
  * that puts it in a modal, for a request no conversation can host. Everything it draws is worked out
  * in `approvalModel.ts`; this file is the elements and the two pieces of state a menu needs.
  */
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type JSX } from "react";
+import { Fragment, useState, type CSSProperties, type JSX } from "react";
 import type { ApprovalScope, PendingApproval, WritableLayer } from "@jaira/shared/browser";
 import { Icon } from "./icons";
+import { Popover, usePopover } from "./popover";
 import {
   answerMenu,
   approvalAnswerOf,
@@ -116,28 +117,19 @@ function Reason({ line }: { line: ReasonLine }): JSX.Element {
 }
 
 export function ApprovalSurface({ pending, error, onDecide, initialMenu }: ApprovalSurfaceProps): JSX.Element {
-  const [open, setOpen] = useState<"allow" | "deny" | null>(initialMenu ?? null);
+  // A menu closes on a press anywhere else and on Escape, like every other menu in the app. One of
+  // the two is open at a time, anchored to its own split button.
+  const [which, setWhich] = useState<"allow" | "deny">(initialMenu ?? "allow");
+  const pop = usePopover({ startOpen: initialMenu !== undefined });
+  const open = pop.open ? which : null;
+  const setOpen = (next: "allow" | "deny" | null): void => {
+    if (next === null) return pop.close();
+    setWhich(next);
+    pop.setOpen(true);
+  };
   const [chosen, setChosen] = useState<ChosenWidths>({});
   /** The part under the pointer, lit on the line and in its row — see the model on "past four parts". */
   const [hot, setHot] = useState<number | null>(null);
-  const answers = useRef<HTMLDivElement>(null);
-
-  // A menu closes on a press anywhere else and on Escape, like every other menu in the app.
-  useEffect(() => {
-    if (open === null) return;
-    const away = (event: MouseEvent): void => {
-      if (answers.current !== null && !answers.current.contains(event.target as Node)) setOpen(null);
-    };
-    const key = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(null);
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open]);
 
   const decide = (decision: "allow" | "deny", reach: Reach): void => {
     const { scope, remember, addTo } = approvalAnswerOf(pending, reach, chosen);
@@ -217,13 +209,13 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
         <Reason key={at} line={line} />
       ))}
 
-      <div className="options approval-answers" ref={answers}>
+      <div className="options approval-answers">
         {(["allow", "deny"] as const).map((decision) => {
           const look = decision === "allow" ? "primary" : "danger";
           const verb = decision === "allow" ? "Allow" : "Deny";
           const menu = open === decision ? answerMenu(pending, decision, chosen) : undefined;
           return (
-            <div key={decision} className={`split ${look}`}>
+            <div key={decision} className={`split ${look}`} ref={decision === which ? pop.anchor : undefined}>
               <button type="button" className={`split-main ${look}`} data-testid={`approval-${decision}`} onClick={() => decide(decision, "once")}>
                 {verb}
               </button>
@@ -239,7 +231,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
                 <Icon name="chevron" />
               </button>
               {menu !== undefined ? (
-                <div className="cx-submenu answer-menu" role="menu" ref={(el) => el?.scrollIntoView?.({ block: "nearest" })}>
+                <Popover at={pop} side="below" align="start" className="cx-submenu answer-menu" role="menu">
                   {menu.what.length > 0 ? (
                     <>
                       <div className="answer-what">
@@ -301,7 +293,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
                       ))}
                     </>
                   ) : null}
-                </div>
+                </Popover>
               ) : null}
             </div>
           );

@@ -195,7 +195,7 @@ describe("no usage left", () => {
 
 describe("the conversation", () => {
   it("puts the context after each answer on its rail, with the change since the answer before", () => {
-    const html = draw(TurnContext, { context: { ...CONTEXT, used: 168400 }, before: CONTEXT });
+    const html = draw(TurnContext, { context: { ...CONTEXT, used: 168400 }, before: CONTEXT, startOpen: true });
     expect(html).toContain("84%");
     expect(html).toContain("+46% since the reply before");
   });
