@@ -45,31 +45,45 @@ const stretch: WorkEntry[] = [
 
 describe("phases", () => {
   it("cuts the stretch at each thought and names each part by what it did", () => {
-    expect(phasesOf(stretch, { merge: false, dropIdle: true }).map((p) => p.name)).toEqual(["Explored", "Explored", "Changed", "Fixed"]);
+    expect(phasesOf(stretch, { merge: "none", dropIdle: true }).map((p) => p.name)).toEqual(["Explored", "Explored", "Changed", "Fixed"]);
   });
 
   it("merges neighbours of one name when asked — what the thinking line would have told apart", () => {
-    const merged = phasesOf(stretch, { merge: true, dropIdle: true });
+    const merged = phasesOf(stretch, { merge: "all", dropIdle: true });
     expect(merged.map((p) => p.name)).toEqual(["Explored", "Changed", "Fixed"]);
     expect(merged[0]!.indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("with the thinking line on, merges a neighbour whose reasoning was withheld — it has no line to tell it apart", () => {
+    const told = "Several columns scroll on their own.";
+    // Withheld, withheld: one phase, as with the line off.
+    expect(phasesOf([think(0), read("a.ts", 1), think(2), read("b.ts", 3)], { merge: "withheld", dropIdle: true }).map((p) => p.indices)).toEqual([[0, 1, 2, 3]]);
+    // Told, then withheld: the withheld one joins the told one, whose line heads both.
+    const joined = phasesOf([think(0, told), read("a.ts", 1), think(2), read("b.ts", 3)], { merge: "withheld", dropIdle: true });
+    expect(joined.map((p) => p.indices)).toEqual([[0, 1, 2, 3]]);
+    expect(thoughtLineOf([think(0, told), read("a.ts", 1), think(2), read("b.ts", 3)], joined[0]!.indices)?.first).toBe(told);
+    // Withheld, then told: the told one keeps its own line, so it stays apart.
+    expect(phasesOf([think(0), read("a.ts", 1), think(2, told), read("b.ts", 3)], { merge: "withheld", dropIdle: true })).toHaveLength(2);
+    // Of the stretch, only the withheld neighbours of one name join.
+    expect(phasesOf(stretch, { merge: "withheld", dropIdle: true }).map((p) => p.name)).toEqual(["Explored", "Explored", "Changed", "Fixed"]);
   });
 
   it("leaves out a part that is only rate limits and notes — even when it is the only part", () => {
     const note = (s: number, text: string): WorkEntry => ({ kind: "event", at: t0 + s * 1000, tone: "plain", text });
     const opening: WorkEntry[] = [note(0, "Context injected: CLAUDE.md"), note(0, "Hook ran"), think(1), read("a.ts", 2), read("b.ts", 3)];
     // The notes before the first thought were a part of their own, and did no work: gone.
-    expect(phasesOf(opening, { merge: false, dropIdle: true }).map((p) => p.indices)).toEqual([[2, 3, 4]]);
+    expect(phasesOf(opening, { merge: "none", dropIdle: true }).map((p) => p.indices)).toEqual([[2, 3, 4]]);
     // Shown when asked.
-    expect(phasesOf(opening, { merge: false, dropIdle: false })).toHaveLength(2);
+    expect(phasesOf(opening, { merge: "none", dropIdle: false })).toHaveLength(2);
     // Alone, it goes too: nothing is left but the foot.
-    expect(phasesOf([note(0, "Hook ran"), note(1, "Context injected")], { merge: false, dropIdle: true })).toHaveLength(0);
+    expect(phasesOf([note(0, "Hook ran"), note(1, "Context injected")], { merge: "none", dropIdle: true })).toHaveLength(0);
     // A thought and a rate limit is still only a rate limit.
     const waiting: WorkEntry[] = [think(0), read("a.ts", 1), think(2), { kind: "event", at: t0 + 3000, tone: "warn", text: "Rate limited — waited 12 s" }];
-    expect(phasesOf(waiting, { merge: false, dropIdle: true })).toHaveLength(1);
+    expect(phasesOf(waiting, { merge: "none", dropIdle: true })).toHaveLength(1);
   });
 
   it("calls running what changes nothing Explored the first time and Checked the second", () => {
-    const names = (entries: WorkEntry[]) => phasesOf(entries, { merge: false, dropIdle: true }).map((p) => p.name);
+    const names = (entries: WorkEntry[]) => phasesOf(entries, { merge: "none", dropIdle: true }).map((p) => p.name);
     expect(names([think(0), bash("npm test", 1), bash("npm run lint", 2), read("a.ts", 3)])).toEqual(["Explored"]);
     // The same file read again — another part of it is still the file — and the same line run again.
     expect(names([think(0), read("a.ts", 1), bash("npm test", 2), think(3), bash("npm  test", 4), call("Read", "file_path", "a.ts", 5)])).toEqual(["Explored", "Checked"]);
@@ -78,7 +92,7 @@ describe("phases", () => {
   });
 
   it("calls a part that did again what had failed, and got through, Fixed — whatever made the difference", () => {
-    const names = (entries: WorkEntry[]) => phasesOf(entries, { merge: false, dropIdle: true }).map((p) => p.name);
+    const names = (entries: WorkEntry[]) => phasesOf(entries, { merge: "none", dropIdle: true }).map((p) => p.name);
     // No edit between: a script, or the world, may have fixed it. Fixed outranks Changed.
     expect(names([think(0), bash("npm test", 1, false), think(2), bash("npm run setup", 3), bash("npm test", 4)])).toEqual(["Explored", "Fixed"]);
     expect(names([think(0), bash("npm test", 1, false), think(2), edit("a.ts", 3), bash("npm test", 4)])).toEqual(["Explored", "Fixed"]);
@@ -96,7 +110,7 @@ describe("phases", () => {
       const command = (entry.args as { command?: string } | undefined)?.command;
       return command === undefined ? entry.name === "Read" : !/^git (commit|push)/.test(command);
     };
-    const names = (entries: WorkEntry[], judged = true) => phasesOf(entries, { merge: false, dropIdle: true, ...(judged ? { verdicts } : {}) }).map((p) => p.name);
+    const names = (entries: WorkEntry[], judged = true) => phasesOf(entries, { merge: "none", dropIdle: true, ...(judged ? { verdicts } : {}) }).map((p) => p.name);
     expect(names([think(0), bash("git commit -m x", 1)])).toEqual(["Changed"]);
     expect(names([think(0), bash("git status", 1)])).toEqual(["Explored"]);
     // Before the set has answered — or where nothing asks — a call that edits is a change and nothing else is.
@@ -194,10 +208,13 @@ describe("in the transcript", () => {
     expect(three).not.toContain(">Fixed<");
     expect(draw([...stretch, answer])).toContain(">Fixed<");
     expect(three).toContain("Running ");
-    expect(three.match(/class="ws-run[ "]/g)).toHaveLength(2);
+    // Until they pass it is a Changed after a Changed whose reasoning was withheld: one phase, whose
+    // last three rows show — the first edit, the failed run rolled into its chips.
+    expect(three.match(/class="ws-run[ "]/g)).toHaveLength(3);
     const none = draw(working, { phases: true, rows: 0, thinking: true, notes: "hide-groups" }, true);
     expect(none).not.toMatch(/class="ws-run[ "]/);
-    expect(none).toContain("ws-chip ws-k-run live");
+    // The run chip holds the failed run too, and the one running.
+    expect(none).toContain("ws-chip ws-k-run failed live");
   });
 
   it("merges the Explored phases and drops the thinking line with thinking off, and draws one row with phases off", () => {
@@ -213,8 +230,11 @@ describe("in the transcript", () => {
     const note = (text: string): WorkEntry => ({ kind: "event", at: t0, tone: "plain", text });
     const withNotes: TranscriptEntry[] = [note("Hook ran: SessionStart"), note("Context injected: CLAUDE.md"), ...stretch, answer];
     const look = (notes: WorkLook["notes"]): WorkLook => ({ phases: true, rows: 3, thinking: true, notes });
-    // Show: the opening notes are a phase of their own, with a notes chip.
-    expect(draw(withNotes, look("show")).match(/class="ws-phase/g)).toHaveLength(5);
+    // Show: the opening notes are kept, with a notes chip — in the first Explored, whose reasoning was
+    // withheld, so nothing tells the two apart.
+    const shown = draw(withNotes, look("show"));
+    expect(shown.match(/class="ws-phase/g)).toHaveLength(4);
+    expect(shown).toContain("ws-k-note");
     // Hide phases of only these: that phase goes; the rate limit inside a working phase is still a chip.
     const groups = draw(withNotes, look("hide-groups"));
     expect(groups.match(/class="ws-phase/g)).toHaveLength(4);

@@ -378,11 +378,19 @@ export interface WorkPhase {
  * work anybody asked for, and its lines are still in "Every step". Even when it is the only piece:
  * then there is no phase at all, only the foot.
  *
- * With `merge`, neighbours that got the same name become one — the thinking line is the only thing
- * that would tell them apart, and it is off. After dropping, so a dropped piece between two of one
- * name does not keep them apart.
+ * `merge` says when neighbours that got the same name become one — the thinking line is the only
+ * thing that would tell them apart:
+ *  - "all": always — the line is off;
+ *  - "withheld": where the later one has no line to draw — the provider withheld its reasoning — so
+ *    a withheld thought groups as it would with the line off. The earlier one's line, if any, heads
+ *    them both;
+ *  - "none": never.
+ * After dropping, so a dropped piece between two of one name does not keep them apart.
  */
-export function phasesOf(entries: readonly WorkEntry[], options: { merge: boolean; dropIdle: boolean; verdicts?: ReadOnlyVerdicts | undefined }): WorkPhase[] {
+export function phasesOf(
+  entries: readonly WorkEntry[],
+  options: { merge: "all" | "withheld" | "none"; dropIdle: boolean; verdicts?: ReadOnlyVerdicts | undefined },
+): WorkPhase[] {
   const cut: number[][] = [];
   entries.forEach((entry, i) => {
     if (entry.kind === "thought" || cut.length === 0) cut.push([]);
@@ -415,10 +423,11 @@ export function phasesOf(entries: readonly WorkEntry[], options: { merge: boolea
     return { name, indices };
   });
   const shown = options.dropIdle ? named.filter((phase) => !isIdle(entries, phase.indices)) : named;
-  if (!options.merge) return shown;
+  if (options.merge === "none") return shown;
   return shown.reduce<WorkPhase[]>((out, phase) => {
     const last = out[out.length - 1];
-    if (last !== undefined && last.name === phase.name) last.indices = [...last.indices, ...phase.indices];
+    const joins = options.merge === "all" || thoughtLineOf(entries, phase.indices) === undefined;
+    if (last !== undefined && last.name === phase.name && joins) last.indices = [...last.indices, ...phase.indices];
     else out.push({ name: phase.name, indices: [...phase.indices] });
     return out;
   }, []);

@@ -315,7 +315,7 @@ export function WorkSummary({
   const dropIdle = look.notes !== "show";
   const { verdicts, heard } = useReadOnlyVerdicts(entries);
   const phases = useMemo(() => {
-    if (look.phases) return phasesOf(entries, { merge: !look.thinking, dropIdle, verdicts });
+    if (look.phases) return phasesOf(entries, { merge: look.thinking ? "withheld" : "all", dropIdle, verdicts });
     // Without phases the stretch is the one group, and the same rule applies to it.
     return dropIdle && isIdle(entries, all) ? [] : [{ name: undefined, indices: all }];
     // `heard` moves when the read-only set answers, and a phase's name may move with it.
