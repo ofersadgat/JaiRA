@@ -124,7 +124,9 @@ async function crashAndReopen(taskId: string): Promise<void> {
   abandoned.push(service);
   const project = openProject(dir, { baseDir: testHome() });
   try {
-    project.db.prepare(`UPDATE jobs SET heartbeat_at = 0 WHERE task_id = ? AND ended_at IS NULL`).run(taskId);
+    // Re-owned as well as staled: the abandoned service still runs in this process, and its heartbeat
+    // would refresh a row it still owned — the one thing a dead process never does.
+    project.db.prepare(`UPDATE jobs SET heartbeat_at = 0, owner_token = owner_token || ':dead' WHERE task_id = ? AND ended_at IS NULL`).run(taskId);
   } finally {
     project.close();
   }

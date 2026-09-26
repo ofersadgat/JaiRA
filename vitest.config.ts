@@ -26,5 +26,12 @@ export default defineConfig({
     environment: "node",
     // Redirects the shared base root away from the developer's real `~/.jaira` — see test/setup.ts.
     setupFiles: ["./test/setup.ts"],
+    // Vitest's 5 s default is a unit-test budget, and most of this suite is not unit tests: a service
+    // test opens a real project, runs whole tasks through the engine and closes it again — 1-2 s
+    // alone, and 4 s or more for 139 passing tests when all 345 files share the machine. The default
+    // failed a different one of them on almost every full run (2026-09-26: ten timeouts over three
+    // runs, nine tests, every one passing alone). A hang still fails; it just fails at 30 s.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
