@@ -405,8 +405,11 @@ export default function App(): JSX.Element {
   const look = useMemo(() => lookOf(state.config), [state.config]);
   // How an account's usage is drawn, for every figure the setting governs — see `limitsStore.ts`.
   useEffect(() => publishUsageFigures(look.conversation.usageFigures), [look.conversation.usageFigures]);
-  const { workPhases, workRows, workThinking } = look.conversation;
-  const workLook = useMemo(() => ({ phases: workPhases, rows: workRows, thinking: workThinking }), [workPhases, workRows, workThinking]);
+  const { workPhases, workRows, workThinking, workNotes } = look.conversation;
+  const workLook = useMemo(
+    () => ({ phases: workPhases, rows: workRows, thinking: workThinking, notes: workNotes }),
+    [workPhases, workRows, workThinking, workNotes],
+  );
   /**
    * The Just you view's reading: what the personal layer states, or every row. Session-scoped, and
    * "What you changed" whenever a window opens — the reason to look at your own layer is usually to

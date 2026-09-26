@@ -351,6 +351,9 @@ export class App {
           })()`);
     if (of !== undefined && clip === null) throw new Error(`nothing matches "${of}" for ${name}`);
 
+    // Again before every capture, not only at launch: a window that fell behind another, or sits on an
+    // idle screen, stops drawing frames, and a capture waits for the next one forever.
+    await this.send("Page.bringToFront");
     const reply = await this.send("Page.captureScreenshot", {
       format: "png",
       captureBeyondViewport: true,

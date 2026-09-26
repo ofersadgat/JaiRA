@@ -46,6 +46,7 @@ import {
   type SequentialBatchLayout,
   type UsageFigures,
   type ThemeMode,
+  type WorkNotes,
   type WorkRows,
 } from "@jaira/shared/browser";
 import { FileTypesPane } from "./fileTypesPane";
@@ -432,6 +433,13 @@ const WORK_ROW_CHOICES: ReadonlyArray<readonly [string, `${WorkRows}`]> = [
   ["5", "5"],
 ];
 
+const WORK_NOTE_CHOICES: Array<[string, WorkNotes]> = [
+  ["Show", "show"],
+  ["Hide phases of only these", "hide-groups"],
+  ["Hide phases and stretches of only these", "hide-blocks"],
+  ["Hide everywhere", "hide"],
+];
+
 const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
   ["One after another", "stacked"],
   ["Side by side", "band"],
@@ -471,6 +479,8 @@ function lookWords(value: unknown, path: string): string {
     case "conversation.workPhases":
     case "conversation.workThinking":
       return value === true ? "on" : value === false ? "off" : shortValue(value, path);
+    case "conversation.workNotes":
+      return WORK_NOTE_CHOICES.find(([, notes]) => notes === value)?.[0].toLowerCase() ?? shortValue(value, path);
     case "conversation.workRows":
       return value === 0 ? "none" : typeof value === "number" ? `${value} rows` : shortValue(value, path);
     case "appFamily":
@@ -665,8 +675,22 @@ export function AppearancePane({
           layer={layer("conversation.workThinking")}
           control={<Switch on={conversation.workThinking} label="Show thinking" disabled={busy} onChange={(workThinking) => onConversation({ workThinking })} />}
         />
+        <SettingsRow
+          name="Rate limits and system notes"
+          description="Lines about the run rather than work: a rate limit waited out, a context injected, a hook that ran. Every step lists them whatever this says."
+          info="Show: counted in the chips like any work. Hide phases of only these: counted, but a phase that has nothing else is left out, and a stretch that has nothing else shows only Every step. Hide phases and stretches of only these: the same, but such a stretch is not drawn at all. Hide everywhere: left out of the summary, and such a stretch is not drawn."
+          layer={layer("conversation.workNotes")}
+          control={
+            <SelectInput
+              value={conversation.workNotes}
+              options={WORK_NOTE_CHOICES}
+              disabled={busy}
+              onChange={(workNotes) => onConversation({ workNotes: workNotes as WorkNotes })}
+            />
+          }
+        />
         <SettingsRow name="Preview" description="One request's work, three times: early on, well into it, and when it is done. Hover a chip, a phase or Every step." full>
-          <WorkPreview look={{ phases: conversation.workPhases, rows: conversation.workRows, thinking: conversation.workThinking }} />
+          <WorkPreview look={{ phases: conversation.workPhases, rows: conversation.workRows, thinking: conversation.workThinking, notes: conversation.workNotes }} />
         </SettingsRow>
       </SettingsSection>
 

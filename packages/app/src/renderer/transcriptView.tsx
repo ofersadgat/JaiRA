@@ -37,7 +37,7 @@
  * with its children's cards underneath — and that arrangement is gone, because it grouped by state
  * where the thing being read is grouped by conversation. See `sessionBands.ts`.
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
 import {
   artifactOf,
   detectedMime,
@@ -64,8 +64,8 @@ import { familyIcon, Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { typeKeyOf, useMessageTypes } from "./messageTypes";
 import { useValuePanel } from "./valuePanel";
-import { WorkSummary } from "./workSummaryView";
-import { inFlight } from "./workSummary";
+import { WorkLookContext, WorkSummary } from "./workSummaryView";
+import { isIdle } from "./workSummary";
 import {
   blocksOf,
   dayLabelOf,
@@ -310,7 +310,7 @@ function Row({
   preview: string;
   tone: Tone;
   /** The verdict at the end of the line, when there is one to give. */
-  mark?: "ok" | "bad" | "waiting";
+  mark?: "ok" | "bad" | "waiting" | "cut";
   /**
    * The preview is a sentence, not an argument.
    *
@@ -355,7 +355,7 @@ function Row({
       <span className="ts-at">{clockOf(entry.at)}</span>
       <span className="ts-chev">{canOpen ? <Icon name="chevron" /> : null}</span>
       <span className="ts-mark">
-        {mark === "ok" ? <Icon name="check" /> : mark === "bad" ? <Icon name="cross" /> : null}
+        {mark === "ok" ? <Icon name="check" /> : mark === "bad" ? <Icon name="cross" /> : mark === "cut" ? <span title="No result was recorded">–</span> : null}
       </span>
     </>
   );
@@ -628,12 +628,15 @@ export interface CallSurface {
 
 function Tool({
   entry,
+  open,
   sidechainOf,
   onOpenSidechain,
   artifacts,
   calls,
 }: {
   entry: ToolEntry;
+  /** See `open` on {@link Work}. */
+  open: boolean;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
   artifacts?: ArtifactSurface | undefined;
@@ -641,6 +644,11 @@ function Tool({
 }): JSX.Element {
   const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
   const asked = askedOf(entry);
+  // No answer recorded is one of two different facts: the call is still running (the record is still
+  // being written, and this is its last stretch), or it never answered (the record went on, or ended,
+  // without one). Only the first may be called running.
+  const unanswered = entry.ok === undefined && entry.result === undefined;
+  const running = unanswered && open;
   // What the crumb will read: the call's first argument is the Task's short description, which is
   // the one name a person chose for this subagent. The tool's own name is the honest fallback.
   const display = toolDisplayOf(entry.name);
@@ -658,7 +666,7 @@ function Tool({
       {...(display.server !== undefined ? { server: display.server } : {})}
       preview={entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary}
       tone={entry.ok === false ? "bad" : "plain"}
-      mark={entry.ok === undefined ? "waiting" : entry.ok ? "ok" : "bad"}
+      mark={entry.ok === undefined ? (running || !unanswered ? "waiting" : "cut") : entry.ok ? "ok" : "bad"}
       {...(workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false
         ? // The host draws the note on its rail when it has one; then the row is only the call.
           calls?.outcomes === "rail"
@@ -734,6 +742,8 @@ function Tool({
               {sub !== undefined ? (
                 <Transcript
                   entries={sub}
+                  // The subagent is at work exactly while the call that spawned it is still running.
+                  working={running}
                   {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
                   {...(artifacts !== undefined ? { artifacts } : {})}
                 />
@@ -741,10 +751,12 @@ function Tool({
             </div>
           ) : null}
           <Payload label="arguments" value={entry.args} {...(artifacts !== undefined ? { artifacts } : {})} />
-          {/* A call still in flight has no result, and saying so is different from showing an empty
-              one — which is why this is absent rather than an empty block. */}
-          {entry.ok === undefined && entry.result === undefined ? (
-            <div className="ts-payload ts-payload-empty">still running</div>
+          {/* A call with no result says which kind of "none" it is — still running, or never answered —
+              which is different from showing an empty one, and why this is not an empty block. */}
+          {unanswered ? (
+            <div className="ts-payload ts-payload-empty">
+              {running ? "still running" : "no result was recorded — the conversation went on without this call answering"}
+            </div>
           ) : (
             <Payload
               label="result"
@@ -806,12 +818,14 @@ export function useElapsed(startedAt: number | undefined, live: boolean, tick = 
  * thinking-start → answer-start, so it is the wait a person actually experienced, not the length of
  * the text that came out of it.
  */
-function Thought({ entry, narrated }: { entry: ThoughtEntry; narrated?: boolean | undefined }): JSX.Element {
+function Thought({ entry, narrated, open }: { entry: ThoughtEntry; narrated?: boolean | undefined; open: boolean }): JSX.Element {
   // Live only while nothing else is counting these seconds. A bar six pixels below saying
   // "Thinking · 12.4 seconds" makes this one a second opinion, and two clocks on one wait is worse
   // than either — but only the LIVE half defers: the duration a finished block states is a fact
   // about that block, and belongs beside it whatever is happening now.
-  const live = entry.live === true && narrated !== true;
+  // And only while the record is still being written: a thought left marked live by a tail that
+  // outlived its turn is a thought that stopped, and a counter on it would climb forever.
+  const live = entry.live === true && open && narrated !== true;
   const elapsed = useElapsed(entry.startedAt, live);
   const shown = live ? elapsed : entry.durationMs;
   // Present tense while it runs. "Thought for 40 seconds" beside a live pulse reads as a block that
@@ -857,7 +871,7 @@ function Thought({ entry, narrated }: { entry: ThoughtEntry; narrated?: boolean 
  * It never opens. There is nothing behind it — half a JSON string is not an argument list, and a row
  * that unfolded onto one would be showing the reader the transport.
  */
-function Writing({ entry }: { entry: WritingEntry }): JSX.Element {
+function Writing({ entry, open }: { entry: WritingEntry; open: boolean }): JSX.Element {
   return (
     <Row
       entry={entry}
@@ -866,10 +880,14 @@ function Writing({ entry }: { entry: WritingEntry }): JSX.Element {
       preview={entry.path ?? ""}
       tone="plain"
       note={
-        <span className="ts-think-live">
-          <Pulse />
-          {`writing${entry.chars > 0 ? ` ${sizeOf(entry.chars)}` : "…"}`}
-        </span>
+        open ? (
+          <span className="ts-think-live">
+            <Pulse />
+            {`writing${entry.chars > 0 ? ` ${sizeOf(entry.chars)}` : "…"}`}
+          </span>
+        ) : (
+          <span className="ts-think-took">{`stopped while being written${entry.chars > 0 ? ` (${sizeOf(entry.chars)})` : ""}`}</span>
+        )
       }
     />
   );
@@ -878,6 +896,7 @@ function Writing({ entry }: { entry: WritingEntry }): JSX.Element {
 /** One entry of work, dispatched by kind. All four land on the same {@link Row}. */
 function Work({
   entry,
+  open,
   sidechainOf,
   onOpenSidechain,
   artifacts,
@@ -885,6 +904,12 @@ function Work({
   calls,
 }: {
   entry: WorkEntry;
+  /**
+   * The row's stretch is the last thing in a record still being written — the ONLY place anything can
+   * still be happening. What a row says is live (a call "still running", a thought's counter, a call
+   * being written) it says only when this is true.
+   */
+  open: boolean;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
   artifacts?: ArtifactSurface | undefined;
@@ -896,6 +921,7 @@ function Work({
     return (
       <Tool
         entry={entry}
+        open={open}
         {...(sidechainOf !== undefined ? { sidechainOf } : {})}
         {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
         {...(artifacts !== undefined ? { artifacts } : {})}
@@ -903,8 +929,8 @@ function Work({
       />
     );
   }
-  if (entry.kind === "thought") return <Thought entry={entry} {...(narrated === true ? { narrated } : {})} />;
-  if (entry.kind === "writing") return <Writing entry={entry} />;
+  if (entry.kind === "thought") return <Thought entry={entry} open={open} {...(narrated === true ? { narrated } : {})} />;
+  if (entry.kind === "writing") return <Writing entry={entry} open={open} />;
   // An event is a fact, not a call: no name to bold, no verdict to give — and nothing to open,
   // unless the fact is a compression of a fuller line (a native attachment, a queued operation).
   return (
@@ -941,7 +967,7 @@ export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean
  */
 function WorkBlockView({
   entries,
-  last,
+  working,
   sidechainOf,
   onOpenSidechain,
   artifacts,
@@ -949,18 +975,20 @@ function WorkBlockView({
   calls,
 }: {
   entries: WorkEntry[];
-  /** The stretch is the last thing in the transcript — the only place work can still be going on. */
-  last: boolean;
+  /** The agent is at work in this stretch now: it is the last thing in a record still being written. */
+  working: boolean;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
   artifacts?: ArtifactSurface | undefined;
   /** A status bar is saying what is happening now — see `narrated` on {@link Transcript}. */
   narrated?: boolean | undefined;
   calls?: CallSurface | undefined;
-}): JSX.Element {
+}): JSX.Element | null {
+  const look = useContext(WorkLookContext);
   const rowOf = (index: number): ReactNode => (
     <Work
       entry={entries[index]!}
+      open={working}
       {...(sidechainOf !== undefined ? { sidechainOf } : {})}
       {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
       {...(artifacts !== undefined ? { artifacts } : {})}
@@ -968,9 +996,11 @@ function WorkBlockView({
       {...(calls !== undefined ? { calls } : {})}
     />
   );
+  // A stretch of nothing but rate limits and notes did no work: with those hidden down to the stretch,
+  // it is not drawn at all — not even its "Every step" line.
+  if ((look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
   // One line has nothing to summarise: a chip saying "1 file" over the row it counts is the row twice.
   if (entries.length === 1) return <div className="ts-work">{rowOf(0)}</div>;
-  const working = last && (narrated === true || entries.some(inFlight));
   const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls) ? [index] : []));
   return <WorkSummary entries={entries} working={working} kept={kept} rowOf={rowOf} clock={clockOf} />;
 }
@@ -1613,9 +1643,21 @@ export function Transcript({
   scope,
   doomedFrom,
   calls,
+  working,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
+  /**
+   * The record is still being written — the agent is at work right now, so the last stretch of work
+   * is drawn as in progress. Said by the caller, which knows (a chat's task status); absent, read off
+   * the session's own status.
+   *
+   * Never inferred from a call with no answer: a conversation can END on one — the agent stopped, the
+   * process went away, the result was never written — and a record that finished that way is not one
+   * still running, however its last call looks (2026-09-25: a finished chat pulsed "Running git fetch…"
+   * forever).
+   */
+  working?: boolean | undefined;
   /**
    * An ARMED cut: every message from this turn on is what a rewind would delete, drawn faded under
    * one counted line, so "everything after it" is a claim the reader can check before agreeing to
@@ -1683,6 +1725,7 @@ export function Transcript({
       ? (call) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call])
       : undefined;
   const blocks = blocksOf(shown);
+  const writing = working ?? session?.status === "running";
   // What an armed cut takes, counted once: the messages at or past the turn, replies included.
   const doomedCount =
     doomedFrom === undefined
@@ -1720,7 +1763,7 @@ export function Transcript({
               <div className={doomed ? "ts-doomed" : undefined}>
               <WorkBlockView
                 entries={block.entries}
-                last={i === blocks.length - 1}
+                working={writing && i === blocks.length - 1}
                 {...(sidechainOf !== undefined ? { sidechainOf } : {})}
                 {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
                 {...(artifacts !== undefined ? { artifacts } : {})}
@@ -1773,10 +1816,12 @@ export function Transcript({
             {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it, and
                 rendering that produces a code block that swallows the rest of the stream. */}
             <pre className="ts-text-live">{block.text}</pre>
-            <div className="ts-live-line">
-              <Pulse />
-              writing…
-            </div>
+            {writing ? (
+              <div className="ts-live-line">
+                <Pulse />
+                writing…
+              </div>
+            ) : null}
           </div>
         );
       })}

@@ -14,7 +14,7 @@
  * `transcriptView.tsx` do not import each other.
  */
 import { createContext, useContext, useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
-import type { WorkRows } from "@jaira/shared/browser";
+import type { WorkNotes, WorkRows } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { Popover, useHoverCard } from "./popover";
 import type { WorkEntry } from "./transcript";
@@ -22,13 +22,16 @@ import {
   allOf,
   chipsOf,
   inFlight,
+  isIdle,
+  isQuiet,
   phasesOf,
   secondsOf,
   sentenceOf,
   spanOf,
-  stepsOf,
+  countOf,
   thoughtLineOf,
   windowOf,
+  ACTIVE_NAME,
   type Said,
   type WorkChip,
   type WorkRun,
@@ -39,8 +42,10 @@ export interface WorkLook {
   phases: boolean;
   rows: WorkRows;
   thinking: boolean;
+  /** Rate limits and system notes — see `WorkNotes`. */
+  notes: WorkNotes;
 }
-export const DEFAULT_WORK_LOOK: WorkLook = { phases: true, rows: 3, thinking: true };
+export const DEFAULT_WORK_LOOK: WorkLook = { phases: true, rows: 3, thinking: true, notes: "hide-groups" };
 /** Provided by the shell from `appearance.conversation`; the default wherever nothing provides it. */
 export const WorkLookContext = createContext<WorkLook>(DEFAULT_WORK_LOOK);
 
@@ -171,22 +176,24 @@ function RunRow({ entries, run, live, now, clock, rowOf }: Rows & { entries: rea
         <div className={`ws-run${running ? " live" : ""}${failedCount > 0 ? " failed" : ""}${run.kind === "wait" ? " wait" : ""}`}>
           <span className="ws-run-at">{clock(first.at)}</span>
           <span className="ws-run-icon">{running ? <Pulse /> : <Icon name={kindIcon(entries, run)} />}</span>
-          <span ref={hover.anchor} {...hover.bind} className="ws-run-said" tabIndex={0}>
-            <SaidText said={said} />
-            {doing !== undefined ? (
-              <span className="ws-now">
-                <SaidText said={doing} />
+          <span className="ws-run-line">
+            <span ref={hover.anchor} {...hover.bind} className="ws-run-said" tabIndex={0}>
+              <SaidText said={said} />
+              {doing !== undefined ? (
+                <span className="ws-now">
+                  <SaidText said={doing} />
+                </span>
+              ) : null}
+            </span>
+            {failedCount > 0 ? <span className="ws-failed">{failedCount} failed</span> : null}
+            {thoughtMs > 0 ? (
+              <span className="ws-run-note">
+                <Icon name="think" />
+                {secondsOf(thoughtMs)}
               </span>
             ) : null}
+            {run.notes.length > 0 ? <span className="ws-run-note">+{run.notes.length} system</span> : null}
           </span>
-          {failedCount > 0 ? <span className="ws-failed">{failedCount} failed</span> : null}
-          {thoughtMs > 0 ? (
-            <span className="ws-run-note">
-              <Icon name="think" />
-              {secondsOf(thoughtMs)}
-            </span>
-          ) : null}
-          {run.notes.length > 0 ? <span className="ws-run-note">+{run.notes.length} system</span> : null}
           <span className="ws-run-took">{running && startedAt !== undefined ? secondsOf(Math.max(0, now - startedAt)) : ""}</span>
         </div>
       )}
@@ -226,21 +233,27 @@ export function WorkSummary({
   }, [entries, working]);
   const now = useNow(working);
   const all = useMemo(() => entries.map((_, i) => i), [entries]);
-  const phases = useMemo(
-    () => (look.phases ? phasesOf(entries, !look.thinking) : [{ name: undefined, indices: all }]),
-    [entries, look.phases, look.thinking, all],
-  );
+  const dropIdle = look.notes !== "show";
+  const phases = useMemo(() => {
+    if (look.phases) return phasesOf(entries, { merge: !look.thinking, dropIdle });
+    // Without phases the stretch is the one group, and the same rule applies to it.
+    return dropIdle && isIdle(entries, all) ? [] : [{ name: undefined, indices: all }];
+  }, [entries, look.phases, look.thinking, dropIdle, all]);
+  /** What the summary counts: everything, or — hiding them — all but the rate limits and notes. */
+  const counted = (indices: readonly number[]): number[] => (look.notes === "hide" ? indices.filter((i) => !isQuiet(entries[i]!)) : [...indices]);
   // The phase in progress: the one holding the running call — or, between calls, the last one.
   const currentAt = working ? (live !== undefined ? phases.findIndex((p) => p.indices.includes(live)) : phases.length - 1) : -1;
   const whole = spanOf(entries, all);
   const took = whole.start === undefined ? undefined : (working ? now : (whole.end ?? whole.start)) - whole.start;
   const foot = useHoverCard<HTMLButtonElement>();
   return (
-    <div className={`ws${working ? " working" : ""}${open ? " open" : ""}`} data-testid="work-summary">
+    <div className={`ws${working ? " working" : ""}${open ? " open" : ""}${phases.length === 0 ? " bare" : ""}`} data-testid="work-summary">
+      {/* Nothing left to summarise — every line was a rate limit or a note — leaves only the foot. */}
+      {phases.length === 0 ? null : (
       <div className="ws-box">
         {phases.map((phase, n) => {
           const current = n === currentAt;
-          const win = current ? windowOf(entries, phase.indices, look.rows) : { rolled: phase.indices, shown: [] as WorkRun[] };
+          const win = current ? windowOf(entries, counted(phase.indices), look.rows) : { rolled: counted(phase.indices), shown: [] as WorkRun[] };
           const span = spanOf(entries, phase.indices);
           const phaseTook = span.start === undefined ? undefined : (current ? now : (span.end ?? span.start)) - span.start;
           return (
@@ -253,7 +266,7 @@ export function WorkSummary({
                       {(hover) => (
                         <span ref={hover.anchor} {...hover.bind} className="ws-name" tabIndex={0}>
                           {current ? <Pulse /> : null}
-                          {phase.name}
+                          {current ? ACTIVE_NAME[phase.name] : phase.name}
                         </span>
                       )}
                     </RowsCard>
@@ -276,6 +289,7 @@ export function WorkSummary({
           );
         })}
       </div>
+      )}
       <button
         type="button"
         ref={foot.anchor}
@@ -289,7 +303,7 @@ export function WorkSummary({
       >
         <span className="ws-foot-label">Every step</span>
         <span className="ws-foot-count">
-          {stepsOf(entries)} steps{took !== undefined ? ` · ${secondsOf(took)}${working ? " so far" : ""}` : ""}
+          {countOf(entries)}{took !== undefined ? ` · ${secondsOf(took)}${working ? " so far" : ""}` : ""}
         </span>
         <span className="ts-chev">
           <Icon name="chevron" />

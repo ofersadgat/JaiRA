@@ -924,9 +924,13 @@ export function liveStatusOf(
     return { kind: "thinking", since: tail.thinkingStartedAt };
   }
   // The LAST unanswered call, because parallel calls settle one at a time and the newest is the one
-  // still being waited on when the others have come back.
+  // still being waited on when the others have come back — and only in the stretch since the last
+  // message: a call further up that never answered is not what this turn is doing (a chat whose old
+  // turn ended on an unanswered `git fetch` would otherwise say "Running git fetch" for every turn
+  // after it).
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i]!;
+    if (entry.kind === "message") break;
     if (entry.kind !== "tool" || entry.ok !== undefined || entry.result !== undefined) continue;
     return { kind: "running", name: entry.name, summary: entry.summary, ...(entry.at !== undefined ? { since: entry.at } : {}) };
   }

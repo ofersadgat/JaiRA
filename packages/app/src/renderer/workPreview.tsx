@@ -27,6 +27,9 @@ function story(now: number): TranscriptEntry[] {
     ...(ok === undefined ? {} : { ok, result: ok ? "ok" : { is_error: true, error: "1 failed" } }),
   });
   return [
+    // What a session logs before it does anything: notes about the run, not work.
+    { kind: "event", at: at(0), tone: "plain", text: "Hook ran: SessionStart (0.4 s)" },
+    { kind: "event", at: at(0), tone: "plain", text: "Context injected: CLAUDE.md (4.1 kB)" },
     { kind: "thought", at: at(1), text: WITHHELD, durationMs: 6_200 },
     call("Grep", "pattern", "scrollbar", 8),
     call("Read", "file_path", `${S}/styles.css`, 9),
@@ -79,9 +82,9 @@ export function WorkPreview({ look }: { look: WorkLook }): JSX.Element {
       return [...moved.slice(0, -1), rest];
     };
     return [
-      { label: "Working", note: "a few calls in", entries: running(all.slice(0, 4), 2_000) },
-      { label: "Working", note: "many calls in", entries: running(all, 5_000) },
-      { label: "Finished", note: "with its answer", entries: [...all, { kind: "message", role: "assistant", at: now, text: ANSWER } as TranscriptEntry] },
+      { label: "Working", note: "a few calls in", entries: running(all.slice(0, 6), 2_000), working: true },
+      { label: "Working", note: "many calls in", entries: running(all, 5_000), working: true },
+      { label: "Finished", note: "with its answer", entries: [...all, { kind: "message", role: "assistant", at: now, text: ANSWER } as TranscriptEntry], working: false },
     ];
   }, [now]);
   return (
@@ -94,7 +97,7 @@ export function WorkPreview({ look }: { look: WorkLook }): JSX.Element {
               {state.label}
               <span className="ws-preview-note">{state.note}</span>
             </div>
-            <Transcript entries={state.entries} />
+            <Transcript entries={state.entries} working={state.working} />
           </div>
         ))}
       </div>

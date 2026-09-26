@@ -36,6 +36,7 @@ import {
   THEME_MODES,
   USAGE_FIGURES,
   WORK_ROWS,
+  WORK_NOTES,
   defaultAppearance,
   defaultConversationLook,
   defaultEditors,
@@ -52,6 +53,7 @@ import {
   type ThemeMode,
   type UsageFigures,
   type WorkRows,
+  type WorkNotes,
 } from "./settings";
 
 /**
@@ -161,7 +163,7 @@ function parseConversation(raw: unknown, where: string): ConversationLook {
   const out = defaultConversationLook();
   if (raw === undefined) return out;
   const spec = plain(raw, where);
-  onlyFields(spec, ["sequentialBatches", "usageFigures", "workPhases", "workRows", "workThinking"], where);
+  onlyFields(spec, ["sequentialBatches", "usageFigures", "workPhases", "workRows", "workThinking", "workNotes"], where);
   if (spec["sequentialBatches"] !== undefined) {
     out.sequentialBatches = oneOf<SequentialBatchLayout>(spec["sequentialBatches"], SEQUENTIAL_BATCH_LAYOUTS, `${where}.sequentialBatches`);
   }
@@ -175,6 +177,7 @@ function parseConversation(raw: unknown, where: string): ConversationLook {
     out.workRows = rows as WorkRows;
   }
   if (spec["workThinking"] !== undefined) out.workThinking = bool(spec["workThinking"], `${where}.workThinking`);
+  if (spec["workNotes"] !== undefined) out.workNotes = oneOf<WorkNotes>(spec["workNotes"], WORK_NOTES, `${where}.workNotes`);
   return out;
 }
 

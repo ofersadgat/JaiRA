@@ -97,6 +97,8 @@ function tookOf(entry: WorkEntry): number {
 // --- words ---------------------------------------------------------------------------------------
 
 export function secondsOf(ms: number): string {
+  // Under a second is not "0 s": something happened, and it took less than the unit can say.
+  if (ms < 1000) return "<1 s";
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s} s`;
   return `${Math.floor(s / 60)} min ${s % 60} s`;
@@ -302,6 +304,9 @@ function summaryOf(entry: WorkEntry): string {
 /** What a phase did — four fixed names; the reasoning that would say more is usually withheld. */
 export type PhaseName = "Explored" | "Changed" | "Checked" | "Fixed";
 
+/** A phase still going says what it is DOING: "Fixing", not "Fixed". */
+export const ACTIVE_NAME: Record<PhaseName, string> = { Explored: "Exploring", Changed: "Changing", Checked: "Checking", Fixed: "Fixing" };
+
 export interface WorkPhase {
   name: PhaseName;
   /** Its entries, by index into the stretch, in order. */
@@ -314,10 +319,15 @@ export interface WorkPhase {
  *  - Changed: it edits a file;
  *  - Checked: it ran more commands than it read or searched;
  *  - Explored: anything else.
+ * With `dropIdle`, a piece whose only lines are rate limits and system notes is left out — it did no
+ * work anybody asked for, and its lines are still in "Every step". Even when it is the only piece:
+ * then there is no phase at all, only the foot.
+ *
  * With `merge`, neighbours that got the same name become one — the thinking line is the only thing
- * that would tell them apart, and it is off.
+ * that would tell them apart, and it is off. After dropping, so a dropped piece between two of one
+ * name does not keep them apart.
  */
-export function phasesOf(entries: readonly WorkEntry[], merge: boolean): WorkPhase[] {
+export function phasesOf(entries: readonly WorkEntry[], options: { merge: boolean; dropIdle: boolean }): WorkPhase[] {
   const cut: number[][] = [];
   entries.forEach((entry, i) => {
     if (entry.kind === "thought" || cut.length === 0) cut.push([]);
@@ -332,13 +342,26 @@ export function phasesOf(entries: readonly WorkEntry[], merge: boolean): WorkPha
     failedBefore = failedBefore || indices.some((i) => failed(entries[i]!));
     return { name, indices };
   });
-  if (!merge) return named;
-  return named.reduce<WorkPhase[]>((out, phase) => {
+  const shown = options.dropIdle ? named.filter((phase) => !isIdle(entries, phase.indices)) : named;
+  if (!options.merge) return shown;
+  return shown.reduce<WorkPhase[]>((out, phase) => {
     const last = out[out.length - 1];
     if (last !== undefined && last.name === phase.name) last.indices = [...last.indices, ...phase.indices];
     else out.push({ name: phase.name, indices: [...phase.indices] });
     return out;
   }, []);
+}
+
+/** A rate limit or a system note: a line about the run, not a step of the work. */
+export function isQuiet(entry: WorkEntry): boolean {
+  const kind = kindOf(entry);
+  return kind === "wait" || kind === "note";
+}
+
+/** Lines with nothing but rate limits and notes among them — thinking aside — and at least one of those. */
+export function isIdle(entries: readonly WorkEntry[], indices: readonly number[]): boolean {
+  const work = indices.map((i) => entries[i]!).filter((entry) => entry.kind !== "thought");
+  return work.length > 0 && work.every(isQuiet);
 }
 
 /**
@@ -383,5 +406,12 @@ export function spanOf(entries: readonly WorkEntry[], indices: readonly number[]
 /** Steps, as the count reads them: calls and thoughts, not the notes about them. */
 export function stepsOf(entries: readonly WorkEntry[]): number {
   return entries.filter((e) => e.kind !== "event").length;
+}
+
+/** What the foot counts: its steps — or, for a stretch of nothing but notes, the notes ("0 steps" is not a count of anything). */
+export function countOf(entries: readonly WorkEntry[]): string {
+  const steps = stepsOf(entries);
+  if (steps > 0) return plural(steps, "step", "steps");
+  return plural(entries.length, "note", "notes");
 }
 

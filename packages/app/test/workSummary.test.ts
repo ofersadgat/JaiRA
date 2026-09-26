@@ -45,17 +45,31 @@ const stretch: WorkEntry[] = [
 
 describe("phases", () => {
   it("cuts the stretch at each thought and names each part by what it did", () => {
-    expect(phasesOf(stretch, false).map((p) => p.name)).toEqual(["Explored", "Explored", "Changed", "Fixed"]);
+    expect(phasesOf(stretch, { merge: false, dropIdle: true }).map((p) => p.name)).toEqual(["Explored", "Explored", "Changed", "Fixed"]);
   });
 
   it("merges neighbours of one name when asked — what the thinking line would have told apart", () => {
-    const merged = phasesOf(stretch, true);
+    const merged = phasesOf(stretch, { merge: true, dropIdle: true });
     expect(merged.map((p) => p.name)).toEqual(["Explored", "Changed", "Fixed"]);
     expect(merged[0]!.indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
   });
 
+  it("leaves out a part that is only rate limits and notes — even when it is the only part", () => {
+    const note = (s: number, text: string): WorkEntry => ({ kind: "event", at: t0 + s * 1000, tone: "plain", text });
+    const opening: WorkEntry[] = [note(0, "Context injected: CLAUDE.md"), note(0, "Hook ran"), think(1), read("a.ts", 2), read("b.ts", 3)];
+    // The notes before the first thought were a part of their own, and did no work: gone.
+    expect(phasesOf(opening, { merge: false, dropIdle: true }).map((p) => p.indices)).toEqual([[2, 3, 4]]);
+    // Shown when asked.
+    expect(phasesOf(opening, { merge: false, dropIdle: false })).toHaveLength(2);
+    // Alone, it goes too: nothing is left but the foot.
+    expect(phasesOf([note(0, "Hook ran"), note(1, "Context injected")], { merge: false, dropIdle: true })).toHaveLength(0);
+    // A thought and a rate limit is still only a rate limit.
+    const waiting: WorkEntry[] = [think(0), read("a.ts", 1), think(2), { kind: "event", at: t0 + 3000, tone: "warn", text: "Rate limited — waited 12 s" }];
+    expect(phasesOf(waiting, { merge: false, dropIdle: true })).toHaveLength(1);
+  });
+
   it("calls a part that ran more than it read Checked", () => {
-    expect(phasesOf([think(0), bash("npm test", 1), bash("npm run lint", 2), read("a.ts", 3)], false)[0]!.name).toBe("Checked");
+    expect(phasesOf([think(0), bash("npm test", 1), bash("npm run lint", 2), read("a.ts", 3)], { merge: false, dropIdle: true })[0]!.name).toBe("Checked");
   });
 });
 
@@ -122,10 +136,10 @@ describe("thinking", () => {
 });
 
 describe("in the transcript", () => {
-  const draw = (entries: TranscriptEntry[], look?: WorkLook): string =>
-    renderToStaticMarkup(
-      look === undefined ? createElement(Transcript, { entries }) : createElement(WorkLookContext.Provider, { value: look }, createElement(Transcript, { entries })),
-    );
+  const draw = (entries: TranscriptEntry[], look?: WorkLook, working?: boolean): string => {
+    const transcript = createElement(Transcript, { entries, ...(working !== undefined ? { working } : {}) });
+    return renderToStaticMarkup(look === undefined ? transcript : createElement(WorkLookContext.Provider, { value: look }, transcript));
+  };
   const answer: TranscriptEntry = { kind: "message", role: "assistant", text: "Done." };
 
   it("draws a finished stretch as its phases and chips, with no rows, and every step behind the foot", () => {
@@ -139,22 +153,75 @@ describe("in the transcript", () => {
 
   it("keeps the latest rows of the phase in progress while the agent works", () => {
     const working = [...stretch.slice(0, 12), { kind: "tool", name: "Bash", summary: "npx vitest run", args: { command: "npx vitest run" }, at: t0 + 55_000 } as WorkEntry];
-    const three = draw(working, { phases: true, rows: 3, thinking: true });
+    const three = draw(working, { phases: true, rows: 3, thinking: true, notes: "hide-groups" }, true);
     expect(three).toContain("ws-phase current");
+    // The phase in progress says what it is doing, not what it did.
+    expect(three).toContain("Fixing");
+    expect(three).not.toContain(">Fixed<");
+    expect(draw([...stretch, answer])).toContain(">Fixed<");
     expect(three).toContain("Running ");
     expect(three.match(/class="ws-run[ "]/g)).toHaveLength(2);
-    const none = draw(working, { phases: true, rows: 0, thinking: true });
+    const none = draw(working, { phases: true, rows: 0, thinking: true, notes: "hide-groups" }, true);
     expect(none).not.toMatch(/class="ws-run[ "]/);
     expect(none).toContain("ws-chip ws-k-run live");
   });
 
   it("merges the Explored phases and drops the thinking line with thinking off, and draws one row with phases off", () => {
-    const off = draw([...stretch, answer], { phases: true, rows: 3, thinking: false });
+    const off = draw([...stretch, answer], { phases: true, rows: 3, thinking: false, notes: "hide-groups" });
     expect(off.match(/class="ws-phase/g)).toHaveLength(3);
     expect(off).not.toContain("ws-think");
-    const flat = draw([...stretch, answer], { phases: false, rows: 3, thinking: true });
+    const flat = draw([...stretch, answer], { phases: false, rows: 3, thinking: true, notes: "hide-groups" });
     expect(flat.match(/class="ws-phase/g)).toHaveLength(1);
     expect(flat).not.toContain("ws-name");
+  });
+
+  it("shows, counts or hides the rate limits and notes as the setting says, and always lists them under Every step", () => {
+    const note = (text: string): WorkEntry => ({ kind: "event", at: t0, tone: "plain", text });
+    const withNotes: TranscriptEntry[] = [note("Hook ran: SessionStart"), note("Context injected: CLAUDE.md"), ...stretch, answer];
+    const look = (notes: WorkLook["notes"]): WorkLook => ({ phases: true, rows: 3, thinking: true, notes });
+    // Show: the opening notes are a phase of their own, with a notes chip.
+    expect(draw(withNotes, look("show")).match(/class="ws-phase/g)).toHaveLength(5);
+    // Hide phases of only these: that phase goes; the rate limit inside a working phase is still a chip.
+    const groups = draw(withNotes, look("hide-groups"));
+    expect(groups.match(/class="ws-phase/g)).toHaveLength(4);
+    expect(groups).toContain("12 s wait");
+    // Hide: no chip for them anywhere.
+    const hidden = draw(withNotes, look("hide"));
+    expect(hidden).not.toContain("12 s wait");
+    expect(hidden).not.toContain("ws-k-note");
+  });
+
+  it("leaves only the foot when every line was a rate limit or a note — or nothing, when stretches go too", () => {
+    const note = (text: string): WorkEntry => ({ kind: "event", at: t0, tone: "plain", text });
+    const idle: TranscriptEntry[] = [note("Hook ran"), note("Context injected"), answer];
+    const html = draw(idle);
+    expect(html).toContain("ws bare");
+    // A stretch of nothing but notes counts its notes, not "0 steps".
+    expect(html).toContain("2 notes");
+    expect(html).not.toContain("0 steps");
+    expect(html).not.toContain("ws-box");
+    expect(html).toContain("Every step");
+    for (const notes of ["hide-blocks", "hide"] as const) {
+      const gone = draw(idle, { phases: true, rows: 3, thinking: true, notes });
+      expect(gone).not.toContain("work-summary");
+      expect(gone).not.toContain("Every step");
+      expect(gone).not.toContain("Hook ran");
+      // A lone note is a stretch of only notes too.
+      expect(draw([note("Hook ran"), answer], { phases: true, rows: 3, thinking: true, notes })).not.toContain("Hook ran");
+    }
+  });
+
+  it("does not call a finished conversation that ended on an unanswered call working", () => {
+    // A chat on 2026-09-25: its record ended on a `bash` call whose result was never written, the task
+    // was completed — and the summary pulsed "Running git fetch…" with a clock that never stopped.
+    const endedOnACall = [...stretch.slice(0, 12), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin", args: { command: "git fetch origin" }, at: t0 + 55_000 } as WorkEntry];
+    for (const html of [draw(endedOnACall), draw(endedOnACall, undefined, false)]) {
+      expect(html).not.toContain("ws-phase current");
+      expect(html).not.toContain("Running ");
+      expect(html).not.toMatch(/class="ws-run[ "]/);
+    }
+    // Said to be working, the same record is drawn in progress.
+    expect(draw(endedOnACall, undefined, true)).toContain("ws-phase current");
   });
 
   it("leaves a single line as the row it always was", () => {

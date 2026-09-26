@@ -252,6 +252,21 @@ export const USAGE_FIGURES: readonly UsageFigures[] = ["off", "number", "ring", 
 export type WorkRows = 0 | 1 | 3 | 5;
 export const WORK_ROWS: readonly WorkRows[] = [0, 1, 3, 5];
 
+/**
+ * What the work summary does with the lines that are about the run rather than work — rate limits and
+ * system notes (a context injected, a hook that ran).
+ *
+ *  - `"show"`: counted in chips like any work, and a phase of nothing else keeps its row.
+ *  - `"hide-groups"`: counted, but a phase of nothing else is left out; a stretch of nothing else is
+ *    only its "Every step" line.
+ *  - `"hide-blocks"`: as `hide-groups`, and a stretch of nothing else is not drawn at all.
+ *  - `"hide"`: left out of the summary altogether, and a stretch of nothing else is not drawn.
+ *
+ * "Every step" lists them wherever it is drawn.
+ */
+export type WorkNotes = "show" | "hide-groups" | "hide-blocks" | "hide";
+export const WORK_NOTES: readonly WorkNotes[] = ["show", "hide-groups", "hide-blocks", "hide"];
+
 /** The conversation's reading preferences — `appearance.conversation` (`./appearanceConfig`). */
 export interface ConversationLook {
   sequentialBatches: SequentialBatchLayout;
@@ -268,11 +283,13 @@ export interface ConversationLook {
    * neighbouring phases that share a name become one — without the line nothing tells them apart.
    */
   workThinking: boolean;
+  /** See {@link WorkNotes}. */
+  workNotes: WorkNotes;
 }
 
 /** Stacked: a batch reads as the sequence it was, until somebody asks otherwise. The number alone. */
 export function defaultConversationLook(): ConversationLook {
-  return { sequentialBatches: "stacked", usageFigures: "number", workPhases: true, workRows: 3, workThinking: true };
+  return { sequentialBatches: "stacked", usageFigures: "number", workPhases: true, workRows: 3, workThinking: true, workNotes: "hide-groups" };
 }
 
 /**

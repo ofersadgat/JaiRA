@@ -10392,7 +10392,7 @@ fieldset.reading {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  width: 76px;
+  width: 92px;
   border-radius: 4px;
   font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 600;
@@ -10516,8 +10516,10 @@ fieldset.reading {
 .ws-fill {
   flex: 1 1 0;
 }
+/* Always at the right edge — whether or not a thinking line is there to push it. */
 .ws-took {
   flex: none;
+  margin-left: auto;
   padding-left: 8px;
   font: calc(var(--size-data) * 10.5 / 12) var(--font-data);
   color: var(--dim);
@@ -10533,7 +10535,7 @@ fieldset.reading {
 }
 .ws-run {
   display: grid;
-  grid-template-columns: auto 18px minmax(0, 1fr) auto auto auto auto;
+  grid-template-columns: auto 18px minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
   min-width: 0;
@@ -10566,7 +10568,19 @@ fieldset.reading {
 .ws-run.wait .ws-run-icon {
   color: var(--warn);
 }
+/* The sentence, then what qualifies it — a failure, the thinking that led here, the notes after —
+   on the same line; only the live timer keeps the right edge. */
+.ws-run-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ws-run-line > :not(.ws-run-said) {
+  flex: none;
+}
 .ws-run-said {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -10638,8 +10652,14 @@ fieldset.reading {
   display: inline-flex;
   transition: transform 0.15s ease;
 }
+.ws.bare .ws-foot {
+  border-radius: 8px;
+}
 .ws.open .ws-foot {
   border-radius: 0;
+}
+.ws.bare.open .ws-foot {
+  border-radius: 8px 8px 0 0;
 }
 .ws.open .ws-foot .ts-chev {
   transform: rotate(180deg);

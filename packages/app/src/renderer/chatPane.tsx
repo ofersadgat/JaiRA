@@ -888,7 +888,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             // The live tail belongs to the END of the conversation, so it rides with whatever is
             // showing there — and a reader looking at the side that was replaced is not looking at
             // where a turn is arriving.
-            {...(split === null && (seam === null || seam.own.length === 0) ? { live: surface.live ?? afterglow } : {})}
+            {...(split === null && (seam === null || seam.own.length === 0) ? { live: surface.live ?? afterglow, working: running } : {})}
             empty={running ? "Working…" : "This conversation has not said anything yet."}
             artifacts={artifacts}
             onEdit={edit}
@@ -913,6 +913,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
                   session={thread?.session ?? null}
                   entries={seam.own}
                   live={surface.live ?? afterglow}
+                  working={running}
                   artifacts={artifacts}
                   onEdit={edit}
                   scope={taskId}
@@ -937,7 +938,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               <Transcript
                 session={thread?.session ?? null}
                 entries={shown.entries}
-                {...(shown.key === KEPT ? { live: surface.live ?? afterglow } : {})}
+                {...(shown.key === KEPT ? { live: surface.live ?? afterglow, working: running } : {})}
                 artifacts={artifacts}
                 // Only on the side that is still being had. A message on the other side cannot be
                 // replaced from here: it is not where this conversation ends, and "edit" means fork
