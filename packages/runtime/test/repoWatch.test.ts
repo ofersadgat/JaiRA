@@ -577,6 +577,21 @@ describe("cadence", () => {
     expect(store.seen({ remote: "origin", repository: "github.com/acme/app" }, "branch", "main")).toBeUndefined();
   });
 
+  it("waits, at dispose, for a read of the targets under way — the git run in each project", async () => {
+    let finish: (targets: RepoWatchTarget[]) => void = () => undefined;
+    const w = new RepositoryWatcher({ targets: () => new Promise<RepoWatchTarget[]>((resolve) => (finish = resolve)), clock, onEvent: () => undefined });
+    void w.kick();
+    await Promise.resolve();
+    let done = false;
+    const disposed = w.dispose().then(() => (done = true));
+    await Promise.resolve();
+    expect(done).toBe(false);
+    finish([target()]);
+    await disposed;
+    expect(done).toBe(true);
+    expect(clock.timers.size).toBe(0);
+  });
+
   it("keys a target by project, remote and repository", () => {
     expect(repoWatchKeyOf(target())).toBe(JSON.stringify(["p1", "origin", "github.com", "acme/app"]));
   });

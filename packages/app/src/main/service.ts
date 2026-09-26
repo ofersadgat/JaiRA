@@ -2716,7 +2716,8 @@ export class AppService {
     this.limits.close();
     this.waiting.close();
     this.remoteWatcher?.dispose();
-    this.repoWatch?.dispose();
+    // Awaited: a read of the remotes runs `git` in each project, which must end before they close.
+    await this.repoWatch?.dispose();
     clearTimeout(this.eventsKick);
     // A sign-in still polling ends as canceled; a renewal timer set for later is nobody's now.
     for (const waiting of this.forgeSignIns.values()) waiting.controller.abort();

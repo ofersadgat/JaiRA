@@ -236,11 +236,18 @@ export class RepositoryWatcher {
   }
 
   private lookAll = false;
+  /** The targets being read — `git` run in each project — while a pass is reading them. */
+  private reading?: Promise<void>;
 
   private async reconcile(lookAll: boolean): Promise<void> {
     let targets: RepoWatchTarget[];
+    const reading = Promise.resolve().then(() => this.options.targets());
+    this.reading = reading.then(
+      () => undefined,
+      () => undefined,
+    );
     try {
-      targets = (await this.options.targets()).filter((target) => target.events.length > 0);
+      targets = (await reading).filter((target) => target.events.length > 0);
     } catch {
       return;
     }
@@ -261,10 +268,17 @@ export class RepositoryWatcher {
     await Promise.all(looks);
   }
 
-  dispose(): void {
+  /**
+   * Stop: no more timers, no more looks. Resolves once a read of the targets already under way has
+   * ended — it runs `git` IN each project, and a closed project whose directory a git process still stands in
+   * cannot be removed (Windows: EBUSY). A forge request in flight is not waited for: its answer is
+   * dropped (`alive`).
+   */
+  dispose(): Promise<void> {
     this.disposed = true;
     for (const polling of this.polling.values()) if (polling.timer !== undefined) this.clock.clearTimeout(polling.timer);
     this.polling.clear();
+    return this.reading ?? Promise.resolve();
   }
 
   /** Look at one target now. Public for "check now" and for tests; one look per target at a time. */
