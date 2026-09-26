@@ -83,6 +83,7 @@ import {
   parseSessionRef,
   loadPinnedBundle,
   userModules,
+  scriptModuleOptions,
   loadPermissionFunction,
   workflowLoadOptions,
   canonicalModulePath,
@@ -4597,6 +4598,7 @@ export class AppService {
         // Compile the workflow's own TypeScript before anything calls it — the step SPEC §7.5.5
         // puts on the far side of the approval gate `beginTaskRun`'s freeze already ran.
         if (userFns !== undefined) await prepareUserFunctions(userFns.userFunctions);
+        const scripts = scriptModuleOptions();
         const result = await executeWorkflow({
           // A loaded machine that ADOPTED a task (decision 0005 §2) reads that child through a
           // stand-in state — see `withAdoptedStandIns`. Every other run gets its bundle as pinned.
@@ -4627,6 +4629,8 @@ export class AppService {
           }),
           ...(started.meta.split !== undefined ? { split: started.meta.split } : {}),
           directed,
+          // A workflow script's imports — resolved along this project's path, run only when approved.
+          ...(scripts !== undefined ? { scripts } : {}),
           // Tee the journal: persist, then push the same event to the renderer so
           // the detail view streams live without polling the database.
           persistence: {

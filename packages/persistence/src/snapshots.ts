@@ -31,6 +31,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, w
 import { dirname, join, relative, sep } from "node:path";
 import { isBareStateId, parseReferencedFile, snapshotHash, stateIdFromPath, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
 import { readJsonFile } from "@jaira/shared";
+import { scriptStatesIn } from "./workflowScripts";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.snapshots");
@@ -156,6 +157,18 @@ export function readWorkflowFiles(
     }
   };
   walk(workflowsDir);
+  // The workflow SCRIPTS here, as the documents they compile to (hw SCRIPTS.md). A state file that
+  // defines the same state as a script is refused rather than letting one silently win.
+  for (const { key, script, document } of scriptStatesIn(workflowsDir, options.onError)) {
+    const clash = Object.keys(files).find((file) => stateIdFromPath(file.split(sep).join("/")) === stateIdFromPath(key));
+    if (clash === undefined) {
+      files[key] = document;
+      continue;
+    }
+    const message = `'${clash}' and '${script}' both define this state — keep one`;
+    if (options.onError === undefined) throw refusal(log, message);
+    options.onError(clash, message);
+  }
   return files;
 }
 

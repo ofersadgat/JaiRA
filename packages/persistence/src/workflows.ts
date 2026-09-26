@@ -33,6 +33,7 @@ import type { LintIssue, StatePermissionSetIssue, WorkflowBrowser, WorkflowEntry
 import type { Project } from "./project";
 import { checkLabel } from "./runLabel";
 import { isStateFile } from "./snapshots";
+import { scriptStatesIn } from "./workflowScripts";
 import { loadWorkflowBundle } from "./permissionSets";
 import { userModules, watchingForUnapproved, withheldApprovalsOf } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
@@ -51,6 +52,8 @@ export type { LintIssue, LintSeverity, WorkflowBrowser, WorkflowEntry, WorkflowF
 export function readWorkflowsTolerantly(workflowsDir: string): {
   files: Record<string, unknown>;
   errors: Map<string, string>;
+  /** A workflow script's state, by its `files` key, to the script a person edits to change it. */
+  scripts: Map<string, string>;
 } {
   const files: Record<string, unknown> = {};
   const errors = new Map<string, string>();
@@ -79,7 +82,21 @@ export function readWorkflowsTolerantly(workflowsDir: string): {
     }
   };
   walk(workflowsDir);
-  return { files, errors };
+  // The workflow SCRIPTS here (hw SCRIPTS.md): each as the ROOT state it compiles to, which is what
+  // a listing lists. The phases and calls it generates are not files anyone edits, and a load reaches
+  // them by id (`scriptStateFor`). A script that does not compile is reported against its file, as a
+  // malformed state file is.
+  const scripts = new Map<string, string>();
+  for (const { key, script, root, document } of scriptStatesIn(workflowsDir, (file, message) => errors.set(file, message))) {
+    if (!root) continue;
+    if (files[key] !== undefined) {
+      errors.set(script, `'${key}' and '${script}' both define this state — keep one`);
+      continue;
+    }
+    files[key] = document;
+    scripts.set(key, script);
+  }
+  return { files, errors, scripts };
 }
 
 /**
@@ -288,12 +305,14 @@ function browseLayers(
   const byStateId = new Map<string, { file: string; raw: unknown; layer: WorkflowLayer; root: string }>();
   const fileEntries: WorkflowFileEntry[] = [];
   for (const { dir, layer } of layers) {
-    const { files, errors } = readWorkflowsTolerantly(dir);
+    const { files, errors, scripts } = readWorkflowsTolerantly(dir);
     for (const [file, message] of errors) {
-      fileEntries.push({ stateId: stateIdFromPath(file), file, error: message, layer, root: dir });
+      fileEntries.push({ stateId: stateIdFromPath(file).replace(/\.(ts|js)$/i, ""), file, error: message, layer, root: dir });
     }
-    for (const [file, raw] of Object.entries(files)) {
-      const stateId = stateIdFromPath(file);
+    for (const [key, raw] of Object.entries(files)) {
+      const stateId = stateIdFromPath(key);
+      // A workflow script is listed as the file it IS, which is what an editor opens.
+      const file = scripts.get(key) ?? key;
       const label = labelOf(raw);
       // First layer wins, exactly as reference resolution does — the later copy is kept in the list
       // and flagged, because "your base workflow is being overridden here" is worth seeing.

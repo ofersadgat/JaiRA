@@ -134,6 +134,41 @@ describe("an operation list's calls", () => {
   });
 });
 
+describe("a workflow script's record (hw SCRIPTS.md §11)", () => {
+  it("hands the code its settled answers and written lines back, in journal order", () => {
+    begin();
+    entered("i-root", "s");
+    journal("i-root", { type: "script.phase", instanceId: "i-root", stateId: "s", site: "phase#0", title: "Find" });
+    journal("i-root", { type: "script.call.settled", instanceId: "i-root", stateId: "s", site: "abc#0", outcome: "value", value: "first", costUsd: 0.01 });
+    journal("i-root", { type: "script.log", instanceId: "i-root", stateId: "s", site: "log#0", message: "one done" });
+    journal("i-root", { type: "script.call.settled", instanceId: "i-root", stateId: "s", site: "abc#1", outcome: "error", failure: { classification: "permanent", reason: "boom" } });
+
+    const load = buildTaskLoad(project, "t", { s: {} });
+    expect(load.loaded!.scriptCalls).toEqual([
+      { site: "phase#0" },
+      { site: "abc#0", value: "first", costUsd: 0.01 },
+      { site: "log#0" },
+      { site: "abc#1", failure: { classification: "permanent", reason: "boom" } },
+    ]);
+  });
+
+  it("lists a state the code CALLED as a child marked with its site — which moves nothing and is owed no answer", () => {
+    begin();
+    entered("i-root", "s");
+    journal("i-called", { type: "instance.entered", instanceId: "i-called", stateId: "triage", childKey: "triage", parentInstanceId: "i-root", calledAt: "workflow:triage:h#0", inputs: { finding: "x" } });
+    terminated("i-called", "triage", "success");
+    // A second call the stop cut short: still running when the process died.
+    journal("i-running", { type: "instance.entered", instanceId: "i-running", stateId: "triage", childKey: "triage", parentInstanceId: "i-root", calledAt: "workflow:triage:h2#0", inputs: { finding: "y" } });
+
+    const load = buildTaskLoad(project, "t", { s: {}, triage: {} });
+    const [ended, running] = load.loaded!.children!;
+    expect(ended).toMatchObject({ id: "i-called", calledAt: "workflow:triage:h#0", live: false, outcome: "success" });
+    expect(running).toMatchObject({ id: "i-running", calledAt: "workflow:triage:h2#0", live: true, occurrence: 1 });
+    // The finished call is the code's to read, not a child a round of the caller still has to answer.
+    expect(load.loaded!.unanswered).toBeUndefined();
+  });
+});
+
 describe("the load description of a half-done run", () => {
   it("loads what completed, presents what was cut, and points at the frontier", () => {
     begin();

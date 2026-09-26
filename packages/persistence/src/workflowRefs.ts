@@ -23,6 +23,7 @@ import { parseJsonText, workflowSearchPath, type JairaPaths } from "@jaira/share
 import { hostCalleeSignatures } from "@jaira/runtime";
 
 import { userModules, type UnapprovedWatch } from "./userModules";
+import { scriptStateFor } from "./workflowScripts";
 import { nodeVfs } from "./vfs";
 
 /**
@@ -221,6 +222,15 @@ function readStateFile(id: string, roots: string | readonly string[], tolerant: 
       if (tolerant) return undefined;
       throw e;
     }
+  }
+  // No state file: a SCRIPT may define it — the state itself, or one a script's compile generates
+  // (hw SCRIPTS.md). Searched after every root's files, so a state file anywhere on the path wins,
+  // as it always did. A script that does not compile is the caller's error, as a malformed file is.
+  try {
+    const script = scriptStateFor(id, search);
+    if (script !== undefined) return script;
+  } catch (e) {
+    if (!tolerant) throw e;
   }
   // Absent everywhere. Left to the caller as an unknown-state VALIDATION error, which carries the
   // referring field and reads far better than a raw ENOENT would.

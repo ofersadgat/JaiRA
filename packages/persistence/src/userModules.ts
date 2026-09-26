@@ -42,12 +42,15 @@ import {
   createSymbolIndex,
   createUserFunctions,
   freezeModules,
+  loadSignatureContext,
   moduleHash,
   pendingApprovals,
   requirePathFor,
   type ApprovalStore,
   type FrozenModules,
   type PendingApproval,
+  type ScriptModuleOptions,
+  type SignatureContext,
   type SymbolIndex,
   type UserFunctions,
   type Vfs,
@@ -248,6 +251,20 @@ export interface UserModules {
   /** The require path modules resolve each other along — the search path plus its `node_modules`. */
   requirePath: readonly string[];
   vfs: Vfs;
+  /**
+   * The search path itself, canonical — where a workflow SCRIPT's imported state is named from
+   * (`workflowScripts.ts`): a file's state id is its path under whichever entry holds it.
+   */
+  searchPath: readonly string[];
+  /** The `$`-roots an import may name (`$JAIRA`, `$PROJECT`, `$BASE`, `$SYSTEM`) — as a reference's. */
+  roots: Readonly<Record<string, string>>;
+  /**
+   * The compiler, loaded — what compiles a workflow script SYNCHRONOUSLY (hw `compileScriptWith`),
+   * which a sync `loadBundle` needs for the same reason it needs this pair at all.
+   */
+  signatures: SignatureContext;
+  /** Whether a module may run: approved, and unchanged since (SPEC §7.5.5) — the gate the index applies. */
+  approved: (file: string) => boolean;
 }
 
 let current: UserModules | undefined;
@@ -284,20 +301,22 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   // because hw does not re-export that type — and a cache is exactly the thing that must not be two
   // maps, since the gated and ungated indexes read the very same files.
   const cache: NonNullable<Parameters<typeof createSymbolIndex>[0]["cache"]> = new Map();
+  // The gate, at the only place it can be applied without lying about resolution: an unapproved
+  // file contributes NO symbol, so it cannot capture a name a later approved file would answer — and
+  // a workflow script's imported module does not run.
+  //
+  // Both `undefined`s are refusals and neither may cancel the other: a file that has never been
+  // approved has no stored hash, and one that cannot be read has no current hash. Comparing them
+  // directly would make an unreadable, never-approved file compare EQUAL and contribute.
+  const approved = (file: string): boolean => {
+    const stored = approvals.approved(file);
+    if (stored === undefined) return false;
+    const actual = currentHashOf(vfs, file);
+    return actual !== undefined && actual === stored;
+  };
   const symbols = await createSymbolIndex({
     vfs,
-    // The gate, at the only place it can be applied without lying about resolution: an unapproved
-    // file contributes NO symbol, so it cannot capture a name a later approved file would answer.
-    //
-    // Both `undefined`s are refusals and neither may cancel the other: a file that has never been
-    // approved has no stored hash, and one that cannot be read has no current hash. Comparing them
-    // directly would make an unreadable, never-approved file compare EQUAL and contribute.
-    approved: (file) => {
-      const stored = approvals.approved(file);
-      if (stored === undefined) return false;
-      const actual = currentHashOf(vfs, file);
-      return actual !== undefined && actual === stored;
-    },
+    approved,
     cache,
   });
   // Shares `cache` with the gated index above, keyed by content hash, so the second index re-reads
@@ -305,7 +324,9 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   // records what a file DECLARES, and resolution still asks `symbols`, which refuses.
   const openSymbols = await createSymbolIndex({ vfs, cache });
   const userFunctions = await createUserFunctions({ vfs, requirePath });
-  current = { symbols, openSymbols, userFunctions, approvals, requirePath, vfs };
+  const signatures = await loadSignatureContext();
+  const roots = { JAIRA: paths.jairaDir, PROJECT: paths.projectDir, BASE: paths.base.baseDir, SYSTEM: paths.builtIn.dir };
+  current = { symbols, openSymbols, userFunctions, approvals, requirePath, vfs, searchPath, roots, signatures, approved };
   return current;
 }
 
@@ -320,6 +341,19 @@ export interface PrepareUserModulesOptions {
    * startup.
    */
   rebuild?: boolean;
+}
+
+/**
+ * What a run hands the engine for a workflow SCRIPT's imports (hw `EngineConfig.scripts`): the search
+ * path they resolve along, the `$`-roots, and the approval gate the symbol index applies — so a
+ * script's imported module runs exactly when a function module in the same file would. A fresh vfs,
+ * because the run reads what is on disk now. `undefined` when this process built no pair: a script
+ * then imports no code.
+ */
+export function scriptModuleOptions(): ScriptModuleOptions | undefined {
+  const modules = current;
+  if (modules === undefined) return undefined;
+  return { vfs: nodeVfs(), requirePath: modules.requirePath, roots: modules.roots, approved: modules.approved };
 }
 
 /** The pair, if this process built it. Sync, because `workflowLoadOptions` is. */
@@ -433,7 +467,14 @@ const BODY_PSEUDO_PATH = "<body>/";
  * inside the snapshot hash (SPEC §7.5.1).
  */
 export function moduleEntriesOf(bundle: WorkflowBundle): string[] {
-  return [...new Set(userFunctionRefsOf(bundle).map((ref) => ref.file))].sort();
+  const files = new Set(userFunctionRefsOf(bundle).map((ref) => ref.file));
+  // A workflow SCRIPT's imported code runs when its states do (hw SCRIPTS.md §13), so it is gated
+  // and frozen exactly as a function module is. The script's own code is not here: it is carried in
+  // its documents, and so is inside the snapshot hash already, as an embedded body is.
+  for (const state of Object.values(bundle.states)) {
+    for (const file of (state as { generated?: { modules?: readonly string[] } }).generated?.modules ?? []) files.add(canonicalModulePath(file));
+  }
+  return [...files].sort();
 }
 
 /** One `user:` reference a bundle makes, split back into the file and the symbol inside it. */

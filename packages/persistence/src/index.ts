@@ -33,6 +33,7 @@ export * from "./userSettingsMigration";
 // js/ts function modules: the approval store, the process-wide symbol index, and the freeze
 // (SPEC §7.5.5).
 export * from "./userModules";
+export * from "./workflowScripts";
 export * from "./workflowSync";
 export * from "./descriptions";
 export * from "./blobStore";

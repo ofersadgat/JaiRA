@@ -35,6 +35,7 @@ import {
   resetUserModules,
   resolveUserFunctions,
   userModules,
+  scriptModuleOptions,
   ensureWorkspace,
   gitFor,
   historySize,
@@ -762,6 +763,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
     // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
     await prepareResolvedFunctions();
+    const scripts = scriptModuleOptions();
     const result = await executeWorkflow({
       bundle,
       inputs,
@@ -769,6 +771,8 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
       prompt,
       session,
       ...governed,
+      // A workflow script's imports — resolved along the search path, run only when approved.
+      ...(scripts !== undefined ? { scripts } : {}),
       ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
     });
     io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
@@ -1290,9 +1294,12 @@ async function runTaskNow(
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
     // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
     await prepareResolvedFunctions();
+    const scripts = scriptModuleOptions();
     const result = await executeWorkflow({
       // An adopted child is read through a stand-in state — see `withAdoptedStandIns`.
       bundle: withAdoptedStandIns(started.bundle, resume?.loaded),
+      // A workflow script's imports — resolved along the project's path, run only when approved.
+      ...(scripts !== undefined ? { scripts } : {}),
       inputs: started.meta.inputs ?? {},
       registry,
       prompt,

@@ -256,6 +256,38 @@ so `plan.yaml` and an equivalent `plan.json` are one workflow with one identity.
 YAML's excess is refused: a value JSON cannot represent, an alias cycle, or a
 duplicate key is a load error.
 
+#### States can be code: workflow scripts
+
+A `.ts`/`.js` under a workflows directory whose first statement after its
+imports is `export const meta = { … }` is a state written as CODE — a superset
+of a Claude Code workflow script — and JaiRA compiles it to the state documents
+it is (declarative-ai `SCRIPTS.md`). `meta` sets the standard fields (`name`,
+`description`, `title`, `environment`, `limits`, `compile`); the exported
+function's parameters and return are the inputs and outputs; `phase("Find")`
+starts a child state; and every `llm()`/`agent()` call is a state of its own,
+so the board shows the calls and a restart resumes between them.
+
+```ts
+// .jaira/workflows/greet.ts
+import { shout } from "$/lib/shout";
+export const meta = { name: "Greet" };
+export default async function greet(who: string) {
+  return { line: await llm("Say hello to " + shout(who)) };
+}
+```
+
+- The browser lists the script as the workflow it is, and opens the script to
+  edit it; the states it generates (`greet/call_0`, a phase, a fan-out) are
+  never files, and are not listed.
+- A script and a state file defining the same state is an error — keep one.
+- A `.ts` without a `meta` among the workflows is a helper a script imports,
+  not a workflow. A mount that names one by id still compiles it.
+- Code a script IMPORTS (`$/lib/shout` above) runs in JaiRA's process, so it
+  is approved and frozen exactly as a function module is (§9.1). The script's
+  own code is part of the workflow, like an embedded body, and needs no approval.
+- Compiling needs the TypeScript compiler JaiRA loads at startup; a process
+  that did not load it (a bare library caller) sees no scripts.
+
 ### 2.2 Reusing a block: transclusion
 
 A document reference is **templating**. The referenced node is spliced in and

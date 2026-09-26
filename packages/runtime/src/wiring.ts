@@ -35,6 +35,7 @@ import {
   type FanOutHost,
   type LoadedInstance,
   type Persistence,
+  type ScriptModuleOptions,
   type SplitEntry,
   type DirectedTransitions,
   type WorkflowBundle,
@@ -376,6 +377,13 @@ export interface WorkflowRunConfig {
    * claim positions in a conversation nobody can read.
    */
   session?: { sessions: SessionStore<JsonValue>; records: RecordStore };
+  /**
+   * Where a compiled workflow SCRIPT's imports come from and whether they may run — hw's
+   * `EngineConfig.scripts` (SCRIPTS.md §13). A script's own code is in its documents; this is only for
+   * the modules it imports. Absent ⇒ a script may import no code, which is the honest answer for a
+   * process that never built the module pair.
+   */
+  scripts?: ScriptModuleOptions;
 }
 
 /** The two halves of one store: where a call's payload lands, and what reads it back. */
@@ -479,6 +487,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.fanOut !== undefined ? { fanOut: cfg.fanOut } : {}),
     ...(cfg.split !== undefined ? { split: cfg.split } : {}),
     ...(cfg.directed !== undefined ? { directed: cfg.directed } : {}),
+    ...(cfg.scripts !== undefined ? { scripts: cfg.scripts } : {}),
   });
   const ctx: ExecServices = {
     validator: new SchemaValidator(),

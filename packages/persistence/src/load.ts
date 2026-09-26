@@ -95,7 +95,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { hashOperation, scopedOperationId, type Failure, type ResolvedValue } from "@declarative-ai/exec";
-import type { CallResult, DirectedDescent, LoadedInstance, LoadedOperation, WorkflowMetrics } from "@declarative-ai/hw";
+import type { CallResult, DirectedDescent, LoadedInstance, LoadedOperation, ScriptCallRecord, WorkflowMetrics } from "@declarative-ai/hw";
 import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { InstanceAddress } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
@@ -156,6 +156,18 @@ interface FoldNode {
   /** The next step of a way down this instance was entered to take, and has not — see the header. */
   descent?: DirectedDescent;
   childKey?: string;
+  /**
+   * The script call site that entered this instance (hw SCRIPTS.md §10): a state a compiled script's
+   * code CALLED rather than a mount's entry. It is listed among its caller's children with this set,
+   * and the caller's code re-attaches it on resume; it answers nothing its parent's rounds owe.
+   */
+  calledAt?: string;
+  /**
+   * What a compiled script's code recorded in this instance, IN JOURNAL ORDER — every
+   * `script.call.settled`, `script.log` and `script.phase` row (hw `LoadedInstance.scriptCalls`). A
+   * re-run of the code is handed a settled call's answer back, and writes a log line or a phase once.
+   */
+  scriptCalls: ScriptCallRecord[];
   /** The element of a fanned-out mount this instance is — see `InstanceNode.element`. */
   element?: number;
   /** A mirrored ADOPTION — see the header. The outputs arrive with its end. */
@@ -408,10 +420,12 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           stateId: event.stateId,
           ...(event.parentInstanceId !== undefined ? { parentId: event.parentInstanceId } : {}),
           ...(event.childKey !== undefined ? { childKey: event.childKey } : {}),
+          ...(event.calledAt !== undefined ? { calledAt: event.calledAt } : {}),
           ...(event.element !== undefined ? { element: event.element } : {}),
           ...((event as { adopted?: boolean }).adopted === true ? { adopted: {} } : {}),
           inputs: (event.inputs ?? {}) as Record<string, JsonValue>,
           children: [],
+          scriptCalls: [],
           index: 0,
           iteration: 0,
           advancedAt: 0,
@@ -435,8 +449,9 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
             parent.children.at(-1)?.childKey === node.childKey &&
             parent.children.at(-1)?.element !== undefined;
           parent.children.push(node);
-          // Entering a NEW child is the parent acting: whatever finished before this was answered.
-          if (!joins) parent.advancedAt = at;
+          // Entering a NEW child is the parent acting: whatever finished before this was answered. A
+          // state its script CALLED is the code waiting on a call, not the machine moving.
+          if (!joins && node.calledAt === undefined) parent.advancedAt = at;
           // The entry a directed transition owed has been made — and, on a way down, this instance
           // owes the next step until it takes one.
           const owed = parent.directed;
@@ -530,6 +545,21 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       }
       case "call.waiting": {
         deferredOps.add(event.operationId);
+        break;
+      }
+      // A compiled script's own record (hw SCRIPTS.md §11): answers, and lines written once.
+      case "script.call.settled": {
+        nodes.get(event.instanceId)?.scriptCalls.push({
+          site: event.site,
+          ...(event.outcome === "value" ? { value: event.value as ResolvedValue } : {}),
+          ...(event.failure !== undefined ? { failure: event.failure } : {}),
+          ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
+        });
+        break;
+      }
+      case "script.log":
+      case "script.phase": {
+        nodes.get(event.instanceId)?.scriptCalls.push({ site: event.site });
         break;
       }
       case "value.settled": {
@@ -690,7 +720,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         (child.terminated === undefined ||
           (child.terminated.outcome !== "success" && child.terminated.outcome !== "skipped" && child.terminated.at > node.advancedAt));
       if (childLive) anyChildLive = true;
-      else if (live && child.terminated !== undefined && child.terminated.outcome === "success" && child.terminated.at > node.advancedAt) {
+      else if (live && child.calledAt === undefined && child.terminated !== undefined && child.terminated.outcome === "success" && child.terminated.at > node.advancedAt) {
         // Finished after this instance's last advancement: the round that would have read it never
         // ran, so the loaded round owes it an answer.
         unanswered.push({ key, at: child.terminated.at });
@@ -730,6 +760,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       ...(node.childKey !== undefined ? { childKey: node.childKey } : {}),
       occurrence,
       ...(node.element !== undefined ? { element: node.element } : {}),
+      ...(node.calledAt !== undefined ? { calledAt: node.calledAt } : {}),
       inputs: node.inputs as Record<string, ResolvedValue>,
       index: node.index,
       iteration: node.iteration,
@@ -752,6 +783,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       ...(live && node.descent !== undefined && node.descent.path.length > 0 ? { descent: node.descent } : {}),
       // Settled fields are used verbatim by `loadRun` and never re-evaluated; an absent one is.
       ...(node.fields.size > 0 ? { fields: Object.fromEntries(node.fields) } : {}),
+      ...(node.scriptCalls.length > 0 ? { scriptCalls: node.scriptCalls } : {}),
       ...(children.length > 0 ? { children } : {}),
     };
   };
