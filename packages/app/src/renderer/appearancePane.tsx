@@ -46,6 +46,7 @@ import {
   type SequentialBatchLayout,
   type UsageFigures,
   type ThemeMode,
+  type WorkRows,
 } from "@jaira/shared/browser";
 import { FileTypesPane } from "./fileTypesPane";
 import { Popover, usePopover } from "./popover";
@@ -68,6 +69,7 @@ import { Column, Tile } from "./board";
 import { PALETTE_CARDS, ThemeMini } from "./paletteCards";
 import { Segmented, SettingsRow, SettingsSection, type RowLayer } from "./settingsLayout";
 import { UsageFiguresPreview } from "./usageMeters";
+import { WorkPreview } from "./workPreview";
 
 /**
  * Faces worth offering by name.
@@ -423,6 +425,13 @@ const USAGE_CHOICES: ReadonlyArray<readonly [string, UsageFigures]> = [
   ["Both", "both"],
 ];
 
+const WORK_ROW_CHOICES: ReadonlyArray<readonly [string, `${WorkRows}`]> = [
+  ["None", "0"],
+  ["1", "1"],
+  ["3", "3"],
+  ["5", "5"],
+];
+
 const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
   ["One after another", "stacked"],
   ["Side by side", "band"],
@@ -459,6 +468,11 @@ function lookWords(value: unknown, path: string): string {
       return BATCH_CHOICES.find(([, layout]) => layout === value)?.[0].toLowerCase() ?? shortValue(value, path);
     case "conversation.usageFigures":
       return USAGE_CHOICES.find(([, figures]) => figures === value)?.[0].toLowerCase() ?? shortValue(value, path);
+    case "conversation.workPhases":
+    case "conversation.workThinking":
+      return value === true ? "on" : value === false ? "off" : shortValue(value, path);
+    case "conversation.workRows":
+      return value === 0 ? "none" : typeof value === "number" ? `${value} rows` : shortValue(value, path);
     case "appFamily":
     case "dataFamily":
       return Array.isArray(value) && value.length > 0 ? value.join(", ") : "JaiRA's own face";
@@ -622,6 +636,37 @@ export function AppearancePane({
         />
         <SettingsRow name="Preview" description="The composer on a subscription, on a key whose provider reports its credit, and on a key whose provider does not." full>
           <UsageFiguresPreview mode={conversation.usageFigures} />
+        </SettingsRow>
+        <SettingsRow
+          name="Group work into phases"
+          description="Cut the work between two messages where the agent stopped to think, and give each part a row of its own."
+          info="A phase is named by what it did: Explored, Changed, Checked or Fixed. Off, the work is one row of chips over the latest steps."
+          layer={layer("conversation.workPhases")}
+          control={<Switch on={conversation.workPhases} label="Group work into phases" disabled={busy} onChange={(workPhases) => onConversation({ workPhases })} />}
+        />
+        <SettingsRow
+          name="Rows shown while it works"
+          description="How many of the latest rows of the phase in progress stay rows while the agent is working. Its older steps are counted in its chips."
+          layer={layer("conversation.workRows")}
+          control={
+            <Segmented
+              label="Rows shown while it works"
+              value={`${conversation.workRows}`}
+              options={WORK_ROW_CHOICES}
+              disabled={busy}
+              onChange={(rows) => onConversation({ workRows: Number(rows) as WorkRows })}
+            />
+          }
+        />
+        <SettingsRow
+          name="Show thinking"
+          description="When the provider kept the model's reasoning, its first line follows the chips. Hover it to read the whole. Off, neighbouring phases with the same name become one."
+          info="Most Claude reasoning arrives withheld; a phase with nothing to show simply has no line."
+          layer={layer("conversation.workThinking")}
+          control={<Switch on={conversation.workThinking} label="Show thinking" disabled={busy} onChange={(workThinking) => onConversation({ workThinking })} />}
+        />
+        <SettingsRow name="Preview" description="One request's work, three times: early on, well into it, and when it is done. Hover a chip, a phase or Every step." full>
+          <WorkPreview look={{ phases: conversation.workPhases, rows: conversation.workRows, thinking: conversation.workThinking }} />
         </SettingsRow>
       </SettingsSection>
 

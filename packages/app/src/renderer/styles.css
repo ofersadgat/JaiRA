@@ -361,6 +361,48 @@
   box-sizing: border-box;
 }
 
+/*
+ * ONE scrollbar, everywhere (the person, 2026-09-25: "is there a way to have a better looking scroll
+ * bar? can we use that scroll bar everywhere?"). Chromium's own was a grey slab in a grey gutter,
+ * the loudest thing in every column that scrolled. This one is a rounded thumb on no track at all:
+ * faint while the pointer is elsewhere, firmer over the box that scrolls, firmest under the pointer.
+ * Drawn from `--text`, so every palette and both themes get it without a token of their own.
+ *
+ * The thumb is inset by a transparent border clipped away (`background-clip: padding-box`), so the
+ * visible pill is 6px inside a 10px target — easy to grab, light to look at.
+ *
+ * `::-webkit-scrollbar` and not `scrollbar-color`/`scrollbar-width`: Chromium ignores every
+ * `::-webkit-scrollbar` rule on an element where either standard property is set, and the standard
+ * ones cannot round a thumb or inset it. Monaco draws its own and is not touched by this.
+ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--text) 16%, transparent);
+}
+:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text) 26%, transparent);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--text) 50%, transparent);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+
 /* The app voice's ground. 13px against a 12.5px base rather than the base itself: the base is the
    thing every register is a ratio OF, not a promise that the body equals it — and holding the
    computed size where it was keeps this whole sweep a no-op until a preference moves. */
@@ -10157,8 +10199,9 @@ fieldset.reading {
   width: 14px;
   height: 14px;
 }
-/* Shrinkable, not fixed: an MCP tool is called `mcp__linear__list_issues`, and a name allowed to
-   take the whole line leaves no room for the argument that says which call this was. */
+/* Shrinkable, not fixed: a name allowed to take the whole line leaves no room for the argument that
+   says which call this was. It is the tool's TITLE ("List merge requests"); the name the agent
+   called is its tooltip. */
 .ts-name {
   flex: 0 1 auto;
   min-width: 0;
@@ -10168,6 +10211,16 @@ fieldset.reading {
   font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 600;
   color: var(--text);
+}
+/* Another MCP server's name after its tool's title — the one part of `mcp__linear__…` that says
+   something. A quiet word, not a chip: it qualifies the name beside it. */
+.ts-server {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  font: 500 calc(var(--size-app) * 10.5 / 12.5) / 16px var(--font-app);
+  color: var(--dim);
 }
 /* The argument that identifies the call — a path, a command — so it is monospace, and it is the
    part that gets cut when the line runs out of room. */
@@ -10276,6 +10329,367 @@ fieldset.reading {
   margin: 2px 0 10px 28px;
   min-width: 0;
 }
+/* --- the work between two messages, summarised (workSummaryView.tsx) ---
+   A box of phases — number, name, a chip per kind of work, the first line of its thinking, its time —
+   over a foot that opens every step. The phase in progress keeps its latest steps as rows. The box is
+   quiet (a wash of the panel, a hairline) because it stands in for work, and the messages around it
+   are what the page is for. */
+:root {
+  --ws-read: #2f8a9e;
+  --ws-search: #6b5bd6;
+  --ws-write: #b0721a;
+  --ws-run: #3d7a4c;
+  --ws-web: #2f6fb5;
+  --ws-tool: #a8508a;
+}
+:root[data-theme="dark"] {
+  --ws-read: #6cc3d6;
+  --ws-search: #a99cff;
+  --ws-write: #e0a656;
+  --ws-run: #7ccf8e;
+  --ws-web: #7fb2f0;
+  --ws-tool: #e08cc6;
+}
+.ws {
+  margin: 6px -6px 10px;
+  min-width: 0;
+}
+.ws-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--panel-2) 55%, transparent);
+}
+.ws-phase {
+  min-width: 0;
+  border-radius: 7px;
+}
+.ws-phase.current {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  padding-bottom: 3px;
+}
+.ws-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px 6px;
+}
+.ws-n {
+  flex: none;
+  width: 14px;
+  text-align: right;
+  font: 600 calc(var(--size-data) * 10 / 12) var(--font-data);
+  color: var(--tok-hint);
+}
+.ws-name {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: 76px;
+  border-radius: 4px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  font-weight: 600;
+  color: var(--text);
+  cursor: default;
+}
+.ws-phase.current .ws-name {
+  color: var(--accent);
+}
+.ws-earlier {
+  flex: none;
+  font: 600 calc(var(--size-app) * 10 / 12.5) / 1 var(--font-app);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+/* The chips give way before the time does; the thinking line takes only what is left over. */
+.ws-chips {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow: hidden;
+}
+.ws-chip {
+  --ws-h: var(--tok-hint);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ws-h) 11%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ws-h) 22%, transparent);
+  font: 500 calc(var(--size-app) * 11.5 / 12.5) / 1 var(--font-app);
+  color: var(--text);
+  white-space: nowrap;
+  cursor: default;
+}
+.ws-chip svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--ws-h);
+}
+.ws-chip:hover,
+.ws-chip:focus-visible {
+  background: color-mix(in srgb, var(--ws-h) 20%, transparent);
+}
+.ws-k-think {
+  --ws-h: var(--accent);
+}
+.ws-k-read {
+  --ws-h: var(--ws-read);
+}
+.ws-k-search {
+  --ws-h: var(--ws-search);
+}
+.ws-k-write {
+  --ws-h: var(--ws-write);
+}
+.ws-k-run {
+  --ws-h: var(--ws-run);
+}
+.ws-k-web {
+  --ws-h: var(--ws-web);
+}
+.ws-k-agent,
+.ws-k-tool {
+  --ws-h: var(--ws-tool);
+}
+.ws-k-wait {
+  --ws-h: var(--warn);
+}
+.ws-chip.failed {
+  --ws-h: var(--bad);
+}
+.ws-chip.live {
+  --ws-h: var(--accent);
+  box-shadow: inset 0 0 0 1.5px var(--ws-h);
+}
+.ws-chip.live .ts-pulse span {
+  background: var(--ws-h);
+}
+.ws-chip-failed {
+  font: 700 10px/1 var(--font-data);
+  color: var(--bad);
+}
+.ws-think {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  font-style: italic;
+  color: var(--dim);
+  cursor: default;
+}
+.ws-think svg {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  color: var(--accent);
+}
+.ws-think-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-think:hover {
+  color: var(--text);
+  background: var(--fill-ghost-hover);
+}
+.ws-fill {
+  flex: 1 1 0;
+}
+.ws-took {
+  flex: none;
+  padding-left: 8px;
+  font: calc(var(--size-data) * 10.5 / 12) var(--font-data);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.ws-phase.current .ws-took {
+  color: var(--accent);
+}
+/* The phase in progress: its latest steps, one row per run of one kind (J). */
+.ws-runs {
+  margin: 1px 0 0 22px;
+  min-width: 0;
+}
+.ws-run {
+  display: grid;
+  grid-template-columns: auto 18px minmax(0, 1fr) auto auto auto auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  color: var(--text);
+}
+.ws-run.live {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.ws-run-at {
+  font: calc(var(--size-data) * 10 / 12) var(--font-data);
+  color: var(--tok-hint);
+  font-variant-numeric: tabular-nums;
+}
+.ws-run-icon {
+  display: inline-flex;
+  justify-content: center;
+  color: var(--dim);
+}
+.ws-run-icon svg {
+  width: 13px;
+  height: 13px;
+}
+.ws-run.failed .ws-run-icon {
+  color: var(--bad);
+}
+.ws-run.wait,
+.ws-run.wait .ws-run-icon {
+  color: var(--warn);
+}
+.ws-run-said {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 4px;
+  cursor: default;
+}
+.ws-run-said code,
+.ws-card code {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+  color: var(--dim);
+}
+.ws-now {
+  color: var(--accent);
+}
+.ws-failed {
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  font-weight: 600;
+  color: var(--bad);
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+.ws-run-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  color: var(--dim);
+}
+.ws-run-note svg {
+  width: 11px;
+  height: 11px;
+}
+.ws-run-took {
+  font: calc(var(--size-data) * 10.5 / 12) var(--font-data);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+/* The foot: every step, on hover as a card, on click in place. */
+.ws-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+  background: color-mix(in srgb, var(--panel-2) 55%, transparent);
+  box-shadow: none;
+  font: calc(var(--size-app) * 11.5 / 12.5) var(--font-app);
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+}
+.ws-foot:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.ws-foot-label {
+  flex: 1;
+}
+.ws-foot-count {
+  font: calc(var(--size-data) * 10.5 / 12) var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+.ws-foot .ts-chev {
+  display: inline-flex;
+  transition: transform 0.15s ease;
+}
+.ws.open .ws-foot {
+  border-radius: 0;
+}
+.ws.open .ws-foot .ts-chev {
+  transform: rotate(180deg);
+}
+.ws-all {
+  margin: 0;
+  padding: 4px 2px 6px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+}
+.ws-kept {
+  margin: 6px 0 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-foot .ts-chev {
+    transition: none;
+  }
+}
+/* The hover card: the rows a chip, a row, a phase or the foot stands for. */
+.ws-card {
+  width: min(560px, calc(100vw - 32px));
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--lift);
+}
+.ws-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
+.ws-card .ts-work {
+  margin: 0;
+}
+.ws-card-text {
+  margin: 0;
+  padding: 4px 8px 6px;
+  white-space: pre-wrap;
+  font: italic calc(var(--size-app) * 12.5 / 12.5) / 1.55 var(--font-app);
+  color: var(--text);
+}
+
 /* A subagent's conversation inside a call's row: the same page, one rule further in. */
 .ts-sidechain {
   margin: 4px 0 8px;
@@ -12033,9 +12447,25 @@ fieldset.reading {
   min-height: 0;
   overflow-y: auto;
 }
+/* No rule above it (the person, 2026-09-25: "the border looks terrible. it should appear as though the
+   composer is on the same plane as the conversation"). The foot is the same ground as the thread, so
+   the box sits on the desk the pages lie on rather than on a shelf of its own; what the rule was for —
+   saying where the scrolled text stops — is a short fade into that ground instead, drawn over the
+   thread's last pixels and never in the way of a click. */
 .chat-foot {
+  position: relative;
   flex: none;
-  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.chat-foot::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 18px;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+  pointer-events: none;
 }
 /* What the model is doing right now — one line, in the one place whose position does not depend on
    how much has happened. Between the record and the box because it is neither: quieter than the
@@ -12204,11 +12634,24 @@ fieldset.reading {
   min-width: 0;
 }
 
-/* The name of the open conversation, in the window's own top strip. */
+/* The name of the open conversation, in the window's own top strip — where the other views put
+   their address, so it sits where the address sits: centred in the bar (the bar stretches its
+   children, and a bare span in it hung its text off the top edge), in from the left by what the
+   address bar's padding and a crumb's add up to, and set as the address's last crumb is — the name
+   of where you are, in the text colour, at its weight. */
 .chat-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  padding: 0 4px;
-  font-size: calc(var(--size-app) * 12.5 / 12.5);
+  padding: 0 16px;
+  font: 600 calc(var(--size-app) * 13 / 12.5) / 1.3 var(--font-app);
+  color: var(--text);
+}
+.chat-title-glyph {
+  flex: none;
+  width: 14px;
+  height: 14px;
   color: var(--dim);
 }
 
@@ -15573,6 +16016,54 @@ button.set-rail-fold:hover {
   min-width: 0;
   max-width: none;
 }
+/* The work summary's preview takes the pointer — its hover cards and "Every step" are what it is
+   for (workPreview.tsx). Three cards, each a header bar naming the state over the real transcript. */
+.set-preview.ws-preview {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  pointer-events: auto;
+  user-select: text;
+}
+.ws-preview-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.ws-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  font-weight: 600;
+  color: var(--text);
+}
+.ws-preview-note {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--dim);
+}
+.ws-preview-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.ws-preview-dot.done {
+  background: var(--ok);
+  box-shadow: none;
+}
+.ws-preview-card > .ts {
+  padding: 8px 12px 10px;
+}
 .convo-preview {
   display: flex;
   flex-direction: column;
@@ -17010,7 +17501,9 @@ button.link.cfg-login-add-sub {
   }
 }
 
-/* Folded: B — 48px, the root's tabs as icons with the name under each, pin and unfold at the foot. */
+/* Folded: B — `PANEL_RAIL` wide, the root's tabs as icons with the name under each, pin and unfold at
+   the foot. Inset 6px from both edges, so a tab's hover and selected fills are tiles inside the rail
+   rather than bands running into its border. */
 .ctx-panel.folded {
   border-left-color: var(--rule);
 }
@@ -17019,7 +17512,7 @@ button.link.cfg-login-add-sub {
   flex-direction: column;
   justify-content: space-between;
   height: 100%;
-  padding: 8px 0;
+  padding: 10px 6px;
   background: var(--panel-2);
 }
 .sp-rail-tabs,
@@ -17038,9 +17531,9 @@ button.link.cfg-login-add-sub {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  width: 44px;
-  padding: 5px 0 4px;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 0 5px;
   border: 0;
   border-radius: 7px;
   background: none;
@@ -17086,7 +17579,7 @@ button.link.cfg-login-add-sub {
   color: var(--bad);
 }
 .sp-rail-name {
-  max-width: 44px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

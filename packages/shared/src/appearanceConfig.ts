@@ -35,6 +35,7 @@ import {
   TAB_SIZES,
   THEME_MODES,
   USAGE_FIGURES,
+  WORK_ROWS,
   defaultAppearance,
   defaultConversationLook,
   defaultEditors,
@@ -50,6 +51,7 @@ import {
   type SequentialBatchLayout,
   type ThemeMode,
   type UsageFigures,
+  type WorkRows,
 } from "./settings";
 
 /**
@@ -159,13 +161,20 @@ function parseConversation(raw: unknown, where: string): ConversationLook {
   const out = defaultConversationLook();
   if (raw === undefined) return out;
   const spec = plain(raw, where);
-  onlyFields(spec, ["sequentialBatches", "usageFigures"], where);
+  onlyFields(spec, ["sequentialBatches", "usageFigures", "workPhases", "workRows", "workThinking"], where);
   if (spec["sequentialBatches"] !== undefined) {
     out.sequentialBatches = oneOf<SequentialBatchLayout>(spec["sequentialBatches"], SEQUENTIAL_BATCH_LAYOUTS, `${where}.sequentialBatches`);
   }
   if (spec["usageFigures"] !== undefined) {
     out.usageFigures = oneOf<UsageFigures>(spec["usageFigures"], USAGE_FIGURES, `${where}.usageFigures`);
   }
+  if (spec["workPhases"] !== undefined) out.workPhases = bool(spec["workPhases"], `${where}.workPhases`);
+  if (spec["workRows"] !== undefined) {
+    const rows = spec["workRows"];
+    if (!(WORK_ROWS as readonly unknown[]).includes(rows)) throw new Error(`${where}.workRows must be one of ${WORK_ROWS.join(", ")}`);
+    out.workRows = rows as WorkRows;
+  }
+  if (spec["workThinking"] !== undefined) out.workThinking = bool(spec["workThinking"], `${where}.workThinking`);
   return out;
 }
 

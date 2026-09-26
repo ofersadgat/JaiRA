@@ -14,6 +14,7 @@
  */
 import { Fragment, useState, type CSSProperties, type JSX } from "react";
 import type { ApprovalScope, PendingApproval, WritableLayer } from "@jaira/shared/browser";
+import { toolDisplayOf } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { Popover, usePopover } from "./popover";
 import {
@@ -146,7 +147,9 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
       <h3>
         <Icon name="shield" className="gate-icon" /> Approve this command?
       </h3>
-      <div className="sub">{pending.tool}</div>
+      <div className="sub" title={pending.tool}>
+        {toolDisplayOf(pending.tool).title}
+      </div>
 
       {drawn ? (
         <>

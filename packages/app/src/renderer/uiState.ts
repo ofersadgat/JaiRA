@@ -94,8 +94,12 @@ export const PANE_WIDE = 1200;
 /** The narrowest the side panel may be dragged: its head's name, three verbs and three controls. */
 export const PANEL_MIN = 300;
 
-/** The folded side panel: a rail of the root's tabs, each icon with its name under it. */
-export const PANEL_RAIL = 48;
+/**
+ * The folded side panel: a rail of the root's tabs, each icon with its name under it. 60, not the 48
+ * it was: at 48 a tab filled the rail edge to edge and every name was cut ("Convers…"); now a tab has
+ * a 6px margin each side and "Conversation" fits under its icon.
+ */
+export const PANEL_RAIL = 60;
 
 /** Disclosure ids — the folds worth reopening the app on. */
 export const FOLD = {
@@ -121,7 +125,7 @@ export const FOLD = {
   /** Whether the JSON editor is showing the schema's field reference. */
   schemaReference: "schema.reference",
   /**
-   * Whether each room's side panel is UNFOLDED (open means a column, shut means the 48px rail). Per
+   * Whether each room's side panel is UNFOLDED (open means a column, shut means the rail). Per
    * room, because the rooms differ in what the panel is for: beside a chat it starts folded — a
    * thread is read on its own until you ask what it produced.
    */

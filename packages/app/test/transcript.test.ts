@@ -11,7 +11,7 @@ import { foldWriting, isStreamBookkeeping, writingPath, type WritingTool } from 
 import type { JsonValue } from "@declarative-ai/json";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { producedArtifact, Transcript, unfoldable } from "../src/renderer/transcriptView";
+import { keptUnderSummary, producedArtifact, Transcript } from "../src/renderer/transcriptView";
 import {
   agentTitleOf,
   blocksOf,
@@ -759,15 +759,16 @@ describe("a page the model made, in the conversation that asked for it", () => {
     expect(producedArtifact({ path: "mocks/07.html", mediaType: "text/html", bytes: 400_000, uri: "artifact://t/mocks/07.html" } as never)).toBeUndefined();
   });
 
-  it("never folds a produced page away, however far back in the block it is", () => {
-    const step = (n: number): TranscriptEntry => ({ kind: "tool", name: "bash", summary: `step ${n}` });
-    const drew: TranscriptEntry = { kind: "tool", name: "show_artifact", summary: "mocks/07.html", result: envelope as never };
-    const entries = [drew, step(1), step(2), step(3), step(4), step(5), step(6)] as never[];
-    const shown = unfoldable(entries, 2);
-    // The five recent steps, and the page from before them — the fold hides the older half because
-    // the question is "what has it done lately", and that is false of a page you asked for.
-    expect(shown.map((r) => r.index)).toEqual([0, 2, 3, 4, 5, 6]);
-    expect(unfoldable(entries, 0).map((r) => r.index)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  it("never summarises a produced page away, however far back in the stretch it is", () => {
+    const step = (n: number): TranscriptEntry => ({ kind: "tool", name: "bash", summary: `step ${n}`, ok: true, result: "" });
+    const drew: TranscriptEntry = { kind: "tool", name: "show_artifact", summary: "mocks/07.html", ok: true, result: envelope as never };
+    // The page is a piece of the answer, not a step towards it: it stays drawn under the summary.
+    expect(keptUnderSummary(drew as never)).toBe(true);
+    expect(keptUnderSummary(step(1) as never)).toBe(false);
+    const html = renderToStaticMarkup(createElement(Transcript, { entries: [drew, step(1), step(2), step(3)] }));
+    expect(html).toContain('data-testid="work-summary"');
+    expect(html).toContain("ws-kept");
+    expect(html).toContain("mocks/07.html");
   });
 });
 
@@ -938,14 +939,13 @@ describe("a structured output that arrived through a tool", () => {
     expect(delivered.ok).toBe(true);
   });
 
-  it("survives the fold, however early in the loop it was called", () => {
+  it("stays drawn under the summary, however early in the loop it was called", () => {
     // Agent transports emit it mid-loop and then go on to summarise, so the answer is routinely the
-    // oldest interesting row in a long block — exactly what the fold hides. See `unfoldable`.
+    // oldest interesting row in a long stretch — exactly what a summary would count away.
     const answer: ToolEntry = { kind: "tool", name: "StructuredOutput", summary: "", callId: "c2", output: { value } };
-    const noise: ToolEntry[] = Array.from({ length: 9 }, (_, i) => ({ kind: "tool", name: "bash", summary: `step ${i}` }));
-    const kept = unfoldable([answer, ...noise], 5).map(({ entry }) => entry);
-    expect(kept).toContain(answer);
-    expect(kept).toHaveLength(6);
+    const noise: ToolEntry[] = Array.from({ length: 9 }, (_, i) => ({ kind: "tool", name: "bash", summary: `step ${i}`, ok: true, result: "" }));
+    expect(keptUnderSummary(answer)).toBe(true);
+    expect(noise.filter((entry) => keptUnderSummary(entry))).toHaveLength(0);
   });
 });
 

@@ -3,7 +3,7 @@
  *
  * What is pinned here is the furniture the person ruled on: the root's head carries its verbs as
  * icons on the name's line, a pushed entry has ‹ and the trail it came from, a pinned stack shows the
- * waiting selection on the offer bar, and a folded panel is the 48px rail of the root's tabs with the
+ * waiting selection on the offer bar, and a folded panel is the rail of the root's tabs with the
  * name under each. And the two rules a face owns: a state's Configuration tab is hidden while the
  * editor has the file, and a conversation's context has no Conversation tab.
  */
@@ -55,6 +55,13 @@ describe("the frame", () => {
     expect(html).toContain("Close the panel");
     // No row of text buttons under the head any more.
     expect(html).not.toContain(">Re-run</button>");
+  });
+
+  it("beside a conversation, ✕ folds to the rail instead of closing, and is the only fold", () => {
+    const html = renderToStaticMarkup(createElement(SidePanel, { stack: root, onStack: () => undefined, face, folded: false, onFold: () => undefined, closeFolds: true }));
+    expect(html).toContain("Collapse the panel to a rail");
+    expect(html).not.toContain("Fold the panel");
+    expect(html).not.toContain("Close the panel");
   });
 
   it("draws the root's tabs, the open one marked", () => {

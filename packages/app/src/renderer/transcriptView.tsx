@@ -54,7 +54,7 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, workflowOutcomeOf, workflowToolOf, type AgentQuestion, type MessageAuthor, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
+import { choicesOfQuestions, toolDisplayOf, workflowOutcomeOf, workflowToolOf, type AgentQuestion, type MessageAuthor, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfAnsweredText, answersOfValue, ChoiceList, ChoiceSteps, type Answer } from "./choices";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
@@ -64,6 +64,8 @@ import { familyIcon, Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { typeKeyOf, useMessageTypes } from "./messageTypes";
 import { useValuePanel } from "./valuePanel";
+import { WorkSummary } from "./workSummaryView";
+import { inFlight } from "./workSummary";
 import {
   blocksOf,
   dayLabelOf,
@@ -288,6 +290,8 @@ type Tone = "plain" | "muted" | "warn" | "bad";
 function Row({
   entry,
   name,
+  called,
+  server,
   preview,
   tone,
   mark,
@@ -299,6 +303,10 @@ function Row({
   entry: WorkEntry;
   /** The bold half of the line. Absent for an event, whose whole text is the preview. */
   name?: string;
+  /** The name the agent actually called, when {@link name} is its display title — the name's tooltip. */
+  called?: string;
+  /** The MCP server a call went to, when that is somebody else's — a quiet word after the name. */
+  server?: string;
   preview: string;
   tone: Tone;
   /** The verdict at the end of the line, when there is one to give. */
@@ -336,7 +344,12 @@ function Row({
       <span className="ts-icon">
         <Icon name={iconOf(entry)} />
       </span>
-      {name !== undefined ? <span className="ts-name">{name}</span> : null}
+      {name !== undefined ? (
+        <span className="ts-name" {...(called !== undefined && called !== name ? { title: called } : {})}>
+          {name}
+        </span>
+      ) : null}
+      {server !== undefined ? <span className="ts-server">{server}</span> : null}
       <span className="ts-preview ellip">{preview}</span>
       {note !== undefined ? <span className="ts-note">{note}</span> : null}
       <span className="ts-at">{clockOf(entry.at)}</span>
@@ -630,7 +643,8 @@ function Tool({
   const asked = askedOf(entry);
   // What the crumb will read: the call's first argument is the Task's short description, which is
   // the one name a person chose for this subagent. The tool's own name is the honest fallback.
-  const chainName = `⑂ ${entry.summary.length > 0 ? entry.summary : entry.name}`;
+  const display = toolDisplayOf(entry.name);
+  const chainName = `⑂ ${entry.summary.length > 0 ? entry.summary : display.title}`;
   const produced = producedArtifact(entry.result);
   // What the call itself says its payload is — see {@link pathMimeOf}. Read from the ARGUMENTS and
   // applied to what came back, because a file's type is a property of the file, not of the string
@@ -639,7 +653,9 @@ function Tool({
   return (
     <Row
       entry={entry}
-      name={entry.name}
+      name={display.title}
+      called={entry.name}
+      {...(display.server !== undefined ? { server: display.server } : {})}
       preview={entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary}
       tone={entry.ok === false ? "bad" : "plain"}
       mark={entry.ok === undefined ? "waiting" : entry.ok ? "ok" : "bad"}
@@ -845,7 +861,8 @@ function Writing({ entry }: { entry: WritingEntry }): JSX.Element {
   return (
     <Row
       entry={entry}
-      name={entry.name}
+      name={toolDisplayOf(entry.name).title}
+      called={entry.name}
       preview={entry.path ?? ""}
       tone="plain"
       note={
@@ -904,50 +921,27 @@ function Work({
 }
 
 /**
- * How many rows of a long stretch of work stay visible.
+ * The rows no summary may hide — drawn under it, whatever it says.
  *
- * Five is roughly what fits above the fold beside a message, and the fold hides the OLDER half
- * rather than the newer one on purpose: a run that is still going is read from its live edge
- * backwards, and the thing you want is what it just did.
+ * The same argument the old fold made for its exemptions, and for the same rows: a page the model
+ * drew, the call that delivered the operation's output, a question the agent put to the person (half
+ * of which the person wrote) and what a workflow tool did are not steps towards the answer, they are
+ * pieces of it. A summary that counted them into "3 commands · 2 edited" would be saying, of work done
+ * on request, that it was bookkeeping.
  */
-const SHOWN = 5;
-
-/** Worth a fold only when it hides more than it costs — one hidden row behind a toggle line is a loss. */
-function foldsAt(count: number): number {
-  return count > SHOWN + 1 ? count - SHOWN : 0;
+export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean {
+  if (entry.kind !== "tool") return false;
+  if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || askedOf(entry) !== undefined) return true;
+  return workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false && calls?.outcomes !== "rail";
 }
 
 /**
- * Which rows of a block survive the fold — the last {@link SHOWN}, and every ANSWER produced before
- * them.
- *
- * The exemption is the fold's own rule taken seriously. It hides the older half because the question
- * asked of a long agent loop is "what has it done lately"; that is true of forty greps and false of
- * the mockup you asked for, which is not a step towards the answer but a piece of it. A run that
- * drew six pages and then read four files would have folded five of the six away — the transcript
- * saying, of work the model did on request, that it was too old to look at.
- *
- * A call that delivered the operation's structured output is exempt by the same argument, and by
- * more of it: a page is a piece of the answer and that call IS the answer, so folding it would hide
- * the one row the state exists to produce behind "12 earlier steps". Agent transports emit it
- * mid-loop rather than last (the model goes on to summarise afterwards), so this is not a rare
- * shape — it is where the row normally sits.
- *
- * Indices are into the WHOLE block, and travel with the rows: they are the render keys, and a
- * slice-relative key hands one row's open/closed state to a different row every time the fold moves.
+ * A stretch of work between two messages: one line is its own row, and more are summarised — phases,
+ * chips and the latest rows, as `workSummaryView.tsx` draws them.
  */
-export function unfoldable(entries: readonly WorkEntry[], hidden: number): Array<{ entry: WorkEntry; index: number }> {
-  const rows = entries.map((entry, index) => ({ entry, index }));
-  if (hidden === 0) return rows;
-  return rows.filter(
-    ({ entry, index }) =>
-      index >= hidden || (entry.kind === "tool" && (entry.output !== undefined || producedArtifact(entry.result) !== undefined)),
-  );
-}
-
-/** A stretch of work between two messages, with its older half foldable. */
 function WorkBlockView({
   entries,
+  last,
   sidechainOf,
   onOpenSidechain,
   artifacts,
@@ -955,6 +949,8 @@ function WorkBlockView({
   calls,
 }: {
   entries: WorkEntry[];
+  /** The stretch is the last thing in the transcript — the only place work can still be going on. */
+  last: boolean;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
   artifacts?: ArtifactSurface | undefined;
@@ -962,38 +958,21 @@ function WorkBlockView({
   narrated?: boolean | undefined;
   calls?: CallSurface | undefined;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const hidden = foldsAt(entries.length);
-  const rows = unfoldable(entries, open ? 0 : hidden);
-  // What the toggle can actually reveal. Not `hidden`: the pages exempted above are on screen
-  // already, and counting them would offer to show rows nobody is hiding.
-  const folded = entries.length - rows.length;
-  return (
-    <div className="ts-work">
-      {folded > 0 ? (
-        <button type="button" className="ts-fold" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          <span className="ts-chev">
-            <Icon name="chevron" />
-          </span>
-          {open ? "Show fewer steps" : `${folded} earlier steps`}
-        </button>
-      ) : null}
-      {/* Keyed by the entry's position in the WHOLE block, not in the visible slice. Folding shifts
-          every index, so a slice-relative key hands one row's open/closed state to a different row —
-          an expanded tool call's payload jumps to an unrelated line. */}
-      {rows.map(({ entry, index }) => (
-        <Work
-          key={index}
-          entry={entry}
-          {...(sidechainOf !== undefined ? { sidechainOf } : {})}
-          {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
-          {...(artifacts !== undefined ? { artifacts } : {})}
-          {...(narrated === true ? { narrated } : {})}
-          {...(calls !== undefined ? { calls } : {})}
-        />
-      ))}
-    </div>
+  const rowOf = (index: number): ReactNode => (
+    <Work
+      entry={entries[index]!}
+      {...(sidechainOf !== undefined ? { sidechainOf } : {})}
+      {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+      {...(artifacts !== undefined ? { artifacts } : {})}
+      {...(narrated === true ? { narrated } : {})}
+      {...(calls !== undefined ? { calls } : {})}
+    />
   );
+  // One line has nothing to summarise: a chip saying "1 file" over the row it counts is the row twice.
+  if (entries.length === 1) return <div className="ts-work">{rowOf(0)}</div>;
+  const working = last && (narrated === true || entries.some(inFlight));
+  const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls) ? [index] : []));
+  return <WorkSummary entries={entries} working={working} kept={kept} rowOf={rowOf} clock={clockOf} />;
 }
 
 /**
@@ -1608,8 +1587,11 @@ function verbOf(status: LiveStatus): string {
 
 /** What it is doing it TO, when there is something to name. */
 function whatOf(status: LiveStatus): string {
-  if (status.kind === "writing") return status.path ?? status.name;
-  if (status.kind === "running") return status.summary.length > 0 ? `${status.name} · ${status.summary}` : status.name;
+  if (status.kind === "writing") return status.path ?? toolDisplayOf(status.name).title;
+  if (status.kind === "running") {
+    const title = toolDisplayOf(status.name).title;
+    return status.summary.length > 0 ? `${title} · ${status.summary}` : title;
+  }
   return "";
 }
 
@@ -1738,6 +1720,7 @@ export function Transcript({
               <div className={doomed ? "ts-doomed" : undefined}>
               <WorkBlockView
                 entries={block.entries}
+                last={i === blocks.length - 1}
                 {...(sidechainOf !== undefined ? { sidechainOf } : {})}
                 {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
                 {...(artifacts !== undefined ? { artifacts } : {})}

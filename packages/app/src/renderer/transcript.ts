@@ -25,8 +25,10 @@ import type { JsonValue } from "@declarative-ai/json";
 // puts it back here, with no restatement to drift.
 import { renderToolResult } from "@declarative-ai/llm/entry";
 import {
+  toolDisplayOf,
   workflowToolOf,
   workflowToolSummary,
+  type ToolIconName,
   writingPath,
   type ConversationTurn,
   type InstanceNode,
@@ -264,7 +266,7 @@ export function blocksOf(entries: readonly TranscriptEntry[]): TranscriptBlock[]
  * Declared here rather than beside the paths, because this is a fact about the transcript and not
  * about SVG: `icons.tsx` imports it and will not compile until it can draw every member.
  */
-export type WorkIconName = "terminal" | "read" | "write" | "web" | "search" | "agent" | "tool" | "think" | "note" | "alert" | "workflow";
+export type WorkIconName = ToolIconName | "think" | "note" | "alert";
 
 /**
  * Which family of thing a tool name belongs to.
@@ -284,6 +286,9 @@ function toolIconOf(name: string): WorkIconName {
   // read by the patterns below as an agent, a write and a write. They draw as the forking path the
   // `made` and `entered` notes use, because that is what they do: they move work about.
   if (workflowToolOf(name) !== undefined) return "workflow";
+  // A tool whose own entry says how it is drawn is drawn that way — the guesses below are for the rest.
+  const known = toolDisplayOf(name).icon;
+  if (known !== undefined) return known;
   const n = name.toLowerCase();
   if (/task|agent|spawn|delegate|dispatch/.test(n)) return "agent";
   if (/web|http|url|browser|fetch|navigate/.test(n)) return "web";

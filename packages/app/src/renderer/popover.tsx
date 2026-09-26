@@ -470,6 +470,46 @@ export const Overlay = forwardRef<HTMLDivElement, DivProps & { children?: ReactN
 });
 
 /**
+ * A hover card the pointer can travel INTO: it stays open for `linger` ms after the anchor is left,
+ * and for as long as the pointer is on the card itself. {@link useHover} closes the moment the anchor
+ * is left, which is right for a tooltip and wrong for a card whose rows open — the pointer crosses a
+ * gap on its way there. Spread `bind` on the anchor and `cardBind` on the float.
+ */
+export function useHoverCard<T extends HTMLElement>(
+  linger = 160,
+): {
+  open: boolean;
+  anchor: RefObject<T | null>;
+  bind: Pick<HTMLAttributes<T>, "onMouseEnter" | "onMouseLeave" | "onFocus" | "onBlur">;
+  cardBind: Pick<HTMLAttributes<HTMLDivElement>, "onMouseEnter" | "onMouseLeave">;
+  close: () => void;
+} {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<T | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const stay = useCallback(() => {
+    clearTimeout(timer.current);
+    setOpen(true);
+  }, []);
+  const leave = useCallback(() => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setOpen(false), linger);
+  }, [linger]);
+  const close = useCallback(() => {
+    clearTimeout(timer.current);
+    setOpen(false);
+  }, []);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return {
+    open,
+    anchor,
+    bind: { onMouseEnter: stay, onMouseLeave: leave, onFocus: stay, onBlur: leave },
+    cardBind: { onMouseEnter: stay, onMouseLeave: leave },
+    close,
+  };
+}
+
+/**
  * Open while the pointer is over the anchor or focus is inside it — a hover card. Spread `bind` on
  * the anchor; `open` says whether to draw the float.
  */

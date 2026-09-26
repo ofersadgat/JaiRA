@@ -54,10 +54,23 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "mcp", label: "MCP", hint: "tools served by connected MCP servers" },
 ];
 
+/**
+ * The glyph a tool is drawn with wherever a call to it is shown. Named here, drawn by the app's icon
+ * set, which fails to compile if it cannot draw one of these.
+ */
+export type ToolIconName = "read" | "search" | "write" | "terminal" | "web" | "git" | "workflow" | "artifact" | "agent" | "tool";
+
 export interface ToolSpec {
   /** The LOGICAL name — what a workflow authors, what a policy is written against. */
   name: string;
+  /** The short word the permission menu lists it under. */
   label: string;
+  /**
+   * What a PERSON calls a call to it — "List merge requests" — on a transcript's row, where the name
+   * the agent called (`mcp__dai__list_merge_requests`) is transport, not a word anybody reads.
+   */
+  title: string;
+  icon: ToolIconName;
   category: ToolCategoryId;
   /** What granting it actually lets the model do, in one line, for the menu. */
   hint: string;
@@ -121,6 +134,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "read_file",
     label: "read",
+    title: "Read file",
+    icon: "read",
     category: "files",
     hint: "read a file in the workspace",
     pathArgs: ["path"],
@@ -128,6 +143,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "glob",
     label: "glob",
+    title: "Find files",
+    icon: "search",
     category: "files",
     hint: "list files matching a pattern",
     pathArgs: ["path"],
@@ -135,6 +152,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "grep",
     label: "grep",
+    title: "Search files",
+    icon: "search",
     category: "files",
     hint: "search file contents for a pattern",
     pathArgs: ["path"],
@@ -142,6 +161,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "edit",
     label: "edit",
+    title: "Edit file",
+    icon: "write",
     category: "files",
     hint: "replace exact text in an existing file",
     pathArgs: ["path"],
@@ -149,6 +170,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "write_file",
     label: "write",
+    title: "Write file",
+    icon: "write",
     category: "files",
     hint: "create a file, or replace one whole",
     pathArgs: ["path"],
@@ -156,6 +179,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "show_artifact",
     label: "show",
+    title: "Show artifact",
+    icon: "artifact",
     category: "files",
     /*
      * ALWAYS GRANTED, and it is the confinement above that pays for it.
@@ -176,6 +201,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "bash",
     label: "bash",
+    title: "Run command",
+    icon: "terminal",
     category: "execution",
     hint: "run shell commands, under the policy",
     pathArgs: ["cwd"],
@@ -183,6 +210,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "web_fetch",
     label: "fetch",
+    title: "Fetch page",
+    icon: "web",
     category: "web",
     hint: "fetch a URL and read what comes back",
     urlArgs: ["url"],
@@ -190,34 +219,36 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   {
     name: "web_search",
     label: "search",
+    title: "Search the web",
+    icon: "web",
     category: "web",
     hint: "search the web",
   },
   // The Git tools (decision 0010 §1): the forge of the workspace's own git remote, through the
   // connection signed in for its host (`runtime/gitTools.ts`). A `git_` prefix only where the bare name
   // is too generic. The readers first, then what leaves the machine, in the decision's order.
-  { name: "list_merge_requests", label: "list_merge_requests", category: "git", hint: "this repository's merge requests, by state, author, branch" },
-  { name: "read_merge_request", label: "read_merge_request", category: "git", hint: "one merge request: description, state, threads, approvals, checks" },
-  { name: "git_checks", label: "git_checks", category: "git", hint: "the CI pipeline or check runs of a branch or commit" },
+  { name: "list_merge_requests", label: "list_merge_requests", title: "List merge requests", icon: "git", category: "git", hint: "this repository's merge requests, by state, author, branch" },
+  { name: "read_merge_request", label: "read_merge_request", title: "Read merge request", icon: "git", category: "git", hint: "one merge request: description, state, threads, approvals, checks" },
+  { name: "git_checks", label: "git_checks", title: "Read checks", icon: "git", category: "git", hint: "the CI pipeline or check runs of a branch or commit" },
   // Served by the event hub over the repository watcher (decision 0010 §2–3, `runtime/eventHub.ts`).
-  { name: "wait_git_event", label: "wait_git_event", category: "git", hint: "wait for an event on the remote (a comment, checks finishing, a push), or its timeout" },
-  { name: "open_merge_request", label: "open_merge_request", category: "git", hint: "push the branch and open (or update) its merge request" },
-  { name: "git_comment", label: "git_comment", category: "git", hint: "comment on a merge request, reply in a thread, resolve it" },
-  { name: "git_merge", label: "git_merge", category: "git", hint: "merge a merge request" },
-  { name: "close_merge_request", label: "close_merge_request", category: "git", hint: "close a merge request without merging" },
-  { name: "git_push", label: "git_push", category: "git", hint: "push the current branch with the connection's credentials" },
+  { name: "wait_git_event", label: "wait_git_event", title: "Wait for a git event", icon: "git", category: "git", hint: "wait for an event on the remote (a comment, checks finishing, a push), or its timeout" },
+  { name: "open_merge_request", label: "open_merge_request", title: "Open merge request", icon: "git", category: "git", hint: "push the branch and open (or update) its merge request" },
+  { name: "git_comment", label: "git_comment", title: "Comment on merge request", icon: "git", category: "git", hint: "comment on a merge request, reply in a thread, resolve it" },
+  { name: "git_merge", label: "git_merge", title: "Merge", icon: "git", category: "git", hint: "merge a merge request" },
+  { name: "close_merge_request", label: "close_merge_request", title: "Close merge request", icon: "git", category: "git", hint: "close a merge request without merging" },
+  { name: "git_push", label: "git_push", title: "Push branch", icon: "git", category: "git", hint: "push the current branch with the connection's credentials" },
   // The workflow tools (decision 0005 §3): the host's own operations, offered to a conversation.
   // `chat_control/*` holds nothing else; `chat/*` holds them beside the project's tools. Served since
   // step 6 (`runtime/workflowTools.ts`, over the host the app lends) — the `unserved` mark they
   // carried until then is gone, and deleting it was the whole change here.
-  { name: "list_workflows", label: "list_workflows", category: "tasks", hint: "list workflows, and what a state takes and produces" },
-  { name: "start_task", label: "start_task", category: "tasks", hint: "start a task in a workflow, from this conversation" },
-  { name: "move_task", label: "move_task", category: "tasks", hint: "move a task to another state — forward, backward or across workflows" },
-  { name: "list_tasks", label: "list_tasks", category: "tasks", hint: "what was started here, where each stands and what it produced" },
-  { name: "answer_question", label: "answer_question", category: "tasks", hint: "settle a question a task is asking" },
-  { name: "hold_task", label: "hold_task", category: "tasks", hint: "hold a task where it stands" },
-  { name: "release_task", label: "release_task", category: "tasks", hint: "release a held task" },
-  { name: "stop_task", label: "stop_task", category: "tasks", hint: "stop a task" },
+  { name: "list_workflows", label: "list_workflows", title: "List workflows", icon: "workflow", category: "tasks", hint: "list workflows, and what a state takes and produces" },
+  { name: "start_task", label: "start_task", title: "Start task", icon: "workflow", category: "tasks", hint: "start a task in a workflow, from this conversation" },
+  { name: "move_task", label: "move_task", title: "Move task", icon: "workflow", category: "tasks", hint: "move a task to another state — forward, backward or across workflows" },
+  { name: "list_tasks", label: "list_tasks", title: "List tasks", icon: "workflow", category: "tasks", hint: "what was started here, where each stands and what it produced" },
+  { name: "answer_question", label: "answer_question", title: "Answer question", icon: "workflow", category: "tasks", hint: "settle a question a task is asking" },
+  { name: "hold_task", label: "hold_task", title: "Hold task", icon: "workflow", category: "tasks", hint: "hold a task where it stands" },
+  { name: "release_task", label: "release_task", title: "Release task", icon: "workflow", category: "tasks", hint: "release a held task" },
+  { name: "stop_task", label: "stop_task", title: "Stop task", icon: "workflow", category: "tasks", hint: "stop a task" },
 ];
 
 /** By logical name — the lookup every consumer wants. */

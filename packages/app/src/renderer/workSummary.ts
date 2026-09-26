@@ -1,0 +1,387 @@
+/**
+ * What a stretch of work AMOUNTED to — the model behind the summary drawn in place of a row per call
+ * (the person's note 6, 2026-09-25, and the tool-summary mockups that followed: B's chips, J's
+ * ordered rows, and 5 + 4 — phases with a rolling window — as the one they chose).
+ *
+ * A stretch is everything between two messages (`WorkBlock`). It is cut into PHASES where the agent
+ * stopped to think; a phase is named by what it did, from four fixed names, because Claude withholds
+ * most of its reasoning and the names cannot come from text that is not there. Inside a phase the
+ * work is counted in CHIPS — one per kind: "3 files", "2 searches", "12 s wait" — and, while the agent
+ * is still working, the phase in progress keeps its latest steps as ROWS, in order, with consecutive
+ * calls of one kind merged into one row ("Read 3 files in …/renderer").
+ *
+ * Pure: entries in, a description out. The view (`workSummaryView.tsx`) draws it; this is tested
+ * without a window.
+ */
+import { toolDisplayOf } from "@jaira/shared/browser";
+import { iconOf, type ThoughtEntry, type WorkEntry, type WorkIconName } from "./transcript";
+
+// --- kinds ---------------------------------------------------------------------------------------
+
+/** What kind of work one entry is — the unit a chip counts. */
+export type WorkKind = "think" | "read" | "search" | "write" | "run" | "web" | "agent" | "tool" | "wait" | "note";
+
+/** A rate limit, as the agents word it: a wait the run sat through, not a fact about the work. */
+const RATE_LIMIT = /rate[\s_-]?limit/i;
+
+export function kindOf(entry: WorkEntry): WorkKind {
+  if (entry.kind === "thought") return "think";
+  if (entry.kind === "event") return RATE_LIMIT.test(entry.text) ? "wait" : "note";
+  switch (iconOf(entry)) {
+    case "read":
+      return "read";
+    case "search":
+      return "search";
+    case "write":
+      return "write";
+    case "terminal":
+      return "run";
+    case "web":
+      return "web";
+    case "agent":
+      return "agent";
+    default:
+      return "tool";
+  }
+}
+
+/**
+ * What a chip counts TOGETHER. Every kind is one chip, except the tools that have no family of their
+ * own: "List merge requests" and "Update issue" are not the same thing twice, so each is its title.
+ */
+export function keyOf(entry: WorkEntry): string {
+  const kind = kindOf(entry);
+  return kind === "tool" && (entry.kind === "tool" || entry.kind === "writing") ? `tool:${toolDisplayOf(entry.name).title}` : kind;
+}
+
+/**
+ * Still happening: a call with no answer yet, a call being written, a thought still being thought.
+ * Read only on the LAST stretch of a transcript — an unanswered call further up is one that was cut
+ * off, not one still running.
+ */
+export function inFlight(entry: WorkEntry): boolean {
+  if (entry.kind === "writing") return true;
+  if (entry.kind === "thought") return entry.live === true;
+  return entry.kind === "tool" && entry.ok === undefined && entry.result === undefined;
+}
+
+/** The file a call is about: its path argument, else the line it was summarised by. */
+function pathOf(entry: WorkEntry): string {
+  if (entry.kind === "writing") return entry.path ?? "";
+  if (entry.kind !== "tool") return "";
+  const args = entry.args;
+  if (args !== null && typeof args === "object" && !Array.isArray(args)) {
+    for (const key of ["file_path", "path", "file", "notebook_path"]) {
+      const value = (args as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.length > 0) return value;
+    }
+  }
+  return entry.summary;
+}
+
+const failed = (entry: WorkEntry): boolean => (entry.kind === "tool" && entry.ok === false) || (entry.kind === "event" && entry.tone === "bad");
+
+/** How long one entry took, where the record says: a thought's own timing; a wait parsed from its line. */
+function tookOf(entry: WorkEntry): number {
+  if (entry.kind === "thought") return entry.durationMs ?? 0;
+  if (entry.kind === "event" && RATE_LIMIT.test(entry.text)) {
+    const said = /(\d+(?:\.\d+)?)\s*(ms|s|sec|seconds?|m|min|minutes?)\b/i.exec(entry.text);
+    if (said === null) return 0;
+    const n = Number(said[1]);
+    const unit = said[2]!.toLowerCase();
+    return unit === "ms" ? n : unit.startsWith("m") && unit !== "ms" ? n * 60_000 : n * 1000;
+  }
+  return 0;
+}
+
+// --- words ---------------------------------------------------------------------------------------
+
+export function secondsOf(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  return `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+const base = (path: string): string => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+function commonDir(paths: readonly string[]): string {
+  const parts = paths.map((p) => p.split(/[\\/]/).slice(0, -1));
+  const out: string[] = [];
+  for (let i = 0; ; i++) {
+    const seg = parts[0]?.[i];
+    if (seg === undefined || !parts.every((p) => p[i] === seg)) break;
+    out.push(seg);
+  }
+  const segs = out.filter(Boolean);
+  return segs.length === 0 ? "" : segs.length <= 2 ? segs.join("/") : `…/${segs.slice(-2).join("/")}`;
+}
+const unique = <T,>(list: readonly T[]): T[] => [...new Set(list)];
+
+// --- chips (B) -----------------------------------------------------------------------------------
+
+export interface WorkChip {
+  key: string;
+  kind: WorkKind;
+  icon: WorkIconName;
+  /** "3 files", "12 s wait", "List merge requests". */
+  label: string;
+  /** The entries it counts, by index into the stretch. */
+  indices: number[];
+  /** How many of them failed. */
+  failed: number;
+  /** One of them is still running. */
+  live: boolean;
+}
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/** One chip per kind of work, in the order each kind first happened. */
+export function chipsOf(entries: readonly WorkEntry[], indices: readonly number[], live?: number): WorkChip[] {
+  const order: string[] = [];
+  const by = new Map<string, number[]>();
+  for (const i of indices) {
+    const key = keyOf(entries[i]!);
+    if (!by.has(key)) {
+      by.set(key, []);
+      order.push(key);
+    }
+    by.get(key)!.push(i);
+  }
+  return order.map((key) => {
+    const at = by.get(key)!;
+    const items = at.map((i) => entries[i]!);
+    const kind = kindOf(items[0]!);
+    const files = unique(items.map(pathOf)).length;
+    const n = items.length;
+    const took = items.reduce((sum, e) => sum + tookOf(e), 0);
+    const label = (() => {
+      switch (kind) {
+        case "think":
+          return took > 0 ? secondsOf(took) : "thinking";
+        case "read":
+          return plural(files, "file", "files");
+        case "write":
+          return `${files} edited`;
+        case "search":
+          return plural(n, "search", "searches");
+        case "run":
+          return plural(n, "command", "commands");
+        case "web":
+          return plural(n, "page", "pages");
+        case "agent":
+          return plural(n, "subagent", "subagents");
+        case "wait":
+          return took > 0 ? `${secondsOf(took)} wait` : plural(n, "rate limit", "rate limits");
+        case "note":
+          return plural(n, "note", "notes");
+        case "tool": {
+          const title = key.slice("tool:".length);
+          return n > 1 ? `${title} ×${n}` : title;
+        }
+      }
+    })();
+    return { key, kind, icon: iconOf(items[0]!), label, indices: at, failed: items.filter(failed).length, live: live !== undefined && at.includes(live) };
+  });
+}
+
+// --- rows (J) ------------------------------------------------------------------------------------
+
+/**
+ * Consecutive calls of one kind — one row. A thought rides on the row after it (it is why that row
+ * happened) and a system note on the row before it (it is what that row caused); neither is a step.
+ */
+export interface WorkRun {
+  key: string;
+  kind: WorkKind;
+  /** The calls, in order. */
+  rows: number[];
+  /** The thinking that led to it. */
+  thoughts: number[];
+  /** Notes that followed it. */
+  notes: number[];
+}
+
+export function runsOf(entries: readonly WorkEntry[], indices: readonly number[]): WorkRun[] {
+  const runs: WorkRun[] = [];
+  let thoughts: number[] = [];
+  for (const i of indices) {
+    const entry = entries[i]!;
+    const key = keyOf(entry);
+    if (key === "think") {
+      thoughts.push(i);
+      continue;
+    }
+    const last = runs[runs.length - 1];
+    if (key === "note" && last !== undefined) {
+      last.notes.push(i);
+      continue;
+    }
+    if (last !== undefined && last.key === key && thoughts.length === 0) last.rows.push(i);
+    else {
+      runs.push({ key, kind: kindOf(entry), rows: [i], thoughts, notes: [] });
+      thoughts = [];
+    }
+  }
+  if (thoughts.length > 0) runs.push({ key: "think", kind: "think", rows: thoughts, thoughts: [], notes: [] });
+  return runs;
+}
+
+/** Every entry a run stands for, in order. */
+export function allOf(run: WorkRun): number[] {
+  return [...run.thoughts, ...run.rows, ...run.notes].sort((a, b) => a - b);
+}
+
+/** A piece of a row's sentence: words, or a name set as code. */
+export type Said = { text: string } | { code: string };
+
+/**
+ * What a run amounted to, in words — or, for the run still going, what it did and what it is doing
+ * NOW: "Read `styles.css`, then **Reading `index.html`**". `now` marks where the present begins.
+ */
+export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: number): { said: Said[]; now?: Said[] } {
+  const items = run.rows.map((i) => entries[i]!);
+  const running = live !== undefined && run.rows.includes(live) ? entries[live]! : undefined;
+  const done = running === undefined ? items : items.filter((e) => e !== running);
+  const say = (list: WorkEntry[]): Said[] => {
+    if (list.length === 0) return [];
+    const files = unique(list.map(pathOf));
+    const where = commonDir(files);
+    switch (run.kind) {
+      case "read":
+        return files.length === 1 ? [{ text: "Read " }, { code: base(files[0]!) }] : [{ text: `Read ${files.length} files` }, ...(where ? [{ text: " in " }, { code: where }] : [])];
+      case "write":
+        return files.length === 1 ? [{ text: "Edited " }, { code: base(files[0]!) }] : [{ text: `Edited ${files.length} files` }, ...(where ? [{ text: " in " }, { code: where }] : [])];
+      case "search":
+        return list.length === 1 ? [{ text: "Searched for " }, { code: summaryOf(list[0]!) }] : [{ text: `Searched for ${list.length} patterns` }];
+      case "run":
+        return list.length === 1 ? [{ text: "Ran " }, { code: summaryOf(list[0]!) }] : [{ text: `Ran ${list.length} commands` }];
+      case "web":
+        return list.length === 1 ? [{ text: "Fetched " }, { code: summaryOf(list[0]!) }] : [{ text: `Fetched ${list.length} pages` }];
+      case "agent":
+        return [{ text: list.length === 1 ? `Ran a subagent` : `Ran ${list.length} subagents` }];
+      case "wait":
+        return [{ text: `Rate-limited${list.reduce((s, e) => s + tookOf(e), 0) > 0 ? ` ${secondsOf(list.reduce((s, e) => s + tookOf(e), 0))}` : ""}` }];
+      case "think":
+        return [{ text: `Thought${list.reduce((s, e) => s + tookOf(e), 0) > 0 ? ` for ${secondsOf(list.reduce((s, e) => s + tookOf(e), 0))}` : ""}` }];
+      case "note":
+        return [{ text: plural(list.length, "note", "notes") }];
+      case "tool": {
+        const title = run.key.slice("tool:".length);
+        return [{ text: list.length > 1 ? `${title} ×${list.length}` : title }, ...(list.length === 1 && summaryOf(list[0]!) ? [{ text: " " }, { code: summaryOf(list[0]!) }] : [])];
+      }
+    }
+  };
+  const said = say(done);
+  if (running === undefined) return { said };
+  const doing = ((): Said[] => {
+    switch (run.kind) {
+      case "read":
+        return [{ text: "Reading " }, { code: base(pathOf(running)) }];
+      case "write":
+        return [{ text: "Editing " }, { code: base(pathOf(running)) }];
+      case "search":
+        return [{ text: "Searching for " }, { code: summaryOf(running) }];
+      case "run":
+        return [{ text: "Running " }, { code: summaryOf(running) }];
+      case "web":
+        return [{ text: "Fetching " }, { code: summaryOf(running) }];
+      case "think":
+        return [{ text: "Thinking" }];
+      default:
+        return [{ text: running.kind === "tool" || running.kind === "writing" ? toolDisplayOf(running.name).title : "Working" }];
+    }
+  })();
+  return { said: said.length > 0 ? [...said, { text: ", then " }] : [], now: doing };
+}
+function summaryOf(entry: WorkEntry): string {
+  if (entry.kind === "tool") return entry.summary;
+  if (entry.kind === "writing") return entry.path ?? "";
+  return "";
+}
+
+// --- phases (5) ----------------------------------------------------------------------------------
+
+/** What a phase did — four fixed names; the reasoning that would say more is usually withheld. */
+export type PhaseName = "Explored" | "Changed" | "Checked" | "Fixed";
+
+export interface WorkPhase {
+  name: PhaseName;
+  /** Its entries, by index into the stretch, in order. */
+  indices: number[];
+}
+
+/**
+ * The stretch cut at each thought, and each piece named by the first rule that fits:
+ *  - Fixed: it edits a file, and an earlier piece had a failed call;
+ *  - Changed: it edits a file;
+ *  - Checked: it ran more commands than it read or searched;
+ *  - Explored: anything else.
+ * With `merge`, neighbours that got the same name become one — the thinking line is the only thing
+ * that would tell them apart, and it is off.
+ */
+export function phasesOf(entries: readonly WorkEntry[], merge: boolean): WorkPhase[] {
+  const cut: number[][] = [];
+  entries.forEach((entry, i) => {
+    if (entry.kind === "thought" || cut.length === 0) cut.push([]);
+    cut[cut.length - 1]!.push(i);
+  });
+  let failedBefore = false;
+  const named = cut.map((indices): WorkPhase => {
+    const kinds = indices.map((i) => kindOf(entries[i]!));
+    const count = (kind: WorkKind): number => kinds.filter((k) => k === kind).length;
+    const name: PhaseName =
+      failedBefore && count("write") > 0 ? "Fixed" : count("write") > 0 ? "Changed" : count("run") > count("read") + count("search") ? "Checked" : "Explored";
+    failedBefore = failedBefore || indices.some((i) => failed(entries[i]!));
+    return { name, indices };
+  });
+  if (!merge) return named;
+  return named.reduce<WorkPhase[]>((out, phase) => {
+    const last = out[out.length - 1];
+    if (last !== undefined && last.name === phase.name) last.indices = [...last.indices, ...phase.indices];
+    else out.push({ name: phase.name, indices: [...phase.indices] });
+    return out;
+  }, []);
+}
+
+/**
+ * The window (4) over the phase in progress: its last `rows` runs stay rows; everything before them
+ * is counted in the phase's chips.
+ */
+export function windowOf(entries: readonly WorkEntry[], indices: readonly number[], rows: number): { rolled: number[]; shown: WorkRun[] } {
+  const runs = runsOf(entries, indices).filter((run) => run.key !== "think");
+  const shown = rows > 0 ? runs.slice(-rows) : [];
+  const kept = new Set(shown.flatMap(allOf));
+  return { rolled: indices.filter((i) => !kept.has(i)), shown };
+}
+
+// --- thinking, as a line ---------------------------------------------------------------------------
+
+/** What the provider says in place of reasoning it would not hand over (`messagePartsOf`). */
+export const WITHHELD = "(withheld by the provider)";
+
+/** A phase's reasoning where it was kept: its first sentence for the line, all of it for the card. */
+export function thoughtLineOf(entries: readonly WorkEntry[], indices: readonly number[]): { first: string; full: string } | undefined {
+  const kept = indices
+    .map((i) => entries[i]!)
+    .filter((e): e is ThoughtEntry => e.kind === "thought" && e.text.trim().length > 0 && e.text.trim() !== WITHHELD);
+  if (kept.length === 0) return undefined;
+  const text = kept[0]!.text.replace(/\s+/g, " ").trim();
+  const first = /^(.+?[.!?;:])(\s|$)/.exec(text)?.[1] ?? text;
+  return { first, full: kept.map((e) => e.text.trim()).join("\n\n") };
+}
+
+// --- spans -----------------------------------------------------------------------------------------
+
+/** When a set of entries began and ended, where the record timed them. `end` is open while it runs. */
+export function spanOf(entries: readonly WorkEntry[], indices: readonly number[]): { start?: number; end?: number } {
+  const timed = indices.map((i) => entries[i]!).filter((e) => e.at !== undefined);
+  if (timed.length === 0) return {};
+  const first = timed[0]!;
+  const last = timed[timed.length - 1]!;
+  const lastTook = last.kind === "thought" ? (last.durationMs ?? 0) : tookOf(last);
+  return { start: first.at!, end: last.at! + lastTook };
+}
+
+/** Steps, as the count reads them: calls and thoughts, not the notes about them. */
+export function stepsOf(entries: readonly WorkEntry[]): number {
+  return entries.filter((e) => e.kind !== "event").length;
+}
+

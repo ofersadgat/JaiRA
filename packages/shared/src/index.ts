@@ -33,6 +33,7 @@ export * from "./structured";
 export * from "./unifiedDiff";
 export * from "./grammars";
 export * from "./toolVocabulary";
+export * from "./toolDisplay";
 export * from "./agentTools";
 export * from "./permissionSets";
 export * from "./mcp";

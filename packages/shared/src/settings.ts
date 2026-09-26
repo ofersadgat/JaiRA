@@ -244,15 +244,35 @@ export const SEQUENTIAL_BATCH_LAYOUTS: readonly SequentialBatchLayout[] = ["stac
 export type UsageFigures = "off" | "number" | "ring" | "both";
 export const USAGE_FIGURES: readonly UsageFigures[] = ["off", "number", "ring", "both"];
 
+/**
+ * How many of the latest rows of the phase in progress stay rows while an agent works — the rest of
+ * the stretch between two messages is counted in chips. `0` keeps none: the running kind's chip
+ * pulses instead.
+ */
+export type WorkRows = 0 | 1 | 3 | 5;
+export const WORK_ROWS: readonly WorkRows[] = [0, 1, 3, 5];
+
 /** The conversation's reading preferences — `appearance.conversation` (`./appearanceConfig`). */
 export interface ConversationLook {
   sequentialBatches: SequentialBatchLayout;
   usageFigures: UsageFigures;
+  /**
+   * The work between two messages, cut where the agent stopped to think, each part a row of its own
+   * named by what it did (Explored, Changed, Checked, Fixed). Off: one row of chips for all of it.
+   */
+  workPhases: boolean;
+  /** See {@link WorkRows}. */
+  workRows: WorkRows;
+  /**
+   * A phase's thinking, where the provider kept it, as its first line after the chips. Off, the
+   * neighbouring phases that share a name become one — without the line nothing tells them apart.
+   */
+  workThinking: boolean;
 }
 
 /** Stacked: a batch reads as the sequence it was, until somebody asks otherwise. The number alone. */
 export function defaultConversationLook(): ConversationLook {
-  return { sequentialBatches: "stacked", usageFigures: "number" };
+  return { sequentialBatches: "stacked", usageFigures: "number", workPhases: true, workRows: 3, workThinking: true };
 }
 
 /**

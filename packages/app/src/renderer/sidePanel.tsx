@@ -16,7 +16,7 @@
  *  - **The tabs.** The nearest tabbed entry's, with as many LABELS as fit — the open tab's first, then
  *    from the left (`panelTabs.ts`). Every tab keeps its icon and count, which is what the folded rail
  *    draws too, so a tab that has lost its words is still the same control.
- *  - **The fold.** A 48px rail: the root's tabs as icons with the name under each, and pin and unfold
+ *  - **The fold.** A rail (`PANEL_RAIL`): the root's tabs as icons with the name under each, and pin and unfold
  *    at the bottom. Folded is a statement about the column, not the stack — unfolding shows the same
  *    stack exactly where it was.
  *
@@ -162,15 +162,21 @@ function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open:
   );
 }
 
-/** The head's right end: pin, fold, close — the same three on every entry. */
+/**
+ * The head's right end: pin, fold, close — the same three on every entry, except where closing is
+ * folding (see `closeFolds` on {@link SidePanel}), when ✕ is the fold and there is no second button
+ * doing the same thing.
+ */
 function FrameControls({
   stack,
   onStack,
   onFold,
+  closeFolds,
 }: {
   stack: PanelStack;
   onStack: (next: (stack: PanelStack) => PanelStack) => void;
   onFold: () => void;
+  closeFolds: boolean;
 }): JSX.Element {
   return (
     <span className="sp-controls">
@@ -183,12 +189,20 @@ function FrameControls({
       >
         <Icon name="pin" />
       </button>
-      <button type="button" className="sp-icon" title="Fold the panel to a rail" onClick={onFold}>
-        <Icon name="fold" />
-      </button>
-      <button type="button" className="sp-icon" title="Close the panel" onClick={() => onStack(close)}>
-        <Icon name="cross" />
-      </button>
+      {closeFolds ? (
+        <button type="button" className="sp-icon" title="Collapse the panel to a rail" onClick={onFold}>
+          <Icon name="cross" />
+        </button>
+      ) : (
+        <>
+          <button type="button" className="sp-icon" title="Fold the panel to a rail" onClick={onFold}>
+            <Icon name="fold" />
+          </button>
+          <button type="button" className="sp-icon" title="Close the panel" onClick={() => onStack(close)}>
+            <Icon name="cross" />
+          </button>
+        </>
+      )}
     </span>
   );
 }
@@ -266,12 +280,20 @@ export function SidePanel({
   face,
   folded,
   onFold,
+  closeFolds = false,
 }: {
   stack: PanelStack;
   onStack: (next: (stack: PanelStack) => PanelStack) => void;
   face: (entry: PanelEntry) => PanelFace;
   folded: boolean;
   onFold: (folded: boolean) => void;
+  /**
+   * ✕ folds to the rail rather than closing. For a panel that stands beside a conversation (the
+   * person, 2026-09-25: "when I open it and click the x, it totally disappears instead of
+   * collapsing"): closed, it stays closed until the room stands on something else — and beside the
+   * conversation you are reading, nothing else ever comes, so a closed panel was a panel gone for good.
+   */
+  closeFolds?: boolean;
 }): JSX.Element | null {
   /** The waiting selection by its own name, when its face can say one. */
   const offerName = stack.offer === null ? undefined : face(stack.offer).titleText;
@@ -348,7 +370,7 @@ export function SidePanel({
             ))}
           </span>
         ) : null}
-        <FrameControls stack={stack} onStack={onStack} onFold={() => onFold(true)} />
+        <FrameControls stack={stack} onStack={onStack} onFold={() => onFold(true)} closeFolds={closeFolds} />
       </header>
 
       {pushed && topFace.sub !== undefined ? <div className="sp-sub sp-sub-pushed ellip">{topFace.sub}</div> : null}

@@ -130,6 +130,9 @@ export class App {
 
     await app.send("Page.enable");
     await app.send("Runtime.enable");
+    // A window behind others (or on an idle screen) draws no frames, and `Page.captureScreenshot`
+    // then waits for one forever — a shot that hangs, not one that fails.
+    await app.send("Page.bringToFront");
     await app.send("Emulation.setDeviceMetricsOverride", {
       width: options.width ?? 1280,
       height: options.height ?? 860,

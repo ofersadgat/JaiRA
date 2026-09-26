@@ -237,6 +237,9 @@ A command rule has no place here. What a command may run is a line under the `ba
 | `appearance.editorTheme` | non-empty string | no, default `"monokai-light"` | the editors' palette, or `"app"`; an id the renderer does not know draws the default |
 | `appearance.conversation.sequentialBatches` | `"stacked"` or `"band"` | no, default `"stacked"` | how a batch whose elements ran in turn is laid out |
 | `appearance.conversation.usageFigures` | `"off"`, `"number"`, `"ring"` or `"both"` | no, default `"number"` | how an account's usage is drawn after the model chip and on the Connections cards (usage-readings contract) |
+| `appearance.conversation.workPhases` | boolean | no, default `true` | the work between two messages cut into phases where the agent stopped to think, each named Explored, Changed, Checked or Fixed; off, one row of chips |
+| `appearance.conversation.workRows` | `0`, `1`, `3` or `5` | no, default `3` | how many of the latest rows of the phase in progress stay rows while the agent works; the rest are counted in chips |
+| `appearance.conversation.workThinking` | boolean | no, default `true` | a phase's first line of kept reasoning after its chips; off, neighbouring phases of one name merge |
 | `appearance.editors.<kind>.<knob>` | boolean, a tab size in `TAB_SIZES`, or a line height within `LINE_HEIGHT` | no, the surface's default | `<kind>` is `code`, `markdown`, `json` or `diff`; only the knobs `EDITOR_KNOBS[kind]` lists |
 | `appearance.renderers.<key>` | `{read?, write?, off?, theme?: {read?, write?}}` | no | `<key>` is `<mime>:<kind>` or `family:<family>:<kind>`; `read` and `write` a renderer id or `null`, `off` a list of ids. A line that says nothing is dropped |
 

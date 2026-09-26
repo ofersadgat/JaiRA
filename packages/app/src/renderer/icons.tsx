@@ -42,6 +42,10 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // The workflow tools (decision 0005 §3) — the same forking path a `made` or `entered` note draws,
   // because a row that starts or moves work is the same kind of fact as the note it leaves behind.
   workflow: ["M6 3v6a3 3 0 0 0 3 3h7", "M6 21v-6", "m13 9 3 3-3 3"],
+  // The Git tools (decision 0010 §1): a branch leaving the trunk and a commit on each.
+  git: ["M6 3v12", "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M18 9a9 9 0 0 1-9 9"],
+  // Something made to look at — `show_artifact`: a framed picture.
+  artifact: ["M4 5h16v14H4Z", "m4 16 5-5 4 4 3-3 4 4", "M15 9.5h.01"],
   think: ["m12 3 1.8 4.4L18 9.2l-4.2 1.8L12 15.4l-1.8-4.4L6 9.2l4.2-1.8Z", "M18.5 15.5 19.4 18l2.1.9-2.1.9-.9 2.2-.9-2.2-2.1-.9 2.1-.9Z"],
   note: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 11v5", "M12 8h.01"],
   alert: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 8v5", "M12 16.5h.01"],

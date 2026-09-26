@@ -65,6 +65,8 @@ import { useSettingsParts } from "./settingsParts";
 import { Segmented, SettingsPage } from "./settingsLayout";
 import { SettingsLayerContext, SettingsRowsContext } from "./controls";
 import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSections";
+import { Icon } from "./icons";
+import { WorkLookContext } from "./workSummaryView";
 import { LicensesPane } from "./licensesPane";
 import { lookOf } from "./appearanceLayer";
 import { useSystemDark } from "./appearance";
@@ -403,6 +405,8 @@ export default function App(): JSX.Element {
   const look = useMemo(() => lookOf(state.config), [state.config]);
   // How an account's usage is drawn, for every figure the setting governs — see `limitsStore.ts`.
   useEffect(() => publishUsageFigures(look.conversation.usageFigures), [look.conversation.usageFigures]);
+  const { workPhases, workRows, workThinking } = look.conversation;
+  const workLook = useMemo(() => ({ phases: workPhases, rows: workRows, thinking: workThinking }), [workPhases, workRows, workThinking]);
   /**
    * The Just you view's reading: what the personal layer states, or every row. Session-scoped, and
    * "What you changed" whenever a window opens — the reason to look at your own layer is usually to
@@ -553,7 +557,9 @@ export default function App(): JSX.Element {
   };
   const permissionSetsProject = state.at;
   const permissionSetsChannel = useMemo<PermissionSetsChannel>(() => {
-    const project = permissionSetsProject !== null ? { project: permissionSetsProject } : {};
+    // At the root the window names the shared root rather than nothing: with several projects open,
+    // nothing named is a refusal, and with one it would read that project instead of the root.
+    const project = { project: permissionSetsProject ?? SHARED_SESSION };
     return {
       read: () => invoke("permissionSets:read", { ...project }),
       write: (request) => invoke("permissionSets:write", { ...request, ...project }),
@@ -590,7 +596,7 @@ export default function App(): JSX.Element {
   const [permissionSetsRead, setPermissionSetsRead] = useState<PermissionSetsData | null>(null);
   useEffect(() => {
     let live = true;
-    void invoke("permissionSets:read", { ...(permissionSetsProject !== null ? { project: permissionSetsProject } : {}), usedBy: false }).then(
+    void invoke("permissionSets:read", { project: permissionSetsProject ?? SHARED_SESSION, usedBy: false }).then(
       (found) => live && setPermissionSetsRead(found),
       () => live && setPermissionSetsRead(null),
     );
@@ -1890,7 +1896,7 @@ export default function App(): JSX.Element {
   };
 
   /**
-   * The column: a splitter and the panel, or the 48px rail when it is folded, or nothing when the
+   * The column: a splitter and the panel, or the rail when it is folded, or nothing when the
    * stack is empty. Its width is remembered per KIND of thing on top (`widthKeyOf`), and animates when
    * that kind changes — a form wants more room than a task's tabs, and the column says so by moving.
    */
@@ -1923,7 +1929,16 @@ export default function App(): JSX.Element {
           <span className="sp-no-split" aria-hidden="true" />
         )}
         <aside className={`col ctx-panel${panelOpen ? "" : " folded"}`}>
-          <SidePanel stack={panelStack} onStack={onStack} face={panelFace} folded={!panelOpen} onFold={(folded) => panelFoldKey !== null && actions.setFold(panelFoldKey, !folded)} />
+          <SidePanel
+            stack={panelStack}
+            onStack={onStack}
+            face={panelFace}
+            folded={!panelOpen}
+            onFold={(folded) => panelFoldKey !== null && actions.setFold(panelFoldKey, !folded)}
+            // Beside a conversation — a chat, or one adopted into the main view — the panel is its
+            // context and has no other door: ✕ folds it to the rail.
+            closeFolds={panelStack.entries[0]?.kind === "chat" || panelStack.entries[0]?.kind === "convo"}
+          />
         </aside>
       </>
     );
@@ -2206,6 +2221,9 @@ export default function App(): JSX.Element {
         because that field is deep inside the editor, and every host of the editor would otherwise
         carry a prop it has no use for. */}
     <ToolsFieldProvider value={toolsFieldData}>
+    {/* How the work between two messages is summarised, in every conversation in the window —
+        Appearance → Conversation. A context because every transcript reads it, however deep. */}
+    <WorkLookContext.Provider value={workLook}>
     <div
       className="app"
       style={{ "--sidebar": `${sidebarShut ? SIDEBAR_RAIL : sidebarWidth}px` } as CSSProperties}
@@ -2344,8 +2362,9 @@ export default function App(): JSX.Element {
               trail: a conversation has no path — it is one thing, with one name, and the list it
               was picked from is beside it. */}
           {view === "chat" ? (
-            <span className="chat-title ellip">
-              {chat.conversations.find((c) => c.taskId === chat.taskId)?.title ?? "New conversation"}
+            <span className="chat-title">
+              <Icon name="comment" className="chat-title-glyph" />
+              <span className="ellip">{chat.conversations.find((c) => c.taskId === chat.taskId)?.title ?? "New conversation"}</span>
             </span>
           ) : null}
           <span className="title-drag" />
@@ -2881,6 +2900,7 @@ export default function App(): JSX.Element {
         </div>
       ) : null}
     </div>
+    </WorkLookContext.Provider>
     </ToolsFieldProvider>
     </MessageTypeContext.Provider>
     </ValuePanelContext.Provider>

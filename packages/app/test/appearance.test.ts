@@ -101,6 +101,11 @@ describe("parsing the appearance block of a settings layer", () => {
     expect(parsed.conversation.usageFigures).toBe("number");
     expect(parseAppearanceConfig({ conversation: { usageFigures: "ring" } }).conversation.usageFigures).toBe("ring");
     expect(() => parseAppearanceConfig({ conversation: { usageFigures: "dial" } })).toThrow(/usageFigures/);
+    // The work summary: phases and thinking on, three rows, until a layer says otherwise.
+    expect(parsed.conversation).toMatchObject({ workPhases: true, workRows: 3, workThinking: true });
+    expect(parseAppearanceConfig({ conversation: { workPhases: false, workRows: 0, workThinking: false } }).conversation).toMatchObject({ workPhases: false, workRows: 0, workThinking: false });
+    expect(() => parseAppearanceConfig({ conversation: { workRows: 2 } })).toThrow(/workRows must be one of 0, 1, 3, 5/);
+    expect(() => parseAppearanceConfig({ conversation: { workPhases: "yes" } })).toThrow(/workPhases must be true or false/);
     expect(parsed.editors.json.wrap).toBe(true);
     expect(parsed.editors.code).toEqual(defaultAppearanceConfig().editors.code);
     expect(parsed.renderers["text/markdown:view"]).toEqual({ read: "source", write: null, off: [], theme: { read: null, write: null } });
