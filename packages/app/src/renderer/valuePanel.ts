@@ -65,6 +65,12 @@ export interface PinnedValue {
 export interface ValuePanel {
   /** Show this in the side panel, replacing whatever was there. */
   open: (item: PinnedValue) => void;
+  /**
+   * Show a state's definition — its file, as the Configuration tab edits it — pushed the same way.
+   * What a message the workflow wrote opens: the words came from that file, so that is where to read
+   * (and change) them.
+   */
+  openState?: ((stateId: string) => void) | undefined;
 }
 
 export const ValuePanelContext = createContext<ValuePanel | null>(null);

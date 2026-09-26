@@ -12,6 +12,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { keptUnderSummary, producedArtifact, Transcript } from "../src/renderer/transcriptView";
+import { ValuePanelContext } from "../src/renderer/valuePanel";
 import {
   agentTitleOf,
   blocksOf,
@@ -1070,5 +1071,19 @@ describe("what was said to the model and not typed by the person", () => {
     // The system prompt keeps its aside, and says whose it is.
     expect(html).toMatch(/ts-tag">system<span class="ts-source ts-source-workflow"/);
     expect(html.match(/ts-source /g)).toHaveLength(2);
+  });
+
+  it("names the workflow the words came from, and is a button that opens its definition where there is a panel to open it in", () => {
+    const opened: string[] = [];
+    const named = renderToStaticMarkup(createElement(Transcript, { session: view, entries: entriesOf(view) }));
+    expect(named).toContain('From <span class="mono">plan/goals</span>');
+    expect(named).not.toContain("ts-source-link");
+    const panel = { open: () => undefined, openState: (stateId: string) => opened.push(stateId) };
+    const linked = renderToStaticMarkup(
+      createElement(ValuePanelContext.Provider, { value: panel }, createElement(Transcript, { session: view, entries: entriesOf(view) })),
+    );
+    expect(linked).toMatch(/<button type="button" class="ts-source ts-source-workflow ts-source-link"[^>]*>.*From <span class="mono">plan\/goals<\/span><\/button>/);
+    // The app's own words are not a workflow's, and open nothing.
+    expect(linked.match(/<button[^>]*ts-source/g)).toHaveLength(1);
   });
 });

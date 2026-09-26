@@ -1002,6 +1002,9 @@ export default function App(): JSX.Element {
   const [held, setHeld] = useState<PinnedValue[]>([]);
   const hold = useCallback((item: PinnedValue) => setHeld((was) => (was.some((one) => one.title === item.title) ? was : [...was, item])), []);
   const unhold = useCallback((item: PinnedValue) => setHeld((was) => was.filter((one) => one.title !== item.title)), []);
+  /** The project a state opened from a conversation is read in — the one `onOpenWorkflow` uses. */
+  const stateProjectRef = useRef<string | null>(null);
+  stateProjectRef.current = state.selectedProject ?? state.at;
   /**
    * "Open in context panel" from any value: the value is PUSHED, on top of what the panel was
    * showing, so ‹ gives it back — and the panel unfolds, because asking to see a thing in a column
@@ -1011,6 +1014,12 @@ export default function App(): JSX.Element {
     () => ({
       open: (item: PinnedValue) => {
         onStack((was) => push(was, { kind: "preview", key: `preview:${item.title}`, preview: item }));
+        const at = roomRef.current;
+        if (at !== null) actions.setFold(PANEL_FOLD[at], true);
+      },
+      openState: (stateId: string) => {
+        const project = stateProjectRef.current;
+        onStack((was) => push(was, { kind: "state", key: `state:${project ?? ""}:${stateId}`, stateId, project, tab: "configuration" }));
         const at = roomRef.current;
         if (at !== null) actions.setFold(PANEL_FOLD[at], true);
       },

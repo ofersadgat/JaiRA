@@ -9690,6 +9690,18 @@ fieldset.reading {
   text-transform: none;
   white-space: nowrap;
 }
+/* The workflow's chip opens the workflow's definition — the same pill, a hand and a deeper tint. */
+button.ts-source-link {
+  cursor: pointer;
+}
+button.ts-source-link:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--text);
+}
+.ts-source .mono {
+  font-size: inherit;
+}
 .ts-source svg {
   width: 11px;
   height: 11px;

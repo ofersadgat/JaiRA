@@ -1026,8 +1026,11 @@ function Message({
   scope,
   doomed = false,
   contextBefore,
+  workflow,
 }: {
   entry: MessageEntry;
+  /** The state whose conversation this is — what a message the workflow wrote names, and opens. */
+  workflow?: string | undefined;
   onEdit?: EditMessage | undefined;
   scope?: string | undefined;
   /** The reading on the answer before this one — what "+46% since the reply before" is measured from. */
@@ -1393,7 +1396,11 @@ function Message({
   const fade = doomed ? " ts-doomed" : "";
   // Said to the model and NOT typed by the person: still on the right, where everything said to the
   // model is, and named by where it came from.
-  const source = entry.by !== undefined ? <MessageSource by={entry.by} /> : null;
+  const openState = panel?.openState;
+  const source =
+    entry.by !== undefined ? (
+      <MessageSource by={entry.by} workflow={workflow} {...(workflow !== undefined && openState !== undefined ? { onOpen: () => openState(workflow) } : {})} />
+    ) : null;
   if (entry.role === "user") {
     return (
       <div className={`ts-msg ts-msg-user${entry.by !== undefined ? " ts-msg-sent" : ""}${fade}`} {...stamped}>
@@ -1430,8 +1437,28 @@ function Message({
  * The badge on a message the person did not type — WHO wrote it, in a word, with the rest on the
  * tooltip. Exported for the snapshot specimens, which draw it over the real stylesheet.
  */
-export function MessageSource({ by }: { by: MessageAuthor }): JSX.Element {
+export function MessageSource({ by, workflow, onOpen }: { by: MessageAuthor; workflow?: string | undefined; onOpen?: (() => void) | undefined }): JSX.Element {
   const said = MESSAGE_SOURCE[by];
+  // The workflow's words name the workflow they came from, and open its definition — the file
+  // they were written in, which is where to read them whole and where to change them.
+  if (by === "workflow" && workflow !== undefined) {
+    const label = (
+      <>
+        <Icon name={said.icon} />
+        From <span className="mono">{workflow}</span>
+      </>
+    );
+    const title = `Written by the workflow ${workflow} — its author's words, not typed here`;
+    return onOpen !== undefined ? (
+      <button type="button" className={`ts-source ts-source-${by} ts-source-link`} title={`${title}. Open its definition beside the conversation.`} onClick={onOpen}>
+        {label}
+      </button>
+    ) : (
+      <span className={`ts-source ts-source-${by}`} title={title}>
+        {label}
+      </span>
+    );
+  }
   return (
     <span className={`ts-source ts-source-${by}`} title={said.title}>
       <Icon name={said.icon} />
@@ -1806,6 +1833,7 @@ export function Transcript({
                 {...(onEdit !== undefined ? { onEdit } : {})}
                 {...(scope !== undefined ? { scope } : {})}
                 doomed={doomed}
+                {...(session?.stateId !== undefined ? { workflow: session.stateId } : {})}
                 {...(context !== undefined && prior !== undefined ? { contextBefore: prior } : {})}
               />
             </Fragment>
