@@ -40,7 +40,7 @@ import {
   type TurnKind,
   type WritingTool,
 } from "@jaira/shared/browser";
-import { compactionOfEvent, type ContextReading } from "@jaira/shared/browser";
+import { APPROVAL_PROMPT_FUNCTION, compactionOfEvent, CUT_OFF_EVENT, type ContextReading } from "@jaira/shared/browser";
 
 // --- entries ------------------------------------------------------------------
 
@@ -117,6 +117,8 @@ export interface ToolEntry {
    * turn and this is the only thing that connects them across two.
    */
   callId?: string;
+  /** The call that made this one, when a tool made it — `approve_tool_call`. See `SessionTurn.calledBy`. */
+  calledBy?: string;
   /**
    * Set when this call SPAWNED a subagent whose conversation the record kept — the key into
    * `SessionView.sidechains`. The row becomes the doorway: the subagent's turns render behind it,
@@ -266,7 +268,7 @@ export function blocksOf(entries: readonly TranscriptEntry[]): TranscriptBlock[]
  * Declared here rather than beside the paths, because this is a fact about the transcript and not
  * about SVG: `icons.tsx` imports it and will not compile until it can draw every member.
  */
-export type WorkIconName = ToolIconName | "think" | "note" | "alert";
+export type WorkIconName = ToolIconName | "think" | "note" | "alert" | "shield";
 
 /**
  * Which family of thing a tool name belongs to.
@@ -281,6 +283,8 @@ export type WorkIconName = ToolIconName | "think" | "note" | "alert";
  * search family after it. Likewise `NotebookEdit` is a write before it is anything else.
  */
 function toolIconOf(name: string): WorkIconName {
+  // The approval prompt: a tool the tool called, drawn as the permission it asks for.
+  if (name === APPROVAL_PROMPT_FUNCTION) return "shield";
   // The WORKFLOW tools first, and by exact name (decision 0005 §3): they are eight known names, not
   // a family to be guessed at, and three of them — `tasks`, `move`, `release` — would otherwise be
   // read by the patterns below as an agent, a write and a write. They draw as the forking path the
@@ -616,7 +620,7 @@ function messageOf(
   }
   for (const part of parts) {
     if (part.kind === "thought") continue;
-    entries.push(part.kind === "result" ? part : stamp(part));
+    entries.push(part.kind === "result" ? part : turn.calledBy !== undefined && part.kind === "tool" ? { ...stamp(part), calledBy: turn.calledBy } : stamp(part));
   }
   return entries;
 }
@@ -718,6 +722,9 @@ export function eventEntry(event: JsonValue): TranscriptEntry[] {
   const e = (event ?? {}) as Record<string, unknown>;
   if (e["type"] === "progress" && typeof e["message"] === "string") {
     return [{ kind: "event", tone: "plain", text: e["message"] as string }];
+  }
+  if (e["type"] === CUT_OFF_EVENT) {
+    return [{ kind: "event", tone: "warn", text: "the app closed before this turn finished — everything above is what had been recorded" }];
   }
   if (e["type"] === "events_dropped") {
     return [{ kind: "event", tone: "warn", text: `${String(e["count"] ?? "?")} stream events were dropped before anything could show them` }];
@@ -849,6 +856,8 @@ export function liveEntriesOf(entry: JsonValue, within?: string): Array<Transcri
       ...(num("at") !== undefined ? { at: num("at")! } : {}),
       ...(num("startedAt") !== undefined ? { startedAt: num("startedAt")! } : {}),
       ...(num("thoughtMs") !== undefined ? { thoughtMs: num("thoughtMs")! } : {}),
+      // Not a time, but carried the same way: the entry's own fact, beside the provider's message.
+      ...(typeof rec["calledBy"] === "string" ? { calledBy: rec["calledBy"] as string } : {}),
     };
     if (typeof message.content === "string") return messageOf({ role, text: message.content, ...times });
     const parts = Array.isArray(message.content) ? message.content : [];

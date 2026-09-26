@@ -234,43 +234,32 @@ export function reasonLines(pending: PendingApproval): ReasonLine[] {
 // --- the approval prompt, called by a function ---------------------------------------
 
 /**
- * What `approve_tool_call` draws — the request a permission function was handed, read back: the line
- * with the ONE part being asked about tinted (the rest of the line is glue: those parts are some other
- * function's, or no one's, to decide), or the call's arguments for a tool that is not the shell.
+ * A request `approve_tool_call` was handed, as the pending approval it is — for a caller that has the
+ * function's inputs rather than the hub's request (the Components gallery). The line is drawn with the
+ * ONE part being asked about as its one part (the rest of the line is glue: those parts are some other
+ * function's, or no one's, to decide); a tool that is not the shell shows its arguments.
  */
-export interface ApprovalRequestView {
-  tool: string;
-  subject: string;
-  function?: string;
-  permissionSet?: string;
-  state?: string;
-  task?: string;
-  cwd?: string;
-  /** The shell line and the part being asked about, as the line's one part. */
-  line?: { text: string; parts: CommandPart[] };
-  /** What the call would do, for a tool with no line. */
-  input: unknown;
-}
-
-const stringOf = (value: unknown): string | undefined => (typeof value === "string" && value.length > 0 ? value : undefined);
-
-export function approvalRequestView(raw: unknown): ApprovalRequestView {
+export function pendingOfPrompt(requestId: string, prompt: string | undefined, raw: unknown): PendingApproval {
   const request = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const part = request["part"] !== null && typeof request["part"] === "object" ? (request["part"] as Record<string, unknown>) : undefined;
   const lineText = stringOf(request["line"]);
   const span = part?.["span"] as TextSpan | undefined;
-  const subject = stringOf(request["subject"]) ?? stringOf(part?.["subject"]) ?? stringOf(request["tool"]) ?? "?";
-  const fields = {
-    tool: stringOf(request["tool"]) ?? "?",
-    subject,
-    ...(stringOf(request["function"]) !== undefined ? { function: stringOf(request["function"])! } : {}),
-    ...(stringOf(request["permissionSet"]) !== undefined ? { permissionSet: stringOf(request["permissionSet"])! } : {}),
-    ...(stringOf(request["state"]) !== undefined ? { state: stringOf(request["state"])! } : {}),
-    ...(stringOf(request["task"]) !== undefined ? { task: stringOf(request["task"])! } : {}),
-    ...(stringOf(request["cwd"]) !== undefined ? { cwd: stringOf(request["cwd"])! } : {}),
-    input: request["input"] ?? {},
+  const tool = stringOf(request["tool"]) ?? "?";
+  const subject = stringOf(request["subject"]) ?? stringOf(part?.["subject"]) ?? tool;
+  const asker = stringOf(request["function"]);
+  const input = (request["input"] ?? {}) as PendingApproval["input"];
+  const base: PendingApproval = {
+    requestId,
+    tool,
+    ...(lineText !== undefined ? { command: lineText } : {}),
+    ...(prompt !== undefined ? { reason: prompt } : {}),
+    input,
+    ...(stringOf(request["task"]) !== undefined ? { taskId: stringOf(request["task"])! } : {}),
+    ...(asker !== undefined ? { asker } : {}),
+    project: "",
+    at: 0,
   };
-  if (lineText === undefined || part === undefined || span === undefined || typeof span.start !== "number" || typeof span.end !== "number") return fields;
+  if (lineText === undefined || part === undefined || span === undefined || typeof span.start !== "number" || typeof span.end !== "number") return base;
   // The program and its subcommand are what a person reads first: underlined, as a matched entry is.
   const text = stringOf(part["text"]) ?? lineText.slice(span.start, span.end);
   const program = stringOf(part["program"]);
@@ -284,15 +273,14 @@ export function approvalRequestView(raw: unknown): ApprovalRequestView {
     kind: (stringOf(part["kind"]) ?? "command") as CommandPart["kind"],
     subject: stringOf(part["subject"]) ?? subject,
     verdict: "asks",
-    decidedBy: {
-      source: "function",
-      ...(fields.function !== undefined ? { function: fields.function } : {}),
-      reason: fields.function !== undefined ? `'${fields.function}' asks you` : "a function asks you",
-    },
+    decidedBy: { source: "function", ...(asker !== undefined ? { function: asker } : {}), reason: asker !== undefined ? `'${asker}' asks you` : "a function asks you" },
     widths: [],
   };
-  return { ...fields, line: { text: lineText, parts: [asked] } };
+  const permissionSet = stringOf(request["permissionSet"]);
+  return { ...base, parts: { line: lineText, dialect: "posix", parts: [asked], verdict: "asks", ...(permissionSet !== undefined ? { permissionSet } : {}) } };
 }
+
+const stringOf = (value: unknown): string | undefined => (typeof value === "string" && value.length > 0 ? value : undefined);
 
 // --- the answer menu --------------------------------------------------------------
 

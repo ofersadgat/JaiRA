@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, SqliteSessionStore } from "@jaira/persistence";
 import { chatInstanceIdOf } from "@jaira/runtime";
-import type { PushMessage } from "@jaira/shared";
+import { CUT_OFF_EVENT, type PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { kept } from "../src/renderer/chatPane";
@@ -314,6 +314,40 @@ describe("2. a turn whose process died", () => {
   });
 });
 
+describe("2b. a turn that died, and the next message's turn", () => {
+  /**
+   * A chat on 2026-09-26: a turn was left open by a quit, and the next message's turn started on the
+   * same chat instance while it stood. The projection kept one unsettled call per instance, lost the
+   * older one, found two records for one start, and answered with nothing — so the moment the new
+   * turn began, the thread lost the turn that died AND never showed the one answering, and the
+   * person's message went with them ("my message that I sent disappeared").
+   */
+  it("keeps both, and the messages that opened them, while the second is still answering", async () => {
+    const taskId = await started("one");
+    const thread = service.chatThread({ taskId })!;
+    const branch = thread.session.sessionId;
+    const project = projectOf();
+    const recorder = project.events.recorder(taskId);
+    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_SESSION };
+    const store = new SqliteSessionStore(project.db as never, { taskId });
+    recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
+    const turn = (seq: number, user: string): void => {
+      recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
+      store.append({
+        id: `turn-${seq}`,
+        source: { kind: "prompt", user, scope: { instanceId: where.instanceId, sequence: seq - 1 } } as never,
+        startMs: Date.now(),
+        session: { id: branch, seq },
+      });
+    };
+
+    turn(1, "close it");
+    expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: close it"]);
+    turn(2, "are the others based off master?");
+    expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: close it", "user: are the others based off master?"]);
+  });
+});
+
 describe("3. re-running a task somebody has talked to", () => {
   it("runs a COPY, so the conversation it already had is still there", async () => {
     // A thread is read from the latest run, and a second run in the same task is a second
@@ -401,6 +435,71 @@ describe("4. two messages in flight at once", () => {
       ...messages.flatMap((message) => [`user: ${message}`, `assistant: answer to ${message}`]),
     ]);
     expect(branchOf(taskId)).toBe(thread.session.sessionId);
+  });
+});
+
+describe("6. the app closing while a turn is going", () => {
+  /** The live session behind the service — what the close unwinds. */
+  const sessionOf = (): { chatTurns: Map<string, Set<AbortController>>; chatDone: Map<string, Promise<void>>; project: { db: { prepare(sql: string): { get(): unknown } } } } =>
+    [...(service as never as { sessions: Map<string, never> }).sessions.values()][0]!;
+
+  /**
+   * A quit on 2026-09-26: a turn waiting on an approval was aborted and the database closed in the
+   * same breath, so its settle threw "The database connection is not open", its record stayed open,
+   * and its agent — killed only once the turn got round to it — outlived the app.
+   */
+  it("stops the turn and WAITS for it to settle before the database closes", async () => {
+    const taskId = await started("one");
+    const session = sessionOf();
+    const turn = new AbortController();
+    session.chatTurns.set(taskId, new Set([turn]));
+    let settledWithTheDatabase = false;
+    // A turn that settles a moment AFTER its abort, as a real one does — its agent has to die first —
+    // and writes as it settles.
+    const settled = new Promise<void>((resolve) => turn.signal.addEventListener("abort", () => setTimeout(resolve, 50)));
+    session.chatDone.set(
+      taskId,
+      settled.then(() => {
+        session.project.db.prepare("SELECT 1").get();
+        settledWithTheDatabase = true;
+      }),
+    );
+    await service.close();
+    expect(turn.signal.aborted).toBe(true);
+    expect(settledWithTheDatabase).toBe(true);
+  });
+
+  it("says so in the thread, at the next open, after the last thing the turn said", async () => {
+    const taskId = await started("one");
+    const thread = service.chatThread({ taskId })!;
+    const project = projectOf();
+    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_SESSION };
+    const recorder = project.events.recorder(taskId);
+    recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
+    recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
+    new SqliteSessionStore(project.db as never, { taskId }).append({
+      id: "cut",
+      source: { kind: "prompt", user: "the message it was cut on", scope: { instanceId: where.instanceId, sequence: 0 } } as never,
+      startMs: Date.now(),
+      session: { id: thread.session.sessionId, seq: 1 },
+    });
+    // Still open, so still nothing to say: it could be answering.
+    expect(service.chatThread({ taskId })!.session.providerEvents?.some((e) => (e.event as { type?: string }).type === CUT_OFF_EVENT) ?? false).toBe(false);
+
+    // The app goes away with the record open; the next open settles it as the process that ended it.
+    await service.close();
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
+    await service.open(dir);
+    const after = service.chatThread({ taskId })!;
+    expect(after.session.turns.map((t) => `${t.role}: ${t.text ?? ""}`)).toEqual(["user: one", "assistant: first answer", "user: the message it was cut on"]);
+    expect(after.session.providerEvents?.filter((e) => (e.event as { type?: string }).type === CUT_OFF_EVENT)).toEqual([{ index: 3, event: { type: CUT_OFF_EVENT } }]);
+  });
+
+  it("tells the window a conversation's turn is over, however it ended", async () => {
+    const taskId = await started("one");
+    const thread = service.chatThread({ taskId })!;
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", fake: STOPPED });
+    expect(pushes.filter((m) => m.type === "chat:turnEnded" && m.taskId === taskId)).toHaveLength(1);
   });
 });
 

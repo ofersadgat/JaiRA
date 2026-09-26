@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToolResult } from "@declarative-ai/llm";
 import type { RecordStore } from "@declarative-ai/exec";
-import { withNativeCapture } from "../src/nativeCapture";
+import { captureNativeSession, foldIntoEntries, withNativeCapture } from "../src/nativeCapture";
 
 type Settled = Parameters<RecordStore["finish"]>[1];
 
@@ -204,6 +204,50 @@ describe("withNativeCapture", () => {
   it("mirrors the inner store's `bySession` presence — absent MEANS the store cannot read", () => {
     expect(withNativeCapture(recorder(false).store, { cwd: "C:\\w", read: async () => [] }).bySession).toBeUndefined();
     expect(withNativeCapture(recorder(true).store, { cwd: "C:\\w", read: async () => [] }).bySession).toBeDefined();
+  });
+});
+
+describe("recovering a call the app quit under", () => {
+  /**
+   * A chat on 2026-09-26: the app quit while a turn waited on an approval. The agent outlived it,
+   * finished its answer into its own file 51 s later, and the turn after it went on in the SAME file
+   * fourteen hours on. The record held only what had streamed before the quit — up to the `bash`
+   * call — so the answer was on disk and nowhere on screen.
+   */
+  const at = (s: number): string => new Date(s * 1000).toISOString();
+  const file = [
+    { type: "user", uuid: "p", timestamp: at(10), message: { role: "user", content: "close it" } },
+    { type: "assistant", uuid: "c", timestamp: at(12), message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "mcp__dai__bash", input: { command: "git fetch" } }] } },
+    { type: "user", uuid: "r", timestamp: at(1300), toolUseResult: "denied", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "tool 'bash' denied by permission policy", is_error: true }] } },
+    { type: "assistant", uuid: "a", timestamp: at(1350), message: { role: "assistant", content: [{ type: "text", text: "MR !6 is closed." }] } },
+    { type: "user", uuid: "p2", timestamp: at(52000), message: { role: "user", content: "the next message" } },
+    { type: "assistant", uuid: "a2", timestamp: at(52010), message: { role: "assistant", content: [{ type: "text", text: "the next answer" }] } },
+  ];
+  const streamed = {
+    entries: [
+      { kind: "message", role: "user", content: "close it", provider: "unknown" },
+      { kind: "message", role: "assistant", provider: "unknown", content: [{ type: "tool_use", id: "t1", name: "mcp__dai__bash", input: { command: "git fetch" } }], timing: { at: 12_000 } },
+    ],
+  };
+
+  it("adds what the record never received, whole, from the file — and stops where the next call began", async () => {
+    const captured = await captureNativeSession(SID, { cwd: "C:/w", sinceMs: 9000, untilMs: 51_000_000, bodies: true, read: async () => file, readSidechains: async () => [] });
+    const entries = foldIntoEntries(structuredClone(streamed), captured)["entries"] as Array<Record<string, unknown>>;
+    const messages = entries.filter((e) => e["kind"] === "message");
+    expect(messages.map((e) => e["role"])).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(messages[2]!["content"]).toEqual([{ type: "tool_result", tool_use_id: "t1", content: "tool 'bash' denied by permission policy", is_error: true, data: "denied" }]);
+    expect(messages[3]!["content"]).toEqual([{ type: "text", text: "MR !6 is closed." }]);
+    // Timed by the file, the only clock these messages have; the streamed one keeps its own.
+    expect(messages[3]).toMatchObject({ uuid: "a", timing: { at: 1_350_000 } });
+    expect(messages[1]).toMatchObject({ uuid: "c", timing: { at: 12_000 } });
+    // The next turn's lines are the next record's.
+    expect(JSON.stringify(entries)).not.toContain("the next");
+  });
+
+  it("adds nothing at a close — every message rode the stream, and a line with nothing to annotate is not invented", async () => {
+    const captured = await captureNativeSession(SID, { cwd: "C:/w", sinceMs: 9000, untilMs: 51_000_000, read: async () => file, readSidechains: async () => [] });
+    const entries = foldIntoEntries(structuredClone(streamed), captured)["entries"] as Array<Record<string, unknown>>;
+    expect(entries.filter((e) => e["kind"] === "message")).toHaveLength(2);
   });
 });
 

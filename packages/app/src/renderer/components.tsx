@@ -7,7 +7,7 @@
  * main re-validates every submission, so this layer is free to be purely about
  * presentation.
  */
-import { Fragment, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   artifactOf,
   isComponentName,
@@ -47,8 +47,8 @@ import { SchemaJsonEditor } from "./schemaEditor";
 import { answerOf, answersOfValue, ChoiceList, ChoiceSteps, EMPTY_ANSWER, initialAnswers, submitsOnClick, type Answer } from "./choices";
 import { gateServices, mountChangesetReview, type ComponentServices } from "./changesetReview";
 import { ValueView } from "./valueView";
-import { approvalRequestView, hueOf, lineSegments } from "./approvalModel";
-import { FunctionBy } from "./approvalSurface";
+import { pendingOfPrompt } from "./approvalModel";
+import { ApprovalSurface } from "./approvalSurface";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import { useSchemaCheck, useTouched } from "./schemaForm/check";
 import { checkBlocker, seedFor } from "./schemaForm/model";
@@ -688,77 +688,6 @@ function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>)
   );
 }
 
-/**
- * The approval prompt, called by a permission FUNCTION (`approve_tool_call`, decision 0007 amended
- * 2026-09-22) — the request the function was handed, and Allow or Deny.
- *
- * Drawn in the command approval's own look (its line, its part row) because it IS the approval, put
- * by a function rather than by the policy: the line is shown whole with the one part being asked
- * about tinted, the row says which permission set line and which function asked, and the answer is the word
- * the function returns. No reach and no "add to the permission set": what a function remembers is its own
- * business, and this answers this call and no other.
- */
-function ApproveToolCall({ inputs, onSubmit, settled }: ComponentProps<ApproveToolCallConfig>): JSX.Element {
-  const view = approvalRequestView(inputs["request"]);
-  // The call's answer, as recorded — the word the prompt returned, or the `{ decision }` it was sent.
-  const answered = settled === undefined ? undefined : typeof settled.value === "string" ? settled.value : recordOf(settled)["decision"];
-  const lit = (mine: string, look: string): string | undefined => (settled === undefined ? look : answered === mine ? look : undefined);
-  const where = [view.state !== undefined ? `state ${view.state}` : undefined, view.cwd !== undefined ? `in ${view.cwd}` : undefined].filter((x) => x !== undefined);
-  return (
-    <div className="approval-surface approve-call" data-testid="approve-tool-call">
-      <div className="sub">{view.tool}</div>
-      {view.line !== undefined ? (
-        <>
-          <pre className="artifact shell-line">
-            {lineSegments(view.line.text, view.line.parts).map((segment, at) =>
-              segment.kind === "glue" ? (
-                <span key={at} className="op">
-                  {segment.text}
-                </span>
-              ) : (
-                <span key={at} className="part-c" style={{ "--hue": hueOf(0) } as CSSProperties}>
-                  {segment.pieces.map((piece, i) => (piece.matched ? <span key={i} className="part-m">{piece.text}</span> : piece.text))}
-                </span>
-              ),
-            )}
-          </pre>
-          <ul className="approval-parts">
-            <li className="part asks" style={{ "--hue": hueOf(0) } as CSSProperties}>
-              <span className="part-swatch" aria-hidden="true" />
-              <code className="part-text">{view.line.parts[0]!.text}</code>
-              <span className="part-arrow">→</span>
-              <span className="part-subject mono">{view.subject}</span>
-              {where.length > 0 ? <span className="part-note">{where.join(" · ")}</span> : null}
-              <span className="part-verdict">
-                {view.function !== undefined ? <FunctionBy name={view.function} /> : null}
-                {settled === undefined ? "asks" : answered === "allow" ? "allowed" : answered === "deny" ? "denied" : "asks"}
-              </span>
-            </li>
-          </ul>
-        </>
-      ) : (
-        <pre className="artifact">{JSON.stringify(view.input, null, 2)}</pre>
-      )}
-      <p className="reason-note">
-        {view.permissionSet !== undefined && view.permissionSet !== "inline" ? (
-          <>
-            Permission set <span className="mono">{view.permissionSet}</span>:{" "}
-          </>
-        ) : null}
-        <b>{view.subject}</b> is decided by the function <b className="mono">{view.function ?? "?"}</b>, which asks you
-        {view.line === undefined && where.length > 0 ? ` — ${where.join(" · ")}` : ""}.
-      </p>
-      <div className="options approval-answers">
-        <button type="button" className={lit("allow", "primary")} disabled={settled !== undefined} data-testid="approve-tool-call-allow" onClick={() => onSubmit({ decision: "allow" })}>
-          Allow
-        </button>
-        <button type="button" className={lit("deny", "danger")} disabled={settled !== undefined} data-testid="approve-tool-call-deny" onClick={() => onSubmit({ decision: "deny" })}>
-          Deny
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function ConfirmAction({ config, onSubmit, settled }: ComponentProps<ConfirmActionConfig>): JSX.Element {
   // Settled: the button that was pressed is the filled one, and neither can be pressed again.
@@ -1027,7 +956,8 @@ export function GateSurface({
       case "confirm_action":
         return <ConfirmAction config={config} inputs={inputs} onSubmit={onSubmit} settled={settled} />;
       case "approve_tool_call":
-        return <ApproveToolCall config={config} inputs={inputs} onSubmit={onSubmit} settled={settled} />;
+        // The ONE approval prompt, however it is reached: drawn as the approval it is.
+        return <ApprovalSurface pending={pendingOfPrompt(pending.requestId, config.prompt, inputs["request"])} onDecide={(decision) => onSubmit({ decision })} />;
       case "review_artifacts":
         return (
           <ChangesetGate

@@ -16,7 +16,6 @@ import type { ExecServices, FunctionInputs, Tool } from "@declarative-ai/exec";
 import {
   APPROVAL_PROMPT_FUNCTION,
   SMART_FUNCTION,
-  approvalRequestKey,
   lowerPermissionSet,
   parsePermissionSet,
   type PermissionFunctionRequest,
@@ -257,24 +256,6 @@ describe("the approval prompt is a FUNCTION a function can call", () => {
     const { hub, parked } = approvalPromptOn(registry);
     const pending = runnerOver(registry)(APPROVAL_PROMPT_FUNCTION, REQUEST);
     await eventually(() => parked.length > 0, "the approval prompt to park");
-    hub.submit(parked[0]!.requestId, { decision: "deny" });
-    expect(await pending).toBe("deny");
-  });
-
-  it("asks again rather than hand a resumed call an answer given to ANOTHER call", async () => {
-    const registry = newRegistry();
-    const { hub, parked } = approvalPromptOn(registry);
-    // A seed, as a recovered gate is answered after a restart: about `npm publish`…
-    hub.seed("t1", APPROVAL_PROMPT_FUNCTION, { decision: "allow", about: approvalRequestKey(REQUEST) });
-    // …consumed by the SAME call, silently.
-    expect(await runnerOver(registry)(APPROVAL_PROMPT_FUNCTION, REQUEST)).toBe("allow");
-    expect(parked).toEqual([]);
-    // A seed about npm publish does not answer `rm -rf dist`: the prompt parks, and a person decides.
-    hub.seed("t1", APPROVAL_PROMPT_FUNCTION, { decision: "allow", about: approvalRequestKey(REQUEST) });
-    const other = { ...REQUEST, input: { command: "rm -rf dist" }, line: "rm -rf dist" };
-    const pending = runnerOver(registry)(APPROVAL_PROMPT_FUNCTION, other);
-    await eventually(() => parked.length > 0, "the approval prompt to park");
-    expect(parked).toHaveLength(1);
     hub.submit(parked[0]!.requestId, { decision: "deny" });
     expect(await pending).toBe("deny");
   });

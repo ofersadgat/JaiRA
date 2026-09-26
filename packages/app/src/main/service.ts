@@ -8,7 +8,7 @@
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
-import { MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig } from "@jaira/shared";
+import { CUT_OFF_EVENT, MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
 import {
   copyFileSync,
   existsSync,
@@ -41,7 +41,7 @@ import {
   type WorkflowBundle,
 } from "@declarative-ai/hw";
 import { hostFunction, type ExecServices, type FunctionInputs, type MemoCache, type RecordRef } from "@declarative-ai/exec";
-import type { ExecPolicy } from "@declarative-ai/permissions";
+import type { ExecPolicy, PermissionDecision } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
 import type { FetchText } from "@declarative-ai/llm";
 import {
@@ -179,6 +179,7 @@ import {
   mirrorStarted,
   settleStartedMirror,
   startedTaskOf,
+  PROCESS_ENDED,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -316,6 +317,10 @@ import {
   sessionServicesFor,
   statusOfResult,
   withNativeCapture,
+  withHostCalls,
+  callingCallOf,
+  approvalCallEntries,
+  approvalResultEntries,
   captureNativeSession,
   foldIntoEntries,
   isEmptyCapture,
@@ -349,6 +354,7 @@ import {
   INTERACTIVE,
   QuestionHub,
   type ApprovalRequest,
+  type ApprovalAnsweredBy,
   type ExecObserver,
   type FakeRule,
   type HubRequest,
@@ -439,8 +445,6 @@ import {
   type SecretSource,
   type RemoteStatusView,
   validateComponentResult,
-  APPROVAL_PROMPT_FUNCTION,
-  approvalRequestKey,
   WORKFLOW_JSON,
   unnamedRouteOf,
   ALWAYS_GRANTED_TOOLS,
@@ -1134,6 +1138,7 @@ function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: Ja
     ...(request.parts?.permissionSet !== undefined && paths !== undefined ? { permissionSet: approvalPermissionSetOf(paths, request.parts.permissionSet) } : {}),
     input: request.input as Record<string, JsonValue>,
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
+    ...(request.asker !== undefined ? { asker: request.asker } : {}),
     project,
     at: request.at,
   };
@@ -1640,9 +1645,13 @@ export class AppService {
     const approvals = new ApprovalHub({
       onRequest: (request) => {
         this.requestOwner.set(request.requestId, key);
+        const session = this.sessions.get(key);
+        if (session !== undefined) this.recordApprovalCall(session, request);
         this.publish({ type: "approval:requested", pending: pendingApprovalOf(request, this.refOf(key), this.sessions.get(key)?.project.paths) });
       },
-      onResolved: (requestId, decision) => {
+      onResolved: (requestId, decision, by) => {
+        const answered = this.sessions.get(key);
+        if (answered !== undefined) this.recordApprovalAnswer(answered, requestId, decision, by);
         // The human's answer is the audit entry policy alone could not produce.
         const session = this.sessions.get(key);
         const run = session?.approvalRun.get(requestId);
@@ -2406,7 +2415,9 @@ export class AppService {
       source: "project",
       message: `opened ${project.paths.projectDir}`,
       project: key,
-      ...(project.recovered.length > 0 ? { detail: { recovered: project.recovered } } : {}),
+      ...(project.recovered.length > 0 || project.recoveredCalls.length > 0
+        ? { detail: { recovered: project.recovered, ...(project.recoveredCalls.length > 0 ? { recoveredCalls: project.recoveredCalls } : {}) } }
+        : {}),
     });
     if (this.options.watchWorkflows !== false) this.watchWorkflows(session);
     // Requests still awaited from the process before this one: closed for a weekend is the normal
@@ -2415,7 +2426,7 @@ export class AppService {
     // The same for the repository watcher (decision 0010 §2): what happened on this project's remotes
     // while nobody was looking is compared now — the latest state only — if anything is switched on.
     this.kickRepoWatch();
-    if (project.recovered.length > 0) {
+    if (project.recovered.length > 0 || project.recoveredCalls.length > 0) {
       this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       // Not awaited: the agent's files are on disk and are not going anywhere, while the window
       // opening behind this call is. It publishes its own invalidate when it finds something.
@@ -2568,7 +2579,11 @@ export class AppService {
   private async recoverNativeSessions(session: ProjectSession): Promise<void> {
     const { project } = session;
     let recoveredAny = false;
-    for (const taskId of project.recovered) {
+    // The interrupted tasks, and the tasks whose conversation lost a turn to the quit — see
+    // `recoverUnsettledCalls`. The second is how a turn the app quit under gets back what the agent
+    // went on to say after it: the process outlived the window and finished its answer into its own
+    // file, which nothing else will ever read.
+    for (const taskId of new Set([...project.recovered, ...project.recoveredCalls])) {
       const store = sessionStoreFor(project);
       let rows: ReturnType<SqliteSessionStore["recoverable"]>;
       try {
@@ -2582,7 +2597,13 @@ export class AppService {
       const capture = this.options.captureNative ?? captureNativeSession;
       for (const row of rows) {
         try {
-          const captured = await capture(row.providerSessionId, { cwd, sinceMs: row.startedAt });
+          // With BODIES: the call was cut off, so the file may hold messages its record never got.
+          const captured = await capture(row.providerSessionId, {
+            cwd,
+            sinceMs: row.startedAt,
+            ...(row.untilMs !== undefined ? { untilMs: row.untilMs } : {}),
+            bodies: true,
+          });
           if (isEmptyCapture(captured)) continue;
           store.foldNativeCapture(row.id, (value) => foldIntoEntries(value, captured) as Record<string, JsonValue>);
           recoveredAny = true;
@@ -4639,6 +4660,8 @@ export class AppService {
           ...stackDetail(e),
         }),
     });
+    // The calls a tool made in this run — `approve_tool_call` — folded into the record of the call that made each.
+    session.records = this.withHostCallsOf(open, taskId, session.records);
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
     // every decision audited and `require_approval` routed to the inbox (§10.2).
@@ -5462,6 +5485,8 @@ export class AppService {
           ...stackDetail(e),
         }),
     });
+    // The calls a tool made in this turn — `approve_tool_call` — folded into its record when it settles.
+    stores.records = this.withHostCallsOf(open, request.taskId, stores.records);
     /**
      * The live turn, for a message somebody typed — everything `startRun` wires, wired here too.
      *
@@ -5858,6 +5883,7 @@ export class AppService {
       if (!open.chatTurns.has(taskId)) {
         open.liveTurns.clear(taskId);
         open.liveFlush.delete(taskId);
+        this.publishFor(open, { type: "chat:turnEnded", taskId });
       }
     }
   }
@@ -6167,6 +6193,12 @@ export class AppService {
         providerEvents.push({ index: event.index + at, event: event.event });
       }
       for (const line of nativeOf(row.value) ?? []) native.push({ index: line.index + at, line: line.line });
+      // A turn the app closed under says so, after the last thing it managed to say — or the thread
+      // simply stops there, and a reader cannot tell a finished turn from a cut one. Only a turn the
+      // PROCESS ended: one somebody stopped settles `interrupted` too, and was not cut off.
+      if (row.status === "interrupted" && (store.record(row.recordId)?.error as { reason?: unknown } | undefined)?.reason === PROCESS_ENDED) {
+        providerEvents.push({ index: turns.length, event: { type: CUT_OFF_EVENT } });
+      }
     }
 
     const session: SessionView = {
@@ -7281,7 +7313,7 @@ export class AppService {
     const approvals = open.approvals.list().filter((request) => request.taskId === taskId && inside(request.instanceId));
     if (questions.length === 0 && approvals.length === 0) return;
     for (const request of questions) open.questions.answer(request.requestId, undefined);
-    for (const request of approvals) open.approvals.decide(request.requestId, "deny", "once");
+    for (const request of approvals) open.approvals.decide(request.requestId, "deny", "once", undefined, undefined, "stopped");
     this.log({ level: "info", source: "run", message: `a skip in ${taskId} withdrew ${questions.length} question(s) and ${approvals.length} approval(s) its interrupted agent had asked`, project: open.key, taskId });
   }
 
@@ -8179,6 +8211,84 @@ export class AppService {
   }
 
   /**
+   * `approve_tool_call` being called, in the conversation of the task that asked: an entry on the live
+   * turn — beside the call that needs permission, which the request's input names — and one waiting
+   * for that call's record to settle (`withHostCallsOf`). An ask no task made (a probe, a sync) has no
+   * conversation to be in.
+   */
+  private recordApprovalCall(session: ProjectSession, request: ApprovalRequest): void {
+    const taskId = request.taskId;
+    if (taskId === undefined) return;
+    const snap = session.liveTurns.snapshot(taskId);
+    const calledBy = snap !== null ? callingCallOf(snap.entries, request.input) : undefined;
+    // Unique across the conversation, not the process: request ids count from one in every process,
+    // and a conversation outlives them.
+    const callId = `approve_${request.at.toString(36)}_${request.requestId}`;
+    session.approvalCalls.set(request.requestId, { callId, ...(calledBy !== undefined ? { calledBy } : {}), taskId, at: request.at });
+    const { live, record } = approvalCallEntries(
+      callId,
+      calledBy,
+      {
+        tool: request.tool,
+        ...(request.command !== undefined ? { command: request.command } : {}),
+        ...(request.reason !== undefined ? { reason: request.reason } : {}),
+        ...(request.asker !== undefined ? { asker: request.asker } : {}),
+      },
+      request.at,
+    );
+    this.hostCall(session, taskId, live, record, request.at);
+  }
+
+  /** Its result — who answered, how, and how long the call waited — beside it, the same two ways. */
+  private recordApprovalAnswer(session: ProjectSession, requestId: string, decision: PermissionDecision, by: ApprovalAnsweredBy): void {
+    const call = session.approvalCalls.get(requestId);
+    if (call === undefined) return;
+    session.approvalCalls.delete(requestId);
+    const at = Date.now();
+    const answer = { decision: decision.decision, scope: decision.scope, by, waitedMs: Math.max(0, at - call.at) };
+    const { live, record } = approvalResultEntries(call.callId, call.calledBy, answer, at);
+    this.hostCall(session, call.taskId, live, record, at);
+  }
+
+  /**
+   * One entry of a call a tool made: onto the task's live turn — at the turn's own position, so it
+   * joins the tail rather than replacing it, and flushed at once, so a turn cut off keeps it — and into
+   * what waits for the record to settle.
+   */
+  private hostCall(session: ProjectSession, taskId: string, live: JsonValue, record: JsonValue, at: number): void {
+    const waiting = session.hostCalls.get(taskId) ?? [];
+    waiting.push(record);
+    session.hostCalls.set(taskId, waiting);
+    const snap = session.liveTurns.snapshot(taskId);
+    if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
+    const where = { id: snap.sessionId, seq: snap.seq };
+    const applied = session.liveTurns.apply(taskId, { session: where, ...(snap.stateId !== undefined ? { stateId: snap.stateId } : {}), entry: live, at });
+    this.publish({
+      type: "session:turn",
+      taskId,
+      n: applied.n,
+      sessionId: where.id,
+      seq: where.seq,
+      ...(snap.stateId !== undefined ? { stateId: snap.stateId } : {}),
+      ...(applied.entry !== undefined ? { entry: applied.entry } : {}),
+    });
+    session.liveFlush.get(taskId)?.();
+  }
+
+  /** A record store that folds this task's waiting host calls into the record of the call that made them. */
+  private withHostCallsOf<S extends Parameters<typeof withHostCalls>[0]>(open: ProjectSession, taskId: string, records: S): S {
+    return withHostCalls(
+      records,
+      () => {
+        const waiting = open.hostCalls.get(taskId) ?? [];
+        open.hostCalls.delete(taskId);
+        return waiting;
+      },
+      (left) => open.hostCalls.set(taskId, [...left, ...(open.hostCalls.get(taskId) ?? [])]),
+    ) as S;
+  }
+
+  /**
    * What a permission set line that names a FUNCTION needs in one run or one turn (decision 0007, amended
    * 2026-09-22), put on `registry`: the approval prompt, parked on this project's gate hub for the
    * task — so it is durable and drawn in the task's conversation like any gate — and `smart`, judging
@@ -8194,7 +8304,13 @@ export class AppService {
     abortSignal?: AbortSignal,
   ): PermissionFunctionRunner {
     const project = open.project;
-    registerApprovalPrompt(registry, (component, inputs) => open.hub.ask(component, inputs, taskId));
+    // The ONE approval prompt: a function that asks the person reaches the same hub the policy does.
+    registerApprovalPrompt(registry, async (_component, inputs) => {
+      const request = inputs["request"] as unknown as PermissionFunctionRequest;
+      const prompt = typeof inputs["prompt"] === "string" ? inputs["prompt"] : undefined;
+      const decision = await open.approvals.askFor(request, { taskId, ...(prompt !== undefined ? { prompt } : {}) });
+      return { value: { decision }, metrics: { startMs: Date.now(), durationMs: 0, costUsd: 0, costSource: "unknown" } };
+    });
     registerSmartFunction(registry, { prompt, config: () => project.config.functions.smart });
     const modules = userModules();
     return permissionFunctionRunner({
@@ -8287,14 +8403,7 @@ export class AppService {
     const found = this.findStoredInteraction(requestId);
     if (found === undefined) throw this.refusal("run", `no pending interaction '${requestId}'`);
     const { session, row } = found;
-    // An approval prompt's answer is about ONE call. The resumed run re-asks whatever its agent asks
-    // next, which need not be the call this answered — so the seed says which request it answers, and
-    // the prompt asks again when a different one comes (`registerApprovalPrompt`).
-    const seeded =
-      row.component === APPROVAL_PROMPT_FUNCTION && value !== null && typeof value === "object" && !Array.isArray(value)
-        ? { ...value, about: approvalRequestKey((row.inputs as Record<string, JsonValue>)["request"]) }
-        : value;
-    session.hub.seed(row.taskId, row.component, seeded);
+    session.hub.seed(row.taskId, row.component, value);
     session.project.interactions.close(requestId);
     this.publish({ type: "interaction:resolved", requestId });
     void this.resumeTask({ taskId: row.taskId, project: session.dir }).catch((e: unknown) => {
@@ -11696,7 +11805,7 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
   if (!Array.isArray(entries)) return [];
   const turns: SessionTurn[] = [];
   for (const raw of entries) {
-    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: unknown; timing?: unknown; by?: unknown; context?: unknown } | null;
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: unknown; timing?: unknown; by?: unknown; context?: unknown; calledBy?: unknown } | null;
     if (entry === null || typeof entry !== "object") continue;
     // Events are not turns, and a subagent's turns belong to the call that spawned it.
     if (entry.kind !== "message" || entry.sidechain !== undefined) continue;
@@ -11706,6 +11815,8 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
       ...turn,
       // Who wrote it, when the person did not — the mark the record carries on the entry.
       ...(entry.by === "host" || entry.by === "workflow" ? { by: entry.by } : {}),
+      // A call a tool made, by the call that made it — `approve_tool_call`, for one.
+      ...(typeof entry.calledBy === "string" ? { calledBy: entry.calledBy } : {}),
       ...(typeof timing.at === "number" ? { at: timing.at } : {}),
       ...(typeof timing.startedAt === "number" ? { startedAt: timing.startedAt } : {}),
       ...(typeof timing.thoughtMs === "number" ? { thoughtMs: timing.thoughtMs } : {}),

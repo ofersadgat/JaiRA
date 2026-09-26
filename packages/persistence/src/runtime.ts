@@ -102,6 +102,12 @@ function toRuntime(row: RawRuntime): TaskRuntimeRow {
   };
 }
 
+/**
+ * The reason a recovery writes on a call it settles because the process that ran it is gone — how a
+ * reader tells a call the app died under from one somebody stopped, which settles `interrupted` too.
+ */
+export const PROCESS_ENDED = "interrupted: the process ended before this call settled";
+
 export class RuntimeStore {
   /**
    * `log` is present only when `config.storage.tasks` puts them in files (DESIGN §4.4). Every write
@@ -343,13 +349,51 @@ export class RuntimeStore {
                     error_json = COALESCE(error_json, ?)
               WHERE task_id = ? AND status = 'open'`,
           )
-          .run(nowMs, JSON.stringify({ reason: "interrupted: the process ended before this call settled" }), id);
+          .run(nowMs, JSON.stringify({ reason: PROCESS_ENDED }), id);
       }
     });
     recover();
     // Recovery is a write like any other, and one that happens at OPEN — so a file-backed task
     // whose interruption was never appended would come back `running` on the next open, forever.
     for (const id of ids) this.logTask(id);
+    return ids;
+  }
+
+  /**
+   * The calls a crash left `open` under a task that is NOT running — returns their task ids.
+   *
+   * {@link recoverInterrupted} settles the open records of the tasks it interrupts, and only those:
+   * it asks for tasks still `running`. But a conversation outlives its run. Every message after the
+   * first is a turn under a task that already reads `completed`, so a process that quit mid-turn left
+   * that turn's record `open` for good — read as live by everything keyed on the status, never handed
+   * to the native-session recovery that restores what the agent went on to say, and never settled.
+   *
+   * At open, nothing in this process is streaming into any row yet, and a task that is not running is
+   * one no other process is driving (a live run's task reads `running`, and chat turns run only in
+   * the app) — so every such row is a call nobody will finish. Settled `interrupted`, exactly as the
+   * sweep above writes, with the streamed partial kept.
+   */
+  recoverUnsettledCalls(nowMs: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT r.task_id AS task_id FROM operation_records r
+           JOIN task_runtime t ON t.task_id = r.task_id
+          WHERE r.status = 'open' AND t.status != 'running'`,
+      )
+      .all() as Array<{ task_id: string }>;
+    const ids = rows.map((row) => row.task_id);
+    const settle = this.db.transaction(() => {
+      for (const id of ids) {
+        this.db
+          .prepare(
+            `UPDATE operation_records SET status = 'interrupted', ended_at = ?,
+                    error_json = COALESCE(error_json, ?)
+              WHERE task_id = ? AND status = 'open'`,
+          )
+          .run(nowMs, JSON.stringify({ reason: PROCESS_ENDED }), id);
+      }
+    });
+    settle();
     return ids;
   }
 

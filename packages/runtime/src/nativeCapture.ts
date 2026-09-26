@@ -37,6 +37,13 @@ type Settled = Parameters<RecordStore["finish"]>[1];
 export interface Captured {
   nativeLines?: NativeLine[];
   nativeSidechains?: Record<string, { agentId: string; meta?: JsonValue; lines: NativeLine[] }>;
+  /**
+   * The main chain's message lines WHOLE — bodies included — by `uuid`. Read only for a RECOVERY
+   * ({@link captureNativeSession}'s `bodies`): at a close the stream carried every message and the
+   * file adds only envelopes, but a call cut off mid-stream has messages the record never received —
+   * the rest of the turn, the answer — and the file is the only place they are.
+   */
+  nativeBodies?: Record<string, JsonValue>;
 }
 
 export interface NativeCaptureOptions {
@@ -110,23 +117,51 @@ function enriched(settled: Settled, captured: Captured): Settled {
  * `sinceMs` is the resumed-session cut: the file spans a whole conversation while a record spans
  * one call, so only lines stamped inside the call are kept — earlier ones belong to the records
  * that captured them at their own closes.
+ *
+ * `untilMs` is the other end, which a close never needs — the file ends where the call did — and a
+ * recovery does: a conversation goes on after a call the app quit under, in the SAME file, and the
+ * lines of the turns after it are theirs. `bodies` keeps the main chain's message lines whole too
+ * ({@link Captured.nativeBodies}), for the messages a cut-off stream never delivered.
  */
 export async function captureNativeSession(
   providerSessionId: string,
-  options: { cwd: string; sinceMs?: number; read?: AgentSessionReader; readSidechains?: NativeCaptureOptions["readSidechains"] },
+  options: {
+    cwd: string;
+    sinceMs?: number;
+    untilMs?: number;
+    bodies?: boolean;
+    read?: AgentSessionReader;
+    readSidechains?: NativeCaptureOptions["readSidechains"];
+  },
 ): Promise<Captured> {
   const read = options.read ?? readNativeSession;
   const readSidechains = options.readSidechains ?? readNativeSidechains;
   const captured: Captured = {};
   const cut = options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {};
-  const native = nativeLinesOf(namingTools(await read(providerSessionId, options.cwd)), cut);
+  const lines = before(await read(providerSessionId, options.cwd), options.untilMs);
+  const native = nativeLinesOf(namingTools(lines), cut);
   if (native.length > 0) captured.nativeLines = native;
+  if (options.bodies === true) {
+    // The same cut as the envelopes, stamped the same way: an unstamped line inherits the last stamp.
+    const bodies: Record<string, JsonValue> = {};
+    let stampMs: number | undefined;
+    for (const raw of lines) {
+      if (!isRecord(raw)) continue;
+      const stamp = typeof raw["timestamp"] === "string" ? Date.parse(raw["timestamp"]) : Number.NaN;
+      if (!Number.isNaN(stamp)) stampMs = stamp;
+      if (options.sinceMs !== undefined && stampMs !== undefined && stampMs < options.sinceMs) continue;
+      if ((raw["type"] === "user" || raw["type"] === "assistant") && raw["isSidechain"] !== true && typeof raw["uuid"] === "string") {
+        bodies[raw["uuid"]] = raw as JsonValue;
+      }
+    }
+    if (Object.keys(bodies).length > 0) captured.nativeBodies = bodies;
+  }
   // The subagents' files, keyed the way `sidechains` already is. The same cut applies per file: a
   // subagent spawned by an EARLIER call in a resumed session folds to nothing here, because that
   // call's own close captured it.
   const chains: NonNullable<Captured["nativeSidechains"]> = {};
   for (const chain of await readSidechains(providerSessionId, options.cwd)) {
-    const lines = nativeLinesOf(namingTools(chain.lines), { ...cut, sidechain: true });
+    const lines = nativeLinesOf(namingTools(before(chain.lines, options.untilMs)), { ...cut, sidechain: true });
     if (lines.length === 0) continue;
     chains[chain.toolUseId ?? `agent-${chain.agentId}`] = {
       agentId: chain.agentId,
@@ -136,6 +171,23 @@ export async function captureNativeSession(
   }
   if (Object.keys(chains).length > 0) captured.nativeSidechains = chains;
   return captured;
+}
+
+/**
+ * The lines stamped before `untilMs` — a file's head, up to where the next call's lines begin. An
+ * unstamped line inherits the last stamp seen, the rule `nativeLinesOf` applies at the other end.
+ */
+function before(lines: readonly unknown[], untilMs: number | undefined): unknown[] {
+  if (untilMs === undefined) return [...lines];
+  const out: unknown[] = [];
+  let stampMs: number | undefined;
+  for (const raw of lines) {
+    const stamp = isRecord(raw) && typeof raw["timestamp"] === "string" ? Date.parse(raw["timestamp"]) : Number.NaN;
+    if (!Number.isNaN(stamp)) stampMs = stamp;
+    if (stampMs !== undefined && stampMs >= untilMs) break;
+    out.push(raw);
+  }
+  return out;
 }
 
 /** True when a capture found nothing — stored as NOTHING rather than as an empty claim. */
@@ -222,7 +274,7 @@ export function foldIntoEntries(value: Record<string, unknown>, captured: Captur
   const folded: Record<string, unknown>[] = [];
 
   // The MAIN chain: entries with no `sidechain` marker.
-  foldChain(entries, captured.nativeLines ?? [], undefined, invariants, folded);
+  foldChain(entries, captured.nativeLines ?? [], undefined, invariants, folded, captured.nativeBodies);
 
   // Each SUBAGENT's own file, against the entries the stream already tagged with the call that
   // spawned it. This is where §5's two key spaces close: the streamed turns are keyed by the tool
@@ -273,6 +325,8 @@ function foldChain(
   marker: { id: string; parentToolUseId: string } | undefined,
   invariants: Record<string, unknown>,
   folded: Record<string, unknown>[],
+  /** A recovery's whole message lines — see {@link Captured.nativeBodies}. */
+  bodies?: Record<string, JsonValue>,
 ): void {
   let cursor = 0;
   for (const { line } of lines) {
@@ -300,7 +354,19 @@ function foldChain(
     // it by one.
     if (type === "user" && ids.length === 0 && line["toolUseResult"] === undefined) continue;
     const entry = ids.length > 0 ? entryNamingTool(entries, ids, type, marker) : nextEntryOfRole(entries, cursor, type, marker);
-    if (entry === undefined) continue;
+    if (entry === undefined) {
+      // A message the record never received — the stream was cut off before it — added from the
+      // file, where it is whole. Only a recovery reads bodies; at a close every message rode the
+      // stream, and a line with nothing to annotate is one this fold has no business inventing.
+      const body = typeof line["uuid"] === "string" ? bodies?.[line["uuid"]] : undefined;
+      if (body === undefined) continue;
+      const added = messageEntryOf(body as Record<string, unknown>);
+      if (added === undefined) continue;
+      entries.push(added);
+      cursor = entries.length;
+      annotate(added, line, ids);
+      continue;
+    }
     // Only ever forward: a result that arrived before its call must not send the order-paired
     // lines after it (a thought, a text) back to entries already annotated.
     cursor = Math.max(cursor, entry.at + 1);
@@ -311,6 +377,9 @@ function foldChain(
 /** Whether an entry belongs to the chain being walked — the main one, or one subagent's. */
 function inChain(entry: Record<string, unknown>, marker: { id: string } | undefined): boolean {
   if (entry["kind"] !== "message") return false;
+  // A call a TOOL made (`approve_tool_call`) is the host's, never in the agent's file: pairing a line
+  // with it by role and order would hang the agent's own threading on the host's entry.
+  if (entry["calledBy"] !== undefined) return false;
   const sidechain = entry["sidechain"];
   if (marker === undefined) return sidechain === undefined;
   return isRecord(sidechain) && sidechain["id"] === marker.id;
@@ -409,6 +478,25 @@ function annotate(entry: Record<string, unknown>, line: Record<string, unknown>,
     if (rendered !== undefined && shown !== undefined && rendered === shown) delete block["content"];
     return;
   }
+}
+
+/**
+ * A whole message line as the entry the stream would have made of it — the shape `LiveTurnLog` gives a
+ * streamed turn: the provider's own message content, and the host clock on `timing` (here the file's
+ * stamp, the only clock this message has).
+ */
+function messageEntryOf(line: Record<string, unknown>): Record<string, unknown> | undefined {
+  const message = line["message"];
+  if (!isRecord(message)) return undefined;
+  const at = typeof line["timestamp"] === "string" ? Date.parse(line["timestamp"]) : Number.NaN;
+  return {
+    kind: "message",
+    role: typeof message["role"] === "string" ? message["role"] : line["type"],
+    content: message["content"] ?? "",
+    ...(typeof line["timestamp"] === "string" ? { timestamp: line["timestamp"] } : {}),
+    provider: "anthropic",
+    ...(Number.isNaN(at) ? {} : { timing: { at } }),
+  };
 }
 
 /** A non-message line as an entry. Its own type is kept — the vocabulary is the agent's, and grows. */

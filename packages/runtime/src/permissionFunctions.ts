@@ -50,7 +50,6 @@ import {
   DEFAULT_SMART_PROMPT,
   SMART_FUNCTION,
   VERDICT_RANK,
-  approvalRequestKey,
   isPermissionAnswer,
   type CommandApproval,
   type CommandPart,
@@ -340,21 +339,21 @@ export const APPROVAL_PROMPT_SIGNATURE: Signature<InlineFamily> = {
 };
 
 /**
- * Park a question on the host's gate hub — `InteractionHub.ask` — and get back what was submitted.
- * Resolves with the engine's contract: a value, or an error as data.
+ * Put `approve_tool_call`'s question to the person — the app's approval hub (`ApprovalHub.askFor`), the
+ * CLI's terminal — and get back what they answered: `{ decision }`, or an error as data.
  */
 export type ParkQuestion = (component: string, inputs: Record<string, JsonValue>) => Promise<FunctionResult<ResolvedValue, WorkflowMetrics>>;
 
 const metrics = (): WorkflowMetrics => ({ startMs: Date.now(), durationMs: 0, costUsd: 0, costSource: "unknown" });
 
 /**
- * `approve_tool_call` — the approval prompt, registered as a function.
+ * `approve_tool_call` — THE approval prompt, registered as a function.
  *
- * Parked through `park` — the host's gate hub, for this task — so it is exactly as durable as any
- * gate: written down, drawn in the task's conversation, and after a restart answerable from the row,
- * the answer seeded into the run that resumes. A seeded answer names the request it answered
- * (`about`), and a resumed run that asks about a DIFFERENT call is asked again rather than handed an
- * answer to a question it never put: a resumed agent is not bound to repeat the call it died in.
+ * One prompt, whoever asks: the policy puts a call to the person through it, and so does a permission
+ * function (`smart`, unsure). In the app it parks on the approval hub (`ApprovalHub.askFor`) and is
+ * drawn as the approval it is; what makes it last is the conversation's record, where it is a call
+ * with a result like any other. A run resumed after a restart asks again: an answer is about one call,
+ * and a resumed agent is not bound to repeat the call it was in.
  */
 export function registerApprovalPrompt(registry: CapabilityRegistry<WorkflowMetrics>, park: ParkQuestion): void {
   registry.functions.set(
@@ -365,16 +364,11 @@ export function registerApprovalPrompt(registry: CapabilityRegistry<WorkflowMetr
           request: (inputs["request"] ?? {}) as JsonValue,
           ...(typeof inputs["prompt"] === "string" ? { prompt: inputs["prompt"] } : {}),
         };
-        const key = approvalRequestKey(given["request"]);
-        for (let round = 0; round < 2; round++) {
-          const result = await park(APPROVAL_PROMPT_FUNCTION, given);
-          if ("error" in result && result.error !== undefined) return result;
-          const answer = result.value as { decision?: unknown; about?: unknown } | undefined;
-          if (answer?.about !== undefined && answer.about !== key) continue; // an answer to another call
-          if (isPermissionAnswer(answer?.decision)) return { value: answer.decision, metrics: metrics() };
-          return { error: { classification: "permanent", reason: `the approval prompt answered ${JSON.stringify(answer)}` }, metrics: metrics() };
-        }
-        return { error: { classification: "permanent", reason: "the approval prompt was answered about another call twice" }, metrics: metrics() };
+        const result = await park(APPROVAL_PROMPT_FUNCTION, given);
+        if ("error" in result && result.error !== undefined) return result;
+        const answer = result.value as { decision?: unknown } | undefined;
+        if (isPermissionAnswer(answer?.decision)) return { value: answer.decision, metrics: metrics() };
+        return { error: { classification: "permanent", reason: `the approval prompt answered ${JSON.stringify(answer)}` }, metrics: metrics() };
       },
       INTERACTIVE,
       { signature: APPROVAL_PROMPT_SIGNATURE },

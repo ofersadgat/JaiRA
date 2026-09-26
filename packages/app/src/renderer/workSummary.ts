@@ -13,13 +13,13 @@
  * Pure: entries in, a description out. The view (`workSummaryView.tsx`) draws it; this is tested
  * without a window.
  */
-import { toolDisplayOf } from "@jaira/shared/browser";
+import { APPROVAL_PROMPT_FUNCTION, toolDisplayOf } from "@jaira/shared/browser";
 import { iconOf, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";
 
 // --- kinds ---------------------------------------------------------------------------------------
 
 /** What kind of work one entry is — the unit a chip counts. */
-export type WorkKind = "think" | "read" | "search" | "write" | "run" | "web" | "agent" | "tool" | "wait" | "note";
+export type WorkKind = "think" | "read" | "search" | "write" | "run" | "web" | "agent" | "tool" | "wait" | "note" | "approval";
 
 /** A rate limit, as the agents word it: a wait the run sat through, not a fact about the work. */
 const RATE_LIMIT = /rate[\s_-]?limit/i;
@@ -27,6 +27,7 @@ const RATE_LIMIT = /rate[\s_-]?limit/i;
 export function kindOf(entry: WorkEntry): WorkKind {
   if (entry.kind === "thought") return "think";
   if (entry.kind === "event") return RATE_LIMIT.test(entry.text) ? "wait" : "note";
+  if (isApprovalCall(entry)) return "approval";
   switch (iconOf(entry)) {
     case "read":
       return "read";
@@ -94,6 +95,59 @@ function tookOf(entry: WorkEntry): number {
   return 0;
 }
 
+// --- the approval prompt, as a step ----------------------------------------------------------------
+
+/** `approve_tool_call` — a call a tool made to put itself to the person (`hostCalls.ts`). */
+export function isApprovalCall(entry: WorkEntry): boolean {
+  return entry.kind === "tool" && entry.name === APPROVAL_PROMPT_FUNCTION;
+}
+
+/** How it was answered — its result's `data` — or `undefined` while it waits. */
+export function approvalAnswerOf(entry: ToolEntry): { decision: "allow" | "deny"; scope: string; by: "person" | "stopped" | "closed"; waitedMs: number } | undefined {
+  const data = entry.detail as { decision?: unknown; scope?: unknown; by?: unknown; waitedMs?: unknown } | undefined;
+  if (data === undefined || data === null || typeof data !== "object") return undefined;
+  if (data.decision !== "allow" && data.decision !== "deny") return undefined;
+  return {
+    decision: data.decision,
+    scope: typeof data.scope === "string" ? data.scope : "once",
+    by: data.by === "stopped" || data.by === "closed" ? data.by : "person",
+    waitedMs: typeof data.waitedMs === "number" ? data.waitedMs : 0,
+  };
+}
+
+/** The line it was about, and who asked, off its arguments. */
+export function approvalAboutOf(entry: ToolEntry): { command?: string; tool?: string; asker?: string } {
+  const args = entry.args as { command?: unknown; tool?: unknown; asker?: unknown } | undefined;
+  return {
+    ...(typeof args?.command === "string" ? { command: args.command } : {}),
+    ...(typeof args?.tool === "string" ? { tool: args.tool } : {}),
+    ...(typeof args?.asker === "string" ? { asker: args.asker } : {}),
+  };
+}
+
+/** How far an answer reached, in a person's words. */
+const REACH: Record<string, string> = { once: "once", run: "for this run", session: "for this session", always: "always" };
+
+/**
+ * An approval as a row reads it (the person, 2026-09-26, round 1's option A): its verdict as the name —
+ * Approve while it waits, then Approved, Denied or Not answered — and who, how far and after how long as
+ * the rest of the line.
+ */
+export function approvalWordsOf(entry: ToolEntry): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" } {
+  const answer = approvalAnswerOf(entry);
+  const about = approvalAboutOf(entry);
+  if (answer === undefined) return { name: "Approve", preview: about.command ?? about.tool ?? "", tone: "plain", mark: "waiting" };
+  const after = answer.waitedMs >= 1000 ? ` · after ${secondsOf(answer.waitedMs)}` : "";
+  if (answer.by !== "person") {
+    return { name: "Not answered", preview: `${answer.by === "closed" ? "the app closed" : "the run stopped"} while it waited${after}`, tone: "warn", mark: "bad" };
+  }
+  const who = about.asker !== undefined ? `by you, for ${about.asker}` : "by you";
+  const reach = REACH[answer.scope] ?? answer.scope;
+  return answer.decision === "allow"
+    ? { name: "Approved", preview: `${who} · ${reach}${after}`, tone: "plain", mark: "ok" }
+    : { name: "Denied", preview: `${who} · ${reach}${after}`, tone: "bad", mark: "bad" };
+}
+
 // --- words ---------------------------------------------------------------------------------------
 
 export function secondsOf(ms: number): string {
@@ -101,6 +155,8 @@ export function secondsOf(ms: number): string {
   if (ms < 1000) return "<1 s";
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s} s`;
+  // Past an hour the seconds are noise, and "872 min" is a sum left for the reader.
+  if (s >= 3600) return `${Math.floor(s / 3600)} h ${Math.floor(s / 60) % 60} min`;
   return `${Math.floor(s / 60)} min ${s % 60} s`;
 }
 const base = (path: string): string => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -174,6 +230,8 @@ export function chipsOf(entries: readonly WorkEntry[], indices: readonly number[
           return took > 0 ? `${secondsOf(took)} wait` : plural(n, "rate limit", "rate limits");
         case "note":
           return plural(n, "note", "notes");
+        case "approval":
+          return plural(n, "approval", "approvals");
         case "tool": {
           const title = key.slice("tool:".length);
           return n > 1 ? `${title} ×${n}` : title;
@@ -254,6 +312,9 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
       case "search":
         return list.length === 1 ? [{ text: "Searched for " }, { code: summaryOf(list[0]!) }] : [{ text: `Searched for ${list.length} patterns` }];
       case "run":
+        // A command still waiting on what it called — the approval that is the turn's live edge — has
+        // not run yet: it is running, held, not ran.
+        if (live !== undefined && list.length === 1 && inFlight(list[0]!)) return [{ text: "Running " }, { code: summaryOf(list[0]!) }];
         return list.length === 1 ? [{ text: "Ran " }, { code: summaryOf(list[0]!) }] : [{ text: `Ran ${list.length} commands` }];
       case "web":
         return list.length === 1 ? [{ text: "Fetched " }, { code: summaryOf(list[0]!) }] : [{ text: `Fetched ${list.length} pages` }];
@@ -265,6 +326,12 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
         return [{ text: `Thought${list.reduce((s, e) => s + tookOf(e), 0) > 0 ? ` for ${secondsOf(list.reduce((s, e) => s + tookOf(e), 0))}` : ""}` }];
       case "note":
         return [{ text: plural(list.length, "note", "notes") }];
+      case "approval": {
+        if (list.length > 1) return [{ text: `${list.length} approvals` }];
+        const words = approvalWordsOf(list[0] as ToolEntry);
+        const command = approvalAboutOf(list[0] as ToolEntry).command;
+        return [{ text: `${words.name} ` }, ...(command !== undefined ? [{ code: command }] : [])];
+      }
       case "tool": {
         const title = run.key.slice("tool:".length);
         return [{ text: list.length > 1 ? `${title} ×${list.length}` : title }, ...(list.length === 1 && summaryOf(list[0]!) ? [{ text: " " }, { code: summaryOf(list[0]!) }] : [])];
@@ -287,6 +354,10 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
         return [{ text: "Fetching " }, { code: summaryOf(running) }];
       case "think":
         return [{ text: "Thinking" }];
+      case "approval": {
+        const command = approvalAboutOf(running as ToolEntry).command;
+        return [{ text: "Waiting for you to approve " }, ...(command !== undefined ? [{ code: command }] : [])];
+      }
       default:
         return [{ text: running.kind === "tool" || running.kind === "writing" ? toolDisplayOf(running.name).title : "Working" }];
     }
@@ -320,7 +391,7 @@ export function verdictKeyOf(entry: ToolEntry): string {
  */
 export function isChange(entry: WorkEntry, verdicts?: ReadOnlyVerdicts): boolean {
   if (entry.kind === "writing") return kindOf(entry) === "write";
-  if (entry.kind !== "tool") return false;
+  if (entry.kind !== "tool" || isApprovalCall(entry)) return false;
   const said = verdicts?.(entry);
   return said === undefined ? kindOf(entry) === "write" : said === false;
 }
@@ -408,6 +479,8 @@ export function phasesOf(
       const entry = entries[i]!;
       if (entry.kind === "writing") changed ||= isChange(entry, options.verdicts);
       if (entry.kind !== "tool") continue;
+      // The approval prompt changes nothing and checks nothing: it is the person being asked.
+      if (isApprovalCall(entry)) continue;
       const action = actionOf(entry);
       if (failing.has(action) && entry.ok === true) fixed = true;
       if (isChange(entry, options.verdicts)) changed = true;
@@ -474,9 +547,16 @@ export function thoughtLineOf(entries: readonly WorkEntry[], indices: readonly n
 
 // --- spans -----------------------------------------------------------------------------------------
 
-/** When a set of entries began and ended, where the record timed them. `end` is open while it runs. */
+/**
+ * When a set of entries began and ended, where the record timed them. `end` is open while it runs.
+ *
+ * System notes are not timed: a note says something about the run, not a step of the work, and the
+ * journal's are stamped when a TURN began — so a stretch holding nothing but the "went to" lines of
+ * two turns, the second one fourteen hours after the first, measured the gap between them as fourteen
+ * hours of work. A rate limit is still timed: that wait is time the work took.
+ */
 export function spanOf(entries: readonly WorkEntry[], indices: readonly number[]): { start?: number; end?: number } {
-  const timed = indices.map((i) => entries[i]!).filter((e) => e.at !== undefined);
+  const timed = indices.map((i) => entries[i]!).filter((e) => e.at !== undefined && kindOf(e) !== "note");
   if (timed.length === 0) return {};
   const first = timed[0]!;
   const last = timed[timed.length - 1]!;

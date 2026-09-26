@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ConversationTurn, InstanceNode, SessionView } from "@jaira/shared/browser";
-import { foldWriting, isStreamBookkeeping, writingPath, type WritingTool } from "@jaira/shared/browser";
+import { CUT_OFF_EVENT, foldWriting, isStreamBookkeeping, writingPath, type WritingTool } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -1085,5 +1085,12 @@ describe("what was said to the model and not typed by the person", () => {
     expect(linked).toMatch(/<button type="button" class="ts-source ts-source-workflow ts-source-link"[^>]*>.*From <span class="mono">plan\/goals<\/span><\/button>/);
     // The app's own words are not a workflow's, and open nothing.
     expect(linked.match(/<button[^>]*ts-source/g)).toHaveLength(1);
+  });
+});
+
+describe("a turn the app closed under", () => {
+  it("is said to have been cut off, where the thread placed it", () => {
+    const entries = entriesOf({ turns: [{ role: "user", text: "check the branches" }], providerEvents: [{ index: 1, event: { type: CUT_OFF_EVENT } }] } as unknown as SessionView);
+    expect(entries.at(-1)).toMatchObject({ kind: "event", tone: "warn", text: expect.stringContaining("the app closed before this turn finished") });
   });
 });

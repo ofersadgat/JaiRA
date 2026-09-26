@@ -1191,10 +1191,15 @@ export function useApp() {
    * Quiet on failure, like the tree beside it: with no project open the honest answer is the shared
    * root's alone, and an error toast on a read nobody asked for is noise about a state the screen
    * already shows.
+   *
+   * At the ROOT it asks for the shared root BY NAME. It asked with no project, which main answers
+   * with the one open project when there is exactly one — a guess the store otherwise never lets it
+   * make — and refuses when there are two: "several projects are open, so this call must name one",
+   * logged each time the root was drawn with two checkouts open (2026-09-26).
    */
   const refreshWorkflows = useCallback(async () => {
     try {
-      const browser = await invoke("workflow:browse", ref.current.at !== null ? { project: ref.current.at } : {});
+      const browser = await invoke("workflow:browse", { project: ref.current.at ?? SHARED_SESSION });
       patch({ workflows: browser.workflows });
     } catch {
       patch({ workflows: [] });
@@ -2366,6 +2371,15 @@ export function useApp() {
         case "userEvent:resolved":
           void refreshUserEvents();
           break;
+        case "chat:turnEnded": {
+          // The backstop for {@link AppState.producing} on a chat turn — what `run:finished` is for a
+          // run. Normally already zero: every turn's start is balanced by its own terminal event.
+          if (ref.current.producing[message.taskId] !== undefined) {
+            const { [message.taskId]: _done, ...rest } = ref.current.producing;
+            patch({ producing: rest });
+          }
+          break;
+        }
         case "run:finished": {
           // The backstop for {@link AppState.producing}. A run's every call is balanced by its own
           // terminal event, so this is normally already zero — but a process killed mid-call publishes

@@ -149,6 +149,12 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
       </h3>
       <div className="sub" title={pending.tool}>
         {toolDisplayOf(pending.tool).title}
+        {pending.asker !== undefined ? (
+          <>
+            {" · asked by "}
+            <FunctionBy name={pending.asker} />
+          </>
+        ) : null}
       </div>
 
       {drawn ? (
@@ -222,6 +228,9 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
               <button type="button" className={`split-main ${look}`} data-testid={`approval-${decision}`} onClick={() => decide(decision, "once")}>
                 {verb}
               </button>
+              {/* A function's question is answered for this call alone — what it remembers is its own
+                  business — so there is no reach to choose, and no caret to choose it with. */}
+              {pending.asker === undefined ? (
               <button
                 type="button"
                 className={`split-caret ${look}`}
@@ -233,6 +242,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
               >
                 <Icon name="chevron" />
               </button>
+              ) : null}
               {menu !== undefined ? (
                 <Popover at={pop} side="below" align="start" className="cx-submenu answer-menu" role="menu">
                   {menu.what.length > 0 ? (

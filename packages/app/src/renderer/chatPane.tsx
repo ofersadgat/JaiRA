@@ -34,16 +34,20 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
 import type {
+  ApprovalScope,
   ChatPlanView,
   ChatSettings,
   ChatThreadView,
   ConversationView,
+  PendingApproval,
+  PendingQuestion,
   SessionTurn,
   TaskDetail,
   TaskSummary,
 } from "@jaira/shared/browser";
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Composer } from "./composer";
+import { ApprovalSurface, QuestionSurface, type ApprovalAnswerExtras } from "./components";
 import { projectName } from "./projects";
 import { ForkMark, OriginMark, ZigDefs } from "./sessionPanels";
 import { useStickToBottom } from "./stickToBottom";
@@ -51,6 +55,7 @@ import { CHAT_SESSION, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, pointOf, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
 import { DayChip, LiveStatusBar, Paper, Transcript } from "./transcriptView";
+import { ApprovalAskContext, approvalCallIndex } from "./workSummaryView";
 import { Icon, Spinner } from "./icons";
 import { invoke } from "./store";
 import { useWaiting } from "./limitsStore";
@@ -124,6 +129,17 @@ export interface ChatSurface {
   onRewind: (taskId: string, seq: number, project?: string) => Promise<void>;
   /** A second conversation sharing everything before `seq`, with `message` as its next turn ("task:fork"). */
   onFork: (taskId: string, seq: number, message: string, overrides?: ChatSettings, project?: string) => Promise<string | null>;
+  /**
+   * The command approval the open conversation's agent is blocked on, and the question it asked — drawn
+   * inline under what it said before asking, as the task panel draws them. A conversation always
+   * renders inline; before this they were drawn only when the same task was open in the Tasks view,
+   * so an agent in a chat waited on a `bash` approval for an hour and a half with nothing on screen
+   * to answer (the person, 2026-09-26: "i restarted the app and dont see any permission ui").
+   */
+  approval?: PendingApproval | undefined;
+  onApproval?: (requestId: string, decision: "allow" | "deny", scope: ApprovalScope, extras?: ApprovalAnswerExtras) => void;
+  question?: PendingQuestion | undefined;
+  onQuestion?: (requestId: string, answers: Record<string, string | string[]> | undefined) => void;
 }
 
 /**
@@ -653,6 +669,14 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   }, [thread]);
 
   const running = surface.detail?.status === "running";
+  /**
+   * Whether the conversation is speaking right now — the run, or a chat turn. Only the opening message
+   * moves the task's status; every message after it is a turn that moves nothing but the journal, so
+   * `running` alone drew every later turn as already finished while its call was still going: no
+   * rows, no pulse, a running call reading "no result was recorded". The sidebar's spinner has always
+   * asked both (`answering` in the list above); what is drawn live asks the same.
+   */
+  const answering = running || (surface.producing[taskId] ?? 0) > 0;
   /** This conversation's messages waiting for the allowance — held, or refused and set to try again. */
   const waitingHere = useWaiting().filter((item) => item.kind === "message" && item.taskId === taskId);
   /** How full the conversation is: the reading on its last answer. */
@@ -729,13 +753,54 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   /**
    * What the model is doing right now — read off exactly what is being rendered.
    *
-   * `running` is the task's own status rather than "the tail is not empty", because a tail outlives
+   * `answering` is the journal's word rather than "the tail is not empty", because a tail outlives
    * the run that made it by a beat (see `afterglow`), and a bar that read the leftovers would keep
    * announcing a finished turn until the record landed.
    */
   const status = useMemo(
-    () => liveStatusOf(entries, surface.live ?? afterglow, running),
-    [entries, surface.live, afterglow, running],
+    () => liveStatusOf(entries, surface.live ?? afterglow, answering),
+    [entries, surface.live, afterglow, answering],
+  );
+
+  /**
+   * What the agent is blocked on — the command it is waiting to run, the question it asked — drawn
+   * where the turn is arriving, under what it said before asking: on the page with the live tail, as
+   * the task panel draws it. Keyed on the request, so a second one starts with nothing lit.
+   */
+  /**
+   * The approval, as the step it is: when the conversation holds its call (`approve_tool_call`, made by
+   * the call that needs permission), the work summary draws its prompt in the step's own row. Drawn
+   * here, under the page, only when the conversation does not hold it — an ask from before the record
+   * had anywhere to put it.
+   */
+  const askValue = useMemo(
+    () =>
+      surface.approval !== undefined && surface.onApproval !== undefined
+        ? {
+            pending: surface.approval,
+            onDecide: (decision: "allow" | "deny", scope: ApprovalScope, extras?: ApprovalAnswerExtras) => surface.onApproval!(surface.approval!.requestId, decision, scope, extras),
+          }
+        : undefined,
+    [surface.approval, surface.onApproval],
+  );
+  const approvalInThread = surface.approval !== undefined && approvalCallIndex(entries as never, surface.approval.requestId) >= 0;
+  const asking = (
+    <>
+      {surface.approval !== undefined && surface.onApproval !== undefined && !approvalInThread ? (
+        <div className="inline-gate">
+          <ApprovalSurface
+            key={surface.approval.requestId}
+            pending={surface.approval}
+            onDecide={(decision, scope, extras) => surface.onApproval!(surface.approval!.requestId, decision, scope, extras)}
+          />
+        </div>
+      ) : null}
+      {surface.question !== undefined && surface.onQuestion !== undefined ? (
+        <div className="inline-gate">
+          <QuestionSurface key={surface.question.requestId} pending={surface.question} onSubmit={(answers) => surface.onQuestion!(surface.question!.requestId, answers)} />
+        </div>
+      ) : null}
+    </>
   );
 
   /** Turn index → the position a replacement is sent at. Built once per thread, read per message. */
@@ -881,6 +946,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             the record. The gaps between messages say how long each pause was; this says which day
             you are looking at, and between them nothing needs a rule drawn across the page. */}
         <DayChip scroller={scroller} />
+        <ApprovalAskContext.Provider value={askValue}>
         <Paper>
           <Transcript
             session={thread?.session ?? null}
@@ -888,8 +954,8 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             // The live tail belongs to the END of the conversation, so it rides with whatever is
             // showing there — and a reader looking at the side that was replaced is not looking at
             // where a turn is arriving.
-            {...(split === null && (seam === null || seam.own.length === 0) ? { live: surface.live ?? afterglow, working: running } : {})}
-            empty={running ? "Working…" : "This conversation has not said anything yet."}
+            {...(split === null && (seam === null || seam.own.length === 0) ? { live: surface.live ?? afterglow, working: answering } : {})}
+            empty={answering ? "Working…" : "This conversation has not said anything yet."}
             artifacts={artifacts}
             onEdit={edit}
             // The conversation is what a type correction belongs to — see `messageTypes.ts`. The
@@ -899,6 +965,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             {...(status !== null ? { narrated: true } : {})}
             {...(doomedFrom !== undefined ? { doomedFrom } : {})}
           />
+          {split === null && (seam === null || seam.own.length === 0) ? asking : null}
         </Paper>
         {split === null && seam !== null && origin !== undefined ? (
           <>
@@ -913,13 +980,14 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
                   session={thread?.session ?? null}
                   entries={seam.own}
                   live={surface.live ?? afterglow}
-                  working={running}
+                  working={answering}
                   artifacts={artifacts}
                   onEdit={edit}
                   scope={taskId}
                   {...(status !== null ? { narrated: true } : {})}
                   {...(doomedFrom !== undefined ? { doomedFrom } : {})}
                 />
+                {asking}
               </Paper>
             ) : null}
           </>
@@ -938,7 +1006,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               <Transcript
                 session={thread?.session ?? null}
                 entries={shown.entries}
-                {...(shown.key === KEPT ? { live: surface.live ?? afterglow, working: running } : {})}
+                {...(shown.key === KEPT ? { live: surface.live ?? afterglow, working: answering } : {})}
                 artifacts={artifacts}
                 // Only on the side that is still being had. A message on the other side cannot be
                 // replaced from here: it is not where this conversation ends, and "edit" means fork
@@ -947,9 +1015,11 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
                 {...(status !== null && shown.key === KEPT ? { narrated: true } : {})}
                 {...(shown.key === KEPT && doomedFrom !== undefined ? { doomedFrom } : {})}
               />
+              {shown.key === KEPT ? asking : null}
             </Paper>
           </>
         ) : null}
+        </ApprovalAskContext.Provider>
       </div>
 
       {/* Between the conversation and the box: the live state is neither part of the record above it
@@ -1003,7 +1073,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         {error !== null ? <p className="cx-error">{error}</p> : null}
         <Composer
           plan={plan ?? null}
-          busy={sending > 0 || running}
+          busy={sending > 0 || answering}
           // There is a thread, so there is somewhere for a mid-turn message to go: it joins the turn
           // in flight where the transport can take it, and waits for it where it cannot. Both are
           // `chat:send`'s own behaviour — the box was the only thing refusing.

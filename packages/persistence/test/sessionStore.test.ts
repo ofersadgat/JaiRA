@@ -824,6 +824,43 @@ describe("stateSessions — a run the process died inside", () => {
     ]);
   });
 
+  /**
+   * A conversation's chat child takes a turn per message on ONE instance. A chat on 2026-09-26: a turn
+   * was left open by a quit, the next message's turn started on the same instance while it stood — and
+   * with one slot per instance the older start was lost, the lists disagreed, and the pass below
+   * answered with nothing: both turns, and the messages that opened them, went off the screen.
+   */
+  it("pairs two unsettled calls of one instance — a turn that died and the next one, still answering", () => {
+    db.prepare(`INSERT INTO task_runtime (task_id, status, outcome, started_at, ended_at, created_at, updated_at) VALUES ('t3','completed','success',1,9,1,1)`).run();
+    const turn = (recordId: string, seq: number, sequence: number): void => {
+      db.prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at) VALUES (?, 't3', 'open', ?, 5)`).run(
+        recordId,
+        JSON.stringify({ session: { id: "chat", seq }, scope: { instanceId: "chat:1", sequence } }),
+      );
+    };
+    started("chat:1" as never, "chat/session", 20);
+    turn("r2", 2, 1);
+    started("chat:1" as never, "chat/session", 30);
+    turn("r3", 3, 2);
+    expect(stateSessions({ db } as never, "t3").map((s) => [s.instanceId, s.seq, s.at])).toEqual([
+      ["chat:1", 2, 20],
+      ["chat:1", 3, 30],
+    ]);
+  });
+
+  it("pairs a call re-dispatched on a continuation with its NEWER start — the older one was cut off", () => {
+    crashedTask();
+    started(7, "wf/a", 20);
+    started(8, "wf/b", 21);
+    started(8, "wf/b", 25);
+    db.prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at) VALUES ('ra', 't3', 'interrupted', ?, 5)`).run(JSON.stringify({ session: { id: "chat", seq: 0 }, scope: { instanceId: "7" } }));
+    db.prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at) VALUES ('rb', 't3', 'interrupted', ?, 5)`).run(JSON.stringify({ session: { id: "other", seq: 0 }, scope: { instanceId: "8" } }));
+    expect(stateSessions({ db } as never, "t3").map((s) => [s.instanceId, s.at])).toEqual([
+      [7, 20],
+      [8, 25],
+    ]);
+  });
+
   it("says nothing rather than guessing when the two lists disagree", () => {
     crashedTask();
     started(7, "wf/a", 20);
@@ -998,6 +1035,17 @@ describe("streamed partials on open records", () => {
     // represent turns that "may exist remotely". They now count as history too — settled, not open.
     expect(s.transcript("err")[0]).toMatchObject({ status: "failed", value: { value: { entries: [said("what got said")] } } });
     expect(await s.messages("err")).toEqual([turn("what got said")]);
+  });
+
+  it("keeps the partial when an ERRORED settle rebuilt LESS than was streamed — a killed agent's question alone", async () => {
+    // A quit on 2026-09-26: the agent was killed mid-turn and settled with the one entry its executor
+    // could rebuild, over a partial holding everything the turn had said and done.
+    const s = store();
+    const at = await s.resolve({ ref: "err3" });
+    const r1 = await s.append({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.update(r1, { value: partial(["thought about it", "ran the command"]) });
+    await s.finish(r1, { result: { error: { classification: "permanent", reason: "agent CLI exited with code 143" }, value: { finishReason: "error", entries: [said("thought about it")] } } as never });
+    expect(await s.messages("err3")).toEqual([turn("thought about it"), turn("ran the command")]);
   });
 
   it("lets an errored settle that DOES carry the conversation win over the partial", async () => {

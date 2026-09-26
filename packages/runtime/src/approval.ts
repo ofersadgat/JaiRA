@@ -14,7 +14,7 @@
  * Upstream's `PermissionLedger` applies it; this hub only collects it.
  */
 import type { Approver, PermissionDecision, PermissionRequest, PermissionScope } from "@declarative-ai/permissions";
-import type { CommandApproval } from "@jaira/shared";
+import type { CommandApproval, PermissionAnswer, PermissionFunctionRequest } from "@jaira/shared";
 import { CommandGrants, approvalReasonOf, commandDecisionOf, type PolicyAuditEntry } from "./policy";
 import { withPermissionFunctions, type PermissionFunctionsOptions } from "./permissionFunctions";
 import { mcpCallOf } from "./mcpServers";
@@ -62,12 +62,24 @@ export interface ApprovalRequest {
    * interrupted and leave a still-running sibling's. Absent for an ask no instance made (a chat turn).
    */
   instanceId?: string;
+  /**
+   * The permission FUNCTION that put this call to the person through `approve_tool_call`, when one
+   * did (`smart`, unsure) — absent when the policy asked. What a function remembers is its own
+   * business (decision 0007, amended 2026-09-22), so its question is answered for this call alone.
+   */
+  asker?: string;
   at: number;
 }
 
+/**
+ * Who answered an approval: the person, or — without asking anybody — a stop (the run is winding
+ * down) or the app closing. What the conversation's record says of an answer nobody gave.
+ */
+export type ApprovalAnsweredBy = "person" | "stopped" | "closed";
+
 export interface ApprovalHubOptions {
   onRequest?: (request: ApprovalRequest) => void;
-  onResolved?: (requestId: string, decision: PermissionDecision) => void;
+  onResolved?: (requestId: string, decision: PermissionDecision, by: ApprovalAnsweredBy) => void;
   nextId?: () => string;
   now?: () => number;
   /**
@@ -129,7 +141,7 @@ export class ApprovalHub {
   stop(taskId: string): void {
     this.stopping.add(taskId);
     for (const [requestId, entry] of [...this.pending]) {
-      if (entry.request.taskId === taskId) this.decide(requestId, "deny", "once");
+      if (entry.request.taskId === taskId) this.decide(requestId, "deny", "once", undefined, undefined, "stopped");
     }
   }
 
@@ -205,12 +217,45 @@ export class ApprovalHub {
       ...(req.instanceId !== undefined ? { instanceId: req.instanceId } : {}),
       at: this.options.now?.() ?? Date.now(),
     };
+    return this.hold(request);
+  }
+
+  /**
+   * `approve_tool_call`, called by a permission FUNCTION: the request it was handed, put to the person
+   * the way the policy puts one — the same parking, the same prompt, the same place on screen. There
+   * is ONE approval prompt; a function reaching it is a caller, not a second kind of question.
+   * `prompt` is the function's own sentence (`smart is unsure — …`), shown as the reason.
+   */
+  askFor(request: PermissionFunctionRequest, context: { taskId?: string; prompt?: string } = {}): Promise<PermissionAnswer> {
+    if (context.taskId !== undefined && this.stopping.has(context.taskId)) return Promise.resolve("deny");
+    const command = request.line ?? request.part?.text;
+    // The line as the policy took it apart, kept against the call's own input — the same breakdown
+    // the policy's ask draws, the function's part among the rest. Absent when a function document
+    // handed on a copy of the request rather than the call's input.
+    const decided = commandDecisionOf(request.input);
+    const parked: ApprovalRequest = {
+      requestId: this.options.nextId?.() ?? `approval-${++this.counter}`,
+      tool: request.tool,
+      ...(command !== undefined ? { command } : {}),
+      ...(context.prompt !== undefined ? { reason: context.prompt } : {}),
+      ...(decided !== undefined ? { parts: decided.parts } : {}),
+      input: request.input as Record<string, unknown>,
+      sessionId: "",
+      ...(context.taskId !== undefined ? { taskId: context.taskId } : {}),
+      asker: request.function,
+      at: this.options.now?.() ?? Date.now(),
+    };
+    return this.hold(parked).then((decided) => decided.decision);
+  }
+
+  /** Park one request until it is answered — or refuse it, when nothing is listening to ask. */
+  private hold(request: ApprovalRequest): Promise<PermissionDecision> {
     if (this.options.onRequest === undefined) {
       // Nobody is listening: refuse rather than hang the agent's tool loop.
       return Promise.resolve(this.options.unattended ?? { decision: "deny", scope: "once" });
     }
     return new Promise<PermissionDecision>((resolve) => {
-      this.pending.set(requestId, { request, resolve });
+      this.pending.set(request.requestId, { request, resolve });
       this.options.onRequest?.(request);
     });
   }
@@ -231,6 +276,7 @@ export class ApprovalHub {
     remember?: readonly string[],
     /** Why a `deny` was given, when it was not a person's plain no — found again by {@link refusalOf}. */
     why?: string,
+    by: ApprovalAnsweredBy = "person",
   ): boolean {
     const entry = this.pending.get(requestId);
     if (!entry) return false;
@@ -243,7 +289,7 @@ export class ApprovalHub {
     }
     const resolved: PermissionDecision = { decision, scope };
     entry.resolve(resolved);
-    this.options.onResolved?.(requestId, resolved);
+    this.options.onResolved?.(requestId, resolved, by);
     return true;
   }
 
@@ -251,7 +297,7 @@ export class ApprovalHub {
    * Deny every parked approval — used when a run is canceled or the window closes,
    * so an agent never waits forever on a question nobody will answer.
    */
-  denyAll(): void {
-    for (const requestId of [...this.pending.keys()]) this.decide(requestId, "deny", "once");
+  denyAll(by: ApprovalAnsweredBy = "closed"): void {
+    for (const requestId of [...this.pending.keys()]) this.decide(requestId, "deny", "once", undefined, undefined, by);
   }
 }

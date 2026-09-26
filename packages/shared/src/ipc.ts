@@ -185,6 +185,11 @@ export interface PendingApproval {
   input: Record<string, JsonValue>;
   taskId?: string;
   /**
+   * The permission FUNCTION that asked, when one put the call to you (`smart`, unsure) — absent when
+   * the policy asked. Its answer reaches this call alone: what a function remembers is its own.
+   */
+  asker?: string;
+  /**
    * The project whose database holds {@link taskId} — the session this request parked in.
    *
    * Required, not optional, because the inbox is ALREADY cross-project: `pendingApprovals()`
@@ -2626,6 +2631,13 @@ export type PushMessage =
       /** Whose run it was — see `store:invalidate`. */
       project?: string;
     }
+  /**
+   * A conversation's last chat turn is over, however it ended — `run:finished` for the turns that are
+   * not runs. A turn is journaled `operation.started` and one terminal event, and that pair is what
+   * says a conversation is answering; a turn that ends WITHOUT its terminal event (the call threw
+   * before it could write one) would otherwise read as answering until the window closed.
+   */
+  | { type: "chat:turnEnded"; taskId: string; project?: string }
   /** One line of what the app did — the Logs panel's live feed (§11.4). */
   | { type: "log:entry"; entry: LogEntry }
   /**

@@ -93,6 +93,30 @@ describe("RuntimeStore", () => {
   });
 });
 
+describe("recovering the calls a quit left open under an ended task", () => {
+  it("settles them interrupted, keeps their partials, and leaves a running task's alone", () => {
+    // A conversation outlives its run: a turn the app quit under is an open record under a task that
+    // reads `completed`, which the interrupted-task sweep never looks at.
+    const store = new RuntimeStore(db);
+    store.insert("t-chat", 1000);
+    store.setStatus("t-chat", "completed", 1002);
+    store.insert("t-running", 1000);
+    store.setStatus("t-running", "running", 1001);
+    db.prepare(`INSERT INTO operation_records (id, task_id, status, result_json, started_at) VALUES ('turn', 't-chat', 'open', '{"value":{"entries":[]}}', 1500)`).run();
+    db.prepare(`INSERT INTO operation_records (id, task_id, status, started_at) VALUES ('live', 't-running', 'open', 1500)`).run();
+
+    expect(store.recoverUnsettledCalls(2000)).toEqual(["t-chat"]);
+    expect(db.prepare(`SELECT status, ended_at, result_json FROM operation_records WHERE id = 'turn'`).get()).toEqual({
+      status: "interrupted",
+      ended_at: 2000,
+      result_json: '{"value":{"entries":[]}}',
+    });
+    // The task itself did not stop: it is not an interrupted task.
+    expect(store.get("t-chat")?.status).toBe("completed");
+    expect(db.prepare(`SELECT status FROM operation_records WHERE id = 'live'`).get()).toEqual({ status: "open" });
+  });
+});
+
 describe("SqliteEventLog", () => {
   it("records EngineEvents through the Persistence port and lists them back", () => {
     const runtime = new RuntimeStore(db);

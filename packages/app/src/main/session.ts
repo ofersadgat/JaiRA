@@ -14,6 +14,7 @@
  * about a project: the executor probes and the availability snapshot. A `claude` binary that answers
  * answers for every project, and asking again per project would pay for the same socket twice.
  */
+import type { JsonValue } from "@declarative-ai/json";
 import type { FakeRule } from "@jaira/runtime";
 import type { FSWatcher } from "node:fs";
 import type { DirectedTransitions } from "@declarative-ai/hw";
@@ -237,6 +238,17 @@ export class ProjectSession {
    * stop is the one moment the exact tail matters, because it is the tail the person was reading.
    */
   readonly liveFlush = new Map<string, () => void>();
+  /**
+   * `approve_tool_call`, as the calls it is in this project's conversations — by request: the call's
+   * id, the call that made it, which task's conversation it is in, and when it was asked. What the
+   * answer's result entry needs to name the right call and say how long it waited.
+   */
+  readonly approvalCalls = new Map<string, { callId: string; calledBy?: string; taskId: string; at: number }>();
+  /**
+   * The calls a TOOL made (`hostCalls.ts`), by task, in the record's own entry shape — waiting for the
+   * record of the call that made them to settle, where `withHostCalls` folds each in after its caller.
+   */
+  readonly hostCalls = new Map<string, JsonValue[]>();
   readonly hub: InteractionHub;
   /** requestId → taskId, for a request whose registration could not name one. */
   readonly requestTask = new Map<string, string>();
@@ -374,12 +386,22 @@ export class ProjectSession {
     this.syncTask = undefined;
     this.pendingSync = undefined;
     // A hand-typed turn is not in `live`, so it would otherwise keep talking to a provider on behalf
-    // of a project that is gone — and finish by writing to a closed database.
-    for (const turns of this.chatTurns.values()) for (const turn of turns) turn.abort();
+    // of a project that is gone — and finish by writing to a closed database. Stopped as the stop
+    // button stops one (`cancelChatTurn`): what it had said is written down first, while its record
+    // is still open, and then it is aborted.
+    for (const [taskId, turns] of this.chatTurns) {
+      this.liveFlush.get(taskId)?.();
+      for (const turn of turns) turn.abort();
+    }
     this.chatTurns.clear();
     const inFlight = [...this.live.values()];
     for (const run of inFlight) run.abort.abort();
-    await Promise.allSettled(inFlight.map((run) => run.done));
+    // And WAITED for, like the runs. Aborting only asked: the turn still has to settle its record and
+    // its agent still has to be killed, and neither can happen after the database below is closed or
+    // the process has exited. Not waiting is how a quit left a turn's record open for good — its
+    // settle threw "The database connection is not open" — and its agent running on with nobody
+    // listening, finishing its answer into its own file a minute after the app was gone (2026-09-26).
+    await Promise.allSettled([...inFlight.map((run) => run.done), ...this.chatDone.values()]);
     this.live.clear();
     this.project.close();
   }

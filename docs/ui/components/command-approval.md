@@ -50,9 +50,13 @@ A block under a running agent's words, below a blue rule: a shield glyph and `Ap
 | error | In the conversation, a failed answer, a permission set file that could not be written among them, is reported in the window's [error-notice](../surfaces/error-notice.md) and the block stays as it was, still asking. | |
 | success | Cannot occur as its own look: once answered the block goes, and the agent's tool row in the transcript shows the call running or refused. | |
 
-## A function that asks the person asks through the approval prompt, which is a gate
+## A function that asks the person asks through the same approval prompt
 
-A function a permission set line names answers `allow` or `deny`; when it wants the person, it calls `approve_tool_call(request)`, which parks the question as a gate in the task's conversation (the [gate surface](gate-surface.md)), durable like every other. The shipped `smart` does this when its judge is unsure.
+A function a permission set line names answers `allow` or `deny`; when it wants the person, it calls `approve_tool_call(request)` — the one approval prompt, the same one the policy asks through (decision 0007, amended 2026-09-26 latest). The shipped `smart` does this when its judge is unsure. The subtitle adds `asked by ☆ {function}`.
+
+## In the conversation: a tool the tool called
+
+Asked, the approval is a step of the work: `approve_tool_call`, called by the call that needs permission, with its own shield row and chip. While it waits, this surface sits under the latest row the work summary shows, which reads "Waiting for you to approve {line}" (the surface's own heading is left off there — the row says it); when the summary shows no rows, the row and the surface sit under the summary. Answered, the surface goes and the row reads **Approved** / **Denied** / **Not answered**, then `by you · {reach} · after {wait}` (or `the app closed while it waited`), nested under its caller in Every step. The call and its result are in the conversation's record.
 
 - **Body.** The tool's name in `--dim`; the shell line in the same box as above with the one part being asked about tinted `--p1` and its program and subcommand underlined, then that part's row with `in {cwd}` and `state {state}` under it, and the pill `☆ {function} asks`. A tool with no line shows its input as indented JSON.
 - **Reason.** `Permission set {bucket/name}: {subject} is decided by the function {function}, which asks you.`

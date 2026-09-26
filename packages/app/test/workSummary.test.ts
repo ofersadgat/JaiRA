@@ -3,13 +3,14 @@
  * each thought and named by what they did, chips per kind, the phase in progress keeping its latest
  * rows, and the thinking line where the provider kept the reasoning.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TranscriptEntry, WorkEntry } from "../src/renderer/transcript";
 import { Transcript } from "../src/renderer/transcriptView";
-import { WorkLookContext, type WorkLook } from "../src/renderer/workSummaryView";
-import { chipsOf, inFlight, phasesOf, runsOf, sentenceOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
+import { ApprovalAskContext, WorkLookContext, type WorkLook } from "../src/renderer/workSummaryView";
+import { approvalWordsOf, chipsOf, inFlight, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
+import { durationOf, thoughtTime } from "../src/renderer/transcriptView";
 
 const t0 = Date.parse("2026-09-25T17:42:08Z");
 const call = (name: string, key: string, arg: string, s: number, ok: boolean | undefined = true): WorkEntry => ({
@@ -182,6 +183,32 @@ describe("thinking", () => {
   });
 });
 
+describe("time", () => {
+  it("says hours past an hour — 872 minutes is a sum left for the reader", () => {
+    expect(secondsOf(400)).toBe("<1 s");
+    expect(secondsOf(59_000)).toBe("59 s");
+    expect(secondsOf(12 * 60_000 + 5000)).toBe("12 min 5 s");
+    expect(secondsOf(59 * 60_000 + 59_000)).toBe("59 min 59 s");
+    expect(secondsOf(3_600_000)).toBe("1 h 0 min");
+    expect(secondsOf(872 * 60_000 + 51_000)).toBe("14 h 32 min");
+    expect(durationOf(872 * 60_000 + 51_000)).toBe("14 h 32 m");
+    expect(durationOf(72_000)).toBe("1 m 12 s");
+    expect(thoughtTime(2 * 3_600_000 + 5 * 60_000)).toBe("2 h 5 m");
+    expect(thoughtTime(125_300)).toBe("2 m 5.3 s");
+  });
+
+  it("does not time the notes: they say when something about the run happened, not how long the work took", () => {
+    const note = (s: number): WorkEntry => ({ kind: "event", at: t0 + s * 1000, tone: "plain", text: "went to chat/session" });
+    const entries = [note(0), note(52_363), think(52_370), bash("git fetch origin --quiet", 52_371, undefined)];
+    expect(spanOf(entries, [0, 1, 2, 3])).toEqual({ start: t0 + 52_370_000, end: t0 + 52_371_000 });
+    // Nothing but notes: nothing to time.
+    expect(spanOf(entries, [0, 1])).toEqual({});
+    // A rate limit is still timed — that wait is time the work took.
+    const limited: WorkEntry = { kind: "event", at: t0, tone: "warn", text: "Rate limited — waited 12 s" };
+    expect(spanOf([limited], [0])).toEqual({ start: t0, end: t0 + 12_000 });
+  });
+});
+
 describe("in the transcript", () => {
   const draw = (entries: TranscriptEntry[], look?: WorkLook, working?: boolean): string => {
     const transcript = createElement(Transcript, { entries, ...(working !== undefined ? { working } : {}) });
@@ -276,6 +303,82 @@ describe("in the transcript", () => {
     }
     // Said to be working, the same record is drawn in progress.
     expect(draw(endedOnACall, undefined, true)).toContain("ws-phase current");
+  });
+
+  it("does not measure a turn from the note of the turn before it", () => {
+    // A chat on 2026-09-26: the turn before had been left open by a quit, so all that stood between the
+    // two turns' "went to" notes was the message the person had typed — and with that gone from the
+    // screen, the notes, a withheld thought and a running `bash` were one stretch "872 min 51 s" long.
+    const note = (s: number): WorkEntry => ({ kind: "event", at: t0 + s * 1000, tone: "plain", text: "went to chat/session" });
+    const stretchOf = [note(0), note(52_363), think(52_370), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin --quiet", args: { command: "git fetch origin --quiet" }, at: t0 + 52_371_000 } as WorkEntry];
+    const look: WorkLook = { phases: true, rows: 5, thinking: true, notes: "hide-blocks" };
+    const done = draw(stretchOf, look, false);
+    expect(done).not.toContain(" h ");
+    expect(done).not.toContain("min");
+    expect(done).toContain("2 steps · 1 s");
+    // Working, the phase in progress keeps its rows and the foot counts up from the thought, not the note.
+    vi.useFakeTimers({ now: t0 + 52_380_000 });
+    try {
+      const working = draw(stretchOf, look, true);
+      expect(working).toContain("ws-phase current");
+      expect(working).toMatch(/class="ws-run live/);
+      expect(working).toContain("Running ");
+      expect(working).toContain("2 steps · 10 s so far");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("an approval — a tool the tool called", () => {
+    // The person, 2026-09-26: the approval is `approve_tool_call`, called by the call that needs
+    // permission — a row and a chip of its own, its prompt in the latest row the summary shows, or under
+    // the summary when it shows no rows, and folded in once answered.
+    const LINE = 'git fetch origin --quiet && echo "master=$(git rev-parse origin/master)"';
+    const bashCall = { kind: "tool", name: "mcp__dai__bash", summary: LINE, args: { command: LINE }, at: t0 + 8_000, callId: "t1" } as WorkEntry;
+    const approve = (answered?: object): WorkEntry =>
+      ({ kind: "tool", name: "approve_tool_call", summary: "", args: { tool: "bash", command: LINE }, at: t0 + 9_000, callId: "approve_abc_approval-1", calledBy: "t1", ...(answered !== undefined ? { ok: true, result: "allowed", detail: answered } : {}) }) as WorkEntry;
+    const pending = { requestId: "approval-1", tool: "bash", command: LINE, input: { command: LINE }, project: "p", at: t0 + 9_000 };
+    const asked = (rows: WorkLook["rows"]): string =>
+      renderToStaticMarkup(
+        createElement(
+          WorkLookContext.Provider,
+          { value: { phases: true, rows, thinking: true, notes: "hide-groups" } },
+          createElement(ApprovalAskContext.Provider, { value: { pending, onDecide: () => undefined } }, createElement(Transcript, { entries: [think(7), bashCall, approve()], working: true })),
+        ),
+      );
+
+    it("draws its prompt in the latest row the summary shows — the row that says what the turn waits on", () => {
+      const html = asked(3);
+      expect(html).toContain("Waiting for you to approve ");
+      const live = html.indexOf('class="ws-run live');
+      const prompt = html.indexOf('class="inline-gate ws-ask"');
+      expect(live).toBeGreaterThan(-1);
+      expect(prompt).toBeGreaterThan(live);
+      expect(prompt).toBeLessThan(html.indexOf('class="ws-foot"'));
+    });
+
+    it("with rows set to None, draws it under the summary with its own row", () => {
+      const html = asked(0);
+      expect(html).not.toContain("ws-runs");
+      expect(html.indexOf('class="ws-kept ts-work ws-ask-row"')).toBeGreaterThan(html.indexOf('class="ws-foot"'));
+      expect(html).toContain('class="inline-gate ws-ask"');
+      // A chip of its own, live while it waits — the step is counted like any other.
+      expect(html).toContain("ws-chip ws-k-approval live");
+      expect(html).toContain("1 approval");
+    });
+
+    it("folds in once answered: no prompt, and the row says who answered, how far and after how long", () => {
+      const html = draw([think(7), bashCall, approve({ decision: "allow", scope: "once", by: "person", waitedMs: 62_000 }), { kind: "message", role: "assistant", text: "done" } as TranscriptEntry]);
+      expect(html).not.toContain("ws-ask");
+      expect(html).toContain("1 approval");
+      expect(approvalWordsOf(approve({ decision: "allow", scope: "once", by: "person", waitedMs: 62_000 }) as never)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", mark: "ok" });
+      expect(approvalWordsOf(approve({ decision: "deny", scope: "run", by: "person", waitedMs: 3_000 }) as never)).toMatchObject({ name: "Denied", preview: "by you · for this run · after 3 s", tone: "bad" });
+      expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "closed", waitedMs: 5_460_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the app closed while it waited · after 1 h 31 min", tone: "warn" });
+    });
+
+    it("is never what names a phase — the person being asked changes nothing and checks nothing", () => {
+      expect(phasesOf([bashCall, approve({ decision: "allow", scope: "once", by: "person", waitedMs: 1 })], { merge: "all", dropIdle: true }).map((p) => p.name)).toEqual(["Explored"]);
+    });
   });
 
   it("leaves a single line as the row it always was", () => {

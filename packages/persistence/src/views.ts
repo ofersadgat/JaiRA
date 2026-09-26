@@ -414,14 +414,16 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
   // this the only projection in the file that cannot run against a bare database handle.
   //
   // One machine per task now, so the question is asked of the TASK: did it stop other than cleanly,
-  // or is anything still streaming into an open record?
+  // or is anything still streaming into an open record — or was, until an open settled it
+  // `interrupted` under a task that had already ended (`recoverUnsettledCalls`: a turn the app quit
+  // under, whose record is still the only place that turn is)?
   const task = project.db
     .prepare(
       `SELECT outcome, ended_at, status FROM task_runtime
         WHERE task_id = ?
           AND (outcome IN ('interrupted', 'error', 'canceled') OR status = 'running'
                OR EXISTS (SELECT 1 FROM operation_records r
-                           WHERE r.task_id = task_runtime.task_id AND r.status = 'open'))`,
+                           WHERE r.task_id = task_runtime.task_id AND r.status IN ('open', 'interrupted')))`,
     )
     .get(taskId) as { outcome: string | null; ended_at: number | null; status: string } | undefined;
   if (task === undefined) return [];
@@ -429,6 +431,13 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
   // Which instances started an operation that never settled — the calls that were in flight. Keyed
   // by durable instance id, which is what lets one pass cover a machine that stopped and continued:
   // a re-dispatch on the continuation starts the same instance's operation again.
+  //
+  // A LIST per instance, newest last, because one instance can hold two unsettled calls that are not
+  // one call re-dispatched: a conversation's chat child takes a turn per message, and a turn whose
+  // process died is followed by the next message's turn on the same instance. A single slot kept the
+  // newer start and lost the older, the count then fell short of the records, and the "ambiguous"
+  // answer below took BOTH turns off the screen — the one that died and the one still answering, and
+  // the message that opened each (the person, 2026-09-26: "my message that I sent disappeared").
   const events = project.db
     .prepare(
       `SELECT type, payload_json, session_ref, created_at FROM state_machine_events
@@ -437,7 +446,7 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
         ORDER BY seq`,
     )
     .all(taskId) as Array<{ type: string; payload_json: string; session_ref: string | null; created_at: number }>;
-  const started = new Map<string, { stateId: string; at: number }>();
+  const started = new Map<string, Array<{ stateId: string; at: number }>>();
   /**
    * The POSITIONS the journal already accounts for — one back from the end each terminal event
    * reported, spelled `<sessionId>@<seq>` here purely as a set key.
@@ -462,10 +471,14 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
     const event = JSON.parse(row.payload_json) as { instanceId?: string; stateId?: string };
     if (event.instanceId === undefined) continue;
     if (row.type === "operation.started") {
-      started.set(event.instanceId, { stateId: event.stateId ?? "", at: row.created_at });
+      started.set(event.instanceId, [...(started.get(event.instanceId) ?? []), { stateId: event.stateId ?? "", at: row.created_at }]);
       continue;
     }
-    started.delete(event.instanceId);
+    // A terminal event settles the instance's NEWEST start: calls on one instance run one at a time,
+    // so whatever is still unsettled beneath it was cut off before it began.
+    const open = started.get(event.instanceId)?.slice(0, -1) ?? [];
+    if (open.length > 0) started.set(event.instanceId, open);
+    else started.delete(event.instanceId);
     if (row.type === "operation.failed") {
       failed.add(String(event.instanceId)); // as TEXT: the generated column below has text affinity
       continue;
@@ -492,9 +505,37 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
       (record.instance_id === null || !failed.has(String(record.instance_id))) &&
       !listed.has(`${record.session_id}@${record.seq}`),
   );
-  if (records.length !== started.size) return []; // ambiguous — see the header
+  // Each instance's newest start, in the order the instances first started: the pairing for the
+  // ordinary case, one unsettled call per instance.
+  let inFlight: Array<[string, { stateId: string; at: number }]> = [...started].map(([id, starts]) => [id, starts[starts.length - 1]!]);
+  if (records.length !== inFlight.length) {
+    /**
+     * More records than instances: an instance holding two unsettled calls of its own. Each record is
+     * then paired with a start OF ITS INSTANCE, in order — an instance's unsettled records take its
+     * newest starts, one each. More starts than records is a call re-dispatched on a continuation (its
+     * record reopened rather than doubled), and the older start is the one that was cut off; fewer is
+     * a record nothing started, and a record that names no instance cannot be placed at all — the
+     * honest answer to either is no rows.
+     */
+    const perInstance = new Map<string, number>();
+    for (const record of records) {
+      if (record.instance_id === null) return []; // ambiguous — see the header
+      perInstance.set(record.instance_id, (perInstance.get(record.instance_id) ?? 0) + 1);
+    }
+    // As TEXT, like `failed`: the record's generated column has text affinity, the journal's id may not.
+    const byText = new Map([...started].map(([id, starts]) => [String(id), { id, starts }]));
+    const taken = new Map<string, number>();
+    inFlight = [];
+    for (const record of records) {
+      const instance = byText.get(record.instance_id!);
+      const wanted = perInstance.get(record.instance_id!)!;
+      if (instance === undefined || instance.starts.length < wanted) return []; // ambiguous — see the header
+      const k = taken.get(record.instance_id!) ?? 0;
+      taken.set(record.instance_id!, k + 1);
+      inFlight.push([instance.id, instance.starts[instance.starts.length - wanted + k]!]);
+    }
+  }
   const out: StateSession[] = [];
-  const inFlight = [...started.entries()];
   for (const [i, record] of records.entries()) {
     const [instanceId, where] = inFlight[i]!;
     out.push({

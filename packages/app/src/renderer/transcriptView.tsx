@@ -54,7 +54,7 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, toolDisplayOf, workflowOutcomeOf, workflowToolOf, type AgentQuestion, type MessageAuthor, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
+import { APPROVAL_PROMPT_FUNCTION, choicesOfQuestions, toolDisplayOf, workflowOutcomeOf, workflowToolOf, type AgentQuestion, type MessageAuthor, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfAnsweredText, answersOfValue, ChoiceList, ChoiceSteps, type Answer } from "./choices";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
@@ -65,7 +65,7 @@ import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { typeKeyOf, useMessageTypes } from "./messageTypes";
 import { useValuePanel } from "./valuePanel";
 import { WorkLookContext, WorkSummary } from "./workSummaryView";
-import { isIdle } from "./workSummary";
+import { approvalAnswerOf, approvalWordsOf, isApprovalCall, isIdle } from "./workSummary";
 import {
   blocksOf,
   dayLabelOf,
@@ -171,11 +171,12 @@ export function sizeOf(bytes: number): string {
   return `${bytes} B`;
 }
 
-/** `2.4 s`, `1 m 12 s`. */
+/** `2.4 s`, `1 m 12 s`, `14 h 32 m` — past an hour the seconds are noise, and 872 minutes is a sum to do. */
 export function durationOf(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
   const seconds = Math.round(ms / 1000);
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} m`;
   return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
 }
 
@@ -191,6 +192,7 @@ export function durationOf(ms: number): string {
 export function thoughtTime(ms: number): string {
   const seconds = Math.max(0, ms) / 1000;
   if (seconds < 60) return `${seconds.toFixed(1)} seconds`;
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} m`;
   return `${Math.floor(seconds / 60)} m ${(seconds % 60).toFixed(1)} s`;
 }
 
@@ -658,6 +660,22 @@ function Tool({
   // applied to what came back, because a file's type is a property of the file, not of the string
   // a tool happened to return.
   const pathMime = pathMimeOf(entry.args);
+  // The approval prompt, a tool the tool called: its verdict is its name, and who, how far and after
+  // how long are the rest of the line (the person, 2026-09-26).
+  if (isApprovalCall(entry)) {
+    const words = approvalWordsOf(entry);
+    return (
+      <Row
+        entry={entry}
+        name={words.name}
+        called={entry.name}
+        preview={words.preview}
+        prose={approvalAnswerOf(entry) !== undefined}
+        tone={words.tone}
+        {...(words.mark !== undefined ? { mark: words.mark === "waiting" && !(unanswered && open) ? "cut" : words.mark } : {})}
+      />
+    );
+  }
   return (
     <Row
       entry={entry}
@@ -1638,13 +1656,15 @@ function verbOf(status: LiveStatus): string {
   if (status.kind === "writing") return "Writing";
   if (status.kind === "answering") return "Answering";
   if (status.kind === "thinking") return "Thinking";
-  if (status.kind === "running") return "Running";
+  // The approval prompt is the turn waiting on the PERSON, not on a program.
+  if (status.kind === "running") return status.name === APPROVAL_PROMPT_FUNCTION ? "Waiting for you" : "Running";
   return "Working";
 }
 
 /** What it is doing it TO, when there is something to name. */
 function whatOf(status: LiveStatus): string {
   if (status.kind === "writing") return status.path ?? toolDisplayOf(status.name).title;
+  if (status.kind === "running" && status.name === APPROVAL_PROMPT_FUNCTION) return status.summary.length > 0 ? `to approve · ${status.summary}` : "to approve a command";
   if (status.kind === "running") {
     const title = toolDisplayOf(status.name).title;
     return status.summary.length > 0 ? `${title} · ${status.summary}` : title;

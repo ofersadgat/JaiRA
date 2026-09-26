@@ -890,18 +890,24 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * field of its own any more — the captured lines ARE the entries now — so the record states when
    * it happened rather than being recognized by a leftover.
    */
-  recoverable(taskId: string): Array<{ id: string; providerSessionId: string; startedAt: number }> {
-    // `interrupted` is what the sweep writes.
+  recoverable(taskId: string): Array<{ id: string; providerSessionId: string; startedAt: number; untilMs?: number }> {
+    // `interrupted` is what the sweep writes. `until` is where the next call of the same provider
+    // session began: a conversation goes on in the same file after a call the app quit under, and
+    // those lines belong to the call that came next.
     return this.db
       .prepare(
-        `SELECT id, provider_session_id, started_at FROM operation_records
+        `SELECT id, provider_session_id, started_at,
+                (SELECT MIN(o.started_at) FROM operation_records o
+                  WHERE o.task_id = r.task_id AND o.provider_session_id = r.provider_session_id
+                    AND o.started_at > r.started_at) AS until_ms
+           FROM operation_records r
           WHERE task_id = ? AND status = 'interrupted' AND provider_session_id IS NOT NULL
             AND (result_json IS NULL OR result_json NOT LIKE '%"capturedAt"%')`,
       )
       .all(taskId)
       .map((row) => {
-        const r = row as { id: string; provider_session_id: string; started_at: number };
-        return { id: r.id, providerSessionId: r.provider_session_id, startedAt: r.started_at };
+        const r = row as { id: string; provider_session_id: string; started_at: number; until_ms: number | null };
+        return { id: r.id, providerSessionId: r.provider_session_id, startedAt: r.started_at, ...(r.until_ms !== null ? { untilMs: r.until_ms } : {}) };
       });
   }
 
@@ -1470,8 +1476,15 @@ function preservePartial(
   existingJson: string | null,
   requestJson: string | null,
 ): JsonValue | undefined {
-  const settled = settledResult as { value?: { entries?: unknown } } | undefined;
-  if (settled?.value?.entries !== undefined) return settledResult;
+  const settled = settledResult as { value?: { entries?: unknown }; error?: unknown } | undefined;
+  // A call that FAILED settles with what its executor could rebuild, and for a delegated agent killed
+  // mid-turn that is the question and nothing more — while the streamed partial holds everything that
+  // arrived: the thinking, the calls, the approval the turn was waiting on. Settling over it threw all of
+  // that away (a quit on 2026-09-26 kept one entry of fourteen). A successful settle is the whole answer
+  // and always wins; a failed one wins only when it holds at least as much as was streamed.
+  const failed = settled?.error !== undefined;
+  if (settled?.value?.entries !== undefined && !failed) return settledResult;
+  // A transport that REPORTS the conversation (`sessionOutcome.messages`) is authoritative, failed or not.
   if (sessionOutcome?.messages !== undefined) return settledResult;
   // Through `withOpening` even though `insertRecord` normally put the question there already: a row
   // opened before that existed, or one whose only flush raced ahead of it, still settles correctly.
@@ -1480,6 +1493,8 @@ function preservePartial(
   // was being written when the call died — so there is nothing to fold in from a second channel.
   const entries = Array.isArray(partial.value?.entries) ? partial.value.entries : [];
   if (entries.length === 0) return settledResult;
+  const settledEntries = Array.isArray(settled?.value?.entries) ? (settled.value.entries as JsonValue[]) : undefined;
+  if (settledEntries !== undefined && settledEntries.length >= entries.length) return settledResult;
   return {
     ...((settledResult ?? {}) as object),
     value: { ...((settled?.value ?? {}) as object), entries },

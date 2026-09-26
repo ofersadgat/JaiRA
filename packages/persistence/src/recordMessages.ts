@@ -17,19 +17,24 @@ import type { JsonValue } from "@declarative-ai/json";
  * The `partial` entry is left out too, and that exclusion is the load-bearing one: these messages are
  * what a resume sends BACK to the provider, and half an assistant turn is not an exchange that
  * happened. It stays in `entries` for the viewer, which wants to show the words that did arrive.
+ *
+ * So is a call a TOOL made (`calledBy`) — `approve_tool_call`, put to the person while the call that
+ * needed it waited. It is part of the conversation's record, and no part of what the model said or
+ * was told: the model never made that call, and a provider replayed one would refuse the history.
  */
 export function messagesOfRecord(value: JsonValue | undefined): JsonValue[] {
   const entries = (value as { value?: { entries?: JsonValue[] } } | undefined)?.value?.entries;
   if (!Array.isArray(entries)) return [];
   return entries
     .filter((e) => {
-      const entry = e as { kind?: unknown; sidechain?: unknown; partial?: unknown } | null;
+      const entry = e as { kind?: unknown; sidechain?: unknown; partial?: unknown; calledBy?: unknown } | null;
       return (
         entry !== null &&
         typeof entry === "object" &&
         entry.kind === "message" &&
         entry.sidechain === undefined &&
-        entry.partial !== true
+        entry.partial !== true &&
+        entry.calledBy === undefined
       );
     })
     .map((e) => {

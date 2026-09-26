@@ -77,34 +77,7 @@ export interface PermissionFunctionRequest {
   permissionSet?: string;
 }
 
-/**
- * What the approval prompt answers — `{ decision }`, and, for a prompt answered after the process
- * that asked it was gone, `about`: WHICH request it answered ({@link approvalRequestKey}). A resumed
- * run re-asks what it was in the middle of asking, and a seeded answer must never answer a different
- * call — so the prompt compares, and asks again when they differ.
- */
+/** What the approval prompt answers — `{ decision }`. */
 export interface ApprovalPromptAnswer {
   decision: PermissionAnswer;
-  about?: string;
-}
-
-/**
- * A request, as a key: the same call, the same part, the same place — and nothing that could differ
- * between two askings of one call (the function, the permission set's name). Canonical JSON, keys sorted.
- */
-export function approvalRequestKey(request: unknown): string {
-  const record = request !== null && typeof request === "object" && !Array.isArray(request) ? (request as Record<string, unknown>) : {};
-  const about = { tool: record["tool"], subject: record["subject"], input: record["input"], part: record["part"], cwd: record["cwd"], state: record["state"], task: record["task"] };
-  return canonical(about);
-}
-
-function canonical(value: unknown): string {
-  if (value === undefined) return "null";
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort();
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
 }

@@ -1349,6 +1349,12 @@ export interface SessionTurn {
   /** Tool calls and their results, kept structured so a viewer can pair and collapse them. */
   parts?: JsonValue;
   /**
+   * The call that made this one, when a TOOL made it rather than the model — `approve_tool_call`, put
+   * to the person while the call that needed permission waited. By that call's id. A tool calling a
+   * tool is an ordinary call with a result in the record; it is only never replayed to the model.
+   */
+  calledBy?: string;
+  /**
    * When the turn ARRIVED, host clock — kept on the entry in `timing`, apart from the provider's own
    * `timestamp`. The two are different facts and only one of them goes back on the wire. Absent for
    * a turn nothing streamed.
@@ -1478,6 +1484,13 @@ export interface SessionOutput {
    */
   name?: string;
 }
+
+/**
+ * The event a chat thread places after a turn the app closed under (`SessionView.providerEvents`):
+ * its record was settled `interrupted` by the recovery at the next open, not by anybody stopping it,
+ * and without a line saying so the thread simply stops where the turn was cut.
+ */
+export const CUT_OFF_EVENT = "jaira.cutOff";
 
 /**
  * A whole CONVERSATION, rather than one call of it — what the Chat view reads.

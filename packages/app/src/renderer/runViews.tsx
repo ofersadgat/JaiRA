@@ -47,6 +47,7 @@ import { sessionKey } from "./sessionCache";
 import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, type TrailStep } from "./trail";
 import { AnsweredForYou, Paper, Pulse, Transcript, durationOf, useElapsed, type CallSurface } from "./transcriptView";
+import { ApprovalAskContext, approvalCallIndex } from "./workSummaryView";
 import { PickStepContext, advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
@@ -1101,10 +1102,17 @@ export function RunConversation({
     // The agent's question or the command it is waiting to run, under what it said before asking.
     // Keyed on the request so a second one from the same agent starts with nothing lit.
     if (piece.node.instanceId === agentHere) {
+      // The approval as the step it is: when this piece's conversation holds its call, the work summary
+      // draws the prompt in that step's row (`ApprovalAskContext`) and it is not drawn again here.
+      const inTranscript = approval !== undefined && approvalCallIndex(entries as never, approval.requestId) >= 0;
       return (
         <>
-          {transcript}
-          {approval !== undefined && onApproval !== undefined ? (
+          {approval !== undefined && onApproval !== undefined && inTranscript ? (
+            <ApprovalAskContext.Provider value={{ pending: approval, onDecide: onApproval }}>{transcript}</ApprovalAskContext.Provider>
+          ) : (
+            transcript
+          )}
+          {approval !== undefined && onApproval !== undefined && !inTranscript ? (
             <div className="inline-gate">
               <ApprovalSurface key={approval.requestId} pending={approval} onDecide={onApproval} />
             </div>

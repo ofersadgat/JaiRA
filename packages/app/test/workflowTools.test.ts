@@ -401,28 +401,27 @@ describe("answer_question", () => {
   });
 
   it("never reaches the APPROVAL PROMPT a permission function calls — the person answers it, never a fast-forward's conversation", async () => {
-    // Structural, as for every approval: the component is not on the list a conversation may answer,
-    // and a fast-forward offers its conversation only what is on that list (decision 0005 §4).
+    // Structural, as for every approval: the prompt is not on the list a conversation may answer, and
+    // a fast-forward offers its conversation only what is on that list (decision 0005 §4).
     expect(ANSWERABLE_COMPONENTS.has(APPROVAL_PROMPT_FUNCTION)).toBe(false);
 
     const session = await conversation("chat/session");
     await call(session, "start_task", { state: "lib/approve" });
-    const gate = await parked();
-    const pending = service.pendingInteractions().find((p) => p.requestId === gate.requestId)!;
-    expect(pending.component).toBe(APPROVAL_PROMPT_FUNCTION);
-    expect(pending.inputs).toMatchObject({ request: { tool: "bash", function: "smart", input: { command: "npm publish" } } });
+    // The ONE approval prompt: a function reaching it parks on the approval hub, as the policy does —
+    // not as a gate a conversation's tools could see.
+    await until(() => service.pendingApprovals().length > 0, "the approval to park");
+    const approval = service.pendingApprovals()[0]!;
+    expect(approval).toMatchObject({ tool: "bash", asker: "smart", input: { command: "npm publish" } });
+    expect(service.pendingInteractions()).toEqual([]);
     // It is not listed as something the conversation's task is asking…
     const listed = (await call(session, "list_tasks", {})) as unknown as TasksResult;
-    expect(listed.tasks.find((t) => t.task === gate.taskId)?.asking).toBeUndefined();
-    // …and the tool refuses it by name, leaving it parked for the person.
-    expect(await call(session, "answer_question", { request: gate.requestId, confidence: 1, value: { decision: "allow" } })).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining("approval"),
-    });
-    expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(true);
+    expect(listed.tasks.find((t) => t.task === approval.taskId)?.asking).toBeUndefined();
+    // …and the tool cannot reach it: it is no question.
+    expect(await call(session, "answer_question", { request: approval.requestId, confidence: 1, value: { decision: "allow" } })).toMatchObject({ ok: false });
+    expect(service.pendingApprovals().some((p) => p.requestId === approval.requestId)).toBe(true);
     // The person's answer is the word the function returns, and the task goes on.
-    service.submitInteraction(gate.requestId, { decision: "allow" });
-    await until(() => statusOf(gate.taskId) === "completed", "the approval to settle");
+    service.submitApproval(approval.requestId, "allow");
+    await until(() => statusOf(approval.taskId!) === "completed", "the approval to settle");
   });
 
   it("refuses a request nobody is waiting on, and one that belongs to a task this conversation did not start", async () => {

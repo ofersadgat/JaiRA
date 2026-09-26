@@ -88,6 +88,12 @@ export interface Project {
   /** Task ids marked `interrupted` by recovery during this open. */
   recovered: string[];
   /**
+   * Task ids whose calls were left unsettled under a task that had already ended — a conversation's
+   * turn the previous process quit under — and were settled `interrupted` by this open. The task
+   * itself was not interrupted, which is why these are not in {@link recovered}.
+   */
+  recoveredCalls: string[];
+  /**
    * Child processes found still open with no live owner — abandoned agents and
    * commands from a previous, crashed process. Reported, never killed.
    */
@@ -407,6 +413,7 @@ function openAt(
   // A task with a live claim is being driven by another process right now — the
   // whole point of §4.2a. Only genuinely abandoned tasks are recovered.
   const recovered = runtime.recoverInterrupted(at, (taskId) => jobs.liveRunJob(taskId, at) !== undefined);
+  const recoveredCalls = runtime.recoverUnsettledCalls(at);
   jobs.reapStale(at);
 
   return {
@@ -425,6 +432,7 @@ function openAt(
     repoWatch: new RepoWatchStore(db),
     eventWaits: new EventWaitStore(db),
     recovered,
+    recoveredCalls,
     orphans,
     storage,
     close: () => db.close(),

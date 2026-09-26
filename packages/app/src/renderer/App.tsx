@@ -752,6 +752,10 @@ export default function App(): JSX.Element {
     onCancelRun: actions.cancelTask,
     onRewind: actions.rewindConversation,
     onFork: actions.forkConversation,
+    approval: state.chat.taskId === null ? undefined : state.approvals.find((a) => a.taskId === state.chat.taskId),
+    onApproval: actions.decideApproval,
+    question: state.chat.taskId === null ? undefined : state.questions.find((q) => q.taskId === state.chat.taskId),
+    onQuestion: actions.answerQuestion,
   };
 
   /**

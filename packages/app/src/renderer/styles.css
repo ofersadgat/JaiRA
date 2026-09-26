@@ -10689,6 +10689,45 @@ button.ts-source-link:hover:not(:disabled) {
 .ws-kept {
   margin: 6px 0 0;
 }
+/* A call a TOOL made — `approve_tool_call` — sits under the call that made it (the person,
+   2026-09-26: "nested in every step"), joined to it by a hook. */
+.ts-called {
+  position: relative;
+  margin-left: 22px;
+}
+.ts-called::before {
+  content: "";
+  position: absolute;
+  left: -13px;
+  top: -5px;
+  height: 17px;
+  width: 9px;
+  border-left: 1.5px solid var(--line);
+  border-bottom: 1.5px solid var(--line);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
+}
+/* The approval prompt of the step waiting on the person, under its row — indented to the row's words
+   in the rolling rows, level with the summary under it. */
+.ws-ask {
+  margin: 4px 0 8px 104px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.ws-ask-row + .ws-ask {
+  margin-left: 30px;
+}
+/* The row above already says what is waiting; the prompt does not say it twice. */
+.ws-ask .approval-surface h3 {
+  display: none;
+}
+@media (max-width: 600px) {
+  .ws-ask {
+    margin-left: 12px;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .ws-foot .ts-chev {
     transition: none;

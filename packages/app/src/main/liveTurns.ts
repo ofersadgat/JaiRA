@@ -59,7 +59,7 @@ const LIVE_PROVIDER = "unknown";
 
 /** One streamed entry as a message entry, or `undefined` for anything that is not a finished turn. */
 function messageEntry(raw: JsonValue, call: string | undefined): { at?: number; entry: JsonValue } | undefined {
-  const rec = raw as { kind?: string; content?: { role?: unknown; content?: JsonValue }; at?: number; startedAt?: number; thoughtMs?: number } | null;
+  const rec = raw as { kind?: string; content?: { role?: unknown; content?: JsonValue }; at?: number; startedAt?: number; thoughtMs?: number; calledBy?: unknown } | null;
   if (rec === null || typeof rec !== "object" || rec.kind !== "message") return undefined;
   const message = rec.content;
   if (message === null || typeof message !== "object") return undefined;
@@ -82,6 +82,8 @@ function messageEntry(raw: JsonValue, call: string | undefined): { at?: number; 
       // Both halves of the subagent fact, which is one fact: this entry belongs to the agent the
       // call spawned. The live log keys a chain by the spawning call, and that id is the agent's.
       ...(call !== undefined ? { sidechain: { id: call, parentToolUseId: call } } : {}),
+      // A call a TOOL made (`approve_tool_call`), by the call that made it — see `SessionTurn.calledBy`.
+      ...(typeof rec.calledBy === "string" ? { calledBy: rec.calledBy } : {}),
     } as JsonValue,
   };
 }

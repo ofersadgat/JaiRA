@@ -14,14 +14,17 @@
  * `transcriptView.tsx` do not import each other.
  */
 import { createContext, useContext, useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
-import type { WorkNotes, WorkRows } from "@jaira/shared/browser";
+import type { PendingApproval, WorkNotes, WorkRows } from "@jaira/shared/browser";
+import { ApprovalSurface, type ApprovalSurfaceProps } from "./approvalSurface";
 import { Icon } from "./icons";
 import { Popover, useHoverCard } from "./popover";
 import type { ToolEntry, WorkEntry } from "./transcript";
+import { APPROVAL_PROMPT_FUNCTION } from "@jaira/shared/browser";
 import {
   allOf,
   chipsOf,
   inFlight,
+  isApprovalCall,
   isIdle,
   isQuiet,
   phasesOf,
@@ -85,6 +88,35 @@ export function forgetReadOnly(judge: ReadOnlyJudge): void {
 }
 export const ReadOnlyJudgeContext = createContext<ReadOnlyJudge | undefined>(undefined);
 
+/**
+ * The approval a conversation's agent is waiting on, and how to answer it — provided by the host that
+ * can answer (the chat, a run's conversation). The approval is a step of the work, `approve_tool_call`
+ * called by the call that needs permission, so its prompt is drawn where that step is: in the latest
+ * row the summary shows, or — when the summary shows no rows, or not that one — under the summary.
+ */
+export interface ApprovalAsk {
+  pending: PendingApproval;
+  onDecide: ApprovalSurfaceProps["onDecide"];
+}
+export const ApprovalAskContext = createContext<ApprovalAsk | undefined>(undefined);
+
+/**
+ * Where the pending approval's call is in `entries`: an `approve_tool_call` still unanswered whose
+ * call id names the request (`approve_<asked>_<requestId>`, `recordApprovalCall`). -1 when this stretch
+ * does not hold it.
+ */
+export function approvalCallIndex(entries: readonly { kind: string; name?: string; callId?: string; ok?: boolean; result?: unknown }[], requestId: string): number {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.kind === "tool" && e.name === APPROVAL_PROMPT_FUNCTION && e.callId?.endsWith(`_${requestId}`) === true && e.ok === undefined && e.result === undefined) return i;
+  }
+  return -1;
+}
+
+/** A call a tool made sits under the call that made it — in Every step and in a hover card's list. */
+const nestOf = (entry: WorkEntry | undefined): string | undefined =>
+  entry !== undefined && entry.kind === "tool" && entry.calledBy !== undefined ? "ts-called" : undefined;
+
 /** What the read-only set says of each call in `entries`, asking for the ones it has not been asked about; and a count that moves when an answer lands. */
 function useReadOnlyVerdicts(entries: readonly WorkEntry[]): { verdicts: ReadOnlyVerdicts | undefined; heard: number } {
   const judge = useContext(ReadOnlyJudgeContext);
@@ -99,7 +131,8 @@ function useReadOnlyVerdicts(entries: readonly WorkEntry[]): { verdicts: ReadOnl
     if (judge === undefined) return;
     const wanted = new Map<string, ToolEntry>();
     for (const entry of entries) {
-      if (entry.kind !== "tool") continue;
+      // The approval prompt is no call a permission set holds: it is the person being asked.
+      if (entry.kind !== "tool" || isApprovalCall(entry)) continue;
       const key = verdictKeyOf(entry);
       if (!judge.known.has(key) && !judge.asking.has(key) && !judge.failed.has(key)) wanted.set(key, entry);
     }
@@ -163,7 +196,7 @@ interface Rows {
 }
 
 /** The hover card every summary part opens: the rows it stands for, as the transcript draws them. */
-function RowsCard({ label, indices, rowOf, children }: Rows & { label: string; indices: readonly number[]; children: (bind: ReturnType<typeof useHoverCard<HTMLSpanElement>>) => ReactNode }): JSX.Element {
+function RowsCard({ label, indices, rowOf, entries, children }: Rows & { label: string; indices: readonly number[]; entries?: readonly WorkEntry[]; children: (bind: ReturnType<typeof useHoverCard<HTMLSpanElement>>) => ReactNode }): JSX.Element {
   const hover = useHoverCard<HTMLSpanElement>();
   return (
     <>
@@ -174,7 +207,13 @@ function RowsCard({ label, indices, rowOf, children }: Rows & { label: string; i
             <span>{label}</span>
             <span>{indices.length === 1 ? "1 line" : `${indices.length} lines`}</span>
           </div>
-          <div className="ts-work">{indices.map((i) => <div key={i}>{rowOf(i)}</div>)}</div>
+          <div className="ts-work">
+            {indices.map((i) => (
+              <div key={i} className={nestOf(entries?.[i])}>
+                {rowOf(i)}
+              </div>
+            ))}
+          </div>
         </Popover>
       ) : null}
     </>
@@ -236,7 +275,7 @@ function ThoughtLine({ entries, indices }: { entries: readonly WorkEntry[]; indi
 }
 
 /** One of J's rows: consecutive calls of one kind, said in a sentence. */
-function RunRow({ entries, run, live, now, clock, rowOf }: Rows & { entries: readonly WorkEntry[]; run: WorkRun; live?: number | undefined; now: number; clock: (at?: number) => string }): JSX.Element {
+function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entries: readonly WorkEntry[]; run: WorkRun; live?: number | undefined; now: number; clock: (at?: number) => string; below?: ReactNode }): JSX.Element {
   const { said, now: doing } = sentenceOf(entries, run, live);
   const running = doing !== undefined;
   const failedCount = run.rows.filter((i) => {
@@ -250,8 +289,9 @@ function RunRow({ entries, run, live, now, clock, rowOf }: Rows & { entries: rea
   const first = entries[run.rows[0]!]!;
   const startedAt = live !== undefined ? entries[live]!.at : undefined;
   return (
-    <RowsCard label={running ? "Now" : "These steps"} indices={allOf(run)} rowOf={rowOf}>
+    <RowsCard label={running ? "Now" : "These steps"} indices={allOf(run)} rowOf={rowOf} entries={entries}>
       {(hover) => (
+        <>
         <div className={`ws-run${running ? " live" : ""}${failedCount > 0 ? " failed" : ""}${run.kind === "wait" ? " wait" : ""}`}>
           <span className="ws-run-at">{clock(first.at)}</span>
           <span className="ws-run-icon">{running ? <Pulse /> : <Icon name={kindIcon(entries, run)} />}</span>
@@ -275,6 +315,8 @@ function RunRow({ entries, run, live, now, clock, rowOf }: Rows & { entries: rea
           </span>
           <span className="ws-run-took">{running && startedAt !== undefined ? secondsOf(Math.max(0, now - startedAt)) : ""}</span>
         </div>
+        {below}
+        </>
       )}
     </RowsCard>
   );
@@ -328,6 +370,17 @@ export function WorkSummary({
   const whole = spanOf(entries, all);
   const took = whole.start === undefined ? undefined : (working ? now : (whole.end ?? whole.start)) - whole.start;
   const foot = useHoverCard<HTMLButtonElement>();
+  // The approval this stretch is waiting on, when the host can answer it: drawn in the latest row the
+  // summary shows when that row is its step, and otherwise under the summary with its own row.
+  const ask = useContext(ApprovalAskContext);
+  const askAt = working && ask !== undefined ? approvalCallIndex(entries, ask.pending.requestId) : -1;
+  const prompt =
+    askAt >= 0 && ask !== undefined ? (
+      <div className="inline-gate ws-ask">
+        <ApprovalSurface key={ask.pending.requestId} pending={ask.pending} onDecide={ask.onDecide} />
+      </div>
+    ) : null;
+  let promptPlaced = false;
   return (
     <div className={`ws${working ? " working" : ""}${open ? " open" : ""}${phases.length === 0 ? " bare" : ""}`} data-testid="work-summary">
       {/* Nothing left to summarise — every line was a rate limit or a note — leaves only the foot. */}
@@ -362,9 +415,11 @@ export function WorkSummary({
               </div>
               {win.shown.length > 0 ? (
                 <div className="ws-runs">
-                  {win.shown.map((run) => (
-                    <RunRow key={run.rows[0]} entries={entries} run={run} live={live} now={now} clock={clock} rowOf={rowOf} />
-                  ))}
+                  {win.shown.map((run, k) => {
+                    const here = prompt !== null && k === win.shown.length - 1 && run.rows.includes(askAt);
+                    if (here) promptPlaced = true;
+                    return <RunRow key={run.rows[0]} entries={entries} run={run} live={live} now={now} clock={clock} rowOf={rowOf} {...(here ? { below: prompt } : {})} />;
+                  })}
                 </div>
               ) : null}
             </div>
@@ -397,13 +452,33 @@ export function WorkSummary({
             <span>Every step</span>
             <span>{entries.length} lines</span>
           </div>
-          <div className="ts-work">{all.map((i) => <div key={i}>{rowOf(i)}</div>)}</div>
+          <div className="ts-work">
+            {all.map((i) => (
+              <div key={i} className={nestOf(entries[i])}>
+                {rowOf(i)}
+              </div>
+            ))}
+          </div>
         </Popover>
       ) : null}
       {open ? (
-        <div className="ws-all ts-work">{all.map((i) => <div key={i}>{rowOf(i)}</div>)}</div>
+        <div className="ws-all ts-work">
+          {all.map((i) => (
+            <div key={i} className={nestOf(entries[i])}>
+              {rowOf(i)}
+            </div>
+          ))}
+        </div>
       ) : kept.length > 0 ? (
         <div className="ws-kept ts-work">{kept.map((i) => <div key={i}>{rowOf(i)}</div>)}</div>
+      ) : null}
+      {/* Not in a row the summary shows — rows set to None, or phases off — so under the summary, with
+          its own row (unless Every step is open, which already lists it). */}
+      {prompt !== null && !promptPlaced ? (
+        <>
+          {open ? null : <div className="ws-kept ts-work ws-ask-row">{rowOf(askAt)}</div>}
+          {prompt}
+        </>
       ) : null}
     </div>
   );
