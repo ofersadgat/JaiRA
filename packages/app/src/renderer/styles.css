@@ -10072,6 +10072,9 @@ fieldset.reading {
   z-index: 3;
   display: flex;
   justify-content: center;
+  /* Not the default `stretch`: stretched to this zero-height row, the chip's box collapses to its
+     padding and the day spills out beneath its own background. */
+  align-items: flex-start;
   height: 0;
   pointer-events: none;
 }
