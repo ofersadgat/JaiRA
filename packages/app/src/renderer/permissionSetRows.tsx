@@ -35,7 +35,7 @@ import {
   type PermissionSetMode,
   type ToolSpec,
 } from "@jaira/shared/browser";
-import { groupModeOf, groupSentence, groupSummary, type CommandGroup } from "./composerPermissionSet";
+import { groupModeOf, groupSentence, groupSummary, runnerFallbackOf, runnerRowsOf, type CommandGroup } from "./composerPermissionSet";
 import { Icon } from "./icons";
 import { Popover, usePopover } from "./popover";
 import { SchemaForm } from "./schemaForm/SchemaForm";
@@ -49,7 +49,8 @@ export const TOOL_ICONS: Record<string, Parameters<typeof Icon>[0]["name"]> = {
 
 /** What the shell's line says in the Tools card: it is also where every unnamed command lands. */
 export const SHELL_HINT = "the shell — and the mode for any command not named below";
-export const SCRIPT_HINT = "running a file — ./x.sh, npm run, python x.py, make";
+export const SCRIPT_HINT = "running a file — ./x.sh, bash x.sh, python x.py — and what a runner runs that could not be read";
+export const RUNNERS_HINT = "whether JaiRA looks inside what a runner runs — each command inside is judged on its own";
 
 /**
  * What one permission MODE means, and the glyph for it.
@@ -743,6 +744,73 @@ export function AddLine({
  * entry the button shows what any other `git` answers to today, the shell's line, and picking a mode
  * is what writes one.
  */
+/**
+ * The command runners' gate, under Execution (decision 0007, amended 2026-09-26, later). The head is
+ * the group's own line, `runner:*`; beneath it a row per runner — its own line's mode with a minus, or,
+ * with none, the group's mode faded, which picking a mode gives it a line of its own.
+ */
+export function RunnerGroupRow({
+  permissionSet,
+  open,
+  onOpen,
+  onGroupMode,
+  onRunnerMode,
+  onRemoveRunner,
+  onRemove,
+  readOnly,
+}: {
+  permissionSet: PermissionSet;
+  open: boolean;
+  onOpen: () => void;
+  onGroupMode: (next: PermissionSetMode) => void;
+  onRunnerMode: (program: string, next: PermissionSetMode) => void;
+  onRemoveRunner: (program: string) => void;
+  /** Take every runner line out — runners are then no longer gated. Draws the minus. */
+  onRemove?: (() => void) | undefined;
+  readOnly?: boolean | undefined;
+}): JSX.Element {
+  const rows = runnerRowsOf(permissionSet);
+  const fallback = runnerFallbackOf(permissionSet);
+  const named = rows.filter((row) => row.own !== undefined);
+  return (
+    <div className={`cx-cat cx-sub${open ? " open" : ""}`}>
+      <div className="cx-cat-head">
+        {onRemove !== undefined ? <RemoveLine subject="Command runners" onRemove={onRemove} /> : null}
+        <button type="button" className="cx-cat-fold" aria-expanded={open} onClick={onOpen}>
+          <span className="cx-more cx-cat-chev">›</span>
+          <span className="cx-chip-icon">
+            <Icon name="terminal" />
+          </span>
+          <span className="cx-opt-text">
+            <span className="cx-opt-name ellip">Command runners</span>
+            <span className="cx-opt-hint ellip">{open || named.length === 0 ? RUNNERS_HINT : named.map((row) => row.program).join(" · ")}</span>
+          </span>
+          <span className="cx-cat-count">{rows.length}</span>
+        </button>
+        <ModePicker mode={fallback} title="Command runners: every runner without a line of its own" onMode={onGroupMode} readOnly={readOnly} />
+      </div>
+      {open ? (
+        <div className="cx-cat-body">
+          {rows.map((row) => (
+            <div key={row.program} className={`set-runner${row.own === undefined ? " set-runner-follows" : ""}`} data-runner={row.program}>
+              <SubjectRow
+                line
+                subject={row.program}
+                hint={row.hint}
+                held
+                mode={row.own ?? fallback}
+                readOnly={readOnly}
+                onRemove={row.own !== undefined && readOnly !== true ? () => onRemoveRunner(row.program) : undefined}
+                onMode={(next) => onRunnerMode(row.program, next)}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function CommandGroupRow({
   group,
   permissionSet,

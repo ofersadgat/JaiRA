@@ -36,6 +36,7 @@ export * from "./toolVocabulary";
 export * from "./toolDisplay";
 export * from "./agentTools";
 export * from "./permissionSets";
+export * from "./commandRunners";
 export * from "./mcp";
 export * from "./permissionSetBuckets";
 export * from "./commandParts";

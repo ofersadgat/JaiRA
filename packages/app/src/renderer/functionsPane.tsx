@@ -30,6 +30,9 @@ import {
   functionAllowed,
   isFunctionMode,
   subjectKindOf,
+  COMMAND_RUNNERS,
+  RUNNER_GROUP_SUBJECT,
+  runnerSubject,
   toolsInCategory,
   permissionSetsAt,
   type ConfigLayer,
@@ -101,6 +104,7 @@ export function FunctionsSections(props: FunctionsProps): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
   const columns = useMemo(() => columnsOf(props.data, props.data === null ? "base" : permissionSetLayersOf(props.layer, props.data.layers).reads), [props.data, props.layer]);
   const commands = useMemo(() => commandSubjectsOf(columns), [columns]);
+  const runners = useMemo(() => runnerSubjectsOf(columns), [columns]);
   const toggle = (name: string): void => setOpen((current) => (current === name ? null : name));
 
   const writer = props.config !== null ? configWriter(props.config, props.layer, props.busy, props.onSave) : null;
@@ -136,7 +140,7 @@ export function FunctionsSections(props: FunctionsProps): JSX.Element {
               <tbody>
                 {TOOL_CATEGORIES.map((category) => {
                   const tools = toolsInCategory(category.id).map((spec) => spec.name);
-                  const extra = category.id === "execution" ? [...commands, "script"] : [];
+                  const extra = category.id === "execution" ? [...commands, ...runners, "script"] : [];
                   const names = [...tools, ...extra];
                   if (names.length === 0) return null;
                   return [
@@ -147,7 +151,7 @@ export function FunctionsSections(props: FunctionsProps): JSX.Element {
                       <FunctionRow
                         key={name}
                         name={name}
-                        sub={subjectKindOf(name) === "command"}
+                        sub={subjectKindOf(name) === "command" || (subjectKindOf(name) === "runner" && name !== RUNNER_GROUP_SUBJECT)}
                         defaults={defaultsSummary(name, writer)}
                         columns={columns}
                         open={open === name}
@@ -349,6 +353,14 @@ function commandSubjectsOf(columns: SetColumn[]): string[] {
   const seen = new Set<string>();
   for (const column of columns) for (const subject of Object.keys(column.decl)) if (subjectKindOf(subject) === "command") seen.add(subject);
   return [...seen].sort();
+}
+
+/** Every runner line a set writes — the group's first, then each runner's in the order they are listed. */
+function runnerSubjectsOf(columns: SetColumn[]): string[] {
+  const seen = new Set<string>();
+  for (const column of columns) for (const subject of Object.keys(column.decl)) if (subjectKindOf(subject) === "runner") seen.add(subject);
+  const order = [RUNNER_GROUP_SUBJECT, ...COMMAND_RUNNERS.map((runner) => runnerSubject(runner.program))];
+  return order.filter((subject) => seen.has(subject));
 }
 
 /** Who uses a function: the sets with a line for it — or, for a judge, the lines that hand calls to it. */

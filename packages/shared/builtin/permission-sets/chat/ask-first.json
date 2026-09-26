@@ -6,6 +6,8 @@
   "write_file": "ask",
   "show_artifact": "ask",
   "bash": "ask",
+  "runner:*": "ask",
+  "script": "ask",
   "web_fetch": "ask",
   "web_search": "ask",
   "list_merge_requests": "ask",

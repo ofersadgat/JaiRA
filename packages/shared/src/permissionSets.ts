@@ -80,6 +80,7 @@
  */
 import { INLINE_PERMISSION_SET } from "./commandParts";
 import { isMcpSubject } from "./mcp";
+import { commandRunnerOf, parseRunnerSubject } from "./commandRunners";
 import {
   PERMISSION_MODES,
   gateModeOf,
@@ -160,10 +161,10 @@ export type PermissionSetDecl = Record<string, PermissionSetEntryDecl>;
  * Neither is a tool JaiRA serves: nothing is offered under it, and the agent that has the server
  * calls the tool by that name, which is what the line judges.
  */
-export type SubjectKind = "tool" | "command" | "script" | "mcp" | "other" | "unknown-tool";
+export type SubjectKind = "tool" | "command" | "script" | "mcp" | "runner" | "other" | "unknown-tool";
 
 export interface PermissionSetEntry {
-  kind: "tool" | "command" | "script" | "mcp";
+  kind: "tool" | "command" | "script" | "mcp" | "runner";
   /**
    * The entry's mode. An authored map entry always has one. Absent only where a block read back
    * ({@link permissionSetOfEnvironment}) lists a tool it gives no mode — the always-granted tools of a turn
@@ -203,12 +204,14 @@ export interface PermissionSetIssue {
  * looks like a PROGRAM — lowercase, no underscore (`git`, `terraform`, `apt-get`) — is a command
  * subject for every command of that program. What is left looks like a tool name and is not one we
  * know (`reed_file`, `Glob`): nothing is offered under it, which the linter says. `mcp__figma` and
- * `mcp__figma__get_code` are MCP subjects: a server's line and one of its tools'.
+ * `mcp__figma__get_code` are MCP subjects: a server's line and one of its tools'. `runner:*` and
+ * `runner:npm` are the command runners' gate — the group's line and one runner's (`commandRunners.ts`).
  */
 export function subjectKindOf(subject: string): SubjectKind {
   if (subject === OTHER_SUBJECT) return "other";
   if (subject === SCRIPT_SUBJECT) return "script";
   if (isMcpSubject(subject)) return "mcp";
+  if (parseRunnerSubject(subject) !== undefined) return "runner";
   if (TOOL_SPEC_BY_NAME.has(subject)) return "tool";
   if (/\s/.test(subject)) return "command";
   return /^[a-z][a-z0-9.+-]*$/.test(subject) ? "command" : "unknown-tool";
@@ -296,6 +299,13 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
       if (implementation !== undefined) warn("'other' names no one tool, so an implementation means nothing on it");
       permissionSet.other = mode;
       continue;
+    }
+    if (kind === "runner") {
+      const program = parseRunnerSubject(subject)!.program;
+      if (program !== undefined && commandRunnerOf(program) === undefined) {
+        warn(`'${program}' is not a command runner JaiRA knows — nothing reads '${subject}'; a line for the program itself is '${program}'`);
+        continue;
+      }
     }
     if (kind === "unknown-tool") {
       // Reported and dropped, which is what "falls to `other`" means: nothing is offered under a
@@ -404,7 +414,8 @@ export function offeredTools(permissionSet: PermissionSet): string[] {
  * Present means offered, and a map's `bash` entry is the answer for "any other command" on a line
  * taken apart (decision 0007 §4). When that answer is `deny` and no command subject and no `script`
  * entry allows, asks or names a function, every line the shell could run is refused — or duplicates a
- * standard tool the permission set serves directly (`cat` is `read_file`). Offering such a shell is a door
+ * standard tool the permission set serves directly (`cat` is `read_file`). A runner line that lets a runner through
+ * (`runner:*`) counts as allowing, since `bash -c "cat x"` is then a read. Offering such a shell is a door
  * with nothing behind it that a RUN cannot see is shut: the gate is told `ask`, and on codex a held
  * shell turns the writing sandbox on. So it is withheld: {@link offeredTools} leaves it
  * out, {@link gateToolModes} answers `deny` for it, and an agent loses its own shell with it. The
@@ -415,7 +426,7 @@ export function shellWithheld(permissionSet: PermissionSet): boolean {
   if (shell === undefined || shell.kind !== "tool" || shell.mode !== "deny") return false;
   // Only what a LINE can run keeps the shell: a command, or `script`. A tool, or an MCP server's
   // line, is judged by name and never reaches the shell.
-  return Object.values(permissionSet.entries).every((entry) => (entry.kind !== "command" && entry.kind !== "script") || entry.mode === "deny");
+  return Object.values(permissionSet.entries).every((entry) => (entry.kind !== "command" && entry.kind !== "script" && entry.kind !== "runner") || entry.mode === "deny");
 }
 
 /**
@@ -543,7 +554,7 @@ export function toolImplementations(permissionSet: PermissionSet): Record<string
 export function shellSubjects(permissionSet: PermissionSet): Record<string, PermissionSetMode> {
   const out: Record<string, PermissionSetMode> = {};
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    if ((entry.kind === "command" || entry.kind === "script" || subject === SHELL_TOOL) && entry.mode !== undefined) out[subject] = entry.mode;
+    if ((entry.kind === "command" || entry.kind === "script" || entry.kind === "runner" || subject === SHELL_TOOL) && entry.mode !== undefined) out[subject] = entry.mode;
   }
   return out;
 }
@@ -641,7 +652,7 @@ export function permissionSetOfEnvironment(
       continue;
     }
     if (held !== undefined) continue;
-    entries[subject] = { kind: subject === SCRIPT_SUBJECT ? "script" : "command", mode };
+    entries[subject] = { kind: subject === SCRIPT_SUBJECT ? "script" : parseRunnerSubject(subject) !== undefined ? "runner" : "command", mode };
   }
   // A function was lowered as `ask` wherever a mode is written; the reference is what it was.
   let other: PermissionSetMode | undefined = permissions?.other;

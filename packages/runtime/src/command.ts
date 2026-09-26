@@ -22,7 +22,7 @@
  * default is to report the line as unparsed and let the policy treat that as "ask",
  * never as "allow".
  */
-import type { TextSpan } from "@jaira/shared";
+import { isCommandRunner, type TextSpan } from "@jaira/shared";
 import { EMBEDDERS, isHarmlessVariable, isShellLocalName, type EmbedderSpec } from "./shellTables";
 
 export type CommandDialect = "posix" | "powershell";
@@ -79,7 +79,18 @@ export interface ParsedCommand {
 
 /** One request a line is made of, before anybody has judged it. */
 export type ShellRequest =
-  | { kind: "command"; span: TextSpan; command: ParsedCommand }
+  | {
+      kind: "command";
+      span: TextSpan;
+      command: ParsedCommand;
+      /**
+       * Set on a command runner that was OPENED (`sh -c`, `env`, `sudo`, `ssh`, `npx`): the runner itself,
+       * spanning the whole invocation, ahead of the requests for what it runs. `kept` when it was a
+       * request of its own before runners had a gate (`ssh` reaches the network whatever it runs).
+       * A set with a runner line judges it as the runner's gate; one without passes an unkept one by.
+       */
+      opened?: { kept: boolean };
+    }
   | {
       kind: "redirect";
       /** Operator and target together. */
@@ -682,10 +693,24 @@ function argv(words: Token[], dialect: CommandDialect, via: string[], depth: num
   const spec = Object.hasOwn(EMBEDDERS, programName(words[start]!.value)) ? EMBEDDERS[programName(words[start]!.value)] : undefined;
   if (spec !== undefined) {
     const opened = openEmbedder(spec, words, start, dialect, via, depth);
-    if (opened !== undefined) return opened;
+    if (opened !== undefined) return isCommandRunner(programName(words[start]!.value)) ? withRunner(opened, words, start, via) : opened;
   }
   const command = commandOf(words, start, via);
   return { requests: [{ kind: "command", span: command.span!, command }] };
+}
+
+/**
+ * An opened command runner's walk with the runner itself at its head, marked `opened` — the request a
+ * set's runner line judges as a gate. A kept embedder's own request is already there, and is marked.
+ */
+function withRunner(opened: Walk, words: Token[], start: number, via: string[]): Walk {
+  const span = { start: words[0]!.start, end: words[words.length - 1]!.end };
+  const head = opened.requests[0];
+  if (head?.kind === "command" && head.span.start === span.start && head.span.end === span.end && head.command.programIndex === start) {
+    return { ...opened, requests: [{ ...head, opened: { kept: true } }, ...opened.requests.slice(1)] };
+  }
+  const runner: ShellRequest = { kind: "command", span, command: { ...commandOf(words, start, via), span }, opened: { kept: false } };
+  return { ...opened, requests: [runner, ...opened.requests] };
 }
 
 /** One segment between separators: its redirects are requests, and what is left is an argv. */
@@ -788,7 +813,8 @@ function walk(text: string, map: readonly number[] | undefined, dialect: Command
 export function takeApart(line: string, dialect: CommandDialect = "posix", via: string[] = []): TakenApart {
   const walked = walk(line, undefined, dialect, via, 0);
   const requests = [...walked.requests].sort((a, b) => a.span.start - b.span.start || b.span.end - a.span.end);
-  const commands = requests.flatMap((r) => (r.kind === "command" ? [r.command] : []));
+  // An opened runner that was never a request of its own is the gate's, not a command rules match on.
+  const commands = requests.flatMap((r) => (r.kind === "command" && (r.opened === undefined || r.opened.kept) ? [r.command] : []));
   return {
     requests,
     commands,

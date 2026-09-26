@@ -10,6 +10,9 @@
  * harness in this repository, so logic that lives in a component is logic nothing asserts.
  */
 import {
+  COMMAND_RUNNERS,
+  RUNNER_GROUP_SUBJECT,
+  runnerSubject,
   holdsTool,
   MODE_WHEN_UNSET,
   SCRIPT_SUBJECT,
@@ -99,10 +102,55 @@ export function withoutSubject(permissionSet: PermissionSet, subject: string): P
   return edited(permissionSet, entries);
 }
 
-/** Add (or re-mode) a command subject or `script`. */
+/** Add (or re-mode) a command subject, a runner's line, or `script`. */
 export function withSubject(permissionSet: PermissionSet, subject: string, mode: PermissionSetMode): PermissionSet {
-  const kind = subject === SCRIPT_SUBJECT ? "script" : "command";
+  const read = subjectKindOf(subject);
+  const kind = read === "script" || read === "runner" ? read : "command";
   return edited(permissionSet, { ...permissionSet.entries, [subject]: { kind, mode } });
+}
+
+// --- Execution: the command runners' gate ------------------------------------------------------------
+
+/** One command runner as its row reads: its own line's mode, or none — then the group's answers for it. */
+export interface RunnerRow {
+  program: string;
+  hint: string;
+  /** The mode of its own `runner:<program>` line, when it has one. */
+  own?: PermissionSetMode;
+}
+
+/** Whether the permission set has any runner line — the group is drawn only then. */
+export function holdsRunners(permissionSet: PermissionSet): boolean {
+  return Object.values(permissionSet.entries).some((entry) => entry.kind === "runner");
+}
+
+/** The group's own line (`runner:*`), when written. */
+export function runnerGroupModeOf(permissionSet: PermissionSet): PermissionSetMode | undefined {
+  return Object.hasOwn(permissionSet.entries, RUNNER_GROUP_SUBJECT) ? permissionSet.entries[RUNNER_GROUP_SUBJECT]!.mode : undefined;
+}
+
+/** Every command runner, in the order they are listed, each with its own line's mode where it has one. */
+export function runnerRowsOf(permissionSet: PermissionSet): RunnerRow[] {
+  return COMMAND_RUNNERS.map((runner) => {
+    const line = runnerSubject(runner.program);
+    const own = Object.hasOwn(permissionSet.entries, line) ? permissionSet.entries[line]!.mode : undefined;
+    return { program: runner.program, hint: runner.hint, ...(own !== undefined ? { own } : {}) };
+  });
+}
+
+/** What a runner with no line of its own gets: the group's line, else — no gate — what any command gets. */
+export function runnerFallbackOf(permissionSet: PermissionSet): PermissionSetMode {
+  return runnerGroupModeOf(permissionSet) ?? shellFallbackOf(permissionSet);
+}
+
+/** Take every runner line out — the group's minus: runners are no longer gated at all. */
+export function withoutRunners(permissionSet: PermissionSet): PermissionSet {
+  return edited(permissionSet, Object.fromEntries(Object.entries(permissionSet.entries).filter(([, entry]) => entry.kind !== "runner")));
+}
+
+/** Gate the runners: the group's line, at `ask` — the Execution add-menu's "Command runners". */
+export function withRunners(permissionSet: PermissionSet): PermissionSet {
+  return holdsRunners(permissionSet) ? permissionSet : withSubject(permissionSet, RUNNER_GROUP_SUBJECT, MODE_WHEN_UNSET);
 }
 
 // --- Execution: the shell, `script`, and commands under their program ----------
@@ -181,6 +229,7 @@ export function commandSubjectOf(typed: string, program?: string): { subject: st
   if (kind === "command") return { subject };
   if (kind === "tool") return { problem: `'${subject}' is a tool — it has a line of its own above` };
   if (kind === "script") return { problem: "'script' has a line of its own above" };
+  if (kind === "runner") return { problem: `'${subject}' is a runner's line — it has a row under Command runners` };
   if (kind === "other") return { problem: "'other' is the last line of the card" };
   return { problem: `'${subject}' does not read as a command — a program is lowercase, like git or apt-get` };
 }
@@ -259,7 +308,7 @@ function sectionLines(permissionSet: PermissionSet, parked: Parked, category: To
   const lines: Array<[string, PermissionSetMode]> = toolsInCategory(category).map((spec) => [spec.name, toolModeOf(permissionSet, parked, spec.name)]);
   if (category !== "execution") return lines;
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    if (entry.kind === "command" || entry.kind === "script") lines.push([subject, entry.mode ?? MODE_WHEN_UNSET]);
+    if (entry.kind === "command" || entry.kind === "script" || entry.kind === "runner") lines.push([subject, entry.mode ?? MODE_WHEN_UNSET]);
   }
   return lines;
 }
@@ -304,5 +353,6 @@ export function sectionCountOf(permissionSet: PermissionSet, category: ToolCateg
   if (category === "mcp") return tools + Object.values(permissionSet.entries).filter((entry) => entry.kind === "mcp").length;
   if (category !== "execution") return tools;
   const script = Object.hasOwn(permissionSet.entries, SCRIPT_SUBJECT) ? 1 : 0;
-  return tools + script + commandGroupsOf(permissionSet).reduce((n, group) => n + Math.max(group.subs.length, 1), 0);
+  const runners = Object.values(permissionSet.entries).filter((entry) => entry.kind === "runner").length;
+  return tools + script + runners + commandGroupsOf(permissionSet).reduce((n, group) => n + Math.max(group.subs.length, 1), 0);
 }

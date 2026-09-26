@@ -6,6 +6,8 @@
   "write_file": "allow",
   "show_artifact": "allow",
   "bash": "allow",
+  "runner:*": "allow",
+  "script": "allow",
   "web_fetch": "allow",
   "web_search": "allow",
   "list_merge_requests": "allow",

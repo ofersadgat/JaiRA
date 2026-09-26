@@ -15070,6 +15070,18 @@ button.ts-source-link:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 /* A command GROUP's minus sits in the head, before the fold, and takes the program with it. */
+/* A command runner's row (decision 0007, amended 2026-09-26, later): its own line has a minus; a row
+   with none shows the group's mode, faded, and keeps the minus's room so the names line up. */
+.set-runner {
+  display: contents;
+}
+.cx-cats:not(.set-readonly) .set-runner-follows > .cx-tool {
+  padding-inline-start: 23px;
+}
+.set-runner-follows .cx-tool-mode {
+  opacity: 0.62;
+}
+
 .cx-cat.cx-sub > .cx-cat-head > .set-minus {
   margin-left: 0;
 }

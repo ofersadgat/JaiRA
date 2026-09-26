@@ -157,6 +157,15 @@ describe("what the shipped chat/read-only lets through", () => {
     }
   });
 
+  it("passes the command runners through and judges what they run; refuses sudo and its kind without looking", () => {
+    for (const line of [`bash -c "git status"`, "env CI=1 git log", "timeout 60 npx vitest run", `sh -c "npm run lint -w @app/cli"`]) {
+      expect(bash(line), line).toBe(true);
+    }
+    for (const line of ["sudo git status", "ssh host ls", "docker exec web cat /etc/hosts", `bash -c "rm -rf dist"`, "npm install", "cargo run", "just build"]) {
+      expect(bash(line), line).toBe(false);
+    }
+  });
+
   it("reads codex's argv as the line a shell would run", () => {
     expect(allows("shell", { command: ["bash", "-lc", "git status"] })).toBe(true);
     expect(allows("shell", { command: ["bash", "-lc", "git push"] })).toBe(false);

@@ -156,9 +156,11 @@ describe("PowerShell dialect", () => {
  * apart, and the span of each piece in the line as it was written.
  */
 describe("taking a line apart", () => {
+  /** A runner's own request, opened ahead of what it runs — the gate's, not a piece of the split. */
+  const runnerHead = (r: ReturnType<typeof takeApart>["requests"][number]): boolean => r.kind === "command" && r.opened !== undefined && !r.opened.kept;
   /** Every request as `kind «text»`, the text cut out of the ORIGINAL line by its span. */
   const pieces = (line: string, dialect: "posix" | "powershell" = "posix"): string[] =>
-    takeApart(line, dialect).requests.map((r) => `${r.kind} «${line.slice(r.span.start, r.span.end)}»`);
+    takeApart(line, dialect).requests.filter((r) => !runnerHead(r)).map((r) => `${r.kind} «${line.slice(r.span.start, r.span.end)}»`);
 
   it.each<[string, string[]]>([
     ["rm foo.txt && git commit -m wip", ["command «rm foo.txt»", "command «git commit -m wip»"]],
@@ -184,7 +186,7 @@ describe("taking a line apart", () => {
   });
 
   it("opens every embedder on the list, recursively, and keeps the spans in the ORIGINAL line", () => {
-    const opened = (line: string): string[] => takeApart(line).requests.flatMap((r) => (r.kind === "command" ? [`${line.slice(r.span.start, r.span.end)} via ${(r.command.via ?? []).join(">")}`] : []));
+    const opened = (line: string): string[] => takeApart(line).requests.flatMap((r) => (r.kind === "command" && !runnerHead(r) ? [`${line.slice(r.span.start, r.span.end)} via ${(r.command.via ?? []).join(">")}`] : []));
     expect(opened(`bash -c "cd /tmp && rm -rf build; git commit -m 'x y'"`)).toEqual(["cd /tmp via bash", "rm -rf build via bash", "git commit -m 'x y' via bash"]);
     expect(opened(`sh -c "bash -lc 'git push'"`)).toEqual(["git push via sh>bash"]);
     expect(opened("sudo -u bob timeout 5 nice -n 3 xargs -n 1 rm")).toEqual(["rm via sudo>timeout>nice>xargs"]);
@@ -201,6 +203,19 @@ describe("taking a line apart", () => {
     expect(opened("find . -name '*.tmp' -exec rm {} \\; -ok mv {} /tmp +")).toEqual(["find . -name '*.tmp' -exec rm {} \\; -ok mv {} /tmp + via ", "rm {} via find", "mv {} /tmp via find"]);
     expect(opened("git -c alias.x='!rm -rf /' x")).toEqual(["git -c alias.x='!rm -rf /' x via ", "rm -rf / via git"]);
     expect(opened("git submodule foreach --recursive 'git reset --hard'")).toEqual(["git submodule foreach --recursive 'git reset --hard' via ", "git reset --hard via git"]);
+  });
+
+  it("puts an opened command runner ahead of what it runs, marked — kept where it was a request of its own already", () => {
+    const heads = (line: string): string[] =>
+      takeApart(line).requests.flatMap((r) => (r.kind === "command" && r.opened !== undefined ? [`${line.slice(r.span.start, r.span.end)} ${r.opened.kept ? "kept" : "opened"}`] : []));
+    expect(heads(`sh -c "bash -lc 'git push'"`)).toEqual([`sh -c "bash -lc 'git push'" opened`, "bash -lc 'git push' opened"]);
+    expect(heads("sudo -u bob rm x")).toEqual(["sudo -u bob rm x opened"]);
+    expect(heads("ssh host ls")).toEqual(["ssh host ls kept"]);
+    // Not runners: what find and git embed is opened as before, with no gate ahead of it.
+    expect(heads("find . -exec rm {} +")).toEqual([]);
+    expect(heads("git submodule foreach 'git status'")).toEqual([]);
+    // The commands rules match on are what they were.
+    expect(takeApart("sudo rm x").commands.map((c) => c.program)).toEqual(["rm"]);
   });
 
   it("leaves an embedder that hides nothing, and one it does not know, as ordinary commands", () => {
@@ -226,7 +241,7 @@ describe("taking a line apart", () => {
     const line = `git status; bash -c "echo 'unterminated"`;
     const result = takeApart(line);
     expect(result).toMatchObject({ unparsed: true, reason: "unterminated quote" });
-    expect(result.requests.map((r) => `${r.kind} «${line.slice(r.span.start, r.span.end)}»`)).toEqual(["command «git status»", "unparsed «echo 'unterminated»"]);
+    expect(result.requests.filter((r) => !runnerHead(r)).map((r) => `${r.kind} «${line.slice(r.span.start, r.span.end)}»`)).toEqual(["command «git status»", "unparsed «echo 'unterminated»"]);
     for (const bad of ["cat <<EOF\nno end", "echo $(unclosed", "echo > ", "case $x in a) ls;; esac"]) {
       expect(takeApart(bad).unparsed, bad).toBe(true);
     }

@@ -23,6 +23,8 @@ import {
   holdsTool,
   MODE_WHEN_UNSET,
   OTHER_SUBJECT,
+  RUNNER_GROUP_SUBJECT,
+  runnerSubject,
   SCRIPT_SUBJECT,
   SHELL_TOOL,
   TOOL_CATEGORIES,
@@ -37,6 +39,7 @@ import {
   addableTools,
   commandGroupsOf,
   commandSubjectOf,
+  holdsRunners,
   sectionCountOf,
   suggestedPrograms,
   suggestedSubcommands,
@@ -45,18 +48,25 @@ import {
   withCommand,
   withOther,
   withoutProgram,
+  withoutRunners,
   withoutSubject,
+  withRunners,
   withSubject,
   withSubjectMode,
   withToolHeld,
   withToolImplementation,
 } from "./composerPermissionSet";
-import { AddMenu, CategoryRow, CommandGroupRow, ModePicker, SCRIPT_HINT, SHELL_HINT, SubjectRow, TOOL_ICONS, ToolRow, type AddOption } from "./permissionSetRows";
+import { AddMenu, CategoryRow, CommandGroupRow, ModePicker, RUNNERS_HINT, RunnerGroupRow, SCRIPT_HINT, SHELL_HINT, SubjectRow, TOOL_ICONS, ToolRow, type AddOption } from "./permissionSetRows";
 
 const NO_PARKED = {};
 
 /** The key a program's fold is kept under, beside the section ids. */
 export const programFold = (program: string): string => `program:${program}`;
+
+/** The key the command runners' group fold is kept under. */
+export const RUNNERS_FOLD = "runners";
+
+const RUNNERS_OPTION: AddOption = { subject: RUNNER_GROUP_SUBJECT, label: "Command runners", hint: RUNNERS_HINT, icon: "terminal" };
 
 /** What a tool's row in an add-menu says: its label, its sentence, its glyph. */
 function toolOption(name: string): AddOption {
@@ -142,9 +152,10 @@ export function PermissionSetCard({ permissionSet, tools, onChange, readOnly, fo
         const held = inCategory.filter((tool) => holdsTool(permissionSet, tool.name));
         const groups = category.id === "execution" ? commandGroupsOf(permissionSet) : [];
         const script = category.id === "execution" && Object.hasOwn(permissionSet.entries, SCRIPT_SUBJECT);
+        const runners = category.id === "execution" && holdsRunners(permissionSet);
         // Read-only, a section that holds nothing has nothing under it to fold over: what ships says
         // nothing about Web, and a chevron that opens onto an empty box says less.
-        if (locked && held.length === 0 && groups.length === 0 && !script) return null;
+        if (locked && held.length === 0 && groups.length === 0 && !script && !runners) return null;
         return (
           <CategoryRow
             key={category.id}
@@ -214,6 +225,18 @@ export function PermissionSetCard({ permissionSet, tools, onChange, readOnly, fo
                 )}
               </CommandGroupRow>
             ))}
+            {runners ? (
+              <RunnerGroupRow
+                permissionSet={permissionSet}
+                open={open.has(RUNNERS_FOLD)}
+                onOpen={() => toggle(RUNNERS_FOLD)}
+                readOnly={locked}
+                onRemove={locked ? undefined : () => write(withoutRunners(permissionSet))}
+                onGroupMode={(next) => write(withSubject(permissionSet, RUNNER_GROUP_SUBJECT, next))}
+                onRunnerMode={(program, next) => write(withSubject(permissionSet, runnerSubject(program), next))}
+                onRemoveRunner={(program) => write(withoutSubject(permissionSet, runnerSubject(program)))}
+              />
+            ) : null}
             {script ? (
               <SubjectRow
                 line
@@ -233,6 +256,7 @@ export function PermissionSetCard({ permissionSet, tools, onChange, readOnly, fo
                 options={[
                   ...addableTools(permissionSet, category.id, offered).map(toolOption),
                   ...(addableScript(permissionSet) ? [SCRIPT_OPTION] : []),
+                  ...(holdsRunners(permissionSet) ? [] : [RUNNERS_OPTION]),
                   ...suggestedPrograms(permissionSet).map((program) => ({
                     subject: program,
                     label: program,
@@ -243,7 +267,10 @@ export function PermissionSetCard({ permissionSet, tools, onChange, readOnly, fo
                 ]}
                 onPick={(subject) => {
                   if (subject === SCRIPT_SUBJECT) write(withSubject(permissionSet, SCRIPT_SUBJECT, MODE_WHEN_UNSET));
-                  else if (TOOL_SPEC_BY_NAME.has(subject)) write(withToolHeld(permissionSet, NO_PARKED, subject, true));
+                  else if (subject === RUNNER_GROUP_SUBJECT) {
+                    write(withRunners(permissionSet));
+                    toggle(RUNNERS_FOLD, true);
+                  } else if (TOOL_SPEC_BY_NAME.has(subject)) write(withToolHeld(permissionSet, NO_PARKED, subject, true));
                   else {
                     write(withCommand(permissionSet, subject));
                     toggle(programFold(subject), true);

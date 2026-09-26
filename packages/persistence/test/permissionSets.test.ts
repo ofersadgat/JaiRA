@@ -22,8 +22,8 @@ import { workflowLoadOptions } from "../src/workflowRefs";
 
 /** The shipped `chat/read-only`, as its file says. */
 const SHIPPED_READ_ONLY = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as Record<string, string>;
-/** A map's command subjects (`git status`, `vitest`, `npm test -u`). */
-const commandLinesOf = (map: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(map).filter(([subject]) => subjectKindOf(subject) === "command"));
+/** A map's shell lines besides the shell's own: commands (`git status`, `vitest -u`), runners (`runner:*`) and `script`. */
+const commandLinesOf = (map: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(map).filter(([subject]) => ["command", "runner", "script"].includes(subjectKindOf(subject))));
 
 let dir: string;
 let project: Project;

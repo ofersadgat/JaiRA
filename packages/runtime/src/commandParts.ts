@@ -388,7 +388,7 @@ const flagMatches = (named: string, given: string): boolean => {
 };
 
 /** The most specific command entry that matches: program, then its subcommand words as a prefix, then every flag it names. */
-function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
+export function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
   const operands = operandsOf(command).filter((w) => w.dynamic !== true);
   // `git -C dir commit`: the value `-C` takes is not the subcommand.
   const subs = command.subcommand !== undefined ? operands.slice(operands.findIndex((w) => w.value.toLowerCase() === command.subcommand)) : [];
@@ -642,4 +642,73 @@ function yarnScriptOf(runner: PackageScriptRunner, words: readonly string[]): Pa
     return withPrefix({ ...inner, workspaces: picks, ifPresent: true });
   }
   return withPrefix(managerScriptOf(runner, words.slice(at)));
+}
+
+// --- make's targets ----------------------------------------------------------------------------------
+
+/** `make` asked to build targets: where, from which makefile, with what — what its dry run is asked. */
+export interface MakeCall {
+  /** Where it runs, as written (`-C sub`, several joined in order), when it was told. */
+  dir?: string;
+  /** The makefile it reads, as written (`-f build.mk`), when it was told. */
+  makefile?: string;
+  /** Its assignments (`V=1`) and targets, in order — passed to the dry run as they were written. */
+  args: string[];
+  /** The line is a dry run already (`make -n`): it prints what it would run, and runs nothing it prints. */
+  dryRun: boolean;
+}
+
+/** Programs that are make. */
+export const MAKE_PROGRAMS: readonly string[] = ["make", "gmake"];
+
+/** Flags that change how make works but not what a recipe runs; those taking a value say so. */
+const MAKE_QUIET = ["-s", "--silent", "--quiet", "-k", "--keep-going", "-S", "--no-keep-going", "--stop", "-w", "--print-directory", "--no-print-directory", "-r", "--no-builtin-rules", "-R", "--no-builtin-variables", "-B", "--always-make", "-i", "--ignore-errors", "-O", "--output-sync"];
+const MAKE_DRY = ["-n", "--just-print", "--dry-run", "--recon"];
+/** Variables that change the shell a printed line would run in, or make itself. */
+const MAKE_SHELL_VARIABLES = ["SHELL", ".SHELLFLAGS", "MAKE", "MAKEFLAGS", "MFLAGS", "MAKEFILES", "MAKESHELL"];
+
+/**
+ * The make call a line is, or `undefined` when it cannot be read off the line: a flag this does not
+ * model (`-t` touches the targets, `--eval` adds a rule, `-q`, `-p`), two makefiles, or an assignment
+ * to the shell a printed line would run in (`SHELL=…`).
+ */
+export function makeCallOf(command: ParsedCommand): MakeCall | undefined {
+  if (!MAKE_PROGRAMS.includes(command.program) || command.dynamic === true) return undefined;
+  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  const args: string[] = [];
+  const dirs: string[] = [];
+  let makefile: string | undefined;
+  let dryRun = false;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    if (!isFlag(word)) {
+      const assigned = /^([A-Za-z_.][A-Za-z0-9_.]*)\s*[:?+]?=/.exec(word);
+      if (assigned !== null && MAKE_SHELL_VARIABLES.includes(assigned[1]!)) return undefined;
+      args.push(word);
+      continue;
+    }
+    const eq = word.startsWith("--") ? word.indexOf("=") : -1;
+    const flag = eq > 0 ? word.slice(0, eq) : word;
+    const inline = eq > 0 ? word.slice(eq + 1) : undefined;
+    const value = (short: string): string | undefined => {
+      if (inline !== undefined) return inline;
+      if (word.length > short.length && word.startsWith(short) && !word.startsWith("--")) return word.slice(short.length);
+      const next = words[++i];
+      return next === undefined || isFlag(next) ? undefined : next;
+    };
+    if (flag === "-C" || flag === "--directory" || (word.startsWith("-C") && !word.startsWith("--"))) {
+      const v = value("-C");
+      if (v === undefined) return undefined;
+      dirs.push(v);
+    } else if (flag === "-f" || flag === "--file" || flag === "--makefile" || (word.startsWith("-f") && !word.startsWith("--"))) {
+      const v = value("-f");
+      if (v === undefined || makefile !== undefined) return undefined;
+      makefile = v;
+    } else if (flag === "-j" || flag === "--jobs" || /^-j\d+$/.test(word)) {
+      // `-j 4`: the count is the next word when it is one.
+      if (inline === undefined && word === "-j" && /^\d+$/.test(words[i + 1] ?? "")) i++;
+    } else if (MAKE_DRY.includes(flag)) dryRun = true;
+    else if (!MAKE_QUIET.includes(flag)) return undefined;
+  }
+  return { ...(dirs.length > 0 ? { dir: dirs.join("/") } : {}), ...(makefile !== undefined ? { makefile } : {}), args, dryRun };
 }

@@ -190,7 +190,7 @@ describe("the Tools card", () => {
     expect(html).toContain("add a git subcommand");
     expect(html).toMatch(/class="cx-cat cx-sub"[^]*?<span class="mono">npm<\/span>[^]*?>test</);
     expect(html).not.toContain("add a npm subcommand");
-    expect(html).toContain("running a file — ./x.sh, npm run, python x.py, make");
+    expect(html).toContain("running a file — ./x.sh, bash x.sh, python x.py — and what a runner runs that could not be read");
     expect(html).toContain("add a command");
     // Order: the shell, the groups, script, then the adding line.
     const at = (text: string): number => html.indexOf(text);

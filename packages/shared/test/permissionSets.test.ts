@@ -5,6 +5,7 @@
 import { Ajv } from "ajv";
 import { describe, expect, it } from "vitest";
 import { operationSchema, toolsSchema } from "../src/schemas";
+import { runnerModeOf } from "../src/commandRunners";
 import {
   declOfPermissionSet,
   heldTools,
@@ -573,5 +574,26 @@ describe("the operation schema", () => {
 
   it("is what the operation and environment blocks hold under `tools`", () => {
     expect((operationSchema().properties as Record<string, unknown>)["tools"]).toEqual(toolsSchema());
+  });
+});
+
+describe("command runner lines (decision 0007, amended 2026-09-26, later)", () => {
+  it("reads runner:* and runner:<program> as the runners' gate, and drops a runner it does not know", () => {
+    const { permissionSet, issues } = parsePermissionSet({ bash: "deny", "runner:*": "allow", "runner:sudo": "deny", "runner:frobnicate": "allow", other: "deny" });
+    expect(permissionSet.entries["runner:*"]).toEqual({ kind: "runner", mode: "allow" });
+    expect(permissionSet.entries["runner:sudo"]).toEqual({ kind: "runner", mode: "deny" });
+    expect(permissionSet.entries["runner:frobnicate"]).toBeUndefined();
+    expect(issues.map((issue) => issue.path)).toEqual(["runner:frobnicate"]);
+    expect(runnerModeOf(permissionSet, "sudo")).toEqual({ mode: "deny", line: "runner:sudo" });
+    expect(runnerModeOf(permissionSet, "npm")).toEqual({ mode: "allow", line: "runner:*" });
+  });
+
+  it("offers the shell for a runner line that lets runners through, and carries the lines lowered and back", () => {
+    const { permissionSet } = parsePermissionSet({ read_file: "allow", bash: "deny", "runner:*": "allow", other: "deny" });
+    expect(shellWithheld(permissionSet)).toBe(false);
+    expect(shellWithheld(parsePermissionSet({ read_file: "allow", bash: "deny", "runner:*": "deny", other: "deny" }).permissionSet)).toBe(true);
+    const lowered = permissionsOfPermissionSet(permissionSet);
+    expect(lowered.subjects).toMatchObject({ bash: "deny", "runner:*": "allow" });
+    expect(permissionSetOfEnvironment(offeredTools(permissionSet), lowered).entries["runner:*"]).toEqual({ kind: "runner", mode: "allow" });
   });
 });

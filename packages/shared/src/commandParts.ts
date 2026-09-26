@@ -37,7 +37,13 @@ export type CommandPartKind =
    * one "for this run" and one "add to the permission set" serve both. Its line IS the tool's name, and
    * its widths are the tool and its server.
    */
-  | "mcp";
+  | "mcp"
+  /**
+   * A command runner's GATE (`runner:npm`, `runner:*` — `commandRunners.ts`): whether the runner may run
+   * at all, and so whether what it runs is looked at. The runner's whole invocation is its span; what
+   * it runs is judged in parts of its own beside it.
+   */
+  | "runner";
 
 /**
  * The answers a part can have. A line runs only if every part is `allowed`.

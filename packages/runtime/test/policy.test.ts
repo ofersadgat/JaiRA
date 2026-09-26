@@ -572,3 +572,66 @@ describe("a package script, judged by what it runs", () => {
     expect(decideCommand({}, "npm test", "posix", { permissionSet, root: "/repo" }).parts.parts.map((p) => p.subject)).toEqual(["script"]);
   });
 });
+
+/**
+ * A command runner's gate (decision 0007, amended 2026-09-26, later): `runner:<program>` or `runner:*`
+ * says whether a runner may run and so whether what it runs is looked at; what it runs is judged on
+ * its own lines; a command line naming the program decides it outright; a set with no runner line has
+ * no gate.
+ */
+describe("a command runner's gate", () => {
+  const set = (lines: Record<string, unknown>) => shellPermissionSetOf(parsePermissionSet({ read_file: "allow", bash: "deny", "git status": "allow", other: "deny", ...lines }).permissionSet)!;
+  const GATED = set({ "runner:*": "allow", "runner:sudo": "deny", "runner:npm": "allow", "npm run build": "allow", script: "deny" });
+  const repo = { dir: "/repo", scripts: { lint: "git status", build: "rm -rf dist" } };
+  const makefile = { path: "/repo/Makefile", text: "check:\n\tgit status\n" };
+  const packages = {
+    at: (dir: string) => (dir === "/repo" ? repo : undefined),
+    workspacesOf: () => [],
+    makefileAt: () => makefile,
+    makeDryRun: (_program: string, _dir: string, args: readonly string[]) => (args.includes("check") ? "git status\nmake: Nothing more to do.\n" : undefined),
+  };
+  /** Each part as `«text» subject verdict by entry`. */
+  const judged = (line: string, permissionSet = GATED, grants?: CommandGrants) => {
+    const decision = decideCommand({}, line, "posix", { permissionSet, root: "/repo", packages, ...(grants !== undefined ? { grants } : {}) });
+    return { action: decision.action, parts: decision.parts.parts.map((p) => `«${p.text}» ${p.subject} ${p.verdict} by ${p.decidedBy.entry ?? p.decidedBy.source}`) };
+  };
+
+  it("lets a runner through and judges what it runs on its own lines", () => {
+    expect(judged("npm run lint")).toEqual({ action: "allow", parts: ["«npm run lint» runner:npm allowed by runner:npm", "«git status» git status allowed by git status"] });
+    expect(judged(`bash -c "git status"`)).toEqual({ action: "allow", parts: [`«bash -c "git status"» runner:bash allowed by runner:*`, "«git status» git status allowed by git status"] });
+    // Nothing inside: the command itself, which no line names.
+    expect(judged("npm install")).toEqual({ action: "deny", parts: ["«npm install» runner:npm allowed by runner:npm", "«npm install» npm install denied by bash"] });
+  });
+
+  it("refuses a runner its gate denies without looking inside", () => {
+    expect(judged("sudo git status")).toEqual({ action: "deny", parts: ["«sudo git status» runner:sudo denied by runner:sudo"] });
+  });
+
+  it("lets a command line naming the program decide it outright, nothing inside read", () => {
+    expect(judged("npm run build")).toEqual({ action: "allow", parts: ["«npm run build» script allowed by npm run build"] });
+  });
+
+  it("asks about a runner its gate asks about, and remembers the answer by the runner's widths", () => {
+    const asking = set({ "runner:*": "ask" });
+    expect(judged("npm run lint", asking)).toEqual({ action: "require_approval", parts: ["«npm run lint» runner:npm asks by runner:*", "«git status» git status allowed by git status"] });
+    const grants = new CommandGrants();
+    grants.remember("runner:npm", "allow");
+    expect(judged("npm run lint", asking, grants).action).toBe("allow");
+  });
+
+  it("reads make's targets off its dry run, and a makefile whose reading runs code not at all", () => {
+    expect(judged("make check")).toEqual({ action: "allow", parts: ["«make check» runner:make allowed by runner:*", "«git status» git status allowed by git status"] });
+    // A dry run asked for runs nothing it prints.
+    expect(judged("make -n check")).toEqual({ action: "allow", parts: ["«make -n check» runner:make allowed by runner:*"] });
+    // A target the dry run cannot read is script.
+    expect(judged("make nothing").parts).toEqual(["«make nothing» runner:make allowed by runner:*", "«make nothing» script denied by script"]);
+    const saved = makefile.text;
+    makefile.text = "VERSION := $(shell git describe)\ncheck:\n\tgit status\n";
+    expect(judged("make check").parts).toEqual(["«make check» runner:make allowed by runner:*", "«make check» script denied by script"]);
+    makefile.text = saved;
+  });
+
+  it("has no gate where the set has no runner line: runners are opened and passed by, as before", () => {
+    expect(judged("sudo git status", set({}))).toEqual({ action: "allow", parts: ["«git status» git status allowed by git status"] });
+  });
+});

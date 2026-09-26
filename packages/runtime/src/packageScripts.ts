@@ -8,13 +8,14 @@
  * the workspaces a line picks — and the lines each one runs. Reading is behind {@link PackageReader}:
  * the file system in the app, a table in a test.
  */
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import picomatch from "picomatch";
 import { globSync } from "tinyglobby";
 import { parse as parseYaml } from "yaml";
 import { absolutize, isAbsolutePath } from "@jaira/shared";
-import type { PackageScriptCall } from "./commandParts";
+import type { MakeCall, PackageScriptCall } from "./commandParts";
 
 /** A `package.json`, as far as running its scripts goes. */
 export interface PackageInfo {
@@ -33,6 +34,10 @@ export interface PackageReader {
   at(dir: string): PackageInfo | undefined;
   /** The packages a workspace root's patterns name. */
   workspacesOf(root: PackageInfo): PackageInfo[];
+  /** The makefile make reads in `dir` — the one named, else `GNUmakefile`, `makefile`, `Makefile` — and its text. */
+  makefileAt?(dir: string, named?: string): { path: string; text: string } | undefined;
+  /** What `<program> -n <args>` prints in `dir`, or `undefined` when it cannot be run or fails. Asked only of a makefile whose reading runs nothing. */
+  makeDryRun?(program: string, dir: string, args: readonly string[]): string | undefined;
 }
 
 /** One package a script runs in, and the lines it runs there, in order: `pre`, the script, `post`. */
@@ -133,6 +138,69 @@ export function scriptRunsOf(reader: PackageReader, call: PackageScriptCall, her
   return runs;
 }
 
+
+// --- make's targets ----------------------------------------------------------------------------------
+
+/**
+ * Whether reading this makefile runs code — so that its dry run would too. GNU make's `-n` still
+ * expands `$(shell …)` and `!=` as it reads, runs `+` recipe lines and `$(MAKE)` ones (a recursive
+ * make), and remakes an `include`d makefile for real; `$(file …)` writes, `$(guile …)` and `$(eval …)`
+ * can do anything, and a `SHELL` of its own changes what a printed line would run in. Any of them,
+ * and the makefile is not dry-run: its targets are `script`.
+ */
+export function makefileRunsCodeWhenRead(text: string): boolean {
+  const lines = text
+    .replace(/\\\r?\n/g, " ")
+    .split(/\r?\n/)
+    .map((line) => (line.startsWith("\t") ? line : line.replace(/(^|[^\\])#.*$/, "$1")));
+  return lines.some(
+    (line) =>
+      /\$[({]\s*(shell|file|guile|eval)\b/.test(line) ||
+      /\$[({]MAKE[)}]/.test(line) ||
+      (!line.startsWith("\t") && /!=/.test(line)) ||
+      /^\t[\s@-]*\+/.test(line) ||
+      /^\s*-?(include|sinclude)(\s|$)/.test(line) ||
+      /^\s*(override\s+)?(export\s+)?(SHELL|\.SHELLFLAGS|MAKESHELL)\s*[:?+!]?=/.test(line),
+  );
+}
+
+/**
+ * A dry run's output as the recipe lines it would run: make's own messages (`make: Nothing to be
+ * done for 'all'.`) left out, a line continued with `\` joined to the next.
+ */
+export function makeDryRunLines(output: string): string[] {
+  const out: string[] = [];
+  let pending = "";
+  for (const raw of output.split(/\r?\n/)) {
+    if (pending === "" && /^g?make(\[\d+\])?: /.test(raw)) continue;
+    if (raw.endsWith("\\")) {
+      pending += `${raw.slice(0, -1)} `;
+      continue;
+    }
+    const line = `${pending}${raw}`.trim();
+    pending = "";
+    if (line.length > 0) out.push(line);
+  }
+  if (pending.trim().length > 0) out.push(pending.trim());
+  return out;
+}
+
+/**
+ * The lines `make` would run for a call, read off its dry run, in the directory it runs in — or
+ * `undefined` when that cannot be read safely: no makefile, one whose reading runs code
+ * ({@link makefileRunsCodeWhenRead}), a reader that cannot dry-run, or a dry run that fails. A line
+ * that is itself a dry run (`make -n`) runs nothing it prints: no lines, once the makefile is safe to read.
+ */
+export function makeRunsOf(reader: PackageReader, program: string, call: MakeCall, here: string): ScriptRun[] | undefined {
+  if (reader.makefileAt === undefined || reader.makeDryRun === undefined) return undefined;
+  const dir = call.dir !== undefined ? resolveFrom(here, call.dir) : here;
+  const makefile = reader.makefileAt(dir, call.makefile);
+  if (makefile === undefined || makefileRunsCodeWhenRead(makefile.text)) return undefined;
+  if (call.dryRun) return [];
+  const output = reader.makeDryRun(program, dir, [...(call.makefile !== undefined ? ["-f", call.makefile] : []), ...call.args]);
+  return output === undefined ? undefined : [{ dir, lines: makeDryRunLines(output) }];
+}
+
 // --- the file system ---------------------------------------------------------------------------------
 
 /** A file's parsed contents, or `undefined` when it is missing or does not parse. */
@@ -176,8 +244,52 @@ export function expandWorkspaces(root: string, patterns: readonly string[]): str
   return [...new Set(files.map((file) => dirname(file)))].sort();
 }
 
-/** The packages on disk. */
+const MAKEFILES = ["GNUmakefile", "makefile", "Makefile"];
+
+function makefileAt(dir: string, named?: string): { path: string; text: string } | undefined {
+  for (const name of named !== undefined ? [named] : MAKEFILES) {
+    const path = isAbsolutePath(name) ? name : join(dir, name);
+    try {
+      return { path, text: readFileSync(path, "utf8") };
+    } catch {
+      // Not this one.
+    }
+  }
+  return undefined;
+}
+
+/** How long a dry run may take before its target is `script`: it runs while a line is being judged. */
+const DRY_RUN_TIMEOUT_MS = 5000;
+/** Dry runs by program, directory, arguments and every makefile's modification time — asked again only when one changed. */
+const DRY_RUNS = new Map<string, string | undefined>();
+
+function makeDryRun(program: string, dir: string, args: readonly string[]): string | undefined {
+  const stamp = MAKEFILES.map((name) => {
+    try {
+      return statSync(join(dir, name)).mtimeMs;
+    } catch {
+      return 0;
+    }
+  }).join(",");
+  const key = JSON.stringify([program, dir, args, stamp]);
+  if (DRY_RUNS.has(key)) return DRY_RUNS.get(key);
+  let output: string | undefined;
+  try {
+    // The environment's own make settings are left out: `MAKEFLAGS=-t` would make the dry run touch.
+    const env = { ...process.env, MAKEFLAGS: "", MFLAGS: "", MAKEFILES: "", GNUMAKEFLAGS: "" };
+    output = execFileSync(program, ["-n", "--no-print-directory", ...args], { cwd: dir, env, encoding: "utf8", timeout: DRY_RUN_TIMEOUT_MS, maxBuffer: 1 << 20, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+  } catch {
+    output = undefined;
+  }
+  if (DRY_RUNS.size > 200) DRY_RUNS.clear();
+  DRY_RUNS.set(key, output);
+  return output;
+}
+
+/** The packages on disk, and make's dry run. */
 export const filePackages: PackageReader = {
+  makefileAt,
+  makeDryRun,
   at: readPackage,
   workspacesOf: (root) => expandWorkspaces(root.dir, root.workspaces ?? []).flatMap((dir) => readPackage(dir) ?? []),
 };

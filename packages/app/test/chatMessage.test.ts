@@ -141,10 +141,11 @@ describe("the settings a message would run under", () => {
     // The same map as the lowered fields a state's declaration arrives as is the same permission set: read FROM the shipped file rather
     // than derived, because the file is what the match is against and the modes it gives the workflow
     // tools (decision 0005 step 6) are its own — `READ_ONLY_PRESET_TOOLS` predates them.
-    // Its command lines (`git status`, `npm test`) arrive where lowering writes them, in `subjects`.
+    // Its command, runner and script lines arrive where lowering writes them, in `subjects`.
     const readOnly = shipped("chat/read-only") as Record<string, PermissionMode>;
-    const subjects = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subject === "bash" || subjectKindOf(subject) === "command"));
-    const toolLines = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subjectKindOf(subject) !== "command"));
+    const shellLine = (subject: string): boolean => subject === "bash" || ["command", "script", "runner"].includes(subjectKindOf(subject));
+    const subjects = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => shellLine(subject)));
+    const toolLines = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subject === "bash" || !shellLine(subject)));
     expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: toolLines, other: "deny", subjects } })).toBe("read-only");
     // A map naming three of the seventeen is not that permission set — it is a map with the rest unticked.
     expect(posture({ tools: ["read_file", "bash", "write_file"], permissions: { tools: toolLines, other: "deny", subjects } })).toBe("custom");

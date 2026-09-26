@@ -37,9 +37,9 @@
  */
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { describeCommand, takeApart, type CommandDialect, type ParsedCommand } from "./command";
-import { SHELL_SUBJECT, classifyRequest, lookUp, packageScriptOf, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
+import { SHELL_SUBJECT, classifyRequest, lookUp, makeCallOf, matchCommandEntry, packageScriptOf, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
-import { filePackages, scriptRunsOf, shellWord, type PackageReader, type ScriptRun } from "./packageScripts";
+import { filePackages, makeRunsOf, scriptRunsOf, shellWord, type PackageReader, type ScriptRun } from "./packageScripts";
 import {
   DEFAULT_ASK_ABOVE_BYTES,
   INLINE_PERMISSION_SET,
@@ -59,6 +59,9 @@ import {
   modeFunction,
   modeWord,
   permissionSetFunctions,
+  isCommandRunner,
+  runnerSubject,
+  RUNNER_GROUP_SUBJECT,
   shellSubjects,
   toolModes,
   RESERVED_MCP_SERVERS,
@@ -334,8 +337,68 @@ const MAX_SCRIPT_DEPTH = 4;
 function scriptRunsFor(part: ClassifiedPart, here: string | undefined, options: DecideCommandOptions): ScriptRun[] | undefined {
   if (options.packages === undefined || here === undefined || part.command === undefined || part.unmodelled !== undefined) return undefined;
   if ((options.scriptDepth ?? 0) >= MAX_SCRIPT_DEPTH) return undefined;
+  // A command line naming it (`npm run build`, `npm`) decides it outright; its script is not read.
+  if (options.permissionSet !== undefined && matchCommandEntry(options.permissionSet, part.command) !== undefined) return undefined;
+  const make = makeCallOf(part.command);
+  if (make !== undefined) return makeRunsOf(options.packages, part.command.program, make, here);
   const call = packageScriptOf(part.command);
   return call === undefined ? undefined : scriptRunsOf(options.packages, call, here);
+}
+
+/** Whether `span` lies within `outer`, and is not `outer` itself. */
+const inside = (span: TextSpan, outer: TextSpan): boolean => span.start >= outer.start && span.end <= outer.end && !(span.start === outer.start && span.end === outer.end);
+
+/**
+ * The gate a part's command runner answers to (`commandRunners.ts`): `"named"` when a command line
+ * names the program (`npm`, `npm run build`), which decides it outright; its own `runner:` line or the
+ * group's; `undefined` when it is no runner, or the set has no runner line at all — then nothing gates it.
+ */
+function runnerGateFor(part: ClassifiedPart, options: DecideCommandOptions): "named" | { mode: PermissionSetMode; line: string } | undefined {
+  const set = options.permissionSet;
+  const command = part.command;
+  if (set === undefined || command === undefined || part.kind === "unparsed" || !isCommandRunner(command.program)) return undefined;
+  const own = (subject: string): PermissionSetMode | undefined => (Object.hasOwn(set.entries, subject) ? set.entries[subject] : undefined);
+  const line = own(runnerSubject(command.program)) !== undefined ? runnerSubject(command.program) : own(RUNNER_GROUP_SUBJECT) !== undefined ? RUNNER_GROUP_SUBJECT : undefined;
+  if (line === undefined) return undefined;
+  if (part.unmodelled === undefined && matchCommandEntry(set, command) !== undefined) return "named";
+  return { mode: own(line)!, line };
+}
+
+/** A runner's gate as a part of the line: its whole invocation, its program underlined, answered by its line — or by what was remembered for the run. */
+function runnerPart(part: ClassifiedPart, gate: { mode: PermissionSetMode; line: string }, options: DecideCommandOptions, line: string): CommandPart {
+  const command = part.command!;
+  const subject = runnerSubject(command.program);
+  const widths = [subject, RUNNER_GROUP_SUBJECT];
+  const reference = modeFunction(gate.mode);
+  let verdict = verdictOfMode(gate.mode);
+  let decidedBy: CommandPart["decidedBy"] = {
+    source: "permissionSet",
+    entry: gate.line,
+    ...(reference !== undefined ? { function: reference } : {}),
+    reason: reference !== undefined ? `the permission set's '${gate.line}' is decided by the function '${reference}'` : `the permission set's '${gate.line}' is ${modeWord(gate.mode)}`,
+  };
+  if (verdict === "asks") {
+    const remembered = options.grants?.answerFor(widths);
+    if (remembered !== undefined) {
+      verdict = remembered.decision === "allow" ? "allowed" : "denied";
+      decidedBy = { source: "remembered", entry: remembered.width, reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run` };
+    }
+  }
+  const program = command.words?.[command.programIndex ?? 0];
+  return {
+    span: part.span,
+    matched: program !== undefined ? [{ ...program.span }] : part.matched,
+    text: line.slice(part.span.start, part.span.end),
+    kind: "runner",
+    subject,
+    ...(verdict === "function"
+      ? { command: { program: command.program, ...(command.subcommand !== undefined ? { subcommand: command.subcommand } : {}), args: [...command.args], flags: [...command.flags] } }
+      : {}),
+    verdict,
+    decidedBy,
+    widths,
+    ...(part.via !== undefined ? { via: part.via } : {}),
+  };
 }
 
 /** Programs that move the directory the REST of the line runs in. */
@@ -474,9 +537,28 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
   const commands: Array<ParsedCommand | undefined> = [];
   let findRoots: string[] = ["."];
   let here =options.cwd !== undefined ? (isAbsolutePath(options.cwd) || options.root === undefined ? options.cwd : absolutize(options.cwd, options.root)) : options.root;
+  // Runners whose inside is not looked at: one the gate refused, or one its own command line decided.
+  const unlooked: TextSpan[] = [];
   for (const request of taken.requests) {
+    if (unlooked.some((span) => inside(request.span, span))) continue;
     const classified = classifyRequest(request, dialect);
     if (classified === undefined) continue;
+    const opened = request.kind === "command" ? request.opened : undefined;
+    const gate = runnerGateFor(classified, options);
+    if (gate === "named") {
+      // A command line naming the runner (`npm`, `sudo`) decides it outright: nothing inside is looked at.
+      if (opened !== undefined) unlooked.push(classified.span);
+    } else if (gate !== undefined) {
+      const part = runnerPart(classified, gate, options, line);
+      parts.push(part);
+      commands.push(classified.command);
+      if (part.verdict === "denied") {
+        unlooked.push(classified.span);
+        continue;
+      }
+      // What an opened runner runs follows, as requests of its own.
+      if (opened !== undefined) continue;
+    } else if (opened !== undefined && !opened.kept) continue;
     // `npm run lint` is what its script runs: each part of those lines, judged in the runner's place.
     const runs = scriptRunsFor(classified, here, options);
     if (runs !== undefined) {

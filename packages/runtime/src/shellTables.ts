@@ -385,6 +385,7 @@ export const SCRIPT_RUNNERS: ReadonlyArray<{ program: string; subcommands?: stri
   { program: "make" },
   { program: "gmake" },
   { program: "just" },
+  { program: "cargo", subcommands: ["run"] },
 ];
 
 /** File extensions that make a bare word a script (`build.sh`), as against a program on the PATH. */
