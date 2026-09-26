@@ -18,6 +18,7 @@
     "app": "npm --workspace @jaira/app run start",
     "app:build": "npm --workspace @jaira/app run build",
     "licenses:sync": "tsx packages/app/licenses/sync.ts",
+    "schemas:sync": "node packages/shared/scripts/vendorSchemas.mjs",
     "postinstall": "node scripts/nativeAbi.mjs --quiet-fail",
     "abi": "node scripts/nativeAbi.mjs",
     "abi:node": "node scripts/nativeAbi.mjs node",

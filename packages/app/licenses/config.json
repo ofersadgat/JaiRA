@@ -57,6 +57,42 @@
           ]
         }
       ]
+    },
+    {
+      "name": "SchemaStore schemas (package.json, tsconfig.json, GitHub Actions workflow)",
+      "license": "Apache-2.0",
+      "bundles": [
+        "main",
+        "window"
+      ],
+      "sourceUrl": "https://github.com/SchemaStore/schemastore",
+      "noticeFiles": [
+        "../../shared/src/vendor/schemas/schemastore.LICENSE",
+        "../../shared/src/vendor/schemas/schemastore.NOTICE"
+      ]
+    },
+    {
+      "name": "Compose Specification schema",
+      "license": "Apache-2.0",
+      "bundles": [
+        "main",
+        "window"
+      ],
+      "sourceUrl": "https://github.com/compose-spec/compose-spec",
+      "noticeFiles": [
+        "../../shared/src/vendor/schemas/compose-spec.LICENSE",
+        "../../shared/src/vendor/schemas/compose-spec.NOTICE"
+      ]
+    },
+    {
+      "name": "GitLab CI/CD schema",
+      "license": "MIT",
+      "bundles": [
+        "main",
+        "window"
+      ],
+      "sourceUrl": "https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/assets/javascripts/editor/schema/ci.json",
+      "noticeFile": "../../shared/src/vendor/schemas/gitlab.LICENSE"
     }
   ],
   "packageOverrides": [

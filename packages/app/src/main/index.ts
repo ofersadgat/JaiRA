@@ -19,6 +19,7 @@ import {
   resolveTheme,
   takeHomeFlag,
   THIRD_PARTY_LICENSES_FILE_NAME,
+  type DetectSchemaRequest,
   type JairaAppearanceConfig,
   type IpcChannel,
   type PushMessage,
@@ -472,7 +473,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "schema:validate": ((request: Parameters<typeof service.validateSchema>[0]) =>
     service.validateSchema(request)) as Handler,
   "schema:check": ((request: Parameters<typeof service.checkValues>[0]) => service.checkValues(request)) as Handler,
-  "schema:detect": ((request: { text: string }) => service.detectSchema(request.text)) as Handler,
+  "schema:detect": ((request: DetectSchemaRequest) => service.detectSchema(request.text, request.path, request.format)) as Handler,
   "file:read": ((request: Parameters<typeof service.readFile>[0]) => service.readFile(request)) as Handler,
   "file:check": ((request: Parameters<typeof service.checkFile>[0]) => service.checkFile(request)) as Handler,
   "file:definition": ((request: Parameters<typeof service.defineFile>[0]) => service.defineFile(request)) as Handler,

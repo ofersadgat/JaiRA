@@ -151,3 +151,32 @@ describe("splitting a line at the caret", () => {
     expect(after).toEqual([]);
   });
 });
+
+/**
+ * JSONC's comments — what a `tsconfig.json` is written with. A quote inside one must not open a
+ * string, or everything after it is coloured as the wrong thing and the hints land on the wrong keys.
+ */
+describe("comments", () => {
+  const text = '{\n  // "not a key": here\n  "strict": true, /* also "not" */\n  "target": "ES2022"\n}';
+
+  it("round-trips, and colours them as comments", () => {
+    const lines = highlightJson(text);
+    expect(rendered(lines)).toBe(text);
+    expect(kindsOf(lines, "comment")).toEqual(['// "not a key": here', '/* also "not" */']);
+  });
+
+  it("leaves the keys after them recognised", () => {
+    expect(kindsOf(highlightJson(text), "key")).toEqual(['"strict"', '"target"']);
+  });
+
+  it("does not take a URL inside a string for a comment", () => {
+    const lines = highlightJson('{ "$schema": "https://json.schemastore.org/tsconfig" }');
+    expect(kindsOf(lines, "comment")).toEqual([]);
+  });
+
+  it("runs an unterminated block comment to the end, as one still being typed", () => {
+    const open = '{ /* half "typed\n "x": 1 }';
+    expect(rendered(highlightJson(open))).toBe(open);
+    expect(kindsOf(highlightJson(open), "key")).toEqual([]);
+  });
+});

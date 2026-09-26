@@ -100,10 +100,18 @@ describe("editing a file", () => {
     // it — so a `.ts` file was edited with no highlighting in an app that colours TypeScript in the
     // transcript, in a fenced block and in a diff. It asks `hasGrammar` now, so naming a grammar in
     // `shared/grammars.ts` is the whole of adding one.
-    for (const path of ["a.ts", "a.py", "a.rs", "a.yaml", "a.sh"]) {
+    for (const path of ["a.ts", "a.py", "a.rs", "a.sh"]) {
       expect(hasGrammar(mimeOfPath(path)), path).toBe(true);
       expect(surface(mimeOfPath(path), "edit"), path).toBe("TextEdit");
     }
+  });
+
+  it("edits YAML in the schema-aware editor, as it does JSON", () => {
+    // A Compose file or a pipeline is held to its schema the moment it opens, which only helps if the
+    // surface that shows a schema is the one that opens. Monaco stays one choice away.
+    expect(hasGrammar(mimeOfPath("a.yaml"))).toBe(true);
+    expect(surface(mimeOfPath("a.yaml"), "edit")).toBe("JsonEdit");
+    expect(fileRenderers("application/yaml", "text").map((r) => r.id)).toEqual(["schema", "monaco", "codeview"]);
   });
 
   it("keeps the plain box for text with no structure to show", () => {

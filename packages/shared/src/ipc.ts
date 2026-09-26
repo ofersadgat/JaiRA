@@ -29,7 +29,7 @@ import type {
 import type { ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
 import type { HiddenReport, HiddenVerdict } from "./hiddenPaths";
-import type { SchemaViolation } from "./schemas";
+import type { SchemaFormat, SchemaViolation } from "./schemas";
 import type { TaskFastForwardRequest, TaskFastForwardResult, TaskMoveRequest, TaskMoveResult, UserEventRequest } from "./userEvents";
 import type { TaskConnectRequest, TaskConnectResult, TaskConnectUndoRequest, TaskConnectUndoResult } from "./connect";
 import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAdoptRequest, TaskAdoptResult, TaskOutputRef } from "./adopt";
@@ -653,11 +653,13 @@ export interface ValidateSchemaRequest {
   /** A {@link SchemaEntry} id. Unknown ids are an error rather than a silent pass. */
   schemaId: string;
   text: string;
+  /** The syntax `text` is written in. Absent ⇒ JSON. */
+  format?: SchemaFormat;
 }
 
 export interface ValidateSchemaResult {
   schemaId: string;
-  /** Set when the text is not JSON at all — no schema errors are reported in that case. */
+  /** Set when the text does not parse in the schema's syntax (JSON, or YAML) — no schema errors are reported in that case. */
   parseError?: string;
   violations: SchemaViolation[];
 }
@@ -718,6 +720,19 @@ export interface SchemaCheckResponse {
  * (including "none") wins from then on. A guess that silently overrode what someone picked would be
  * worse than no guess.
  */
+/** What a file is, to the detector: its text, and where it lives when it lives somewhere. */
+export interface DetectSchemaRequest {
+  text: string;
+  /** The syntax `text` is written in. Absent ⇒ JSON. */
+  format?: SchemaFormat;
+  /**
+   * The file's path, when the text is a file's. Its NAME is asked first — a `package.json` is one
+   * because of what it is called (`SchemaEntry.files`) — and only a file no name claims is read for
+   * its content.
+   */
+  path?: string;
+}
+
 export interface DetectSchemaResult {
   /** The best match, or null when the document satisfies none of them. */
   schemaId: string | null;
@@ -2026,7 +2041,7 @@ export interface IpcContract {
   /** Check values against the schemas a form is drawn from — see {@link SchemaCheckRequest}. */
   "schema:check": { request: SchemaCheckRequest; response: SchemaCheckResponse };
   /** Which registered schema a document already satisfies — see {@link DetectSchemaResult}. */
-  "schema:detect": { request: { text: string }; response: DetectSchemaResult };
+  "schema:detect": { request: DetectSchemaRequest; response: DetectSchemaResult };
   /** Read any file under a layer root as text. Refuses types that are not text. */
   "file:read": { request: ReadFileRequest; response: FileSource };
   /** Type-check one file against its real project — see {@link CheckFileRequest}. */

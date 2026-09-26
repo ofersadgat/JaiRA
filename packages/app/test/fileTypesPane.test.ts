@@ -113,7 +113,8 @@ describe("what an All row offers", () => {
     expect(reachOf("prose", "text", "live")).toBe("only Markdown");
     // …and says nothing at all about one that reaches the whole family, which is most of them.
     expect(reachOf("prose", "text", "monaco")).toBeNull();
-    expect(reachOf("data", "text", "schema")).toBe("only JSON and Workflow (JSON)");
+    // JSON and YAML, and the workflow types that inherit each — not CSV or the config file.
+    expect(reachOf("data", "text", "schema")).toBe("4 of 7 types");
   });
 });
 

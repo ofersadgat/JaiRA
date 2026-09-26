@@ -31,6 +31,14 @@
  * where to open — no mirrored copy of the textarea, no font metrics, no drift. The same marker
  * carries the inline ghost of what Tab would write.
  *
+ * ## YAML is the same editor
+ *
+ * A Compose file or a GitLab pipeline has a schema as surely as a state does, and the value a schema
+ * describes does not care which syntax spelled it. So `format: "yaml"` swaps the scanner that colours
+ * the layer (`highlightYaml`, which takes the same per-key hints) and the parse main runs before it
+ * checks, and the rest — picker, verdict, violations, field reference — is unchanged. Completion at
+ * the cursor stays JSON's for now: `cursorContext` reads braces and quotes, and YAML has neither.
+ *
  * ## The checking happens in main
  *
  * ajv is a main-process dependency by design (see `service.validateSchema`), so the draft goes over
@@ -50,10 +58,11 @@ import {
 } from "react";
 import {
   listSchemas,
-  mergeSkeleton,
   propertiesOf,
   schemaById,
+  withMissingFields,
   type SchemaEntry,
+  type SchemaFormat,
   type SchemaProperty,
   type ValidateSchemaResult,
 } from "@jaira/shared/browser";
@@ -64,6 +73,7 @@ import { viewTheme } from "./fileTypes";
 import { useRenderChoice } from "./renderChoice";
 import { cursorContext, siblingKeys } from "./jsonCursor";
 import { highlightJson, splitTokensAt, type HighlightLine, type Token } from "./jsonHighlight";
+import { highlightYaml } from "./yamlHighlight";
 import type { UiSurface } from "./fileTypes";
 import { Splitter } from "./splitter";
 import { FOLD, PANE, paneDefault } from "./uiState";
@@ -90,7 +100,9 @@ export interface SchemaJsonEditorProps {
   dirty?: boolean;
   onRevert?: (() => void) | undefined;
   /** Check a draft against a schema. Supplied by the store, which owns the IPC. */
-  validate: (schemaId: string, text: string) => Promise<ValidateSchemaResult | null>;
+  validate: (schemaId: string, text: string, format?: SchemaFormat) => Promise<ValidateSchemaResult | null>;
+  /** The syntax the text is written in — see "YAML is the same editor" above. Absent ⇒ JSON. */
+  format?: SchemaFormat;
   /** The schema chosen for this document, and how to remember a change. */
   schemaId: string | null;
   onSchema: (schemaId: string | null) => void;
@@ -179,6 +191,7 @@ export function SchemaJsonEditor({
   dirty,
   onRevert,
   validate,
+  format = "json",
   schemaId,
   onSchema,
   lockedSchema = false,
@@ -231,10 +244,10 @@ export function SchemaJsonEditor({
       return;
     }
     const timer = setTimeout(() => {
-      void validate(entry.id, text).then(setResult);
+      void validate(entry.id, text, format).then(setResult);
     }, VALIDATE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [entry, text, validate]);
+  }, [entry, text, format, validate]);
 
   /**
    * What each key means, by the path it sits at.
@@ -249,17 +262,26 @@ export function SchemaJsonEditor({
       const at = path.join(".");
       let block = cache.get(at);
       if (block === undefined) {
-        block = new Map(propertiesOf(entry, path).map((p) => [p.key, p.description]));
+        // One line, whatever the schema wrote: a hint is drawn in a zero-width slot at the end of its
+        // line, and a published description's line breaks (tsconfig's have several) would spill it
+        // onto the lines below, over the text.
+        block = new Map(propertiesOf(entry, path).map((p) => [p.key, p.description?.replace(/\s+/g, " ").trim()]));
         cache.set(at, block);
       }
       return block.get(key);
     };
   }, [entry]);
 
-  const lines: HighlightLine[] = useMemo(() => highlightJson(text, describe), [text, describe]);
+  const lines: HighlightLine[] = useMemo(
+    () => (format === "yaml" ? highlightYaml(text, describe) : highlightJson(text, describe)),
+    [format, text, describe],
+  );
 
-  /** Where the cursor is, and therefore what may be written there. */
-  const context = useMemo(() => (entry ? cursorContext(text, cursor) : null), [entry, text, cursor]);
+  /** Where the cursor is, and therefore what may be written there. JSON's syntax only — see above. */
+  const context = useMemo(
+    () => (entry && format === "json" ? cursorContext(text, cursor) : null),
+    [entry, format, text, cursor],
+  );
 
   /** The cursor as a (line, column) pair, for placing the marker in the coloured layer. */
   const at = useMemo(() => {
@@ -471,23 +493,16 @@ export function SchemaJsonEditor({
   /** Add what the document is missing, leaving what it has exactly as it is. */
   const addMissing = (): void => {
     if (entry === undefined) return;
-    let current: unknown = {};
-    if (text.trim().length > 0) {
-      try {
-        current = JSON.parse(text);
-      } catch {
-        // Unreachable while the button is disabled on a parse error, but a merge into a document
-        // that cannot be read would be a guess at what it holds — and guessing is what "merge"
-        // exists to avoid.
-        return;
-      }
-    }
-    // Through `splice` over the whole document, so filling in the missing fields is one undoable
-    // step rather than a silent replacement of everything the editor held.
-    splice(0, text.length, `${JSON.stringify(mergeSkeleton(entry, current), null, 2)}\n`);
+    // An edit of the text, not a re-print of the value — comments, order and indentation survive
+    // (see `withMissingFields`). Through `splice` over the whole document, so filling in the missing
+    // fields is one undoable step rather than a silent replacement of everything the editor held.
+    const next = withMissingFields(entry, text, format);
+    if (next !== text) splice(0, text.length, next);
   };
 
   const parses = result?.parseError === undefined;
+  const syntax = format === "yaml" ? "YAML" : "JSON";
+  const plain = `none — plain ${syntax}`;
 
   /** The marker is only worth rendering when something is anchored to it. */
   const showMarker = suggestions.length > 0;
@@ -519,15 +534,15 @@ export function SchemaJsonEditor({
           <span className="schema-pick">
             <span className="sub">Schema</span>
             <span className="chip" title={entry?.hint ?? ""}>
-              {entry?.label ?? "none — plain JSON"}
+              {entry?.label ?? plain}
             </span>
           </span>
         ) : (
           <label className="schema-pick">
             <span className="sub">Schema</span>
             <select value={schemaId ?? ""} onChange={(e) => onSchema(e.target.value === "" ? null : e.target.value)}>
-              <option value="">none — plain JSON</option>
-              {listSchemas().map((option) => (
+              <option value="">{plain}</option>
+              {listSchemas(format).map((option) => (
                 <option key={option.id} value={option.id} title={option.hint}>
                   {option.label}
                 </option>
@@ -543,14 +558,14 @@ export function SchemaJsonEditor({
               className="ghost"
               onClick={addMissing}
               disabled={busy || !parses}
-              title={parses ? entry.hint : "fix the JSON first — a document that cannot be read cannot be merged into"}
+              title={parses ? entry.hint : `fix the ${syntax} first — a document that cannot be read cannot be merged into`}
             >
               Add missing fields
             </button>
             <button className="ghost" onClick={() => setShowReference(!showReference)}>
               {showReference ? "Hide fields" : "Fields"}
             </button>
-            <SchemaStatus result={result} />
+            <SchemaStatus result={result} syntax={syntax} />
           </>
         ) : null}
         {/* Outside the schema branch: wrapping is about reading the text, and a plain `.json` file
@@ -662,7 +677,7 @@ export function SchemaJsonEditor({
 
 
       {result?.parseError !== undefined ? (
-        <div className="reason">not valid JSON: {result.parseError}</div>
+        <div className="reason">not valid {syntax}: {result.parseError}</div>
       ) : (
         (result?.violations ?? []).map((violation, i) => (
           <div key={`${violation.path}-${i}`} className="notice bad violation">
@@ -718,9 +733,9 @@ function renderTokens(line: HighlightLine, column: number, marker: JSX.Element |
 }
 
 /** A one-glance verdict, so "is it valid?" does not require reading the list below. */
-function SchemaStatus({ result }: { result: ValidateSchemaResult | null }): JSX.Element {
+function SchemaStatus({ result, syntax }: { result: ValidateSchemaResult | null; syntax: string }): JSX.Element {
   if (result === null) return <span className="chip">checking…</span>;
-  if (result.parseError !== undefined) return <span className="chip chip-bad">not JSON</span>;
+  if (result.parseError !== undefined) return <span className="chip chip-bad">not {syntax}</span>;
   const count = result.violations.length;
   if (count === 0) return <span className="chip chip-ok">conforms</span>;
   return (
@@ -756,8 +771,9 @@ function SchemaReference({ entry }: { entry: SchemaEntry }): JSX.Element {
     <section className="schema-reference">
       <h4>{String(entry.document["title"] ?? entry.label)}</h4>
       <div className="sub">
-        ★ marks what a complete document needs — required after the environment merge, never in the
-        file itself.
+        {entry.files !== undefined
+          ? "★ marks what a complete document is expected to carry."
+          : "★ marks what a complete document needs — required after the environment merge, never in the file itself."}
       </div>
       <FieldList entry={entry} path={[]} open={open} onToggle={toggle} />
     </section>
@@ -782,8 +798,12 @@ const REFERENCE_DEPTH = 6;
  */
 const REFERENCE_WIDTH = paneDefault(PANE.schemaReference);
 
-/** The placeholder a map's author-chosen key is shown as. Any name resolves the same way. */
-const ANY_KEY = "*";
+/**
+ * The placeholder a map's author-chosen key is walked as. Any name resolves the same way — as long as
+ * it is a name: a published schema says what a map's keys may be with a `patternProperties` pattern
+ * (a Compose service is `^[a-zA-Z0-9._-]+$`), and `*` would match none of them.
+ */
+const ANY_KEY = "name";
 
 function FieldList({
   entry,

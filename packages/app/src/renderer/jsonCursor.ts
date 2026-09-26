@@ -58,7 +58,8 @@ interface Frame {
  * assumption: a tokenizer that throws on the half-typed string under the cursor answers nothing, and
  * the half-typed string under the cursor is exactly what is being asked about.
  */
-export function cursorContext(text: string, cursor: number): CursorContext {
+export function cursorContext(source: string, cursor: number): CursorContext {
+  const text = blankComments(source);
   const stack: Frame[] = [];
   let inString = false;
   let escaped = false;
@@ -196,7 +197,8 @@ function currentKeyOf(stack: Frame[]): string | undefined {
  * the list is filtered by this. Scans the enclosing object's span only — from the `{` that opened it
  * to its match, which may be past the cursor and may not exist yet.
  */
-export function siblingKeys(text: string, cursor: number): string[] {
+export function siblingKeys(source: string, cursor: number): string[] {
+  const text = blankComments(source);
   const open = openingBraceOf(text, cursor);
   if (open === -1) return [];
 
@@ -253,4 +255,41 @@ function openingBraceOf(text: string, cursor: number): number {
     if (stack[i]! >= 0) return stack[i]!;
   }
   return -1;
+}
+
+/**
+ * The text with every JSONC comment turned to spaces — the same length, the same line breaks.
+ *
+ * What lets the scans above stay JSON scans. A `tsconfig.json` is written with `//` and `/* *\/`
+ * comments, and a quote inside one would open a "string" that ran on through the rest of the file;
+ * blanking them first keeps every offset where it was, so a cursor, a partial name and the span a
+ * completion replaces all still point into the real text. A cursor inside a comment reads as
+ * whitespace, which offers nothing — the right answer there.
+ */
+export function blankComments(text: string): string {
+  if (!text.includes("/")) return text;
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === '"') {
+      // A string, copied whole: a `//` inside one is a URL, not a comment.
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (ch === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
+      const line = text[i + 1] === "/";
+      const close = line ? text.indexOf("\n", i) : text.indexOf("*/", i + 2);
+      const end = close === -1 ? text.length : line ? close : close + 2;
+      out += text.slice(i, end).replace(/[^\n]/g, " ");
+      i = end;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
 }

@@ -26,6 +26,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
+import { Ajv2020 } from "ajv/dist/2020";
 import {
   DirectedTransitions,
   InMemoryPersistence,
@@ -406,9 +407,12 @@ import {
   parseConfig,
   parseSettings,
   listSchemas,
+  parseStructured,
   propertiesOf,
   resolveExecutorTree,
   schemaById,
+  schemaForFile,
+  type SchemaFormat,
   sessionKey,
   JAIRA_DIR_NAME,
   SHARED_SESSION,
@@ -837,21 +841,109 @@ function isBindingFormArtifact(error: ErrorObject): boolean {
   return missing === "$ref" || missing === "$expr" || missing === "json";
 }
 
-function collapseErrors(all: readonly ErrorObject[]): SchemaViolation[] {
+/**
+ * The key an "unknown field" error is about, or undefined when it is not one.
+ *
+ * Two keywords say it: draft-07's `additionalProperties`, and 2020-12's `unevaluatedProperties` —
+ * which is how the Compose Specification closes a service, since a service is an `allOf` of two
+ * specs and `additionalProperties` cannot see across the branches.
+ */
+function unknownField(error: ErrorObject): string | undefined {
+  const params = error.params as { additionalProperty?: string; unevaluatedProperty?: string };
+  if (error.keyword === "additionalProperties") return String(params.additionalProperty);
+  if (error.keyword === "unevaluatedProperties" && params.unevaluatedProperty !== undefined) return String(params.unevaluatedProperty);
+  return undefined;
+}
+
+/** A summary that a branch failed — `anyOf` here, `oneOf` too in a published schema. */
+const isSummary = (keyword: string): boolean => keyword === "anyOf" || keyword === "oneOf";
+
+/**
+ * Keep, of every failed union, only the errors of the branch that came closest.
+ *
+ * A published schema says "an object or null", or "a job that runs steps, or one that calls a reusable
+ * workflow", and ajv reports why EVERY branch failed. So a tsconfig with a wrong option also heard
+ * "compilerOptions must be null", and a job missing `runs-on` also heard that `steps` is not allowed
+ * — true of the branch the author was not writing, and useless to them. The branch that came closest
+ * is the one whose errors reach deepest into the document (it got furthest before failing); on a tie,
+ * the one with fewer complaints; then the one listed first, which in this app's own leaves is the
+ * field's own type rather than a binding form.
+ *
+ * A branch is found by the schema OBJECTS it is made of — ajv's `verbose` mode puts the one an error
+ * came from on it as `parentSchema`. Not by `schemaPath`: ajv reports an error inside a referenced
+ * definition relative to that definition (`#/required`), so a job's two kinds, each a `$ref`, would
+ * report identical paths. The walk from a branch follows its own `$ref`s but not those nested deeper;
+ * an error in a definition reached that way belongs to no branch, and is kept.
+ */
+function closestBranches(errors: readonly ErrorObject[], root: object): ErrorObject[] {
+  const dropped = new Set<ErrorObject>();
+  const depthOf = (error: ErrorObject): number => (error.instancePath === "" ? 0 : error.instancePath.split("/").length - 1);
+  for (const union of errors) {
+    if (union.keyword !== "anyOf" && union.keyword !== "oneOf") continue;
+    const options = union.schema;
+    if (!Array.isArray(options)) continue;
+    const branches = options.map((option) => schemaObjectsOf(root, option));
+    const members: ErrorObject[][] = options.map(() => []);
+    for (const error of errors) {
+      if (error === union || !error.instancePath.startsWith(union.instancePath)) continue;
+      const j = branches.findIndex((objects) => objects.has(error.parentSchema as object));
+      if (j >= 0) members[j]!.push(error);
+    }
+    const scored = members
+      .map((found, j) => ({ j, depth: Math.max(...found.map(depthOf)), count: found.length }))
+      .filter((branch) => branch.count > 0)
+      .sort((a, b) => b.depth - a.depth || a.count - b.count || a.j - b.j);
+    const best = scored[0]?.j;
+    if (best === undefined || scored.length < 2) continue;
+    members.forEach((found, j) => {
+      if (j !== best) for (const error of found) dropped.add(error);
+    });
+  }
+  return errors.filter((error) => !dropped.has(error));
+}
+
+/**
+ * Every schema object one union branch is made of: the branch, what its `$ref` chain lands on, and
+ * everything nested inside those — without following the `$ref`s found further down, which lead to
+ * definitions other branches may share. Bounded, because a schema is a graph.
+ */
+function schemaObjectsOf(root: object, branch: unknown): Set<object> {
+  const found = new Set<object>();
+  let start: unknown = branch;
+  for (let hops = 0; hops < 8 && start !== null && typeof start === "object"; hops++) {
+    found.add(start);
+    const ref = (start as { $ref?: unknown }).$ref;
+    if (typeof ref !== "string" || !ref.startsWith("#/")) break;
+    start = ref
+      .slice(2)
+      .split("/")
+      .reduce<unknown>((node, part) => (node === null || typeof node !== "object" ? undefined : (node as Record<string, unknown>)[part.replace(/~1/g, "/").replace(/~0/g, "~")]), root);
+  }
+  const queue = [...found];
+  while (queue.length > 0 && found.size < 5000) {
+    const node = queue.pop()!;
+    for (const child of Object.values(node)) {
+      if (child !== null && typeof child === "object" && !found.has(child)) {
+        found.add(child);
+        queue.push(child);
+      }
+    }
+  }
+  return found;
+}
+
+function collapseErrors(all: readonly ErrorObject[], root: object): SchemaViolation[] {
   // Keep the unfiltered set as a fallback: reporting nothing for a document ajv called invalid would
   // be a worse failure than reporting noise.
   const real = all.filter((error) => !isBindingFormArtifact(error));
-  const errors = real.length > 0 ? real : all;
+  const errors = closestBranches(real.length > 0 ? real : all, root);
 
   const groups = new Map<string, ErrorObject[]>();
   for (const error of errors) {
     // ajv's `instancePath` is a JSON pointer (`/operation/temperature`); the editor shows dotted
     // paths, which is how the format's own documentation writes them.
     const path = error.instancePath.replace(/^\//, "").replace(/\//g, ".");
-    const extra =
-      error.keyword === "additionalProperties"
-        ? String((error.params as { additionalProperty?: string }).additionalProperty)
-        : "";
+    const extra = unknownField(error) ?? "";
     const key = `${path}|${extra}`;
     const group = groups.get(key);
     if (group) group.push(error);
@@ -859,7 +951,7 @@ function collapseErrors(all: readonly ErrorObject[]): SchemaViolation[] {
   }
 
   const rows = [...groups.entries()].map(([key, group]) => {
-    const chosen = group.find((error) => error.keyword !== "anyOf") ?? group[0]!;
+    const chosen = group.find((error) => !isSummary(error.keyword)) ?? group[0]!;
     const path = key.slice(0, key.lastIndexOf("|"));
     return { path, keyword: chosen.keyword, ...messageFor(chosen) };
   });
@@ -877,7 +969,7 @@ function collapseErrors(all: readonly ErrorObject[]): SchemaViolation[] {
    */
   const explained = rows.filter(
     (row) =>
-      row.keyword !== "anyOf" ||
+      !isSummary(row.keyword) ||
       !rows.some((other) => other !== row && isUnder(other.path, row.path)),
   );
 
@@ -892,10 +984,8 @@ function isUnder(path: string, ancestor: string): boolean {
 
 /** One error, worded for someone reading it beside the document rather than debugging a validator. */
 function messageFor(error: ErrorObject): { message: string } {
-  if (error.keyword === "additionalProperties") {
-    const name = String((error.params as { additionalProperty?: string }).additionalProperty);
-    return { message: `unknown field '${name}' — nothing else is recognized here` };
-  }
+  const unknown = unknownField(error);
+  if (unknown !== undefined) return { message: `unknown field '${unknown}' — nothing else is recognized here` };
   // "must be equal to one of the allowed values" without saying which ones sends you to the
   // documentation for something the schema is already holding. ajv puts them in `params`.
   if (error.keyword === "enum") {
@@ -1209,6 +1299,8 @@ export class AppService {
    * at construction would cost that on every window — see {@link validateSchema}.
    */
   private ajv?: Ajv;
+  /** The same, for a schema written in JSON Schema 2020-12 — the Compose Specification is. */
+  private ajv2020?: Ajv2020;
   private readonly schemaValidators = new Map<string, ValidateFunction>();
   /**
    * The validator a FORM's values are checked with — see {@link checkValues}. Its own instance, not
@@ -9270,18 +9362,20 @@ export class AppService {
     const entry = schemaById(request.schemaId);
     if (!entry) throw this.refusal("config", `no schema named '${request.schemaId}'`);
 
-    let value: unknown;
-    try {
-      value = JSON.parse(request.text);
-    } catch (e) {
+    // The shared parse, so a file that reads here reads the same in the Data view: YAML, or JSON read
+    // as JSONC — a `tsconfig.json` carries comments and trailing commas, and `tsc` accepts both.
+    const parsed = parseStructured(request.text, request.format ?? "json");
+    if (!parsed.ok) {
       // The parse error IS the answer while it stands: schema errors against a half-typed document
       // would all be noise about the part that has not been written yet.
-      return { schemaId: entry.id, parseError: (e as Error).message, violations: [] };
+      const at = parsed.spot === undefined ? "" : ` (line ${parsed.spot.line}, column ${parsed.spot.column})`;
+      return { schemaId: entry.id, parseError: `${parsed.message}${at}`, violations: [] };
     }
+    const value = parsed.value;
 
     const validate = this.schemaValidator(entry.id, entry.document);
     if (validate(value)) return { schemaId: entry.id, violations: [] };
-    return { schemaId: entry.id, violations: collapseErrors(validate.errors ?? []) };
+    return { schemaId: entry.id, violations: collapseErrors(validate.errors ?? [], entry.document) };
   }
 
   /**
@@ -9360,23 +9454,31 @@ export class AppService {
    * `expected` is the measure — the keys a complete document of that kind carries — counted only
    * where the document actually has them, so a bare `{}` does not get promoted to the most demanding
    * schema on the strength of matching everything vacuously.
+   *
+   * The file's NAME is asked before any of that, when there is one: a `package.json` or a
+   * `.gitlab-ci.yml` is what it is called, whatever it holds — and an empty one is still one, which is
+   * exactly when help filling it in is worth most. The schemas claimed by name are never guessed from
+   * content (`SchemaEntry.files`), so the reading below only ever weighs this app's own.
    */
-  detectSchema(text: string): DetectSchemaResult {
-    let value: unknown;
-    try {
-      value = JSON.parse(text);
-    } catch {
-      // Nothing to detect from. Not an error: this is asked while a file is opening, and an empty or
-      // half-written document is the ordinary case.
-      return { schemaId: null, candidates: [] };
+  detectSchema(text: string, path?: string, format: SchemaFormat = "json"): DetectSchemaResult {
+    const named = path === undefined ? undefined : schemaForFile(path);
+    if (named !== undefined && (named.formats === undefined || named.formats.includes(format))) {
+      return { schemaId: named.id, candidates: [named.id] };
     }
+
+    const parsed = parseStructured(text, format);
+    // Nothing to detect from. Not an error: this is asked while a file is opening, and an empty or
+    // half-written document is the ordinary case.
+    if (!parsed.ok) return { schemaId: null, candidates: [] };
+    const value = parsed.value;
     // A non-object cannot be any of these, and `{}` satisfies all of them vacuously — suggesting one
     // for an empty file would be picking for the author rather than reading what they wrote.
     if (value === null || typeof value !== "object" || Array.isArray(value)) return { schemaId: null, candidates: [] };
     const keys = Object.keys(value as Record<string, unknown>);
     if (keys.length === 0) return { schemaId: null, candidates: [] };
 
-    const scored = listSchemas()
+    const scored = listSchemas(format)
+      .filter((entry) => entry.files === undefined)
       .filter((entry) => {
         const declared = new Set(propertiesOf(entry).map((property) => property.key));
         return keys.every((key) => declared.has(key)) && this.schemaValidator(entry.id, entry.document)(value);
@@ -9387,14 +9489,29 @@ export class AppService {
     return { schemaId: candidates[0] ?? null, candidates };
   }
 
-  /** Compiled validators, cached by schema id. The documents are static, so one compile each. */
+  /**
+   * Compiled validators, cached by schema id. The documents are static, so one compile each.
+   *
+   * `strict: false` for the same reason the shared wrapper sets it: these documents carry `title`,
+   * `markdownDescription` and other harmless extras, and a strictness throw here would break the
+   * editor, not the schema. `validateFormats: false` says out loud what was already true — this ajv
+   * has no format library, so `format` is annotation — rather than logging a warning for every
+   * `uri-reference` in GitLab's schema.
+   *
+   * The dialect is the document's own: a published schema that declares 2020-12 uses keywords
+   * (`unevaluatedProperties`) the draft-07 class does not know, and would compile to a validator that
+   * silently skips them.
+   */
   private schemaValidator(id: string, document: object): ValidateFunction {
     const cached = this.schemaValidators.get(id);
     if (cached) return cached;
-    // `strict: false` for the same reason the shared wrapper sets it: these documents carry `title`
-    // and other harmless extras, and a strictness throw here would break the editor, not the schema.
-    this.ajv ??= new Ajv({ allErrors: true, strict: false });
-    const compiled = this.ajv.compile(document);
+    const dialect = (document as { $schema?: unknown }).$schema;
+    // `verbose` puts on each error the schema object it came from — see `closestBranches`.
+    const options = { allErrors: true, strict: false, validateFormats: false, verbose: true } as const;
+    const compiled =
+      typeof dialect === "string" && dialect.includes("2020-12")
+        ? (this.ajv2020 ??= new Ajv2020(options)).compile(document)
+        : (this.ajv ??= new Ajv(options)).compile(document);
     this.schemaValidators.set(id, compiled);
     return compiled;
   }

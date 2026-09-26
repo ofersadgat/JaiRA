@@ -74,6 +74,7 @@ import type {
   RendererEdit,
   PathWrite,
   EventsNotice,
+  SchemaFormat,
 } from "@jaira/shared/browser";
 import { withNoticeRead } from "./noticesModel";
 import {
@@ -4212,9 +4213,9 @@ export function useApp() {
        * error banner over every transiently-bad state would be its own kind of noise. The status
        * chip going quiet is the report.
        */
-      validateSchema: async (schemaId: string, text: string) => {
+      validateSchema: async (schemaId: string, text: string, format?: SchemaFormat) => {
         try {
-          return await invoke("schema:validate", { schemaId, text });
+          return await invoke("schema:validate", { schemaId, text, ...(format !== undefined ? { format } : {}) });
         } catch {
           return null;
         }
@@ -4591,9 +4592,13 @@ export function useApp() {
        * Quiet on failure like the other editor-side calls: this runs as a file opens, and the answer
        * is a suggestion. Failing to guess is not something to interrupt anyone about.
        */
-      detectSchema: async (text: string) => {
+      detectSchema: async (text: string, path?: string, format?: SchemaFormat) => {
         try {
-          return await invoke("schema:detect", { text });
+          return await invoke("schema:detect", {
+            text,
+            ...(path !== undefined ? { path } : {}),
+            ...(format !== undefined ? { format } : {}),
+          });
         } catch {
           return null;
         }

@@ -25,7 +25,9 @@ import {
   parseStructured,
   parseUnifiedDiff,
   schemaById,
+  structuredFormatOf,
   type FileSource,
+  type SchemaFormat,
   type StructuredFormat,
   type WorkflowSource,
 } from "@jaira/shared/browser";
@@ -341,7 +343,8 @@ export function JsonView({ doc }: FileSurfaceProps): JSX.Element {
  * editing the document afterwards cannot pull the picker out from under the author.
  *
  * Detection reads `doc.text`, the file as it is on disk, rather than any draft: what schema a file IS
- * should not change while it is half-typed.
+ * should not change while it is half-typed. And it is handed the path, because some files are what
+ * they are CALLED — a `package.json`, a `.gitlab-ci.yml` — and the name is asked before the content.
  */
 function useSchemaChoice(doc: FileSource, context: FileSurfaceContext): string | undefined {
   const key = docKey(doc.layer, doc.path);
@@ -350,18 +353,26 @@ function useSchemaChoice(doc: FileSource, context: FileSurfaceContext): string |
   useEffect(() => {
     if (chosen !== undefined) return;
     let live = true;
-    void detectSchema(doc.text).then((found) => {
+    void detectSchema(doc.text, doc.path, schemaFormatOf(doc)).then((found) => {
       if (live && found !== null) onSchemaChoice(key, found.schemaId);
     });
     return () => {
       live = false;
     };
-  }, [key, chosen, doc.text, detectSchema, onSchemaChoice]);
+  }, [key, chosen, doc.text, doc.path, detectSchema, onSchemaChoice]);
   return chosen;
 }
 
 /**
- * A JSON document as the fields its schema declares — the FORM, as a data renderer.
+ * Which syntax a document held to a schema is written in — YAML for a YAML type (a Compose file, a
+ * pipeline), JSON for everything else this is registered on.
+ */
+function schemaFormatOf(doc: FileSource): SchemaFormat {
+  return structuredFormatOf(doc.mime) === "yaml" ? "yaml" : "json";
+}
+
+/**
+ * A JSON or YAML document as the fields its schema declares — the FORM, as a data renderer.
  *
  * The third way to read a `.json` file, beside the tree and its own source, and the one the value
  * viewer has always had (`viewsFor` offers `form` for any value that arrives with an object schema).
@@ -385,7 +396,7 @@ export function JsonFormView({ doc, context }: FileSurfaceProps): JSX.Element {
   const chosen = useSchemaChoice(doc, context);
   const entry = chosen === undefined || chosen === "" ? undefined : schemaById(chosen);
   if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
-  const parsed = parseStructured(doc.text, "json");
+  const parsed = parseStructured(doc.text, schemaFormatOf(doc));
   if (!parsed.ok) {
     return (
       <div className="notice bad">
@@ -425,11 +436,12 @@ export function JsonFormView({ doc, context }: FileSurfaceProps): JSX.Element {
 }
 
 /**
- * The JSON editor, with a schema picker.
+ * The JSON editor, with a schema picker — and the YAML one, which is the same editor.
  *
  * Everything schema-shaped lives in {@link SchemaJsonEditor}; this is the adapter that gives it a
  * draft, a save path and somewhere to remember the choice. The draft rules are {@link TextEdit}'s,
  * for the same reasons — a reload must not land on unsaved typing, and a new file is a new draft.
+ * The syntax comes from the document's type, and decides which schemas the picker offers.
  */
 export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const key = docKey(doc.layer, doc.path);
@@ -445,6 +457,7 @@ export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
       // The document's own type, so a palette chosen for a vendor JSON is read under the key it was
       // written to rather than under plain JSON.
       mime={doc.mime}
+      format={schemaFormatOf(doc)}
       busy={busy}
       dirty={draft.dirty}
       readOnly={reading}
@@ -959,6 +972,15 @@ registerFileSurface("application/json", "text", { id: "schema", label: "Schema-a
 registerFileSurface("application/json", "text", MONACO);
 registerFileSurface("application/json", "text", CODEVIEW);
 
+// YAML gets the same editor for the same reason, now that there are YAML files with a known shape — a
+// Compose file, a GitLab pipeline, a state written as YAML. Validation, the field reference, the hints
+// at the ends of lines and "Add missing fields" work as they do for JSON; completion at the cursor
+// does not yet, because it reads JSON's syntax. First, as JSON's is: a file whose schema is detected
+// should open held to it, and one with none is still a coloured editor.
+registerFileSurface("application/yaml", "text", { id: "schema", label: "Schema-aware", note: "validation and a field reference against a known shape", writes: true, themed: true, look: "json" as const, surface: JsonEdit });
+registerFileSurface("application/yaml", "text", MONACO);
+registerFileSurface("application/yaml", "text", CODEVIEW);
+
 // ONE text renderer, and deliberately no second: this editor writes through `config:write`, which
 // parses and validates the document, and every alternative writes bytes. Offering another here would
 // be offering a way to save a settings file that stops the app from opening.
@@ -974,6 +996,7 @@ registerFileSurface("application/json", "data", { id: "tree", label: "Data", not
 registerFileSurface("application/json", "data", { id: "form", label: "Form", note: "the fields the document's schema declares, in the order it declares them", surface: JsonFormView });
 registerFileSurface("application/json", "data", { ...NOTHING, surface: null });
 registerFileSurface("application/yaml", "data", { id: "tree", label: "Data", note: "the value, as a tree", surface: YamlView });
+registerFileSurface("application/yaml", "data", { id: "form", label: "Form", note: "the fields the document's schema declares, in the order it declares them", surface: JsonFormView });
 registerFileSurface("application/yaml", "data", { ...NOTHING, surface: null });
 registerFileSurface("text/csv", "data", { id: "table", label: "Table", note: "rows and columns, rather than the delimiters", surface: DelimitedView });
 registerFileSurface("text/csv", "data", { ...NOTHING, surface: null });

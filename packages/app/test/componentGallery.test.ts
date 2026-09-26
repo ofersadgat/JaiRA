@@ -210,6 +210,6 @@ describe("where the gallery's schemas live", () => {
       // answer to "what schema is this `.json`".
       expect(picker, surface.id).not.toContain(surface.schemaId);
     }
-    expect(picker).toEqual(["state", "state-prompt", "prompt-operation"]);
+    expect(picker).toEqual(["state", "state-prompt", "prompt-operation", "package-json", "tsconfig", "compose", "gitlab-ci", "github-workflow"]);
   });
 });

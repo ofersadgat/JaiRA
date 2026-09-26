@@ -68,7 +68,7 @@ import type {
   PendingApproval,
 } from "@jaira/shared/browser";
 import { defaultRendererChoice, mimeFallbacks, paneFamilyOf } from "@jaira/shared/browser";
-import type { EditorKind, PaneFamily, RendererChoice, RendererChoices, RenderView } from "@jaira/shared/browser";
+import type { EditorKind, PaneFamily, RendererChoice, RendererChoices, RenderView, SchemaFormat } from "@jaira/shared/browser";
 import type { ComponentServices } from "./changesetReview";
 import type { EditorServices } from "./components";
 import type { Drafts, SetDraft } from "./drafts";
@@ -428,8 +428,8 @@ export interface FileSurfaceContext {
   onFork?: ((taskId: string, seq: number) => void) | undefined;
   /** Write a configuration layer as a parsed document — validated in main, unlike a raw file write. */
   onSaveConfig: (layer: ConfigLayer, doc: unknown) => void;
-  /** Check a draft against a registered schema — what the JSON editor's picker turns on. */
-  validateSchema: (schemaId: string, text: string) => Promise<ValidateSchemaResult | null>;
+  /** Check a draft against a registered schema — what the JSON and YAML editors' picker turns on. */
+  validateSchema: (schemaId: string, text: string, format?: SchemaFormat) => Promise<ValidateSchemaResult | null>;
   /**
    * What a set of states declare — how the children table knows which slots a mount has to fill,
    * and what a binding may point at (WORKFLOWS.md §6.1).
@@ -512,8 +512,11 @@ export interface FileSurfaceContext {
    * markdown preview rather than offering buttons that would do nothing.
    */
   sync?: SyncSurface | undefined;
-  /** Which registered schema a document already satisfies. Null when nothing could be asked. */
-  detectSchema: (text: string) => Promise<DetectSchemaResult | null>;
+  /**
+   * Which registered schema a document is — by its file name when that says (`package.json`), else by
+   * what it already satisfies. Null when nothing could be asked.
+   */
+  detectSchema: (text: string, path?: string, format?: SchemaFormat) => Promise<DetectSchemaResult | null>;
   /** Word wrap in the JSON editor — a saved preference, not per-document (`editors.json.wrap`). */
   wrapJson: boolean;
   onWrapJson: (wrap: boolean) => void;

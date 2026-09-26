@@ -25,6 +25,15 @@
  * What the schemas DO catch is the error people actually make by hand: a misspelled key, and a
  * scalar of the wrong type. `additionalProperties` is where the two shapes genuinely differ, and the
  * difference is authored, not incidental — see {@link STATE_SCHEMA} and {@link OPERATION_SCHEMA}.
+ *
+ * ## And the files this app does not define
+ *
+ * `package.json`, `tsconfig.json`, a Compose file, `.gitlab-ci.yml` and a GitHub Actions workflow are
+ * held to the schemas their own ecosystems publish, vendored as they are (`src/vendor/schemas/`). Two things follow. They are written the way
+ * published schemas are — `allOf`, `oneOf`, `patternProperties`, `$defs` — so the walk that serves
+ * the reference panel and completion ({@link propertiesOf}) reads all of those, not only the shapes
+ * built here. And they are claimed by file NAME ({@link SchemaEntry.files}), because a schema open
+ * enough for every real `package.json` is satisfied by far too much else to be guessed from content.
  */
 import {
   CONVERSATION_MODES,
@@ -35,7 +44,14 @@ import {
   type JsonField,
   type SimpleField,
 } from "./operationVocabulary";
+import { applyEdits, modify, parse as parseJsonc, type ParseError } from "jsonc-parser";
+import { parseDocument } from "yaml";
 import { DEFAULT_MEDIA_TYPE, TYPE_NAMES } from "./slotTypes";
+import composeSchema from "./vendor/schemas/compose-spec.schema.json";
+import githubWorkflowSchema from "./vendor/schemas/github-workflow.schema.json";
+import gitlabCiSchema from "./vendor/schemas/gitlab-ci.schema.json";
+import packageJsonSchema from "./vendor/schemas/package.json.schema.json";
+import tsconfigSchema from "./vendor/schemas/tsconfig.schema.json";
 
 /** A schema document, as far as this module builds one. Structural — no JSON Schema types imported. */
 export type SchemaDoc = Record<string, unknown>;
@@ -67,7 +83,40 @@ export interface SchemaEntry {
    * and putting it in the picker would offer nine choices that are wrong for every `.json` on disk.
    */
   pickable?: boolean;
+  /**
+   * The syntaxes a document held to this schema is written in. Absent ⇒ either.
+   *
+   * The schema itself is JSON Schema whatever the file is: it describes the VALUE, which is why a
+   * state written as YAML is held to the same `state` schema as one written as JSON. What this
+   * narrows is the picker — a `.json` file is not offered the Compose schema, nor a `.yaml` one npm's.
+   */
+  formats?: readonly SchemaFormat[];
+  /**
+   * The names that ARE this kind of document — `package.json`, `tsconfig.*.json`,
+   * `.github/workflows/*.yml`.
+   *
+   * A file whose path matches one is held to this schema the moment it opens, whatever it holds: the
+   * name is the ecosystem's own declaration of what the file is, which is a stronger signal than any
+   * reading of its keys. And an entry that has names is found ONLY by name: these published schemas
+   * are open by design (a `package.json` takes any tool's config block), so satisfying one says
+   * nothing about a file called something else.
+   *
+   * Each is a pattern over the END of the path, one `/`-separated segment per segment, where `*`
+   * stands for any run of characters inside one segment — see {@link matchesFile}.
+   */
+  files?: readonly string[];
+  /**
+   * What the skeleton writes for an expected key, where a blank of the right type would be refused.
+   *
+   * The type-based blank (`""`, `{}`, `[]`) is right for this app's own schemas, which constrain
+   * nothing a blank breaks. A published one can: npm's `name` has `minLength: 1`, so "Add missing
+   * fields" would write the one value that turns the verdict red.
+   */
+  placeholders?: Readonly<Record<string, unknown>>;
 }
+
+/** The syntaxes a schema-held document can be written in. */
+export type SchemaFormat = "json" | "yaml";
 
 // --- the binding forms every leaf admits ------------------------------------
 
@@ -539,13 +588,51 @@ export function registerSchema(entry: SchemaEntry): void {
   REGISTRY.set(entry.id, entry);
 }
 
-/** Everything in the picker, in registration order — see {@link SchemaEntry.pickable}. */
-export function listSchemas(): SchemaEntry[] {
-  return [...REGISTRY.values()].filter((entry) => entry.pickable !== false);
+/**
+ * Everything in the picker, in registration order — see {@link SchemaEntry.pickable}.
+ *
+ * `format` narrows it to the schemas a document in that syntax can be held to; absent lists them all.
+ */
+export function listSchemas(format?: SchemaFormat): SchemaEntry[] {
+  return [...REGISTRY.values()].filter(
+    (entry) => entry.pickable !== false && (format === undefined || entry.formats === undefined || entry.formats.includes(format)),
+  );
 }
 
 export function schemaById(id: string): SchemaEntry | undefined {
   return REGISTRY.get(id);
+}
+
+/**
+ * The schema a file is held to by its NAME — see {@link SchemaEntry.files}.
+ *
+ * First match in registration order, so a narrower pattern registered earlier wins a tie.
+ */
+export function schemaForFile(path: string): SchemaEntry | undefined {
+  for (const entry of REGISTRY.values()) {
+    if (entry.pickable !== false && entry.files?.some((pattern) => matchesFile(pattern, path)) === true) return entry;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a path ends in what a {@link SchemaEntry.files} pattern names.
+ *
+ * Compared from the end, segment by segment: `.github/workflows/*.yml` takes
+ * `repo/.github/workflows/ci.yml` and not `repo/workflows/ci.yml`, and `package.json` takes
+ * `packages/app/package.json`. Case matters — `Package.json` is not one to npm either — and
+ * separators of both kinds count, since a path may arrive from Windows. `*` never crosses a `/`.
+ */
+export function matchesFile(pattern: string, path: string): boolean {
+  const want = pattern.split("/");
+  const have = path.split(/[\\/]/);
+  if (have.length < want.length) return false;
+  const tail = have.slice(have.length - want.length);
+  return want.every((segment, i) => {
+    if (!segment.includes("*")) return segment === tail[i];
+    const source = segment.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*");
+    return new RegExp(`^${source}$`).test(tail[i]!);
+  });
 }
 
 registerSchema({
@@ -574,6 +661,85 @@ registerSchema({
   expected: ["kind", "prompt"],
 });
 
+// --- files the wider world defines --------------------------------------------
+//
+// The schemas their own ecosystems publish, vendored by `npm run schemas:sync` (see
+// `scripts/vendorSchemas.mjs` for the sources and the one rewrite). Unlike the ones above, these are
+// not this app's to shape: they are held to exactly what their tools accept, and they are found by
+// the file's name, never by its content.
+
+registerSchema({
+  id: "package-json",
+  label: "package.json (npm)",
+  hint: "an npm package manifest — SchemaStore's schema",
+  document: packageJsonSchema as SchemaDoc,
+  expected: ["name", "version"],
+  placeholders: { name: "my-package", version: "0.1.0" },
+  formats: ["json"],
+  files: ["package.json"],
+});
+
+registerSchema({
+  id: "tsconfig",
+  label: "tsconfig.json (TypeScript)",
+  hint: "a TypeScript project's compiler configuration — SchemaStore's schema",
+  document: tsconfigSchema as SchemaDoc,
+  // Nothing is required: `{}` is a legal tsconfig, and `extends` alone is a common one.
+  expected: ["compilerOptions"],
+  formats: ["json"],
+  // `tsconfig.base.json`, `tsconfig.app.json`, … are the same file under the names projects give
+  // their variants; `tsc -p` and every editor read them as tsconfigs.
+  files: ["tsconfig.json", "tsconfig.*.json"],
+});
+
+registerSchema({
+  id: "compose",
+  label: "Compose file",
+  hint: "a Docker Compose application — the Compose Specification's schema",
+  document: composeSchema as SchemaDoc,
+  expected: ["services"],
+  formats: ["yaml"],
+  files: [
+    "compose.yaml",
+    "compose.yml",
+    "compose.override.yaml",
+    "compose.override.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+    "docker-compose.override.yaml",
+    "docker-compose.override.yml",
+  ],
+});
+
+registerSchema({
+  id: "gitlab-ci",
+  label: "GitLab CI/CD",
+  hint: "a GitLab pipeline — the schema GitLab's own pipeline editor checks against",
+  document: gitlabCiSchema as SchemaDoc,
+  expected: ["stages"],
+  // GitLab's own defaults, and the schema refuses an empty list.
+  placeholders: { stages: ["build", "test", "deploy"] },
+  formats: ["yaml"],
+  files: [".gitlab-ci.yml", ".gitlab-ci.yaml"],
+});
+
+registerSchema({
+  id: "github-workflow",
+  label: "GitHub Actions workflow",
+  hint: "a GitHub Actions workflow — SchemaStore's schema",
+  document: githubWorkflowSchema as SchemaDoc,
+  expected: ["on", "jobs"],
+  // The smallest workflow GitHub runs: the schema refuses an empty `on` and a `jobs` with no job in
+  // it, so a blank of either would be the one value that turns the verdict red.
+  placeholders: {
+    on: "push",
+    jobs: { build: { "runs-on": "ubuntu-latest", steps: [{ uses: "actions/checkout@v4" }] } },
+  },
+  formats: ["yaml"],
+  // By PATH, not name: `ci.yml` is only a workflow because of the directory it sits in.
+  files: [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+});
+
 // --- what the schema can do for an editor -----------------------------------
 
 /** One violation, as the editor lists it. */
@@ -592,10 +758,12 @@ export interface SchemaViolation {
  * neither, and deleting it is more work than writing the two keys you wanted.
  */
 export function skeletonOf(entry: SchemaEntry): unknown {
-  const properties = (entry.document["properties"] ?? {}) as Record<string, SchemaDoc>;
+  // Through the walk, not the root's own `properties`: a published schema's root may be nothing but an
+  // `allOf` of definitions (`tsconfig.json`'s is), and its fields are only found by merging them.
+  const properties = (descend(entry.document, entry.document)?.["properties"] ?? {}) as Record<string, SchemaDoc>;
   const out: Record<string, unknown> = {};
   for (const key of entry.expected) {
-    out[key] = placeholderFor(properties[key]);
+    out[key] = entry.placeholders !== undefined && key in entry.placeholders ? entry.placeholders[key] : placeholderFor(properties[key]);
   }
   if (entry.expected.length === 0) {
     // Nothing is required even after merging — so offer the fields an author almost always writes
@@ -624,7 +792,9 @@ function placeholderFor(schema: SchemaDoc | undefined): unknown {
 /** The declared type of a leaf, looking through the `anyOf` that admits binding forms. */
 function firstOwnType(schema: SchemaDoc): string | undefined {
   if (typeof schema["type"] === "string") return schema["type"];
-  const options = schema["anyOf"];
+  // `["string", "null"]` is how a published schema says "optional string" — the type is the other one.
+  if (Array.isArray(schema["type"])) return (schema["type"] as unknown[]).find((t): t is string => typeof t === "string" && t !== "null");
+  const options = schema["anyOf"] ?? schema["oneOf"];
   if (Array.isArray(options) && options.length > 0) {
     const first = options[0] as SchemaDoc;
     if (typeof first["type"] === "string") return first["type"];
@@ -656,13 +826,7 @@ export function propertiesOf(entry: SchemaEntry, at: readonly string[] = []): Sc
   let schema: SchemaDoc | undefined = descend(root, root);
   for (const step of at) {
     if (schema === undefined) return [];
-    const properties = (schema["properties"] ?? {}) as Record<string, SchemaDoc>;
-    // A named property first; failing that, `additionalProperties` — which is how a map with
-    // AUTHOR-CHOSEN keys answers "what goes inside `inputs.issue`?". Without this fallback every
-    // such map is a dead end, and the slot, child and permission blocks are all such maps.
-    const extra = schema["additionalProperties"];
-    const next = properties[step] ?? (typeof extra === "object" && extra !== null ? (extra as SchemaDoc) : undefined);
-    schema = descend(root, next);
+    schema = descend(root, memberOf(schema, step));
   }
   const properties = (schema?.["properties"] ?? {}) as Record<string, SchemaDoc>;
   return Object.entries(properties).map(([key, value]) => {
@@ -670,7 +834,13 @@ export function propertiesOf(entry: SchemaEntry, at: readonly string[] = []): Sc
     return {
       key,
       type: firstOwnType(value),
-      description: typeof value["description"] === "string" ? value["description"] : undefined,
+      // GitLab's schema sometimes writes only the markdown form, for its own editor's hover.
+      description:
+        typeof value["description"] === "string"
+          ? value["description"]
+          : typeof value["markdownDescription"] === "string"
+            ? value["markdownDescription"]
+            : undefined,
       // Two sources, because the question has two scopes: the entry knows what its ROOT document
       // needs, and the property knows what it is itself — which is the only one that can answer for
       // a field nested inside an `operation` block.
@@ -695,6 +865,48 @@ export function mergeSkeleton(entry: SchemaEntry, current: unknown): unknown {
   return mergeMissing(skeletonOf(entry), current);
 }
 
+/**
+ * {@link mergeSkeleton}, on the TEXT — what the editor's "Add missing fields" writes.
+ *
+ * An edit rather than a re-serialisation, in both syntaxes. Parsing to a value and printing it back
+ * would drop every comment in a `tsconfig.json` or a pipeline and re-quote, re-indent and re-order
+ * what nobody touched; so JSON goes through `jsonc-parser`'s `modify`, which inserts a key and
+ * nothing else, and YAML through `yaml`'s `Document`, which keeps the author's comments and quoting.
+ * The indentation of a JSON insertion follows the document's own (a tab, or its first indent).
+ *
+ * Top level only, which is all the skeleton ever proposes. A document that does not parse, or whose
+ * root is not an object, comes back unchanged — merging into it would be a guess at what it holds.
+ * An empty one gets the skeleton on its own.
+ */
+export function withMissingFields(entry: SchemaEntry, text: string, format: SchemaFormat = "json"): string {
+  const skeleton = skeletonOf(entry) as Record<string, unknown>;
+  if (format === "yaml") {
+    const doc = parseDocument(text);
+    if (doc.errors.length > 0) return text;
+    if (doc.contents === null) doc.contents = doc.createNode({}) as never;
+    if (!isPlainObject(doc.toJS())) return text;
+    for (const [key, value] of Object.entries(skeleton)) {
+      if (!doc.has(key)) doc.set(key, value);
+    }
+    return doc.toString();
+  }
+
+  if (text.trim() === "") return `${JSON.stringify(skeleton, null, 2)}\n`;
+  const errors: ParseError[] = [];
+  const current = parseJsonc(text, errors, { allowTrailingComma: true, disallowComments: false });
+  if (errors.length > 0 || !isPlainObject(current)) return text;
+  const indent = /\n([ \t]+)\S/.exec(text)?.[1] ?? "  ";
+  const formattingOptions = indent.startsWith("\t")
+    ? { insertSpaces: false, tabSize: 2, eol: "\n" }
+    : { insertSpaces: true, tabSize: indent.length, eol: "\n" };
+  let out = text;
+  for (const [key, value] of Object.entries(skeleton)) {
+    if (key in current) continue;
+    out = applyEdits(out, modify(out, [key], value, { formattingOptions }));
+  }
+  return out;
+}
+
 function mergeMissing(additions: unknown, current: unknown): unknown {
   if (!isPlainObject(additions)) return current;
   // A document that is not an object cannot be merged into — an array or a scalar at the root is not
@@ -714,22 +926,57 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Look through the binding-form `anyOf` to the schema the author is actually writing.
+ * The schema one key of an object answers to.
  *
- * The binding forms are recognised by a NON-EMPTY `required` — they are the only schemas here that
- * have one, since nothing in this format is required in the file. Testing for the key's presence
- * instead would skip the real schemas too, all of which carry `required: []`.
+ * A named property first. Failing that, a `patternProperties` entry whose pattern the key matches —
+ * how a Compose file's `services` says what each service is. Failing that, `additionalProperties` —
+ * which is how a map with AUTHOR-CHOSEN keys answers "what goes inside `inputs.issue`?". Without the
+ * two fallbacks every such map is a dead end, and the slot, child and permission blocks here, and a
+ * pipeline's jobs, are all such maps.
+ */
+function memberOf(schema: SchemaDoc, key: string): SchemaDoc | undefined {
+  const named = ((schema["properties"] ?? {}) as Record<string, SchemaDoc>)[key];
+  if (named !== undefined) return named;
+  const patterns = schema["patternProperties"];
+  if (patterns !== null && typeof patterns === "object") {
+    for (const [pattern, member] of Object.entries(patterns as Record<string, SchemaDoc>)) {
+      try {
+        if (new RegExp(pattern, "u").test(key)) return member;
+      } catch {
+        // A pattern this engine cannot read is one the walk cannot follow; ajv's verdict still stands.
+      }
+    }
+  }
+  const extra = schema["additionalProperties"];
+  return typeof extra === "object" && extra !== null ? (extra as SchemaDoc) : undefined;
+}
+
+/**
+ * The binding forms, recognised by what they ARE: an object requiring exactly one of `$ref`, `$expr`
+ * or `json`. Recognising them by any non-empty `required` was enough while this module wrote every
+ * schema it walked — nothing here is required in the file — and stops being enough the moment a
+ * published schema's `oneOf` has branches that require a key for real.
+ */
+function isBindingForm(option: SchemaDoc): boolean {
+  const required = option["required"];
+  return (
+    Array.isArray(required) &&
+    required.length === 1 &&
+    BINDING_FORMS.some((form) => (form["required"] as string[])[0] === required[0])
+  );
+}
+
+/**
+ * Look through an `anyOf` or `oneOf` to the schema the author is actually writing — past the binding
+ * forms this format admits everywhere, to the branch that has something inside it.
  */
 function unwrap(schema: SchemaDoc | undefined): SchemaDoc | undefined {
   if (schema === undefined) return undefined;
-  const options = schema["anyOf"];
+  const options = schema["anyOf"] ?? schema["oneOf"];
   if (!Array.isArray(options)) return schema;
 
   const candidates = (options as SchemaDoc[])
-    .filter((option) => {
-      const required = option["required"];
-      return !(Array.isArray(required) && required.length > 0);
-    })
+    .filter((option) => !isBindingForm(option))
     // Recursive because these nest: `conversation` is a leaf whose own type is itself an `anyOf` of
     // a shorthand string and the full block.
     .map((option) => unwrap(option))
@@ -737,46 +984,94 @@ function unwrap(schema: SchemaDoc | undefined): SchemaDoc | undefined {
 
   // Prefer the branch that has something to descend INTO. `conversation` may be written as a bare
   // mode string or as a block, and only one of those can answer "what goes inside it?" — returning
-  // the first branch would make every such field a dead end.
+  // the first branch would make every such field a dead end. A `$ref` counts: what it points at is
+  // resolved by the caller, and a published schema's object branch is usually one.
   return (
-    candidates.find(
-      (option) =>
-        option["properties"] !== undefined ||
-        option["items"] !== undefined ||
-        option["additionalProperties"] !== undefined,
-    ) ?? candidates[0]
+    candidates.find((option) => hasMembers(option) || option["items"] !== undefined || typeof option["$ref"] === "string") ??
+    candidates[0]
+  );
+}
+
+/** Whether a schema says anything about the keys inside it. */
+function hasMembers(schema: SchemaDoc): boolean {
+  return (
+    schema["properties"] !== undefined ||
+    schema["patternProperties"] !== undefined ||
+    (typeof schema["additionalProperties"] === "object" && schema["additionalProperties"] !== null)
   );
 }
 
 /**
  * Peel a schema down to the object whose properties are being asked about.
  *
- * Three wrappers can sit in the way and they compose in any order, so this loops rather than
- * branching once: a binding-form `anyOf`, a `$ref` into the shared definitions, and an array whose
- * ITEMS are what a cursor "inside transitions" is actually in — the path carries no index (see
- * `cursorContext`), so the array itself is never the answer.
+ * Four wrappers can sit in the way and they compose in any order, so this loops rather than
+ * branching once: a `$ref` into the definitions, an `allOf` whose branches each contribute
+ * properties (a Compose service is a container spec AND a workload spec), a binding-form `anyOf` or
+ * a published schema's `oneOf`, and an array whose ITEMS are what a cursor "inside transitions" is
+ * actually in — the path carries no index (see `cursorContext`), so the array itself is never the
+ * answer. A schema that declares members of its own stops the walk even beside a `oneOf`: a GitLab
+ * job lists its keys and then says which combinations are legal, and the keys are the answer.
  *
  * Bounded, because a `$ref` cycle is a document bug rather than a reason to hang the renderer.
  */
-function descend(root: SchemaDoc, schema: SchemaDoc | undefined): SchemaDoc | undefined {
+function descend(root: SchemaDoc, schema: SchemaDoc | undefined, depth = 0): SchemaDoc | undefined {
   let current = schema;
-  for (let step = 0; step < 12; step++) {
+  for (let step = 0; step < 12 && depth < 6; step++) {
     if (current === undefined) return undefined;
-    if (Array.isArray(current["anyOf"])) {
-      current = unwrap(current);
-      continue;
-    }
     if (typeof current["$ref"] === "string") {
       current = pointerTo(root, current["$ref"]);
       continue;
     }
-    if (current["items"] !== undefined) {
+    if (Array.isArray(current["allOf"])) return merged(root, current, depth);
+    if (hasMembers(current)) return current;
+    if (Array.isArray(current["anyOf"]) || Array.isArray(current["oneOf"])) {
+      current = unwrap(current);
+      continue;
+    }
+    if (current["items"] !== undefined && typeof current["items"] === "object") {
       current = current["items"] as SchemaDoc;
       continue;
     }
     return current;
   }
   return undefined;
+}
+
+/**
+ * An `allOf`, as the one object its branches describe together: every branch's properties, the
+ * schema's own last so they win, and the first map fallback any of them declares.
+ *
+ * A branch that is itself a choice (`anyOf`/`oneOf` with nothing of its own) contributes EVERY
+ * option's properties, not just the likeliest one's: `tsconfig.json`'s root is an `allOf` whose last
+ * branch is "files, or include, or exclude, or references", and each of the four may be written.
+ */
+function merged(root: SchemaDoc, schema: SchemaDoc, depth: number): SchemaDoc {
+  const { allOf, ...own } = schema;
+  const parts: (SchemaDoc | undefined)[] = [];
+  for (const branch of allOf as SchemaDoc[]) {
+    let resolved: SchemaDoc | undefined = branch;
+    for (let hops = 0; hops < 12 && typeof resolved?.["$ref"] === "string"; hops++) {
+      resolved = pointerTo(root, resolved["$ref"] as string);
+    }
+    const options = resolved?.["anyOf"] ?? resolved?.["oneOf"];
+    if (resolved !== undefined && Array.isArray(options) && !hasMembers(resolved)) {
+      for (const option of options as SchemaDoc[]) {
+        if (!isBindingForm(option)) parts.push(descend(root, option, depth + 1));
+      }
+    } else {
+      parts.push(descend(root, branch, depth + 1));
+    }
+  }
+  parts.push(own);
+  const out: SchemaDoc = { ...own, properties: {} };
+  for (const part of parts) {
+    if (part === undefined) continue;
+    Object.assign(out["properties"] as SchemaDoc, part["properties"] ?? {});
+    for (const key of ["patternProperties", "additionalProperties"] as const) {
+      if (out[key] === undefined && part[key] !== undefined) out[key] = part[key];
+    }
+  }
+  return out;
 }
 
 /** Resolve a local JSON pointer (`#/definitions/jsonSchema`). Foreign refs are not resolvable here. */

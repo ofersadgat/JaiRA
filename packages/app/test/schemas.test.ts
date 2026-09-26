@@ -7,13 +7,13 @@
  * than none. So most of what follows is "this valid thing must produce no violations", and the
  * catching tests are the two errors people actually make by hand: a misspelled key and a wrong type.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { specPlanningFiles } from "@jaira/runtime";
-import { listSchemas, mergeSkeleton, propertiesOf, schemaById, skeletonOf } from "@jaira/shared";
+import { listSchemas, matchesFile, mergeSkeleton, propertiesOf, schemaById, schemaForFile, skeletonOf, withMissingFields } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
@@ -39,8 +39,30 @@ const check = (schemaId: string, doc: unknown): string[] =>
     .violations.map((v) => `${v.path}: ${v.message}`);
 
 describe("the registry", () => {
-  it("offers the three entries the picker lists", () => {
-    expect(listSchemas().map((s) => s.id)).toEqual(["state", "state-prompt", "prompt-operation"]);
+  it("offers the entries the picker lists", () => {
+    expect(listSchemas().map((s) => s.id)).toEqual([
+      "state",
+      "state-prompt",
+      "prompt-operation",
+      "package-json",
+      "tsconfig",
+      "compose",
+      "gitlab-ci",
+      "github-workflow",
+    ]);
+  });
+
+  it("offers each syntax the schemas its documents can be written in", () => {
+    // A state is a state in either syntax; npm and tsc read JSON, the three CI and Compose files YAML.
+    expect(listSchemas("json").map((s) => s.id)).toEqual(["state", "state-prompt", "prompt-operation", "package-json", "tsconfig"]);
+    expect(listSchemas("yaml").map((s) => s.id)).toEqual([
+      "state",
+      "state-prompt",
+      "prompt-operation",
+      "compose",
+      "gitlab-ci",
+      "github-workflow",
+    ]);
   });
 
   it("refuses an unknown id rather than silently passing the document", () => {
@@ -221,6 +243,8 @@ describe("what the schema offers the editor", () => {
   it("produces something valid whatever it merged into", () => {
     for (const entry of listSchemas()) {
       expect(check(entry.id, mergeSkeleton(entry, {})), `${entry.id} into {}`).toEqual([]);
+      // `label` is a partial of THIS app's documents; a Compose file rightly refuses it.
+      if (entry.files !== undefined) continue;
       expect(check(entry.id, mergeSkeleton(entry, { label: "x" })), `${entry.id} into a partial`).toEqual([]);
     }
   });
@@ -457,3 +481,176 @@ describe("detecting a document's schema", () => {
     expect(check(id, doc)).toEqual([]);
   });
 });
+
+/**
+ * The files their own ecosystems define — held to the published schema, found by NAME.
+ *
+ * The same two risks as this app's own schemas, the first one sharper: these are somebody else's
+ * format, and a verdict against a `package.json` npm itself accepts would be this editor being wrong
+ * about a file it does not own. So the repo's own manifests must pass, and a typo must not.
+ */
+describe("files the wider world defines", () => {
+  const yaml = (schemaId: string, text: string): string[] =>
+    service.validateSchema({ schemaId, text, format: "yaml" }).violations.map((v) => `${v.path}: ${v.message}`);
+
+  it("claims a file by its name, whatever it holds — even empty", () => {
+    expect(service.detectSchema("", "packages/app/package.json").schemaId).toBe("package-json");
+    expect(service.detectSchema("", "C:\\work\\compose.yaml", "yaml").schemaId).toBe("compose");
+    expect(service.detectSchema("", "docker-compose.yml", "yaml").schemaId).toBe("compose");
+    expect(service.detectSchema("", ".gitlab-ci.yml", "yaml").schemaId).toBe("gitlab-ci");
+    expect(schemaForFile("my-package.json")).toBeUndefined();
+  });
+
+  it("does not claim a name in a syntax the schema is not written in", () => {
+    // A `package.json` read as YAML is not npm's file; the name alone should not hand it npm's schema.
+    expect(service.detectSchema("{}", "package.json", "yaml").schemaId).toBeNull();
+  });
+
+  it("never guesses these from content — a manifest under another name is plain JSON", () => {
+    expect(service.detectSchema(JSON.stringify({ name: "x", version: "1.0.0" }), "fixture.json").schemaId).toBeNull();
+  });
+
+  it("passes this repository's own package.json files", () => {
+    for (const file of ["package.json", "packages/app/package.json", "packages/shared/package.json"]) {
+      const text = readFileSync(join(__dirname, "..", "..", "..", file), "utf8");
+      expect(service.validateSchema({ schemaId: "package-json", text }).violations, file).toEqual([]);
+    }
+  });
+
+  it("reports a package.json field of the wrong type", () => {
+    const found = check("package-json", { name: 5, version: "1.0.0" });
+    expect(found.some((e) => e.startsWith("name:"))).toBe(true);
+  });
+
+  it("passes a Compose file and reports a misspelled service key", () => {
+    expect(yaml("compose", "services:\n  web:\n    image: nginx\n    ports: ['80:80']\n")).toEqual([]);
+    // `unevaluatedProperties` is 2020-12's, and a draft-07 compile would skip it — this is the test
+    // that the Compose Specification is compiled in its own dialect.
+    expect(yaml("compose", "services:\n  web:\n    imagee: nginx\n")).toEqual([
+      "services.web: unknown field 'imagee' — nothing else is recognized here",
+    ]);
+  });
+
+  it("passes a GitLab pipeline and reports a job it cannot run", () => {
+    expect(yaml("gitlab-ci", "stages: [build]\nbuild:\n  stage: build\n  script: [make]\n")).toEqual([]);
+    expect(yaml("gitlab-ci", "build:\n  scrpt: make\n").length).toBeGreaterThan(0);
+  });
+
+  it("states a YAML parse error instead of schema noise", () => {
+    const result = service.validateSchema({ schemaId: "compose", text: "services: [\n", format: "yaml" });
+    expect(result.parseError).toBeDefined();
+    expect(result.violations).toEqual([]);
+  });
+
+  it("detects a state written as YAML by its content, as it does one written as JSON", () => {
+    const text = "label: Plan\nsequence: [goals]\nchildren:\n  goals: {}\n";
+    expect(service.detectSchema(text, "plan.yaml", "yaml").schemaId).toBe("state");
+  });
+
+  it("walks the published shapes for the field reference", () => {
+    const keys = (id: string, at: string[]): string[] => propertiesOf(schemaById(id)!, at).map((p) => p.key);
+    expect(keys("package-json", [])).toEqual(expect.arrayContaining(["name", "version", "scripts", "dependencies"]));
+    // A service is `patternProperties` → `$ref` → `allOf` of two specs: all three have to be read.
+    expect(keys("compose", ["services", "web"])).toEqual(expect.arrayContaining(["image", "ports", "deploy"]));
+    // A job is any key the pipeline does not reserve (`additionalProperties`), then `allOf` again.
+    expect(keys("gitlab-ci", ["build"])).toEqual(expect.arrayContaining(["script", "stage", "rules"]));
+    // A tsconfig's root is nothing BUT an `allOf` of definitions.
+    expect(keys("tsconfig", [])).toEqual(expect.arrayContaining(["compilerOptions", "extends", "include"]));
+    expect(keys("tsconfig", ["compilerOptions"])).toEqual(expect.arrayContaining(["strict", "target", "paths"]));
+    expect(keys("github-workflow", ["jobs", "build"])).toEqual(expect.arrayContaining(["runs-on", "steps", "needs"]));
+  });
+});
+
+describe("names that are patterns", () => {
+  it("matches from the end of the path, one segment per segment", () => {
+    expect(matchesFile("package.json", "packages/app/package.json")).toBe(true);
+    expect(matchesFile("package.json", "my-package.json")).toBe(false);
+    expect(matchesFile("tsconfig.*.json", "tsconfig.base.json")).toBe(true);
+    expect(matchesFile("tsconfig.*.json", "tsconfig.json")).toBe(false);
+    expect(matchesFile(".github/workflows/*.yml", "C:\\repo\\.github\\workflows\\ci.yml")).toBe(true);
+    // The directory is what makes a workflow a workflow.
+    expect(matchesFile(".github/workflows/*.yml", "repo/workflows/ci.yml")).toBe(false);
+    expect(matchesFile(".github/workflows/*.yml", "ci.yml")).toBe(false);
+    // `*` stays inside its segment.
+    expect(matchesFile(".github/workflows/*.yml", ".github/workflows/nested/ci.yml")).toBe(false);
+  });
+
+  it("claims a tsconfig and its variants, and a workflow by its directory", () => {
+    expect(service.detectSchema("", "packages/app/tsconfig.json").schemaId).toBe("tsconfig");
+    expect(service.detectSchema("", "tsconfig.base.json").schemaId).toBe("tsconfig");
+    expect(service.detectSchema("", ".github/workflows/ci.yml", "yaml").schemaId).toBe("github-workflow");
+    expect(service.detectSchema("", ".github/workflows/release.yaml", "yaml").schemaId).toBe("github-workflow");
+    expect(schemaForFile("config/ci.yml")).toBeUndefined();
+  });
+});
+
+describe("tsconfig.json and GitHub Actions", () => {
+  const repo = (file: string): string => readFileSync(join(__dirname, "..", "..", "..", file), "utf8");
+  const yaml = (schemaId: string, text: string): string[] =>
+    service.validateSchema({ schemaId, text, format: "yaml" }).violations.map((v) => `${v.path}: ${v.message}`);
+
+  it("passes this repository's own tsconfigs — comments, trailing commas and all", () => {
+    // `tsconfig.base.json` is written with `//` comments, which `tsc` accepts and `JSON.parse` does not.
+    expect(repo("tsconfig.base.json")).toContain("//");
+    for (const file of ["tsconfig.base.json", "packages/app/tsconfig.json", "packages/shared/tsconfig.json"]) {
+      const result = service.validateSchema({ schemaId: "tsconfig", text: repo(file) });
+      expect(result.parseError, file).toBeUndefined();
+      expect(result.violations, file).toEqual([]);
+    }
+  });
+
+  it("reports a compiler option of the wrong type — and not why the other branch failed", () => {
+    // `compilerOptions` is "an object, or null". The object branch got further; that null was not
+    // written is not news to anyone.
+    expect(check("tsconfig", { compilerOptions: { strict: "yes" } })).toEqual(["compilerOptions.strict: must be boolean"]);
+  });
+
+  it("passes this repository's own workflow", () => {
+    expect(yaml("github-workflow", repo(".github/workflows/ci.yml"))).toEqual([]);
+  });
+
+  it("reports a job GitHub cannot run", () => {
+    const valid = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n";
+    expect(yaml("github-workflow", valid)).toEqual([]);
+    // A job is one that runs steps OR one that calls a reusable workflow. This is the first kind with
+    // no `runs-on`; that the second kind takes no `steps` is about a job nobody is writing.
+    expect(yaml("github-workflow", "on: push\njobs:\n  build:\n    steps:\n      - run: make\n")).toEqual([
+      "jobs.build: must have required property 'runs-on'",
+    ]);
+  });
+});
+
+/**
+ * "Add missing fields", on the text — the one place this editor writes a document it did not type.
+ *
+ * What must hold is that it ADDS: a tsconfig's comments, a pipeline's comments, the order and the
+ * indentation the author chose all come back as they were, with the missing keys beside them.
+ */
+describe("adding missing fields to a document's text", () => {
+  it("adds to JSONC without touching its comments, order or tabs", () => {
+    const text = '{\n\t// the base every package extends\n\t"extends": "./tsconfig.base.json",\n}\n';
+    const out = withMissingFields(schemaById("tsconfig")!, text);
+    expect(out).toContain("\t// the base every package extends\n\t\"extends\": \"./tsconfig.base.json\"");
+    expect(out).toMatch(/\n\t"compilerOptions": \{\}/);
+    expect(service.validateSchema({ schemaId: "tsconfig", text: out }).violations).toEqual([]);
+  });
+
+  it("keeps a YAML document's comments, and writes values the schema accepts", () => {
+    const text = "# deploys on every push\nname: ci\n";
+    const out = withMissingFields(schemaById("github-workflow")!, text, "yaml");
+    expect(out.startsWith("# deploys on every push\nname: ci\n")).toBe(true);
+    expect(out).toContain("on: push");
+  });
+
+  it("writes the skeleton into an empty document, and leaves an unreadable one alone", () => {
+    expect(JSON.parse(withMissingFields(schemaById("package-json")!, ""))).toEqual({ name: "my-package", version: "0.1.0" });
+    expect(withMissingFields(schemaById("package-json")!, '{"name": ')).toBe('{"name": ');
+    expect(withMissingFields(schemaById("package-json")!, "[1, 2]")).toBe("[1, 2]");
+  });
+
+  it("adds nothing a document already has", () => {
+    const text = '{\n  "name": "x",\n  "version": "1.0.0"\n}\n';
+    expect(withMissingFields(schemaById("package-json")!, text)).toBe(text);
+  });
+});
+

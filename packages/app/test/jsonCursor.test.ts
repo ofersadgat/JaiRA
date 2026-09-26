@@ -152,3 +152,21 @@ describe("siblingKeys", () => {
     expect(siblingKeys(marked.replace("|", ""), marked.indexOf("|"))).toEqual(["label"]);
   });
 });
+
+describe("comments", () => {
+  it("does not let a quote inside a comment move the cursor into a string", () => {
+    const found = at('{\n  // the "base" config\n  "compilerOptions": { "str|" }\n}');
+    expect(found.path).toEqual(["compilerOptions"]);
+    expect(found.partial).toBe("str");
+    expect(found.quoted).toBe(true);
+  });
+
+  it("offers nothing while the cursor is inside a comment", () => {
+    expect(at('{ // "comp|\n}').quoted).toBe(false);
+  });
+
+  it("lists the siblings around a comment", () => {
+    const text = '{ "a": 1, /* "b": 2 */ "c": 3, "| }';
+    expect(siblingKeys(text.replace("|", ""), text.indexOf("|"))).toEqual(["a", "c"]);
+  });
+});

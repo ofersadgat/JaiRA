@@ -23,9 +23,8 @@
  */
 
 /**
- * `comment` is never emitted by {@link highlightJson} — JSON has none — and is here because
- * `yamlHighlight.ts` shares this vocabulary and the CSS that colours it. One set of token classes
- * rather than two that have to agree.
+ * One vocabulary for both scanners: `yamlHighlight.ts` shares it and the CSS that colours it, rather
+ * than two sets of token classes that have to agree. `comment` is JSONC's `//` and `/* *\/` here.
  */
 export type TokenKind = "key" | "string" | "number" | "literal" | "punct" | "plain" | "comment";
 
@@ -77,6 +76,19 @@ export function highlightJson(text: string, describe?: Describe): HighlightLine[
 
   while (i < text.length) {
     const ch = text[i]!;
+
+    // --- comments: JSONC's, as a `tsconfig.json` or `settings.json` carries them ---
+    // Before strings, and that is the point of recognising them at all: a quote inside a comment
+    // would otherwise open a "string" that swallowed the rest of the document. An unterminated block
+    // comment runs to the end, as a half-typed one does. The string before it may still become a key.
+    if (ch === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
+      const line = text[i + 1] === "/";
+      const close = line ? text.indexOf("\n", i) : text.indexOf("*/", i + 2);
+      const end = close === -1 ? text.length : line ? close : close + 2;
+      emit(text.slice(i, end), "comment");
+      i = end;
+      continue;
+    }
 
     // --- strings, terminated or not ---
     if (ch === '"') {
