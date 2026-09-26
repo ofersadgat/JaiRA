@@ -10108,13 +10108,15 @@ export class AppService {
   }
 
   /**
-   * The layers Settings → Permission sets reads and writes: the named project's, or — with nothing open —
-   * the shared root standing as its own project, which has no `project` layer at all.
+   * The layers Settings → Permission sets reads and writes: the named project's, or — named `shared`
+   * (a window standing at the root), or with nothing open — the shared root standing as its own
+   * project, which has no `project` layer at all.
    *
    * Computed and never OPENED: `baseAsProjectPaths` is arithmetic on a directory name, where the
    * shared session would create a database for the sake of listing eight files.
    */
   private permissionSetPaths(project?: string): JairaPaths {
+    if (project === SHARED_SESSION) return baseAsProjectPaths(this.baseDir);
     return project !== undefined || this.hasProject ? this.requireProject(project).paths : baseAsProjectPaths(this.baseDir);
   }
 

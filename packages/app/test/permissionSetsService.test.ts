@@ -21,6 +21,7 @@ import {
   rebasePermissionSetChange,
   permissionSetsAt,
   permissionSetStanding,
+  SHARED_SESSION,
   type PushMessage,
   type PermissionSetDecl,
 } from "@jaira/shared";
@@ -30,6 +31,7 @@ import { AppService } from "../src/main/service";
 let dir: string;
 let service: AppService;
 let pushes: PushMessage[];
+const others: string[] = [];
 
 const shipped = (id: string): PermissionSetDecl => JSON.parse(readFileSync(join(jairaBuiltInPaths().dir, "permission-sets", `${id}.json`), "utf8")) as PermissionSetDecl;
 
@@ -51,7 +53,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await service.close();
-  rmSync(dir, { recursive: true, force: true });
+  for (const one of [dir, ...others.splice(0)]) rmSync(one, { recursive: true, force: true });
 });
 
 describe("permissionSets:read", () => {
@@ -79,6 +81,17 @@ describe("permissionSets:read", () => {
     write(join(dir, ".jaira"), "workflows/plan.json", { environment: { tools: "$/permission-sets/chat/read-only" } });
     expect(service.readPermissionSetSettings({ project: dir }).usedBy["chat/read-only"]).toEqual(["plan"]);
     expect(service.readPermissionSetSettings({ project: dir, usedBy: false }).usedBy).toEqual({});
+  });
+
+  it("reads the shared root when the window names it, with several projects open", async () => {
+    const other = mkdtempSync(join(tmpdir(), "jaira-permission-sets-service-"));
+    others.push(other);
+    initProject(other, testHome());
+    await service.open(other);
+    // Nothing named with two open is the caller's fault, and stays a refusal…
+    expect(() => service.readPermissionSetSettings({ usedBy: false })).toThrow(/several projects are open/);
+    // …while `shared` — a window standing at the root — reads the root, which has no project layer.
+    expect(service.readPermissionSetSettings({ project: SHARED_SESSION, usedBy: false }).layers).toEqual(["base", "system"]);
   });
 });
 
