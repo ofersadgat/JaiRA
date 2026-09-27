@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en" data-palette="ink">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The island page (decision 0013, S5): one DOM component, driven over the bridge in protocol.ts.
+         No remote code; 'wasm-unsafe-eval' for the TextMate grammars, blob: workers for Monaco. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob:"
+    />
+    <title>JaiRA island</title>
+  </head>
+  <body style="margin: 0">
+    <div id="island"></div>
+    <script type="module" src="./%ISLAND%.tsx"></script>
+  </body>
+</html>

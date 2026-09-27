@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "one dev",
-    "build": "one build"
+    "build": "one build",
+    "build:island": "node island/build.mjs"
   },
   "dependencies": {
     "@react-navigation/native": "~7.3.16",

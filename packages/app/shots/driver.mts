@@ -65,6 +65,10 @@ export interface Options {
   readonly height?: number;
   /** Not the default 9222: a browser someone already has open would answer instead of the app. */
   readonly port?: number;
+  /** A phone instead of a window: its viewport and scale, with touch (the island harness, 0013 S5). */
+  readonly phone?: { readonly width: number; readonly height: number; readonly scale: number };
+  /** Extra switches for a {@link browse}d browser. */
+  readonly flags?: readonly string[];
 }
 
 export class App {
@@ -113,7 +117,7 @@ export class App {
     const profile = join(options.out, `.profile-${port}`);
     const child = spawn(
       browser,
-      ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--hide-scrollbars", url],
+      ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--hide-scrollbars", ...(options.flags ?? []), url],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     return App.attach(child, port, options, true);
@@ -172,13 +176,14 @@ export class App {
     // then waits for one forever — a shot that hangs, not one that fails.
     await app.send("Page.bringToFront");
     await app.send("Emulation.setDeviceMetricsOverride", {
-      width: options.width ?? 1280,
-      height: options.height ?? 860,
+      width: options.phone?.width ?? options.width ?? 1280,
+      height: options.phone?.height ?? options.height ?? 860,
       // Two, so 10px type is readable in the PNG. The old harness could only ask for this with a
       // process-wide launch switch; here it is a call, and it could differ per shot.
-      deviceScaleFactor: 2,
-      mobile: false,
+      deviceScaleFactor: options.phone?.scale ?? 2,
+      mobile: options.phone !== undefined,
     });
+    if (options.phone !== undefined) await app.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     return app;
   }
 
@@ -439,6 +444,18 @@ export class App {
         if (document.documentElement) still(); else document.addEventListener("DOMContentLoaded", still);
       })()`,
     });
+  }
+
+  /** Type into whatever has focus, as an IME commits text: one `insertText`, no key events. */
+  async type(text: string): Promise<void> {
+    await this.send("Input.insertText", { text });
+  }
+
+  /** The renderer's own counters (`Performance.getMetrics`): heap, nodes, documents, frames. */
+  async metrics(): Promise<Record<string, number>> {
+    await this.send("Performance.enable");
+    const reply = (await this.send("Performance.getMetrics")) as unknown as { result?: { metrics?: { name: string; value: number }[] } };
+    return Object.fromEntries((reply.result?.metrics ?? []).map((m) => [m.name, m.value]));
   }
 
   /** Load `url` in the window, and wait for it to finish loading. */
