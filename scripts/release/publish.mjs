@@ -14,8 +14,10 @@
  * Environment: RELEASES_REPO, GH_TOKEN, PLAN_TAG, PLAN_VERSION, PLAN_PRERELEASE ("true" | "false").
  * Node 22, no dependencies.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { mergeManifests, parseManifest, serializeManifest } from "./manifests.mjs";
 
 const env = process.env;
 const repo = env.RELEASES_REPO ?? "ofersadgat/releases";
@@ -48,9 +50,31 @@ async function exists(path) {
   return true;
 }
 
-const files = readdirSync(dir)
+const all = readdirSync(dir)
   .map((name) => join(dir, name))
   .filter((file) => statSync(file).isFile());
+
+/**
+ * The update manifests, merged across architectures (`manifests.mjs`): each build machine's copy
+ * arrives as `<name>@<build>`, and the release gets one `<name>` listing every architecture's file.
+ */
+const copies = new Map();
+for (const file of all) {
+  const match = /^(.+\.yml)@(.+)$/.exec(basename(file));
+  if (match === null) continue;
+  copies.set(match[1], [...(copies.get(match[1]) ?? []), file]);
+}
+const merged = mkdtempSync(join(tmpdir(), "jaira-manifests-"));
+for (const [name, sources] of copies) {
+  const manifest = mergeManifests(
+    sources.map((file) => parseManifest(readFileSync(file, "utf8"), basename(file))),
+    name,
+  );
+  if (manifest.version !== env.PLAN_VERSION) throw new Error(`${name} is for ${manifest.version}, not ${env.PLAN_VERSION}`);
+  writeFileSync(join(merged, name), serializeManifest(manifest));
+  console.log(`${name}: ${manifest.files.map((f) => f.url).join(", ")}`);
+}
+const files = [...all.filter((file) => !/\.yml@/.test(basename(file))), ...[...copies.keys()].map((name) => join(merged, name))];
 if (files.length === 0) throw new Error(`no installers in ${dir}`);
 
 if (!(await exists(`/repos/${repo}/contents/README.md`))) {

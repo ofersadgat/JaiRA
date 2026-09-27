@@ -144,11 +144,24 @@ jobs:
             npm run app:dist
           fi
 
+      # The update manifests (latest*.yml / nightly*.yml) carry this machine's name: two machines write
+      # the same file name, and publish.mjs merges the copies into one per name (manifests.mjs).
+      - name: Name the update manifests by build
+        working-directory: JaiRA/packages/app/release/${{ needs.plan.outputs.version }}
+        shell: bash
+        run: |
+          for manifest in *.yml; do
+            [ -e "$manifest" ] || continue
+            [ "$manifest" = "builder-debug.yml" ] && continue
+            mv "$manifest" "$manifest@${{ matrix.name }}"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.name }}
           if-no-files-found: error
           path: |
+            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.yml@*
             JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.exe
             JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.blockmap
             JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.dmg

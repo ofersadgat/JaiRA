@@ -130,6 +130,8 @@ release:plan:
     - mkdir -p installers smoke
     - find "packages/app/release/$PLAN_VERSION" -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) -exec cp {} installers/ \; 2>/dev/null || true
     - cp "packages/app/release/$PLAN_VERSION/smoke.png" "smoke/$CI_JOB_NAME_SLUG.png" 2>/dev/null || true
+    # Each update manifest under this build's name; the publish step merges the copies of one name.
+    - for m in "packages/app/release/$PLAN_VERSION"/*.yml; do [ -f "$m" ] && [ "$(basename "$m")" != builder-debug.yml ] && cp "$m" "installers/$(basename "$m")@$CI_JOB_NAME_SLUG"; done; true
   artifacts:
     when: always
     expire_in: 1 week
@@ -173,6 +175,8 @@ release:build:win-x64:
     - New-Item -ItemType Directory -Force installers, smoke | Out-Null
     - Get-ChildItem "packages\app\release\$env:PLAN_VERSION\*" -File -Include *.exe, *.blockmap -ErrorAction SilentlyContinue | Copy-Item -Destination installers
     - Copy-Item "packages\app\release\$env:PLAN_VERSION\smoke.png" "smoke\$env:CI_JOB_NAME_SLUG.png" -ErrorAction SilentlyContinue
+    # Each update manifest under this build's name; the publish step merges the copies of one name.
+    - Get-ChildItem "packages\app\release\$env:PLAN_VERSION\*.yml" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "builder-debug.yml" } | ForEach-Object { Copy-Item $_.FullName "installers\$($_.Name)@$env:CI_JOB_NAME_SLUG" }
   artifacts:
     when: always
     expire_in: 1 week

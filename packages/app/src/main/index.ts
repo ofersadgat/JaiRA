@@ -16,6 +16,7 @@ import {
   IPC_CHANNELS,
   PALETTE_FRAME,
   PUSH_CHANNEL,
+  releasePageOf,
   resolveTheme,
   takeHomeFlag,
   THIRD_PARTY_LICENSES_FILE_NAME,
@@ -30,8 +31,11 @@ import {
   type TaskConnectUndoRequest,
   type TaskMoveRequest,
 } from "@jaira/shared";
+import type { JsonValue } from "@declarative-ai/json";
+import { autoUpdater } from "electron-updater";
 import { stackDetail } from "./diagnostics";
 import { AppService, type CrashKind, type KeychainPort } from "./service";
+import { UpdateManager, type UpdaterPort } from "./updates";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
 // map for modules compiled after it runs, and by the time this line executes the bundle it belongs to
@@ -217,30 +221,33 @@ process.on("warning", (warning: Error) => {
  */
 const home = takeHomeFlag(process.argv.slice(1)).home;
 
+/** Tell the window something. The service's pushes and the updater's both go this way. */
+function pushToWindow(message: PushMessage): void {
+  // GUARDED, because this is a send into another process and the service treats it as a statement.
+  //
+  // `webContents.send` structure-clones its argument and throws on anything it cannot represent, and
+  // it throws again for a window torn down between the check and the call. A window whose RENDERER
+  // is gone is a third case, and one `send` does not throw for — see `rendererAlive`. Every caller upstream is
+  // ordinary bookkeeping — "a run started", "the board changed" — written as if telling the window
+  // were free. It is not, and an exception here surfaces wherever that bookkeeping happened to sit,
+  // which for an engine event is inside the run.
+  //
+  // A push is NEWS, and news that cannot be delivered is not the sender's failure to survive: the
+  // renderer refetches on reconnect and on `store:invalidate`, so a dropped frame costs latency and
+  // nothing else.
+  try {
+    if (window && !window.isDestroyed() && rendererAlive) window.webContents.send(PUSH_CHANNEL, message);
+  } catch (e) {
+    // Not through `service.log`, which would publish a `log:entry` back through this same failing
+    // channel. `recordCrash` records; whether the window hears about it is a separate question that
+    // this frame is in no position to answer.
+    reportCrash("push", new Error(`'${message.type}' could not be delivered: ${(e as Error).message}`));
+  }
+}
+
 const service = new AppService({
   ...(home !== undefined ? { baseDir: home } : {}),
-  publish: (message: PushMessage) => {
-    // GUARDED, because this is a send into another process and the service treats it as a statement.
-    //
-    // `webContents.send` structure-clones its argument and throws on anything it cannot represent, and
-    // it throws again for a window torn down between the check and the call. A window whose RENDERER
-    // is gone is a third case, and one `send` does not throw for — see `rendererAlive`. Every caller upstream is
-    // ordinary bookkeeping — "a run started", "the board changed" — written as if telling the window
-    // were free. It is not, and an exception here surfaces wherever that bookkeeping happened to sit,
-    // which for an engine event is inside the run.
-    //
-    // A push is NEWS, and news that cannot be delivered is not the sender's failure to survive: the
-    // renderer refetches on reconnect and on `store:invalidate`, so a dropped frame costs latency and
-    // nothing else.
-    try {
-      if (window && !window.isDestroyed() && rendererAlive) window.webContents.send(PUSH_CHANNEL, message);
-    } catch (e) {
-      // Not through `service.log`, which would publish a `log:entry` back through this same failing
-      // channel. `recordCrash` records; whether the window hears about it is a separate question that
-      // this frame is in no position to answer.
-      reportCrash("push", new Error(`'${message.type}' could not be delivered: ${(e as Error).message}`));
-    }
-  },
+  publish: pushToWindow,
   keychain: electronKeychain(),
   // The app checks what can actually answer a prompt — by itself, at startup, at project open, and
   // after every configuration write. It is the one caller that should: it has a settings screen to
@@ -294,6 +301,68 @@ service.recordApp("info", `JaiRA ${app.getVersion()} started`, {
   // a quiet app. Naming the level here is what makes that visible rather than mysterious.
   logLevel: process.env["LOG_LEVEL"] ?? "info (default; set LOG_LEVEL=debug for more)",
 });
+
+/**
+ * Why this build cannot update itself, or nothing when it can (decision 0011 §4). The feed file is
+ * written by electron-builder when the build is packaged with a publish target (`package.mjs`); Linux
+ * updates only the AppImage (which says where it is in `APPIMAGE`) and the `.deb` (which carries the
+ * `package-type` marker electron-updater installs it by).
+ */
+function updateDisabledReason(): string | undefined {
+  if (!app.isPackaged) return "a development build does not update itself";
+  if (process.env["JAIRA_DISABLE_AUTO_UPDATE"] !== undefined) return "turned off by JAIRA_DISABLE_AUTO_UPDATE";
+  if (!existsSync(join(process.resourcesPath, "app-update.yml"))) return "this build has no update feed";
+  if (process.platform === "linux" && process.env["APPIMAGE"] === undefined && !existsSync(join(process.resourcesPath, "package-type"))) {
+    return "only the AppImage and .deb builds update themselves";
+  }
+  return undefined;
+}
+
+/**
+ * What the packaging step recorded about this build (`package.mjs` writes `jairaBuild` into the
+ * packaged `package.json`). A development build has none.
+ */
+function buildInfo(): { macSigned?: boolean } {
+  try {
+    const manifest = JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8")) as { jairaBuild?: { macSigned?: boolean } };
+    return manifest.jairaBuild ?? {};
+  } catch {
+    return {};
+  }
+}
+
+const updates = (() => {
+  const disabledReason = updateDisabledReason();
+  if (disabledReason === undefined) {
+    autoUpdater.logger = {
+      info: (message: unknown) => service.recordApp("debug", `updater: ${String(message)}`),
+      warn: (message: unknown) => service.recordApp("warn", `updater: ${String(message)}`),
+      error: (message: unknown) => service.recordApp("warn", `updater: ${String(message)}`),
+      debug: () => undefined,
+    };
+  }
+  return new UpdateManager({
+    version: app.getVersion(),
+    ...(disabledReason === undefined ? { port: autoUpdater as unknown as UpdaterPort } : { disabledReason }),
+    // Squirrel.Mac installs only an app signed with a Developer ID; until there is one (0011 §2), a mac
+    // build checks and points at the release page.
+    manual: process.platform === "darwin" && buildInfo().macSigned !== true,
+    releaseUrl: releasePageOf,
+    publish: (state) => pushToWindow({ type: "update:changed", state }),
+    log: (level, message, data) => service.recordApp(level, message, data as JsonValue | undefined),
+  });
+})();
+
+/** Set when the person asked to install: the quit then ends in the installer rather than an exit. */
+let installAfterQuit = false;
+
+/** Install the downloaded update by quitting the ordinary way (`before-quit` below finishes it). */
+function requestInstall(): { installing: boolean } {
+  if (!updates.canInstall()) return { installing: false };
+  installAfterQuit = true;
+  setImmediate(() => app.quit());
+  return { installing: true };
+}
 
 /**
  * The three verbs that could not be service methods.
@@ -542,6 +611,10 @@ const handlers: Record<IpcChannel, Handler> = {
   "secret:capabilities": (() => service.secretCapabilities()) as Handler,
   "secret:set": ((request: Parameters<typeof service.setSecret>[0]) => service.setSecret(request)) as Handler,
   "licenses:read": (() => readLicenseManifest()) as Handler,
+  "update:state": (() => updates.current()) as Handler,
+  "update:check": (() => updates.check()) as Handler,
+  "update:download": (() => updates.download()) as Handler,
+  "update:install": (() => requestInstall()) as Handler,
 };
 
 /**
@@ -566,7 +639,11 @@ function registerIpc(): void {
         // The one handler whose result the frame depends on: the window controls are drawn by the
         // OS, so a theme switch — a write to a settings layer's `appearance` — has to be pushed back
         // out to it.
-        if (channel === "config:write") repaintTitleBar();
+        // …and the update channel is the machine's setting, read by the main process, not the window.
+        if (channel === "config:write") {
+          repaintTitleBar();
+          updates.configure(service.updateSettings());
+        }
         return answer;
       } catch (e) {
         // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
@@ -958,6 +1035,11 @@ void app.whenReady().then(async () => {
     leftAt = undefined;
   });
 
+  // The app's own updates (decision 0011 §4): the machine's channel, then a check shortly after start
+  // and hourly. Nothing downloads until the person asks.
+  updates.configure(service.updateSettings());
+  updates.start();
+
   const capture = process.env["JAIRA_CAPTURE"];
   if (capture) void captureAndExit(window, capture);
 
@@ -980,5 +1062,12 @@ app.on("before-quit", (event) => {
   // The other end of the launch line. A log that ends mid-sentence is a crash; a log that ends here
   // is a quit, and telling those two apart in yesterday's file is most of reading it.
   service.recordApp("info", "quitting: draining runs and closing the databases");
-  void service.close().finally(() => app.quit());
+  updates.stop();
+  void service.close().finally(() => {
+    // An install is this same quit, finished by the installer: the runs have drained and the databases
+    // are closed before anything replaces the app. `quitAndInstall` quits too; the `app.quit()` after
+    // it is what still ends the process if the installer could not be started.
+    if (installAfterQuit) updates.installNow();
+    app.quit();
+  });
 });

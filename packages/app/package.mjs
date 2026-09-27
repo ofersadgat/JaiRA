@@ -49,6 +49,13 @@ const version = process.env.JAIRA_BUILD_VERSION ?? appPackage.version;
 const electronVersion = require("electron/package.json").version;
 
 /**
+ * The feed and the nightly spelling, as `@jaira/shared` `updates.ts` has them (`UPDATE_FEED_REPOSITORY`,
+ * `channelOfVersion`) — repeated because this script runs on plain Node, which cannot load that source.
+ */
+const UPDATE_FEED = { owner: "ofersadgat", repo: "releases" };
+const NIGHTLY_VERSION = /^\d+\.\d+\.\d+-nightly\.\d{8}\.\d+$/;
+
+/**
  * The version the workspace resolved, so the stage installs exactly what the tests ran against.
  *
  * Found by walking the resolution paths rather than `require("<name>/package.json")`: a package whose
@@ -110,6 +117,9 @@ function stageApp() {
         private: true,
         main: "entry.cjs",
         dependencies,
+        // Read by the updater (`index.ts` `buildInfo`): a mac build installs updates only once it is
+        // signed with a Developer ID, and says so here rather than finding out from Squirrel.Mac.
+        jairaBuild: { macSigned: process.platform === "darwin" && process.env.CSC_LINK !== undefined },
       },
       null,
       2,
@@ -153,8 +163,16 @@ function builderConfig(stage, output) {
     // Nothing to rebuild: the one native module is Node-API and prebuilt.
     npmRebuild: false,
     nodeGypRebuild: false,
-    // The updater's feed is written in the updates step (0011 §4); until then there is none.
-    publish: null,
+    // The update feed (0011 §4): electron-builder writes it into `resources/app-update.yml` and writes
+    // the channel's `latest*.yml` or `nightly*.yml` beside the installers; the release pipeline
+    // publishes those, never electron-builder itself (`publish: "never"` below).
+    publish: {
+      provider: "github",
+      owner: UPDATE_FEED.owner,
+      repo: UPDATE_FEED.repo,
+      channel: NIGHTLY_VERSION.test(version) ? "nightly" : "latest",
+      releaseType: NIGHTLY_VERSION.test(version) ? "prerelease" : "release",
+    },
     // The architecture in every name: the release collects all six builds into one directory, and
     // electron-builder's defaults name an x64 and an arm64 installer the same.
     artifactName: "${productName}-${version}-${os}-${arch}.${ext}",

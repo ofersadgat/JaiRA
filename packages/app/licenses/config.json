@@ -116,6 +116,18 @@
           "@reflink/reflink and its platform binaries declare the MIT license in package.json and name no author; neither the packages nor github.com/pnpm/reflink ship a LICENSE file."
         ]
       }
+    },
+    {
+      "repositoryUrl": "https://github.com/develar/lazy-val",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": [
+          "Copyright (c) Vladimir Krivosheev"
+        ],
+        "preamble": [
+          "lazy-val (a dependency of electron-updater) declares the MIT license in package.json and names Vladimir Krivosheev as its author; the package ships no LICENSE file."
+        ]
+      }
     }
   ]
 }

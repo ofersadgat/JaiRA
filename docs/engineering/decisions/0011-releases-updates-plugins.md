@@ -423,6 +423,49 @@ these should default to releases on github").**
   `bump.mjs`. The released versions are read with `git ls-remote --tags` on the releases repository, not
   the API, whose anonymous limit is 60 requests an hour.
 
+**Step 4, the main-process half, 2026-09-26.** The screens wait for their mockups.
+
+- **Shared types:** `@jaira/shared` `updates.ts` holds `UpdateChannel`, `UpdateState`,
+  `channelOfVersion`, `UPDATE_FEED_REPOSITORY` and `releasePageOf`.
+- **The setting:** `updates.channel` is a config block (`JairaUpdatesConfig`, `parseUpdates`, and an
+  `updates` section in `CONFIG_SECTIONS` for SchemaForm).
+  - `AppService.updateSettings()` reads it from the built-in, base and personal layers only, the way
+    `windowAppearance()` reads the look.
+- **`packages/app/src/main/updates.ts` `UpdateManager`** drives electron-updater through a small port, so
+  its rules are tested without it (`updates.test.ts`, 12 tests):
+  - Download and install happen only when asked.
+  - It checks 15 s after start, then hourly. A check already running is shared, and there are no
+    checks once an update is downloaded.
+  - The channel is the setting, else the build's own. Nightly reads the `nightly` feed with
+    prereleases allowed; stable reads `latest`.
+  - After a switch, one check may go back a version.
+  - A version from the other channel is ignored.
+  - `manual` offers the release page instead of a download.
+- **`index.ts`:**
+  - The updater is disabled, with a reason:
+    - in a development build;
+    - with `JAIRA_DISABLE_AUTO_UPDATE`;
+    - with no `app-update.yml`;
+    - on Linux, for anything but the AppImage or the `.deb`.
+  - A mac build is `manual` unless its packaged `package.json` says `jairaBuild.macSigned`.
+  - The IPC channels are `update:state`, `update:check`, `update:download` and `update:install`, and the
+    push is `update:changed`.
+  - A `config:write` re-applies the setting.
+  - **An install is the ordinary quit:** runs drain and the databases close, and only then
+    `quitAndInstall` runs. `app.quit()` follows it in case the installer could not start.
+- **Packaging:** `package.mjs` publishes to the GitHub feed with channel `nightly` or `latest` by version.
+  electron-builder writes `resources/app-update.yml` and the channel's manifest beside the installers.
+- **Manifests across architectures:**
+  - Two build machines write the same manifest name: Windows x64 and arm64, and the two macs.
+  - Both pipelines collect each copy as `<name>@<build>`.
+  - `scripts/release/manifests.mjs`, adapted from t3code's `update-manifest.ts` with its MIT notice,
+    merges them into one manifest per name.
+  - electron-updater picks the file whose name carries the machine's architecture.
+- **A licence override for `lazy-val`** (from electron-updater): it declares MIT and ships no licence
+  file, which the Licenses build refuses.
+- **Not yet shown to the person:** checked by tests and a packaged nightly that wrote its feed. An
+  end-to-end update needs two published releases built with this code.
+
 ## Consequences
 
 **Easier:**

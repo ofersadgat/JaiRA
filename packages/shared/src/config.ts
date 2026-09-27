@@ -26,6 +26,7 @@ import { parseFunctionRule, type JairaOperationNode, type JairaPromptNode } from
 import { defaultMcp, parseMcp, type JairaMcpConfig } from "./mcp";
 import { candidatesOf, parsePresetModel, presetNameRefusal } from "./presetModels";
 import { defaultAppearanceConfig, parseAppearanceConfig, type JairaAppearanceConfig } from "./appearanceConfig";
+import { UPDATE_CHANNELS, type UpdateChannel } from "./updates";
 import { EVENT_NAMES, EVENT_SPECS, isEventName, type EventName } from "./events";
 
 /**
@@ -319,6 +320,8 @@ export interface JairaConfig {
   autopilot: JairaAutopilotConfig;
   /** What a message or a run does when an account's allowance runs out (usage readings). */
   limits: JairaLimitsConfig;
+  /** The app's own updates (decision 0011 §5): the machine's to decide, so read from the base and personal layers. */
+  updates: JairaUpdatesConfig;
   /** Each shipped function's defaults, by the function's name — one place per function (decision 0007, amended 2026-09-23). */
   functions: JairaFunctionsConfig;
   /** The MCP servers every agent run is handed, by the name their tools are called under (`./mcp`). */
@@ -431,6 +434,16 @@ export interface JairaLimitsConfig {
    * this setting is about refusals nobody saw coming.
    */
   retryOnReset: boolean;
+}
+
+/** The app's own updates (decision 0011 §5). */
+export interface JairaUpdatesConfig {
+  /**
+   * The channel to follow: `stable` releases or `nightly` builds. Absent, the running build's own
+   * channel. Switching installs the other channel's newest version the next time it is checked, even
+   * when that is an older version — which is how nightly goes back to stable.
+   */
+  channel?: UpdateChannel;
 }
 
 /**
@@ -644,6 +657,7 @@ export function defaultConfig(): JairaConfig {
     integrations: defaultIntegrations(),
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
     limits: { retryOnReset: true },
+    updates: {},
     functions: defaultFunctions(),
     mcp: defaultMcp(),
     appearance: defaultAppearanceConfig(),
@@ -743,6 +757,18 @@ function parseLimits(raw: unknown): JairaLimitsConfig {
   if (retryOnReset === undefined) return { retryOnReset: true };
   if (typeof retryOnReset !== "boolean") throw new Error("config.limits.retryOnReset must be true or false");
   return { retryOnReset };
+}
+
+/** Parse the updates block: a channel that is not one of the two is refused, not guessed at. */
+export function parseUpdates(raw: unknown): JairaUpdatesConfig {
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.updates must be an object");
+  const channel = (raw as Record<string, unknown>)["channel"];
+  if (channel === undefined) return {};
+  if (typeof channel !== "string" || !(UPDATE_CHANNELS as readonly string[]).includes(channel)) {
+    throw new Error(`config.updates.channel must be one of ${UPDATE_CHANNELS.join(", ")}`);
+  }
+  return { channel: channel as UpdateChannel };
 }
 
 function parseAutopilot(raw: unknown): JairaAutopilotConfig {
@@ -1294,6 +1320,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     integrations: parseIntegrations(cfg["integrations"]),
     autopilot: parseAutopilot(cfg["autopilot"]),
     limits: parseLimits(cfg["limits"]),
+    updates: parseUpdates(cfg["updates"]),
     functions: parseFunctions(cfg["functions"]),
     mcp: parseMcp(cfg["mcp"]),
     appearance: parseAppearanceConfig(cfg["appearance"]),

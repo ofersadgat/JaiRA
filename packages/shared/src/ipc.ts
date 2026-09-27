@@ -37,6 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
+import type { UpdateState } from "./updates";
 import type { CommandApproval } from "./commandParts";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
@@ -2209,6 +2210,17 @@ export interface IpcContract {
    * refusal says. Refused when the renderer was built without it.
    */
   "licenses:read": { request: void; response: unknown };
+  /** The app's own updates (decision 0011 §4): where the updater stands. */
+  "update:state": { request: void; response: UpdateState };
+  /** Read the feed now, rather than at the next hourly check. */
+  "update:check": { request: void; response: UpdateState };
+  /** Download the available update. A platform that installs by hand (`manual`) downloads nothing. */
+  "update:download": { request: void; response: UpdateState };
+  /**
+   * Install the downloaded update: the app quits the ordinary way — runs drain, the databases close —
+   * and the installer replaces it and starts it again. `installing: false` when nothing is downloaded.
+   */
+  "update:install": { request: void; response: { installing: boolean } };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2367,6 +2379,10 @@ export const IPC_CHANNELS = [
   "secret:capabilities",
   "secret:set",
   "licenses:read",
+  "update:state",
+  "update:check",
+  "update:download",
+  "update:install",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -2677,6 +2693,8 @@ export type PushMessage =
   | { type: "limits:changed"; view: LimitsView }
   /** The waiting messages and runs changed — one was added, sent, dropped or rescheduled. Machine-wide. */
   | { type: "waiting:changed"; items: WaitingItem[] }
+  /** The updater moved (decision 0011 §4). */
+  | { type: "update:changed"; state: UpdateState }
   /** An events task posted a notice (decision 0010 §4, `notify`). Also written to the log. */
   | { type: "notice:posted"; notice: EventsNotice }
 

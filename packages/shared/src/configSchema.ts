@@ -190,6 +190,24 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
     },
   },
   {
+    key: "updates",
+    title: "Updates",
+    hint: "Which releases this machine follows (decision 0011).",
+    schema: {
+      $type: "updates",
+      type: "object",
+      properties: {
+        channel: {
+          type: "string",
+          enum: ["stable", "nightly"],
+          title: "update track",
+          description:
+            "stable follows releases; nightly follows the builds the next release is promoted from, several a day at most. Unset, the track the installed build came from. Switching installs the other track's newest version at the next check, even when it is older than this one.",
+        },
+      },
+    },
+  },
+  {
     key: "functions",
     title: "Functions",
     hint: "The defaults of the functions JaiRA ships — each function's settings, in one place.",

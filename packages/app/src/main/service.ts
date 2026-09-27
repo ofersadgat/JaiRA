@@ -410,6 +410,8 @@ import {
   routeHealthOf,
   type ModelAvailability,
   parseAppearanceConfig,
+  parseUpdates,
+  type JairaUpdatesConfig,
   type JairaAppearanceConfig,
   mimeOfPath,
   parseComponentConfig,
@@ -11642,6 +11644,21 @@ export class AppService {
       return parseAppearanceConfig((merged as { appearance?: unknown } | undefined)?.appearance);
     } catch {
       return parseAppearanceConfig(undefined);
+    }
+  }
+
+  /**
+   * The app's update settings (decision 0011 §5), read the way `windowAppearance` reads the look: the
+   * built-in, base and personal layers, never a project's — which releases a machine follows is not a
+   * checkout's to say. A layer that does not parse leaves the running build's own channel.
+   */
+  updateSettings(): JairaUpdatesConfig {
+    const base = jairaBasePaths(this.baseDir);
+    try {
+      const merged = mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]);
+      return parseUpdates((merged as { updates?: unknown } | undefined)?.updates);
+    } catch {
+      return {};
     }
   }
 
