@@ -87,6 +87,27 @@ export function rendererWrites(layerDoc: unknown, edits: readonly RendererEdit[]
   return [["appearance.renderers", Object.keys(block).length > 0 ? block : undefined]];
 }
 
+/**
+ * The paths a list of renderer edits STATES, one per field — what `clearedAbove` takes out of the
+ * stronger layers. `rendererWrites` writes the layer's whole `renderers` block, which also holds the
+ * keys nobody touched; the edits name what was picked. A field taken back (`null`, an empty `off`)
+ * and a key taken back whole are ↺s, which never reach past the layer's own document.
+ */
+export function rendererWritten(edits: readonly RendererEdit[]): ConfigPath[] {
+  return edits.flatMap(({ key, edit }): ConfigPath[] => {
+    if (edit === null) return [];
+    const at = (...rest: string[]): ConfigPath => ["appearance", "renderers", key, ...rest];
+    const out: ConfigPath[] = [];
+    for (const field of ["read", "write"] as const) if (edit[field] !== undefined && edit[field] !== null) out.push(at(field));
+    if (edit.off !== undefined && edit.off.length > 0) out.push(at("off"));
+    for (const view of ["read", "write"] as const) {
+      const value = edit.theme?.[view];
+      if (value !== undefined && value !== null) out.push(at("theme", view));
+    }
+    return out;
+  });
+}
+
 /** The effective look with some writes applied at once — the window moves on the click, not the round trip. */
 export function lookWith(look: JairaAppearanceConfig, writes: readonly PathWrite[]): JairaAppearanceConfig {
   // Only statements: a removal's answer is whatever the layers below say, which is main's to work out.

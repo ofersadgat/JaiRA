@@ -48,6 +48,8 @@ export interface HealthItem {
   subject?: string;
   /** Since when, epoch ms. */
   since: number;
+  /** How many, for an item that counts (the log's errors and warnings since they were last dismissed). */
+  count?: number;
 }
 
 /** The count a Settings row shows: errors win the colour. */

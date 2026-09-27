@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { clearedAbove, defaultAppearanceConfig, mergeConfigLayers, parseConfig, statedChanges, withPaths, type ConfigView } from "@jaira/shared";
-import { lookOf, rendererWrites, targetLayerOf } from "../src/renderer/appearanceLayer";
+import { lookOf, rendererWrites, rendererWritten, targetLayerOf } from "../src/renderer/appearanceLayer";
 
 function view(docs: { base?: unknown; project?: unknown; you?: unknown }): ConfigView {
   return {
@@ -77,6 +77,27 @@ describe("a change made on one layer's page (the person's rule, 2026-09-25)", ()
     expect(clearedAbove(layered, "base", next)).toEqual([{ layer: "you", doc: { files: { hidden: ["dist"] } } }]);
   });
 
+  it("takes a written path out of the stronger layers even when this layer already said the same (the person, 2026-09-26)", () => {
+    // The person's machine: Shared says zinc, Just you says pastel-rail over it. Picking zinc on Shared
+    // left Shared's document as it was, so read off the document alone there was nothing to carry up.
+    const layered = view({
+      base: { appearance: { palette: "zinc", laneColors: null } },
+      you: { appearance: { palette: "pastel-rail", laneColors: null, editorTheme: "solarized-light" } },
+    });
+    const writes = [["appearance.palette", "zinc"], ["appearance.laneColors", null]] as const;
+    const next = withPaths(layered.base, writes);
+    expect(clearedAbove(layered, "base", next)).toEqual([]);
+    expect(clearedAbove(layered, "base", next, writes.map(([path]) => path))).toEqual([{ layer: "you", doc: { appearance: { editorTheme: "solarized-light" } } }]);
+    // A ↺ is a removal, and never reaches past its own document.
+    expect(clearedAbove(layered, "base", withPaths(layered.base, [["appearance.palette", undefined]]), ["appearance.palette"])).toEqual([]);
+  });
+
+  it("takes out only the leaves a block written whole states", () => {
+    const layered = view({ base: {}, you: { appearance: { editors: { code: { wrap: true, brackets: false } } } } });
+    const next = withPaths(layered.base, [["appearance.editors.code", { wrap: false }]]);
+    expect(clearedAbove(layered, "base", next, ["appearance.editors.code"])).toEqual([{ layer: "you", doc: { appearance: { editors: { code: { brackets: false } } } } }]);
+  });
+
   it("keeps a key with dots of its own whole — an event name", () => {
     const layered = { ...view({}), base: {}, you: { events: { "git.push": { enabled: false }, "git.merge_request.opened": { enabled: true } } } } as unknown as ConfigView;
     const next = withPaths({}, [[["events", "git.push", "enabled"], true]]);
@@ -102,5 +123,32 @@ describe("a renderer edit, in one layer", () => {
   it("writes an empty off-list as nothing said", () => {
     const [[, block]] = rendererWrites(null, [{ key: "text/css:text", edit: { off: [] } }, { key: "text/x:text", edit: { off: ["a", "a"] } }]) as [[string, unknown]];
     expect(block).toEqual({ "text/x:text": { off: ["a"] } });
+  });
+});
+
+describe("what a renderer edit states, for the stronger layers", () => {
+  it("names each field picked, and none taken back", () => {
+    expect(
+      rendererWritten([
+        { key: "text/markdown:preview", edit: { read: "source", write: null, theme: { read: "one-dark", write: null } } },
+        { key: "text/css:text", edit: { off: [] } },
+        { key: "text/x:text", edit: null },
+      ]),
+    ).toEqual([
+      ["appearance", "renderers", "text/markdown:preview", "read"],
+      ["appearance", "renderers", "text/markdown:preview", "theme", "read"],
+    ]);
+  });
+
+  it("takes a renderer picked on Shared out of Just you, leaving its other lines", () => {
+    const layered = view({
+      base: { appearance: { renderers: { "text/markdown:preview": { read: "source" } } } },
+      you: { appearance: { renderers: { "text/markdown:preview": { read: "live", write: "monaco" }, "text/css:text": { read: "source" } } } },
+    });
+    const edits = [{ key: "text/markdown:preview", edit: { read: "source" } }];
+    const next = withPaths(layered.base, rendererWrites(layered.base, edits));
+    expect(clearedAbove(layered, "base", next, rendererWritten(edits))).toEqual([
+      { layer: "you", doc: { appearance: { renderers: { "text/markdown:preview": { write: "monaco" }, "text/css:text": { read: "source" } } } } },
+    ]);
   });
 });

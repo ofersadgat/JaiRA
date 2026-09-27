@@ -214,6 +214,19 @@ function UpdatesSection({ config, onTrack, notesOpen }: { config: ConfigView | n
 
 // --- plugins ------------------------------------------------------------------------------------------
 
+/**
+ * "✓ from this checkout 0.3.282": a development checkout's own copy, in its `node_modules` — present,
+ * at whatever version the checkout has, and not the store's to download, update or remove.
+ */
+function FromCheckout({ version }: { version: string | undefined }): JSX.Element {
+  return (
+    <span className="plg-ok" title="This development checkout has the package in its node_modules, so nothing is downloaded, updated or removed here">
+      <span aria-hidden="true">✓ </span>
+      from this checkout{version !== undefined ? <> <code>{version}</code></> : null}
+    </span>
+  );
+}
+
 /** "✓ 0.3.282": installed, and the version this build names. */
 function Current({ version }: { version: string }): JSX.Element {
   return (
@@ -311,6 +324,13 @@ function BaseRow({ family, checked }: { family: PluginFamily; checked: Partial<R
       : row.note;
   let control: ReactNode;
   if (row.busy) control = <Progress row={row} />;
+  else if (row.workspace)
+    control = (
+      <>
+        <FromCheckout version={row.status.installed} />
+        <Check row={row} checked={checked[row.id]} />
+      </>
+    );
   else if (row.status.error !== undefined) control = <button type="button" onClick={() => installPlugin(row.id)}>Try again</button>;
   else if (row.current)
     control = (
@@ -365,6 +385,7 @@ function BuildLine({ family, build }: { family: PluginFamily; build: PluginRow }
   const label = `the ${build.name} build`;
   let tail: ReactNode;
   if (build.busy) tail = <Progress row={build} />;
+  else if (build.workspace) tail = <FromCheckout version={build.status.installed} />;
   else if (build.status.error !== undefined)
     tail = (
       <button type="button" className="sm" onClick={() => installPlugin(build.id)}>

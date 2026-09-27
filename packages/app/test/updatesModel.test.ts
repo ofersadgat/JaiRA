@@ -13,6 +13,8 @@ import {
   healthFixLabel,
   healthGroups,
   healthTally,
+  isUnseenLog,
+  logUnseen,
   pluginFamilies,
   sidebarUpdateOf,
   sizeWords,
@@ -156,6 +158,14 @@ describe("the plugins", () => {
     expect(sdk!.base).toMatchObject({ current: false, outdated: true });
   });
 
+  it("take a development checkout's own copy as present, at its version, and as nothing to update", () => {
+    const [sdk] = pluginFamilies([status("claude-agent-sdk", { installed: "0.9.0", from: "workspace" })]);
+    expect(sdk!.base).toMatchObject({ workspace: true, current: false, outdated: false });
+    // The store's copy is the store's, whichever version.
+    const [stored] = pluginFamilies([status("claude-agent-sdk", { installed: "1.0.0", from: "store" })]);
+    expect(stored!.base).toMatchObject({ workspace: false, current: true });
+  });
+
   it("count the base in a build's download until the base is installed", () => {
     const [llama] = pluginFamilies([status("llama", { downloadBytes: 37 }), status("llama-cpu", { downloadBytes: 9 })]);
     expect(buildDownloadBytes(llama!, llama!.builds[0]!)).toBe(46);
@@ -195,5 +205,32 @@ describe("Settings' warnings and errors", () => {
     expect(healthFixLabel("sign-in")).toBe("Sign in again");
     expect(healthFixLabel("open-logs")).toBe("Open logs");
     expect(healthFixLabel("retry-plugin")).toBe("Try again");
+  });
+});
+
+describe("the log's entries not seen yet (the person, 2026-09-26)", () => {
+  const logItem = (id: string, level: HealthItem["level"], detail: string, since: number, count?: number): HealthItem => ({ id, level, page: "logs", title: "Log", detail, action: "open-logs", since, ...(count !== undefined ? { count } : {}) });
+  const board = [logItem("log:errors", "error", "2 errors were logged", 100, 2), logItem("log:warnings", "warning", "1 warning was logged", 200, 1), { ...logItem("update", "warning", "offline", 50), page: "about" as const }];
+
+  it("reads since when, how many, and what to dismiss off the board's two log items", () => {
+    expect(logUnseen(board)).toEqual({ since: { error: 100, warn: 200 }, counts: { error: 2, warning: 1 }, ids: ["log:errors", "log:warnings"] });
+    expect(logUnseen([board[1]!])).toEqual({ since: { warn: 200 }, counts: { warning: 1 }, ids: ["log:warnings"] });
+    // Both dismissed: nothing to mark.
+    expect(logUnseen([board[2]!])).toBeUndefined();
+  });
+
+  it("marks an error or a warning written at or after its level's since, and nothing else", () => {
+    const unseen = logUnseen(board);
+    expect(isUnseenLog({ level: "error", at: 100 }, unseen)).toBe(true);
+    expect(isUnseenLog({ level: "error", at: 99 }, unseen)).toBe(false);
+    // Each level by its own item: a warning before the warnings' since is seen, though after the errors'.
+    expect(isUnseenLog({ level: "warn", at: 150 }, unseen)).toBe(false);
+    expect(isUnseenLog({ level: "warn", at: 250 }, unseen)).toBe(true);
+    expect(isUnseenLog({ level: "info", at: 250 }, unseen)).toBe(false);
+    // Shown on the page it belongs to (a failed plugin download), so the board did not count it.
+    expect(isUnseenLog({ level: "warn", at: 250, raised: "plugin:llama-cuda" }, unseen)).toBe(false);
+    // Dismissed: the marks go.
+    expect(isUnseenLog({ level: "warn", at: 250 }, logUnseen([board[0]!]))).toBe(false);
+    expect(isUnseenLog({ level: "error", at: 250 }, undefined)).toBe(false);
   });
 });

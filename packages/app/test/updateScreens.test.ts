@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { HealthItem, UpdateState } from "@jaira/shared";
 import { AboutPane } from "../src/renderer/aboutPane";
 import { NeedsAttention } from "../src/renderer/healthView";
+import { LogsPanel } from "../src/renderer/logs";
 import { publishPlugins, publishUpdate } from "../src/renderer/updatesStore";
 import { SidebarUpdateRow } from "../src/renderer/updatesView";
 
@@ -82,5 +83,65 @@ describe("Needs attention", () => {
     expect(html).toContain("Needs attention");
     expect(html).toContain("Sign in again");
     expect(html).toContain("prob prob-error");
+  });
+});
+
+describe("About's Plugins, drawn", () => {
+  it("shows a development checkout's own copy as present, with no Download, Update or Remove", () => {
+    publishUpdate({ status: "disabled", version: "0.1.0", channel: "stable", reason: "a development build does not update itself" });
+    publishPlugins([
+      { id: "claude-agent-sdk", version: "1.0.0", available: true, installed: "0.9.0", from: "workspace", downloadBytes: 1024 },
+      { id: "llama", version: "3.0.0", available: true, installed: "3.1.0", from: "workspace" },
+      { id: "llama-cpu", version: "3.0.0", available: true, installed: "3.1.0", from: "workspace" },
+    ]);
+    const html = about();
+    expect(html).toContain("from this checkout");
+    expect(html).toContain("<code>0.9.0</code>");
+    expect(html).toContain("<code>3.1.0</code>");
+    for (const verb of [">Download<", ">Update<", ">Add<", "plg-more", "is installed; this build uses"]) expect(html).not.toContain(verb);
+  });
+});
+
+describe("the Logs panel's entries not seen yet", () => {
+  const noopQuery = (): void => undefined;
+  const panel = (unseen: Parameters<typeof LogsPanel>[0]["unseen"]): string =>
+    renderToStaticMarkup(
+      h(LogsPanel, {
+        entries: [
+          { id: 3, at: 300, level: "warn", source: "app", message: "could not install the Local models: CUDA plugin", detail: { message: "EPERM: operation not permitted" }, raised: "plugin:llama-cuda" },
+          { id: 2, at: 200, level: "warn", source: "runtime", message: "could not look at github for events" },
+          { id: 1, at: 50, level: "error", source: "ipc", message: "an old failure" },
+        ],
+        hasOlder: false,
+        loading: false,
+        onSearch: noopQuery,
+        onOlder: noopQuery,
+        policy: { minLevel: "debug", overrides: [] },
+        onPolicy: noop,
+        output: null,
+        onOpenJob: noop,
+        onOpenTask: noop,
+        onClearOutput: noop,
+        unseen,
+        onDismissUnseen: noop,
+      }),
+    );
+
+  it("marks what was logged since the last dismissal, counts it, and offers Dismiss", () => {
+    const html = panel({ since: { warn: 100, error: 100 }, counts: { warning: 1 }, ids: ["log:warnings"] });
+    // The runtime warning is marked; the old error and the one About already shows are not.
+    expect(html.match(/log-unseen-warn/g)).toHaveLength(1);
+    expect(html).not.toContain("log-unseen-error");
+    expect(html).toContain("not seen");
+    expect(html).toContain(">Dismiss<");
+  });
+
+  it("draws no marks and no Dismiss once dismissed, and shows warnings and a detail's reason all the same", () => {
+    const html = panel(undefined);
+    expect(html).not.toContain("log-unseen");
+    expect(html).not.toContain(">Dismiss<");
+    expect(html).toContain("could not look at github for events");
+    // The EPERM lives only in the detail; it is read on the row without unfolding it.
+    expect(html).toContain("EPERM: operation not permitted");
   });
 });

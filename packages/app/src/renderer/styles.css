@@ -225,10 +225,17 @@
  * paints over it. A float's own rule says what it LOOKS like and never where it is: no `position`, no
  * inset, no z-index. Floats share one layer; one opened from another comes later in `<body>`, so it is
  * the one on top.
+ *
+ * `no-drag`, because the window's drag strips (`.title-drag`, `.side-title`) are hit-tested by the OS,
+ * not by the page: a press on a float lying over one moved the window and never reached the page. The
+ * Needs attention card opened from the Settings panel's header is clamped to the top of the window,
+ * and its Dismiss all sat on the title strip and did nothing (the person, 2026-09-26). A `no-drag` box
+ * punches its own shape out of the drag region under it.
  */
 .float {
   position: fixed;
   z-index: var(--z-float);
+  -webkit-app-region: no-drag;
 }
 
 /*
@@ -8669,6 +8676,16 @@ textarea.cfg-input {
 .log-level { text-transform: uppercase; font-size: calc(var(--size-app) * 10 / 12.5); }
 .log-level.log-warn { color: var(--warn, #b8860b); }
 .log-level.log-error { color: var(--bad, #c0392b); }
+/* Not seen yet (`isUnseenLog`): the row washed as Settings' Needs attention rows are, and a dot in the
+   level's colour before the message — never a coloured edge. */
+.log-row.log-unseen-error { background: var(--tint-bad); }
+.log-row.log-unseen-warn { background: var(--tint-warn); }
+.log-new { margin-right: 6px; font-size: 0.8em; }
+.log-unseen-error .log-new { color: var(--bad, #c0392b); }
+.log-unseen-warn .log-new { color: var(--warn, #b8860b); }
+.logs-bar .log-unseen-bar { display: inline-flex; align-items: center; gap: 6px; }
+/* The reason an entry carries only in its detail, after the message on the same line. */
+.log-reason { color: var(--dim); }
 .log-source { color: var(--dim); }
 .log-links { text-align: right; white-space: nowrap; }
 .log-row .link {

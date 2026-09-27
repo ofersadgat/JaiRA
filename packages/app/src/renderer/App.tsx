@@ -69,8 +69,8 @@ import { Icon } from "./icons";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "./workSummaryView";
 import { AboutPane } from "./aboutPane";
 import { HealthCard, NeedsAttention } from "./healthView";
-import { healthCounts } from "./updatesModel";
-import { checkForUpdate, installPlugin, useHealth } from "./updatesStore";
+import { healthCounts, logUnseen } from "./updatesModel";
+import { checkForUpdate, dismissHealth, installPlugin, useHealth } from "./updatesStore";
 import { SidebarUpdateRow } from "./updatesView";
 import { Popover, usePopover } from "./popover";
 import { lookOf } from "./appearanceLayer";
@@ -2336,7 +2336,7 @@ export default function App(): JSX.Element {
         views={rows}
         roots={rootRows}
         // The log's errors and warnings since they were last dismissed, on its row as on Settings'.
-        footer={FOOTER_VIEWS.map((row) => (row.id === "logs" ? { ...row, counts: healthCounts(health, "logs"), onSeen: openHealthCard, seenTitle: "What needs attention" } : row))}
+        footer={FOOTER_VIEWS.map((row) => (row.id === "logs" ? { ...row, counts: logUnseen(health)?.counts ?? {}, onSeen: openHealthCard, seenTitle: "What needs attention" } : row))}
         settings={settingsRow}
         update={(collapsed) => <SidebarUpdateRow collapsed={collapsed} onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />}
         onLeaveSettings={() => actions.setView(beforeSettings.current)}
@@ -2696,6 +2696,11 @@ export default function App(): JSX.Element {
                   actions.select(taskId);
                 }}
                 onClearOutput={actions.closeJobOutput}
+                // The errors and warnings not seen since the last dismissal — Settings' two log items.
+                unseen={logUnseen(health)}
+                onDismissUnseen={() => {
+                  for (const id of logUnseen(health)?.ids ?? []) dismissHealth(id);
+                }}
               />
             </div>
           ) : null}
@@ -2841,7 +2846,11 @@ export default function App(): JSX.Element {
                       now={eventStatus.now}
                       onWrite={(writes) => {
                         if (state.config === null) return;
-                        actions.saveConfig(state.configLayer, withPaths(state.config[state.configLayer], writes));
+                        actions.saveConfig(
+                          state.configLayer,
+                          withPaths(state.config[state.configLayer], writes),
+                          writes.map(([path]) => path),
+                        );
                       }}
                       onOpenConnections={() => actions.setSection("connections")}
                     />

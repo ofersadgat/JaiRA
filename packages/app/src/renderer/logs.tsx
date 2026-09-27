@@ -45,6 +45,8 @@ import {
   type LogPolicy,
   type LogQuery,
 } from "@jaira/shared/browser";
+import { Pills } from "./pill";
+import { isUnseenLog, type LogUnseen } from "./updatesModel";
 
 const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
 
@@ -109,6 +111,19 @@ function stamp(at: number): { day: string; time: string } {
  */
 const keyOf = (entry: LogEntry): string => `${entry.at}-${entry.id}`;
 
+/**
+ * Why it went wrong, when the entry says so only in its detail — `could not install the … plugin`
+ * with the EPERM in `detail.message`. Printed after the message on the row's one line, so a reason is
+ * read without unfolding the row; a message that already carries it is not repeated.
+ */
+function reasonOf(entry: LogEntry): string | undefined {
+  const detail = entry.detail;
+  if (detail === null || detail === undefined || typeof detail !== "object" || Array.isArray(detail)) return undefined;
+  const said = (detail as Record<string, unknown>)["message"];
+  if (typeof said !== "string" || said.trim() === "" || entry.message.includes(said)) return undefined;
+  return said;
+}
+
 export interface LogsPanelProps {
   /** The pages fetched so far, newest first. */
   entries: LogEntry[];
@@ -127,6 +142,12 @@ export interface LogsPanelProps {
   onOpenJob: (jobId: number) => void;
   onOpenTask: (taskId: string) => void;
   onClearOutput: () => void;
+  /**
+   * The errors and warnings not seen yet — Settings' two log items (`logUnseen`): each such entry is
+   * marked, the bar counts them, and its Dismiss clears both, as the items' × does elsewhere.
+   */
+  unseen?: LogUnseen | undefined;
+  onDismissUnseen?: (() => void) | undefined;
 }
 
 /**
@@ -177,6 +198,8 @@ export function LogsPanel({
   onOpenJob,
   onOpenTask,
   onClearOutput,
+  unseen,
+  onDismissUnseen,
 }: LogsPanelProps): JSX.Element {
   const [level, setLevel] = useState<LogLevel>("debug");
   const [source, setSource] = useState("");
@@ -270,6 +293,19 @@ export function LogsPanel({
         <SourceSelect value={source} sources={sources} onChange={setSource} />
         <input placeholder="Filter…" value={text} onChange={(e) => setText(e.target.value)} aria-label="Filter" />
         <span className="grow" />
+        {/* What has not been seen since the last dismissal: the same counts Settings' row carries, and
+            the one control that clears them from here. */}
+        {unseen !== undefined ? (
+          <span className="log-unseen-bar">
+            <Pills counts={unseen.counts} budget={140} />
+            <span className="sub">not seen</span>
+            {onDismissUnseen !== undefined ? (
+              <button title="Mark these seen: clears the counts here and on the Settings row" onClick={onDismissUnseen}>
+                Dismiss
+              </button>
+            ) : null}
+          </span>
+        ) : null}
         <button className={showConfig ? "on" : ""} onClick={() => setShowConfig((v) => !v)}>
           Configure
         </button>
@@ -295,12 +331,14 @@ export function LogsPanel({
           const key = keyOf(entry);
           const open = expanded.has(key);
           const { day, time } = stamp(entry.at);
+          const fresh = isUnseenLog(entry, unseen);
+          const reason = reasonOf(entry);
           return (
             <div key={key} className={`log-line${open ? " log-shown" : ""}`}>
               {/* The whole row is the control. A message that does not fit is the commonest reason to
                   want it open, so the target has to be the message rather than a caret beside it. */}
               <div
-                className={`log-row log-${entry.level}${dated ? " logs-dated" : ""}`}
+                className={`log-row log-${entry.level}${dated ? " logs-dated" : ""}${fresh ? ` log-unseen log-unseen-${entry.level}` : ""}`}
                 onClick={() => toggle(key)}
                 role="button"
                 tabIndex={0}
@@ -321,7 +359,17 @@ export function LogsPanel({
                 <span className="log-source" title={entry.source}>
                   {entry.source}
                 </span>
-                <span className="log-message">{entry.message}</span>
+                <span className="log-message">
+                  {/* Not seen yet: a dot in the level's colour and a wash on the row — named in the
+                      title, and never a coloured edge (the person's rule). */}
+                  {fresh ? (
+                    <span className="log-new" title="Not seen yet" aria-label="not seen yet">
+                      ●
+                    </span>
+                  ) : null}
+                  {entry.message}
+                  {reason !== undefined ? <span className="log-reason"> — {reason}</span> : null}
+                </span>
                 {/* Their own column, held open on every row. Inline they sat at wherever the message
                     happened to end, which put the same control in a different place on each line —
                     and pushed the message column's width around with it. They stop the click here:

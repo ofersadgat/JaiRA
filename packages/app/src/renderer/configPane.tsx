@@ -54,10 +54,12 @@ export interface ConfigPaneProps {
 export function layerWriter(
   doc: Record<string, unknown> | null,
   layer: ConfigLayer,
-  onSave: (layer: ConfigLayer, doc: unknown) => void,
+  onSave: (layer: ConfigLayer, doc: unknown, written?: readonly string[]) => void,
 ): { set: (path: string, value: unknown) => void; stated: (path: string) => boolean } {
-  // A container the removal emptied goes with it, so an untouched section leaves no trace.
-  const set = (path: string, value: unknown): void => onSave(layer, withPaths(doc, [[path, value]]));
+  // A container the removal emptied goes with it, so an untouched section leaves no trace. The path
+  // goes with the document, so the stronger layers lose it even when this layer already said the same
+  // (`clearedAbove`'s `written`).
+  const set = (path: string, value: unknown): void => onSave(layer, withPaths(doc, [[path, value]]), [path]);
 
   const stated = (path: string): boolean => {
     let cursor: unknown = doc;
@@ -80,7 +82,7 @@ export function configWriter(
   config: ConfigView,
   layer: ConfigLayer,
   locked: boolean,
-  onSave: (layer: ConfigLayer, doc: unknown) => void,
+  onSave: (layer: ConfigLayer, doc: unknown, written?: readonly string[]) => void,
 ): Writer {
   const doc = config[layer] as Record<string, unknown> | null;
   const effective = config.effective as Record<string, unknown>;

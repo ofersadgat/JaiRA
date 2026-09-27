@@ -122,6 +122,7 @@ export class HealthBoard {
       detail: count === 1 ? `1 ${noun} was logged` : `${count} ${noun}s were logged`,
       action: "open-logs",
       since: this.items.get(id)?.since ?? this.now(),
+      count,
     });
     this.changed();
   }

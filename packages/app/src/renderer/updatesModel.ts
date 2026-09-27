@@ -22,6 +22,7 @@ import {
   type HealthAction,
   type HealthItem,
   type HealthPage,
+  type LogEntry,
   type PluginId,
   type PluginStatus,
   type UpdateBusy,
@@ -241,9 +242,15 @@ export interface PluginRow {
   /** One line under the name: what it does, or (a build) what hardware it is for. */
   note: string;
   status: PluginStatus;
-  /** Installed, and the version this build names. */
+  /**
+   * Present because this development checkout has the package in its `node_modules` — it works
+   * without a download, whatever version it is, and the store does not own it: nothing to download,
+   * update or remove. Neither `current` nor `outdated` then.
+   */
+  workspace: boolean;
+  /** Installed in the store, and the version this build names. */
   current: boolean;
-  /** Installed, but another version than this build names — what an app update left behind. */
+  /** Installed in the store, but another version than this build names — what an app update left behind. */
   outdated: boolean;
   /** Downloading now. */
   busy: boolean;
@@ -268,13 +275,15 @@ const BUILD_NOTES: Partial<Record<PluginId, string>> = {
 function rowOf(status: PluginStatus): PluginRow {
   const spec = PLUGINS.find((p) => p.id === status.id)!;
   const variant = spec.variantOf !== undefined;
+  const workspace = status.from === "workspace" && status.installed !== undefined;
   return {
     id: status.id,
     name: variant ? spec.title.replace(/^Local models: /, "") : spec.title,
     note: variant ? (BUILD_NOTES[status.id] ?? spec.purpose) : spec.purpose,
     status,
-    current: status.installed !== undefined && status.installed === status.version,
-    outdated: status.installed !== undefined && status.installed !== status.version,
+    workspace,
+    current: !workspace && status.installed !== undefined && status.installed === status.version,
+    outdated: !workspace && status.installed !== undefined && status.installed !== status.version,
     busy: status.progress !== undefined,
   };
 }
@@ -385,4 +394,49 @@ export function sinceWords(item: HealthItem, now: number = Date.now()): string {
   const time = at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
   const when = at.toDateString() === new Date(now).toDateString() ? time : `${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time}`;
   return `${item.level === "error" ? "since" : "at"} ${when}`;
+}
+
+// --- the log's unseen entries ---------------------------------------------------------------------
+
+/** The log's two items on the board (main's `health.ts`): errors and warnings written since each was last dismissed. */
+export const LOG_ERRORS_ID = "log:errors";
+export const LOG_WARNINGS_ID = "log:warnings";
+
+/**
+ * What in the log the person has not seen, read off the board: since when each level has entries they
+ * have not dismissed, and how many (the count main keeps, which spans pages the panel has not
+ * fetched). Absent when both are dismissed.
+ */
+export interface LogUnseen {
+  /** Epoch ms of the first error and the first warning since the last dismissal. */
+  since: { error?: number; warn?: number };
+  counts: PillCounts;
+  /** The board's ids to dismiss, for the panel's Dismiss. */
+  ids: string[];
+}
+
+/** How many entries a log item counts (the board keeps it); one when it does not say. */
+const loggedCount = (item: HealthItem): number => item.count ?? 1;
+
+export function logUnseen(items: readonly HealthItem[]): LogUnseen | undefined {
+  const errors = items.find((item) => item.id === LOG_ERRORS_ID);
+  const warnings = items.find((item) => item.id === LOG_WARNINGS_ID);
+  if (errors === undefined && warnings === undefined) return undefined;
+  return {
+    since: { ...(errors !== undefined ? { error: errors.since } : {}), ...(warnings !== undefined ? { warn: warnings.since } : {}) },
+    counts: { ...(errors !== undefined ? { error: loggedCount(errors) } : {}), ...(warnings !== undefined ? { warning: loggedCount(warnings) } : {}) },
+    ids: [errors, warnings].flatMap((item) => (item === undefined ? [] : [item.id])),
+  };
+}
+
+/**
+ * Whether one entry is among those not seen: an error or a warning written at or after its level's
+ * `since`. An entry Settings already shows where it belongs (`raised`, a failed plugin download on
+ * About) is not counted by the board, so it is not marked here either.
+ */
+export function isUnseenLog(entry: Pick<LogEntry, "level" | "at" | "raised">, unseen: LogUnseen | undefined): boolean {
+  if (unseen === undefined || entry.raised !== undefined) return false;
+  if (entry.level !== "error" && entry.level !== "warn") return false;
+  const since = unseen.since[entry.level];
+  return since !== undefined && entry.at >= since;
 }

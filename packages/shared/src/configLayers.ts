@@ -148,11 +148,32 @@ export function statedChanges(before: unknown, after: unknown, prefix: readonly 
  * that holds something that is not an object at a parent of a changed path (a `null` where a block
  * would be) loses that parent, since it would cover the change as surely as the path itself. Only the
  * layers whose documents change are returned, weakest first.
+ *
+ * `written` names the paths the edit stated, when the caller knows them: those are taken out of the
+ * stronger layers even where `layer` already said the same thing. Picking on Shared the palette Shared
+ * already states, under a personal one, changed nothing in Shared's document — so, read off the
+ * document alone, there was nothing to carry up and the personal palette stayed on screen (the person,
+ * 2026-09-26: "the base layer value should change and it should clear the value from any more specific
+ * layer"). A path written `undefined` is a ↺ and never reaches past its own document.
  */
-export function clearedAbove(view: ConfigView, layer: ConfigLayer, next: unknown): Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> {
-  const changed = statedChanges(view[layer], next).filter(
-    (keys) => !ADDITIVE_PATHS.some((additive) => pathKeys(additive).every((key, i) => keys[i] === key)),
-  );
+export function clearedAbove(
+  view: ConfigView,
+  layer: ConfigLayer,
+  next: unknown,
+  written: ReadonlyArray<ConfigPath> = [],
+): Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> {
+  // Walked to its leaves like the document's own changes, so a block written whole takes out only what it states.
+  const stated = written.flatMap((path) => {
+    const value = valueAtPath(next, path);
+    return value === undefined ? [] : statedChanges(undefined, value, pathKeys(path));
+  });
+  const seen = new Set<string>();
+  const changed = [...statedChanges(view[layer], next), ...stated].filter((keys) => {
+    const key = JSON.stringify(keys);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return !ADDITIVE_PATHS.some((additive) => pathKeys(additive).every((part, i) => keys[i] === part));
+  });
   if (changed.length === 0) return [];
   const out: Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> = [];
   for (const above of layersAbove(layer)) {

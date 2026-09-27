@@ -101,6 +101,13 @@ describe("the stylesheet has no in-place floats", () => {
     expect(users.filter((selector) => FIXED_OK[selector] === undefined)).toEqual([]);
   });
 
+  it("a float takes itself out of the window's drag strips, so a press on it reaches the page", () => {
+    // The OS hit-tests `-webkit-app-region: drag`, not the page: a float lying over the title strip
+    // without this moved the window instead (the Needs attention card's Dismiss all, 2026-09-26).
+    const float = all.find((r) => r.selector === ".float");
+    expect(float === undefined ? undefined : decl(float.body, "-webkit-app-region")).toBe("no-drag");
+  });
+
   it("`position: fixed` is only on the window's own layers", () => {
     const offenders = all
       .filter((r) => decl(r.body, "position") === "fixed" && FIXED_OK[r.selector] === undefined)

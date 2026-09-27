@@ -73,6 +73,7 @@ import type {
   WorkflowSource,
   RendererEdit,
   PathWrite,
+  ConfigPath,
   EventsNotice,
   SchemaFormat,
 } from "@jaira/shared/browser";
@@ -125,7 +126,7 @@ import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflo
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
 import { applyAppearance, useSystemDark } from "./appearance";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
-import { lookOf, lookWith, rendererWrites, targetLayerOf } from "./appearanceLayer";
+import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pill";
@@ -3425,14 +3426,18 @@ export function useApp() {
        * round trip would read as a switch that had not registered. `layer` absent is a change made
        * outside Settings (the sidebar's theme switch, an editor's wrap toggle), which lands where the
        * window will show it — see `targetLayerOf`.
+       *
+       * Every path it states is taken out of the stronger layers — even one the layer already said the
+       * same about, which a comparison of the layer's document before and after cannot see (`written`
+       * in `clearedAbove`). `written` narrows that to what was picked, for a block written whole.
        */
-      writeLook: async (writes: readonly PathWrite[], layer?: ConfigLayer) => {
+      writeLook: async (writes: readonly PathWrite[], layer?: ConfigLayer, written: readonly ConfigPath[] = writes.map(([path]) => path)) => {
         const current = ref.current.config;
         if (current === null || writes.length === 0) return;
         const into = layer ?? targetLayerOf(current, writes[0]![0]);
         const doc = withPaths(current[into], writes);
         // Worked out BEFORE the window moves: the stronger layers are read from what they said.
-        const above = clearedAbove(current, into, doc);
+        const above = clearedAbove(current, into, doc, written);
         const effective = { ...(current.effective as Record<string, unknown>), appearance: lookWith(lookOf(current), writes) } as unknown as JsonValue;
         const moved = Object.fromEntries(above.map((write) => [write.layer, write.doc as JsonValue]));
         patch({ config: { ...current, ...moved, [into]: doc as JsonValue, effective } });
@@ -3766,9 +3771,9 @@ export function useApp() {
        * what was picked is what shows (`clearedAbove`). Main validates each write before it lands,
        * so a rejected save leaves the file untouched and the message names the offending field.
        */
-      saveConfig: async (layer: ConfigLayer, config: unknown) => {
+      saveConfig: async (layer: ConfigLayer, config: unknown, written?: readonly ConfigPath[]) => {
         const view = ref.current.config;
-        await actionsRef.current.saveConfigFile(layer, config, view === null ? [] : clearedAbove(view, layer, config));
+        await actionsRef.current.saveConfigFile(layer, config, view === null ? [] : clearedAbove(view, layer, config, written));
       },
 
       /**
@@ -4290,7 +4295,7 @@ export function useApp() {
         const current = ref.current.config;
         if (current === null) return;
         const into = layer ?? targetLayerOf(current, "appearance.renderers");
-        await actions.writeLook(rendererWrites(current[into], edits), into);
+        await actions.writeLook(rendererWrites(current[into], edits), into, rendererWritten(edits));
       },
 
       /**
