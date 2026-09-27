@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { commandFiles, stageCli } from "./packageCli.mjs";
+import { buildTailnet, TAILNET_OUT } from "./buildTailnet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "package.json"));
@@ -157,9 +158,11 @@ function builderConfig(stage, output, command) {
     // Read with plain `node:fs` from worker threads and by the TypeScript compiler host, so a real
     // directory: `defaultBuiltInDir` looks in `<resources>/builtin` first.
     // `bin/` holds the `jaira` command's wrapper (packageCli.mjs, decision 0011 §7).
+    // `tailnet/` holds JaiRA's Tailscale helper, found beside `builtin/` (`helperBinary`).
     extraResources: [
       { from: join(here, "dist", "builtin"), to: "builtin" },
       { from: command.bin, to: "bin" },
+      { from: TAILNET_OUT, to: "tailnet" },
     ],
     asar: true,
     // The addon must be a real file to be loaded; the compiler reads its lib files off the real disk
@@ -318,6 +321,8 @@ rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 const stage = stageApp();
 await stageCli(stage, Object.keys(RUNTIME_MODULES));
+// JaiRA's Tailscale helper for this machine, shipped beside the built-in layer (decision 0013 §2).
+await buildTailnet();
 const command = commandFiles(stage);
 try {
   const { build, Platform } = require("electron-builder");

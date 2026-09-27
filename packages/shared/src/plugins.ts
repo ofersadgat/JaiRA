@@ -15,7 +15,7 @@
  * A plugin's version is its package's version; nothing here is versioned by the app.
  */
 
-export type PluginId = "claude-agent-sdk" | "llama" | "llama-cpu" | "llama-vulkan" | "llama-cuda" | "llama-cuda-ext" | "llama-metal" | "tailnet";
+export type PluginId = "claude-agent-sdk" | "llama" | "llama-cpu" | "llama-vulkan" | "llama-cuda" | "llama-cuda-ext" | "llama-metal";
 
 export interface PluginSpec {
   id: PluginId;
@@ -23,7 +23,7 @@ export interface PluginSpec {
   /** One line: what it makes possible. */
   purpose: string;
   /** The package it is built around: the family's root. */
-  root: "@anthropic-ai/claude-agent-sdk" | "node-llama-cpp" | "@jaira/tailnet";
+  root: "@anthropic-ai/claude-agent-sdk" | "node-llama-cpp";
   /** A variant needs its family's base plugin, and is linked into it. */
   variantOf?: PluginId;
 }
@@ -47,8 +47,6 @@ export const PLUGINS: readonly PluginSpec[] = [
     variantOf: "llama",
   },
   { id: "llama-metal", title: "Local models: Metal", purpose: "Runs local models on an Apple Silicon GPU.", root: "node-llama-cpp", variantOf: "llama" },
-  // JaiRA's own way onto a tailnet, for a machine without the Tailscale app (decision 0013 §2).
-  { id: "tailnet", title: "Tailscale for JaiRA", purpose: "Reaches your other machines on your tailnet without installing the Tailscale app.", root: "@jaira/tailnet" },
 ];
 
 export function pluginSpec(id: PluginId): PluginSpec {

@@ -116,12 +116,13 @@ The person's rulings of 2026-09-27 are quoted where they settle something.
   - **Where the Tailscale app is installed,** "Reachable from my other machines" runs
     `tailscale serve --bg --https=443 http://127.0.0.1:<port>`, as t3code does. Tailscale supplies the
     HTTPS name (`<machine>.<tailnet>.ts.net`) and its certificate.
-  - **Where it is not,** a downloadable plugin (0011 §6) carries a helper built on Tailscale's
-    embeddable library, `tsnet`: one small Go program per platform.
+  - **Where it is not,** a helper built on Tailscale's embeddable library, `tsnet`: one small Go
+    program, which every installer carries for its platform (amended 2026-09-27, below).
     - The helper joins the tailnet as its own node (`jaira-<machine>`) after a one-time sign-in, whose
       link Settings → Machines shows.
     - It forwards its tailnet HTTPS port to the engine's loopback port.
-    - CI builds it, and it is published as per-platform npm packages for the plugin manifest to fetch.
+    - Packaging builds it for the machine it runs on (`packages/app/buildTailnet.mjs`), into
+      `resources/tailnet` beside the built-in layer.
   - **Either way,** the other machines see one HTTPS address.
 - **Never public.** Funnel is never used, and nothing listens on a public interface.
 - **The protocol is 0012's.** The `hello`/`req`/`res`/`push` frames travel as WebSocket messages, one
@@ -570,8 +571,16 @@ the workspace specific stuff remains in the the workspace".
     v1.88 no longer builds with it, so the module moves to tailscale.com v1.102.5 (`go 1.26.6`), with
     `go.sum` committed. CI takes its Go from `go.mod` and no longer tidies. Run against the real control
     plane, the helper says its sign-in link once per link, where it used to repeat it every few
-    seconds, and `HelperReach` passes it on. Signing in needs a person, and publishing needs an
-    `NPM_TOKEN`.
+    seconds, and `HelperReach` passes it on. Signing in needs a person.
+  - **Bundled, not a plugin** (the person: "bundle it in the installer and drop the plugin"). At 8.6 MB
+    compressed against a 129 MB installer it is not worth a download of its own, where the Agent SDK
+    (about 110 MB) and local models (10 to 175 MB) are. `buildTailnet.mjs` compiles it while the app is
+    packaged, with the `go` on the PATH or a Go release it downloads, and the installer ships it as
+    `resources/tailnet`; `helperBinary` looks there and beside the built-in layer (a development build
+    after `npm --workspace @jaira/app run tailnet`). The `tailnet` plugin, its manifest root, the
+    Download line on Settings → Machines and the npm publishing are gone; the tailnet workflow only
+    checks that it compiles for six platforms. Verified: `npm run dist -- --dir` puts
+    `resources/tailnet/jaira-tailnet.exe` in the Windows app, whose smoke test passes.
   - **Out of usage per route:** placement judges a workspace by the accounts the task's models spend
     (the model ids its root state names, and the default executor's model, through `accountOfRoute`).
     With none known, it judges by every account being spent, as before.

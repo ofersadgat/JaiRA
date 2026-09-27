@@ -4,27 +4,27 @@
  * forwards to the engine's loopback listener; this runs it and reads what it says (one JSON object per
  * line: `needs-login`, `running`, `error`).
  *
- * Found at `JAIRA_TAILNET_HELPER`, or where the Tailscale plugin puts it under the base root.
+ * Found at `JAIRA_TAILNET_HELPER`, or beside the built-in layer: the installer ships it as
+ * `resources/tailnet` next to `resources/builtin` (`packages/app/buildTailnet.mjs`), and a development
+ * build puts it in `packages/app/dist/tailnet` next to `dist/builtin` (`npm run tailnet`).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { activePluginStore, currentPlatform, platformPackageOf } from "@jaira/runtime";
+import { dirname, join } from "node:path";
+import { defaultBuiltInDir } from "@jaira/shared";
 import type { ReachPort } from "./fleet";
 import { tailscaleCli, tailscaleServe, tailscaleStatus, tailscaleUnserve } from "./tailscale";
 
-export function helperBinary(baseDir: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function helperBinary(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const named = env["JAIRA_TAILNET_HELPER"];
   if (named !== undefined && named !== "" && existsSync(named)) return named;
   const exe = process.platform === "win32" ? "jaira-tailnet.exe" : "jaira-tailnet";
-  // The Tailscale for JaiRA plugin (decision 0011 §6): its platform package, beside its root in the store.
-  const store = activePluginStore();
-  const platform = currentPlatform();
-  const name = platformPackageOf("tailnet", platform);
-  const dir = store !== undefined && name !== undefined ? store.platformDir("@jaira/tailnet", name) : undefined;
-  if (dir !== undefined && existsSync(join(dir, exe))) return join(dir, exe);
-  void baseDir;
-  return undefined;
+  const resources = (process as { resourcesPath?: unknown }).resourcesPath;
+  const candidates = [
+    ...(typeof resources === "string" && resources.length > 0 ? [join(resources, "tailnet", exe)] : []),
+    join(dirname(defaultBuiltInDir()), "tailnet", exe),
+  ];
+  return candidates.find((file) => existsSync(file));
 }
 
 /** Runs the helper while this machine is published; one process at a time. */
@@ -39,11 +39,11 @@ export class HelperReach implements ReachPort {
   ) {}
 
   async unavailable(): Promise<string | undefined> {
-    return helperBinary(this.baseDir) === undefined ? "JaiRA's Tailscale plugin is not installed" : undefined;
+    return helperBinary() === undefined ? "this build of JaiRA carries no Tailscale helper" : undefined;
   }
 
   publish(loopbackPort: number, progress?: (update: { signInUrl?: string }) => void): Promise<{ url: string; via: "helper" }> {
-    const binary = this.command?.exe ?? helperBinary(this.baseDir);
+    const binary = this.command?.exe ?? helperBinary();
     if (binary === undefined) return Promise.reject(new Error("JaiRA's Tailscale plugin is not installed"));
     this.close();
     const dir = join(this.baseDir, "system", "tailnet");
@@ -118,8 +118,9 @@ export function autoReach(baseDir: string, hostname: () => string): ReachPort {
         const status = await tailscaleStatus();
         return status.running ? undefined : status.reason;
       }
-      if (helperBinary(baseDir) !== undefined) return undefined;
-      return "Tailscale is not installed here: install it, or download Tailscale for JaiRA";
+      if (helperBinary() !== undefined) return undefined;
+      // Every installer carries the helper; only a development build without `npm run tailnet` lacks it.
+      return "Tailscale is not installed here, and this build of JaiRA carries no Tailscale helper";
     },
     publish: async (port, progress) => {
       if (tailscaleCli() !== undefined) return { ...(await tailscaleServe(port)), via: "tailscale" as const };

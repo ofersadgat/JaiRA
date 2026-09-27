@@ -94,8 +94,6 @@ export function platformPackageOf(id: PluginId, platform: PluginPlatform): strin
     return platform.musl === true ? `${base}-musl` : base;
   }
   if (id === "llama") return undefined;
-  // One binary per platform, as esbuild ships its own (decision 0013 §2).
-  if (id === "tailnet") return `@jaira/tailnet-${platform.os}-${platform.arch}`;
   const os = platform.os === "win32" ? "win" : platform.os === "darwin" ? "mac" : platform.os;
   const stem = `@node-llama-cpp/${os}-${platform.arch}`;
   switch (id) {
