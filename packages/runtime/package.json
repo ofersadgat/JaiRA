@@ -33,6 +33,7 @@
     "@jaira/shared": "*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "picomatch": "^4.0.7",
+    "tar": "^7.5.22",
     "tinyglobby": "^0.2.17",
     "yaml": "^2.9.1"
   },

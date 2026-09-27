@@ -235,7 +235,14 @@ function smoke(output) {
     encoding: "utf8",
     timeout: 120_000,
   });
-  rmSync(home, { recursive: true, force: true });
+  // Windows can hold the database a moment after the app has exited (a scanner reading the new file),
+  // so the scratch home is removed with retries, and one that still will not go is left with a warning
+  // rather than failing a build whose app has already proved itself.
+  try {
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (e) {
+    console.warn(`left the smoke test's scratch home at ${home}: ${e.message}`);
+  }
   const out = `${run.stdout ?? ""}${run.stderr ?? ""}`;
   if (run.status !== 0 || !existsSync(shot)) {
     console.error(out);

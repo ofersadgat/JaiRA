@@ -429,7 +429,9 @@ describe("commercial use", () => {
         { bundle: "window", moduleIds: [] },
       ],
     });
-    expect(manifest.entries.length).toBeGreaterThan(300);
+    // A floor that says the walk reached the real tree. It was 300 while node-llama-cpp's 117 packages
+    // shipped in the app; they are a downloadable plugin now (decision 0011 §6), and 234 remain.
+    expect(manifest.entries.length).toBeGreaterThan(200);
     const problems = manifest.entries.flatMap((entry) => {
       const problem = commercialUseProblem(entry.license, entry.name);
       return problem === null ? [] : [`${entry.name}${entry.version !== null ? `@${entry.version}` : ""}: ${problem}`];

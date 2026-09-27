@@ -17,11 +17,15 @@ import { existsSync } from "node:fs";
 import { probeClaudeUsage, readCodexLimits } from "@declarative-ai/agents-cli";
 import type { LimitReading } from "@declarative-ai/exec";
 import { defaultResolve } from "./executors";
+import { activePluginStore } from "./plugins";
 
 /** The SDK's bundled claude for this platform, when it can be found; `undefined` otherwise. */
 export function sdkClaudeBinary(resolve: (id: string) => string = defaultResolve): string | undefined {
   const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/package.json`;
   const exe = process.platform === "win32" ? "claude.exe" : "claude";
+  // The Claude Agent SDK plugin's copy first (decision 0011 §6): the binary the person downloaded.
+  const stored = activePluginStore()?.platformDir("@anthropic-ai/claude-agent-sdk", `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`);
+  if (stored !== undefined && existsSync(join(stored, exe))) return join(stored, exe);
   const tries: Array<() => string> = [
     () => resolve(pkg),
     // Beside the SDK the upstream agents package resolves — where a linked checkout keeps it.

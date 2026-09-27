@@ -15,7 +15,8 @@
  * `claude-cli` is the route for a subscription: the person's own unmodified binary, signed in through
  * Anthropic's own flow, which the same terms allow.
  */
-import { sdkAgentQuery, type AgentQuery } from "@declarative-ai/agents-api";
+import { createSdkAgentQuery, type AgentQuery } from "@declarative-ai/agents-api";
+import { importPluginRoot } from "./plugins";
 import type { SecretResolver } from "./secrets";
 
 /** The variables the SDK route reads a key from when config names none, in the order they are tried. */
@@ -53,10 +54,16 @@ export function sdkCredential(named: string | undefined, secrets: SecretResolver
 }
 
 /**
+ * The SDK transport on the SDK wherever it is: the plugin store's copy when the Claude Agent SDK plugin
+ * is installed (decision 0011 §6), else the package by name (a development checkout, an npm install).
+ */
+const pluginSdkQuery: AgentQuery = createSdkAgentQuery({ loadSdk: () => importPluginRoot("@anthropic-ai/claude-agent-sdk") });
+
+/**
  * The SDK transport, held to {@link sdkCredential}: asked on every call, so a key stored after the
  * route was built is used, and one removed stops the next call rather than the next restart.
  */
-export function sdkQueryOnKey(credential: () => SdkCredential, query: AgentQuery = sdkAgentQuery): AgentQuery {
+export function sdkQueryOnKey(credential: () => SdkCredential, query: AgentQuery = pluginSdkQuery): AgentQuery {
   return (opts) => {
     const found = credential();
     if ("refused" in found) throw new Error(found.refused);

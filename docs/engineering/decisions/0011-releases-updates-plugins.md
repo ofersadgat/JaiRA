@@ -466,6 +466,60 @@ these should default to releases on github").**
 - **Not yet shown to the person:** checked by tests and a packaged nightly that wrote its feed. An
   end-to-end update needs two published releases built with this code.
 
+**Step 5, 2026-09-26 (declarative-ai 94536c1):** the library takes loaders and learns nothing of plugins.
+
+- `setLlamaModuleLoader(load)` in `llm/embedded.ts` is process-wide, like the loaded module. A new loader
+  forgets the module already loaded.
+- `createSdkAgentQuery({ loadSdk })` in `agents-api/sdkQuery.ts` sets the loader for that query.
+- A host loader's error passes through as it is. API.md.
+- The MCP SDK is still imported by name: it ships in the installer (`RUNTIME_MODULES`).
+
+**Step 6, 2026-09-26:** the store, the loaders and `jaira plugin`.
+
+- **The manifest:** `scripts/plugins/manifest.mjs` builds it from `package-lock.json`.
+  - It covers the two roots (`@anthropic-ai/claude-agent-sdk`, `node-llama-cpp`), each with its closure,
+    plus the root's own `optionalDependencies` as per-platform packages with their own closures.
+  - Every package is keyed `name@version` with `resolved`, `integrity`, `os`/`cpu`/`libc`, and each
+    dependency pinned to the key the lock resolved.
+  - The lock holds every platform's package, so one manifest serves every build.
+  - It has 140 packages and is 65 KB. The SDK is one package plus a binary per platform, and
+    node-llama-cpp is 117 packages plus 14 variants.
+  - Both builds write it as `dist/plugins.json`, which is inside the asar in a packaged app.
+- **`@jaira/shared` `plugins.ts`:** `PLUGINS`, `PluginId` and `PluginStatus`, for the screens.
+- **`@jaira/runtime` `plugins.ts` `PluginStore`,** under `<base root>/plugins`:
+  - **Storing:** each download is checked against the lock's hash before anything is written. A package
+    is unpacked (with `tar`, BlueOak-1.0.0, allowed) into a staging directory and renamed into
+    `store/<name>@<version>/node_modules/<name>`.
+  - **Linking:** each dependency is linked beside the package it belongs to (pnpm's arrangement, junctions
+    on Windows).
+  - **Variants:** a platform or GPU package is linked into its root's directory, where the root looks for
+    it. Installing a variant installs its base first. `installed.json` records the plugins.
+  - **Removing:** removing a base removes its variants, and every stored package that no installed
+    plugin lists is deleted. `removeTree` never follows a link.
+  - **Suggesting a variant:** `detectGpu` looks for `nvcuda.dll`/`libcuda.so.1` and
+    `vulkan-1.dll`/`libvulkan.so.1`, and `recommendedLlamaVariant` orders Metal, CUDA, Vulkan, CPU.
+  - **Loading:** `importPluginRoot` loads from the store, else by name (a development checkout or an npm
+    install), else says how to get the plugin.
+- **Where it is wired:**
+  - `startPlugins(baseDir, bundleDir)` opens the store and sets the llama loader. `index.ts` calls it
+    before the service, whose probes ask, and `runCli` calls it after `--home`.
+  - `sdkQueryOnKey` defaults to an SDK query that loads through it.
+  - The executor probe (`resolvePluginRoot`), the embedded loader check, and `sdkClaudeBinary` (the store's
+    `claude` first) all look in the store.
+  - The startup log line lists the installed plugins.
+- **`jaira plugin list | install <plugin> | remove <plugin>`:** JSON on stdout, progress on stderr.
+- **Out of the installer:** both packages are now `devDependencies` of `@jaira/app`. Development still
+  has them, and the Licenses page no longer lists them; 234 notices remain.
+- **Verified for real, 2026-09-26:** `jaira plugin install claude-agent-sdk` into a scratch home fetched
+  and checked 236 MB in 3 s. The SDK loaded from the store and resolved its own `claude.exe` through the
+  link, which ran (`2.1.282`). `remove` left an empty store. Tests: `runtime/test/plugins.test.ts`, 11
+  tests against a registry of real tarballs.
+- **Still to do (step 7, after mockups):**
+  - the Connections page rows and IPC;
+  - the Licenses page listing installed plugins' notices;
+  - downloading an app update's new plugin versions before it installs;
+  - a variant check in the embedded probe: node-llama-cpp with no variant installed cannot load a model.
+
 ## Consequences
 
 **Easier:**

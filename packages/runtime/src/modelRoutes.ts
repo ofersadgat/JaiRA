@@ -58,6 +58,7 @@ import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, permi
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
 import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
+import { resolvePluginRoot } from "./plugins";
 import type { Exec } from "./exec";
 import type { ExecEnv } from "./paths";
 import type { ExecObserver } from "./exec";
@@ -562,7 +563,7 @@ function statOf(path: string, stat: NonNullable<RouteProbeOptions["stat"]>): { s
 /** Whether the embedded route's loader resolves from here — the other half of its probe. */
 export function checkEmbeddedLoader(options: Pick<RouteProbeOptions, "resolve"> = {}): EmbeddedWeightsReport["loader"] {
   try {
-    (options.resolve ?? defaultResolve)(EMBEDDED_MODULE);
+    resolvePluginRoot(EMBEDDED_MODULE, options.resolve ?? defaultResolve);
     return { module: EMBEDDED_MODULE, installed: true };
   } catch (e) {
     return { module: EMBEDDED_MODULE, installed: false, error: (e as Error).message.split("\n")[0]! };
@@ -710,7 +711,7 @@ async function probeEmbeddedRoute(
       name: "embedded",
       status: "failed",
       detail: `the weights are there, but '${EMBEDDED_MODULE}' is not installed, so nothing can load them`,
-      fix: `install ${EMBEDDED_MODULE}, or serve the same weights through a local server instead`,
+      fix: "download the Local models plugin on the Connections page (`jaira plugin install llama` and a variant), or serve the same weights through a local server instead",
     };
   }
   const usable = rows.filter((row) => row.exists);

@@ -5,7 +5,8 @@
  * the same @jaira/persistence primitives in phase 3.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { formatRecord, setLogSink } from "@declarative-ai/log";
 import { DirectedTransitions, loadBundle, validateBundle, moduleHash as moduleHashOf, type DirectedTransition } from "@declarative-ai/hw";
@@ -73,6 +74,8 @@ import {
   type JairaPaths,
   type ModuleApproval,
   type TaskMoveRequest,
+  isPluginId,
+  pluginSpec,
 } from "@jaira/shared";
 import {
   buildPromptExecutor,
@@ -143,6 +146,8 @@ import {
   type ConformanceReport,
   type FakeRule,
   type WorkflowExecResult,
+  activePluginStore,
+  startPlugins,
 } from "@jaira/runtime";
 
 export interface CliIo {
@@ -257,6 +262,10 @@ const USAGE = `usage:
   jaira functions revoke <file>... [--project <dir>]
   jaira workflow check [<description.md>] [--workflow <rootStateId>]... [--model <id>]
             [--json] [--fake <json|@file>] [--repair-turns <n>] [--project <dir>]
+  jaira plugin list
+  jaira plugin install <plugin>     claude-agent-sdk, llama, or a llama variant (llama-cpu,
+                                    llama-vulkan, llama-cuda, llama-cuda-ext, llama-metal)
+  jaira plugin remove <plugin>
 
   A run is held to the project's policy (.jaira/settings.json → policy) and each state's permission set, as
   in the app. A tool call or shell line the policy asks about is put to you at the terminal; with no
@@ -304,6 +313,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         else process.env[BASE_DIR_ENV] = previous;
       };
     }
+    // Downloadable plugins (decision 0011 §6): the store under this home, from the manifest the bundle
+    // ships beside itself. A run from source has no manifest, and imports the packages by name.
+    startPlugins(jairaBasePaths().baseDir, dirname(fileURLToPath(import.meta.url)));
     return await dispatch(rest, io);
   } catch (e) {
     if (e instanceof UsageError) {
@@ -411,6 +423,8 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
           throw new UsageError(`unknown task subcommand '${sub ?? ""}'`);
       }
     }
+    case "plugin":
+      return cmdPlugin(rest, io);
     case undefined:
     case "help":
     case "--help":
@@ -1414,6 +1428,45 @@ function renderBoard(board: BoardView): string {
   // already in the column it came to rest in — see `BoardView.finished`. Printing it listed half the
   // board twice, under a heading that named a status rather than a place.
   return lines.join("\n") + "\n";
+}
+
+/**
+ * `jaira plugin list | install <plugin> | remove <plugin>` — the downloadable plugins (decision 0011
+ * §6), the same store the app's Connections page uses: shared by every JaiRA on this machine under the
+ * base root. The list and each result are JSON on stdout; download progress goes to stderr.
+ */
+async function cmdPlugin(argv: string[], io: CliIo): Promise<number> {
+  const [sub, id, ...extra] = argv;
+  if (extra.length > 0) throw new UsageError(`unexpected '${extra.join(" ")}'`);
+  const store = activePluginStore();
+  if (store === undefined) {
+    throw new Error("this jaira carries no plugin manifest (it is running from source), so its packages are imported from node_modules instead");
+  }
+  switch (sub) {
+    case "list":
+      io.stdout(JSON.stringify(store.status(), null, 2) + "\n");
+      return 0;
+    case "install":
+    case "remove": {
+      if (id === undefined || !isPluginId(id)) throw new UsageError(`jaira plugin ${sub} needs a plugin: ${store.status().map((s) => s.id).join(", ")}`);
+      if (sub === "remove") {
+        store.remove(id);
+        io.stdout(JSON.stringify({ removed: id }) + "\n");
+        return 0;
+      }
+      let last = -1;
+      await store.install(id, (p) => {
+        if (p.total === 0 || p.done === last) return;
+        last = p.done;
+        io.stderr(p.package === "" ? `${pluginSpec(id).title}: ${p.total} packages fetched\n` : `fetching ${p.package} (${p.done + 1}/${p.total})\n`);
+      });
+      const status = store.status().find((s) => s.id === id);
+      io.stdout(JSON.stringify({ installed: id, version: status?.installed }) + "\n");
+      return 0;
+    }
+    default:
+      throw new UsageError(`unknown plugin subcommand '${sub ?? ""}'`);
+  }
 }
 
 /** Worktrees git knows about, joined with the tasks they belong to (DESIGN §9.2). */

@@ -16,6 +16,7 @@ import {
   IPC_CHANNELS,
   PALETTE_FRAME,
   PUSH_CHANNEL,
+  defaultBaseDir,
   releasePageOf,
   resolveTheme,
   takeHomeFlag,
@@ -36,6 +37,7 @@ import { autoUpdater } from "electron-updater";
 import { stackDetail } from "./diagnostics";
 import { AppService, type CrashKind, type KeychainPort } from "./service";
 import { UpdateManager, type UpdaterPort } from "./updates";
+import { startPlugins } from "@jaira/runtime";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
 // map for modules compiled after it runs, and by the time this line executes the bundle it belongs to
@@ -221,6 +223,11 @@ process.on("warning", (warning: Error) => {
  */
 const home = takeHomeFlag(process.argv.slice(1)).home;
 
+// Downloadable plugins (decision 0011 §6): the store under the base root, from the manifest the build
+// wrote beside this bundle. Opened before the service, whose startup probes ask whether the Claude
+// Agent SDK and node-llama-cpp are there.
+const plugins = startPlugins(home ?? defaultBaseDir(), __dirname);
+
 /** Tell the window something. The service's pushes and the updater's both go this way. */
 function pushToWindow(message: PushMessage): void {
   // GUARDED, because this is a send into another process and the service treats it as a statement.
@@ -293,6 +300,8 @@ service.recordApp("info", `JaiRA ${app.getVersion()} started`, {
   baseDir: service.baseRoot(),
   pid: process.pid,
   platform: `${process.platform}-${process.arch}`,
+  // Which downloadable plugins this machine has (decision 0011 §6); null when the build ships no manifest.
+  plugins: plugins === undefined ? null : plugins.status().flatMap((s) => (s.installed !== undefined ? [`${s.id}@${s.installed}`] : [])),
   electron: process.versions["electron"] ?? null,
   chrome: process.versions["chrome"] ?? null,
   node: process.versions["node"] ?? null,

@@ -30,6 +30,7 @@ export * from "./executorTree";
 export * from "./presetModels";
 export * from "./usage";
 export * from "./updates";
+export * from "./plugins";
 export * from "./configSchema";
 export * from "./forge";
 export * from "./remoteSettlement";

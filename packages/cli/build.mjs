@@ -15,7 +15,7 @@
  */
 import { build } from "esbuild";
 import { existsSync } from "node:fs";
-import { cp, rm } from "node:fs/promises";
+import { cp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -63,4 +63,9 @@ await build({
 const builtIn = fileURLToPath(new URL("../shared/builtin", import.meta.url));
 if (existsSync(builtIn)) await cp(builtIn, "dist/builtin", { recursive: true });
 
-console.log("built dist/cli.mjs, dist/mcpBridgeWorker.mjs and dist/builtin/");
+// The plugin manifest (decision 0011 §6): every package `jaira plugin install` may fetch, at the versions
+// the workspace's lockfile resolved, with their hashes. Beside the bundle, where `startPlugins` looks.
+const { buildPluginManifest } = await import("../../scripts/plugins/manifest.mjs");
+await writeFile("dist/plugins.json", `${JSON.stringify(buildPluginManifest())}\n`);
+
+console.log("built dist/cli.mjs, dist/mcpBridgeWorker.mjs, dist/builtin/ and dist/plugins.json");

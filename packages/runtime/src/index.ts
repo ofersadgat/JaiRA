@@ -83,3 +83,5 @@ export * from "./sdkCredential";
 // The model catalog kept current by this machine (decision 0009).
 export * from "./modelCatalog";
 export * from "./modelLevels";
+// Downloadable plugins: the store, the loaders, and which variant suits this machine (decision 0011 §6).
+export * from "./plugins";

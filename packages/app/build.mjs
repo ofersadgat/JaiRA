@@ -148,4 +148,10 @@ if (existsSync(builtIn)) await cp(builtIn, `${outdir}/builtin`, { recursive: tru
 
 await writeFile(`${outdir}/main-modules.json`, `${JSON.stringify([...bundled].sort())}\n`, "utf8");
 
-console.log("built dist/main.cjs, dist/preload.cjs, dist/tsProjectWorker.cjs, dist/mcpBridgeWorker.cjs, dist/builtin/ and dist/main-modules.json");
+// The plugin manifest (decision 0011 §6): every package a plugin download may fetch, at the versions the
+// workspace's lockfile resolved, with their hashes. Beside main.cjs, where `startPlugins` looks — inside
+// the asar in a packaged app, which main reads like any file.
+const { buildPluginManifest } = await import("../../scripts/plugins/manifest.mjs");
+await writeFile(`${outdir}/plugins.json`, `${JSON.stringify(buildPluginManifest())}\n`);
+
+console.log("built dist/main.cjs, dist/preload.cjs, dist/tsProjectWorker.cjs, dist/mcpBridgeWorker.cjs, dist/builtin/, dist/main-modules.json and dist/plugins.json");

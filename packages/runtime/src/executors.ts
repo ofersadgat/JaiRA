@@ -44,6 +44,7 @@ import type { Exec } from "./exec";
 import type { ExecEnv } from "./paths";
 import { SecretResolver } from "./secrets";
 import { SDK_KEY_NAMES } from "./sdkCredential";
+import { resolvePluginRoot } from "./plugins";
 
 // The wire shapes live in `shared` so the renderer can name them; the behaviour lives here.
 export type { ExecutorInfo, ExecutorKind, ProbeResult, ProbeStatus } from "@jaira/shared";
@@ -208,13 +209,13 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
   if (info.kind === "sdk") {
     const resolve = options.resolve ?? defaultResolve;
     try {
-      resolve(AGENT_SDK_MODULE);
+      resolvePluginRoot(AGENT_SDK_MODULE, resolve);
     } catch {
       return {
         name: info.name,
         status: "failed",
         detail: `'${AGENT_SDK_MODULE}' is not installed, so the in-process adapter cannot run`,
-        fix: `install ${AGENT_SDK_MODULE}, or use claude-cli instead — it needs neither the package nor a key`,
+        fix: "download the Claude Agent SDK plugin on the Connections page (`jaira plugin install claude-agent-sdk`), or use claude-cli instead — it needs neither the package nor a key",
         ...credential,
       };
     }
