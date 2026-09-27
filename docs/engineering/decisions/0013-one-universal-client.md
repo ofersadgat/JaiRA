@@ -1,0 +1,409 @@
+---
+id: engineering/decisions/0013-one-universal-client
+type: decision
+status: accepted
+updated: 2026-09-27
+decides_for: [engineering/units/app-shell, engineering/units/ipc-bridge, engineering/units/renderer-store]
+---
+
+# 0013. One client for desktop and mobile, reached by a spike that migrates component by component
+
+The person, 2026-09-27: "I want to create a mobile app which shares as much code as possible with the
+jaira app … use the One framework … an electron build which will build the desktop apps that we have
+today and then … mobile apps which will mirror the ui and allow you to interact with other remote jaira
+servers … The UI should look identical … a spike which acts as a proof of concept and allows us to
+gradually migrate from copies of the ui to being able to reuse the same components across both."
+
+## Context
+
+### The renderer today (read 2026-09-27)
+
+| | |
+|---|---|
+| Size | 99 `.tsx` (56k lines), 73 `.ts` (24k lines), **one `styles.css` of 18.7k lines** |
+| Styling | Plain global class names (~3,080 `className=`, 51 inline styles). Palettes are CSS custom properties under `:root[data-palette=…]`, written by `applyAppearance`. Fonts are bundled woff2. |
+| UI libraries | None. React 19, Vite 6, `markdown-it`, Monaco 0.56 (+ Shiki on Oniguruma WASM), CodeMirror 6. |
+| Navigation | No router. The address is state: `AppState.at`, `view`, `doc` (`store.ts:786`). |
+| State | One hook, `useApp()` in `store.ts` (4.7k lines), called once in `App.tsx`, plus small module stores. |
+| Transport | **One seam.** `bridge()` at `store.ts:158` returns `window.jaira`, a `JairaBridge` (`shared/src/ipc.ts:2762`): `invoke(channel, request)` and `subscribe(listener)`. 137 channels, 19 push types. The renderer imports no Node or Electron. |
+| DOM-only | Monaco (`monacoDiff.tsx`), CodeMirror (`markdownEditor.tsx`), iframes (`valueView.tsx`, `jaira-artifact:`), HTML5 drag and drop (7 files), the state graph (HTML boxes over SVG with its own camera), portals, Selection/Range, `getBoundingClientRect` (13 files), `ResizeObserver` (7 files), `dangerouslySetInnerHTML` for markdown. |
+| Tests | Vitest in Node mode; ~101 tests import renderer model modules, ~32 use `renderToStaticMarkup`; `shots/*.mts` drive the real app over CDP for screenshots. |
+
+Two facts carry this plan. First, the transport seam is already one function, so a remote client needs a
+new `JairaBridge`, not a new UI. Second, the look is **CSS on DOM**, and React Native has neither. Every
+component that becomes truly shared must be rewritten from `div` + class to Tamagui/React Native
+primitives. That is the real cost, and it is paid per component.
+
+### One (read 2026-09-27)
+
+- "Web is stable, and native is stable in Metro mode." **Development on Windows is rated "early"**, and
+  this repo is developed on Windows. There is one npm maintainer, Nate Wienert (Tamagui).
+- Web and native come from one route tree. `.web.tsx` / `.native.tsx` / `.ios.tsx` / `.android.tsx` pick
+  per platform, for pages, layouts and ordinary modules. **A web route may render an existing DOM tree
+  unchanged**, with `.css` imports.
+- On web, `react-native` is aliased to react-native-web, so a Tamagui/React Native tree **also renders in
+  a browser**. That is what makes the fidelity gate below automatic.
+- Native builds through Expo: `one prebuild`, `one run:ios|android`, EAS Build/Submit, Expo Go for
+  development.
+- Web output can be a pure SPA (`web.defaultRenderMode: 'spa'`, no loaders), statically served from
+  `dist/client`.
+- **Electron: no guide or example.** The maintainer says it "should work as is." There is no hash
+  history, so `file://` will not route; `dist/client` must be served from a custom protocol with an
+  `index.html` fallback.
+- **No `'use dom'`.** Expo Router has DOM components and One does not. A DOM-only component on native
+  must be hosted in `react-native-webview`, bridged by hand.
+- Monorepos work. Symlinked workspace packages have produced duplicate React on Android (issue #752).
+  Metro needs `watchFolders` covering `../declarative-ai`.
+
+## Rulings (2026-09-27)
+
+1. **Mobile shows exactly the desktop UI.** "What I want now is to generate the exact same ui on mobile
+   as there is on desktop. This is meant as a migration step, not as a final step (which will do a
+   mobile ui/ux pass)." No drawer, no sheets, no phone layout in this work.
+2. **Styling: Tamagui.**
+3. **Transport: throwaway.** "There is another session building out the remote properly … just do the
+   quickest thing to get it working and expect to throw it away."
+4. **One 1.27.1, Tamagui 2.7, Metro for native, and the native side thin** ([Version](#version)). The
+   person: "your recommendations sound fine."
+7. **Electron is the first desktop target; native desktop comes later.** The person: "there are react
+   native builds for windows and mac … we should also support an electron build which will be the first
+   target and we'll think of true native desktop solutions after that." See
+   [Native desktop, later](#native-desktop-later).
+5. **Read-only first.** "We can do read only as a v1 and interactive as v2." And: test whether a browser
+   view can encapsulate the components that are hard to migrate, such as Monaco and CodeMirror.
+6. **Fidelity is tested in a browser for now.** "Using one to render the browser version should be a
+   good approximation until we're ready for a more faithful test." Device testing comes later.
+
+## Options considered
+
+**How the UI is shared:**
+
+| Option | For | Against |
+|---|---|---|
+| A. Rewrite everything in Tamagui now | One codebase, finally | Months before anything ships. 18.7k lines of CSS at once. The desktop regresses while it happens. |
+| B. Mobile is one WebView around today's renderer | Identical for free, in days | Not One. Nothing is ever shared as native components. |
+| C. **Strangler.** Two trees during the migration: today's DOM tree, and a **universal tree** of Tamagui copies that renders on native *and* in the browser. Hard components are **islands**: the DOM component itself, inline on web and in a WebView on native. The desktop switches a component from DOM to universal once the two are pixel-identical. | The desktop is untouched on day one. Fidelity is a pixel diff in a browser, not an opinion. Islands give mobile the whole UI before every component is ported. | Two implementations of each not-yet-shared component, which can drift until the desktop switches. |
+
+C is taken. B survives as the fallback if the spike fails (see *Revisit when*).
+
+## Decision
+
+### Shape
+
+```text
+packages/
+  shared/      unchanged: the contract (ipc.ts), browser.ts
+  ui/          NEW @jaira/ui: today's src/renderer, moved as-is by `git mv`
+                 (DOM components, styles.css, store.ts, fonts)
+  universal/   NEW @jaira/universal: the Tamagui tree
+                 tamagui.config.ts    generated from styles.css (below)
+                 primitives/          Row, Column, AppText, DataText … the defaults encoded once
+                 components/          copies of ui components, same names and props
+                 islands/             Island.web.tsx (renders the DOM component inline)
+                                      Island.native.tsx (renders it in react-native-webview)
+                 App.tsx              the universal shell: same layout as ui's App.tsx
+  client/      NEW @jaira/client: the One app
+                 app/_layout.tsx
+                 app/index.web.tsx      the DOM tree (what Electron shows)
+                 app/universal+spa.tsx  the universal tree in a browser (the fidelity gate)
+                 app/index.native.tsx   the universal tree on a phone
+                 bridges/               electronBridge (window.jaira), socketBridge (throwaway)
+                 island/                the page an island's WebView loads
+  app/         Electron main, preload, packaging; its renderer is now client's dist/client
+```
+
+- **The bridge becomes injectable.** `bridge()` returns whatever `setBridge()` installed, defaulting to
+  `window.jaira`. Nothing else in `store.ts` changes. **Both trees run the same `useApp()`**, so the
+  universal tree is a second *view* of the same state, not a second app.
+- **The universal shell is the desktop layout.** Sidebar, address bar, main pane and side panel, at the
+  same widths and sizes, on the phone too (ruling 1). On a phone it is shown at desktop width in a
+  horizontally scrolling, pinch-zoomable frame; the mobile pass replaces that later.
+- **A component is in one of four states:** `dom` (only the DOM version), `copy` (a universal copy
+  exists; the desktop still uses DOM), `shared` (the desktop uses the universal one; DOM version and its
+  CSS deleted), `island` (DOM forever, a WebView on native).
+- **Where a region has no copy yet, the universal tree shows it as an island.** So mobile shows the
+  whole UI from early on, and the islands shrink as copies land.
+- **Electron keeps its main process.** `app:build` runs `one build` (SPA, no loaders) instead of
+  `vite build`, and main serves `dist/client` from an `app://` protocol with an `index.html` fallback.
+  The CSP moves from the `<meta>` to a response header on that protocol, and keeps its directives.
+
+### Tamagui, generated from the CSS
+
+- `tamagui.config.ts` is **generated** from `styles.css` by a script (like `schemas:sync`), never
+  hand-copied:
+  - every `:root[data-palette=…]` block becomes a Tamagui theme (light and dark per palette);
+  - `--font-app` and `--font-data` become the two font families, with `--size-app` scaling;
+  - spacing, radii and sizes that the ported components use become tokens as they are ported.
+- A check in `typecheck` fails when `styles.css` and the generated config disagree, so a palette edit
+  reaches the universal tree at the next build.
+- The primitives encode what React Native does differently from today's CSS once:
+  - flex-direction column by default,
+  - `border-box`,
+  - no margin collapse,
+  - no inherited text style.
+  `AppText` and `DataText` encode the two type voices (`docs/ui/direction.md`), including "data never
+  takes `text-transform`".
+- Fonts: the woff2 files are converted to TTF for native (expo-font) and used as-is on web.
+- **To verify in the spike:** that Tamagui's theme CSS variables on web do not collide with the same
+  names in `styles.css`, since both trees may share a page once the desktop starts switching
+  components.
+
+### The fidelity gate (ruling 6)
+
+- The `shots` driver gains a mode that renders the **same seeded state** twice: the DOM tree at `/` and
+  the universal tree at `/universal`, in the same browser at the same size, and pixel-diffs them per
+  region.
+- A copy is done when its region diffs to zero, or to a listed and explained difference such as
+  antialiasing.
+- A component becomes `shared` only when the desktop's existing shots are still identical with it
+  swapped in. **The desktop is the reference and never regresses for the sake of the phone.**
+- Device screenshots come later (ruling 6). Until then, the browser rendering of the universal tree
+  stands in for the phone.
+
+### Islands (ruling 5)
+
+- An island is a DOM component bundled into a small local page (`client/island/`) with `styles.css` and
+  the fonts. Props go in and events come out over `postMessage`. The palette follows the host's theme.
+- `Island.web.tsx` renders the component inline, so on web there is no WebView and the pixel diff still
+  works.
+- `Island.native.tsx` renders the page in `react-native-webview`. It sizes the WebView to its content,
+  or gives it the region's fixed size for editors.
+- Candidates for permanent islands: Monaco (the diff and file views), the CodeMirror markdown editor,
+  interactive artifacts, and possibly the state graph.
+- **What is known before measuring (research, 2026-09-27):**
+  - **CodeMirror 6** uses the platform's own selection and editing on phones. It runs in a WebView in a
+    maintained package (`@actualwave/react-native-codeditor`), with known Android fixes:
+    - leave out `drawSelection()`, which breaks the IME cursor;
+    - set `EditorView.EDIT_CONTEXT = false` to avoid misplaced characters when typing fast;
+    - use `adjustResize`.
+  - **Monaco says it does not support mobile** (README FAQ: "No"; #246 open since 2016). It has no touch
+    selection, and it captures touch-drag scrolling with no option to hand it back (#4108). Read-only
+    viewing may work; editing is a research project.
+  - **Assets load from `file://`,** the way Expo's own DOM components do: a config plugin copies the
+    island folder into the app bundle (`android_asset/`, the iOS bundle), and the WebView gets
+    `allowFileAccess`, `allowFileAccessFromFileURLs` and `allowingReadAccessToURL`.
+    - Not an `html` string: that gives a null origin and pushes megabytes over the bridge.
+    - Not `expo-asset`: it renames files, which breaks relative references.
+  - **Workers and WASM are the weak points.** Android refuses `file://` workers and fetches from a null
+    origin. Monaco then runs its diff on the main thread, which is slower but still works. An inline
+    blob worker is unverified on both platforms. Fetching `.wasm` over `file://` fails in WKWebView, so
+    the grammar WASM is inlined as base64. iOS Lockdown Mode disables WASM altogether. **Shiki's
+    JavaScript regex engine needs no WASM,** so islands use it.
+  - **Cost:** every WKWebView is its own process on iOS; on Android they share one renderer. Keep one to
+    three live islands per screen, and show a static rendering until a region is tapped or scrolled
+    into view.
+  - **Both editors render only the lines in view.** An island stretched to full content height renders
+    every line. Editors therefore get their region's fixed size, as on the desktop, and scroll
+    inside.
+- **The frame conflicts with editors.** The desktop-width frame of ruling 1 pans and zooms, and so does
+  an editor island. The rule is that a one-finger drag inside an island belongs to the island, and a
+  two-finger drag or a pinch belongs to the frame. S5 tests it.
+- **The same island page runs in a browser.** The page posts through `window.ReactNativeWebView` when it
+  exists and through `window.parent` otherwise, so a browser harness can host it in an iframe. With
+  touch emulation, Playwright's WebKit engine is the closest desktop stand-in for WKWebView. It catches
+  layout and loading problems, but not keyboard, IME or gesture problems.
+
+### Read-only v1
+
+- `socketBridge` has an allowlist of read channels. Any other `invoke` is refused in the client with a
+  "read-only in this version" notice.
+- Controls that would mutate stay visible, because the UI must be identical, but are inert.
+- v2 turns the allowlist off and makes the controls live.
+
+### The throwaway transport (ruling 3)
+
+The quickest thing that works:
+
+- The desktop's main opens a WebSocket on `JAIRA_SPIKE_WS=<port>` when that variable is set. It prints a
+  random token to the log, and it dispatches `{id, channel, request}` to the existing `handlers` table
+  and forwards every push to every socket.
+- There is no pairing, no TLS, no Settings row and no per-connection state. The phone connects on the
+  LAN with address and token typed once.
+- `socketBridge` is about fifty lines behind `JairaBridge`. When the other session's remote transport
+  lands, it replaces both ends and nothing above the bridge notices.
+- Known and accepted: the spike's clients share the desktop's "current project"; iOS needs a
+  local-network cleartext exception; Android needs `usesCleartextTraffic`.
+
+### The spike
+
+Time-boxed, on a branch. Each part has an exit test.
+
+| # | Part | Exit test |
+|---|---|---|
+| S0 | **Toolchain on this machine.** `packages/client` and `packages/universal` on the chosen One version, Tamagui, npm workspaces, Metro mode, `watchFolders` for `../declarative-ai`, React deduped. Android emulator on Windows; iOS through EAS. | `one dev` serves web; the Android emulator shows a Tamagui screen in the ink palette that imports from `@jaira/shared/browser` and `@declarative-ai/json`. Windows pain is written down, not silently worked around. |
+| S1 | **One hosts today's UI in Electron.** `git mv src/renderer packages/ui`. `index.web.tsx` renders `<App/>`. Main loads `app://`. Monaco's worker, the WASM tokenizer, fonts and `jaira-artifact:` frames work under the new CSP. | **Every `shots/*.mts` produces the same pixels** as the Vite build (zero diff, or a listed, explained one). `npm run app:dist` and its package probe pass. |
+| S2 | **The throwaway transport** above, plus `setBridge()`. | The **DOM tree in an ordinary browser** on another machine connects and shows the desktop's projects and board. |
+| S3 | **The universal shell**, read-only. Copies of the frame: sidebar with project rows, the address bar, the side panel frame. The Tasks room: board, columns, `task-card`, `status-pill`, `task-metrics`. Everything else in the frame is an island. Runs at `/universal` in the browser and on the Android emulator against S2. | The fidelity gate passes for the copied regions against the DOM tree, in two palettes and both schemes. The emulator shows the same screen, live: a task that moves on the desktop moves on the phone. |
+| S4 | **The first shared components.** The desktop switches `status-pill` and `task-card` to their universal versions and deletes their DOM versions and CSS blocks. | S1's shots are still pixel-identical on desktop. The measured hours per component become the migration's estimate. |
+| S5 | **The island test** (ruling 5). Three islands on the emulator and on iOS via EAS: the markdown view (static, auto-height), the Monaco diff editor read-only (worker and WASM loaded from the bundled page), and the CodeMirror markdown editor, read-only and then editable (to answer v2's question early). | See [Island test](#island-test). |
+
+The spike ends with this record updated with what it measured: hours per copied component, bundle sizes,
+cold start on a mid-range Android, the gate's results, the island findings, and how bad Windows was.
+Then a go/no-go for the migration.
+
+### Island test
+
+**What is built:**
+
+- One island folder, built with Vite by `client/island/`, holding four pages:
+  - the markdown view (`markdown.tsx`);
+  - today's Monaco diff (`monacoDiff.tsx`), read-only, with its worker created from an inline blob;
+  - the same diff in CodeMirror's `@codemirror/merge`, as the fallback candidate;
+  - today's CodeMirror markdown editor (`markdownEditor.tsx`).
+- The config plugin that copies the folder into both native bundles.
+- A typed bridge that carries props, the theme's CSS variables, content height, a `ready` event, and
+  links routed back out.
+- A test screen inside the desktop-width frame. It shows native rows and one, three, then six islands,
+  over files of 200, 2,000 and 20,000 lines.
+- The same pages in the browser harness, driven by the same script.
+
+**What is measured**, on a low-end Android emulator image and on iOS through an EAS simulator build
+(real devices when they are available):
+
+| Measure | Pass |
+|---|---|
+| Time to `ready` for a 2,000-line diff | under 1.5 s |
+| Worker started, or the main-thread fallback acceptable | either, stated which |
+| Grammar highlighting | Shiki's JS engine highlights identically to the desktop's WASM engine |
+| The frame scrolls and zooms past islands | no stuck gestures; one finger inside an editor scrolls the editor |
+| Memory for three islands | under about 150 MB added |
+| Auto-height (markdown) | settles without a resize loop |
+| Palette switch | islands follow the host's palette without a reload |
+| Long-press select and copy (v1) | works in all four |
+| Typing with Gboard and a Japanese IME in the CodeMirror editor (v2's question) | no misplaced characters, and the keyboard does not cover the caret |
+| Pixel diff of each island page in the browser harness against the desktop | zero, or explained |
+
+**If it fails:**
+
+- Monaco cannot give up touch scrolling, or cannot get under the time limit: diffs on native use
+  CodeMirror's merge view. They stay Monaco on desktop, and the difference is listed in the ledger as a
+  known departure from "identical".
+- Islands at 20,000 lines stall: cap what is loaded and page the rest.
+- Blob workers fail on iOS: the diff runs on the main thread or on the React Native side.
+- WebViews fail altogether on a platform: that component needs a native read-only equivalent before v1
+  can show it.
+
+### After the spike: the migration
+
+**The order is the frame first, then leaves, then rooms.** Mobile needs the frame to be native to feel
+like anything, and leaves are cheap to prove.
+
+1. The frame and the Tasks room (done in the spike).
+2. Leaves: `icon`, `switch`, `segmented-control`, `chip-box`, `sidebar-row`, `project-row`,
+   `conversation-row`, `work-row`.
+3. Read surfaces: `transcript`, `message`, `value-view`, `waiting-on-sheet`, `inbox-strip`, and the
+   run views.
+4. The Chat and Files rooms, then the side panel's views (`panelStack.ts` is already pure and carries
+   over).
+5. Interactive v2: `composer`, gates, `agent-question`, `command-approval`, and drag and drop (Gesture
+   Handler on native, the HTML5 path kept in a `.web.tsx` beside the shared file where it must be).
+6. Settings pages, one at a time.
+7. Never: Monaco, CodeMirror, interactive artifacts. These stay islands.
+
+**Rules:**
+
+- **The ledger.** Each `docs/ui/components/*.md` gains `platforms: dom | copy | shared | island`, and
+  `docs/ui/index.md` counts them with the lines of `styles.css` left.
+- **Drift.** A `copy` whose DOM half changes without its universal half is a CI failure through the
+  fidelity gate, not a warning. That is what keeps the copies honest while they exist.
+- **Copies are short-lived.** A copy that passes the gate is switched on the desktop within the same
+  piece of work, where the desktop shots allow it, so the time spent with two versions stays short.
+
+## Version
+
+Read 2026-09-27 from npm, the `v2-beta` branch, and the draft post `version-two.mdx` (2026-09-17, not
+published). There is no changelog, no git tag and no upgrade guide for 2.0.
+
+- **Stable:** `one@1.27.1` (2026-09-14). `main` says v2-beta "is where One work goes; main stays as it
+  was", so 1.x looks frozen. That is an inference; no maintenance policy is stated.
+- **Beta:** `2.0.0-beta.N.M`, published several times a day, on a branch 901 commits ahead of `main`
+  and about 2,300 commits in the last week. Pin it exactly. **`one@^2` resolves to an unrelated 2013
+  package** of the same name, and no version scheme has been announced for a stable 2.
+- **No date for 2.0 stable** anywhere.
+
+**What 2.0 breaks, measured against what this plan uses:**
+
+| Change in 2.0 | Hits this plan? |
+|---|---|
+| **Expo removed from the toolchain.** Config moves from `app.json` to `one({ native: { app } })`. `prebuild`/`run` use the RN community CLI. No Expo Go. `one/expo-plugin` → `vxrn/expo-plugin`, `one/react-native-commands` → `one/react-native-config`. | **Yes.** Native setup, EAS, and the islands' config plugin |
+| React Native 0.86 → 0.87. **New Architecture required** (One now ships native code and Nitro modules). **iOS 17 minimum.** | Yes. The native build, and react-native-webview must be New Architecture ready |
+| React Navigation 7 → **8.0.0-alpha**, pinned exactly. `Presentations` replaces `NavigationRender`. | Barely. The app has no router and uses a single route per tree. |
+| Metro config: `expo/metro-config` → `require('one/metro-config').withOne(__dirname)`. The docs contradict themselves on whether `babel-preset-expo` is needed. | Yes, small |
+| Rolldown becomes the default native bundler. | No. This plan pins `bundler: 'metro'` |
+| `SafeAreaView` → `One.UI.SafeArea.View`. `EXPO_OS` gone on web (use `ONE_PLATFORM`). `ONE_PUBLIC_` env prefix. Peer floors: gesture-handler ≥3, screens ≥4.25, worklets ≥0.12.2. | Small |
+| New: SwiftUI/Compose components (`One.UI`), Rolldown native HMR, web navigators that keep `react-native` out of the web bundle. | Not needed for the spike |
+
+**The web side is the same in both.** Both use React ^19.2.3, Vite ^8.2 and Rolldown, and both pair
+with **Tamagui 2.x** (2.7.7 is current; the docs pin 2.6.2). Starting on Tamagui 2 means its own v1→v2
+breaks (`space` → `gap`, no `Stack`, `animation` → `transition`, `aria-*`) never apply to us.
+
+**Windows is unsupported on both.** `installation.mdx` says "One currently doesn't support Windows… for
+development", and `status.mdx` rates it "early". S0 must find out whether that means rough edges or a
+wall. If it is a wall, the fallback is to develop the client inside WSL, with the Android emulator on the Windows side reached through `adb` over TCP.
+
+**Also:** One brings Vite 8, and the app is on Vite 6. S1 moves the renderer build to One, so `packages/app`
+drops its own Vite. Until then, the two must not be hoisted into one copy.
+
+**Ruled: 1.27.1 with Tamagui 2.7, Metro for native, and the native side kept thin.** The reasons:
+
+- The part of the spike most at risk (S1, S3, the gate) is web, and it is identical in both.
+- Keeping native thin means configuring through `vite.config.ts` where 1.27 allows it, importing
+  nothing from `@react-navigation/*`, and keeping `app.json` minimal. A later move to 2 is then mostly
+  the Expo-to-community-CLI swap, which is known.
+- The islands' config plugin is written against the Expo plugin API. It is the one piece that 2.0
+  moves to `vxrn/expo-plugin`.
+
+**Move to 2 when** it has a published release or a non-draft announcement, or when 1.x stops building
+against a Tamagui or react-native-webview release we need.
+
+## Native desktop, later
+
+The desktop ships as Electron first, from the DOM tree and then from shared components as they are
+switched (ruling 7). Microsoft's `react-native-windows` and `react-native-macos` are the candidates for
+a true native desktop after that. This plan leaves the door open to them without building for them:
+
+- The universal tree is plain React Native plus Tamagui, so it is the tree those targets would run.
+  Every component the migration makes `shared` is one they get for free.
+- Islands are `react-native-webview` pages, which that library also supports on Windows (WebView2)
+  and macOS (WKWebView). The islands' asset-copy plugin is the part that would need a desktop variant.
+- One's environments are web, iOS and Android only, as read on 2026-09-27. A native-desktop build would
+  therefore run the universal tree through the platform's own Metro setup, beside One rather than
+  through it. **This was not checked against those projects' current versions,** and it is the
+  first question when that work starts.
+- Nothing in the spike depends on this.
+
+## Consequences
+
+**Easier:**
+
+- The desktop is untouched in look from the first day.
+- A browser client comes for free from S2.
+- Fidelity is a number from a pixel diff, not a judgement.
+- `store.ts`, `panelStack.ts`, `transcript.ts`, `stateGraph.ts` layout and the other pure modules are
+  shared from the start, along with their ~100 tests.
+
+**Harder:**
+
+- Two implementations of each copied component until it is switched.
+- Two styling systems during the migration, both generated from the same `:root` blocks.
+- The toolchain grows by Expo, Metro, EAS, react-native-web and Tamagui, on a framework with one
+  maintainer and "early" Windows support.
+
+**Deferred:** a native desktop build ([above](#native-desktop-later)).
+
+**Foreclosed for now:** any mobile-specific layout. That is the later mobile UI/UX pass, which starts
+from a universal tree it can rearrange.
+
+## Revisit when
+
+- **S0 or S1 fails.** One cannot host the DOM tree in Electron identically, or Windows development is
+  not workable. Then fall back to B for mobile, and keep the migration on plain react-native-web inside
+  the existing Vite build.
+- **Copying costs more than about a day per leaf component.** Then mobile leans on islands for longer,
+  and copies are reserved for the frame and the read surfaces.
+- **Islands fail S5 on iOS or Android.** Then the components concerned need native equivalents (a
+  read-only diff view first) before v1 can show them.
+- **One publishes a stable 2.** Then move before migration step 3, not during it (see [Version](#version)).
+- **The other session's remote transport lands.** Then `socketBridge` and the spike's WebSocket are
+  deleted.
+- **One gains `'use dom'`.** Then the islands move to it.
