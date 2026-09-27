@@ -14,6 +14,7 @@ import { AppService, hostEngine, resolveBaseDir, type HostedEngine } from "@jair
 import { takeHomeFlag } from "@jaira/shared";
 import { startPlugins } from "@jaira/runtime";
 import { electronKeychain } from "./keychain";
+import { tailChromiumLog } from "./chromiumLog";
 
 const home = takeHomeFlag(process.argv.slice(1)).home;
 const baseDir = resolveBaseDir(home);
@@ -36,11 +37,13 @@ app.on("window-all-closed", () => undefined);
 
 let hosted: HostedEngine | undefined;
 let stopping: Promise<void> | undefined;
+let stopChromiumLog = (): void => undefined;
 
 function stop(why: string): Promise<void> {
   stopping ??= (async () => {
     say(`stopping (${why}): draining runs and closing the databases`);
     hosted?.built()?.recordApp("info", `the server is stopping (${why})`);
+    stopChromiumLog();
     try {
       await hosted?.close();
     } finally {
@@ -90,6 +93,8 @@ void app.whenReady().then(async () => {
     return;
   }
   const service = hosted.engine();
+  // Chromium's own lines: a server started detached has no stderr anyone reads (`chromiumLog.ts`).
+  stopChromiumLog = tailChromiumLog((record) => service.recordChromium(record.level, record.message, record.detail));
   service.recordApp("info", `JaiRA ${app.getVersion()} serves the engine (pid ${process.pid})`, { baseDir, argv: process.argv.slice(1) });
   say(`JaiRA ${app.getVersion()} serves the engine for ${baseDir} (pid ${process.pid})`);
   // The projects last open, as the desktop re-opens them: their events tasks, watchers and waiting runs

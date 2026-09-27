@@ -293,6 +293,8 @@ export function enginePeerHandlers(service: AppService, control: EngineControl):
     "engine:stop": (() => control.stop()) as Handler,
     "engine:recordApp": ((request: { level: LogLevel; message: string; detail?: JsonValue; raised?: string }) =>
       service.recordApp(request.level, request.message, request.detail, request.raised)) as Handler,
+    "engine:recordChromium": ((request: { level: LogLevel; message: string; detail?: JsonValue }) =>
+      service.recordChromium(request.level, request.message, request.detail)) as Handler,
     "engine:recordCrash": ((request: { kind: CrashKind; error: { message: string; name?: string; stack?: string } }) =>
       service.recordCrash(request.kind, errorOf(request.error))) as Handler,
     "engine:recordWarning": ((request: { error: { message: string; name?: string; stack?: string } }) => service.recordWarning(errorOf(request.error))) as Handler,

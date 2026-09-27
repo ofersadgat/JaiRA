@@ -91,7 +91,9 @@ export class App {
     const port = options.port ?? 9229;
     mkdirSync(options.out, { recursive: true });
 
-    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`], {
+    // `--user-data-dir` is Chromium's switch and Electron's `userData` follows it: the world's keychain
+    // and profile, never the author's. See `World.userData`.
+    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`], {
       cwd: world.project,
       env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project },
       stdio: ["ignore", "pipe", "pipe"],

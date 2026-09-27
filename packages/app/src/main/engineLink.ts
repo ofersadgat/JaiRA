@@ -26,6 +26,8 @@ export interface EngineLink {
   /** One of the window's requests. */
   invoke(channel: string, request: unknown): Promise<unknown>;
   recordApp(level: LogLevel, message: string, detail?: JsonValue, raised?: string): void;
+  /** A line Chromium logged about itself (`chromiumLog.ts`). */
+  recordChromium(level: LogLevel, message: string, detail?: JsonValue): void;
   recordCrash(kind: CrashKind, error: Error): void;
   recordWarning(error: Error): void;
   recordIpcFailure(channel: string, error: unknown): void;
@@ -63,6 +65,7 @@ export function localLink(service: AppService, hosted: HostedEngine | undefined)
       return (handler as (request: unknown) => unknown)(request);
     },
     recordApp: (level, message, detail, raised) => service.recordApp(level, message, detail, raised),
+    recordChromium: (level, message, detail) => service.recordChromium(level, message, detail),
     recordCrash: (kind, error) => service.recordCrash(kind, error),
     recordWarning: (error) => service.recordWarning(error),
     recordIpcFailure: (channel, error) => service.recordIpcFailure(channel, error),
@@ -112,6 +115,7 @@ export function remoteLink(client: EngineClient): EngineLink {
     invoke: (channel, request) => client.invoke(channel, request),
     recordApp: (level, message, detail, raised) =>
       tell("engine:recordApp", { level, message, ...(detail !== undefined ? { detail } : {}), ...(raised !== undefined ? { raised } : {}) }),
+    recordChromium: (level, message, detail) => tell("engine:recordChromium", { level, message, ...(detail !== undefined ? { detail } : {}) }),
     recordCrash: (kind, error) => tell("engine:recordCrash", { kind, error: wire(error) }),
     recordWarning: (error) => tell("engine:recordWarning", { error: wire(error) }),
     recordIpcFailure: (channel, error) => tell("engine:recordIpcFailure", { channel, error: wire(error) }),

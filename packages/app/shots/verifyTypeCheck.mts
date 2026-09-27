@@ -24,6 +24,7 @@ import { initProject } from "@jaira/persistence";
 import { Git, NodeExec, happyRules } from "@jaira/runtime";
 import { writeWorkflowFiles, specPlanningFiles } from "@jaira/runtime";
 import { App } from "./driver.mjs";
+import type { World } from "./world.mjs";
 
 /**
  * A world of its own per run, under one git-ignored parent.
@@ -42,7 +43,7 @@ function put(project: string, path: string, text: string): void {
 }
 
 /** A project with one file that is fine and one that is not, and imports that do resolve. */
-async function build(): Promise<{ home: string; project: string }> {
+async function build(): Promise<World> {
   const home = join(ROOT, "home");
   const project = join(ROOT, "project");
   rmSync(ROOT, { recursive: true, force: true });
@@ -95,7 +96,7 @@ async function build(): Promise<{ home: string; project: string }> {
   await git.run(["config", "user.name", "Verify"]);
   await git.run(["add", "."]);
   await git.run(["commit", "-m", "base"]);
-  return { home, project };
+  return { home, project, userData: join(ROOT, "user-data") };
 }
 
 /** What the window says, flattened — the cheapest true signal that a state has been reached. */

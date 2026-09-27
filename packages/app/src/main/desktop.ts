@@ -55,6 +55,7 @@ import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { localLink, remoteLink, type EngineLink } from "./engineLink";
 import { electronKeychain } from "./keychain";
+import { tailChromiumLog } from "./chromiumLog";
 import { startPlugins } from "@jaira/runtime";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
@@ -239,6 +240,9 @@ let hosted: HostedEngine | undefined;
 let startedServer = false;
 /** Why this window is not using the engine it would have chosen. */
 let engineNote: string | undefined;
+
+/** Stops reading Chromium's log, after one last read; set once the engine is there to read it into. */
+let stopChromiumLog = (): void => undefined;
 
 /** Where this window's engine runs, for About. */
 function engineStatus(): EngineStatus {
@@ -1200,6 +1204,9 @@ void app.whenReady().then(async () => {
   const engine = established;
   link = engine;
   recordLaunch(engine);
+  // Chromium's own lines, from the first — the file has held them since the profile opened. Through
+  // `link` at each line, so a window that took over its engine keeps reporting to the new one.
+  stopChromiumLog = tailChromiumLog((record) => link?.recordChromium(record.level, record.message, record.detail));
   if (engineNote !== undefined) engine.recordApp("warn", engineNote);
   // The projects this window had open when it was last quit, before the one the command line names:
   // restoring first keeps the list's own order (oldest to newest) and leaves an explicitly requested
@@ -1300,6 +1307,7 @@ app.on("before-quit", (event) => {
   // is a quit, and telling those two apart in yesterday's file is most of reading it.
   engine?.recordApp("info", engine.mode === "local" ? "quitting: draining runs and closing the databases" : "quitting: disconnecting from the engine");
   updates.stop();
+  stopChromiumLog();
   // A local engine closes its pipe first — nothing should start a run on an engine that is draining —
   // then drains. A remote one is left, stopped only where this window is the reason it runs.
   const closed = engine === undefined ? Promise.resolve() : engine.mode === "local" ? engine.close() : releaseRemote(engine).then(() => engine.close());

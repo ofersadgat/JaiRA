@@ -64,6 +64,7 @@ export const PEER_CHANNELS = [
   "engine:info",
   "engine:stop",
   "engine:recordApp",
+  "engine:recordChromium",
   "engine:recordCrash",
   "engine:recordWarning",
   "engine:recordIpcFailure",

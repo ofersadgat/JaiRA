@@ -1737,6 +1737,7 @@ export interface LogQuery {
  */
 export const LOG_SOURCES: readonly string[] = [
   "app",
+  "chromium",
   "crash",
   "engine",
   "ipc",

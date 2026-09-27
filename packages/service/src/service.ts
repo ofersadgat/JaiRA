@@ -3584,6 +3584,24 @@ export class AppService {
   }
 
   /**
+   * A line Chromium logged about itself — a cache it could not open, a GPU process that fell over —
+   * read back from the file the shell has it write (`packages/app/src/main/chromiumLog.ts`).
+   *
+   * A source of its own, not `app`: the shell is only the courier. Chromium's level is kept as it
+   * said it, so its ERRORs read as errors — some are benign, but which ones is the reader's call, and
+   * a `chromium` policy row turns the lot down.
+   *
+   * NEVER THROWS, like the rest of this family.
+   */
+  recordChromium(level: LogLevel, message: string, detail?: JsonValue): void {
+    try {
+      this.log({ level, source: "chromium", message, ...(detail === undefined ? {} : { detail }) });
+    } catch {
+      // Same last-resort rule as the rest of this family.
+    }
+  }
+
+  /**
    * A page of what the app has said — what the Logs panel reads, newest first.
    *
    * Read from the mirror rather than from memory, so the answer spans every launch on disk; paged

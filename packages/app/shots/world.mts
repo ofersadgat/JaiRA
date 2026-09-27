@@ -29,6 +29,12 @@ export interface World {
   readonly home: string;
   /** The project the app opens. */
   readonly project: string;
+  /**
+   * Electron's `userData`, its own for the same reason as `home`: it holds the keychain's
+   * `secrets.json` and the Chromium profile. Left to the default, every run read and wrote the
+   * author's dev keychain (`%APPDATA%\@jaira\app`) and fought the author's own window for its caches.
+   */
+  readonly userData: string;
 }
 
 /**
@@ -48,7 +54,7 @@ export function buildWorld(dir: string): World {
   // tests and the starter a fresh project is seeded with. A fourth copy authored here would be one
   // more thing to keep true; this one is kept true by three other callers.
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles() as Record<string, unknown>);
-  return { home, project };
+  return { home, project, userData: join(dir, "user-data") };
 }
 
 /**

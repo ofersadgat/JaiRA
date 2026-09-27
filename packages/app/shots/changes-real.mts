@@ -18,7 +18,7 @@ const pause = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 async function main(): Promise<void> {
   const [project, title] = [process.argv[2]!, process.argv[3]!];
-  const world = { home: join(project, "..", "home"), project };
+  const world = { home: join(project, "..", "home"), project, userData: join(project, "..", "user-data") };
   mkdirSync(world.home, { recursive: true });
   const app = await App.launch(world, { out: OUT, port: 9254, width: 1440, height: 1000 });
   try {

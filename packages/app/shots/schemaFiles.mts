@@ -41,7 +41,7 @@ put(project, "compose.yaml", "services:\n  web:\n    imagee: nginx\n    ports:\n
 // `scrpt` is not a job key, and a job with no `script` cannot run.
 put(project, ".gitlab-ci.yml", "stages: [build]\n\nbuild:\n  stage: build\n  scrpt: make\n");
 
-const app = await App.launch({ home, project }, { out: OUT, port: 9243, width: 1400, height: 900 });
+const app = await App.launch({ home, project, userData: join(ROOT, "user-data") }, { out: OUT, port: 9243, width: 1400, height: 900 });
 /**
  * Click the Files tree row named EXACTLY this. Not `clickText`, which takes the deepest element that
  * merely contains the text — once the picker lists "tsconfig.json (TypeScript)", that is its option.
