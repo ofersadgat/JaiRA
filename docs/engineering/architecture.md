@@ -70,11 +70,10 @@ These are not conventions. Crossing one is a design change, not a refactor.
 
 ## Traps
 
-- **Native-module ABI.** `better-sqlite3` is a V8-ABI addon and one build cannot
-  serve both Node and Electron (Node 22 → `NODE_MODULE_VERSION` 127, Electron 33
-  → 130). Both are cached side by side under `build/abi/<abi>/` and each runtime
-  loads its own, so the app and the tests can run at once. `npm install` fetches
-  both; `npm run abi` redoes it.
+- **Native modules must stay Node-API.** `better-sqlite3` 13 is a Node-API addon,
+  so the one binary its package ships per platform serves Node (the tests, the CLI)
+  and Electron (the app) alike. A V8-ABI addon would bring back a build per runtime,
+  which is what `better-sqlite3` 12 needed.
 - **A model id may name its route, and need not.** `anthropic/claude-sonnet-5`
   pins the route and is refused where that route has no credential; bare
   `claude-sonnet-5` is placed by its FAMILY — JaiRA finds a route that serves

@@ -8,14 +8,8 @@
  * `@ai-exec/hw`; the tables here are shaped so they can be added alongside
  * without migration of what exists.
  */
-import { createLogger, errorToJson } from "@declarative-ai/log";
-import { Refusal } from "@jaira/shared";
 import Database from "better-sqlite3";
 import { migrate } from "./migrations";
-import { abiAdvice, sqliteBinding } from "./nativeBinding";
-
-/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
-const log = createLogger("jaira.persistence.db");
 
 export type JairaDb = Database.Database;
 
@@ -196,14 +190,12 @@ CREATE TABLE IF NOT EXISTS models (
 /**
  * Open the store.
  *
- * The addon is named explicitly when a build for this runtime's ABI is cached — see
- * `nativeBinding.ts`. That is what lets the same `node_modules` serve the tests (Node) and the app
- * (Electron) without either of them swapping a file the other is using. With nothing cached, the
- * package finds its own, which is the ordinary case for an installed copy.
+ * The addon is a Node-API build (better-sqlite3 13), so the one binary the package ships for this
+ * platform serves Node and Electron alike: the tests and the app share `node_modules` with nothing
+ * to swap or cache per runtime.
  */
 export function openDb(file: string): JairaDb {
-  const binding = sqliteBinding();
-  const db = openWithAdvice(file, binding);
+  const db = new Database(file);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
@@ -231,25 +223,4 @@ export function openDb(file: string): JairaDb {
     if (shell.n === 0) db.exec(`DROP TABLE runs`);
   }
   return db;
-}
-
-/**
- * `new Database`, with the one failure worth translating.
- *
- * An ABI mismatch is the single error here that is about the developer's machine rather than about
- * the database, and Node reports it as two version numbers with no remedy attached. Rethrown with
- * the command that fixes it — and rethrown, not swallowed: there is no opening this file without it.
- */
-function openWithAdvice(file: string, binding: string | undefined): JairaDb {
-  try {
-    return binding !== undefined ? new Database(file, { nativeBinding: binding }) : new Database(file);
-  } catch (e) {
-    const advice = abiAdvice(e);
-    if (advice === undefined) throw e;
-    // Not through `refusal`, and the reason is the `cause`: this is the one refusal here that chains
-    // the underlying error, and losing that would leave the advice with no way back to the ABI
-    // mismatch it is advice ABOUT. So the line is written by hand and the marker applied by hand.
-    log.warn(advice, { file, cause: errorToJson(e) });
-    throw new Refusal(advice, { cause: e });
-  }
 }

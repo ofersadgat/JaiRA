@@ -178,7 +178,6 @@ Indexes `command_log_task (task_id, id)`, `artifacts_task (task_id, id)`, UNIQUE
 | Condition | Response | Caller does |
 | --- | --- | --- |
 | A migration step throws | the step's transaction rolls back and the error leaves `openDb` | fix the cause; the next open resumes from that step |
-| No addon is cached or built for this runtime's ABI | `Refusal` carrying the loader's message and ``Run `npm run abi` `` advice | run the command |
 | Another process holds the write lock past `better-sqlite3`'s busy timeout | `database is locked` | retry |
 | An insert or reopen claims a live seat | `UNIQUE constraint failed` naming `operation_records.session_id` and `session_seq`; `SqliteSessionStore` raises `PositionTaken` | upstream forks the conversation |
 | An insert reuses an `operation_records.id` | `UNIQUE constraint failed` on `operation_records.id`; the store reopens a non-completed row or refuses `record '<id>' has already settled` | a completed refusal is a caller bug |

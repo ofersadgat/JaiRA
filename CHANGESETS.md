@@ -441,14 +441,15 @@ honest and far better than a backend that half-implements them.
 worktree *management* and no commondir resolution. And the objection does not extend to nodegit:
 libgit2 handles linked worktrees natively, which makes it the *stronger* fallback in semantics —
 survival odds are the caveat above. What survives is a cost, not a blocker: a second native module
-on top of better-sqlite3, both needing the electron-vs-node rebuild `scripts/nativeAbi.mjs` manages.
+on top of better-sqlite3, and unlike better-sqlite3 13 (Node-API) nodegit is a V8-ABI addon, so it would
+need a build per runtime, Node and Electron.
 
 **If it ever ships, it ships as an `optionalDependency`, resolved at build time.** npm skips an
 optional dependency whose native build fails; the backend does a guarded `require` and registers
 only on success, which the selection above already tolerates. For the packaged app the question
 "does it compile" is answered on the **build machine** — users get whatever CI built, so
 optionality is a per-release, per-platform property, not a per-machine probe. Three consequences:
-`scripts/nativeAbi.mjs` treats a nodegit rebuild failure as non-fatal; the build reports which
+the build treats a nodegit rebuild failure as non-fatal; the build reports which
 backends shipped rather than silently dropping one; and CI asserts the module actually built, or
 the fallback path ships untested forever. The case that earns its keep is precisely the packaged
 app on a machine with no git installed — in dev, git-cli always wins and nodegit never runs.

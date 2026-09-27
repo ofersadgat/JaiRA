@@ -32,7 +32,7 @@
     "@openrouter/ai-sdk-provider": "^2.9.0",
     "ai": "^6.0.195",
     "ajv": "^8.20.0",
-    "better-sqlite3": "^12.2.0",
+    "better-sqlite3": "^13.0.3",
     "canonicalize": "^2.1.0",
     "typescript": "^5.7.2",
     "undici": "^7.27.0",

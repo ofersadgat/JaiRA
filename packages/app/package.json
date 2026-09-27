@@ -17,9 +17,7 @@
     "build:main": "node build.mjs",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
-    "start": "npm run build && npm run abi:electron && electron .",
-    "abi:electron": "node ../../scripts/nativeAbi.mjs electron",
-    "abi:node": "node ../../scripts/nativeAbi.mjs node",
+    "start": "npm run build && electron .",
     "shots": "tsx shots/run.mts",
     "shots:logs": "tsx shots/logs.mts"
   },
@@ -58,7 +56,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.1",
+    "electron": "^44.4.5",
     "vite": "^6.0.5"
   }
 }

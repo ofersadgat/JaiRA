@@ -75,7 +75,6 @@ this workflow calls js/ts functions that have not been approved on this machine:
 | --- | --- | --- |
 | A library or service site declines | throws `Refusal` after its `warn` line | the app's `recordIpcFailure` logs nothing more and the renderer shows the message; the CLI prints `error: <message>` and exits 1 |
 | A start reaches a module never approved, or changed since its approval | `beginTaskRun` throws `ApprovalRequired` before it validates, snapshots or pins anything | the CLI's `beginTaskRunAsking` asks, or refuses with the command appended; the app's `startTask` keeps `pending` for `functions:pending` and rethrows, and the renderer fetches the list and opens the module approval dialog |
-| The SQLite addon was built for another ABI | `openDb` throws a `Refusal` holding the load error, `This runtime needs the SQLite addon built for ABI <n>` and the instruction to run `npm run abi`, with the load error as `cause` | run `npm run abi` |
 | A plain `Error` reaches an IPC handler | `recordIpcFailure` logs `<channel>: <message>` at `error` with its stack, then the handler rethrows | the renderer shows the message |
 
 ## A second refusal class or a change to the message text breaks callers silently, and there is no deprecation path

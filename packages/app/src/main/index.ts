@@ -773,9 +773,9 @@ async function createWindow(): Promise<BrowserWindow> {
    * recorded, and what follows is the same failure repeating.
    */
   const printed = new Set<string>();
-  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    if (level < 3 || printed.size >= RENDERER_CONSOLE_LIMIT) return;
-    const at = `${message} (${sourceId}:${line})`;
+  win.webContents.on("console-message", ({ level, message, lineNumber, sourceId }) => {
+    if (level !== "error" || printed.size >= RENDERER_CONSOLE_LIMIT) return;
+    const at = `${message} (${sourceId}:${lineNumber})`;
     if (printed.has(at)) return;
     printed.add(at);
     reportCrash("renderer", new Error(at));

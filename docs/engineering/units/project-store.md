@@ -7,8 +7,8 @@ implements: [product/pick-up-where-it-left-off, product/share-processes-across-p
 layer: data
 owns_contracts: [engineering/contracts/sqlite-schema]
 requires: [engineering/units/storage-policy, engineering/units/event-journal, engineering/units/operation-record-store, engineering/units/task-lifecycle, engineering/units/process-claims, engineering/units/project-layout, engineering/units/project-config]
-implemented_by: [packages/persistence/src/project.ts, packages/persistence/src/db.ts, packages/persistence/src/migrations.ts, packages/persistence/src/nativeBinding.ts]
-verified_by: [packages/persistence/test/lifecycle.test.ts, packages/persistence/test/systemProject.test.ts, packages/persistence/test/nativeBinding.test.ts, packages/persistence/test/jobs.test.ts, packages/persistence/test/sessionStore.test.ts, packages/persistence/test/rowFile.test.ts]
+implemented_by: [packages/persistence/src/project.ts, packages/persistence/src/db.ts, packages/persistence/src/migrations.ts]
+verified_by: [packages/persistence/test/lifecycle.test.ts, packages/persistence/test/systemProject.test.ts, packages/persistence/test/jobs.test.ts, packages/persistence/test/sessionStore.test.ts, packages/persistence/test/rowFile.test.ts]
 siblings: [engineering/units/storage-policy, engineering/units/process-claims, engineering/units/project-layout, engineering/units/module-approvals]
 ---
 
@@ -24,7 +24,7 @@ siblings: [engineering/units/storage-policy, engineering/units/process-claims, e
 4. It builds every store on that one connection, handing the journal, task and artifact stores a file log only when their concern is file-backed.
 5. It reads `jobs.orphans`, lets `runtime.recoverInterrupted` mark every `running` task with no live run claim `interrupted`, then calls `jobs.reapStale`.
 
-`openDb` in `db.ts` loads the `better-sqlite3` addon cached for this runtime's ABI under `build/abi/<abi>/` when there is one, sets `journal_mode = WAL` and `foreign_keys = ON`, runs the bootstrap `SCHEMA`, runs `migrate`, and drops the `events` and `runs` shells the bootstrap recreates when they are empty. `migrate` in `migrations.ts` applies `MIGRATIONS` in order, each step in its own IMMEDIATE transaction that re-reads `PRAGMA user_version` before acting. `initProject` creates the project layout, writes `settings.json` from `defaultConfig()` when it is absent, and writes the `.gitignore` template or appends the `system/machine.key` line to an existing ignore file that lacks it. `sessionStoreFor(project, scope)` is the only constructor that gives a session store its conversation file log.
+`openDb` in `db.ts` opens the file with `better-sqlite3` (a Node-API addon, so one binary serves Node and Electron), sets `journal_mode = WAL` and `foreign_keys = ON`, runs the bootstrap `SCHEMA`, runs `migrate`, and drops the `events` and `runs` shells the bootstrap recreates when they are empty. `migrate` in `migrations.ts` applies `MIGRATIONS` in order, each step in its own IMMEDIATE transaction that re-reads `PRAGMA user_version` before acting. `initProject` creates the project layout, writes `settings.json` from `defaultConfig()` when it is absent, and writes the `.gitignore` template or appends the `system/machine.key` line to an existing ignore file that lacks it. `sessionStoreFor(project, scope)` is the only constructor that gives a session store its conversation file log.
 
 It deliberately does not own:
 
@@ -67,14 +67,12 @@ It deliberately does not own:
 | 9 | A store never reads a file-backed concern from `main`, because `applyStorage` runs before any store is built | `rowFile.test.ts` "survives the database being thrown away, the machine's outcome included" |
 | 10 | The ignore template hides the database and logs and nothing else in `system/`, and the machine key is ignored however the root was created | `rowFile.test.ts` "ignores the database and the logs, and nothing else"; `systemProject.test.ts` "keeps the machine key out of every repository, however the root was created", "adds the key to an ignore file written before the key existed", "leaves an ignore file alone when the key is already covered" |
 | 11 | The shared root searches only itself, parses its config without layering it over itself, and generates only under `system/` | `systemProject.test.ts` `"searches only itself — there is no layer behind the layer"`, "reads its own config without laying it over itself", "puts everything it generates under system/, and nothing else there" |
-| 12 | An ABI mismatch becomes a `Refusal` naming the command that fixes it, and every other open failure passes through unchanged | `nativeBinding.test.ts` "turns the loader's two version numbers into the command that fixes them", "stays out of the way of every other failure" |
 
 ## Every open failure stops the project from opening, and every half-finished open is finished by the next one
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
 | A settings layer is malformed, half-written or holds a refused field | `readJsonFile` or `parseConfig` throws out of the open | fix the named field and reopen | the project does not open; the error names `config.<field>` |
-| No addon is built for this runtime's ABI | `openDb` throws a `Refusal` carrying the loader's message and the advice | run `npm run abi` | the open error names the command |
 | Two processes open one database at once | each migration step takes the write lock, so the second waits and skips a step whose version it re-reads as applied; a lock held past `better-sqlite3`'s busy timeout throws `database is locked` | reopen | the second open fails only when the lock outlasts the timeout |
 | The process is killed during a migration | the step's transaction never commits and the database stays at the last whole version; rebuild steps check the table's shape, never the version | the next open re-runs the step | none |
 | A migration step throws | the step rolls back and the error leaves `openDb` | fix the cause and reopen | the project does not open |

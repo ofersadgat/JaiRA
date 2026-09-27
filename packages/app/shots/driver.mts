@@ -34,12 +34,17 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import type { World } from "./world.mjs";
 
-/** Where Electron and the app live, relative to this file (`packages/app/shots`). */
+/** Where the app lives, relative to this file (`packages/app/shots`). */
 const APP_DIR = join(import.meta.dirname, "..");
-const ELECTRON = join(APP_DIR, "..", "..", "node_modules", "electron", "dist", "electron.exe");
+/**
+ * The Electron executable, as the `electron` package reports it. Since Electron 42 the package no
+ * longer downloads its binary on install; asking for the path downloads it the first time.
+ */
+const ELECTRON = createRequire(join(APP_DIR, "package.json"))("electron") as string;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
