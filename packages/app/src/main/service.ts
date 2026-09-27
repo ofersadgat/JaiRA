@@ -1395,8 +1395,9 @@ export class AppService {
       dir: jairaBasePaths(this.baseDir).logsDir,
       publish: (entry) => {
         this.publish({ type: "log:entry", entry });
-        // Errors and warnings in the log are counted among Settings' until the person dismisses them.
-        if (entry.level === "error" || entry.level === "warn") this.health.logged(entry.level);
+        // Errors and warnings in the log are counted among Settings' until the person dismisses them —
+        // except one Settings already shows where it belongs (`raised`).
+        if ((entry.level === "error" || entry.level === "warn") && entry.raised === undefined) this.health.logged(entry.level);
       },
     });
     // What is worth keeping, from the setting that says so. BEFORE the sink is installed below, so
@@ -3179,9 +3180,9 @@ export class AppService {
    *
    * NEVER THROWS: several callers are the last frame before a failure is lost.
    */
-  recordApp(level: LogLevel, message: string, detail?: JsonValue): void {
+  recordApp(level: LogLevel, message: string, detail?: JsonValue, raised?: string): void {
     try {
-      this.log({ level, source: "app", message, ...(detail === undefined ? {} : { detail }) });
+      this.log({ level, source: "app", message, ...(detail === undefined ? {} : { detail }), ...(raised === undefined ? {} : { raised }) });
     } catch {
       // Same last-resort rule as the rest of this family.
     }
@@ -9232,7 +9233,8 @@ export class AppService {
         this.writeSecret({ name: credential, value: token.accessToken, target });
         this.markForgeToken(credential, { provider: mark.provider, host: mark.host }, target, token);
       } catch (e) {
-        this.log({ level: "warn", source: "config", message: `could not renew the ${mark.host} sign-in: ${(e as Error).message}` });
+        // A renewal that failed shows in Settings as the connection's error once the check finds it refused.
+        this.log({ level: "warn", source: "config", message: `could not renew the ${mark.host} sign-in: ${(e as Error).message}`, raised: `forge:${name}` });
       }
     }
   }

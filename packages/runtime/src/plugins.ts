@@ -21,7 +21,8 @@
  * The manifest is `scripts/plugins/manifest.mjs`'s output, shipped as `plugins.json` beside the bundle.
  */
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
@@ -135,6 +136,12 @@ export interface PluginStoreOptions {
   /** Tests hand in a registry; the default is the real `fetch`. */
   fetch?: (url: string) => Promise<{ ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> }>;
   gpu?: GpuFacts;
+  /**
+   * The version of a package present where this code resolves packages from — a development checkout's
+   * `node_modules` — or nothing. A plugin whose packages are all there works without the store, and
+   * the status says so (`from: "workspace"`). A packaged app has none of them there.
+   */
+  workspace?: (name: string) => string | undefined;
 }
 
 export interface InstallProgress {
@@ -208,15 +215,36 @@ export class PluginStore {
     const recommended = recommendedLlamaVariant(this.platform, this.options.gpu ?? detectGpu(this.platform), available);
     return PLUGINS.map((spec) => {
       const download = this.downloadBytes(spec.id);
+      const workspace = installed[spec.id] === undefined ? this.workspaceVersion(spec.id) : undefined;
       return {
         id: spec.id,
         version: this.options.manifest.roots[spec.root]?.version ?? "",
         available: available(spec.id),
-        ...(installed[spec.id] !== undefined ? { installed: installed[spec.id]!.version } : {}),
+        ...(installed[spec.id] !== undefined
+          ? { installed: installed[spec.id]!.version, from: "store" as const }
+          : workspace !== undefined
+            ? { installed: workspace, from: "workspace" as const }
+            : {}),
         ...(spec.variantOf !== undefined && spec.id === recommended ? { recommended: true } : {}),
         ...(download !== undefined ? { downloadBytes: download } : {}),
       };
     });
+  }
+
+  /**
+   * The version a development checkout provides a plugin at, when every package it adds is there: the
+   * family's root for a base plugin (and this machine's `claude` binary for the SDK), the platform
+   * package for a variant.
+   */
+  private workspaceVersion(id: PluginId): string | undefined {
+    const lookup = this.options.workspace;
+    if (lookup === undefined) return undefined;
+    const spec = pluginSpec(id);
+    const extra = platformPackageOf(id, this.platform);
+    if (spec.variantOf !== undefined) return extra !== undefined ? lookup(extra) : undefined;
+    const root = lookup(spec.root);
+    if (root === undefined) return undefined;
+    return extra === undefined || lookup(extra) !== undefined ? root : undefined;
   }
 
   /** What installing this build's version of a plugin would fetch; unknown when a size is missing. */
@@ -247,12 +275,14 @@ export class PluginStore {
   }
 
   /**
-   * The key of the root package to load: this build's version when it is stored, else the version
-   * installed before an app update named a newer one — kept working until the newer one is fetched.
+   * The key of the root package to load: the version whose install finished — this build's once it has
+   * been fetched, else the one installed before an app update named a newer one, which keeps working
+   * until then.
    */
   private rootKey(root: PluginSpec["root"]): string | undefined {
-    const entry = this.options.manifest.roots[root];
-    if (entry !== undefined && this.stored(entry.key)) return entry.key;
+    // Only an install that FINISHED counts: a download that failed part-way can leave the root stored
+    // with its dependencies missing or unlinked, and loading that would fail somewhere far from here.
+    // The installed record is written last, so it is the version that is whole.
     const base = PLUGINS.find((p) => p.root === root && p.variantOf === undefined);
     const record = base !== undefined ? this.read().plugins[base.id] : undefined;
     if (record === undefined) return undefined;
@@ -331,12 +361,16 @@ export class PluginStore {
     this.collect(file);
   }
 
-  /** Delete every stored package no installed plugin lists. */
+  /**
+   * Delete every stored package no installed plugin lists, and the staging directories of downloads
+   * that did not finish (another process's, or this one's from a move that fell back to copying).
+   */
   private collect(file: InstalledFile): void {
     if (!existsSync(this.store)) return;
     const kept = new Set(Object.values(file.plugins).flatMap((r) => (r?.keys ?? []).map(keyDir)));
+    const busy = new Set(this.staging);
     for (const dir of readdirSync(this.store)) {
-      if (kept.has(dir) || dir.startsWith(".")) continue;
+      if (kept.has(dir) || busy.has(dir)) continue;
       try {
         removeTree(join(this.store, dir));
       } catch {
@@ -356,7 +390,9 @@ export class PluginStore {
     const actual = createHash(algorithm).update(bytes).digest("base64");
     if (actual !== expected) throw new Error(`${key}: the download does not match the lockfile's ${algorithm} hash, so it was not stored`);
     // Unpacked beside the store and renamed in: a package is either wholly there or not there at all.
-    const staging = join(this.store, `.staging-${process.pid}-${keyDir(key)}`);
+    const stagingName = `.staging-${process.pid}-${keyDir(key)}`;
+    const staging = join(this.store, stagingName);
+    this.staging.add(stagingName);
     removeTree(staging);
     const target = join(staging, "node_modules", pkg.name);
     mkdirSync(target, { recursive: true });
@@ -368,8 +404,15 @@ export class PluginStore {
     });
     const final = join(this.store, keyDir(key));
     removeTree(final);
-    renameSync(staging, final);
+    try {
+      await moveInto(staging, final);
+    } finally {
+      this.staging.delete(stagingName);
+    }
   }
+
+  /** Staging directories of downloads in progress here, which a collection must leave alone. */
+  private readonly staging = new Set<string>();
 
   /** Link each dependency the lockfile resolved beside the package, where it will look for it. */
   private linkDependencies(key: string): void {
@@ -416,6 +459,39 @@ export function entryFile(dir: string): string {
     return undefined;
   };
   return join(dir, pick(manifest.exports) ?? manifest.main ?? "index.js");
+}
+
+/**
+ * Move a freshly unpacked package into the store.
+ *
+ * On Windows a rename of a directory that was just written is refused (EPERM, EACCES, EBUSY) while
+ * something still has a file in it open — typically the virus scanner reading a new `.node` binary —
+ * and the lock lasts from a moment to several seconds (measured 2026-09-26: `@reflink/reflink-win32-
+ * x64-msvc` failed the first rename). So the rename is retried with a growing wait for up to ~20 s, and
+ * if the directory still will not move, it is COPIED into place and the staging copy removed, which
+ * needs only read access to what is locked.
+ */
+export async function moveInto(from: string, to: string, attempts = 12): Promise<void> {
+  let wait = 50;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      const locked = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+      if (!locked) throw e;
+      if (attempt >= attempts) break;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = Math.min(wait * 2, 4000);
+    }
+  }
+  cpSync(from, to, { recursive: true, verbatimSymlinks: true });
+  try {
+    removeTree(from);
+  } catch {
+    // Still locked: a leftover staging directory is swept by the next collection (it starts with ".").
+  }
 }
 
 /** Delete a directory without ever following a link inside it: a link is removed, not descended into. */
@@ -473,10 +549,30 @@ export function readBundledPluginManifest(dir: string): PluginManifest | undefin
  */
 export function startPlugins(baseDir: string, bundleDir: string): PluginStore | undefined {
   const manifest = readBundledPluginManifest(bundleDir);
-  const store = manifest !== undefined ? new PluginStore({ home: join(baseDir, "plugins"), manifest }) : undefined;
+  const store = manifest !== undefined ? new PluginStore({ home: join(baseDir, "plugins"), manifest, workspace: workspaceLookup(bundleDir) }) : undefined;
   usePluginStore(store);
   setLlamaModuleLoader(() => importPluginRoot("node-llama-cpp"));
   return store;
+}
+
+/**
+ * Look a package up where code in `dir` would resolve it from, by reading `<node_modules>/<name>/
+ * package.json` along Node's own search paths — not `require.resolve("<name>/package.json")`, which a
+ * package whose `exports` leaves its package.json out answers with an error or the wrong file.
+ */
+export function workspaceLookup(dir: string): (name: string) => string | undefined {
+  const paths = createRequire(join(dir, "noop.js")).resolve.paths("x") ?? [];
+  return (name) => {
+    for (const base of paths) {
+      try {
+        const version = (JSON.parse(readFileSync(join(base, name, "package.json"), "utf8")) as { version?: unknown }).version;
+        if (typeof version === "string") return version;
+      } catch {
+        // not here
+      }
+    }
+    return undefined;
+  };
 }
 
 /** What to say when a plugin's root is needed and missing. */

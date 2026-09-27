@@ -375,8 +375,9 @@ const updates = (() => {
   if (disabledReason === undefined) {
     autoUpdater.logger = {
       info: (message: unknown) => service.recordApp("debug", `updater: ${String(message)}`),
-      warn: (message: unknown) => service.recordApp("warn", `updater: ${String(message)}`),
-      error: (message: unknown) => service.recordApp("warn", `updater: ${String(message)}`),
+      // Shown in Settings as the update's warning, so not counted again from the log.
+      warn: (message: unknown) => service.recordApp("warn", `updater: ${String(message)}`, undefined, "update"),
+      error: (message: unknown) => service.recordApp("warn", `updater: ${String(message)}`, undefined, "update"),
       debug: () => undefined,
     };
   }
@@ -391,7 +392,7 @@ const updates = (() => {
       pushToWindow({ type: "update:changed", state });
       noteUpdateHealth(state);
     },
-    log: (level, message, data) => service.recordApp(level, message, data as JsonValue | undefined),
+    log: (level, message, data) => service.recordApp(level, message, data as JsonValue | undefined, level === "warn" ? "update" : undefined),
     busy: () => service.activeWork(),
     suspendForUpdate: () => service.suspendForUpdate(),
     // The ordinary quit: `before-quit` below drains, closes, and then lets the updater install.
@@ -454,7 +455,7 @@ async function installPlugin(id: PluginId): Promise<PluginStatus[]> {
       action: "retry-plugin",
       subject: id,
     });
-    service.recordApp("warn", `could not install the ${pluginSpec(id).title} plugin`, { message: (e as Error).message });
+    service.recordApp("warn", `could not install the ${pluginSpec(id).title} plugin: ${(e as Error).message}`, { message: (e as Error).message }, `plugin:${id}`);
   } finally {
     pluginProgress.delete(id);
     publishPlugins();

@@ -6,7 +6,7 @@
  * removal takes only what nothing else uses and never follows a link; and a root loads from the store.
  */
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import { c as tarCreate } from "tar";
 import {
   entryFile,
   importPluginRoot,
+  moveInto,
   platformPackageOf,
   PluginStore,
   recommendedLlamaVariant,
@@ -143,6 +144,9 @@ describe("the plugin store", () => {
     await expect(store.install("claude-agent-sdk")).rejects.toThrow(/does not match the lockfile's sha512 hash/);
     expect(existsSync(join(store.packageDir("shared-dep@1.0.0"), "package.json"))).toBe(false);
     expect(store.status().find((s) => s.id === "claude-agent-sdk")?.installed).toBeUndefined();
+    // The root itself was stored before the failure; a half-finished install is still never loaded.
+    expect(existsSync(join(store.packageDir("@anthropic-ai/claude-agent-sdk@0.3.1"), "package.json"))).toBe(true);
+    expect(store.hasRoot("@anthropic-ai/claude-agent-sdk")).toBe(false);
   });
 
   it("installs a variant's base first, and links the variant where its root looks for it", async () => {
@@ -187,6 +191,53 @@ describe("the plugin store", () => {
     expect(status["llama-cpu"]?.recommended).toBeUndefined();
     expect(status["llama-cuda"]?.available).toBe(false);
     expect(status["llama-metal"]?.available).toBe(false);
+  });
+});
+
+describe("moving a download into the store", () => {
+  // Windows refuses to rename a directory while a file in it is open — what a virus scanner reading a
+  // fresh `.node` binary does, and what failed the person's first CUDA download (EPERM on rename).
+  it.runIf(process.platform === "win32")("copies it into place when the rename stays refused", async () => {
+    const from = join(dir, "staging");
+    const to = join(dir, "final");
+    mkdirSync(join(from, "bins"), { recursive: true });
+    writeFileSync(join(from, "bins", "llama.node"), "binary");
+    const held = openSync(join(from, "bins", "llama.node"), "r");
+    try {
+      await moveInto(from, to, 2);
+    } finally {
+      closeSync(held);
+    }
+    expect(readFileSync(join(to, "bins", "llama.node"), "utf8")).toBe("binary");
+  });
+
+  it("renames when nothing holds it", async () => {
+    const from = join(dir, "staging2");
+    mkdirSync(from);
+    writeFileSync(join(from, "a.txt"), "a");
+    await moveInto(from, join(dir, "final2"));
+    expect(existsSync(from)).toBe(false);
+    expect(readFileSync(join(dir, "final2", "a.txt"), "utf8")).toBe("a");
+  });
+});
+
+describe("a development checkout's own packages", () => {
+  it("count as present, from the workspace, when every package a plugin adds is there", async () => {
+    const present: Record<string, string> = {
+      "@anthropic-ai/claude-agent-sdk": "0.3.1",
+      "@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.1",
+      "node-llama-cpp": "3.2.1",
+      "@node-llama-cpp/win-x64-vulkan": "3.2.1",
+    };
+    const store = new PluginStore({ home: join(dir, "plugins"), manifest: await manifestOf(), platform: PLATFORM, workspace: (name) => present[name] });
+    const status = Object.fromEntries(store.status().map((s) => [s.id, s]));
+    expect(status["claude-agent-sdk"]).toMatchObject({ installed: "0.3.1", from: "workspace" });
+    expect(status["llama"]).toMatchObject({ installed: "3.2.1", from: "workspace" });
+    expect(status["llama-vulkan"]).toMatchObject({ installed: "3.2.1", from: "workspace" });
+    expect(status["llama-cpu"]?.installed).toBeUndefined();
+    expect(store.outdated()).toEqual([]);
+    delete present["@anthropic-ai/claude-agent-sdk-win32-x64"];
+    expect(store.status().find((s) => s.id === "claude-agent-sdk")?.installed).toBeUndefined();
   });
 });
 

@@ -68,6 +68,12 @@ export interface PluginStatus {
   available: boolean;
   /** The version installed, if one is; it may differ from `version` until the new one is fetched. */
   installed?: string;
+  /**
+   * Where the installed copy is: `store`, downloaded into the plugin store; `workspace`, a package this
+   * development checkout already has in its `node_modules`, which works without a download and which
+   * the store does not own (nothing to update or remove).
+   */
+  from?: "store" | "workspace";
   /** For a `llama-*` variant: the one this machine's hardware suggests. */
   recommended?: boolean;
   /** What installing this build's version would download, in bytes: the packages not already stored. */

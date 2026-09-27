@@ -1651,6 +1651,13 @@ export interface LogEntry {
   jobId?: number;
   /** A stack, an argv, an exit code — whatever the reader would want and the message cannot hold. */
   detail?: JsonValue;
+  /**
+   * The Settings item (`HealthItem.id`) this entry is ALSO shown as — a plugin download that failed, an
+   * update check, a sign-in that could not be renewed. Settings shows the problem where it belongs, so
+   * the log does not count it a second time (the person, 2026-09-26: "if an error happens in a location
+   * and is repeated in a log, the log shouldnt display a warning/error for it").
+   */
+  raised?: string;
 }
 
 /**
