@@ -70,4 +70,10 @@ export interface PluginStatus {
   installed?: string;
   /** For a `llama-*` variant: the one this machine's hardware suggests. */
   recommended?: boolean;
+  /** What installing this build's version would download, in bytes: the packages not already stored. */
+  downloadBytes?: number;
+  /** While a download runs: packages done of the total. */
+  progress?: { done: number; total: number };
+  /** Why the last install failed (offline, a hash mismatch), until the next attempt. */
+  error?: string;
 }

@@ -72,4 +72,35 @@ export interface UpdateState {
   checkedAt?: number;
   /** What went wrong, for `error`. */
   error?: string;
+  /** The version whose notice the person dismissed; the notice shows again for a newer one. */
+  dismissed?: string;
+  /**
+   * A downloaded update the person put off: `on-quit` installs when JaiRA next closes ("Not now"; any
+   * quit installs a downloaded update), `waiting` restarts by itself once nothing is going ("Wait +
+   * update").
+   */
+  pending?: "on-quit" | "waiting";
+  /** While `waiting`: what is still going. */
+  busy?: UpdateBusy;
+}
+
+/**
+ * The person's answer to "Restart to update" (decision 0011 §4, the ruling of 2026-09-26): `now`, or,
+ * with runs or chat turns going, "Not now" (`later`), "Pause + update" (`pause`), "Wait + update"
+ * (`wait`), and `cancel` to stop waiting.
+ */
+export type UpdateRestartChoice = "now" | "later" | "pause" | "wait" | "cancel";
+
+export interface UpdateRestartAnswer {
+  /** The app is quitting to install. */
+  installing: boolean;
+  /** `now` found work going and did nothing: what is going, for the three choices. */
+  busy?: UpdateBusy;
+  pending?: UpdateState["pending"];
+}
+
+/** What is going: runs in flight, and chat turns being answered. */
+export interface UpdateBusy {
+  runs: number;
+  turns: number;
 }

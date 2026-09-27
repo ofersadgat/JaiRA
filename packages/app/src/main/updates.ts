@@ -18,7 +18,7 @@
  *
  * electron-updater is reached through {@link UpdaterPort}, so all of the above is tested without it.
  */
-import { channelOfVersion, type UpdateChannel, type UpdateState } from "@jaira/shared";
+import { channelOfVersion, type UpdateBusy, type UpdateChannel, type UpdateRestartAnswer, type UpdateRestartChoice, type UpdateState } from "@jaira/shared";
 import type { JairaUpdatesConfig } from "@jaira/shared";
 
 /** The part of electron-updater's `autoUpdater` this uses. */
@@ -57,7 +57,21 @@ export interface UpdateManagerOptions {
   /** How long after start the first check waits, and how often checks repeat. */
   firstCheckMs?: number;
   intervalMs?: number;
+  /** What is going now: runs in flight and chat turns being answered. */
+  busy?: () => UpdateBusy;
+  /** Mark every run so the next start resumes it, before a "Pause + update" quits. */
+  suspendForUpdate?: () => void;
+  /** Quit the app the ordinary way (drain, close); `installOnQuit` then finishes it. */
+  quit?: () => void;
+  /** The version whose notice the person dismissed, as remembered; and how to remember a new one. */
+  dismissed?: string;
+  saveDismissed?: (version: string) => void;
+  /** How often "Wait + update" looks at what is going. */
+  pollMs?: number;
 }
+
+export type RestartChoice = UpdateRestartChoice;
+export type RestartAnswer = UpdateRestartAnswer;
 
 export const FIRST_CHECK_MS = 15_000;
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
@@ -85,10 +99,11 @@ export class UpdateManager {
 
   constructor(private readonly options: UpdateManagerOptions) {
     this.own = channelOfVersion(options.version);
+    const dismissed = options.dismissed !== undefined ? { dismissed: options.dismissed } : {};
     this.state =
       options.port === undefined
-        ? { status: "disabled", version: options.version, channel: this.own, reason: options.disabledReason ?? "this build does not update itself" }
-        : { status: "idle", version: options.version, channel: this.own, ...(options.manual === true ? { manual: true } : {}) };
+        ? { status: "disabled", version: options.version, channel: this.own, reason: options.disabledReason ?? "this build does not update itself", ...dismissed }
+        : { status: "idle", version: options.version, channel: this.own, ...(options.manual === true ? { manual: true } : {}), ...dismissed };
     const port = options.port;
     if (port !== undefined) {
       port.autoDownload = false;
@@ -195,16 +210,90 @@ export class UpdateManager {
     return this.state;
   }
 
-  /** Whether an install can start: only a downloaded update. The caller then quits the app. */
+  /** Whether an install can happen: only a downloaded update. */
   canInstall(): boolean {
     return this.state.status === "downloaded";
   }
 
-  /** Replace the app and relaunch it. Called after the quit has drained runs and closed the databases. */
-  installNow(): void {
+  /**
+   * The person's answer to "Restart to update" (the ruling of 2026-09-26):
+   *
+   *  - `now` restarts at once when nothing is going; with runs or chat turns going it installs nothing
+   *    and says how many, so the window can offer the three choices below.
+   *  - `later` ("Not now") leaves the update to install when JaiRA next closes — which is true of ANY
+   *    quit once an update is downloaded (`installOnQuit`); this only says so on screen.
+   *  - `pause` ("Pause + update") suspends every run so the next start resumes it, then restarts.
+   *  - `wait` ("Wait + update") restarts by itself once nothing is going, and can be canceled.
+   *  - `cancel` stops waiting; the update still installs on quit.
+   */
+  restart(choice: RestartChoice): RestartAnswer {
+    if (!this.canInstall()) return { installing: false };
+    this.stopWaiting();
+    const { busy: _busy, pending: _pending, ...rest } = this.state;
+    switch (choice) {
+      case "now": {
+        const busy = this.options.busy?.() ?? { runs: 0, turns: 0 };
+        if (busy.runs + busy.turns > 0) return { installing: false, busy };
+        return this.quitToInstall();
+      }
+      case "pause":
+        this.options.suspendForUpdate?.();
+        return this.quitToInstall();
+      case "wait": {
+        this.set({ ...rest, pending: "waiting", busy: this.options.busy?.() ?? { runs: 0, turns: 0 } });
+        this.waiting = setInterval(() => {
+          const busy = this.options.busy?.() ?? { runs: 0, turns: 0 };
+          if (busy.runs + busy.turns === 0) {
+            this.stopWaiting();
+            this.quitToInstall();
+            return;
+          }
+          const was = this.state.busy;
+          if (was?.runs !== busy.runs || was?.turns !== busy.turns) this.set({ ...this.state, busy });
+        }, this.options.pollMs ?? 2000);
+        this.waiting.unref?.();
+        return { installing: false, pending: "waiting" };
+      }
+      case "later":
+      case "cancel":
+        this.set({ ...rest, pending: "on-quit" });
+        return { installing: false, pending: "on-quit" };
+    }
+  }
+
+  private waiting: ReturnType<typeof setInterval> | undefined;
+
+  private stopWaiting(): void {
+    if (this.waiting !== undefined) clearInterval(this.waiting);
+    this.waiting = undefined;
+  }
+
+  private quitToInstall(): RestartAnswer {
+    this.relaunch = true;
+    this.options.quit?.();
+    return { installing: true };
+  }
+
+  /** Whether the quit under way was asked for to install, so the app starts again afterwards. */
+  private relaunch = false;
+
+  /**
+   * Called at the end of every quit, after runs have drained and the databases closed: a downloaded
+   * update installs. It starts the app again only when the quit was a restart asked for here; any
+   * other quit installs silently and the update is simply there at the next start.
+   */
+  installOnQuit(): void {
+    this.stopWaiting();
     if (!this.canInstall()) return;
-    this.options.log?.("info", `installing update ${this.state.available?.version ?? ""}`);
-    this.options.port?.quitAndInstall(true, true);
+    this.options.log?.("info", `installing update ${this.state.available?.version ?? ""}${this.relaunch ? " and restarting" : " on quit"}`);
+    this.options.port?.quitAndInstall(true, this.relaunch);
+  }
+
+  /** Hide the notice for this version; a newer one shows again. */
+  dismiss(version: string): UpdateState {
+    this.options.saveDismissed?.(version);
+    this.set({ ...this.state, dismissed: version });
+    return this.state;
   }
 
   private schedule(ms: number): void {

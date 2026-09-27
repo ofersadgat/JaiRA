@@ -215,7 +215,7 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
         name: info.name,
         status: "failed",
         detail: `'${AGENT_SDK_MODULE}' is not installed, so the in-process adapter cannot run`,
-        fix: "download the Claude Agent SDK plugin on the Connections page (`jaira plugin install claude-agent-sdk`), or use claude-cli instead — it needs neither the package nor a key",
+        fix: "download the Claude Agent SDK plugin on the About page (`jaira plugin install claude-agent-sdk`), or use claude-cli instead — it needs neither the package nor a key",
         ...credential,
       };
     }

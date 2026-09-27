@@ -162,8 +162,11 @@ electron-builder runs with `--publish never`.
 - **Download and install are the person's clicks**, never automatic.
 - **Installing is a quit**, so it takes the app's existing quit path. Runs pause and chat turns are
   waited for, exactly as they are on a quit.
-- **Before an update installs, the plugins it needs are downloaded** (§6). An update never leaves a
-  route that worked broken.
+- **An update never leaves a route that worked broken** (§6). This was first written as "the plugins
+  it needs are downloaded before it installs". That cannot be done: the new build's plugin manifest is
+  inside the installer, which the running build cannot read. As built (2026-09-26), the new build brings
+  each installed plugin up to its version in the background at start, and the older version keeps
+  loading until then.
 - **Differential download** is turned off when an x64 mac build runs on Apple Silicon, so the next
   download is the arm64 build (t3code's rule).
 - **Screens:**
@@ -514,11 +517,48 @@ these should default to releases on github").**
   and checked 236 MB in 3 s. The SDK loaded from the store and resolved its own `claude.exe` through the
   link, which ran (`2.1.282`). `remove` left an empty store. Tests: `runtime/test/plugins.test.ts`, 11
   tests against a registry of real tarballs.
-- **Still to do (step 7, after mockups):**
-  - the Connections page rows and IPC;
-  - the Licenses page listing installed plugins' notices;
-  - downloading an app update's new plugin versions before it installs;
-  - a variant check in the embedded probe: node-llama-cpp with no variant installed cannot load a model.
+**The screens' rulings (2026-09-26, mockups https://claude.ai/artifact/Eme8jcwTYz5HH8FbR7eWxX v1):**
+
+- **The notice** is a row above Settings. A nightly reads just "nightly", with the full version on hover.
+  Hovering shows an × at the right end that dismisses the notice for that version.
+- **Settings → About** replaces Licenses. It holds Updates, then separate plugin rows (version, a check,
+  an update/download button, and extra plugins to download), then the notices. There is no layer switch.
+- **Release notes** are shown as published.
+- **A build that cannot update itself** still shows About, with the reason as the Status error.
+- **Restart to update while runs or chat turns are going** offers three buttons: **Not now**,
+  **Pause + update** and **Wait + update**. After Not now, or once an update is downloaded, any quit
+  installs it, and it is there at the next start.
+- **Plugins follow the app:** the build's version, a check against it, and Update to it. Extra plugins
+  means the other variants. No other versions are offered.
+- Round 2 of the mockups (v2) draws all of this. Its open questions go to the person.
+
+**Built behind the screens (2026-09-26):**
+
+- **`UpdateManager.restart(now | later | pause | wait | cancel)`:**
+  - `now` with work going answers `busy` and quits nothing.
+  - `pause` suspends every run and restarts. `ProjectSession.updatingAtClose` stamps each unwound run
+    `SUSPENDED_UPDATE`, which `resumeSuspended` resumes at the next open, like `SUSPENDED_WAITING`.
+  - `wait` polls `AppService.activeWork()` (runs in flight plus chat turns) and restarts at zero.
+    `cancel` stops that.
+  - `installOnQuit()` runs at the end of every quit, relaunching only after a restart that was asked for.
+  - `dismiss(version)` is remembered in `<base>/system/updates.json`.
+- **IPC:** `update:install { when }` answers `UpdateRestartAnswer`, and `update:dismiss` is new.
+  `UpdateState` gains `dismissed`, `pending` and `busy`.
+- **Plugins:**
+  - `plugin:list | install | remove` and the `plugin:changed` push, with each plugin's `progress` and
+    last `error` held in main.
+  - `PluginStatus.downloadBytes` comes from the manifest's `size`. The registry answers HEAD without a
+    length, so the build asks each tarball for one byte and reads `content-range`.
+  - Measured downloads on win-x64: SDK 106 MB, Local models 37 MB, CPU 9 MB, Vulkan 25 MB, CUDA 132 MB,
+    CUDA (extended) 167 MB.
+  - `PluginStore.outdated()` lists installed plugins that are not at this build's version, and main
+    brings them up to date at start.
+  - `rootKey` loads the older installed version until then.
+  - A plugin install collects what it replaced, as far as it can: a native file the app has loaded
+    cannot be deleted on Windows, so it waits for the next collection.
+  - The embedded probe reports Local models with no build installed.
+- **Still to do:** the screens themselves, after the round-2 answers, and the About page listing
+  installed plugins' notices.
 
 ## Consequences
 

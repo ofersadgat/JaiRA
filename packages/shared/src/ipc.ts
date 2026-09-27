@@ -37,7 +37,8 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { UpdateState } from "./updates";
+import type { UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
+import type { PluginId, PluginStatus } from "./plugins";
 import type { CommandApproval } from "./commandParts";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
@@ -2217,10 +2218,23 @@ export interface IpcContract {
   /** Download the available update. A platform that installs by hand (`manual`) downloads nothing. */
   "update:download": { request: void; response: UpdateState };
   /**
-   * Install the downloaded update: the app quits the ordinary way — runs drain, the databases close —
-   * and the installer replaces it and starts it again. `installing: false` when nothing is downloaded.
+   * "Restart to update". `now` quits the ordinary way — runs drain, the databases close — and the
+   * installer replaces the app and starts it again; with runs or chat turns going it does nothing and
+   * answers `busy`, for "Not now" (`later`), "Pause + update" (`pause`, the runs resume after the
+   * restart) and "Wait + update" (`wait`, `cancel` to stop). Any quit installs a downloaded update.
    */
-  "update:install": { request: void; response: { installing: boolean } };
+  "update:install": { request: { when?: UpdateRestartChoice } | void; response: UpdateRestartAnswer };
+  /** Hide the notice for this version; a newer one shows it again. */
+  "update:dismiss": { request: { version: string }; response: UpdateState };
+  /** The downloadable plugins (decision 0011 §6), as this machine sees them. Empty when the build ships no manifest. */
+  "plugin:list": { request: void; response: PluginStatus[] };
+  /**
+   * Download this build's version of a plugin (and its base, for a variant). Answers when it ends;
+   * progress and a failure arrive in `plugin:changed` and in the plugin's `progress`/`error`.
+   */
+  "plugin:install": { request: { id: PluginId }; response: PluginStatus[] };
+  /** Remove a plugin (a base takes its variants with it), and every package nothing else uses. */
+  "plugin:remove": { request: { id: PluginId }; response: PluginStatus[] };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2383,6 +2397,10 @@ export const IPC_CHANNELS = [
   "update:check",
   "update:download",
   "update:install",
+  "update:dismiss",
+  "plugin:list",
+  "plugin:install",
+  "plugin:remove",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -2695,6 +2713,8 @@ export type PushMessage =
   | { type: "waiting:changed"; items: WaitingItem[] }
   /** The updater moved (decision 0011 §4). */
   | { type: "update:changed"; state: UpdateState }
+  /** A plugin download moved, ended or failed, or a plugin was removed. */
+  | { type: "plugin:changed"; plugins: PluginStatus[] }
   /** An events task posted a notice (decision 0010 §4, `notify`). Also written to the log. */
   | { type: "notice:posted"; notice: EventsNotice }
 

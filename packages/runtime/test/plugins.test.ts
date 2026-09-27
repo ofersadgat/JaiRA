@@ -190,6 +190,46 @@ describe("the plugin store", () => {
   });
 });
 
+describe("plugins follow the app", () => {
+  it("keeps loading the version an older build installed until this build's is fetched, then drops the old one", async () => {
+    const older = storeOf(await manifestOf());
+    await older.install("claude-agent-sdk");
+
+    // The app updated: its manifest names a newer SDK.
+    const manifest = await manifestOf();
+    const next = await publish(
+      "@anthropic-ai/claude-agent-sdk",
+      "0.3.2",
+      esm("@anthropic-ai/claude-agent-sdk", "0.3.2", 'import { answer } from "shared-dep";\nexport const query = () => answer * 2;\n'),
+      { dependencies: { "shared-dep": "shared-dep@1.0.0" } },
+    );
+    manifest.packages["@anthropic-ai/claude-agent-sdk@0.3.2"] = next;
+    manifest.roots["@anthropic-ai/claude-agent-sdk"] = { ...manifest.roots["@anthropic-ai/claude-agent-sdk"]!, version: "0.3.2", key: "@anthropic-ai/claude-agent-sdk@0.3.2", closure: ["@anthropic-ai/claude-agent-sdk@0.3.2", "shared-dep@1.0.0"] };
+    const store = storeOf(manifest);
+
+    expect(store.outdated()).toEqual(["claude-agent-sdk"]);
+    expect(store.status().find((s) => s.id === "claude-agent-sdk")).toMatchObject({ version: "0.3.2", installed: "0.3.1" });
+    expect(((await store.load("@anthropic-ai/claude-agent-sdk")) as { query(): number }).query()).toBe(42);
+    expect(store.platformDir("@anthropic-ai/claude-agent-sdk", "@anthropic-ai/claude-agent-sdk-win32-x64")).toBeDefined();
+
+    await store.install("claude-agent-sdk");
+    expect(store.outdated()).toEqual([]);
+    expect(existsSync(join(dir, "plugins", "store", "@anthropic-ai+claude-agent-sdk@0.3.1"))).toBe(false);
+    expect(existsSync(join(store.packageDir("shared-dep@1.0.0"), "index.js"))).toBe(true);
+  });
+
+  it("says what a download would fetch, counting only what is not stored yet", async () => {
+    const manifest = await manifestOf();
+    for (const pkg of Object.values(manifest.packages)) pkg.size = 1000;
+    const store = storeOf(manifest);
+    expect(store.status().find((s) => s.id === "llama")?.downloadBytes).toBe(2000); // node-llama-cpp + shared-dep
+    await store.install("claude-agent-sdk"); // stores shared-dep
+    expect(store.status().find((s) => s.id === "llama")?.downloadBytes).toBe(1000);
+    delete manifest.packages["node-llama-cpp@3.2.1"]!.size;
+    expect(storeOf(manifest).status().find((s) => s.id === "llama")?.downloadBytes).toBeUndefined();
+  });
+});
+
 describe("which packages a machine gets", () => {
   it("names the platform package each plugin adds", () => {
     expect(platformPackageOf("claude-agent-sdk", { os: "linux", arch: "x64", musl: true })).toBe("@anthropic-ai/claude-agent-sdk-linux-x64-musl");

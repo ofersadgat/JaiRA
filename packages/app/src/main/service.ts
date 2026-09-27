@@ -514,7 +514,7 @@ import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
 import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
-import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_WAITING } from "./session";
+import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
 import { EventsSupervisor } from "./eventsSupervisor";
 import { arrivedAt, fastForwardView, labelOfTarget, leftKeyOf, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
@@ -4829,9 +4829,18 @@ export class AppService {
         });
         // A run unwound by the app closing while its task was waiting on a person is SUSPENDED, and
         // its row says so in the spelling the next open resumes on — see `SUSPENDED_WAITING`.
-        // The same for a run the close caught being FAST-FORWARDED — see `SUSPENDED_FORWARDING`.
+        // The same for a run the close caught being FAST-FORWARDED — see `SUSPENDED_FORWARDING` — and
+        // for every run a "Pause + update" closed on — see `SUSPENDED_UPDATE`.
         const suspended =
-          status !== "canceled" ? undefined : open.suspendedAtClose.has(taskId) ? SUSPENDED_WAITING : open.forwardingAtClose.has(taskId) ? SUSPENDED_FORWARDING : undefined;
+          status !== "canceled"
+            ? undefined
+            : open.suspendedAtClose.has(taskId)
+              ? SUSPENDED_WAITING
+              : open.forwardingAtClose.has(taskId)
+                ? SUSPENDED_FORWARDING
+                : open.updatingAtClose
+                  ? SUSPENDED_UPDATE
+                  : undefined;
         finishTaskRun(project, taskId, status, {
           outputs: result.value,
           ...(suspended !== undefined
@@ -6448,14 +6457,19 @@ export class AppService {
     const project = session.project;
     const candidates = project.runtime
       .list()
-      .filter((row) => row.status === "canceled" && (reasonOf(row.failureJson) === SUSPENDED_WAITING || reasonOf(row.failureJson) === SUSPENDED_FORWARDING));
+      .filter((row) => {
+        if (row.status !== "canceled") return false;
+        const reason = reasonOf(row.failureJson);
+        return reason === SUSPENDED_WAITING || reason === SUSPENDED_FORWARDING || reason === SUSPENDED_UPDATE;
+      });
     for (const row of candidates) {
       // A session already on its way out — `closeSession` deletes it before awaiting this — must
       // not have a run started under it.
       if (this.closed || this.sessions.get(session.key) !== session) return;
       try {
         await this.resumeTask({ taskId: row.taskId, project: project.paths.projectDir });
-        this.log({ level: "info", source: "run", message: `resumed ${row.taskId}: it was waiting on you when the app closed`, project: session.key, taskId: row.taskId });
+        const why = reasonOf(row.failureJson) === SUSPENDED_UPDATE ? "it was paused to install an update" : "it was waiting on you when the app closed";
+        this.log({ level: "info", source: "run", message: `resumed ${row.taskId}: ${why}`, project: session.key, taskId: row.taskId });
       } catch (e) {
         this.log({
           level: "warn",
@@ -11645,6 +11659,29 @@ export class AppService {
     } catch {
       return parseAppearanceConfig(undefined);
     }
+  }
+
+  /**
+   * What is going right now, across every open project: runs in flight and chat turns being
+   * answered — what a quit would stop, and so what "Restart to update" asks about (decision 0011 §4).
+   */
+  activeWork(): { runs: number; turns: number } {
+    let runs = 0;
+    let turns = 0;
+    for (const session of this.sessions.values()) {
+      runs += session.live.size;
+      for (const set of session.chatTurns.values()) turns += set.size;
+    }
+    return { runs, turns };
+  }
+
+  /**
+   * "Pause + update": every run the coming quit unwinds is SUSPENDED (`SUSPENDED_UPDATE`), so the next
+   * start resumes it the way it resumes a run that was waiting on a person. A chat turn is not a run
+   * and is cut like any quit cuts one.
+   */
+  suspendForUpdate(): void {
+    for (const session of this.sessions.values()) session.updatingAtClose = true;
   }
 
   /**

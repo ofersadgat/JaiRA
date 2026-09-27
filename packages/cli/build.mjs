@@ -65,7 +65,7 @@ if (existsSync(builtIn)) await cp(builtIn, "dist/builtin", { recursive: true });
 
 // The plugin manifest (decision 0011 §6): every package `jaira plugin install` may fetch, at the versions
 // the workspace's lockfile resolved, with their hashes. Beside the bundle, where `startPlugins` looks.
-const { buildPluginManifest } = await import("../../scripts/plugins/manifest.mjs");
-await writeFile("dist/plugins.json", `${JSON.stringify(buildPluginManifest())}\n`);
+const { buildPluginManifest, withSizes } = await import("../../scripts/plugins/manifest.mjs");
+await writeFile("dist/plugins.json", `${JSON.stringify(await withSizes(buildPluginManifest()))}\n`);
 
 console.log("built dist/cli.mjs, dist/mcpBridgeWorker.mjs, dist/builtin/ and dist/plugins.json");

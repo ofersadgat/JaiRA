@@ -37,6 +37,8 @@ export interface PluginPackage {
   os?: string[];
   cpu?: string[];
   libc?: string[];
+  /** The tarball's size in bytes, when the build could ask the registry. */
+  size?: number;
   /** Each dependency's name → the key (`name@version`) it resolves to. */
   dependencies: Record<string, string>;
 }
@@ -204,25 +206,69 @@ export class PluginStore {
     const installed = this.read().plugins;
     const available = (id: PluginId): boolean => this.keysOf(id) !== undefined;
     const recommended = recommendedLlamaVariant(this.platform, this.options.gpu ?? detectGpu(this.platform), available);
-    return PLUGINS.map((spec) => ({
-      id: spec.id,
-      version: this.options.manifest.roots[spec.root]?.version ?? "",
-      available: available(spec.id),
-      ...(installed[spec.id] !== undefined ? { installed: installed[spec.id]!.version } : {}),
-      ...(spec.variantOf !== undefined && spec.id === recommended ? { recommended: true } : {}),
-    }));
+    return PLUGINS.map((spec) => {
+      const download = this.downloadBytes(spec.id);
+      return {
+        id: spec.id,
+        version: this.options.manifest.roots[spec.root]?.version ?? "",
+        available: available(spec.id),
+        ...(installed[spec.id] !== undefined ? { installed: installed[spec.id]!.version } : {}),
+        ...(spec.variantOf !== undefined && spec.id === recommended ? { recommended: true } : {}),
+        ...(download !== undefined ? { downloadBytes: download } : {}),
+      };
+    });
   }
 
-  /** Whether the root package a family is built around is installed at this build's version. */
+  /** What installing this build's version of a plugin would fetch; unknown when a size is missing. */
+  private downloadBytes(id: PluginId): number | undefined {
+    const keys = this.keysOf(id);
+    if (keys === undefined) return undefined;
+    let total = 0;
+    for (const key of keys) {
+      if (this.stored(key)) continue;
+      const size = this.options.manifest.packages[key]?.size;
+      if (size === undefined) return undefined;
+      total += size;
+    }
+    return total;
+  }
+
+  /** The installed plugins whose version is not this build's: what an app update left behind. */
+  outdated(): PluginId[] {
+    const installed = this.read().plugins;
+    return PLUGINS.filter((spec) => {
+      const record = installed[spec.id];
+      return record !== undefined && record.version !== this.options.manifest.roots[spec.root]?.version && this.keysOf(spec.id) !== undefined;
+    }).map((spec) => spec.id);
+  }
+
+  private stored(key: string): boolean {
+    return existsSync(join(this.packageDir(key), "package.json"));
+  }
+
+  /**
+   * The key of the root package to load: this build's version when it is stored, else the version
+   * installed before an app update named a newer one — kept working until the newer one is fetched.
+   */
+  private rootKey(root: PluginSpec["root"]): string | undefined {
+    const entry = this.options.manifest.roots[root];
+    if (entry !== undefined && this.stored(entry.key)) return entry.key;
+    const base = PLUGINS.find((p) => p.root === root && p.variantOf === undefined);
+    const record = base !== undefined ? this.read().plugins[base.id] : undefined;
+    if (record === undefined) return undefined;
+    const key = `${root}@${record.version}`;
+    return this.stored(key) ? key : undefined;
+  }
+
+  /** Whether the root package a family is built around is installed (this build's version, or an older one). */
   hasRoot(root: PluginSpec["root"]): boolean {
-    const entry = this.options.manifest.roots[root];
-    return entry !== undefined && existsSync(join(this.packageDir(entry.key), "package.json"));
+    return this.rootKey(root) !== undefined;
   }
 
-  /** Where an installed root package is, or nothing when it is not installed at this build's version. */
+  /** Where the installed root package is, or nothing when none is installed. */
   rootDir(root: PluginSpec["root"]): string | undefined {
-    const entry = this.options.manifest.roots[root];
-    return entry !== undefined && this.hasRoot(root) ? this.packageDir(entry.key) : undefined;
+    const key = this.rootKey(root);
+    return key !== undefined ? this.packageDir(key) : undefined;
   }
 
   /** Where a stored package's files are. */
@@ -234,9 +280,9 @@ export class PluginStore {
 
   /** The directory of an installed platform package, found beside its root (`@anthropic-ai/claude-agent-sdk-win32-x64`). */
   platformDir(root: PluginSpec["root"], name: string): string | undefined {
-    const entry = this.options.manifest.roots[root];
-    if (entry === undefined) return undefined;
-    const dir = join(this.store, keyDir(entry.key), "node_modules", name);
+    const key = this.rootKey(root);
+    if (key === undefined) return undefined;
+    const dir = join(this.store, keyDir(key), "node_modules", name);
     return existsSync(join(dir, "package.json")) ? dir : undefined;
   }
 
@@ -264,6 +310,9 @@ export class PluginStore {
     const file = this.read();
     file.plugins[id] = { version: root.version, keys, installedAt: Date.now() };
     this.write(file);
+    // An older version this one replaced is now nobody's. Best effort: on Windows a native file the
+    // running app has loaded cannot be deleted, and the next collection takes it instead.
+    this.collect(file);
   }
 
   /** Remove a plugin (and its variants, for a base), then every stored package nothing installed still uses. */
@@ -272,9 +321,9 @@ export class PluginStore {
     const doomed = [id, ...PLUGINS.filter((p) => p.variantOf === id).map((p) => p.id)];
     for (const each of doomed) {
       const extra = platformPackageOf(each, this.platform);
-      const root = this.options.manifest.roots[pluginSpec(each).root];
-      if (extra !== undefined && root !== undefined && pluginSpec(each).variantOf !== undefined) {
-        removeTree(join(this.store, keyDir(root.key), "node_modules", extra));
+      const rootKey = this.rootKey(pluginSpec(each).root);
+      if (extra !== undefined && rootKey !== undefined && pluginSpec(each).variantOf !== undefined) {
+        removeTree(join(this.store, keyDir(rootKey), "node_modules", extra));
       }
       delete file.plugins[each];
     }
@@ -286,7 +335,14 @@ export class PluginStore {
   private collect(file: InstalledFile): void {
     if (!existsSync(this.store)) return;
     const kept = new Set(Object.values(file.plugins).flatMap((r) => (r?.keys ?? []).map(keyDir)));
-    for (const dir of readdirSync(this.store)) if (!kept.has(dir) && !dir.startsWith(".")) removeTree(join(this.store, dir));
+    for (const dir of readdirSync(this.store)) {
+      if (kept.has(dir) || dir.startsWith(".")) continue;
+      try {
+        removeTree(join(this.store, dir));
+      } catch {
+        // in use (a loaded native file on Windows): left for the next collection
+      }
+    }
   }
 
   private async fetchPackage(key: string): Promise<void> {
@@ -339,9 +395,9 @@ export class PluginStore {
 
   /** Load an installed root package: `import()` of its entry, from the store. */
   async load(root: PluginSpec["root"]): Promise<unknown> {
-    const entry = this.options.manifest.roots[root];
-    if (entry === undefined || !this.hasRoot(root)) throw new Error(`${root} is not installed`);
-    return import(/* @vite-ignore */ pathToFileURL(entryFile(this.packageDir(entry.key))).href);
+    const dir = this.rootDir(root);
+    if (dir === undefined) throw new Error(`${root} is not installed`);
+    return import(/* @vite-ignore */ pathToFileURL(entryFile(dir)).href);
   }
 }
 
@@ -426,7 +482,7 @@ export function startPlugins(baseDir: string, bundleDir: string): PluginStore | 
 /** What to say when a plugin's root is needed and missing. */
 export function pluginMissing(root: PluginSpec["root"]): Error {
   const spec = PLUGINS.find((p) => p.root === root && p.variantOf === undefined)!;
-  return new Error(`${spec.title} is not installed: download it on the Connections page, or run \`jaira plugin install ${spec.id}\``);
+  return new Error(`${spec.title} is not installed: download it on the About page, or run \`jaira plugin install ${spec.id}\``);
 }
 
 /**

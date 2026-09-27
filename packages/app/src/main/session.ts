@@ -126,6 +126,12 @@ export const SUSPENDED_WAITING = "suspended while waiting on you: the app closed
  */
 export const SUSPENDED_FORWARDING = "suspended while running forward: the app closed";
 
+/**
+ * The same, for every run the app closed on to install an update the person asked to install with
+ * "Pause + update" (decision 0011 §4). The pause was only for the update, so the next open resumes it.
+ */
+export const SUSPENDED_UPDATE = "suspended to install an update";
+
 export class ProjectSession {
   readonly key: string;
   readonly kind: SessionKind;
@@ -144,6 +150,8 @@ export class ProjectSession {
   readonly suspendedAtClose = new Set<string>();
   /** The tasks being FAST-FORWARDED when this session began closing — see {@link SUSPENDED_FORWARDING}. */
   readonly forwardingAtClose = new Set<string>();
+  /** Set by "Pause + update": every run this close unwinds is suspended — see {@link SUSPENDED_UPDATE}. */
+  updatingAtClose = false;
   /**
    * Set at the top of {@link close}. What a run does while it is being unwound by a close is not a
    * person's decision, so nothing that ends then writes that it ended: a fast-forward keeps its open

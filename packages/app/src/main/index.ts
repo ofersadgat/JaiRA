@@ -17,6 +17,9 @@ import {
   PALETTE_FRAME,
   PUSH_CHANNEL,
   defaultBaseDir,
+  pluginSpec,
+  type PluginId,
+  type PluginStatus,
   releasePageOf,
   resolveTheme,
   takeHomeFlag,
@@ -36,7 +39,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import { autoUpdater } from "electron-updater";
 import { stackDetail } from "./diagnostics";
 import { AppService, type CrashKind, type KeychainPort } from "./service";
-import { UpdateManager, type UpdaterPort } from "./updates";
+import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
 import { startPlugins } from "@jaira/runtime";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
@@ -340,8 +343,21 @@ function buildInfo(): { macSigned?: boolean } {
   }
 }
 
+/** Where the updater remembers the version whose notice was dismissed: the machine's, beside `limits.json`. */
+const updatesFile = join(service.baseRoot(), "system", "updates.json");
+
+function readDismissed(): string | undefined {
+  try {
+    const value = (JSON.parse(readFileSync(updatesFile, "utf8")) as { dismissed?: unknown }).dismissed;
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const updates = (() => {
   const disabledReason = updateDisabledReason();
+  const dismissed = readDismissed();
   if (disabledReason === undefined) {
     autoUpdater.logger = {
       info: (message: unknown) => service.recordApp("debug", `updater: ${String(message)}`),
@@ -359,18 +375,77 @@ const updates = (() => {
     releaseUrl: releasePageOf,
     publish: (state) => pushToWindow({ type: "update:changed", state }),
     log: (level, message, data) => service.recordApp(level, message, data as JsonValue | undefined),
+    busy: () => service.activeWork(),
+    suspendForUpdate: () => service.suspendForUpdate(),
+    // The ordinary quit: `before-quit` below drains, closes, and then lets the updater install.
+    quit: () => setImmediate(() => app.quit()),
+    ...(dismissed !== undefined ? { dismissed } : {}),
+    saveDismissed: (version) => {
+      try {
+        mkdirSync(dirname(updatesFile), { recursive: true });
+        writeFileSync(updatesFile, `${JSON.stringify({ dismissed: version })}\n`);
+      } catch (e) {
+        service.recordApp("warn", "could not remember the dismissed update", { message: (e as Error).message });
+      }
+    },
   });
 })();
 
-/** Set when the person asked to install: the quit then ends in the installer rather than an exit. */
-let installAfterQuit = false;
+/**
+ * The downloadable plugins as the window sees them (decision 0011 §6): the store's status, with the
+ * download under way and the last failure held here, where the downloads run.
+ */
+const pluginProgress = new Map<PluginId, { done: number; total: number }>();
+const pluginErrors = new Map<PluginId, string>();
 
-/** Install the downloaded update by quitting the ordinary way (`before-quit` below finishes it). */
-function requestInstall(): { installing: boolean } {
-  if (!updates.canInstall()) return { installing: false };
-  installAfterQuit = true;
-  setImmediate(() => app.quit());
-  return { installing: true };
+function pluginStatuses(): PluginStatus[] {
+  return (plugins?.status() ?? []).map((status) => {
+    const progress = pluginProgress.get(status.id);
+    const error = pluginErrors.get(status.id);
+    return { ...status, ...(progress !== undefined ? { progress } : {}), ...(error !== undefined ? { error } : {}) };
+  });
+}
+
+function publishPlugins(): void {
+  pushToWindow({ type: "plugin:changed", plugins: pluginStatuses() });
+}
+
+/** Download a plugin; a failure is kept on its row rather than thrown, so the page can say it and offer Try again. */
+async function installPlugin(id: PluginId): Promise<PluginStatus[]> {
+  if (plugins === undefined) throw new Error("this build carries no plugin manifest");
+  if (pluginProgress.has(id)) return pluginStatuses();
+  pluginErrors.delete(id);
+  pluginProgress.set(id, { done: 0, total: 0 });
+  publishPlugins();
+  try {
+    await plugins.install(id, (p) => {
+      pluginProgress.set(id, { done: p.done, total: p.total });
+      publishPlugins();
+    });
+    service.recordApp("info", `installed the ${pluginSpec(id).title} plugin`);
+  } catch (e) {
+    pluginErrors.set(id, (e as Error).message);
+    service.recordApp("warn", `could not install the ${pluginSpec(id).title} plugin`, { message: (e as Error).message });
+  } finally {
+    pluginProgress.delete(id);
+    publishPlugins();
+  }
+  // What the routes can run on just changed; the Connections page reads it from the probes.
+  void service.probeExecutors().catch(() => undefined);
+  return pluginStatuses();
+}
+
+function removePlugin(id: PluginId): PluginStatus[] {
+  if (plugins === undefined) throw new Error("this build carries no plugin manifest");
+  pluginErrors.delete(id);
+  try {
+    plugins.remove(id);
+  } catch (e) {
+    pluginErrors.set(id, `could not remove it: ${(e as Error).message}`);
+  }
+  publishPlugins();
+  void service.probeExecutors().catch(() => undefined);
+  return pluginStatuses();
 }
 
 /**
@@ -623,7 +698,11 @@ const handlers: Record<IpcChannel, Handler> = {
   "update:state": (() => updates.current()) as Handler,
   "update:check": (() => updates.check()) as Handler,
   "update:download": (() => updates.download()) as Handler,
-  "update:install": (() => requestInstall()) as Handler,
+  "update:install": ((request: { when?: RestartChoice } | undefined) => updates.restart(request?.when ?? "now")) as Handler,
+  "update:dismiss": ((request: { version: string }) => updates.dismiss(request.version)) as Handler,
+  "plugin:list": (() => pluginStatuses()) as Handler,
+  "plugin:install": ((request: { id: PluginId }) => installPlugin(request.id)) as Handler,
+  "plugin:remove": ((request: { id: PluginId }) => removePlugin(request.id)) as Handler,
 };
 
 /**
@@ -1048,6 +1127,12 @@ void app.whenReady().then(async () => {
   // and hourly. Nothing downloads until the person asks.
   updates.configure(service.updateSettings());
   updates.start();
+  // Plugins follow the app (the person, 2026-09-26): a plugin an older build installed is brought to
+  // this build's version in the background, bases before their variants; the older one keeps working
+  // until the newer one is stored.
+  void (async () => {
+    for (const id of plugins?.outdated() ?? []) await installPlugin(id);
+  })();
 
   const capture = process.env["JAIRA_CAPTURE"];
   if (capture) void captureAndExit(window, capture);
@@ -1073,10 +1158,12 @@ app.on("before-quit", (event) => {
   service.recordApp("info", "quitting: draining runs and closing the databases");
   updates.stop();
   void service.close().finally(() => {
-    // An install is this same quit, finished by the installer: the runs have drained and the databases
-    // are closed before anything replaces the app. `quitAndInstall` quits too; the `app.quit()` after
-    // it is what still ends the process if the installer could not be started.
-    if (installAfterQuit) updates.installNow();
+    // A downloaded update installs at the end of EVERY quit (the person, 2026-09-26: "if not now is
+    // pressed or the app is otherwise closed, the update happens on restart"): the runs have drained and
+    // the databases are closed before anything replaces the app. It starts the app again only when the
+    // quit was "Restart to update". `quitAndInstall` quits too; the `app.quit()` after it is what still
+    // ends the process if the installer could not be started.
+    updates.installOnQuit();
     app.quit();
   });
 });

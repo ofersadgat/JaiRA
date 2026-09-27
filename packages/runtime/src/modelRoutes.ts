@@ -58,7 +58,7 @@ import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, permi
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
 import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
-import { resolvePluginRoot } from "./plugins";
+import { activePluginStore, resolvePluginRoot } from "./plugins";
 import type { Exec } from "./exec";
 import type { ExecEnv } from "./paths";
 import type { ExecObserver } from "./exec";
@@ -564,6 +564,15 @@ function statOf(path: string, stat: NonNullable<RouteProbeOptions["stat"]>): { s
 export function checkEmbeddedLoader(options: Pick<RouteProbeOptions, "resolve"> = {}): EmbeddedWeightsReport["loader"] {
   try {
     resolvePluginRoot(EMBEDDED_MODULE, options.resolve ?? defaultResolve);
+    // From the plugin store, node-llama-cpp runs only on a build it was given (decision 0011 §6): the
+    // base alone loads, and then cannot load a model.
+    const store = activePluginStore();
+    if (store?.hasRoot(EMBEDDED_MODULE) === true) {
+      const builds = store.status().filter((s) => s.id.startsWith("llama-") && s.installed !== undefined);
+      if (builds.length === 0) {
+        return { module: EMBEDDED_MODULE, installed: false, error: "Local models has no build installed (CPU, Vulkan, CUDA or Metal): add one on the About page" };
+      }
+    }
     return { module: EMBEDDED_MODULE, installed: true };
   } catch (e) {
     return { module: EMBEDDED_MODULE, installed: false, error: (e as Error).message.split("\n")[0]! };
@@ -711,7 +720,7 @@ async function probeEmbeddedRoute(
       name: "embedded",
       status: "failed",
       detail: `the weights are there, but '${EMBEDDED_MODULE}' is not installed, so nothing can load them`,
-      fix: "download the Local models plugin on the Connections page (`jaira plugin install llama` and a variant), or serve the same weights through a local server instead",
+      fix: "download the Local models plugin and a build on the About page (`jaira plugin install llama-cpu`, or another build), or serve the same weights through a local server instead",
     };
   }
   const usable = rows.filter((row) => row.exists);

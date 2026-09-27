@@ -114,8 +114,37 @@ export function buildPluginManifest(lockFile = join(repo, "package-lock.json")) 
   return { schema: 1, roots, packages };
 }
 
+/**
+ * Each package's download size, which the lockfile does not record and the About page shows next to a
+ * Download button. The registry answers HEAD without a `content-length` (measured 2026-09-26), so each
+ * tarball is asked for its first byte and the total is read from `content-range: bytes 0-0/<size>`, a
+ * few at a time. Best effort: a build without the network still has a manifest, only without sizes.
+ */
+export async function withSizes(manifest, { concurrency = 16, timeoutMs = 10_000 } = {}) {
+  const keys = Object.keys(manifest.packages);
+  let next = 0;
+  let missed = 0;
+  async function worker() {
+    while (next < keys.length) {
+      const pkg = manifest.packages[keys[next++]];
+      try {
+        const response = await fetch(pkg.resolved, { headers: { range: "bytes=0-0" }, signal: AbortSignal.timeout(timeoutMs) });
+        await response.arrayBuffer();
+        const length = Number(/\/(\d+)$/.exec(response.headers.get("content-range") ?? "")?.[1]);
+        if (response.ok && Number.isFinite(length) && length > 0) pkg.size = length;
+        else missed += 1;
+      } catch {
+        missed += 1;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  if (missed > 0) console.warn(`plugin manifest: no size for ${missed} of ${keys.length} packages`);
+  return manifest;
+}
+
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const manifest = buildPluginManifest();
+  const manifest = await withSizes(buildPluginManifest());
   const out = process.argv[2];
   const text = `${JSON.stringify(manifest, null, 2)}\n`;
   if (out === undefined) process.stdout.write(text);
