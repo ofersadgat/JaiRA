@@ -35,11 +35,16 @@ function parse<T>(text: string): T | undefined {
 export class RepoWatchStore implements RepoWatchPort {
   constructor(
     private readonly db: JairaDb,
+    /**
+     * The workspace watching (decision 0013 §4): two clones of one repository watch the same remote,
+     * and each keeps its own baseline.
+     */
+    private readonly workspace: string,
     private readonly now: () => number = Date.now,
   ) {}
 
   cursor(scope: RepoWatchScope): RepoWatchCursor | undefined {
-    const row = this.db.prepare(`SELECT cursor_json FROM repo_watch_cursors WHERE remote = ? AND repository = ?`).get(scope.remote, scope.repository) as
+    const row = this.db.prepare(`SELECT cursor_json FROM repo_watch_cursors WHERE workspace = ? AND remote = ? AND repository = ?`).get(this.workspace, scope.remote, scope.repository) as
       | { cursor_json: string }
       | undefined;
     return row === undefined ? undefined : (parse<RepoWatchCursor>(row.cursor_json) ?? {});
@@ -47,7 +52,7 @@ export class RepoWatchStore implements RepoWatchPort {
 
   /** The last error of a poll, when it failed (`null` clears it; absent leaves it). */
   lastError(scope: RepoWatchScope): string | undefined {
-    const row = this.db.prepare(`SELECT last_error FROM repo_watch_cursors WHERE remote = ? AND repository = ?`).get(scope.remote, scope.repository) as
+    const row = this.db.prepare(`SELECT last_error FROM repo_watch_cursors WHERE workspace = ? AND remote = ? AND repository = ?`).get(this.workspace, scope.remote, scope.repository) as
       | { last_error: string | null }
       | undefined;
     return row?.last_error ?? undefined;
@@ -56,26 +61,26 @@ export class RepoWatchStore implements RepoWatchPort {
   setCursor(scope: RepoWatchScope, cursor: RepoWatchCursor, error?: string | null): void {
     this.db
       .prepare(
-        `INSERT INTO repo_watch_cursors (remote, repository, cursor_json, last_error, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(remote, repository) DO UPDATE SET
+        `INSERT INTO repo_watch_cursors (workspace, remote, repository, cursor_json, last_error, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(workspace, remote, repository) DO UPDATE SET
            cursor_json = excluded.cursor_json,
            last_error = CASE WHEN ? THEN excluded.last_error ELSE repo_watch_cursors.last_error END,
            updated_at = excluded.updated_at`,
       )
-      .run(scope.remote, scope.repository, JSON.stringify(cursor), error ?? null, this.now(), error !== undefined ? 1 : 0);
+      .run(this.workspace, scope.remote, scope.repository, JSON.stringify(cursor), error ?? null, this.now(), error !== undefined ? 1 : 0);
   }
 
   seen<K extends RepoWatchKind>(scope: RepoWatchScope, kind: K, key: string): RepoWatchSeen[K] | undefined {
     const row = this.db
-      .prepare(`SELECT state_json FROM repo_watch_seen WHERE remote = ? AND repository = ? AND kind = ? AND key = ?`)
-      .get(scope.remote, scope.repository, kind, key) as { state_json: string } | undefined;
+      .prepare(`SELECT state_json FROM repo_watch_seen WHERE workspace = ? AND remote = ? AND repository = ? AND kind = ? AND key = ?`)
+      .get(this.workspace, scope.remote, scope.repository, kind, key) as { state_json: string } | undefined;
     return row === undefined ? undefined : parse<RepoWatchSeen[K]>(row.state_json);
   }
 
   seenAll<K extends RepoWatchKind>(scope: RepoWatchScope, kind: K): Map<string, RepoWatchSeen[K]> {
     const rows = this.db
-      .prepare(`SELECT key, state_json FROM repo_watch_seen WHERE remote = ? AND repository = ? AND kind = ? ORDER BY key`)
-      .all(scope.remote, scope.repository, kind) as Array<{ key: string; state_json: string }>;
+      .prepare(`SELECT key, state_json FROM repo_watch_seen WHERE workspace = ? AND remote = ? AND repository = ? AND kind = ? ORDER BY key`)
+      .all(this.workspace, scope.remote, scope.repository, kind) as Array<{ key: string; state_json: string }>;
     const out = new Map<string, RepoWatchSeen[K]>();
     for (const row of rows) {
       const state = parse<RepoWatchSeen[K]>(row.state_json);
@@ -87,14 +92,14 @@ export class RepoWatchStore implements RepoWatchPort {
   see<K extends RepoWatchKind>(scope: RepoWatchScope, kind: K, key: string, state: RepoWatchSeen[K]): void {
     this.db
       .prepare(
-        `INSERT INTO repo_watch_seen (remote, repository, kind, key, state_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(remote, repository, kind, key) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at`,
+        `INSERT INTO repo_watch_seen (workspace, remote, repository, kind, key, state_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(workspace, remote, repository, kind, key) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at`,
       )
-      .run(scope.remote, scope.repository, kind, key, JSON.stringify(state), this.now());
+      .run(this.workspace, scope.remote, scope.repository, kind, key, JSON.stringify(state), this.now());
   }
 
   forget(scope: RepoWatchScope, kind: RepoWatchKind, key: string): void {
-    this.db.prepare(`DELETE FROM repo_watch_seen WHERE remote = ? AND repository = ? AND kind = ? AND key = ?`).run(scope.remote, scope.repository, kind, key);
+    this.db.prepare(`DELETE FROM repo_watch_seen WHERE workspace = ? AND remote = ? AND repository = ? AND kind = ? AND key = ?`).run(this.workspace, scope.remote, scope.repository, kind, key);
   }
 }
 

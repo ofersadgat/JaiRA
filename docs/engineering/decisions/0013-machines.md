@@ -447,8 +447,65 @@ Each UI step is drawn as a mockup first.
     same version now says "another build".
   - an `else` that bound to the wrong `if` listed "/" among the Windows drives.
 
-**Still open:** step 4, one index in `~/.jaira` with clone indexes retired, and replication. See the
-question that follows.
+### Step 4, first half: one database, owners, clone databases retired
+
+The person, on where the index lives: "the database is in ~/.jaira as are the shared workspace files but
+the workspace specific stuff remains in the the workspace".
+
+- **One file.** Every workspace opens `~/.jaira/system/jaira.db` (`JairaPaths.dbFile` is the base's),
+  each on its own connection. A clone keeps its settings, workflows, task files and any records its
+  `storage` puts in files. Its file-backed concerns still replay into `TEMP` tables of its own
+  connection, so they never mix with another workspace's.
+- **A workspace is an id**, minted into `system/workspace.id` on first open. The `.gitignore` template
+  hides it, and an existing ignore file gains the line, as it did for `machine.key`. It is an id and not
+  the folder's path, so a clone moved on disk keeps its history, and a second clone of one repository,
+  which has the same committed files, does not share it.
+- **Migration 21:**
+  - `workspaces` (id, machine, dir);
+  - `task_owners` (task → workspace);
+  - the watcher's two tables keyed by workspace as well;
+  - `storage_index` dropped. It is a cache, now kept per workspace and concern.
+- **Ownership.** `RuntimeStore.insert` claims the task in the same transaction. A task another workspace
+  owns is refused, before its file is written. Every read and update of `task_runtime` is limited to
+  the workspace's own tasks, and so is everything built on it:
+  - the board;
+  - open-time recovery, which also settles a crash's unsettled calls;
+  - resuming;
+  - the events task;
+  - pruning;
+  - cancellation;
+  - the gates still waiting;
+  - the requests awaited;
+  - the live-jobs list;
+  - the connect-row scan after a crash.
+
+  Run claims and the stale-job sweep stay machine-wide.
+- **File-backed concerns.** A `both` write-back replaces only the workspace's own rows. It used to
+  empty the whole `main` table, which in a shared file is every other workspace's history. A replayed
+  journal lets the shared table mint its sequence numbers again. A replayed task no workspace owns is
+  claimed by the one that replayed it.
+- **The shared root's rows,** the only ones in the file before, are claimed for it on its next open
+  (`claimUnowned`).
+- **A clone's old database** (`mergeLegacyDb`, the migration tool, to be deleted once every clone has
+  been opened):
+  - it is brought to the current schema, attached, and copied in one transaction;
+  - journal sequence numbers and job ids are shifted past those already present, with fork cuts and
+    boundaries, job parents and job output following;
+  - then it is removed.
+  - A task the shared database already has (a pulled task file another clone ran too) is left in
+    `jaira.db.unmerged` rather than lost.
+- **Verified** (`persistence/test/workspace.test.ts`):
+  - two clones on one database, each seeing and acting on only its own tasks;
+  - a refused foreign id, which leaves no file;
+  - recovery in one leaving the other's running task and open turn alone;
+  - a moved clone keeping its history;
+  - the shared root's old rows;
+  - a `both` workspace rebuilding its index without touching another's;
+  - the merge, renumbered and with references following;
+  - the merge conflict kept aside.
+  - Full suite: 363 files.
+- **Found on the way:** `recoverUnsettledCalls` assumed nothing else in the process was streaming at
+  open. With one database, opening a second project would have settled the first one's live chat turn.
 
 ## Consequences
 

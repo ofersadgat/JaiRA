@@ -369,7 +369,7 @@ describe("file:check, in a task's worktree", () => {
   function worktreeTask(at?: string): string {
     const taskId = service.createTask({ title: "Do the work", workflow: "feature/plan", inputs: { issue: "x" } }).taskId;
     if (at === undefined) return taskId;
-    const db = new Database(join(project, ".jaira", "system", "jaira.db"));
+    const db = new Database(join(testHome(), "system", "jaira.db"));
     try {
       db.prepare(`UPDATE task_runtime SET worktree_path = ? WHERE task_id = ?`).run(at, taskId);
     } finally {

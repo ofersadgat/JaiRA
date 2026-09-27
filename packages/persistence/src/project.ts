@@ -9,7 +9,7 @@
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   baseAsProjectPaths,
   defaultConfig,
@@ -43,6 +43,7 @@ import { EventWaitStore, RepoWatchStore } from "./repoWatch";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
+import { claimReplayed, claimUnowned, mergeLegacyDb, registerWorkspace, workspaceIdOf } from "./workspace";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.project");
@@ -58,6 +59,11 @@ export interface Project {
    */
   kind: "project" | "shared";
   paths: JairaPaths;
+  /**
+   * This workspace's id in the one database (decision 0013 §4) — what its tasks are owned by. See
+   * `workspace.ts`.
+   */
+  workspace: string;
   config: JairaConfig;
   db: JairaDb;
   tasks: TaskFileStore;
@@ -134,8 +140,8 @@ const JAIRA_GITIGNORE = `# Two files, and everything else under ${SYS}/ is meant
 # nothing derived left to hide, and hiding it would defeat the point of choosing files.
 #
 # The database is what survives: it is a rebuildable index of those files now, and an
-# unmergeable binary either way. The logs are this machine talking to itself and would
-# conflict on every line.
+# unmergeable binary either way — the shared root's, where it lives (decision 0013 §4).
+# The logs are this machine talking to itself and would conflict on every line.
 ${SYS}/jaira.db
 ${SYS}/jaira.db-wal
 ${SYS}/jaira.db-shm
@@ -146,6 +152,10 @@ ${SYS}/logs/
 # signature exists to prevent — so it is ignored for a stronger reason than derived
 # state: it is a secret.
 ${SYS}/machine.key
+
+# This workspace's id in the shared database (decision 0013 §4). Committed, every clone
+# of the repository would claim the same tasks.
+${SYS}/workspace.id
 
 # Credentials. .env.local is machine-local by convention and is the first project link of the
 # secret chain (DESIGN §8.1). Its sibling .env is deliberately NOT ignored: a project that wants
@@ -165,24 +175,32 @@ ${SYS}/machine.key
  * whole `system/` directory being ignored wholesale, both mean there is nothing to add.
  */
 function ensureKeyIgnored(ignoreFile: string): void {
+  ensureIgnored(
+    ignoreFile,
+    "machine.key",
+    `# Added by JaiRA: the key that signs this machine's approvals (SPEC §7.5.5). Committing
+# it would hand every clone the ability to mint approvals for this disk.`,
+  );
+  ensureIgnored(
+    ignoreFile,
+    "workspace.id",
+    `# Added by JaiRA: this workspace's id in the shared database (decision 0013 §4). Committed,
+# every clone of the repository would claim the same tasks.`,
+  );
+}
+
+/** Append `system/<name>` to an existing ignore file that does not already hide it. */
+function ensureIgnored(ignoreFile: string, name: string, comment: string): void {
   let text: string;
   try {
     text = readFileSync(ignoreFile, "utf8");
   } catch {
     return; // No file — the template is about to be written, and it carries the line.
   }
-  if (text.includes("machine.key")) return;
+  if (text.includes(name)) return;
   if (text.split(/\r?\n/).some((line) => line.trim() === `${SYS}/` || line.trim() === SYS)) return;
   const separator = text.length === 0 || text.endsWith("\n") ? "" : "\n";
-  writeFileSync(
-    ignoreFile,
-    `${text}${separator}
-# Added by JaiRA: the key that signs this machine's approvals (SPEC §7.5.5). Committing
-# it would hand every clone the ability to mint approvals for this disk.
-${SYS}/machine.key
-`,
-    "utf8",
-  );
+  writeFileSync(ignoreFile, `${text}${separator}\n${comment}\n${SYS}/${name}\n`, "utf8");
 }
 
 /**
@@ -382,11 +400,20 @@ function openAt(
   // belong to their writers, and only a file-backed concern gets one (see below).
   mkdirSync(paths.snapshotsDir, { recursive: true });
   mkdirSync(paths.tasksDir, { recursive: true });
+  // The one database, in the shared root (decision 0013 §4) — created with its directory when this is
+  // the first workspace this machine opens.
+  mkdirSync(dirname(paths.dbFile), { recursive: true });
   const db = openDb(paths.dbFile);
+  const workspace = workspaceIdOf(paths);
+  registerWorkspace(db, workspace, paths.projectDir);
+  // What was here before: a clone's own database, merged once and removed; the shared root's rows,
+  // which were the only ones in this file, claimed as its own.
+  if (kind === "project") mergeLegacyDb(db, paths, workspace);
+  else claimUnowned(db, workspace);
   // BEFORE anything reads. A file-backed concern is served by a `TEMP` table standing in front of
   // its `main` counterpart (DESIGN §4.4), and a store constructed against the connection first would
   // have prepared its statements against the table it is meant to shadow.
-  const storage = applyStorage(db, config.storage, {
+  const storage = applyStorage(db, workspace, config.storage, {
     journal: () => replayJournal(db, paths.journalDir),
     conversations: () => replayConversations(db, paths.conversationsDir),
     tasks: () => replayRows(db, paths.taskRowsDir, TASK_ROWS),
@@ -403,8 +430,9 @@ function openAt(
   const journalDir = isFileBacked(config.storage.journal) ? paths.journalDir : undefined;
   const taskLog = isFileBacked(config.storage.tasks) ? new RowLog(paths.taskRowsDir) : undefined;
   const artifactLog = isFileBacked(config.storage.artifacts) ? new RowLog(paths.artifactRowsDir) : undefined;
-  const runtime = new RuntimeStore(db, taskLog);
-  const jobs = new JobStore(db, opts?.staleMs);
+  claimReplayed(db, workspace);
+  const runtime = new RuntimeStore(db, workspace, taskLog);
+  const jobs = new JobStore(db, opts?.staleMs, workspace);
 
   // Read orphans BEFORE reaping: the rows are the only record those processes ever
   // existed, and an abandoned agent is still running and still billing.
@@ -419,6 +447,7 @@ function openAt(
   return {
     kind,
     paths,
+    workspace,
     config,
     db,
     tasks: new TaskFileStore(paths.tasksDir),
@@ -427,9 +456,9 @@ function openAt(
     commands: new CommandLog(db),
     artifacts: new SqliteArtifactStore(db, artifactLog),
     jobs,
-    interactions: new InteractionStore(db),
-    remotes: new RemoteHandleStore(db),
-    repoWatch: new RepoWatchStore(db),
+    interactions: new InteractionStore(db, workspace),
+    remotes: new RemoteHandleStore(db, workspace),
+    repoWatch: new RepoWatchStore(db, workspace),
     eventWaits: new EventWaitStore(db),
     recovered,
     recoveredCalls,

@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostFunction, type FunctionInputs, type JsonValue } from "@declarative-ai/exec";
-import { initProject, openProject, type Project } from "@jaira/persistence";
+import { createTask, initProject, openProject, type Project } from "@jaira/persistence";
 import { INTERACTIVE, NodeExec, REMOTE_FUNCTIONS, REVIEW_ARTIFACTS, newRegistry } from "@jaira/runtime";
 import { isJairaComment, type Changeset } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
@@ -32,6 +32,8 @@ function open(policy: Record<string, unknown> = { remote: { publish: "allow" } }
   mkdirSync(join(rig.work, ".jaira"), { recursive: true });
   writeFileSync(join(rig.work, ".jaira", ".env.local"), 'GITLAB_TOKEN="good"\n');
   project = openProject(rig.work, { baseDir: home });
+  // The task the run belongs to: what its workspace watches is its own tasks' requests (decision 0013 §4).
+  createTask(project, { id: "t-1", title: "Review the implementation", workflow: "w" });
 }
 
 beforeEach(() => {

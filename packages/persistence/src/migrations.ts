@@ -523,6 +523,74 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 21,
+    note: "one database for every workspace: which workspace owns each task, and the watcher's memory per workspace",
+    // Decision 0013 §4. The database moved out of each clone into the shared root, so "the project is
+    // the database itself" stopped being true: a task belongs to the WORKSPACE that made it, named by
+    // the id in its `system/workspace.id` (a clone moved on disk keeps its history), and a replica of
+    // another machine's workspace is one more owner. `task_owners` is kept apart from `task_runtime`
+    // because that table can be file-backed, and ownership must not move with a file a clone pulls.
+    //
+    // The watcher's two tables gain the workspace in their key: two clones of one repository watch
+    // the same remote and must not share a baseline. Their rows so far were the shared root's (the
+    // only project whose records were in this file), claimed by `claimUnowned` at its next open.
+    // `storage_index` is a cache of what a file-backed index was built from, one row per concern and
+    // now per workspace; dropped rather than moved, which costs at most one replay.
+    run: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workspaces (
+          id         TEXT PRIMARY KEY,
+          machine    TEXT,             -- NULL for this machine's own; a machine id for a replica
+          dir        TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS task_owners (
+          task_id   TEXT PRIMARY KEY,
+          workspace TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS task_owners_workspace ON task_owners(workspace, task_id);
+        DROP TABLE IF EXISTS storage_index;
+      `);
+      const hasWorkspace = (table: string): boolean =>
+        (db.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info(?) WHERE name = 'workspace'`).get(table) as { n: number }).n > 0;
+      if (!hasWorkspace("repo_watch_cursors")) {
+        db.exec(`
+          ALTER TABLE repo_watch_cursors RENAME TO repo_watch_cursors_unscoped;
+          CREATE TABLE repo_watch_cursors (
+            workspace   TEXT NOT NULL DEFAULT '',
+            remote      TEXT NOT NULL,
+            repository  TEXT NOT NULL,
+            cursor_json TEXT NOT NULL DEFAULT '{}',
+            last_error  TEXT,
+            updated_at  INTEGER NOT NULL,
+            PRIMARY KEY (workspace, remote, repository)
+          );
+          INSERT INTO repo_watch_cursors (remote, repository, cursor_json, last_error, updated_at)
+            SELECT remote, repository, cursor_json, last_error, updated_at FROM repo_watch_cursors_unscoped;
+          DROP TABLE repo_watch_cursors_unscoped;
+        `);
+      }
+      if (!hasWorkspace("repo_watch_seen")) {
+        db.exec(`
+          ALTER TABLE repo_watch_seen RENAME TO repo_watch_seen_unscoped;
+          CREATE TABLE repo_watch_seen (
+            workspace   TEXT NOT NULL DEFAULT '',
+            remote      TEXT NOT NULL,
+            repository  TEXT NOT NULL,
+            kind        TEXT NOT NULL CHECK (kind IN ('merge_request', 'branch', 'checks')),
+            key         TEXT NOT NULL,
+            state_json  TEXT NOT NULL,
+            updated_at  INTEGER NOT NULL,
+            PRIMARY KEY (workspace, remote, repository, kind, key)
+          );
+          INSERT INTO repo_watch_seen (remote, repository, kind, key, state_json, updated_at)
+            SELECT remote, repository, kind, key, state_json, updated_at FROM repo_watch_seen_unscoped;
+          DROP TABLE repo_watch_seen_unscoped;
+        `);
+      }
+    },
+  },
 ];
 
 /**

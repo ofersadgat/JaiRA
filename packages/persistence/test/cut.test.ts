@@ -302,9 +302,9 @@ describe("rewind", () => {
     const before = first.events.list("t-1").map((e) => e.type);
     first.close();
     open.pop();
-    rmSync(join(dir, "repo", ".jaira", "system", "jaira.db"), { force: true });
-    rmSync(join(dir, "repo", ".jaira", "system", "jaira.db-wal"), { force: true });
-    rmSync(join(dir, "repo", ".jaira", "system", "jaira.db-shm"), { force: true });
+    rmSync(join(baseDir, "system", "jaira.db"), { force: true });
+    rmSync(join(baseDir, "system", "jaira.db-wal"), { force: true });
+    rmSync(join(baseDir, "system", "jaira.db-shm"), { force: true });
 
     const second = project();
     expect(second.events.list("t-1").map((e) => e.type)).toEqual(before);

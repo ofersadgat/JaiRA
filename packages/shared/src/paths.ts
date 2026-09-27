@@ -75,7 +75,18 @@ export interface JairaPaths {
   taskRowsDir: string;
   /** One JSONL per task: the artifact MAP. The bytes are `artifacts/` and are a different question. */
   artifactRowsDir: string;
+  /**
+   * The database — the SHARED root's, for every workspace (decision 0013 §4). A clone keeps its
+   * settings, workflows, task files and any file-backed records; the index the app loads from is
+   * one file in `~/.jaira`, where each task is owned by the workspace named in {@link workspaceIdFile}.
+   */
   dbFile: string;
+  /**
+   * This workspace's identity in that database: an id minted on first open and never committed, so
+   * a clone moved on disk keeps its history and a second clone of the same repository does not
+   * share it.
+   */
+  workspaceIdFile: string;
   /**
    * Where the last agreed state of `workflows/workflow.md` and the state files is recorded.
    *
@@ -183,8 +194,13 @@ export interface JairaBasePaths {
   machineKeyFile: string;
   /** Everything JaiRA generates for this root — see {@link JairaPaths.systemDir}. */
   systemDir: string;
-  /** Run state for the base opened as a project — see the amendment above. */
+  /**
+   * The one database on this machine: run state for the base opened as a project, and for every
+   * other workspace too (decision 0013 §4).
+   */
   dbFile: string;
+  /** The base's own workspace id — see {@link JairaPaths.workspaceIdFile}. */
+  workspaceIdFile: string;
   snapshotsDir: string;
   tasksDir: string;
   logsDir: string;
@@ -411,6 +427,7 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     // `system/` shares.
     machineKeyFile: join(system, "machine.key"),
     dbFile: join(system, "jaira.db"),
+    workspaceIdFile: join(system, "workspace.id"),
     snapshotsDir: join(system, "snapshots"),
     tasksDir: join(system, "tasks"),
     logsDir: join(system, "logs"),
@@ -458,6 +475,7 @@ export function baseAsProjectPaths(baseDir: string = defaultBaseDir(), builtInDi
     taskRowsDir: base.taskRowsDir,
     artifactRowsDir: base.artifactRowsDir,
     dbFile: base.dbFile,
+    workspaceIdFile: base.workspaceIdFile,
     syncFile: base.syncFile,
     worktreesDir: join(base.baseDir, WORKTREES_DIR_NAME),
     base,
@@ -492,7 +510,9 @@ export function jairaPaths(projectDir: string, baseDir?: string, builtInDir?: st
     conversationsDir: join(system, "conversations"),
     taskRowsDir: join(system, "taskRows"),
     artifactRowsDir: join(system, "artifactRows"),
-    dbFile: join(system, "jaira.db"),
+    // The shared root's: one database for every workspace (decision 0013 §4).
+    dbFile: base.dbFile,
+    workspaceIdFile: join(system, "workspace.id"),
     syncFile: join(system, "sync.json"),
     worktreesDir: join(dirname(root), WORKTREES_DIR_NAME, basename(root)),
     base,

@@ -13,6 +13,7 @@ import type { TaskStatus } from "@jaira/shared";
 import { isTerminalStatus } from "@jaira/shared";
 import type { JairaDb } from "./db";
 import type { RowLog } from "./rowFile";
+import { claimTask, OWNED_BY } from "./workspace";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.runtime");
@@ -116,6 +117,11 @@ export class RuntimeStore {
    */
   constructor(
     private readonly db: JairaDb,
+    /**
+     * The workspace this store answers for (decision 0013 §4): the database holds every workspace's
+     * tasks, and this one reads, lists, recovers and changes only the ones it owns.
+     */
+    readonly workspace: string,
     private readonly log?: RowLog,
   ) {}
 
@@ -124,39 +130,43 @@ export class RuntimeStore {
   }
 
   insert(taskId: string, nowMs: number, fields?: { branch?: string; parentTaskId?: string; documentId?: string }): void {
-    this.db
-      .prepare(
-        `INSERT INTO task_runtime (task_id, status, branch, parent_task_id, document_id, created_at, updated_at)
-         VALUES (?, 'queued', ?, ?, ?, ?, ?)`,
-      )
-      .run(taskId, fields?.branch ?? null, fields?.parentTaskId ?? null, fields?.documentId ?? null, nowMs, nowMs);
+    this.db.transaction(() => {
+      // Claimed with the row: a task another workspace owns is refused here, before it has one.
+      claimTask(this.db, this.workspace, taskId);
+      this.db
+        .prepare(
+          `INSERT INTO task_runtime (task_id, status, branch, parent_task_id, document_id, created_at, updated_at)
+           VALUES (?, 'queued', ?, ?, ?, ?, ?)`,
+        )
+        .run(taskId, fields?.branch ?? null, fields?.parentTaskId ?? null, fields?.documentId ?? null, nowMs, nowMs);
+    })();
     this.logTask(taskId);
   }
 
   get(taskId: string): TaskRuntimeRow | undefined {
-    const row = this.db.prepare(`SELECT * FROM task_runtime WHERE task_id = ?`).get(taskId) as
+    const row = this.db.prepare(`SELECT * FROM task_runtime WHERE task_id = ? AND ${OWNED_BY}`).get(taskId, this.workspace) as
       | RawRuntime
       | undefined;
     return row ? toRuntime(row) : undefined;
   }
 
   list(): TaskRuntimeRow[] {
-    const rows = this.db.prepare(`SELECT * FROM task_runtime ORDER BY created_at, task_id`).all() as RawRuntime[];
+    const rows = this.db.prepare(`SELECT * FROM task_runtime WHERE ${OWNED_BY} ORDER BY created_at, task_id`).all(this.workspace) as RawRuntime[];
     return rows.map(toRuntime);
   }
 
   setStatus(taskId: string, status: TaskStatus, nowMs: number): void {
     const res = this.db
-      .prepare(`UPDATE task_runtime SET status = ?, updated_at = ? WHERE task_id = ?`)
-      .run(status, nowMs, taskId);
+      .prepare(`UPDATE task_runtime SET status = ?, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`)
+      .run(status, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
 
   setSnapshot(taskId: string, snapshotHash: string, nowMs: number): void {
     const res = this.db
-      .prepare(`UPDATE task_runtime SET snapshot_hash = ?, updated_at = ? WHERE task_id = ?`)
-      .run(snapshotHash, nowMs, taskId);
+      .prepare(`UPDATE task_runtime SET snapshot_hash = ?, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`)
+      .run(snapshotHash, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
@@ -168,8 +178,8 @@ export class RuntimeStore {
    */
   setPin(taskId: string, snapshotHash: string | null, documentId: string | null, nowMs: number): void {
     const res = this.db
-      .prepare(`UPDATE task_runtime SET snapshot_hash = ?, document_id = ?, updated_at = ? WHERE task_id = ?`)
-      .run(snapshotHash, documentId, nowMs, taskId);
+      .prepare(`UPDATE task_runtime SET snapshot_hash = ?, document_id = ?, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`)
+      .run(snapshotHash, documentId, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
@@ -177,8 +187,8 @@ export class RuntimeStore {
   /** Record the task ↔ worktree mapping (DESIGN §3: it lives in SQLite). */
   setWorktree(taskId: string, worktreePath: string, nowMs: number): void {
     const res = this.db
-      .prepare(`UPDATE task_runtime SET worktree_path = ?, updated_at = ? WHERE task_id = ?`)
-      .run(worktreePath, nowMs, taskId);
+      .prepare(`UPDATE task_runtime SET worktree_path = ?, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`)
+      .run(worktreePath, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
@@ -190,23 +200,23 @@ export class RuntimeStore {
    */
   setParent(taskId: string, parentTaskId: string | undefined, nowMs: number): void {
     const res = this.db
-      .prepare(`UPDATE task_runtime SET parent_task_id = ?, updated_at = ? WHERE task_id = ?`)
-      .run(parentTaskId ?? null, nowMs, taskId);
+      .prepare(`UPDATE task_runtime SET parent_task_id = ?, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`)
+      .run(parentTaskId ?? null, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
 
   /** The branch a task is bound to, when it was bound AFTER creation — a task taking up the workspace of one it adopts. */
   setBranch(taskId: string, branch: string, nowMs: number): void {
-    const res = this.db.prepare(`UPDATE task_runtime SET branch = ?, updated_at = ? WHERE task_id = ?`).run(branch, nowMs, taskId);
+    const res = this.db.prepare(`UPDATE task_runtime SET branch = ?, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`).run(branch, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
 
   clearWorktree(taskId: string, nowMs: number): void {
     this.db
-      .prepare(`UPDATE task_runtime SET worktree_path = NULL, updated_at = ? WHERE task_id = ?`)
-      .run(nowMs, taskId);
+      .prepare(`UPDATE task_runtime SET worktree_path = NULL, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`)
+      .run(nowMs, taskId, this.workspace);
     this.logTask(taskId);
   }
 
@@ -220,9 +230,9 @@ export class RuntimeStore {
         `UPDATE task_runtime
             SET snapshot_hash = ?, started_at = ?, ended_at = NULL, outcome = NULL,
                 outputs_json = NULL, failure_json = NULL, updated_at = ?
-          WHERE task_id = ?`,
+          WHERE task_id = ? AND ${OWNED_BY}`,
       )
-      .run(snapshotHash, nowMs, nowMs, taskId);
+      .run(snapshotHash, nowMs, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
@@ -239,9 +249,9 @@ export class RuntimeStore {
       .prepare(
         `UPDATE task_runtime SET status = 'interrupted', outcome = 'interrupted', ended_at = ?,
                 outputs_json = NULL, failure_json = NULL, updated_at = ?
-          WHERE task_id = ?`,
+          WHERE task_id = ? AND ${OWNED_BY}`,
       )
-      .run(nowMs, nowMs, taskId);
+      .run(nowMs, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
@@ -271,7 +281,7 @@ export class RuntimeStore {
         `UPDATE task_runtime
             SET snapshot_hash = ?, document_id = ?, root_instance_id = ?, forked_at_seq = ?, fork_boundary_seq = ?,
                 status = ?, started_at = ?, ended_at = ?, outcome = ?, updated_at = ?
-          WHERE task_id = ?`,
+          WHERE task_id = ? AND ${OWNED_BY}`,
       )
       .run(
         fork.snapshotHash,
@@ -285,6 +295,7 @@ export class RuntimeStore {
         fork.outcome ?? null,
         nowMs,
         taskId,
+        this.workspace,
       );
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
@@ -297,8 +308,8 @@ export class RuntimeStore {
     extra?: { outputsJson?: string; failureJson?: string },
   ): void {
     const res = this.db
-      .prepare(`UPDATE task_runtime SET ended_at = ?, outcome = ?, outputs_json = ?, failure_json = ?, updated_at = ? WHERE task_id = ?`)
-      .run(nowMs, outcome, extra?.outputsJson ?? null, extra?.failureJson ?? null, nowMs, taskId);
+      .prepare(`UPDATE task_runtime SET ended_at = ?, outcome = ?, outputs_json = ?, failure_json = ?, updated_at = ? WHERE task_id = ? AND ${OWNED_BY}`)
+      .run(nowMs, outcome, extra?.outputsJson ?? null, extra?.failureJson ?? null, nowMs, taskId, this.workspace);
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
@@ -321,8 +332,8 @@ export class RuntimeStore {
   recoverInterrupted(nowMs: number, isLive?: (taskId: string) => boolean, only?: string): string[] {
     const running = (
       only === undefined
-        ? this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running'`).all()
-        : this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running' AND task_id = ?`).all(only)
+        ? this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running' AND ${OWNED_BY}`).all(this.workspace)
+        : this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running' AND task_id = ? AND ${OWNED_BY}`).all(only, this.workspace)
     ) as Array<{ task_id: string }>;
     const ids = running.map((r) => r.task_id).filter((id) => isLive === undefined || !isLive(id));
     const recover = this.db.transaction(() => {
@@ -330,9 +341,9 @@ export class RuntimeStore {
         this.db
           .prepare(
             `UPDATE task_runtime SET status = 'interrupted', outcome = 'interrupted', ended_at = ?, updated_at = ?
-              WHERE task_id = ?`,
+              WHERE task_id = ? AND ${OWNED_BY}`,
           )
-          .run(nowMs, nowMs, id);
+          .run(nowMs, nowMs, id, this.workspace);
         // The task's operation records left 'open' by the crash settle with it. 'open' means "a live
         // process is streaming into this row" — the state signal every record reader now keys on —
         // and no such process exists. The streamed partial in result_json is deliberately KEPT: those
@@ -378,9 +389,10 @@ export class RuntimeStore {
       .prepare(
         `SELECT DISTINCT r.task_id AS task_id FROM operation_records r
            JOIN task_runtime t ON t.task_id = r.task_id
-          WHERE r.status = 'open' AND t.status != 'running'`,
+          WHERE r.status = 'open' AND t.status != 'running'
+            AND r.task_id IN (SELECT task_id FROM task_owners WHERE workspace = ?)`,
       )
-      .all() as Array<{ task_id: string }>;
+      .all(this.workspace) as Array<{ task_id: string }>;
     const ids = rows.map((row) => row.task_id);
     const settle = this.db.transaction(() => {
       for (const id of ids) {

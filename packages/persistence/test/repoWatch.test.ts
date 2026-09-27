@@ -14,7 +14,7 @@ const origin = { remote: "origin", repository: "github.com/acme/app" };
 beforeEach(() => {
   db = openDb(":memory:");
   now = 1_000;
-  store = new RepoWatchStore(db, () => now);
+  store = new RepoWatchStore(db, "w", () => now);
 });
 afterEach(() => db.close());
 
@@ -65,7 +65,7 @@ describe("repository watcher memory", () => {
   it("reads the same from a process that was not there", () => {
     store.setCursor(origin, { branches: true });
     store.see(origin, "branch", "main", { head: "a1" });
-    const later = new RepoWatchStore(db, () => 99);
+    const later = new RepoWatchStore(db, "w", () => 99);
     expect(later.cursor(origin)).toEqual({ branches: true });
     expect(later.seen(origin, "branch", "main")).toEqual({ head: "a1" });
   });

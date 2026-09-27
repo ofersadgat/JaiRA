@@ -28,6 +28,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { JairaDb } from "./db";
+import { OWNED_BY } from "./workspace";
 
 /** A gate as it was parked, in the shape the renderer draws one from. */
 export interface StoredInteraction {
@@ -81,7 +82,11 @@ function parseInputs(text: string): Record<string, JsonValue> {
 }
 
 export class InteractionStore {
-  constructor(private readonly db: JairaDb) {}
+  constructor(
+    private readonly db: JairaDb,
+    /** Whose gates {@link list} returns — the database holds every workspace's (decision 0013 §4). */
+    private readonly workspace: string,
+  ) {}
 
   /**
    * A state has parked. Idempotent on the request id, because the hub mints one per park and a
@@ -123,8 +128,8 @@ export class InteractionStore {
   /** Every gate this project is holding, oldest first — the order they were asked in. */
   list(): StoredInteraction[] {
     const rows = this.db
-      .prepare(`SELECT * FROM pending_interactions ORDER BY created_at, rowid`)
-      .all() as RawInteraction[];
+      .prepare(`SELECT * FROM pending_interactions WHERE ${OWNED_BY} ORDER BY created_at, rowid`)
+      .all(this.workspace) as RawInteraction[];
     return rows.map(toStored);
   }
 

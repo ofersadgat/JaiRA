@@ -16,6 +16,7 @@ import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchin
 import { nodeVfs } from "./vfs";
 import { workflowLoadOptions } from "./workflowRefs";
 import type { Project } from "./project";
+import { ownerOf } from "./workspace";
 import { removeTaskJournal } from "./journalFile";
 import { removeTaskConversations } from "./conversationFile";
 import { removeTaskRows } from "./rowFile";
@@ -79,6 +80,10 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
     ...(input.system !== undefined ? { system: input.system } : {}),
   };
   if (project.runtime.get(meta.id)) throw refusal(log, `task '${meta.id}' already exists`, { taskId: meta.id });
+  // Asked before the file is written: the runtime row claims the id for this workspace, and one
+  // another workspace owns (decision 0013 §4) must not leave a task file behind as it is refused.
+  const owner = ownerOf(project.db, meta.id);
+  if (owner !== undefined && owner !== project.workspace) throw refusal(log, `task '${meta.id}' belongs to another workspace`, { taskId: meta.id });
   project.tasks.write(meta);
   project.runtime.insert(meta.id, nowMs, {
     branch: meta.branch,

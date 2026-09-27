@@ -19,6 +19,7 @@
  */
 import type { ForgeProviderKind, ProbeCursor, RemoteHandle, RemoteHandlePatch, RemoteHandlePort, RemoteHandleRow } from "@jaira/shared";
 import type { JairaDb } from "./db";
+import { OWNED_BY } from "./workspace";
 
 interface Raw {
   task_id: string;
@@ -86,6 +87,8 @@ export type StoredRemoteHandle = RemoteHandleRow;
 export class RemoteHandleStore implements RemoteHandlePort {
   constructor(
     private readonly db: JairaDb,
+    /** Whose requests {@link awaiting} returns — the database holds every workspace's (decision 0013 §4). */
+    private readonly workspace: string,
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -102,7 +105,9 @@ export class RemoteHandleStore implements RemoteHandlePort {
 
   /** The rows something is parked on — "nothing parked, nothing polled" is this list being empty. */
   awaiting(): RemoteHandleRow[] {
-    const rows = this.db.prepare(`SELECT * FROM remote_handles WHERE awaiting = 1 AND number IS NOT NULL ORDER BY created_at, task_id, key`).all() as Raw[];
+    const rows = this.db
+      .prepare(`SELECT * FROM remote_handles WHERE awaiting = 1 AND number IS NOT NULL AND ${OWNED_BY} ORDER BY created_at, task_id, key`)
+      .all(this.workspace) as Raw[];
     return rows.map(toStored);
   }
 

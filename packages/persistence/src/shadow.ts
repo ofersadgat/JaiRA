@@ -79,27 +79,54 @@ export const keepsIndex = (mode: string): boolean => mode === "both";
  * which is what would have happened without it.
  */
 const INDEX_TABLE = `CREATE TABLE IF NOT EXISTS storage_index (
-  concern     TEXT PRIMARY KEY,
+  workspace   TEXT NOT NULL,
+  concern     TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
-  built_at    INTEGER NOT NULL
+  built_at    INTEGER NOT NULL,
+  PRIMARY KEY (workspace, concern)
 )`;
 
-export function readFingerprint(db: JairaDb, concern: JairaStorageConcern): string | undefined {
+export function readFingerprint(db: JairaDb, workspace: string, concern: JairaStorageConcern): string | undefined {
   db.exec(INDEX_TABLE);
-  const row = db.prepare(`SELECT fingerprint FROM storage_index WHERE concern = ?`).get(concern) as
+  const row = db.prepare(`SELECT fingerprint FROM storage_index WHERE workspace = ? AND concern = ?`).get(workspace, concern) as
     | { fingerprint: string }
     | undefined;
   return row?.fingerprint;
 }
 
-export function writeFingerprint(db: JairaDb, concern: JairaStorageConcern, fingerprint: string, at: number): void {
+export function writeFingerprint(db: JairaDb, workspace: string, concern: JairaStorageConcern, fingerprint: string, at: number): void {
   db.exec(INDEX_TABLE);
-  db.prepare(`INSERT OR REPLACE INTO storage_index (concern, fingerprint, built_at) VALUES (?, ?, ?)`).run(
+  db.prepare(`INSERT OR REPLACE INTO storage_index (workspace, concern, fingerprint, built_at) VALUES (?, ?, ?, ?)`).run(
+    workspace,
     concern,
     fingerprint,
     at,
   );
 }
+
+/**
+ * Which of `main`'s rows of a concern table are this workspace's (decision 0013 §4) — the database
+ * holds every workspace's, so a seed copies only these and a `both` write-back replaces only these.
+ * A table keyed by task asks the task's owner; `sessions`, which carries no task, is the lineage
+ * this workspace's records hang off, ancestors included.
+ */
+export function ownedRows(table: string): string {
+  const owned = `SELECT task_id FROM main.task_owners WHERE workspace = :workspace`;
+  if (table !== "sessions") return `task_id IN (${owned})`;
+  return `id IN (
+    WITH RECURSIVE lineage(id) AS (
+      SELECT session_id FROM main.operation_records WHERE session_id IS NOT NULL AND task_id IN (${owned})
+      UNION SELECT landed_session_id FROM main.operation_records WHERE landed_session_id IS NOT NULL AND task_id IN (${owned})
+      UNION SELECT session_id FROM main.session_names WHERE task_id IN (${owned})
+      UNION SELECT s.parent FROM main.sessions s JOIN lineage ON s.id = lineage.id WHERE s.parent IS NOT NULL
+    ) SELECT id FROM lineage)`;
+}
+
+/**
+ * Keys `main` mints that a write-back must let it mint again: one workspace's replayed journal is
+ * numbered from one, and the shared table already holds every other workspace's numbers.
+ */
+const MINTED: Record<string, string> = { state_machine_events: "seq", artifacts: "id" };
 
 /** Every table a storage configuration puts behind a shadow, in creation order. */
 export function shadowedTables(storage: JairaStorageConfig): string[] {
@@ -163,12 +190,14 @@ export function shadowTable(db: JairaDb, table: string): boolean {
  * from a FILE is the case that cannot promise that, which is why nothing points at a rowid any more
  * (migration 8).
  */
-export function seedFromMain(db: JairaDb, table: string): number {
+export function seedFromMain(db: JairaDb, table: string, workspace: string): number {
   const columns = writableColumns(db, table)
     .map((c) => `"${c}"`)
     .join(", ");
   if (columns.length === 0) return 0;
-  const info = db.prepare(`INSERT INTO temp."${table}" (${columns}) SELECT ${columns} FROM main."${table}"`).run();
+  const info = db
+    .prepare(`INSERT INTO temp."${table}" (${columns}) SELECT ${columns} FROM main."${table}" WHERE ${ownedRows(table)}`)
+    .run({ workspace });
   return Number(info.changes);
 }
 
@@ -220,6 +249,7 @@ export interface ShadowReport {
  */
 export function applyStorage(
   db: JairaDb,
+  workspace: string,
   storage: JairaStorageConfig,
   sources: Partial<Record<JairaStorageConcern, ReplaySource>> = {},
   fingerprints: Partial<Record<JairaStorageConcern, Fingerprint>> = {},
@@ -235,8 +265,8 @@ export function applyStorage(
     // what makes that safe — without one, a `git pull` under a persisted index leaves the two
     // disagreeing and nothing notices, which is the gap §4.4 shipped with and this closes.
     const fingerprint = fingerprints[concern]?.();
-    if (keepsIndex(storage[concern]) && fingerprint !== undefined && readFingerprint(db, concern) === fingerprint) {
-      for (const table of shadowed) seedFromMain(db, table);
+    if (keepsIndex(storage[concern]) && fingerprint !== undefined && readFingerprint(db, workspace, concern) === fingerprint) {
+      for (const table of shadowed) seedFromMain(db, table, workspace);
       report.reused.push(concern);
       continue;
     }
@@ -253,20 +283,34 @@ export function applyStorage(
         // Emptied CHILDREN FIRST and refilled parents first, because `main` still has its foreign
         // keys — only the shadow drops them. `runs.task_id` references `task_runtime`, so deleting
         // in concern order would take the parent out from under its rows.
-        for (const table of [...shadowed].reverse()) db.prepare(`DELETE FROM main."${table}"`).run();
+        //
+        // Only this workspace's rows, in both directions: the database holds every workspace's.
+        // `sessions` is emptied before the records its scope is read from.
+        for (const table of [...shadowed].reverse()) db.prepare(`DELETE FROM main."${table}" WHERE ${ownedRows(table)}`).run({ workspace });
         for (const table of shadowed) {
           const columns = writableColumns(db, table)
+            .filter((c) => c !== MINTED[table])
             .map((c) => `"${c}"`)
             .join(", ");
           if (columns.length > 0) {
-            db.prepare(`INSERT INTO main."${table}" (${columns}) SELECT ${columns} FROM temp."${table}"`).run();
+            if (table === "sessions") {
+              db.prepare(`INSERT OR IGNORE INTO main."${table}" (${columns}) SELECT ${columns} FROM temp."${table}"`).run();
+            } else {
+              // A replayed task no workspace owns yet is this one's — the claim a new task makes on
+              // insert. One another workspace owns stays theirs, and its rows are not written back.
+              db.prepare(`INSERT OR IGNORE INTO main.task_owners (task_id, workspace) SELECT DISTINCT task_id, ? FROM temp."${table}" WHERE task_id IS NOT NULL`).run(workspace);
+              db.prepare(
+                `INSERT OR IGNORE INTO main."${table}" (${columns}) SELECT ${columns} FROM temp."${table}"
+                  WHERE task_id IN (SELECT task_id FROM main.task_owners WHERE workspace = ?)`,
+              ).run(workspace);
+            }
           }
         }
-        writeFingerprint(db, concern, fingerprint, now());
+        writeFingerprint(db, workspace, concern, fingerprint, now());
       }
       continue;
     }
-    for (const table of shadowed) report.seeded[table] = seedFromMain(db, table);
+    for (const table of shadowed) report.seeded[table] = seedFromMain(db, table, workspace);
   }
   return report;
 }

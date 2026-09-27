@@ -15,7 +15,9 @@ const identity = { taskId: "t-1", key: "review", provider: "gitlab" as const, ho
 beforeEach(() => {
   db = openDb(":memory:");
   now = 1_000;
-  store = new RemoteHandleStore(db, () => now);
+  store = new RemoteHandleStore(db, "w", () => now);
+  // The workspace that owns the task (decision 0013 §4): what `awaiting` lists is its own.
+  db.prepare(`INSERT INTO task_owners (task_id, workspace) VALUES (?, ?)`).run("t-1", "w");
 });
 afterEach(() => db.close());
 
@@ -51,7 +53,7 @@ describe("remote handles", () => {
   it("stores the quiet window as a timestamp, so it reads the same from a process that was not there", () => {
     store.ensure(identity);
     store.update("t-1", "review", { number: 41, url: "u", settleAt: 601_000, settleAfterMs: 600_000, seen: ["n1", "n2"], cursor: { since: "2026-09-19T00:00:00.000Z" }, requestId: "ui-7", awaiting: true });
-    const later = new RemoteHandleStore(db, () => 999_999);
+    const later = new RemoteHandleStore(db, "w", () => 999_999);
     expect(later.get("t-1", "review")).toMatchObject({ settleAt: 601_000, settleAfterMs: 600_000, seen: ["n1", "n2"], cursor: { since: "2026-09-19T00:00:00.000Z" } });
     expect(later.byRequest("ui-7")?.key).toBe("review");
     // An explicit act clears the window: `null` and not merely "leave it".

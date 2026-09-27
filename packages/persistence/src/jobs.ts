@@ -15,6 +15,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { JairaDb } from "./db";
+import { OWNED_BY } from "./workspace";
 
 // The wire shapes live in `@jaira/shared` so the renderer can name one without reaching into this
 // Node-only package — the same rule the lint and view models already follow.
@@ -73,6 +74,12 @@ export class JobStore {
   constructor(
     private readonly db: JairaDb,
     private readonly staleMs: number = DEFAULT_STALE_MS,
+    /**
+     * Whose jobs {@link live} lists, when set — the database holds every workspace's (decision 0013
+     * §4). Claims, liveness and the stale sweep stay machine-wide: a process is this machine's whoever
+     * started it, and an orphan is reported by whichever open finds it first.
+     */
+    private readonly workspace?: string,
   ) {}
 
   /** Claim a task's run for this process. Returns the job id to heartbeat and end. */
@@ -213,8 +220,10 @@ export class JobStore {
   /** Everything currently open, newest first — what a "what is running?" view reads. */
   live(nowMs: number): JobRow[] {
     const rows = this.db
-      .prepare(`SELECT * FROM jobs WHERE ended_at IS NULL AND heartbeat_at > ? ORDER BY id DESC`)
-      .all(nowMs - this.staleMs) as RawJob[];
+      .prepare(
+        `SELECT * FROM jobs WHERE ended_at IS NULL AND heartbeat_at > ?${this.workspace !== undefined ? ` AND (task_id IS NULL OR ${OWNED_BY})` : ""} ORDER BY id DESC`,
+      )
+      .all(...(this.workspace !== undefined ? [nowMs - this.staleMs, this.workspace] : [nowMs - this.staleMs])) as RawJob[];
     return rows.map(toJob);
   }
 

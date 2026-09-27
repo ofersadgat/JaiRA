@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe("RuntimeStore", () => {
   it("inserts queued rows and updates status/snapshot", () => {
-    const store = new RuntimeStore(db);
+    const store = new RuntimeStore(db, "w");
     store.insert("t-1", 1000);
     expect(store.get("t-1")).toMatchObject({ taskId: "t-1", status: "queued", createdAt: 1000 });
     store.setStatus("t-1", "running", 2000);
@@ -34,7 +34,7 @@ describe("RuntimeStore", () => {
   });
 
   it("tracks the machine's one execution on the task row", () => {
-    const store = new RuntimeStore(db);
+    const store = new RuntimeStore(db, "w");
     store.insert("t-1", 1000);
     store.beginTask("t-1", "hash1", 1100);
     store.endTask("t-1", "success", 1200, { outputsJson: '{"x":1}' });
@@ -45,7 +45,7 @@ describe("RuntimeStore", () => {
   });
 
   it("recovery marks running tasks interrupted and closes their dangling runs", () => {
-    const store = new RuntimeStore(db);
+    const store = new RuntimeStore(db, "w");
     store.insert("t-running", 1000);
     store.setStatus("t-running", "running", 1001);
     store.beginTask("t-running", "h", 1001);
@@ -65,7 +65,7 @@ describe("RuntimeStore", () => {
     // 'open' means "a live process is streaming into this row" — the state signal the record readers
     // key on — and after a crash no such process exists. The partial result_json survives the flip:
     // those turns really were exchanged before the process died.
-    const store = new RuntimeStore(db);
+    const store = new RuntimeStore(db, "w");
     store.insert("t-crash", 1000);
     store.setStatus("t-crash", "running", 1001);
     store.beginTask("t-crash", "h", 1001);
@@ -97,7 +97,7 @@ describe("recovering the calls a quit left open under an ended task", () => {
   it("settles them interrupted, keeps their partials, and leaves a running task's alone", () => {
     // A conversation outlives its run: a turn the app quit under is an open record under a task that
     // reads `completed`, which the interrupted-task sweep never looks at.
-    const store = new RuntimeStore(db);
+    const store = new RuntimeStore(db, "w");
     store.insert("t-chat", 1000);
     store.setStatus("t-chat", "completed", 1002);
     store.insert("t-running", 1000);
@@ -119,7 +119,7 @@ describe("recovering the calls a quit left open under an ended task", () => {
 
 describe("SqliteEventLog", () => {
   it("records EngineEvents through the Persistence port and lists them back", () => {
-    const runtime = new RuntimeStore(db);
+    const runtime = new RuntimeStore(db, "w");
     runtime.insert("t-1", 1000);
     const log = new SqliteEventLog(db);
 

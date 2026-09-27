@@ -228,9 +228,13 @@ describe("fileTree", () => {
     const home = mkdtempSync(join(tmpdir(), "jaira-home-"));
     const absent = join(home, "shared");
     const withBase = openProject(dir, { baseDir: absent });
+    // Listed and closed first: the database lives in the shared root (decision 0013 §4), and an open
+    // file is not one Windows lets go of. The tree itself is read from disk alone.
+    const listed = browseWorkflows(withBase);
+    withBase.close();
     rmSync(absent, { recursive: true, force: true });
     try {
-      const tree = fileTree(withBase, browseWorkflows(withBase));
+      const tree = fileTree(withBase, listed);
 
       expect(tree.roots.map((r) => r.layer)).toEqual(["project", "base", "system"]);
       const base = tree.roots[1]!;
@@ -239,7 +243,6 @@ describe("fileTree", () => {
       expect(base.dir).toBe(absent);
       expect(tree.roots[0]!.exists).toBe(true);
     } finally {
-      withBase.close();
       rmSync(home, { recursive: true, force: true });
     }
   });

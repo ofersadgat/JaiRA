@@ -235,6 +235,9 @@ describe("system/ is committed now", () => {
       // must never travel: the key SIGNS what this disk has agreed to run, so a committed one lets
       // any clone mint approvals here (SPEC §7.5.5).
       "system/machine.key",
+      // Which workspace this clone is in the shared database (decision 0013 §4): committed, every
+      // clone of the repository would claim the same tasks.
+      "system/workspace.id",
       ".env.local",
     ]);
     expect(existsSync(join(dir, "repo", ".jaira", ".gitignore"))).toBe(true);

@@ -33,6 +33,7 @@ const storageOf = (over: Partial<JairaStorageConfig>): JairaStorageConfig => ({ 
 /** A task to hang journal rows off. */
 function seedTask(): void {
   db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t1','running',1,1)`).run();
+  db.prepare(`INSERT INTO task_owners (task_id, workspace) VALUES ('t1', 'w')`).run();
 }
 
 const event = (payload: object): void =>
@@ -132,7 +133,7 @@ describe("seeding from main — the flip path", () => {
     event({ operationId: "b" });
     shadowTable(db, "state_machine_events");
 
-    expect(seedFromMain(db, "state_machine_events")).toBe(2);
+    expect(seedFromMain(db, "state_machine_events", "w")).toBe(2);
     // `seq` is carried explicitly rather than re-minted, so a seed changes no identity. A replay
     // from a FILE is the case that cannot promise that — which is why nothing points at a rowid.
     expect(db.prepare(`SELECT seq, operation_id FROM state_machine_events ORDER BY seq`).all()).toEqual([
@@ -151,7 +152,7 @@ describe("seeding from main — the flip path", () => {
 
 describe("applyStorage", () => {
   it("does nothing at all when everything is in the database, which is the default", () => {
-    expect(applyStorage(db, defaultConfig().storage)).toEqual({ shadowed: [], seeded: {}, replayed: {}, reused: [] });
+    expect(applyStorage(db, "w", defaultConfig().storage)).toEqual({ shadowed: [], seeded: {}, replayed: {}, reused: [] });
     expect(db.prepare(`SELECT COUNT(*) AS n FROM temp.sqlite_master`).get()).toEqual({ n: 0 });
   });
 
@@ -163,14 +164,14 @@ describe("applyStorage", () => {
   });
 
   it("treats `both` as file-backed, because it is the same truth plus a persisted index", () => {
-    expect(applyStorage(db, storageOf({ artifacts: "both" })).shadowed).toEqual(["artifacts"]);
+    expect(applyStorage(db, "w", storageOf({ artifacts: "both" })).shadowed).toEqual(["artifacts"]);
   });
 
   it("reports what it shadowed and what it carried over", () => {
     seedTask();
     event({ operationId: "carried" });
 
-    const report = applyStorage(db, parseConfig({ storage: { journal: "file" } }).storage);
+    const report = applyStorage(db, "w", parseConfig({ storage: { journal: "file" } }).storage);
     expect(report.shadowed).toEqual(["state_machine_events"]);
     expect(report.seeded).toEqual({ state_machine_events: 1 });
     expect(db.prepare(`SELECT COUNT(*) AS n FROM state_machine_events`).get()).toEqual({ n: 1 });

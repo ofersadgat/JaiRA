@@ -197,10 +197,11 @@ describe("authoring into the shared root", () => {
     const svc = new AppService({ publish: () => undefined, baseDir: base });
     try {
       await svc.open(other);
-      // Opening a project materialises the base root, so remove it again: the point is that a write
-      // does not depend on the directory already being there.
-      rmSync(base, { recursive: true, force: true });
-      expect(existsSync(base)).toBe(false);
+      // Opening a project materialises the base root, so remove its workflows again: the point is that
+      // a write does not depend on the directory already being there. Not the whole root — the
+      // database every workspace shares lives in it (decision 0013 §4), open.
+      rmSync(join(base, "workflows"), { recursive: true, force: true });
+      expect(existsSync(join(base, "workflows"))).toBe(false);
 
       const written = svc.writeWorkflow({
         stateId: "review/step",
