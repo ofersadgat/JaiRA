@@ -12,7 +12,7 @@ import { openDb } from "../src/db";
 import { createTask } from "../src/lifecycle";
 import { initProject, openProject, openSharedProject, type Project } from "../src/project";
 import { RuntimeStore } from "../src/runtime";
-import { legacyDbFile, ownerOf } from "../src/workspace";
+import { ownerOf } from "../src/workspace";
 
 let root: string;
 let home: string;
@@ -50,7 +50,7 @@ describe("one database, many workspaces", () => {
   it("keeps the database in the shared root, and nothing in the clone", () => {
     const a = openAt(clone("a"));
     expect(a.paths.dbFile).toBe(join(home, "system", "jaira.db"));
-    expect(existsSync(legacyDbFile(a.paths))).toBe(false);
+    expect(existsSync(join(a.paths.systemDir, "jaira.db"))).toBe(false);
     expect(a.workspace).toMatch(/^[0-9a-f-]{36}$/);
   });
 
@@ -136,65 +136,5 @@ describe("a workspace whose records are files", () => {
       (a.db.prepare(`SELECT COUNT(*) AS n FROM main.state_machine_events WHERE task_id = ?`).get(id) as { n: number }).n;
     expect(inMain(inA.id)).toBe(1);
     expect(inMain(inB.id)).toBe(1);
-  });
-});
-
-describe("the database a clone used to keep", () => {
-  /** Write an old clone database: its own journal numbered from one, a fork pointing into it. */
-  function legacy(dir: string, tasks: string[]): void {
-    const file = legacyDbFile(jairaPaths(dir, home));
-    const db = openDb(file);
-    const runtime = new RuntimeStore(db, "old");
-    for (const id of tasks) {
-      runtime.insert(id, 1);
-      for (const type of ["a", "b"]) {
-        db.prepare(`INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES (?, ?, '{}', 1)`).run(id, type);
-      }
-    }
-    db.prepare(`UPDATE task_runtime SET forked_at_seq = 2, fork_boundary_seq = 1 WHERE task_id = ?`).run(tasks[0]);
-    const job = db.prepare(`INSERT INTO jobs (kind, task_id, owner_token, started_at, heartbeat_at, ended_at) VALUES ('run', ?, 'x', 1, 1, 2)`).run(tasks[0]);
-    db.prepare(`INSERT INTO job_output (job_id, stream, seq, chunk, created_at) VALUES (?, 'stderr', 0, 'boom', 1)`).run(job.lastInsertRowid);
-    db.close();
-  }
-
-  it("is merged into the shared database once, renumbered, and removed", () => {
-    // Something already in the shared database, so the clone's numbers have to move.
-    const first = openAt(clone("first"));
-    const earlier = createTask(first, { title: "earlier", workflow: "w" });
-    first.db.prepare(`INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES (?, 'x', '{}', 1)`).run(earlier.id);
-    first.db.prepare(`INSERT INTO jobs (kind, task_id, owner_token, started_at, heartbeat_at, ended_at) VALUES ('run', ?, 'y', 1, 1, 2)`).run(earlier.id);
-
-    const dir = clone("old");
-    legacy(dir, ["t-legacyaaaa", "t-legacybbbb"]);
-    const old = openAt(dir);
-
-    expect(existsSync(legacyDbFile(old.paths))).toBe(false);
-    expect(old.runtime.list().map((r) => r.taskId).sort()).toEqual(["t-legacyaaaa", "t-legacybbbb"]);
-    expect(ownerOf(old.db, "t-legacyaaaa")).toBe(old.workspace);
-    const seqs = (id: string): number[] =>
-      (old.db.prepare(`SELECT seq FROM state_machine_events WHERE task_id = ? ORDER BY seq`).all(id) as Array<{ seq: number }>).map((r) => r.seq);
-    // Past the one event already here, order kept.
-    expect(seqs("t-legacyaaaa")).toEqual([2, 3]);
-    expect(seqs("t-legacybbbb")).toEqual([4, 5]);
-    // The fork's cut and boundary moved with the journal they point into.
-    expect(old.runtime.get("t-legacyaaaa")).toMatchObject({ forkedAtSeq: 3, forkBoundarySeq: 2 });
-    // A job's output follows its job to the job's new id.
-    const job = old.db.prepare(`SELECT id FROM jobs WHERE task_id = 't-legacyaaaa'`).get() as { id: number };
-    expect(job.id).toBe(2);
-    expect(old.db.prepare(`SELECT chunk FROM job_output WHERE job_id = ?`).get(job.id)).toEqual({ chunk: "boom" });
-    // The other workspace is untouched.
-    expect(first.runtime.list().map((r) => r.taskId)).toEqual([earlier.id]);
-  });
-
-  it("leaves a task the shared database already has in the old file, renamed, rather than lose it", () => {
-    const first = openAt(clone("first"));
-    const taken = createTask(first, { title: "ran here too", workflow: "w" });
-    const dir = clone("old");
-    legacy(dir, [taken.id, "t-legacycccc"]);
-    const old = openAt(dir);
-
-    expect(old.runtime.list().map((r) => r.taskId)).toEqual(["t-legacycccc"]);
-    expect(existsSync(`${legacyDbFile(old.paths)}.unmerged`)).toBe(true);
-    expect(ownerOf(old.db, taken.id)).toBe(first.workspace);
   });
 });

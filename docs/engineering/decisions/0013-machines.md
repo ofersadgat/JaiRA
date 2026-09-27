@@ -486,8 +486,8 @@ the workspace specific stuff remains in the the workspace".
   claimed by the one that replayed it.
 - **The shared root's rows,** the only ones in the file before, are claimed for it on its next open
   (`claimUnowned`).
-- **A clone's old database** (`mergeLegacyDb`, the migration tool, to be deleted once every clone has
-  been opened):
+- **A clone's old database** was merged once by a migration tool (`mergeLegacyDb`), deleted on
+  2026-09-27 once the person's clones had been opened by this build:
   - it is brought to the current schema, attached, and copied in one transaction;
   - journal sequence numbers and job ids are shifted past those already present, with fork cuts and
     boundaries, job parents and job output following;

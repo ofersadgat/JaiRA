@@ -43,7 +43,7 @@ import { EventWaitStore, RepoWatchStore } from "./repoWatch";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
-import { claimReplayed, claimUnowned, mergeLegacyDb, registerWorkspace, workspaceIdOf } from "./workspace";
+import { claimReplayed, claimUnowned, registerWorkspace, workspaceIdOf } from "./workspace";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.project");
@@ -420,10 +420,9 @@ function openAt(
   const workspace = workspaceIdOf(paths);
   if (!replica) {
     registerWorkspace(db, workspace, paths.projectDir);
-    // What was here before: a clone's own database, merged once and removed; the shared root's rows,
-    // which were the only ones in this file, claimed as its own.
-    if (kind === "project") mergeLegacyDb(db, paths, workspace);
-    else claimUnowned(db, workspace);
+    // The shared root's rows, which were the only ones in this file before it held every workspace's,
+    // claimed as its own.
+    if (kind === "shared") claimUnowned(db, workspace);
   }
   // BEFORE anything reads. A file-backed concern is served by a `TEMP` table standing in front of
   // its `main` counterpart (DESIGN §4.4), and a store constructed against the connection first would
