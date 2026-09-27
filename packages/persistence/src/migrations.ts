@@ -591,6 +591,33 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 22,
+    note: "a replica remembers what it holds of another machine's tasks, and where the owner's journal numbers landed here",
+    // Decision 0013 §6. A replica asks the owner for what changed since what it holds, so it keeps,
+    // per task, the owner's version and how far into the owner's journal it has read. The owner's
+    // journal numbers are re-minted as they land in this file (every workspace shares its sequence),
+    // and `replica_seqs` is the map back — what lets a fork's cut, which names its parent's position
+    // in the OWNER's numbers, point at the right row here.
+    sql: `
+      CREATE TABLE IF NOT EXISTS replica_versions (
+        workspace  TEXT NOT NULL,
+        task_id    TEXT NOT NULL,
+        version    TEXT NOT NULL,
+        seq        INTEGER NOT NULL DEFAULT 0,
+        events     INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (workspace, task_id)
+      );
+      CREATE TABLE IF NOT EXISTS replica_seqs (
+        workspace  TEXT NOT NULL,
+        remote_seq INTEGER NOT NULL,
+        local_seq  INTEGER NOT NULL,
+        PRIMARY KEY (workspace, remote_seq)
+      );
+      CREATE INDEX IF NOT EXISTS replica_seqs_local ON replica_seqs(local_seq);
+    `,
+  },
 ];
 
 /**

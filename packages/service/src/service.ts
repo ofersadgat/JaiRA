@@ -131,6 +131,9 @@ import {
   listDescriptions,
   loadLayeredConfig,
   openProject,
+  exportChanges,
+  snapshotFiles,
+  type ReplicaKnown,
   openSharedProject,
   sessionStoreFor,
   JobOutputSink,
@@ -683,6 +686,7 @@ import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
 import { Fleet, type ReachPort } from "./fleet";
 import { Federation } from "./federation";
+import { Replicator } from "./replicator";
 import { machineTags } from "./machine";
 import { Placement, workspaceKey, type MachineCapacity, type PlacementRules } from "./placement";
 import { ResourceSampler } from "./resources";
@@ -698,6 +702,11 @@ export interface AppServiceOptions {
   version?: string;
   /** How this machine is published on the tailnet. Default: the installed Tailscale app. */
   reach?: ReachPort;
+  /**
+   * Whether this engine keeps a copy of the fleet's tasks when the person has not said (decision 0013
+   * §6). A window's engine does; `jaira serve` with no window does not (ruling 7). Default: no.
+   */
+  replicate?: boolean;
   /**
    * The persistent MCP bridge CLI agent runs register on. Default: a worker-thread host reading its
    * worker file from beside `main.cjs` — right for the bundled app, and a seam here so a test that
@@ -1369,6 +1378,7 @@ export class AppService {
       publish: (view) => this.publish({ type: "machines:changed", view }),
       log: (level, message) => this.log({ level, source: "machines", message }),
       ...(options.reach !== undefined ? { reach: options.reach } : {}),
+      replicateByDefault: options.replicate === true,
     });
     this.resources = new ResourceSampler();
     this.placement = new Placement({
@@ -1383,6 +1393,11 @@ export class AppService {
     this.federation = new Federation(this.fleet, {
       baseDir: this.baseDir,
       publish: (message) => this.publish(message),
+      log: (level, message) => this.log({ level, source: "machines", message }),
+      hasReplica: (machineId, dir) => this.replicator.hasReplica(machineId, dir),
+    });
+    this.replicator = new Replicator(this.fleet, this.federation, {
+      baseDir: this.baseDir,
       log: (level, message) => this.log({ level, source: "machines", message }),
     });
     // Settings' warnings and errors: before the log below, whose errors it counts.
@@ -2395,6 +2410,10 @@ export class AppService {
 
   /** Other machines' workspaces, used from here (decision 0013 §4, §7). */
   readonly federation: Federation;
+  /** This machine's copy of the fleet's tasks (decision 0013 §6). */
+  readonly replicator: Replicator;
+  /** Copies of other machines' workspaces, opened to be read while their machine is offline — by remote key. */
+  private readonly replicaSessions = new Map<string, ProjectSession>();
 
   /** How busy this machine is, for placement (decision 0013 §5). */
   private readonly resources: ResourceSampler;
@@ -2611,6 +2630,11 @@ export class AppService {
     return {
       ...this.fleet.handlersFor(caller),
       "fleet:capacity": () => this.capacity(),
+      // A machine keeping a copy of this one's tasks (decision 0013 §6): what changed since what it
+      // holds, the big strings it lacks, and a snapshot's files.
+      "replica:pull": ((request: { project: string; known?: Record<string, ReplicaKnown> }) => exportChanges(this.p(request.project), request.known ?? {})) as (request: never) => unknown,
+      "replica:blobs": ((request: { hashes: string[] }) => this.replicator.blobs((request.hashes ?? []).slice(0, 2_000))) as (request: never) => unknown,
+      "replica:snapshot": ((request: { project: string; hash: string }) => snapshotFiles(this.p(request.project), request.hash)) as (request: never) => unknown,
       "fleet:placement": ((request: { identity: string; rules: PlacementRules }) => {
         if (this.placement.merge(request.identity, request.rules)) this.publish({ type: "store:invalidate", scope: "config" });
         return null;
@@ -3067,6 +3091,9 @@ export class AppService {
     this.closed = true;
     clearInterval(this.placementTimer);
     this.resources.close();
+    this.replicator.close();
+    for (const replica of this.replicaSessions.values()) replica.project.close();
+    this.replicaSessions.clear();
     this.fleet.close();
     this.limits.close();
     this.waiting.close();
@@ -3186,7 +3213,27 @@ export class AppService {
       return open.length === 1 ? open[0] : undefined;
     }
     if (ref === SHARED_SESSION) return this.sharedSession();
+    // Another machine's workspace, asked of here only when that machine is offline (`Federation`):
+    // read from this machine's copy of it.
+    const remote = parseRemoteProjectKey(ref);
+    if (remote !== undefined) return this.replicaSession(ref, remote.machineId, remote.dir);
     return this.sessions.get(sessionKey(ref));
+  }
+
+  /**
+   * A copy of another machine's workspace, opened to be READ (decision 0013 §6). Never among the
+   * sessions: nothing resumes, watches, supervises or answers for it here — its owner does all of that
+   * once it is back, and whatever a person gives it meanwhile waits in the outbox.
+   */
+  private replicaSession(key: string, machineId: string, dir: string): ProjectSession | undefined {
+    const open = this.replicaSessions.get(key);
+    if (open !== undefined) return open;
+    const workspace = this.replicator.workspaceOf(machineId, dir);
+    if (workspace === undefined || !this.replicator.hasReplica(machineId, dir)) return undefined;
+    const project = openProject(this.replicator.replicaDir(machineId, workspace), { baseDir: this.baseDir, replica: true });
+    const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key, project) });
+    this.replicaSessions.set(key, session);
+    return session;
   }
 
   /** The same, but a missing one is an error rather than an absence. */

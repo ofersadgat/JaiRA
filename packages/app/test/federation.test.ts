@@ -110,6 +110,33 @@ describe("another machine's workspaces", () => {
     await expect.poll(async () => (await remotes(a)).length, { timeout: 8000 }).toBe(1);
   });
 
+  it("keeps a copy of another machine's tasks, and reads it while that machine is away", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    a.service.fleet.setReplicate(true);
+    const dir = clone();
+    initProject(dir, b.base);
+    await b.service.open(dir);
+    const task = (await b.call("task:create", { title: "written on the mini", workflow: "chat/session", project: dir })) as { taskId: string };
+    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await expect.poll(async () => (await remotes(a)).length, { timeout: 8000 }).toBe(1);
+    const [remote] = await remotes(a);
+    const bId = b.service.fleet.identity().id;
+    await a.service.replicator.pull(bId);
+    expect(a.service.replicator.hasReplica(bId, parseRemoteProjectKey(remote!.project)!.dir)).toBe(true);
+
+    await b.hosted.close();
+    made.splice(made.indexOf(b), 1);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("offline");
+    // Read from the copy: the conversation and the board, as they were when it was taken.
+    expect(await a.call("task:conversation", { taskId: task.taskId, project: remote!.project })).toMatchObject({ taskId: task.taskId, title: "written on the mini" });
+    await expect(a.call("board:roots", { project: remote!.project })).resolves.toMatchObject({ columns: expect.any(Array) });
+    // And only read: what would change it waits for the machine, or is refused.
+    await expect(a.call("task:rename", { taskId: task.taskId, title: "x", project: remote!.project })).rejects.toThrow(/mac-mini is offline/);
+    // Nothing of the copy is this machine's own.
+    expect(((await a.call("task:all", {})) as Array<{ taskId: string }>).some((t) => t.taskId === task.taskId)).toBe(false);
+  });
+
   it("keeps an answer for a machine that went away, and says it is waiting", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");

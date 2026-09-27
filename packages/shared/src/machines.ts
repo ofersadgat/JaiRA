@@ -41,7 +41,8 @@ export interface PeerView extends MachineView {
 }
 
 export interface MachinesView {
-  self: MachineView & { reach: MachineReach; version: string };
+  /** `replicate`: this machine keeps a copy of the other machines' tasks (decision 0013 §6). */
+  self: MachineView & { reach: MachineReach; version: string; replicate: boolean };
   machines: PeerView[];
   /** The code being shown under Pair a machine, while it is valid. */
   pairing?: { code: string; expiresAt: number };

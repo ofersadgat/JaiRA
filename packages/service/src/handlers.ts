@@ -229,6 +229,12 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "machines:rename": ((request: { label: string }) => service.fleet.rename(request.label)) as Handler,
     "machines:tags": ((request: { tags: string[] }) => service.fleet.setTags(request.tags)) as Handler,
     "machines:reach": ((request: { on: boolean }) => service.fleet.setReachable(request.on === true)) as Handler,
+    "machines:replicate": ((request: { on: boolean }) => {
+      const view = service.fleet.setReplicate(request.on === true);
+      // Switched on: every online machine is copied now rather than at the next minute.
+      if (request.on === true) for (const peer of service.fleet.peers()) if (peer.state === "online") service.replicator.schedule(peer.id, 0);
+      return view;
+    }) as Handler,
     "machines:pairCode": (() => service.fleet.pairingCode()) as Handler,
     "machines:pairCancel": (() => service.fleet.cancelPairing()) as Handler,
     "machines:add": ((request: { address: string; code: string }) => service.fleet.add(request.address, request.code)) as Handler,

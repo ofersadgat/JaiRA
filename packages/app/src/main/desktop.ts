@@ -955,6 +955,9 @@ function buildService(): AppService {
     baseDir,
     version: app.getVersion(),
     publish: pushToWindow,
+    // A window's engine keeps a copy of the other machines' tasks, to read while they are offline
+    // (decision 0013 §6); `jaira serve` does not, unless the person switches it on.
+    replicate: true,
     keychain: electronKeychain(),
     // The app checks what can actually answer a prompt — by itself, at startup, at project open, and
     // after every configuration write. It is the one caller that should: it has a settings screen to

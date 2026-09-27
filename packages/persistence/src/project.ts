@@ -356,7 +356,18 @@ function layeredConfigOf(files: readonly string[]): JairaConfig {
 
 export function openProject(
   projectDir: string,
-  opts?: { now?: () => number; staleMs?: number; baseDir?: string; builtInDir?: string },
+  opts?: {
+    now?: () => number;
+    staleMs?: number;
+    baseDir?: string;
+    builtInDir?: string;
+    /**
+     * A replica of another machine's workspace (decision 0013 §6), opened to be READ: its rows belong
+     * to the owner, so nothing here recovers, claims, merges or re-registers them — a task running
+     * there is not interrupted by a window reading its copy here.
+     */
+    replica?: boolean;
+  },
 ): Project {
   const paths = jairaPaths(projectDir, opts?.baseDir, opts?.builtInDir);
   if (!existsSync(paths.jairaDir)) {
@@ -386,8 +397,9 @@ function openAt(
   paths: JairaPaths,
   config: JairaConfig,
   kind: Project["kind"],
-  opts?: { now?: () => number; staleMs?: number },
+  opts?: { now?: () => number; staleMs?: number; replica?: boolean },
 ): Project {
+  const replica = opts?.replica === true;
   const now = opts?.now ?? Date.now;
   // Everything under `system/` is generated, so a missing one is regenerated rather than refused.
   // Deleting it is how a person discards state whose format has moved on, and a clone of a project
@@ -405,11 +417,13 @@ function openAt(
   mkdirSync(dirname(paths.dbFile), { recursive: true });
   const db = openDb(paths.dbFile);
   const workspace = workspaceIdOf(paths);
-  registerWorkspace(db, workspace, paths.projectDir);
-  // What was here before: a clone's own database, merged once and removed; the shared root's rows,
-  // which were the only ones in this file, claimed as its own.
-  if (kind === "project") mergeLegacyDb(db, paths, workspace);
-  else claimUnowned(db, workspace);
+  if (!replica) {
+    registerWorkspace(db, workspace, paths.projectDir);
+    // What was here before: a clone's own database, merged once and removed; the shared root's rows,
+    // which were the only ones in this file, claimed as its own.
+    if (kind === "project") mergeLegacyDb(db, paths, workspace);
+    else claimUnowned(db, workspace);
+  }
   // BEFORE anything reads. A file-backed concern is served by a `TEMP` table standing in front of
   // its `main` counterpart (DESIGN §4.4), and a store constructed against the connection first would
   // have prepared its statements against the table it is meant to shadow.
@@ -430,19 +444,19 @@ function openAt(
   const journalDir = isFileBacked(config.storage.journal) ? paths.journalDir : undefined;
   const taskLog = isFileBacked(config.storage.tasks) ? new RowLog(paths.taskRowsDir) : undefined;
   const artifactLog = isFileBacked(config.storage.artifacts) ? new RowLog(paths.artifactRowsDir) : undefined;
-  claimReplayed(db, workspace);
+  if (!replica) claimReplayed(db, workspace);
   const runtime = new RuntimeStore(db, workspace, taskLog);
   const jobs = new JobStore(db, opts?.staleMs, workspace);
 
   // Read orphans BEFORE reaping: the rows are the only record those processes ever
   // existed, and an abandoned agent is still running and still billing.
   const at = now();
-  const orphans = jobs.orphans(at);
+  const orphans = replica ? [] : jobs.orphans(at);
   // A task with a live claim is being driven by another process right now — the
   // whole point of §4.2a. Only genuinely abandoned tasks are recovered.
-  const recovered = runtime.recoverInterrupted(at, (taskId) => jobs.liveRunJob(taskId, at) !== undefined);
-  const recoveredCalls = runtime.recoverUnsettledCalls(at);
-  jobs.reapStale(at);
+  const recovered = replica ? [] : runtime.recoverInterrupted(at, (taskId) => jobs.liveRunJob(taskId, at) !== undefined);
+  const recoveredCalls = replica ? [] : runtime.recoverUnsettledCalls(at);
+  if (!replica) jobs.reapStale(at);
 
   return {
     kind,

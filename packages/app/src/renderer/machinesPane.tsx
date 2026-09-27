@@ -231,6 +231,19 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
         control={<Switch on={reach.on} label="Reachable from my other machines" disabled={busy} onChange={(on) => act(invoke("machines:reach", { on }))} />}
       />
       <SettingsRow
+        name="Keep a copy of my other machines' tasks"
+        description="Their boards and conversations stay readable here while a machine is off. What you answer meanwhile waits for it."
+        info="Copied into this machine's JaiRA folder as each machine's tasks change. A task deleted on its machine is deleted here too; history pruned there to save space is kept here."
+        control={
+          <Switch
+            on={view.self.replicate}
+            label="Keep a copy of my other machines' tasks"
+            disabled={busy}
+            onChange={(on) => act(invoke("machines:replicate", { on }))}
+          />
+        }
+      />
+      <SettingsRow
         name="Pair a machine"
         description={
           view.self.reach.state === "on"

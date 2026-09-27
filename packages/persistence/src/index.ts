@@ -6,6 +6,7 @@ export * from "./snapshots";
 export * from "./project";
 export * from "./shadow";
 export * from "./workspace";
+export * from "./replica";
 export * from "./journalFile";
 export * from "./conversationFile";
 export * from "./rowFile";

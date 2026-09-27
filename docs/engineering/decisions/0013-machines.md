@@ -507,6 +507,60 @@ the workspace specific stuff remains in the the workspace".
 - **Found on the way:** `recoverUnsettledCalls` assumed nothing else in the process was streaming at
   open. With one database, opening a second project would have settled the first one's live chat turn.
 
+### Step 4, second half: replication
+
+- **Who copies.** A window's engine keeps a copy of every paired machine's tasks (`AppService` option
+  `replicate`, on in `desktop.ts`); `jaira serve` does not (ruling 7). Settings → Machines → "Keep a copy
+  of my other machines' tasks" is the person's choice over that default (`machines:replicate`, kept in
+  `machine.json`).
+- **Where.** In the one database, owned by the remote workspace's id, registered in `workspaces` with
+  its machine and directory. Task files and snapshots go under `<base>/remote/<machine>/<workspace>/`,
+  laid out as a workspace whose `workspace.id` is the owner's, so the ordinary views read it.
+- **The exchange** (`persistence/src/replica.ts`, the owner answering from its peer handlers):
+  - `replica:pull` sends what the replica holds per task (`replica_versions`, migration 22):
+    - the owner's version, which moves when anything the window shows moves (runtime, journal, records,
+      gates, artifacts, session names, the task file);
+    - the last owner journal number held, and how many rows.
+  - The owner answers with the changed tasks, a page at a time (25 tasks or about 8 MB), and every task
+    it has.
+    - The journal comes only from where the replica stopped, unless a rewind took rows out from under
+      it; then it comes whole.
+    - Big strings stay blob hashes, and the replica fetches only the ones it lacks (`replica:blobs`).
+    - A snapshot's files are fetched once (`replica:snapshot`).
+  - The replica re-mints the owner's journal numbers as they land. `replica_seqs` maps them back, so a
+    fork's cut and boundary point at the right rows.
+  - A task the owner no longer lists was deleted there, and is deleted here. A task whose whole
+    history is gone while it is still listed was pruned there, and keeps its history here (ruling 11).
+  - A task id this machine already owns under another workspace is left alone.
+- **When** (`service/src/replicator.ts`): as a machine comes online, 1.5 s after its engine pushes
+  anything but machine-local news, and every minute; one pull per machine at a time.
+- **Read while away.** For a machine that is offline, `Federation.route` hands the reads a window makes
+  (board, roots, the task pane's detail and list, conversation, session history, view and live snapshot,
+  run records, changes, artifacts, job output, events status, state views)
+  to this engine. `sessionOf` answers a remote key with a copy opened read-only: `openProject(…, {
+  replica: true })` recovers, claims, merges and registers nothing, and the session is never among the
+  engine's own, so nothing resumes, watches or supervises it. Everything else still goes to the outbox
+  or is refused.
+- **Verified:**
+  - `persistence/test/replica.test.ts`:
+    - tasks, journals, records and blobs copied and read like a workspace;
+    - nothing sent when nothing changed;
+    - the incremental journal, then the whole journal after a rewind;
+    - a prune kept and a delete applied;
+    - a task owned here left alone.
+  - In the real app (`shots/machines-replica.mts`): a second base root's `jaira serve` runs a task, the
+    window copies it, the server stops, and after a reload the card is still on the merged board with
+    its machine chip and its conversation opens with every step, from the copy.
+  - `app/test/federation.test.ts`: two engines; A copies B's task, B goes away, and A still reads its
+    conversation and board, refuses a rename, and does not count the copy among its own tasks.
+- **Not yet:**
+  - the setting limits nothing by project or age (ruling 11 asked for both), only on or off;
+  - `task:all` does not list an offline machine's copied tasks;
+  - gates waiting in a copy are not offered while their machine is away;
+  - live pushes are not applied as they arrive: a push only schedules the next pull;
+  - the composer's preview (`chat:plan`) is refused while the machine is away, though a message sent then
+    waits in the outbox as before.
+
 ## Consequences
 
 **Easier:**

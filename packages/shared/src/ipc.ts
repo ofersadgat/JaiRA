@@ -2269,6 +2269,8 @@ export interface IpcContract {
   "machines:tags": { request: { tags: string[] }; response: MachinesView };
   /** Publish this machine on the tailnet, or stop. */
   "machines:reach": { request: { on: boolean }; response: MachinesView };
+  /** Keep a copy of the other machines' tasks here, or stop (decision 0013 §6). */
+  "machines:replicate": { request: { on: boolean }; response: MachinesView };
   /** Show a one-time pairing code, or stop showing it. */
   "machines:pairCode": { request: void; response: MachinesView };
   "machines:pairCancel": { request: void; response: MachinesView };
@@ -2469,6 +2471,7 @@ export const IPC_CHANNELS = [
   "machines:rename",
   "machines:tags",
   "machines:reach",
+  "machines:replicate",
   "machines:pairCode",
   "machines:pairCancel",
   "machines:add",

@@ -7,10 +7,11 @@
  * knows. Its engine's pushes come back with their keys rewritten, so the board, a conversation, a gate
  * and the composer work on a remote task exactly as on a local one.
  *
- * Until replication (§6), what is shown is what the machine says now: an offline machine's projects stay
- * listed from the last time it answered, and its boards are empty until it is back. An answer to an
- * offline machine — a gate's decision, an approval, an agent's question, a message — waits in the
- * outbox and is delivered when it reconnects (ruling 13).
+ * What is shown is what the machine says now, while it is online. Offline, its projects stay listed from
+ * the last time it answered, and its boards and conversations are read from this machine's copy of them
+ * (§6, `Replicator`) when there is one. An answer to an offline machine — a gate's decision, an
+ * approval, an agent's question, a message — waits in the outbox and is delivered when it reconnects
+ * (ruling 13).
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -23,8 +24,33 @@ export const QUEUEABLE = new Set(["approval:submit", "question:submit", "interac
 /** Answers addressed by request id alone, found on the machine that asked. */
 const BY_REQUEST = new Set(["approval:submit", "question:submit", "interaction:submit", "userEvent:deliver"]);
 
+/**
+ * What a window reads of a workspace — answered from this machine's copy while the owner is offline.
+ * Everything else about an offline machine's workspace waits in the outbox or is refused.
+ */
+export const REPLICA_READS = new Set([
+  "board:view",
+  "board:roots",
+  "task:conversation",
+  "task:detail",
+  "task:list",
+  "task:inputSources",
+  "session:history",
+  "session:live",
+  "session:view",
+  "run:records",
+  "task:changes",
+  "artifact:list",
+  "artifact:serve",
+  "job:output",
+  "events:status",
+  "state:view",
+  "state:slots",
+  "state:effective",
+]);
+
 /** Pushes that are about one machine and mean nothing on another. */
-const MACHINE_LOCAL = new Set([
+export const MACHINE_LOCAL = new Set([
   "open:external",
   "log:entry",
   "health:changed",
@@ -50,6 +76,8 @@ type Pending = { requestId: string; project?: string } & Record<string, unknown>
 
 export interface FederationOptions {
   baseDir: string;
+  /** Whether this machine holds a copy of a machine's workspace to read while it is offline. */
+  hasReplica?: (machineId: string, dir: string) => boolean;
   publish: (message: PushMessage) => void;
   log?: (level: "info" | "warn", message: string) => void;
 }
@@ -112,6 +140,14 @@ export class Federation {
     return out;
   }
 
+  /** The directories of one machine's workspaces, as it last listed them. */
+  projectsOf(machineId: string): string[] {
+    return this.remoteProjects().flatMap((summary) => {
+      const key = parseRemoteProjectKey(summary.project);
+      return key !== undefined && key.machineId === machineId ? [key.dir] : [];
+    });
+  }
+
   /** Ask a machine for its projects again, shortly: many pushes arrive together. */
   refresh(machineId: string, delayMs = 400): void {
     if (this.refreshing.has(machineId)) return;
@@ -147,7 +183,11 @@ export class Federation {
   route(channel: string, request: unknown): Promise<unknown> | undefined {
     const body = request !== null && typeof request === "object" ? (request as Record<string, unknown>) : undefined;
     const remote = parseRemoteProjectKey(typeof body?.["project"] === "string" ? (body["project"] as string) : undefined);
-    if (remote !== undefined) return this.forward(remote.machineId, channel, { ...body, project: remote.dir });
+    if (remote !== undefined) {
+      // Offline, a read is answered here, from the copy — by the handler this returns to.
+      if (this.fleet.client(remote.machineId) === undefined && REPLICA_READS.has(channel) && this.options.hasReplica?.(remote.machineId, remote.dir) === true) return undefined;
+      return this.forward(remote.machineId, channel, { ...body, project: remote.dir });
+    }
     // Addressed to a machine by id: browsing its folders, opening or making a project there (§8).
     if (typeof body?.["machine"] === "string" && body["machine"] !== this.fleet.identity().id) {
       const { machine, ...rest } = body;

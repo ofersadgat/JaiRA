@@ -15,6 +15,12 @@ export interface MachineIdentity {
   os: MachineOs;
   /** The person's own tags; the OS is always a tag too (see {@link machineTags}). */
   tags: string[];
+  /**
+   * Whether this machine keeps a copy of the fleet's tasks (decision 0013 §6) — the person's choice,
+   * absent when they have not made one and the host's default stands (a window's engine does, a
+   * `jaira serve` does not).
+   */
+  replicate?: boolean;
   createdAt: number;
 }
 
@@ -66,13 +72,13 @@ export function machineIdentity(baseDir: string): MachineIdentity {
 }
 
 /** Rename this machine or change its tags. A tag is lower-case letters, digits and dashes. */
-export function updateMachineIdentity(baseDir: string, patch: { label?: string; tags?: string[] }): MachineIdentity {
+export function updateMachineIdentity(baseDir: string, patch: { label?: string; tags?: string[]; replicate?: boolean }): MachineIdentity {
   const current = machineIdentity(baseDir);
   const label = patch.label !== undefined ? patch.label.trim() : current.label;
   if (label === "") throw new Error("a machine needs a name");
   const tags = patch.tags !== undefined ? [...new Set(patch.tags.map((t) => t.trim().toLowerCase()).filter((t) => t !== ""))] : current.tags;
   for (const tag of tags) if (!/^[a-z0-9][a-z0-9-]*$/.test(tag)) throw new Error(`'${tag}' is not a tag: use lower-case letters, digits and dashes`);
-  const next = { ...current, label, tags: tags.filter((t) => t !== current.os) };
+  const next = { ...current, label, tags: tags.filter((t) => t !== current.os), ...(patch.replicate !== undefined ? { replicate: patch.replicate } : {}) };
   write(baseDir, next);
   return next;
 }
