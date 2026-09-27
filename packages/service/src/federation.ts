@@ -88,6 +88,8 @@ export class Federation {
   /** Requests a machine is waiting on a person for, by id: which machine, and the request. */
   private readonly pending = new Map<string, { machineId: string; kind: "approval" | "question" | "interaction" | "userEvent"; request: Pending }>();
   private readonly refreshing = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Gates read from an offline machine's copy, by request id: which machine an answer waits for. */
+  private readonly offlineRequests = new Map<string, string>();
   private nextOutbox = 1;
 
   constructor(
@@ -97,6 +99,7 @@ export class Federation {
     fleet.onPeerPush((machineId, message) => this.relay(machineId, message as PushMessage));
     fleet.onPeerState((machineId, online) => {
       if (online) {
+        for (const [id, owner] of this.offlineRequests) if (owner === machineId) this.offlineRequests.delete(id);
         this.refresh(machineId, 0);
         void this.fetchPending(machineId);
         void this.deliver(machineId);
@@ -194,8 +197,8 @@ export class Federation {
       return this.forward(machine as string, channel, rest);
     }
     if (BY_REQUEST.has(channel) && typeof body?.["requestId"] === "string") {
-      const owner = this.pending.get(body["requestId"] as string);
-      if (owner !== undefined) return this.forward(owner.machineId, channel, body);
+      const owner = this.pending.get(body["requestId"] as string)?.machineId ?? this.offlineRequests.get(body["requestId"] as string);
+      if (owner !== undefined) return this.forward(owner, channel, body);
     }
     return undefined;
   }
@@ -237,6 +240,15 @@ export class Federation {
   pendingOf(kind: "approval" | "question" | "interaction" | "userEvent"): Pending[] {
     const answered = new Set(this.outbox().flatMap((item) => (typeof (item.request as { requestId?: unknown })?.requestId === "string" ? [(item.request as { requestId: string }).requestId] : [])));
     return [...this.pending.values()].filter((e) => e.kind === kind && !answered.has(e.request.requestId)).map((e) => e.request);
+  }
+
+  /**
+   * A gate read from an offline machine's copy: answering it here is answering that machine, so the
+   * answer waits in the outbox. Returns the outbox entry already holding an answer to it, if one does.
+   */
+  holdOffline(machineId: string, requestId: string): OutboxItem | undefined {
+    this.offlineRequests.set(requestId, machineId);
+    return this.outbox().find((item) => item.machineId === machineId && (item.request as { requestId?: unknown } | null)?.requestId === requestId);
   }
 
   /** What waits in the outbox, as the Machines page lists it. */

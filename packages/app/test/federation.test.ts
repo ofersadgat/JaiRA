@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { initProject } from "@jaira/persistence";
+import { initProject, openDb } from "@jaira/persistence";
 import { AppService, hostEngine, loopbackReach, serviceHandlers, type HostedEngine } from "@jaira/service";
 import { parseRemoteProjectKey, type ProjectSummary, type PushMessage } from "@jaira/shared";
 
@@ -135,6 +135,40 @@ describe("another machine's workspaces", () => {
     await expect(a.call("task:rename", { taskId: task.taskId, title: "x", project: remote!.project })).rejects.toThrow(/mac-mini is offline/);
     // Nothing of the copy is this machine's own.
     expect(((await a.call("task:all", {})) as Array<{ taskId: string }>).some((t) => t.taskId === task.taskId)).toBe(false);
+  });
+
+  it("offers the gate an offline machine was holding, and keeps the answer for it until it is back", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    a.service.fleet.setReplicate(true);
+    const dir = clone();
+    initProject(dir, b.base);
+    await b.service.open(dir);
+    const task = (await b.call("task:create", { title: "needs a yes", workflow: "chat/session", project: dir })) as { taskId: string };
+    // A gate the mini is holding for a person.
+    const db = openDb(join(b.base, "system", "jaira.db"));
+    db.prepare(`INSERT INTO pending_interactions (request_id, task_id, component, inputs_json, created_at) VALUES ('ui-held', ?, 'choose_option', ?, 1)`).run(
+      task.taskId,
+      JSON.stringify({ prompt: "Ship it?", options: ["yes", "no"] }),
+    );
+    db.close();
+    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await expect.poll(async () => (await remotes(a)).length, { timeout: 8000 }).toBe(1);
+    const bId = b.service.fleet.identity().id;
+    await a.service.replicator.pull(bId);
+    await b.hosted.close();
+    made.splice(made.indexOf(b), 1);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("offline");
+
+    const held = (): Promise<Array<{ requestId: string; offline?: { machine: string }; queued?: { outboxId: string; value: unknown } }>> =>
+      a.call("interaction:pending") as never;
+    expect(await held()).toEqual([expect.objectContaining({ requestId: "ui-held", offline: { machine: "mac-mini" } })]);
+    expect(await a.call("interaction:submit", { requestId: "ui-held", value: { decision: "yes" } })).toMatchObject({ queued: true, machine: "mac-mini" });
+    const [answered] = await held();
+    expect(answered).toMatchObject({ queued: { value: { decision: "yes" } } });
+    // Taken back: the gate is open again.
+    await a.call("machines:withdraw", { id: answered!.queued!.outboxId });
+    expect((await held())[0]!.queued).toBeUndefined();
   });
 
   it("keeps an answer for a machine that went away, and says it is waiting", async () => {

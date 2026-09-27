@@ -19272,3 +19272,25 @@ button.chg-by {
   gap: 8px;
   align-items: center;
 }
+
+/*
+ * A gate answered here for a machine that is offline (decision 0013 §7): the answer waits in the
+ * outbox, said under the gate in the warn tint, with a way to take it back until it is delivered.
+ */
+.pending-send {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--control-radius);
+  background: var(--tint-warn);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+}
+.pending-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--warn);
+  flex: none;
+}

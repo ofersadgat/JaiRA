@@ -419,6 +419,7 @@ import {
   parseEngineConfig,
   repositoryIdentity,
   parseRemoteProjectKey,
+  remoteProjectKey,
   type PlacementView,
   type PlacementWorkspace,
   type QueuedPlacement,
@@ -8485,7 +8486,34 @@ export class AppService {
     const stored = [...this.sessions.entries()].flatMap(([key, s]) =>
       this.storedInteractionsOf(key, s).filter((row) => !seen.has(row.requestId)),
     );
-    return [...[...live, ...stored], ...(this.federation.pendingOf("interaction") as unknown as PendingInteraction[])];
+    return [...[...live, ...stored], ...(this.federation.pendingOf("interaction") as unknown as PendingInteraction[]), ...this.offlineInteractions()];
+  }
+
+  /**
+   * The gates offline machines were holding when they were last copied (decision 0013 §7), keyed for
+   * here: answered here, the answer waits in the outbox and is delivered when the machine is back — and
+   * until then the gate stays, drawn as answered, with the answer still able to be taken back.
+   */
+  private offlineInteractions(): PendingInteraction[] {
+    const out: PendingInteraction[] = [];
+    for (const peer of this.fleet.peers()) {
+      if (peer.state === "online") continue;
+      for (const dir of this.federation.projectsOf(peer.id)) {
+        const key = remoteProjectKey(peer.id, dir);
+        const session = this.replicaSession(key, peer.id, dir);
+        if (session === undefined) continue;
+        for (const row of this.storedInteractionsOf(key, session)) {
+          const answered = this.federation.holdOffline(peer.id, row.requestId);
+          out.push({
+            ...row,
+            project: key,
+            offline: { machine: peer.label },
+            ...(answered !== undefined ? { queued: { outboxId: answered.id, value: (answered.request as { value?: unknown }).value } } : {}),
+          });
+        }
+      }
+    }
+    return out;
   }
 
   /**

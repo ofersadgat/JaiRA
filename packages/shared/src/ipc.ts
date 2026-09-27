@@ -349,6 +349,13 @@ export interface SubmitInteractionRequest {
 export interface PendingInteraction {
   requestId: string;
   taskId: string;
+  /**
+   * The gate is another machine's, read from this machine's copy while that machine is offline
+   * (decision 0013 §7): an answer given here waits in the outbox until it reconnects.
+   */
+  offline?: { machine: string };
+  /** Answered here and waiting for {@link offline}'s machine — what was chosen, and how to take it back. */
+  queued?: { outboxId: string; value: unknown };
   /** Where {@link taskId} is recorded. Same reason as {@link PendingApproval.project}. */
   project: ProjectRef;
   /**

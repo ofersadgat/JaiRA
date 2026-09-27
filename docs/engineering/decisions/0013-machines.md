@@ -541,6 +541,11 @@ the workspace specific stuff remains in the the workspace".
   replica: true })` recovers, claims, merges and registers nothing, and the session is never among the
   engine's own, so nothing resumes, watches or supervises it. Everything else still goes to the outbox
   or is refused.
+- **Gates while away** (the person, 2026-09-27: yes), as the approved mockup draws them. An offline
+  machine's gates are read from its copy and offered with the rest (`offlineInteractions`). An answer
+  routes to the outbox (`Federation.holdOffline`), and the gate then stays drawn as answered, with "Your
+  answer waits for mac-mini … Take it back" (`offline.tsx`). The conversation of an offline machine's
+  task says "mac-mini is offline · last seen … What it did until then is here."
 - **Verified:**
   - `persistence/test/replica.test.ts`:
     - tasks, journals, records and blobs copied and read like a workspace;
@@ -556,7 +561,6 @@ the workspace specific stuff remains in the the workspace".
 - **Not yet:**
   - the setting limits nothing by project or age (ruling 11 asked for both), only on or off;
   - `task:all` does not list an offline machine's copied tasks;
-  - gates waiting in a copy are not offered while their machine is away;
   - live pushes are not applied as they arrive: a push only schedules the next pull;
   - the composer's preview (`chat:plan`) is refused while the machine is away, though a message sent then
     waits in the outbox as before.

@@ -56,6 +56,7 @@ import { PieceReadingContext, SessionBandsView, cutNameOf, type CutOffer } from 
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
+import { OfflineBanner, PendingSend } from "./offline";
 import { invoke, subscribe } from "./store";
 import { useTaskRun } from "./taskRun";
 
@@ -1037,6 +1038,16 @@ export function RunConversation({
     // about the run; here it is the body of the state whose letterhead says "asked of you", under
     // the prompt that state wrote.
     if (gate !== undefined && onGate !== undefined && isAsking(piece.node)) {
+      // Answered here for a machine that is offline: drawn as answered, with the answer waiting.
+      if (gate.queued !== undefined && gate.offline !== undefined) {
+        const outboxId = gate.queued.outboxId;
+        return (
+          <>
+            <GateSurface pending={gate} onSubmit={() => undefined} services={gateServices} settled={{ value: gate.queued.value as JsonValue }} />
+            <PendingSend machine={gate.offline.machine} onTakeBack={() => void invoke("machines:withdraw", { id: outboxId }).catch(() => undefined)} />
+          </>
+        );
+      }
       return (
         <GateSurface
           pending={gate}
@@ -1566,6 +1577,7 @@ function ChatComposer({
   if (plan === null && instanceId !== undefined) {
     return (
       <div className="cx-doing">
+        <OfflineBanner project={project} />
         {waitingLines}
         {error !== null ? <p className="cx-error">{error}</p> : null}
         {cutStrip ?? (
@@ -1584,6 +1596,7 @@ function ChatComposer({
 
   return (
     <>
+      <OfflineBanner project={project} />
       {cutStrip !== null ? <div className="cx-doing">{cutStrip}</div> : null}
       {cutStrip === null && forwarding ? (
         <div className="cx-doing">

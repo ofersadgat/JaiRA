@@ -25,7 +25,7 @@ export function useMachines(): [MachinesView | undefined, (next: MachinesView) =
 
 const errorOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-function ago(at: number | undefined): string {
+export function ago(at: number | undefined): string {
   if (at === undefined) return "never seen";
   const minutes = Math.round((Date.now() - at) / 60_000);
   if (minutes < 1) return "last seen now";
