@@ -14,12 +14,12 @@
  * without a window.
  */
 import { APPROVAL_PROMPT_FUNCTION, toolDisplayOf } from "@jaira/shared/browser";
-import { iconOf, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";
+import { iconOf, shellLineOf, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";
 
 // --- kinds ---------------------------------------------------------------------------------------
 
 /** What kind of work one entry is — the unit a chip counts. */
-export type WorkKind = "think" | "read" | "search" | "write" | "run" | "web" | "agent" | "tool" | "wait" | "note" | "approval";
+export type WorkKind = "think" | "read" | "search" | "write" | "run" | "git" | "web" | "agent" | "tool" | "wait" | "note" | "approval";
 
 /** A rate limit, as the agents word it: a wait the run sat through, not a fact about the work. */
 const RATE_LIMIT = /rate[\s_-]?limit/i;
@@ -37,6 +37,9 @@ export function kindOf(entry: WorkEntry): WorkKind {
       return "write";
     case "terminal":
       return "run";
+    // A shell line that runs git is a command of its own kind; a Git TOOL (the forge's) is itself.
+    case "git":
+      return entry.kind === "tool" && shellLineOf(entry) !== undefined ? "git" : "tool";
     case "web":
       return "web";
     case "agent":
@@ -222,6 +225,8 @@ export function chipsOf(entries: readonly WorkEntry[], indices: readonly number[
           return plural(n, "search", "searches");
         case "run":
           return plural(n, "command", "commands");
+        case "git":
+          return plural(n, "git command", "git commands");
         case "web":
           return plural(n, "page", "pages");
         case "agent":
@@ -289,8 +294,8 @@ export function allOf(run: WorkRun): number[] {
   return [...run.thoughts, ...run.rows, ...run.notes].sort((a, b) => a - b);
 }
 
-/** A piece of a row's sentence: words, or a name set as code. */
-export type Said = { text: string } | { code: string };
+/** A piece of a row's sentence: words, or a name set as code — `shell` when it is a command line. */
+export type Said = { text: string } | { code: string; shell?: boolean };
 
 /**
  * What a run amounted to, in words — or, for the run still going, what it did and what it is doing
@@ -312,10 +317,11 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
       case "search":
         return list.length === 1 ? [{ text: "Searched for " }, { code: summaryOf(list[0]!) }] : [{ text: `Searched for ${list.length} patterns` }];
       case "run":
+      case "git":
         // A command still waiting on what it called — the approval that is the turn's live edge — has
         // not run yet: it is running, held, not ran.
-        if (live !== undefined && list.length === 1 && inFlight(list[0]!)) return [{ text: "Running " }, { code: summaryOf(list[0]!) }];
-        return list.length === 1 ? [{ text: "Ran " }, { code: summaryOf(list[0]!) }] : [{ text: `Ran ${list.length} commands` }];
+        if (live !== undefined && list.length === 1 && inFlight(list[0]!)) return [{ text: "Running " }, shellOf(list[0]!)];
+        return list.length === 1 ? [{ text: "Ran " }, shellOf(list[0]!)] : [{ text: `Ran ${list.length} ${run.kind === "git" ? "git commands" : "commands"}` }];
       case "web":
         return list.length === 1 ? [{ text: "Fetched " }, { code: summaryOf(list[0]!) }] : [{ text: `Fetched ${list.length} pages` }];
       case "agent":
@@ -330,7 +336,7 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
         if (list.length > 1) return [{ text: `${list.length} approvals` }];
         const words = approvalWordsOf(list[0] as ToolEntry);
         const command = approvalAboutOf(list[0] as ToolEntry).command;
-        return [{ text: `${words.name} ` }, ...(command !== undefined ? [{ code: command }] : [])];
+        return [{ text: `${words.name} ` }, ...(command !== undefined ? [{ code: command, shell: true }] : [])];
       }
       case "tool": {
         const title = run.key.slice("tool:".length);
@@ -349,20 +355,26 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
       case "search":
         return [{ text: "Searching for " }, { code: summaryOf(running) }];
       case "run":
-        return [{ text: "Running " }, { code: summaryOf(running) }];
+      case "git":
+        return [{ text: "Running " }, shellOf(running)];
       case "web":
         return [{ text: "Fetching " }, { code: summaryOf(running) }];
       case "think":
         return [{ text: "Thinking" }];
       case "approval": {
         const command = approvalAboutOf(running as ToolEntry).command;
-        return [{ text: "Waiting for you to approve " }, ...(command !== undefined ? [{ code: command }] : [])];
+        return [{ text: "Waiting for you to approve " }, ...(command !== undefined ? [{ code: command, shell: true }] : [])];
       }
       default:
         return [{ text: running.kind === "tool" || running.kind === "writing" ? toolDisplayOf(running.name).title : "Working" }];
     }
   })();
   return { said: said.length > 0 ? [...said, { text: ", then " }] : [], now: doing };
+}
+/** A command, as the line it ran — drawn in the colours of its parts, as an approval draws it. */
+function shellOf(entry: WorkEntry): Said {
+  const line = entry.kind === "tool" ? shellLineOf(entry) : undefined;
+  return line !== undefined ? { code: line, shell: true } : { code: summaryOf(entry) };
 }
 function summaryOf(entry: WorkEntry): string {
   if (entry.kind === "tool") return entry.summary;
@@ -396,16 +408,8 @@ export function isChange(entry: WorkEntry, verdicts?: ReadOnlyVerdicts): boolean
   return said === undefined ? kindOf(entry) === "write" : said === false;
 }
 
-/** The line a command call ran: its `command`, an argv joined, or the line it was summarised by. */
-function commandLineOf(entry: ToolEntry): string {
-  const args = entry.args;
-  if (args !== null && typeof args === "object" && !Array.isArray(args)) {
-    const command = (args as Record<string, unknown>)["command"];
-    if (typeof command === "string") return command;
-    if (Array.isArray(command) && command.every((word) => typeof word === "string")) return command.join(" ");
-  }
-  return entry.summary;
-}
+/** The line a command call ran, or the line it was summarised by. */
+const commandLineOf = (entry: ToolEntry): string => shellLineOf(entry) ?? entry.summary;
 
 /**
  * The ACTION a call is, for "has it done this before": the file a read reads (another part of it is
@@ -414,7 +418,7 @@ function commandLineOf(entry: ToolEntry): string {
 export function actionOf(entry: ToolEntry): string {
   const kind = kindOf(entry);
   if (kind === "read") return `read\u0000${pathOf(entry)}`;
-  if (kind === "run") return `run\u0000${commandLineOf(entry).replace(/\s+/g, " ").trim()}`;
+  if (kind === "run" || kind === "git") return `run\u0000${commandLineOf(entry).replace(/\s+/g, " ").trim()}`;
   return `${entry.name}\u0000${JSON.stringify(entry.args ?? null)}`;
 }
 

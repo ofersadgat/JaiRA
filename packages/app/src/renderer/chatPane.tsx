@@ -33,6 +33,7 @@
  * is the same routing every base-layer workflow uses.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
+import { useKeptDraft } from "./composerDrafts";
 import type {
   ApprovalScope,
   ChatPlanView,
@@ -430,6 +431,7 @@ function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
           overrides={overrides}
           onOverrides={setOverrides}
           placeholder="Ask for a change, or a question about the code…"
+          draftKey={`chat:new:${project ?? ""}`}
           onSend={(message) => void surface.onNew(message, overrides)}
           onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
           // With no project open this runs in JaiRA's own root, which has no "this project" to keep in.
@@ -505,7 +507,8 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const [sending, setSending] = useState(0);
   const [sent, setSent] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  // Kept per conversation, so leaving it and coming back finds what was being typed.
+  const [draft, setDraft] = useKeptDraft(`chat:${taskId}`);
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
   const [arming, setArming] = useState<Arming | null>(null);
   const mentions = useMentions(surface.hasProject, project);

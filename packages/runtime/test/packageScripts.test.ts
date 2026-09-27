@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeCallOf } from "../src/commandParts";
-import { takeApart } from "../src/command";
+import { takeApart } from "@jaira/shared";
 import { expandWorkspaces, filePackages, makeDryRunLines, makefileRunsCodeWhenRead, scriptRunsOf } from "../src/packageScripts";
 
 let root: string;

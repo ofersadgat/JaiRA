@@ -9,7 +9,7 @@
  * one row per part.
  *
  * Pure data and pure helpers: no parser and no policy here, so the renderer can import it. The parser
- * is `@jaira/runtime`'s `command.ts`; the verdicts are its `policy.ts`.
+ * is `shellCommand.ts`; the verdicts are `@jaira/runtime`'s `policy.ts`.
  */
 import type { PermissionMode } from "./operationVocabulary";
 

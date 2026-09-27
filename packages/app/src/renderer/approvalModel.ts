@@ -70,7 +70,7 @@ const clamp = (span: TextSpan, length: number): TextSpan => ({ start: Math.max(0
 const covers = (span: TextSpan, at: number): boolean => at >= span.start && at < span.end;
 
 /** The line as tinted stretches and glue. Spans outside the line, empty or reversed, are ignored. */
-export function lineSegments(line: string, parts: readonly CommandPart[]): LineSegment[] {
+export function lineSegments(line: string, parts: ReadonlyArray<Pick<CommandPart, "span" | "matched">>): LineSegment[] {
   const spans = parts.map((part) => clamp(part.span, line.length));
   const size = (index: number): number => spans[index]!.end - spans[index]!.start;
   const owner: Array<number | undefined> = [];

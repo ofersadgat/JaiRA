@@ -31,7 +31,6 @@ import { Icon } from "./icons";
 import { EVENTS_STATE_ID } from "./automationsModel";
 import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "./panelStack";
 import {
-  ChangesView,
   HeldView,
   OutputsView,
   PreviewCard,
@@ -45,6 +44,7 @@ import {
   pathOf,
   useEffectiveRead,
 } from "./panelViews";
+import { ChangesPanel } from "./changesPanel";
 import { RunPanel, type RunSurface } from "./runPanel";
 import { RunConversation, SidechainConversation, askingInstanceOf, hasAsking } from "./runViews";
 import { TAB_ICONS, type PanelFace, type PanelTabSpec, type PanelVerb } from "./sidePanel";
@@ -200,6 +200,11 @@ function taskVerbsOf(host: PanelHost, detail: TaskDetail, project: string | unde
 }
 
 /** A pinned value, pushed on top of whatever is there. */
+/** Another task on top of the stack — a subtask the Changes tab names. */
+function openTask(host: PanelHost, taskId: string, project: string | undefined): void {
+  host.onStack((was) => push(was, { kind: "task", key: `task:${taskId}`, taskId, ...(project !== undefined ? { project } : {}), tab: "conversation" }));
+}
+
 function pushPreview(host: PanelHost, item: PinnedValue): void {
   host.onStack((was) => push(was, { kind: "preview", key: `preview:${item.title}`, preview: item }));
 }
@@ -391,7 +396,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
           case "steps":
             return stepsBody(host, detail, entry, false);
           case "changes":
-            return <ChangesView taskId={detail.taskId} project={project} signal={detail.status} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
+            return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "outputs":
             return <OutputsView detail={detail} sessions={host.context.sessionHistory} onOpen={(title, value) => pushPreview(host, { title, value })} />;
           case "configuration":
@@ -420,7 +425,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
           case "produced":
             return <ProducedView taskId={detail.taskId} project={project} signal={detail.timeline.length} artifacts={host.serveOf(detail.taskId, project)} onOpen={(item) => pushPreview(host, item)} onHold={host.hold} />;
           case "changes":
-            return <ChangesView taskId={detail.taskId} project={project} signal={detail.status} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
+            return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "held":
             return <HeldView held={host.held} onOpen={(item) => pushPreview(host, item)} onDrop={host.unhold} />;
           case "configuration":
@@ -455,7 +460,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
           entry.tab === "produced" ? (
             <ProducedView taskId={entry.taskId} project={project} signal={detail?.timeline.length ?? 0} artifacts={host.serveOf(entry.taskId, project)} onOpen={(item) => pushPreview(host, item)} onHold={host.hold} />
           ) : entry.tab === "changes" ? (
-            <ChangesView taskId={entry.taskId} project={project} signal={detail?.status} />
+            <ChangesPanel taskId={entry.taskId} project={project} signal={`${detail?.status}:${detail?.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} />
           ) : (
             <HeldView held={host.held} onOpen={(item) => pushPreview(host, item)} onDrop={host.unhold} />
           ),

@@ -25,7 +25,6 @@ export * from "./paths";
 export * from "./exec";
 export * from "./git";
 export * from "./gitRemotes";
-export * from "./command";
 export * from "./policy";
 export * from "./packageScripts";
 // A run's policy, one recipe for the app and the CLI alike.
@@ -35,6 +34,8 @@ export * from "./permissionFunctions";
 export * from "./questions";
 export * from "./agents";
 export * from "./agentTools";
+// What each part of a shell line is a request for — the Changes tab sorts a line's parts by it.
+export { classifyRequest, type ClassifiedPart } from "./commandParts";
 // What a claude or codex agent is handed under one effective environment, MEASURED through the real
 // chain — how a permission set's effect on an agent is tested (decision 0007).
 export * from "./agentHanded";

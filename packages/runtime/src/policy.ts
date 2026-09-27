@@ -18,7 +18,7 @@
  *    {@link ParsedCommand}s instead of a second enforcement mechanism.
  *
  * **One shell line is several requests** (decision 0007 §4). A line is taken apart
- * (`command.ts`), each part is named as a request for a SUBJECT — a standard tool on a
+ * (`shellCommand.ts` in `@jaira/shared`), each part is named as a request for a SUBJECT — a standard tool on a
  * path, `script`, or a command (`commandParts.ts`) — and each is judged here: the
  * destructive floor first, then the permission set, the same subject → mode map every tool
  * answers to. The line runs only if every part may; one that asks produces ONE approval
@@ -36,7 +36,7 @@
  *     directory layout.
  */
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
-import { describeCommand, takeApart, type CommandDialect, type ParsedCommand } from "./command";
+import { describeCommand, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
 import { SHELL_SUBJECT, classifyRequest, lookUp, makeCallOf, matchCommandEntry, packageScriptOf, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
 import { filePackages, makeRunsOf, scriptRunsOf, shellWord, type PackageReader, type ScriptRun } from "./packageScripts";

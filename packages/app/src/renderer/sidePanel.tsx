@@ -25,7 +25,7 @@
  */
 import { useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Icon, type PATHS } from "./icons";
-import { acceptOffer, close, crumbOf, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "./panelStack";
+import { acceptOffer, close, crumbOf, forward, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "./panelStack";
 import { labelPlan } from "./panelTabs";
 
 type IconKey = keyof typeof PATHS;
@@ -313,14 +313,37 @@ export function SidePanel({
 
   const pushed = stack.entries.length > 1;
   const verbs = topFace.verbs ?? [];
+  const next = stack.ahead[0];
+  const ahead =
+    next !== undefined ? (
+      <button type="button" className="sp-icon sp-forward" title={`Forward to ${crumbOf(next)}`} aria-label="Forward" onClick={() => onStack(forward)}>
+        <Icon name="back" />
+      </button>
+    ) : null;
   return (
-    <div className={`sp${pushed ? " pushed" : ""}`} data-kind={top.kind}>
+    <div
+      className={`sp${pushed ? " pushed" : ""}`}
+      data-kind={top.kind}
+      // The mouse's own back and forward buttons, and Alt+← / Alt+→, while the pointer or the focus is
+      // in the panel — the ways a browser's history is walked, walking this one.
+      onMouseUp={(event) => {
+        if (event.button !== 3 && event.button !== 4) return;
+        event.preventDefault();
+        onStack(event.button === 3 ? pop : forward);
+      }}
+      onKeyDown={(event) => {
+        if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+        event.preventDefault();
+        onStack(event.key === "ArrowLeft" ? pop : forward);
+      }}
+    >
       <header className="sp-head">
         {pushed ? (
           <>
             <button type="button" className="sp-icon sp-back" title="Back" onClick={() => onStack(pop)}>
               <Icon name="back" />
             </button>
+            {ahead}
             <div className="sp-titles">
               <div className="sp-trail">
                 {stack.entries.slice(0, -1).map((entry, i) => (
@@ -342,6 +365,7 @@ export function SidePanel({
           </>
         ) : (
           <>
+            {ahead}
             {topFace.glyph !== undefined ? <span className="sp-glyph">{topFace.glyph}</span> : null}
             <div className="sp-titles">
               <div className="sp-name-line">

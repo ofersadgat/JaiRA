@@ -14,6 +14,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { BaselineFile, Changeset } from "./changeset";
+import type { TaskChangeLog } from "./changeLog";
 import type { Choice, ComponentConfig } from "./components";
 import type {
   AvailabilitySnapshot,
@@ -1442,22 +1443,13 @@ export interface ReviewChangesRequest {
 }
 
 /**
- * A task's worktree edits as a changeset, READ ONLY — what the side panel's Changes tab draws (the
- * panel rulings, 2026-09-24). The same diff `changeset:review` walks through the gate, without
- * starting a review: reading what an agent changed is not a decision about it.
+ * What a task changed, read from its own record of calls and grouped as the tool menu groups tools —
+ * what the side panel's Changes tab draws (`changeLog.ts`; the rulings of 2026-09-26). Its subtasks'
+ * changes are in it, attributed; nothing is read from the disk.
  */
 export interface TaskChangesRequest {
   taskId: string;
-  /** The revision the diff is taken against. Default HEAD — the agent's uncommitted work. */
-  base?: string;
   project?: ProjectRef;
-}
-
-export interface TaskChangesResult {
-  /** Absent when there is nothing to diff — see {@link reason}. */
-  changeset?: Changeset;
-  /** Why there is no changeset: no worktree, or none yet. Said in words, for the tab to show. */
-  reason?: string;
 }
 
 export interface ReviewChangesResult {
@@ -2107,8 +2099,8 @@ export interface IpcContract {
   };
   /** Review a task's worktree edits as a changeset — see {@link ReviewChangesRequest}. */
   "changeset:review": { request: ReviewChangesRequest; response: ReviewChangesResult };
-  /** A task's worktree edits, read only — see {@link TaskChangesRequest}. */
-  "task:changes": { request: TaskChangesRequest; response: TaskChangesResult };
+  /** What a task changed, grouped — see {@link TaskChangesRequest}. */
+  "task:changes": { request: TaskChangesRequest; response: TaskChangeLog };
   /** Review a sync's proposed files through the same gate — see {@link ReviewSyncRequest}. */
   "changeset:reviewSync": { request: ReviewSyncRequest; response: ReviewChangesResult };
   /** Write any file under a layer root. Unparsed — see {@link WriteFileRequest}. */

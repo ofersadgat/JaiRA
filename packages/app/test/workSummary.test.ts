@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { TranscriptEntry, WorkEntry } from "../src/renderer/transcript";
+import { iconOf, type TranscriptEntry, type WorkEntry } from "../src/renderer/transcript";
 import { Transcript } from "../src/renderer/transcriptView";
 import { ApprovalAskContext, WorkLookContext, type WorkLook } from "../src/renderer/workSummaryView";
 import { approvalWordsOf, chipsOf, inFlight, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
@@ -385,5 +385,30 @@ describe("in the transcript", () => {
     const html = draw([read("a.ts", 1), answer]);
     expect(html).not.toContain("work-summary");
     expect(html).toContain("ts-row");
+  });
+});
+
+describe("a shell line that runs git (the person's note, 2026-09-26)", () => {
+  it("draws the git icon for git on its own and nested in a line, and the terminal otherwise", () => {
+    const icons = ["git status", "cd packages/app && git diff --stat", "sh -c 'git log -1'", "env GIT_PAGER=cat git show", "npx vitest run"].map((line) => iconOf(bash(line, 1)));
+    expect(icons).toEqual(["git", "git", "git", "git", "terminal"]);
+  });
+
+  it("counts git commands as a kind of their own, and says them as commands", () => {
+    const entries = [bash("git status", 1), bash("git diff", 2), bash("npm test", 3)];
+    expect(chipsOf(entries, [0, 1, 2]).map((chip) => chip.label)).toEqual(["2 git commands", "1 command"]);
+    const [gits] = runsOf(entries, [0, 1, 2]);
+    expect(sentenceOf(entries, gits!).said).toEqual([{ text: "Ran 2 git commands" }]);
+    expect(sentenceOf(entries, runsOf(entries, [0])[0]!).said).toEqual([{ text: "Ran " }, { code: "git status", shell: true }]);
+  });
+
+  it("keeps a forge Git tool as the tool it is", () => {
+    expect(chipsOf([call("mcp__dai__git_push", "branch", "main", 1)], [0])[0]!.kind).toBe("tool");
+  });
+
+  it("draws a command row's line in the colours of its parts", () => {
+    const html = renderToStaticMarkup(createElement(Transcript, { entries: [bash("cd app && git status", 1)] }));
+    expect(html).toContain('class="shell-line"');
+    expect(html.match(/class="part-c"/g)?.length).toBe(2);
   });
 });

@@ -40,6 +40,9 @@ export * from "./commandRunners";
 export * from "./mcp";
 export * from "./permissionSetBuckets";
 export * from "./commandParts";
+export * from "./shellCommand";
+export * from "./shellTables";
+export * from "./changeLog";
 export * from "./permissionFunctions";
 export * from "./permissionSetEdit";
 // Node-side only (it carries the YAML serializer): a state file's list and block rewritten as a permission set.

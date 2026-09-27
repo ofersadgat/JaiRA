@@ -60,6 +60,12 @@ export type PanelMotion = "push" | "pop" | "replace" | "tab" | "none";
 export interface PanelStack {
   /** Root first. Empty ⇒ the panel has nothing to say and is closed. */
   entries: readonly PanelEntry[];
+  /**
+   * What ‹ went back past, nearest first — what › goes forward to again, as a browser's forward does
+   * (the person, 2026-09-26: "there should be forward / backward navigation through the back
+   * button"). Emptied by going anywhere new, and by a new root.
+   */
+  ahead: readonly PanelEntry[];
   /** Pinned: a new root from the room waits on {@link offer} instead of replacing this stack. */
   pinned: boolean;
   /** What the room would show, while a pinned stack is keeping it out. */
@@ -69,7 +75,7 @@ export interface PanelStack {
   motion: PanelMotion;
 }
 
-export const EMPTY_STACK: PanelStack = { entries: [], pinned: false, offer: null, closedOn: null, motion: "none" };
+export const EMPTY_STACK: PanelStack = { entries: [], ahead: [], pinned: false, offer: null, closedOn: null, motion: "none" };
 
 export function topOf(stack: PanelStack): PanelEntry | undefined {
   return stack.entries[stack.entries.length - 1];
@@ -98,13 +104,13 @@ export function reconcile(stack: PanelStack, rule: PanelEntry | null, force?: { 
     if (same && stack.offer === null) return stack;
     const entries = same ? stack.entries : [refreshed, ...stack.entries.slice(1)];
     const moved = tab !== undefined && "tab" in root && root.tab !== tab;
-    return { ...stack, entries: moved ? [entries[0]!] : entries, offer: null, motion: moved ? "tab" : stack.motion };
+    return { ...stack, entries: moved ? [entries[0]!] : entries, ...(moved ? { ahead: [] } : {}), offer: null, motion: moved ? "tab" : stack.motion };
   }
   if (stack.pinned && stack.entries.length > 0) {
     return stack.offer?.key === rule.key ? stack : { ...stack, offer: rule };
   }
   if (stack.closedOn === rule.key) return stack;
-  return { entries: [rule], pinned: false, offer: null, closedOn: null, motion: stack.entries.length === 0 ? "none" : "replace" };
+  return { entries: [rule], ahead: [], pinned: false, offer: null, closedOn: null, motion: stack.entries.length === 0 ? "none" : "replace" };
 }
 
 /** A pinned value's React node does not serialise, and is not part of its identity anyway. */
@@ -112,26 +118,43 @@ function stripNode(entry: PanelEntry): unknown {
   return entry.kind === "preview" ? { ...entry, preview: { ...entry.preview, node: undefined, serve: undefined, onPrompt: undefined } } : entry;
 }
 
-/** A link inside the panel: the entry goes on top. Pushing what is already on top is a no-op. */
+/**
+ * A link inside the panel: the entry goes on top. Pushing what is already on top is a no-op. Pushing
+ * what › would go forward to IS going forward, so the rest of the way ahead is kept; anything else
+ * starts a new way, and the old one is gone.
+ */
 export function push(stack: PanelStack, entry: PanelEntry): PanelStack {
   if (topOf(stack)?.key === entry.key) return stack;
   // Pushing something already lower down pops back to it rather than stacking a second copy — a
   // trail that read `task › step › task` would be a loop, not a history.
   const at = stack.entries.findIndex((one) => one.key === entry.key);
-  if (at >= 0) return { ...stack, entries: stack.entries.slice(0, at + 1), motion: "pop" };
-  return { ...stack, entries: [...stack.entries, entry], closedOn: null, motion: "push" };
+  if (at >= 0) return popTo(stack, at);
+  const ahead = stack.ahead[0]?.key === entry.key ? stack.ahead.slice(1) : [];
+  return { ...stack, entries: [...stack.entries, entry], ahead, closedOn: null, motion: "push" };
+}
+
+/** Back to level `index`, what it passes kept ahead of it — nearest first, before what was already there. */
+function backTo(stack: PanelStack, entries: readonly PanelEntry[], index: number): PanelStack {
+  return { ...stack, entries, ahead: [...stack.entries.slice(index + 1), ...stack.ahead], motion: "pop" };
 }
 
 /** ‹ — one level back. The root is never popped: ✕ is how the panel is closed. */
 export function pop(stack: PanelStack): PanelStack {
   if (stack.entries.length <= 1) return stack;
-  return { ...stack, entries: stack.entries.slice(0, -1), motion: "pop" };
+  return backTo(stack, stack.entries.slice(0, -1), stack.entries.length - 2);
+}
+
+/** › — forward again to where ‹ came back from. */
+export function forward(stack: PanelStack): PanelStack {
+  const next = stack.ahead[0];
+  if (next === undefined) return stack;
+  return { ...stack, entries: [...stack.entries, next], ahead: stack.ahead.slice(1), motion: "push" };
 }
 
 /** A crumb: back to that level. */
 export function popTo(stack: PanelStack, index: number): PanelStack {
   if (index < 0 || index >= stack.entries.length - 1) return stack;
-  return { ...stack, entries: stack.entries.slice(0, index + 1), motion: "pop" };
+  return backTo(stack, stack.entries.slice(0, index + 1), index);
 }
 
 /**
@@ -148,7 +171,8 @@ export function setTab(stack: PanelStack, tab: string, kind?: PanelKind): PanelS
     const entries = [...stack.entries.slice(0, i), next];
     const popping = i < stack.entries.length - 1;
     if (!popping && entry.tab === tab) return stack;
-    return { ...stack, entries, motion: popping ? "pop" : "tab" };
+    // Another tab is somewhere new: what was ahead was ahead of the tab it left.
+    return { ...stack, entries, ahead: entry.tab === tab && popping ? [...stack.entries.slice(i + 1), ...stack.ahead] : [], motion: popping ? "pop" : "tab" };
   }
   return stack;
 }
@@ -164,7 +188,7 @@ export function selectStep(stack: PanelStack, step: string | undefined): PanelSt
     const next = { ...entry, tab: "steps", ...(step !== undefined ? { step } : {}) } as PanelEntry;
     if (step === undefined && "step" in next) delete (next as { step?: string }).step;
     const popping = i < stack.entries.length - 1;
-    return { ...stack, entries: [...stack.entries.slice(0, i), next], motion: popping ? "pop" : "tab" };
+    return { ...stack, entries: [...stack.entries.slice(0, i), next], ahead: [], motion: popping ? "pop" : "tab" };
   }
   return stack;
 }
@@ -176,7 +200,7 @@ export function pin(stack: PanelStack, on: boolean): PanelStack {
 /** The offer bar's "Show it here": the waiting root replaces the stack, and the pin comes off. */
 export function acceptOffer(stack: PanelStack): PanelStack {
   if (stack.offer === null) return stack;
-  return { entries: [stack.offer], pinned: false, offer: null, closedOn: null, motion: "replace" };
+  return { entries: [stack.offer], ahead: [], pinned: false, offer: null, closedOn: null, motion: "replace" };
 }
 
 /** ✕ — the panel closes, and stays closed until the room stands on something else. */

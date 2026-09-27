@@ -18,6 +18,7 @@ import type { PendingApproval, WorkNotes, WorkRows } from "@jaira/shared/browser
 import { ApprovalSurface, type ApprovalSurfaceProps } from "./approvalSurface";
 import { Icon } from "./icons";
 import { Popover, useHoverCard } from "./popover";
+import { ShellLine } from "./shellLine";
 import type { ToolEntry, WorkEntry } from "./transcript";
 import { APPROVAL_PROMPT_FUNCTION } from "@jaira/shared/browser";
 import {
@@ -186,7 +187,13 @@ function useNow(running: boolean): number {
 function SaidText({ said }: { said: readonly Said[] }): JSX.Element {
   return (
     <>
-      {said.map((part, i) => ("code" in part ? <code key={i}>{part.code}</code> : <span key={i}>{part.text}</span>))}
+      {said.map((part, i) =>
+        "code" in part ? (
+          <code key={i}>{part.shell === true ? <ShellLine line={part.code} /> : part.code}</code>
+        ) : (
+          <span key={i}>{part.text}</span>
+        ),
+      )}
     </>
   );
 }
@@ -202,7 +209,7 @@ function RowsCard({ label, indices, rowOf, entries, children }: Rows & { label: 
     <>
       {children(hover)}
       {hover.open ? (
-        <Popover anchor={hover.anchor} side="below" className="ws-card" {...hover.cardBind}>
+        <Popover anchor={hover.anchor} side="below" settle className="ws-card" {...hover.cardBind}>
           <div className="ws-card-head">
             <span>{label}</span>
             <span>{indices.length === 1 ? "1 line" : `${indices.length} lines`}</span>
@@ -447,7 +454,7 @@ export function WorkSummary({
         </span>
       </button>
       {foot.open && !open ? (
-        <Popover anchor={foot.anchor} side="below" className="ws-card" {...foot.cardBind}>
+        <Popover anchor={foot.anchor} side="below" settle className="ws-card" {...foot.cardBind}>
           <div className="ws-card-head">
             <span>Every step</span>
             <span>{entries.length} lines</span>

@@ -46,7 +46,7 @@ import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
 import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, type TrailStep } from "./trail";
-import { AnsweredForYou, Paper, Pulse, Transcript, durationOf, useElapsed, type CallSurface } from "./transcriptView";
+import { AnsweredForYou, Paper, Pulse, Transcript, durationOf, useElapsed, type CallSurface, type EditMessage } from "./transcriptView";
 import { ApprovalAskContext, approvalCallIndex } from "./workSummaryView";
 import { PickStepContext, advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
@@ -1083,12 +1083,29 @@ export function RunConversation({
       markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions),
       piece.part,
     );
+    // The message that opened this state's conversation is where its entry into the run is: a rewind
+    // or a fork from it cuts at the same journal point as the rail's entered row — for a message typed
+    // into the run, before that message (the person, 2026-09-26: "i'm mousing over my message in the
+    // conversation and there isnt a rewind / fork button on hover").
+    const entered = onCut !== undefined ? notes.find((note) => note.kind === "entered" && note.instanceId === piece.node.instanceId) : undefined;
+    const opening = entries.find((entry): entry is Extract<typeof entry, { kind: "message" }> => entry.kind === "message" && entry.role === "user")?.turn;
+    const onEdit: EditMessage | undefined =
+      entered !== undefined && onCut !== undefined && opening !== undefined
+        ? {
+            can: () => false,
+            edit: () => undefined,
+            cut: (turn) => (turn === opening ? "before" : undefined),
+            rewind: () => onCut.rewind(entered),
+            fork: () => onCut.fork(entered),
+          }
+        : undefined;
     const transcript = (
       <Transcript
         session={view}
         entries={entries}
         live={live}
         calls={calls}
+        {...(onEdit !== undefined ? { onEdit } : {})}
         // The SESSION, not the task: a turn number is only unique inside one, so a run's several
         // conversations would otherwise overwrite each other's type corrections at turn 3. A piece
         // with no session id yet is one still being written, and gets the control without the
@@ -1577,6 +1594,8 @@ function ChatComposer({
       {error !== null ? <p className="cx-error">{error}</p> : null}
       <Composer
         plan={plan ?? null}
+        // Kept per conversation: the task, and the state's conversation within it when one is picked.
+        draftKey={`task:${taskId}${instanceId !== undefined ? `#${instanceId}` : ""}`}
         usage={{ context: contextReading, onCompact, cost: conversationCost }}
         // A run in flight is busy whatever the box says: the button is the only handle on it, and a
         // disabled composer over a running workflow used to be a panel with no way to stop it.

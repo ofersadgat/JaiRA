@@ -108,6 +108,7 @@ import {
 import { BrandIcon, Icon } from "./icons";
 import { AddLine, CategoryRow, CommandGroupRow, modeMeta, ModePicker, SCRIPT_HINT, SubjectRow, ToolRow } from "./permissionSetRows";
 import { Popover, usePopover } from "./popover";
+import { useKeptDraft } from "./composerDrafts";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import { AllowanceNumber, ContextMeter, ModelWindow, RouteLeft, SpentNotice, useSpent } from "./usageMeters";
 import { levelsFooter, useModelParameters } from "./modelParameters";
@@ -849,6 +850,7 @@ export function Composer({
   placeholder,
   value,
   onValue,
+  draftKey,
   mentions,
   readMention,
   onSavePermissionSet,
@@ -908,6 +910,12 @@ export function Composer({
   value?: string;
   onValue?: (next: string) => void;
   /**
+   * Where the composer's OWN draft is kept (`composerDrafts.ts`), so leaving the view and coming back
+   * finds it — the conversation it writes into, named by the host. Absent ⇒ the draft goes with the
+   * box. Unused when the host owns the draft through {@link value}.
+   */
+  draftKey?: string | undefined;
+  /**
    * Project paths matching a query — what `@` completes against. Absent ⇒ `@` is an ordinary
    * character, which is correct for a composer with no project behind it.
    */
@@ -927,7 +935,7 @@ export function Composer({
   /** Where `+` may write. A conversation with no project open has only "for all projects". */
   saveLayers?: readonly WritableLayer[] | undefined;
 }): JSX.Element {
-  const [own, setOwn] = useState("");
+  const [own, setOwn] = useKeptDraft(value === undefined ? draftKey : undefined);
   const draft = value ?? own;
   const setDraft = (next: string): void => (onValue !== undefined ? onValue(next) : setOwn(next));
   /**

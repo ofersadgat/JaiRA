@@ -65,13 +65,15 @@ import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { typeKeyOf, useMessageTypes } from "./messageTypes";
 import { useValuePanel } from "./valuePanel";
 import { WorkLookContext, WorkSummary } from "./workSummaryView";
-import { approvalAnswerOf, approvalWordsOf, isApprovalCall, isIdle } from "./workSummary";
+import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, isApprovalCall, isIdle } from "./workSummary";
+import { ShellLine } from "./shellLine";
 import {
   blocksOf,
   dayLabelOf,
   endOfBlock,
   gapBetween,
   iconOf,
+  shellLineOf,
   startOfBlock,
   type Gap,
   type LiveStatus,
@@ -295,6 +297,7 @@ function Row({
   called,
   server,
   preview,
+  command,
   tone,
   mark,
   prose,
@@ -310,6 +313,8 @@ function Row({
   /** The MCP server a call went to, when that is somebody else's — a quiet word after the name. */
   server?: string;
   preview: string;
+  /** The preview is this command line: drawn in the colours of its parts, as an approval draws it. */
+  command?: string | undefined;
   tone: Tone;
   /** The verdict at the end of the line, when there is one to give. */
   mark?: "ok" | "bad" | "waiting" | "cut";
@@ -352,7 +357,7 @@ function Row({
         </span>
       ) : null}
       {server !== undefined ? <span className="ts-server">{server}</span> : null}
-      <span className="ts-preview ellip">{preview}</span>
+      <span className="ts-preview ellip">{command !== undefined ? <ShellLine line={command} /> : preview}</span>
       {note !== undefined ? <span className="ts-note">{note}</span> : null}
       <span className="ts-at">{clockOf(entry.at)}</span>
       <span className="ts-chev">{canOpen ? <Icon name="chevron" /> : null}</span>
@@ -617,6 +622,66 @@ export function AnsweredForYou({ by, onAnswerYourself }: { by: SettledByView; on
  * What a surface lends the CALL rows of its transcript — the placement decisions a transcript cannot
  * make for itself (a component has no opinion about its place).
  */
+/**
+ * A subagent's conversation, under the call that spawned it: a line naming it, that unfolds it here —
+ * a conversation inside a conversation renders as one, same component, one step further in,
+ * because it is one — and, where the host can stand in it, walks into it.
+ */
+function SidechainDoor({
+  call,
+  name,
+  entries,
+  running,
+  onOpenSidechain,
+  artifacts,
+}: {
+  call: string;
+  name: string;
+  entries: TranscriptEntry[] | undefined;
+  /** The subagent is at work exactly while the call that spawned it is still running. */
+  running: boolean;
+  onOpenSidechain?: OpenSidechain | undefined;
+  artifacts?: ArtifactSurface | undefined;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const messages = entries?.filter((entry) => entry.kind === "message").length ?? 0;
+  return (
+    <div className={`ts-sidechain${open ? " open" : ""}`}>
+      <div className="ts-sidechain-head">
+        {entries !== undefined ? (
+          <button type="button" className="ts-sidechain-fold" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
+            <span className="ts-chev">
+              <Icon name="chevron" />
+            </span>
+            <span>
+              Subagent conversation · {messages === 1 ? "1 message" : `${messages} messages`}
+              {running ? " · working" : ""}
+            </span>
+          </button>
+        ) : (
+          <span>Subagent conversation</span>
+        )}
+        {onOpenSidechain !== undefined ? (
+          // The doorway as NAVIGATION: the same conversation, as the last element of the address
+          // instead of a fold inside a row — which is what makes it a place you can stand in, and walk
+          // back out of.
+          <button type="button" className="ts-sidechain-open" onClick={() => onOpenSidechain(call, name)}>
+            walk in →
+          </button>
+        ) : null}
+      </div>
+      {open && entries !== undefined ? (
+        <Transcript
+          entries={entries}
+          working={running}
+          {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+          {...(artifacts !== undefined ? { artifacts } : {})}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export interface CallSurface {
   /**
    * Where a workflow tool's note goes. `inline` (the default) draws it under the call — right for a
@@ -670,6 +735,7 @@ function Tool({
         name={words.name}
         called={entry.name}
         preview={words.preview}
+        command={approvalAnswerOf(entry) === undefined ? approvalAboutOf(entry).command : undefined}
         prose={approvalAnswerOf(entry) !== undefined}
         tone={words.tone}
         {...(words.mark !== undefined ? { mark: words.mark === "waiting" && !(unanswered && open) ? "cut" : words.mark } : {})}
@@ -683,9 +749,27 @@ function Tool({
       called={entry.name}
       {...(display.server !== undefined ? { server: display.server } : {})}
       preview={entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary}
+      command={entry.sidechain === undefined ? shellLineOf(entry) : undefined}
       tone={entry.ok === false ? "bad" : "plain"}
       mark={entry.ok === undefined ? (running || !unanswered ? "waiting" : "cut") : entry.ok ? "ok" : "bad"}
-      {...(workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false
+      {...(entry.sidechain !== undefined && (sub !== undefined || onOpenSidechain !== undefined)
+        ? {
+            // The subagent's conversation is what this call DID — a conversation of its own, the call's
+            // child — so its door is on the row without being asked for, not behind the row's fold
+            // with the arguments (the person, 2026-09-26: "i thought we had subagents create child
+            // conversations, no? it currently is just listed as a tool use").
+            shown: (
+              <SidechainDoor
+                call={entry.sidechain}
+                name={chainName}
+                entries={sub}
+                running={running}
+                {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+                {...(artifacts !== undefined ? { artifacts } : {})}
+              />
+            ),
+          }
+        : workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false
         ? // The host draws the note on its rail when it has one; then the row is only the call.
           calls?.outcomes === "rail"
           ? {}
@@ -737,37 +821,6 @@ function Tool({
           : {})}
       body={
         <>
-          {/* The subagent's conversation, first: it is what this call DID, and the arguments and
-              report below are its envelope. A conversation inside a conversation renders as one —
-              same component, one rule down the left edge — because it is one. */}
-          {entry.sidechain !== undefined && (sub !== undefined || onOpenSidechain !== undefined) ? (
-            <div className="ts-sidechain">
-              <div className="ts-sidechain-head">
-                <span>subagent conversation{sub !== undefined ? ` · ${sub.length} entries` : ""}</span>
-                {onOpenSidechain !== undefined ? (
-                  // The doorway as NAVIGATION: the same conversation, as the last element of the
-                  // address instead of a fold inside a row — which is what makes it a place you can
-                  // stand in, and walk back out of.
-                  <button
-                    type="button"
-                    className="ts-sidechain-open"
-                    onClick={() => onOpenSidechain(entry.sidechain!, chainName)}
-                  >
-                    walk in →
-                  </button>
-                ) : null}
-              </div>
-              {sub !== undefined ? (
-                <Transcript
-                  entries={sub}
-                  // The subagent is at work exactly while the call that spawned it is still running.
-                  working={running}
-                  {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
-                  {...(artifacts !== undefined ? { artifacts } : {})}
-                />
-              ) : null}
-            </div>
-          ) : null}
           <Payload label="arguments" value={entry.args} {...(artifacts !== undefined ? { artifacts } : {})} />
           {/* A call with no result says which kind of "none" it is — still running, or never answered —
               which is different from showing an empty one, and why this is not an empty block. */}
@@ -969,12 +1022,14 @@ function Work({
  *
  * The same argument the old fold made for its exemptions, and for the same rows: a page the model
  * drew, the call that delivered the operation's output, a question the agent put to the person (half
- * of which the person wrote) and what a workflow tool did are not steps towards the answer, they are
- * pieces of it. A summary that counted them into "3 commands · 2 edited" would be saying, of work done
+ * of which the person wrote), what a workflow tool did and a subagent's conversation are not steps
+ * towards the answer, they are pieces of it. A summary that counted them into "3 commands · 2 edited" would be saying, of work done
  * on request, that it was bookkeeping.
  */
 export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean {
   if (entry.kind !== "tool") return false;
+  // A subagent's call: its conversation is a child of this one, not a step of it.
+  if (entry.sidechain !== undefined) return true;
   if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || askedOf(entry) !== undefined) return true;
   return workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false && calls?.outcomes !== "rail";
 }

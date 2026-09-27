@@ -598,7 +598,6 @@ import type {
   ReadUriRequest,
   ReviewChangesRequest,
   TaskChangesRequest,
-  TaskChangesResult,
   ReviewChangesResult,
   ReviewSyncRequest,
   ArtifactSummary,
@@ -656,6 +655,8 @@ import type {
   PermissionMode,
   ToolChoice,
 } from "@jaira/shared";
+import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from "@jaira/shared";
+import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
 import { walkHiddenReport } from "./hiddenReport";
 import { layeredHiddenRules, whyHiddenPath, type ConfigLayer, type HiddenReport, type HiddenReportRequest, type HiddenRule, type HiddenVerdict } from "@jaira/shared";
@@ -10800,19 +10801,39 @@ export class AppService {
    * from `interaction:requested` like any other component. Blocking the channel until a human
    * finishes reading a multi-file diff would hang the renderer that has to show it.
    */
-  async taskChanges(request: TaskChangesRequest): Promise<TaskChangesResult> {
+  /**
+   * What a task changed, from its own record of calls and its subtasks' — the Changes tab. Each call
+   * is judged by the project's `chat/read-only` permission set, as `judgeReadOnly` judges it for the
+   * work summary, and a shell line part by part too; `changeLogOf` groups what did not pass.
+   */
+  taskChanges(request: TaskChangesRequest): TaskChangeLog {
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
-    if (session === undefined) return { reason: "no project is open" };
-    const worktree = session.project.runtime.get(request.taskId)?.worktreePath;
-    // Not a refusal: a task with no worktree is the common case, and the tab says so in words.
-    if (worktree === undefined) return { reason: "this task edits no worktree of its own" };
-    const git = gitFor(session.project, worktree);
-    const changeset = await worktreeChangeset(git, request.base ?? "HEAD", (path) => {
-      const file = withinWorkspace(worktree, path);
-      if (file === undefined || !existsSync(file)) return undefined;
-      return readFileSync(file, "utf8");
-    });
-    return changeset.changes.length === 0 ? { reason: `nothing changed since ${request.base ?? "HEAD"}` } : { changeset };
+    if (session === undefined) return EMPTY_CHANGE_LOG;
+    const project = session.project;
+    const paths = this.permissionSetPaths(request.project);
+    const choice = readPermissionSets(paths).find((candidate) => candidate.id === READ_ONLY_PERMISSION_SET);
+    const permissionSet = choice === undefined ? undefined : parsePermissionSet(choice.decl).permissionSet;
+    const config = project.config;
+    const policy = projectPolicy(config);
+    const judge: ReadOnlyJudge = (name, args, dialect) =>
+      permissionSet === undefined ? undefined : allowsCall(policy, permissionSet, name, args, dialect, { root: paths.projectDir, packages: filePackages });
+    const options = { judge, dialect: dialectFor(config.execEnvironment) };
+    const valuesOf = (taskId: string): JsonValue[] => sessionStoreFor(project, { taskId }).records().flatMap((row) => (row.result !== undefined ? [row.result] : []));
+    const calls = judgedCallsOf(valuesOf(request.taskId), options);
+    // The tasks this one made, and theirs: their work is filed where this task's is.
+    const seen = new Set([request.taskId]);
+    const walk = (parent: string, depth: number): void => {
+      if (depth > 3) return;
+      for (const child of project.tasks.list()) {
+        if (child.origin?.taskId !== parent || child.origin.kind === "started" || seen.has(child.id)) continue;
+        seen.add(child.id);
+        calls.push(...judgedCallsOf(valuesOf(child.id), { ...options, by: { kind: "subtask", name: child.title, taskId: child.id } }));
+        walk(child.id, depth + 1);
+      }
+    };
+    walk(request.taskId, 0);
+    const root = project.runtime.get(request.taskId)?.worktreePath ?? paths.projectDir;
+    return changeLogOf(calls, { root, title: (name) => toolDisplayOf(name).title });
   }
 
   async reviewChanges(request: ReviewChangesRequest): Promise<ReviewChangesResult> {
@@ -11928,15 +11949,21 @@ export function structuredOutputOf(
  *
  * It used to read `LlmOutput.sidechains`, a second key space holding the same conversation. Upstream
  * folds them into `entries` with a `sidechain` marker, so the grouping happens here, on read.
+ *
+ * Keyed by the CALL that spawned each one, which is what a transcript's row looks a subagent up by.
+ * While a record streams the marker's `id` is that call; once a Claude session file is folded in at
+ * close (`nativeCapture.foldIntoEntries`) the `id` is the AGENT's and the call is `parentToolUseId`
+ * — keyed by `id`, every closed record's subagents were filed where no row looked, and a subagent's
+ * conversation went back to being one tool call.
  */
-function sidechainsOf(value: JsonValue | undefined): Record<string, SessionTurn[]> | undefined {
+export function sidechainsOf(value: JsonValue | undefined): Record<string, SessionTurn[]> | undefined {
   const entries = (value as { value?: { entries?: JsonValue[] } } | undefined)?.value?.entries;
   if (!Array.isArray(entries)) return undefined;
   const out: Record<string, SessionTurn[]> = {};
   for (const raw of entries) {
-    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: { id?: unknown } } | null;
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: { id?: unknown; parentToolUseId?: unknown } } | null;
     if (entry === null || typeof entry !== "object" || entry.kind !== "message") continue;
-    const call = entry.sidechain?.id;
+    const call = typeof entry.sidechain?.parentToolUseId === "string" ? entry.sidechain.parentToolUseId : entry.sidechain?.id;
     if (typeof call !== "string") continue;
     (out[call] ??= []).push(turnOf({ role: entry.role, content: entry.content } as JsonValue));
   }

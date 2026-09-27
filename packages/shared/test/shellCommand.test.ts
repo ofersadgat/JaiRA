@@ -5,7 +5,7 @@
  * anything unmodellable comes back `unparsed` rather than looking benign.
  */
 import { describe, expect, it } from "vitest";
-import { describeCommand, parseCommand, programName, takeApart } from "../src/command";
+import { describeCommand, parseCommand, programName, takeApart } from "../src/shellCommand";
 
 /** The single command on a line (fails loudly if the line produced several). */
 function one(line: string, dialect: "posix" | "powershell" = "posix") {

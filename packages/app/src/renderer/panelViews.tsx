@@ -9,7 +9,7 @@
  * layout was settled. The inspectors these replace each had a vocabulary of their own.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import type { ArtifactSummary, EffectiveStateValues, InstanceNode, SessionRef, StateView, TaskChangesResult, TaskDetail } from "@jaira/shared/browser";
+import type { ArtifactSummary, EffectiveStateValues, InstanceNode, SessionRef, StateView, TaskDetail } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { Badge } from "./board";
 import { Icon } from "./icons";
@@ -387,40 +387,8 @@ export function StepCard({
 }
 
 /* ------------------------------------------------------------------------------------------------ */
-/* Changes, outputs, produced, held                                                                 */
+/* Outputs, produced, held                                                                 */
 /* ------------------------------------------------------------------------------------------------ */
-
-/**
- * What the task's worktree changed, read only (`task:changes`). Re-read when `signal` moves — the
- * task went on — since a diff is a reading of the disk, not of the journal.
- */
-export function ChangesView({ taskId, project, signal, onReview }: { taskId: string; project?: string | undefined; signal: unknown; onReview?: (() => void) | undefined }): JSX.Element {
-  const [found, setFound] = useState<TaskChangesResult | "error" | undefined>(undefined);
-  useEffect(() => {
-    let live = true;
-    void invoke("task:changes", { taskId, ...(project !== undefined ? { project } : {}) })
-      .then((result) => live && setFound(result))
-      .catch(() => live && setFound("error"));
-    return () => {
-      live = false;
-    };
-  }, [taskId, project, signal]);
-  if (found === undefined) return <p className="empty">Reading the worktree…</p>;
-  if (found === "error") return <p className="empty">The worktree could not be read.</p>;
-  if (found.changeset === undefined) return <p className="empty">{found.reason ?? "Nothing changed."}</p>;
-  return (
-    <div className="pv-changes">
-      {onReview !== undefined ? (
-        <div className="pv-actions">
-          <button type="button" onClick={onReview}>
-            Review these changes
-          </button>
-        </div>
-      ) : null}
-      <ValueView value={found.changeset} />
-    </div>
-  );
-}
 
 const count = (n: number): string => n.toLocaleString();
 

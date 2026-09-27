@@ -25,9 +25,11 @@ import type { JsonValue } from "@declarative-ai/json";
 // puts it back here, with no restatement to drift.
 import { renderToolResult } from "@declarative-ai/llm/entry";
 import {
+  takeApart,
   toolDisplayOf,
   workflowToolOf,
   workflowToolSummary,
+  type TakenApart,
   type ToolIconName,
   writingPath,
   type ConversationTurn,
@@ -313,7 +315,56 @@ function toolIconOf(name: string): WorkIconName {
 export function iconOf(entry: WorkEntry): WorkIconName {
   if (entry.kind === "thought") return "think";
   if (entry.kind === "event") return entry.tone === "plain" ? "note" : "alert";
-  return toolIconOf(entry.name);
+  const icon = toolIconOf(entry.name);
+  // A shell line that runs git — as itself, or inside `cd x && …`, `sh -c "…"`, `env X=1 …` — is
+  // drawn as the Git tools are: what the line DOES is version control, whatever tool carried it.
+  if (icon === "terminal" && entry.kind === "tool") {
+    const line = shellLineOf(entry);
+    if (line !== undefined && runsGit(line)) return "git";
+  }
+  return icon;
+}
+
+// --- a shell call's line ------------------------------------------------------
+
+/**
+ * The line a shell call ran — its `command`, or an argv joined — when the tool is one of the shell
+ * family (`Bash`, JaiRA's `bash`, codex's `shell`). `undefined` for every other call.
+ */
+export function shellLineOf(entry: ToolEntry): string | undefined {
+  if (toolIconOf(entry.name) !== "terminal") return undefined;
+  const args = entry.args;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return typeof args === "string" && args.length > 0 ? args : undefined;
+  const command = (args as Record<string, unknown>)["command"];
+  if (typeof command === "string" && command.length > 0) return command;
+  if (Array.isArray(command) && command.length > 0 && command.every((word) => typeof word === "string")) return command.join(" ");
+  return undefined;
+}
+
+/** Lines already taken apart: a transcript draws the same call on every update. */
+const takenLines = new Map<string, TakenApart>();
+
+/**
+ * A shell line as the requests it is made of — the same parse an approval draws its line from
+ * (`takeApart`, decision 0007 §4). POSIX first, which is what Claude's `Bash` is everywhere; a line
+ * POSIX cannot read at all is tried as PowerShell, which is what JaiRA's `bash` runs on Windows.
+ */
+export function takenApartOf(line: string): TakenApart {
+  const known = takenLines.get(line);
+  if (known !== undefined) return known;
+  let taken = takeApart(line, "posix");
+  if (taken.unparsed && taken.commands.length === 0) {
+    const other = takeApart(line, "powershell");
+    if (other.commands.length > 0) taken = other;
+  }
+  if (takenLines.size > 2000) takenLines.clear();
+  takenLines.set(line, taken);
+  return taken;
+}
+
+/** Whether any command on the line — however deep inside a runner — is `git`. */
+export function runsGit(line: string): boolean {
+  return takenApartOf(line).requests.some((request) => request.kind === "command" && request.command.program === "git");
 }
 
 /**

@@ -12,7 +12,7 @@
  * task's workspace, so a WSL project's agent commands execute inside the distro.
  */
 import { createLogger } from "@declarative-ai/log";
-import { refusal } from "@jaira/shared";
+import { refusal, takeApart } from "@jaira/shared";
 import {
   hostFunction,
   type CapabilityRegistry,
@@ -59,7 +59,6 @@ import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
 import { commandDecisionOf, commandNarrowingOf, commandWords, isDeniedPath } from "./policy";
 import { refusalOf } from "./approval";
-import { takeApart } from "./command";
 import { dialectFor, interpreterFor, type ExecEnv } from "./paths";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */

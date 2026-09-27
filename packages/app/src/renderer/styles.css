@@ -7110,6 +7110,12 @@ button.link.change-path {
 .shell-line .part-c.hot {
   background: color-mix(in srgb, var(--hue) 26%, transparent);
 }
+/* The same line on one row of a conversation (`shellLine.tsx`): the tint, a little tighter. */
+.ts-preview .shell-line .part-c,
+.ws-run-said .shell-line .part-c,
+.ws-card .shell-line .part-c {
+  padding: 0 2px;
+}
 
 /* One row per part, in the same colour: what was typed, what it is a request FOR, and what the
    permission-set says to it. */
@@ -10471,7 +10477,8 @@ button.ts-source-link:hover:not(:disabled) {
 .ws-k-write {
   --ws-h: var(--ws-write);
 }
-.ws-k-run {
+.ws-k-run,
+.ws-k-git {
   --ws-h: var(--ws-run);
 }
 .ws-k-web {
@@ -10764,11 +10771,40 @@ button.ts-source-link:hover:not(:disabled) {
   color: var(--text);
 }
 
-/* A subagent's conversation inside a call's row: the same page, one rule further in. */
+/* A subagent's conversation inside a call's row: the same page, one step further in. */
+/* Indented, not ruled: the coloured left edge went out with the stripes (75e1b452). */
 .ts-sidechain {
-  margin: 4px 0 8px;
-  padding: 6px 0 2px 10px;
-  border-left: 2px solid var(--accent, var(--rule));
+  margin: 2px 0 6px;
+  padding: 2px 0 2px 12px;
+}
+.ts-sidechain.open {
+  padding-top: 6px;
+}
+.ts-sidechain:not(.open) .ts-sidechain-head {
+  margin-bottom: 0;
+}
+/* The subagent's line folds its conversation in and out, as a row's line folds its body. */
+.ts-sidechain-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.ts-sidechain-fold:hover {
+  color: var(--text);
+}
+.ts-sidechain-fold .ts-chev {
+  transform: rotate(-90deg);
+}
+.ts-sidechain-fold[aria-expanded="true"] .ts-chev {
+  transform: none;
 }
 .ts-sidechain-head {
   display: flex;
@@ -17394,6 +17430,10 @@ button.link.cfg-login-add-sub {
   border-left: 1px solid var(--line);
 }
 /* Every icon button in the panel: a 26px target, the glyph at 15. */
+/* › — the back chevron, turned around: forward to where ‹ came back from. */
+.sp-forward svg {
+  transform: scaleX(-1);
+}
 .sp-icon {
   flex: none;
   display: inline-flex;
@@ -18238,4 +18278,435 @@ button.link.cfg-login-add-sub {
 }
 [data-part="automations"] .au-ask {
   margin: 10px 16px;
+}
+
+/* ---- the Changes tab (changesPanel.tsx) ------------------------------------------------------------
+   White cards on the window's ground, one per group of the tool menu, each folding from its head. The
+   ground takes over the panel body's own padding, so it runs to the panel's edges. */
+.chg {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: -12px -12px -18px;
+  padding: 10px 12px 18px;
+  background: var(--bg);
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
+}
+.chg svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex: none;
+}
+.chg-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.chg-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  cursor: pointer;
+}
+.chg-actions {
+  display: flex;
+}
+.chg-empty {
+  padding: 8px 2px;
+}
+.chg-card {
+  border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent);
+  min-width: 0;
+}
+.chg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  justify-content: flex-start;
+  cursor: pointer;
+}
+.chg-head:hover {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.chg-card:not(.folded) .chg-head {
+  padding-bottom: 5px;
+  border-radius: 10px 10px 0 0;
+}
+.chg-fold {
+  color: var(--tok-hint);
+  transition: transform 0.12s ease;
+}
+.chg .chg-fold svg {
+  width: 12px;
+  height: 12px;
+}
+.chg-card.folded .chg-fold,
+.chg-folder.shut .chg-fold {
+  transform: rotate(-90deg);
+}
+.chg-icon {
+  color: var(--dim);
+}
+.chg-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.chg-sum {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+}
+.chg-n {
+  flex: none;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--dim);
+  font: 500 calc(var(--size-data) * 10.5 / 12) / 1.7 var(--font-data);
+  text-align: center;
+}
+.chg-body {
+  padding: 0 2px 6px;
+  min-width: 0;
+}
+.chg code {
+  font-family: var(--font-data);
+  font-size: 0.92em;
+}
+.chg-add {
+  color: var(--ok);
+}
+.chg-del {
+  color: var(--bad);
+}
+.chg-cmd {
+  color: var(--tok-hint);
+}
+.chg-by {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  font: 500 calc(var(--size-app) * 10.5 / 12.5) / 1.65 var(--font-app);
+  color: var(--dim);
+  white-space: nowrap;
+}
+button.chg-by {
+  color: var(--accent);
+  cursor: pointer;
+}
+.chg-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--accent);
+  text-decoration: none;
+}
+.chg-out:hover {
+  text-decoration: underline;
+}
+.chg .chg-out svg {
+  width: 11px;
+  height: 11px;
+}
+.chg-in {
+  padding: 0;
+  font: inherit;
+}
+/* the tree */
+.chg-tree {
+  display: grid;
+  min-width: 0;
+}
+.chg-folder,
+.chg-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-right: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  justify-content: flex-start;
+  cursor: pointer;
+}
+.chg-folder:hover,
+.chg-file:not(:disabled):hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.chg-file:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.chg-folder {
+  color: var(--dim);
+  font: calc(var(--size-data) * 11 / 12) / 1.4 var(--font-data);
+}
+.chg .chg-folder svg,
+.chg .chg-file-icon svg {
+  width: 13px;
+  height: 13px;
+}
+.chg-file {
+  font: calc(var(--size-data) * 11.5 / 12) / 1.4 var(--font-data);
+  color: var(--text);
+}
+.chg-file-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.chg-file-from {
+  font: calc(var(--size-app) * 10.5 / 12.5) / 1.35 var(--font-app);
+  color: var(--dim);
+}
+.chg-file-from s {
+  color: var(--bad);
+  font-family: var(--font-data);
+}
+.chg-counts {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  font-size: calc(var(--size-data) * 11 / 12);
+}
+.chg-counts .chg-cmd {
+  font-family: var(--font-app);
+}
+.chg-letter {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  font: 700 calc(var(--size-data) * 10.5 / 12) / 1 var(--font-data);
+}
+.chg-file.k-create .chg-file-icon,
+.chg-file.k-create .chg-file-name,
+.chg-file.k-create .chg-letter {
+  color: var(--ok);
+}
+.chg-file.k-delete .chg-file-icon,
+.chg-file.k-delete .chg-file-name,
+.chg-file.k-delete .chg-letter {
+  color: var(--bad);
+}
+.chg-file.k-delete .chg-file-name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.chg-file.k-rename .chg-file-icon,
+.chg-file.k-rename .chg-file-name,
+.chg-file.k-rename .chg-letter {
+  color: var(--p1);
+}
+.chg-file.k-modify .chg-file-icon,
+.chg-file.k-modify .chg-letter {
+  color: var(--warn);
+}
+.chg-hunks {
+  margin: 2px 6px 6px;
+  padding: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font: calc(var(--size-data) * 10.5 / 12) / 1.5 var(--font-data);
+  overflow-x: auto;
+  max-height: 320px;
+}
+.chg-hunks .ln {
+  display: block;
+  padding: 0 8px;
+  white-space: pre;
+}
+.chg-hunks .ln.a {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+.chg-hunks .ln.d {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+.chg-hunks .ln.hd {
+  color: var(--tok-hint);
+}
+/* git: a banner per merge request, then the steps as a ladder */
+.chg-banner {
+  display: grid;
+  gap: 4px;
+  margin: 0 6px 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  min-width: 0;
+}
+.chg-banner-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+}
+.chg-banner-top > svg {
+  color: var(--dim);
+}
+.chg-banner-top {
+  align-items: flex-start;
+}
+.chg-banner-top > svg {
+  margin-top: 2px;
+}
+/* The title runs as text, the arrow at its end, so a long one wraps under its own start. */
+.chg-banner-top .chg-out {
+  display: inline;
+  color: var(--text);
+}
+.chg .chg-banner-top .chg-out svg {
+  display: inline-block;
+  margin-left: 4px;
+  vertical-align: -1px;
+}
+.chg-banner-top b {
+  color: var(--accent);
+}
+.chg-banner-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding-left: 22px;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.chg-branches code {
+  white-space: nowrap;
+}
+.chg-pill {
+  padding: 0 8px;
+  border-radius: 999px;
+  font: 500 calc(var(--size-app) * 10.5 / 12.5) / 1.8 var(--font-app);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.chg-pill.merged {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+.chg-pill.closed {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--dim);
+}
+.chg-ladder {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.chg-step,
+.chg-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.chg-step {
+  position: relative;
+}
+.chg-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 20px;
+  bottom: -6px;
+  width: 2px;
+  background: var(--line);
+}
+.chg-dot {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin: 4px 0 0 2px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.chg-step.todo .chg-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--panel);
+  border: 2px dashed var(--warn);
+}
+.chg-step.todo .chg-said {
+  color: var(--warn);
+}
+.chg-item-icon {
+  color: var(--dim);
+  padding-top: 2px;
+}
+.chg-line {
+  min-width: 0;
+}
+.chg-said {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.chg-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.chg-sub .ellip {
+  min-width: 0;
+}
+.chg-at {
+  font: calc(var(--size-data) * 10.5 / 12) / 1.6 var(--font-data);
+  color: var(--tok-hint);
+  white-space: nowrap;
+}
+.chg .shell-line .part-c {
+  padding: 0 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chg-fold {
+    transition: none;
+  }
 }

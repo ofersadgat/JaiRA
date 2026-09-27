@@ -346,6 +346,14 @@ export interface PopoverProps extends DivProps {
   matchWidth?: boolean | undefined;
   /** The float's own element, for a host that dismisses it by rules of its own (the context menu). */
   ref?: Ref<HTMLDivElement> | undefined;
+  /**
+   * Once shown, it STAYS where it opened — against the anchor, which it still follows — and grows
+   * downward from there, scrolling inside past the window's edge, instead of being placed afresh when
+   * its content changes size. For a card whose rows open under the pointer: placed afresh, a card that
+   * grew past its room flipped to the anchor's other side or slid up, the pointer was left outside it,
+   * and it closed before the click that opened the row could be followed by another.
+   */
+  settle?: boolean | undefined;
   children?: ReactNode;
 }
 
@@ -353,7 +361,7 @@ export interface PopoverProps extends DivProps {
  * A float placed against an anchor, drawn over everything. The element it renders IS the card:
  * `className` styles it, and the layer's own `.float` rule makes it fixed on the float layer.
  */
-export function Popover({ anchor, at, side = "below", align = "start", gap, matchWidth, ref, className, style, children, ...rest }: PopoverProps): JSX.Element {
+export function Popover({ anchor, at, side = "below", align = "start", gap, matchWidth, settle, ref, className, style, children, ...rest }: PopoverProps): JSX.Element {
   const parent = useContext(LayerContext);
   const layer = at?.layer ?? parent;
   const own = useRef<HTMLDivElement | null>(null);
@@ -365,6 +373,8 @@ export function Popover({ anchor, at, side = "below", align = "start", gap, matc
   const [matched, setMatched] = useState<number | undefined>(undefined);
   const [, bump] = useState(0);
   const target: FloatAnchor | undefined = anchor ?? at?.anchor;
+  /** With `settle`: where it was first shown, relative to the anchor's top left. */
+  const settled = useRef<{ dx: number; dy: number } | null>(null);
 
   // Registered with the layer it opened from, so a press inside it is not a press outside that one.
   useLayoutEffect(() => {
@@ -393,7 +403,16 @@ export function Popover({ anchor, at, side = "below", align = "start", gap, matc
     // The height it WANTS, not the height a previous cap left it: what it scrolls through counts.
     const chrome = element.offsetHeight - element.clientHeight;
     const height = Math.max(element.offsetHeight, element.scrollHeight + chrome);
-    const next = placeFloat(a, { width, height }, { width: window.innerWidth, height: window.innerHeight }, side, align, gap);
+    const view = { width: window.innerWidth, height: window.innerHeight };
+    let next = placeFloat(a, { width, height }, view, side, align, gap);
+    if (settle === true && !hidden) {
+      if (settled.current === null) settled.current = { dx: next.left - a.left, dy: next.top - a.top };
+      else {
+        const top = a.top + settled.current.dy;
+        const room = Math.max(MIN_HEIGHT, view.height - top - FLOAT_EDGE);
+        next = { left: a.left + settled.current.dx, top, maxHeight: height > room ? room : undefined };
+      }
+    }
     setPlaced((was) =>
       was !== null && Math.abs(was.left - next.left) < 0.5 && Math.abs(was.top - next.top) < 0.5 && was.maxHeight === next.maxHeight && was.hidden === hidden
         ? was

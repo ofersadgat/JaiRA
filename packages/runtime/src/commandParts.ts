@@ -2,7 +2,7 @@
  * What each part of a shell line is a request FOR, and what a permission set says about it
  * (decision 0007 §4).
  *
- * `command.ts` takes the line apart; this module names each piece's SUBJECT, and looks the subject
+ * `shellCommand.ts` (`@jaira/shared`) takes the line apart; this module names each piece's SUBJECT, and looks the subject
  * up in the same subject → mode map every tool answers to. There are no categories here — no
  * read/write/network classes. A file utility is the standard tool on its path, running a file is
  * `script`, and anything else is the program and its subcommand. The verdicts themselves — rules, the
@@ -25,7 +25,7 @@ import {
   type PermissionSet,
   type PermissionSetMode,
 } from "@jaira/shared";
-import { variableOf, type CommandDialect, type CommandWord, type ParsedCommand, type ShellRequest } from "./command";
+import { variableOf, type CommandDialect, type CommandWord, type ParsedCommand, type ShellRequest } from "@jaira/shared";
 import {
   EMBEDDERS,
   NO_REQUEST,
@@ -42,7 +42,7 @@ import {
   isShellLocalName,
   type PackageScriptRunner,
   type UtilitySpec,
-} from "./shellTables";
+} from "@jaira/shared";
 
 /** The subject that answers for "any other command" — the shell tool's own entry. */
 export const SHELL_SUBJECT = "bash";

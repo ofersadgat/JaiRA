@@ -22,7 +22,8 @@
  * default is to report the line as unparsed and let the policy treat that as "ask",
  * never as "allow".
  */
-import { isCommandRunner, type TextSpan } from "@jaira/shared";
+import { isCommandRunner } from "./commandRunners";
+import type { TextSpan } from "./commandParts";
 import { EMBEDDERS, isHarmlessVariable, isShellLocalName, type EmbedderSpec } from "./shellTables";
 
 export type CommandDialect = "posix" | "powershell";

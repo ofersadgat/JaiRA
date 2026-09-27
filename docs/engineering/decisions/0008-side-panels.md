@@ -116,6 +116,15 @@ task entered. The second is a fork at that state's entry, so it keeps the inputs
 **New channel.** `task:changes` returns a task's worktree edits as a changeset, read only, for the
 Changes tab.
 
+**Amended 2026-09-26.** The Changes tab no longer diffs a worktree. `task:changes` reads the task's
+own record of calls (and its subtasks'), judges each by the project's `chat/read-only` permission set,
+and groups what did not pass as the tool menu groups tools — Files, Execution, Web, Git, Tasks &
+workflows, MCP, Other — each a white card on the panel's ground that folds from its head. Files is a
+tree with one-child folders merged; Git leads with a banner per merge request, linked, then its steps
+as a ladder. A header switch leaves out what subagents and subtasks did. Nothing is read from the
+disk: an edit's own record carries its patch, and a command's file change names the command, with no
+counts (`changeLog.ts` in `@jaira/shared` and in the app's main, `changesPanel.tsx`).
+
 **Removed.**
 
 - Components: `StateInspector`, `RunInspector`, `TaskInspector`, `TaskContext`, `TaskPanel`,

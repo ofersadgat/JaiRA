@@ -3,6 +3,7 @@ import {
   EMPTY_STACK,
   acceptOffer,
   close,
+  forward,
   pin,
   pop,
   popTo,
@@ -171,5 +172,31 @@ describe("the pinned panel is the window's", () => {
     const unpinned = routeChange(pinned, shown, pin(shown, false));
     expect(unpinned.pinned).toBeNull();
     expect(unpinned.room?.entries.map((e) => e.key)).toEqual(["task:t1"]);
+  });
+});
+
+describe("forward (the person, 2026-09-26)", () => {
+  const keys = (stack: PanelStack): string[] => stack.entries.map((e) => e.key);
+  const deep = push(push(on(EMPTY_STACK, task("t1")), config("a")), state("b"));
+
+  it("goes forward again to where back came from, one level at a time", () => {
+    const back = pop(pop(deep));
+    expect(keys(back)).toEqual(["task:t1"]);
+    expect(back.ahead.map((e) => e.key)).toEqual(["config:a", "state:b"]);
+    expect(keys(forward(back))).toEqual(["task:t1", "config:a"]);
+    expect(keys(forward(forward(back)))).toEqual(["task:t1", "config:a", "state:b"]);
+    expect(forward(forward(back)).ahead).toEqual([]);
+  });
+
+  it("keeps what a crumb passes, and forgets the way ahead when somewhere new is opened", () => {
+    const back = popTo(deep, 0);
+    expect(back.ahead.map((e) => e.key)).toEqual(["config:a", "state:b"]);
+    expect(push(back, config("a")).ahead.map((e) => e.key)).toEqual(["state:b"]);
+    expect(push(back, config("elsewhere")).ahead).toEqual([]);
+    expect(on(back, task("t2")).ahead).toEqual([]);
+  });
+
+  it("does nothing with nowhere to go", () => {
+    expect(forward(deep)).toBe(deep);
   });
 });
