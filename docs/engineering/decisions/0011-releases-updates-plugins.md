@@ -338,8 +338,40 @@ the machine it runs on.
     screenshot.
 - **The result:** `JaiRA Setup 0.1.0.exe`, 129 MB, unsigned, with a blockmap. The unpacked app is
   467 MB, of which `app.asar` is 76 MB and the unpacked addon and compiler 24 MB. The rest is Electron.
-- **Still to do for step 2:** macOS and Linux run in CI in step 3. The app has no icon yet, so
-  electron-builder uses Electron's default.
+- **Still to do for step 2:** macOS and Linux run in CI in step 3. There is no icon, by the person's
+  choice ("no icon"), so electron-builder uses Electron's default.
+
+**Step 3, written 2026-09-26, not yet run:** `.github/workflows/release.yml` plus
+`.github/scripts/release-plan.mjs`.
+
+- **`plan` job:** decides the channel, version, JaiRA commit and declarative-ai commit, or that there is
+  nothing to build.
+  - A `vX.Y.Z` tag releases that commit as stable.
+  - A manual stable run promotes the latest nightly's commit, with the nightly's `X.Y.Z` unless a
+    version is given.
+  - A nightly builds `main`. The schedule is every six hours, and it skips a run with no new commit
+    since the last nightly or within six hours of it.
+  - The nightly version is the next patch after both the app's `package.json` and the newest stable
+    release, so nothing is committed back.
+  - The notes record `jaira-commit:` and `declarative-ai-commit:` (read back to promote a nightly),
+    plus the commits since the previous release in the same channel.
+  - declarative-ai `main` is resolved once, so all six machines build the same commit. It is not
+    pinned.
+- **`build` job:** runs on six GitHub-hosted runners: `windows-latest`, `windows-11-arm`,
+  `macos-latest`, `macos-15-intel`, `ubuntu-latest` and `ubuntu-24.04-arm`.
+  - Each checks both repositories out side by side, as `ci.yml` does.
+  - It runs `npm run app:dist`, under `xvfb-run` on Linux, where the smoke launches with
+    `--no-sandbox`.
+  - Artifact names carry the architecture.
+  - macOS builds are signed ad hoc (`identity: "-"`), because Apple Silicon will not run an unsigned
+    arm64 binary.
+  - Each smoke screenshot is uploaded as its own artifact.
+- **`publish` job:** gives the releases repository its first commit when it has none (a README through
+  the contents API). It then publishes with `softprops/action-gh-release` to `ofersadgat/releases`:
+  nightly as a prerelease, stable as latest.
+- **Needs:**
+  - the `RELEASES_TOKEN` secret;
+  - declarative-ai pushed to GitHub, since its `main` there is what gets built.
 
 ## Consequences
 

@@ -155,9 +155,18 @@ function builderConfig(stage, output) {
     nodeGypRebuild: false,
     // The updater's feed is written in the updates step (0011 §4); until then there is none.
     publish: null,
+    // The architecture in every name: the release collects all six builds into one directory, and
+    // electron-builder's defaults name an x64 and an arm64 installer the same.
+    artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
     win: { target: [{ target: "nsis", arch: [process.arch] }] },
     nsis: { differentialPackage: true },
-    mac: { target: [{ target: "dmg", arch: [process.arch] }, { target: "zip", arch: [process.arch] }], category: "public.app-category.developer-tools" },
+    mac: {
+      target: [{ target: "dmg", arch: [process.arch] }, { target: "zip", arch: [process.arch] }],
+      category: "public.app-category.developer-tools",
+      // Unsigned until there is a Developer ID (0011 §2). Apple Silicon refuses to run an arm64 binary
+      // with no signature at all, and packaging invalidates Electron's own, so it is signed ad hoc.
+      ...(process.env.CSC_LINK === undefined ? { identity: "-" } : {}),
+    },
     linux: { target: [{ target: "AppImage", arch: [process.arch] }, { target: "deb", arch: [process.arch] }], category: "Development", maintainer: "JaiRA" },
   };
 }
@@ -201,7 +210,9 @@ function smoke(output) {
   const shot = join(output, "smoke.png");
   rmSync(shot, { force: true });
   console.log(`smoke test: ${exe}`);
-  const run = spawnSync(exe, [], {
+  // A CI Linux runner cannot give Chromium's sandbox helper the setuid root it needs.
+  const argv = process.platform === "linux" && process.env.CI ? ["--no-sandbox"] : [];
+  const run = spawnSync(exe, argv, {
     env: { ...process.env, JAIRA_HOME: home, JAIRA_CAPTURE: shot, JAIRA_CAPTURE_DELAY_MS: "4000", ELECTRON_ENABLE_LOGGING: "1" },
     encoding: "utf8",
     timeout: 120_000,

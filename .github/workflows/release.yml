@@ -1,0 +1,203 @@
+name: Release
+
+# Builds installers on six machines and publishes them to the public releases repository
+# (decision 0011 §3). What to build is decided by `.github/scripts/release-plan.mjs`:
+#
+# - a pushed `vX.Y.Z` tag releases that commit as stable;
+# - a manual `stable` run promotes the latest nightly's commit;
+# - a nightly builds `main`, from the schedule (skipped with no new commits or within six hours of the
+#   last nightly) or by hand.
+#
+# Needs one secret: RELEASES_TOKEN, a fine-grained token with Contents read/write on the releases
+# repository and nothing else.
+#
+# Unsigned for now: every signing step belongs here once the accounts exist, gated on its secrets.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: nightly builds main; stable promotes the latest nightly
+        type: choice
+        options: [nightly, stable]
+        default: nightly
+      version:
+        description: "stable only: X.Y.Z (default: the latest nightly's X.Y.Z)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && 'stable' || inputs.channel || 'nightly' }}
+  cancel-in-progress: false
+
+env:
+  RELEASES_REPO: ofersadgat/releases
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.plan.outputs.skip }}
+      channel: ${{ steps.plan.outputs.channel }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.plan.outputs.commit }}
+      upstream: ${{ steps.plan.outputs.upstream }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      notes: ${{ steps.plan.outputs.notes }}
+    steps:
+      - name: Require the releases token
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$RELEASES_TOKEN" ]; then
+            echo "::error::Add a RELEASES_TOKEN secret: a fine-grained token with Contents read/write on $RELEASES_REPO."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - id: plan
+        run: node .github/scripts/release-plan.mjs
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_VERSION: ${{ inputs.version }}
+          RUN_NUMBER: ${{ github.run_number }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.skip != 'true'
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: win-x64, os: windows-latest }
+          - { name: win-arm64, os: windows-11-arm }
+          - { name: mac-arm64, os: macos-latest }
+          - { name: mac-x64, os: macos-15-intel }
+          - { name: linux-x64, os: ubuntu-latest }
+          - { name: linux-arm64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout JaiRA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          path: JaiRA
+
+      # Unpinned (0011 §3): main, as the plan saw it, so all six machines build the same commit.
+      - name: Checkout declarative-ai
+        uses: actions/checkout@v4
+        with:
+          repository: ofersadgat/declarative-ai
+          ref: ${{ needs.plan.outputs.upstream }}
+          path: declarative-ai
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Linux build and display tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb fakeroot
+
+      - name: Install and build declarative-ai
+        working-directory: declarative-ai
+        run: |
+          npm install
+          npm run build
+
+      - name: Install JaiRA
+        working-directory: JaiRA
+        run: npm install
+
+      # The smoke test at the end of package.mjs launches the packaged app, which needs a display.
+      - name: Build the installer
+        working-directory: JaiRA
+        shell: bash
+        env:
+          JAIRA_BUILD_VERSION: ${{ needs.plan.outputs.version }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # The renderer build needs more than Node's default heap (the GitLab pipeline sets the same).
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a npm run app:dist
+          else
+            npm run app:dist
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.exe
+            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.blockmap
+            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.dmg
+            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.zip
+            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.AppImage
+            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.deb
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.name }}
+          path: JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/smoke.png
+          if-no-files-found: ignore
+
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+
+      # A release needs a commit to tag, and a new repository has none. Creating a file through the
+      # contents API makes the first commit; after that this finds the README and does nothing.
+      - name: Give the releases repository its first commit
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if ! gh api "repos/$RELEASES_REPO/contents/README.md" --silent 2>/dev/null; then
+            printf '# JaiRA releases\n\nInstallers for JaiRA, built from ofersadgat/JaiRA. Each release names the commits it was built from.\n' \
+              | base64 -w0 > readme.b64
+            gh api -X PUT "repos/$RELEASES_REPO/contents/README.md" \
+              -f message="Add README" -f content="$(cat readme.b64)" --silent
+          fi
+
+      - name: Write the notes
+        env:
+          NOTES: ${{ needs.plan.outputs.notes }}
+        run: printf '%s\n' "$NOTES" > notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ env.RELEASES_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ needs.plan.outputs.tag }}
+          name: JaiRA ${{ needs.plan.outputs.version }}
+          body_path: notes.md
+          prerelease: ${{ needs.plan.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.plan.outputs.prerelease == 'true' && 'false' || 'true' }}
+          files: installers/*
+          fail_on_unmatched_files: true
