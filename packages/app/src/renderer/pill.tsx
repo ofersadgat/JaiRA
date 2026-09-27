@@ -405,3 +405,10 @@ export function Pills({
     </span>
   );
 }
+
+/** Several tallies as one: a project's workspaces on its one row (decision 0013 §4). */
+export function sumCounts(all: readonly PillCounts[]): PillCounts {
+  const out: PillCounts = {};
+  for (const counts of all) for (const [kind, n] of Object.entries(counts) as Array<[keyof PillCounts, number | undefined]>) if (n !== undefined) out[kind] = (out[kind] ?? 0) + n;
+  return out;
+}

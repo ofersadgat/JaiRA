@@ -19190,3 +19190,10 @@ button.chg-by {
   gap: 10px;
   align-items: center;
 }
+
+/* A notice rather than a failure: what was done will happen, later (decision 0013 §7). */
+.toast.toast-info {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--line);
+}

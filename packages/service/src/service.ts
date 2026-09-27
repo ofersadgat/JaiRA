@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 /**
  * The app service (DESIGN §11.2): everything the renderer can ask for, with no
  * Electron in sight.
@@ -412,6 +413,7 @@ import {
   parseAppearanceConfig,
   parseUpdates,
   parseEngineConfig,
+  repositoryIdentity,
   type JairaEngineConfig,
   type JairaUpdatesConfig,
   type JairaAppearanceConfig,
@@ -674,6 +676,7 @@ import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
 import { Fleet, type ReachPort } from "./fleet";
+import { Federation } from "./federation";
 import { walkHiddenReport } from "./hiddenReport";
 import { layeredHiddenRules, whyHiddenPath, type ConfigLayer, type HiddenReport, type HiddenReportRequest, type HiddenRule, type HiddenVerdict } from "@jaira/shared";
 
@@ -1357,6 +1360,11 @@ export class AppService {
       publish: (view) => this.publish({ type: "machines:changed", view }),
       log: (level, message) => this.log({ level, source: "machines", message }),
       ...(options.reach !== undefined ? { reach: options.reach } : {}),
+    });
+    this.federation = new Federation(this.fleet, {
+      baseDir: this.baseDir,
+      publish: (message) => this.publish(message),
+      log: (level, message) => this.log({ level, source: "machines", message }),
     });
     // Settings' warnings and errors: before the log below, whose errors it counts.
     this.health = new HealthBoard({
@@ -2365,6 +2373,33 @@ export class AppService {
 
   /** This machine and the machines it is paired with (decision 0013 §1–§3). */
   readonly fleet: Fleet;
+
+  /** Other machines' workspaces, used from here (decision 0013 §4, §7). */
+  readonly federation: Federation;
+
+  /** Each open project's repository identity, read once from git. */
+  private readonly repositories = new Map<string, string | null>();
+
+  private repositoryOf(dir: string): string | undefined {
+    let identity: string | null | undefined = this.repositories.get(dir);
+    if (identity === undefined) {
+      identity = null;
+      for (const remote of ["upstream", "origin"]) {
+        try {
+          const url = execFileSync("git", ["-C", dir, "config", "--get", `remote.${remote}.url`], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim();
+          const found = repositoryIdentity(url);
+          if (found !== undefined) {
+            identity = found;
+            break;
+          }
+        } catch {
+          // No such remote, or no git.
+        }
+      }
+      this.repositories.set(dir, identity);
+    }
+    return identity ?? undefined;
+  }
 
   /**
    * Messages and runs waiting for an account's allowance to reset — held because the account had
@@ -3990,7 +4025,10 @@ export class AppService {
       for (const request of [...session.approvals.list(), ...session.questions.list()]) {
         if (request.taskId !== undefined && running.has(request.taskId)) parked.add(request.taskId);
       }
+      const identity = session.kind === "user" ? this.repositoryOf(session.dir) : undefined;
       out.push({
+        ...(identity !== undefined ? { identity } : {}),
+        machine: { id: this.fleet.identity().id, label: this.fleet.identity().label, state: "online", self: true },
         project: session.dir,
         // The shared group is named for the root it IS, not "shared": repointing the root is the one
         // thing that changes which runs are in it, so the directory is the useful label.
@@ -4014,6 +4052,8 @@ export class AppService {
     }
     // The user's work first, then the shared root — outward from what you are working on to the
     // background it runs against.
+    // Every paired machine's workspaces (decision 0013 §4): forwarded to, by their keys.
+    out.push(...this.federation.remoteProjects());
     const rank = (kind: ProjectSummary["kind"]): number => (kind === "user" ? 0 : 1);
     return out.sort((a, b) => (rank(a.kind) === rank(b.kind) ? a.label.localeCompare(b.label) : rank(a.kind) - rank(b.kind)));
   }
@@ -7931,7 +7971,8 @@ export class AppService {
   pendingApprovals(): PendingApproval[] {
     // Every session's, not the focused one's: an approval names its own request id, and a run in
     // another project parked on a tool call is still waiting for the same person.
-    return [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir, s.project.paths)));
+    const local = [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir, s.project.paths)));
+    return [...local, ...(this.federation.pendingOf("approval") as unknown as PendingApproval[])];
   }
 
   /**
@@ -7977,7 +8018,8 @@ export class AppService {
 
   /** Mid-run questions awaiting the person — `AskUserQuestion`, parked by a running agent. */
   pendingQuestions(): PendingQuestion[] {
-    return [...this.sessions.values()].flatMap((s) => s.questions.list().map((r) => pendingQuestionOf(r, s.dir)));
+    const local = [...this.sessions.values()].flatMap((s) => s.questions.list().map((r) => pendingQuestionOf(r, s.dir)));
+    return [...local, ...(this.federation.pendingOf("question") as unknown as PendingQuestion[])];
   }
 
   /**
@@ -7999,9 +8041,10 @@ export class AppService {
    * did not travel with the list would be a card that silently refused to be picked up.
    */
   pendingUserEvents(): PendingUserEvent[] {
-    return [...this.sessions.entries()].flatMap(([key, s]) =>
-      s.userEvents.list().map((request) => ({ ...request, project: this.refOf(key) })),
-    );
+    return [
+      ...[...this.sessions.entries()].flatMap(([key, s]) => s.userEvents.list().map((request) => ({ ...request, project: this.refOf(key) }))),
+      ...(this.federation.pendingOf("userEvent") as unknown as PendingUserEvent[]),
+    ];
   }
 
   /**
@@ -8150,7 +8193,7 @@ export class AppService {
     const stored = [...this.sessions.entries()].flatMap(([key, s]) =>
       this.storedInteractionsOf(key, s).filter((row) => !seen.has(row.requestId)),
     );
-    return [...live, ...stored];
+    return [...[...live, ...stored], ...(this.federation.pendingOf("interaction") as unknown as PendingInteraction[])];
   }
 
   /**

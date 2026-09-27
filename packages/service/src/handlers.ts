@@ -42,8 +42,29 @@ export const HOST_CHANNELS = [
 export type HostChannel = (typeof HOST_CHANNELS)[number];
 export type ServiceChannel = Exclude<IpcChannel, HostChannel>;
 
-/** Every request the service answers, by channel. */
-export function serviceHandlers(service: AppService): Record<ServiceChannel, Handler> {
+/**
+ * Every request the service answers, by channel — this machine's projects here, another machine's
+ * forwarded to it (decision 0013 §7, `Federation.route`).
+ */
+export function serviceHandlers(service: AppService, options: { local?: boolean } = {}): Record<ServiceChannel, Handler> {
+  const table = localHandlers(service);
+  // Another machine asking: answered with THIS machine's workspaces only. Forwarding on would send its
+  // own requests back to it, and two machines asking each other for everything would never stop.
+  if (options.local === true) return table;
+  const routed = {} as Record<ServiceChannel, Handler>;
+  for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
+    routed[channel] = ((request: unknown) => service.federation.route(channel, request) ?? (handler as (request: unknown) => unknown)(request)) as Handler;
+  }
+  // The root's lists span every machine: each online one's, keyed for forwarding.
+  routed["task:all"] = (async (request: unknown) => {
+    const local = (await (table["task:all"] as (request: unknown) => unknown)(request)) as unknown[];
+    const remote = await service.federation.everyMachine("task:all", request);
+    return [...local, ...remote];
+  }) as Handler;
+  return routed;
+}
+
+function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
   return {
     "project:open": ((request: { dir: string; remember?: boolean }) =>
       service.open(resolve(request.dir), request.remember === false ? { remember: false } : {})) as Handler,

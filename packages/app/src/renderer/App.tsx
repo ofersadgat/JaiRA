@@ -68,6 +68,7 @@ import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSe
 import { Icon } from "./icons";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "./workSummaryView";
 import { AboutPane } from "./aboutPane";
+import { groupOf, groupProjects, mergeBoards } from "./workspaceGroups";
 import { MachinesPane } from "./machinesPane";
 import { HealthCard, NeedsAttention } from "./healthView";
 import { healthCounts, logUnseen } from "./updatesModel";
@@ -84,6 +85,7 @@ import {
   Pill,
   Pills,
   projectCounts,
+  sumCounts,
   taskCounts,
   unseenRows,
   unseenTasks,
@@ -751,6 +753,18 @@ export default function App(): JSX.Element {
    * filed under JaiRA rather than mixed into a checkout.
    */
   const shownProjects = state.projects;
+  /**
+   * One project per repository, however many clones and machines it is on (decision 0013 §4) — or every
+   * workspace on its own, when the person turned grouping off. What the sidebar and the board list.
+   */
+  const groups = useMemo(() => groupProjects(state.projects, ui.groupWorkspaces !== false), [state.projects, ui.groupWorkspaces]);
+  /** The group the address stands in: a workspace of it stands the whole group's row. */
+  const atGroup = groupOf(groups, state.at)?.key ?? state.at;
+  /** The projects as the address bar names them: a workspace by its group's name. */
+  const namedProjects = useMemo(
+    () => state.projects.map((p) => ({ ...p, label: groupOf(groups, p.project)?.label ?? p.label })),
+    [state.projects, groups],
+  );
   /** Directory → hue, for the surfaces that draw a project they did not enumerate. */
   const projectHues = useMemo(
     () => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])),
@@ -2055,16 +2069,21 @@ export default function App(): JSX.Element {
    * The counts are the same ones the address bar carries — one derivation, so a project row and the
    * crumb over its board can never disagree about how much is waiting.
    */
-  const sidebarProjects: SidebarProject[] = shownProjects.map((p) => ({
-    project: p.project,
-    label: p.label,
-    kind: p.kind,
+  void shownProjects;
+  const sidebarProjects: SidebarProject[] = groups.map((g) => ({
+    project: g.key,
+    label: g.label,
+    kind: g.kind,
+    ...(g.where !== undefined ? { where: g.where } : {}),
     // Looked up rather than recomputed from THIS list's index: the sidebar hides one project and the
     // strip and the crumb bar hide none, and a hue derived from each list's own position would give
     // one project two colours the moment those lists differ.
-    hue: projectHues[p.project] ?? "var(--p0)",
-    counts: projectCounts(p, ui.seen),
-    onSeen: () => actions.markProjectSeen(p.project),
+    hue: projectHues[g.key] ?? "var(--p0)",
+    // A group's pills are its workspaces', together.
+    counts: sumCounts(g.members.map((m) => projectCounts(m, ui.seen))),
+    onSeen: () => {
+      for (const m of g.members) actions.markProjectSeen(m.project);
+    },
   }));
 
   /**
@@ -2099,7 +2118,9 @@ export default function App(): JSX.Element {
   const chatCounts = taskCounts(state.allConversations, ui.seen);
   /** The project the address is standing on, as the summary its rows count from. */
   const atSummary = state.at === null ? null : (shownProjects.find((p) => p.project === state.at) ?? null);
-  const atChats = state.at === null ? [] : chatsOf(state.at);
+  /** Every workspace of the group the address stands in — a grouped project's rows count them all (decision 0013 §4). */
+  const atMembers = groupOf(groups, state.at)?.members ?? (atSummary === null ? [] : [atSummary]);
+  const atChats = atMembers.flatMap((m) => chatsOf(m.project));
   /**
    * Start a conversation, from the row that names them.
    *
@@ -2156,11 +2177,8 @@ export default function App(): JSX.Element {
       ? {
           ...v,
           // This project's work, less what is in the room next door — see `rootRows`.
-          counts: minusCounts(
-            atSummary === null ? {} : projectCounts(atSummary, ui.seen),
-            taskCounts(atChats, ui.seen),
-          ),
-          onSeen: () => actions.markSeenAll(atSummary === null ? [] : runsOf(atSummary)),
+          counts: minusCounts(sumCounts(atMembers.map((m) => projectCounts(m, ui.seen))), taskCounts(atChats, ui.seen)),
+          onSeen: () => actions.markSeenAll(atMembers.flatMap(runsOf)),
         }
       : v.id === "chat"
       ? {
@@ -2347,7 +2365,7 @@ export default function App(): JSX.Element {
         collapsed={sidebarShut}
         onCollapsed={(shut) => actions.setFold(FOLD.shellSidebar, !shut)}
         projects={sidebarProjects}
-        at={state.at}
+        at={atGroup}
         onProject={actions.standOn}
         busy={state.busy}
         // The theme on SCREEN: the sidebar's toggle flips what you see, so on `system` it starts from
@@ -2443,7 +2461,7 @@ export default function App(): JSX.Element {
           */}
           {view === "tasks" ? (
             <TaskAddressBar
-              projects={state.projects}
+              projects={namedProjects}
               focus={state.taskFocus}
               at={atProject}
               boards={state.boards}
@@ -2539,10 +2557,19 @@ export default function App(): JSX.Element {
                   group is a section of one list and each header sticks under the bar as you reach it.
                 */}
                 {state.projects.length === 0 ? <p className="empty">Open a project to see its board.</p> : null}
-                {state.projects
-                  .filter((p) => state.taskFocus === null || p.project === state.taskFocus)
-                  .map((p, i) => (
-                    <section key={p.project} className="board-group" data-project={p.project}>
+                {groups
+                  .filter((g) => state.taskFocus === null || g.members.some((m) => m.project === state.taskFocus))
+                  .map((g, i) => {
+                    // One board for the project's workspaces, merged by column (decision 0013 §4); a
+                    // card knows its own workspace, and every verb on it goes there.
+                    const board = mergeBoards(g, state.boards);
+                    const p = { project: g.key };
+                    const own = (card: { project?: string }): string => card.project ?? g.key;
+                    const owner = (taskId: string): string =>
+                      [...(board?.columns.flatMap((c) => c.cards) ?? []), ...(board?.atLevel ?? []), ...(board?.finished ?? [])].find((c) => c.taskId === taskId)?.project ?? g.key;
+                    const holds = (project: string | null | undefined): boolean => g.members.some((m) => m.project === project);
+                    return (
+                    <section key={g.key} className="board-group" data-project={g.key}>
                       {/*
                         A header per section, EXCEPT the first — which is the one the address bar is
                         already naming when you are at the top of the column, and two rows saying the
@@ -2559,7 +2586,7 @@ export default function App(): JSX.Element {
                         // above taking that row's place rather than as two rows that resemble
                         // each other.
                         <TaskAddressBar
-                          projects={state.projects}
+                          projects={namedProjects}
                           focus={null}
                           at={p.project}
                           boards={state.boards}
@@ -2572,18 +2599,18 @@ export default function App(): JSX.Element {
                           onOpenProject={() => void actions.chooseProject("open")}
                         />
                       ) : null}
-                      {state.boards[p.project] ? (
+                      {board !== null ? (
                         <Board
-                          board={state.boards[p.project]!}
-                          selected={state.selectedProject === p.project ? state.selected : null}
-                          selectedSet={picked !== null && picked.project === p.project ? pickedSet! : undefined}
-                          numbered={state.boards[p.project]!.level !== ""}
-                          onSelectTask={(taskId, e) => pickTask(p.project, taskId, e)}
+                          board={board}
+                          selected={holds(state.selectedProject) ? state.selected : null}
+                          selectedSet={picked !== null && holds(picked.project) ? pickedSet! : undefined}
+                          numbered={board.level !== ""}
+                          onSelectTask={(taskId, e) => pickTask(owner(taskId), taskId, e)}
                           // A card's "started by events · …" line: the events task, opened at the
                           // automation that started the card (decision 0010 §4).
                           onOpenAt={(taskId, stateId) => {
-                            setPicked({ project: p.project, ids: [taskId], anchor: taskId });
-                            actions.select(taskId, p.project, stateId ?? null);
+                            setPicked({ project: owner(taskId), ids: [taskId], anchor: taskId });
+                            actions.select(taskId, owner(taskId), stateId ?? null);
                           }}
                           // Clicking a COLUMN describes the state it stands for, in the panel that
                           // describes whatever was last clicked — the Files view's answer to clicking
@@ -2592,50 +2619,47 @@ export default function App(): JSX.Element {
                           // would start belongs to the one it was clicked on.
                           onSelectColumn={(stateId) => actions.selectWorkflow(stateId, p.project)}
                           selectedColumn={state.taskWorkflowProject === p.project ? state.taskWorkflow : null}
-                          onDrill={(level) => actions.drillProject(p.project, level)}
+                          onDrill={(level) => {
+                            for (const m of g.members) actions.drillProject(m.project, level);
+                          }}
                           // Double-clicking a COLUMN opens that state and every task in it;
                           // double-clicking a CARD opens that one run. The level a run is walked into
                           // at is the board's own, except at the root listing — where the columns are
                           // workflows and the level below the listing is the card's own workflow.
-                          onOpenTask={(card) =>
-                            actions.openTask(
-                              card.taskId,
-                              p.project,
-                              state.boards[p.project]!.level === "" ? card.workflow : state.boards[p.project]!.level,
-                            )
-                          }
-                          onTaskMenu={(card, at) => openTaskMenu(p.project, card, at)}
+                          onOpenTask={(card) => actions.openTask(card.taskId, own(card), board.level === "" ? card.workflow : board.level)}
+                          onTaskMenu={(card, at) => openTaskMenu(own(card), card, at)}
                           // The column's own right-click: the place, and every task standing in it.
                           onColumnMenu={(stateId, at) => openColumnMenu(p.project, stateId, at)}
                           // What the running workflows are WAITING for somebody to do
                           // (`on_user_event`, WORKFLOWS.md §7.4). Computed per board, because a wait
                           // is an offer only where both ends of it are on screen: the card, and the
                           // column its rule names.
-                          dragOffers={dragOffersOf(state.boards[p.project]!, state.userEvents)}
+                          dragOffers={dragOffersOf(board, state.userEvents)}
                           // The drop PUBLISHES `task_move` (decision 0005) rather than answering the
                           // wait by id: main answers that wait when it is still there, and moves the
                           // task itself when the run went on while the card was in the air.
-                          onTaskDrop={(_requestId, card, columnKey) => void actions.moveTask(p.project, card.taskId, columnKey)}
+                          onTaskDrop={(_requestId, card, columnKey) => void actions.moveTask(own(card), card.taskId, columnKey)}
                           // A column NO rule offered is still somewhere a task can go (decision 0005
                           // §1): the host finds or makes the workflow that relates the two. The dry
                           // run is asked once per column per drag; the drop is the commit, with no
                           // step after it; Undo is on the card it made or moved.
                           connect={{
-                            ask: (card, column) => actions.connectPreview(p.project, card.taskId, column.stateId),
-                            onDrop: (card, column, confirmed) => void actions.connectTask(p.project, card.taskId, column.stateId, confirmed ? { confirmed: true } : {}),
+                            ask: (card, column) => actions.connectPreview(own(card), card.taskId, column.stateId),
+                            onDrop: (card, column, confirmed) => void actions.connectTask(own(card), card.taskId, column.stateId, confirmed ? { confirmed: true } : {}),
                             // A NEXT-TRANSITION chip: the same move, at the exact mount it names.
                             onMove: (card, move, confirmed) =>
-                              void actions.connectTask(p.project, card.taskId, move.target, { path: move.path, ...(confirmed ? { confirmed: true } : {}) }),
+                              void actions.connectTask(own(card), card.taskId, move.target, { path: move.path, ...(confirmed ? { confirmed: true } : {}) }),
                             // Where the board says so: the task keeps the token, and main judges it.
-                            undoable: undoableOn(state.boards[p.project]!),
-                            onUndo: (taskId) => void actions.undoConnect(taskId, p.project),
+                            undoable: undoableOn(board),
+                            onUndo: (taskId) => void actions.undoConnect(taskId, owner(taskId)),
                           }}
                         />
                       ) : (
                         <p className="empty">No board here yet.</p>
                       )}
                     </section>
-                  ))}
+                    );
+                  })}
                 {/*
                   Room to scroll past the end.
                   Without it the LAST group can never reach the top of the column, so it can never
@@ -2644,7 +2668,7 @@ export default function App(): JSX.Element {
                   group: with one, there is nothing to scroll between and this would be a screen of
                   blank under a single board.
                 */}
-                {state.taskFocus === null && state.projects.length > 1 ? <div className="board-tail" /> : null}
+                {state.taskFocus === null && groups.length > 1 ? <div className="board-tail" /> : null}
               </div>
               )}
 
@@ -2881,7 +2905,7 @@ export default function App(): JSX.Element {
                     />
                   </>
                 ) : null}
-                {state.section === "machines" ? <MachinesPane /> : null}
+                {state.section === "machines" ? <MachinesPane grouped={ui.groupWorkspaces !== false} onGrouped={actions.setGroupWorkspaces} /> : null}
                 {state.section === "about" ? (
                   <AboutPane
                     config={state.config}
@@ -3047,6 +3071,10 @@ export default function App(): JSX.Element {
       {state.error ? (
         <div className="toast" onClick={actions.dismissError}>
           {state.error}
+        </div>
+      ) : state.notice ? (
+        <div className="toast toast-info" onClick={actions.dismissNotice}>
+          {state.notice}
         </div>
       ) : null}
     </div>

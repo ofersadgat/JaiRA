@@ -14,6 +14,7 @@
 import { Fragment, useEffect, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { BoardCard, BoardColumn, BoardView, InstanceStatus, MoveConfirm as MoveConfirmKind, NextMove, TaskStatus } from "@jaira/shared/browser";
 import { canConnect, ConnectDrag, nestUnder, ownColumnOf, previewOf, type ConnectAsk, type ConnectPreview, type Words } from "./connectDrag";
+import { MachineChip } from "./machineChip";
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
 import { cardRemoteWord } from "./remoteStrip";
@@ -765,6 +766,8 @@ export function Card({
       meta={
         card.endedAt !== undefined ? (
           <>
+            {/* Where it runs, first: a project of several workspaces (decision 0013 §4). */}
+            {card.where !== undefined ? <MachineChip label={card.where.label} state={card.where.state} {...(card.where.title !== undefined ? { title: card.where.title } : {})} /> : null}
             {/* An ADOPTED task says so, and says what it ran: its status is on its pill, and "where it
                 is" is under the task above it. */}
             <span className="ellip">{card.under !== undefined ? `adopted · ${card.workflow}` : (card.activeStateId ?? card.status)}</span>
@@ -774,6 +777,7 @@ export function Card({
           </>
         ) : (
           <>
+            {card.where !== undefined ? <MachineChip label={card.where.label} state={card.where.state} {...(card.where.title !== undefined ? { title: card.where.title } : {})} /> : null}
             {/* An ADOPTED task says so, and says what it ran: its status is on its pill, and "where it
                 is" is under the task above it. */}
             <span className="ellip">{card.under !== undefined ? `adopted · ${card.workflow}` : (card.activeStateId ?? card.status)}</span>

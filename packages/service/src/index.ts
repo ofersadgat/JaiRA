@@ -19,3 +19,4 @@ export * from "./machine";
 export * from "./machineTokens";
 export * from "./fleet";
 export * from "./tailscale";
+export * from "./federation";

@@ -248,6 +248,8 @@ export interface AppState {
   /** The last prune plan (dry run) or applied result — never auto-applied. */
   prune: PruneReport | null;
   error: string | null;
+  /** Something done that did not happen yet: an answer waiting for a machine that is offline (decision 0013 §7). */
+  notice: string | null;
   /**
    * A directory somebody chose to open that is not a project yet, held until they answer.
    *
@@ -817,6 +819,7 @@ const EMPTY: AppState = {
   history: null,
   prune: null,
   error: null,
+  notice: null,
   initPrompt: null,
   busy: false,
   // The layout starts EMPTY rather than at the defaults: an absent id means "whatever this control
@@ -999,6 +1002,14 @@ export function useApp() {
   ref.current = state;
 
   const fail = useCallback((e: unknown) => patch({ error: (e as Error).message, busy: false }), [patch]);
+  /** An answer another machine will get when it is back: said, so it is not taken for lost. */
+  const waited = useCallback(
+    (answer: unknown) => {
+      const queued = answer as { queued?: boolean; machine?: string } | null;
+      if (queued?.queued === true) patch({ notice: `Waiting for ${queued.machine ?? "that machine"}, which is offline: it is delivered when ${queued.machine ?? "it"} reconnects.` });
+    },
+    [patch],
+  );
 
   /**
    * The pending write of the remembered layout, and whether one has been read yet.
@@ -2792,6 +2803,12 @@ export function useApp() {
         void refreshBoard(level);
       },
       dismissError: () => patch({ error: null }),
+      dismissNotice: () => patch({ notice: null }),
+      /** Clones of one repository as one project, or each workspace on its own (decision 0013 §4). */
+      setGroupWorkspaces: (on: boolean) => {
+        const { groupWorkspaces: _was, ...rest } = ref.current.settings.ui;
+        setUi(on ? rest : { ...rest, groupWorkspaces: false });
+      },
 
       /**
        * Which workflow the New-task form is filling in, and the boxes that go with it.
@@ -3292,13 +3309,15 @@ export function useApp() {
         extras: { remember?: string[]; addTo?: WritableLayer } = {},
       ) => {
         try {
-          await invoke("approval:submit", {
-            requestId,
-            decision,
-            scope,
-            ...(extras.remember !== undefined ? { remember: extras.remember } : {}),
-            ...(extras.addTo !== undefined ? { addTo: extras.addTo } : {}),
-          });
+          waited(
+            await invoke("approval:submit", {
+              requestId,
+              decision,
+              scope,
+              ...(extras.remember !== undefined ? { remember: extras.remember } : {}),
+              ...(extras.addTo !== undefined ? { addTo: extras.addTo } : {}),
+            }),
+          );
         } catch (e) {
           fail(e);
         }
@@ -3309,14 +3328,14 @@ export function useApp() {
        */
       answerQuestion: async (requestId: string, answers?: Record<string, string | string[]>) => {
         try {
-          await invoke("question:submit", { requestId, ...(answers !== undefined ? { answers } : {}) });
+          waited(await invoke("question:submit", { requestId, ...(answers !== undefined ? { answers } : {}) }));
         } catch (e) {
           fail(e);
         }
       },
       answer: async (requestId: string, value: unknown) => {
         try {
-          await invoke("interaction:submit", { requestId, value: value as never });
+          waited(await invoke("interaction:submit", { requestId, value: value as never }));
         } catch (e) {
           fail(e);
         }

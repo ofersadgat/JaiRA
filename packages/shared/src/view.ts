@@ -266,6 +266,13 @@ export interface PathStep {
 export interface BoardCard {
   taskId: string;
   title: string;
+  /**
+   * The workspace the task is in, when the board is one project's clones merged (decision 0013 §4) —
+   * what opening it addresses. Absent on a board of one workspace, which is the board's own.
+   */
+  project?: string;
+  /** Where it runs, as the card's chip says it — set with {@link project}. */
+  where?: { label: string; state: "on" | "off" | "warn" | "none"; title?: string };
   /** Task-level status (the runtime row), not the instance status. */
   status: TaskStatus;
   workflow: string;
@@ -1132,8 +1139,18 @@ export interface HistorySize {
  * two projects side by side would be columns of different things.
  */
 export interface ProjectSummary {
-  /** The project directory — the key every project-scoped channel takes. */
+  /**
+   * The key every project-scoped channel takes: the project directory, or — for a workspace on another
+   * machine — a `remoteProjectKey` the engine forwards (decision 0013 §7).
+   */
   project: string;
+  /**
+   * The repository it is a clone of, as `repositoryIdentity` spells it: clones with the same one are
+   * one project, grouped (decision 0013 §4). Absent for a project without a remote.
+   */
+  identity?: string;
+  /** Which machine the workspace is on, and whether it is reachable now. `self` for this one. */
+  machine?: { id: string; label: string; state: "online" | "offline" | "connecting" | "mismatch"; self?: true };
   /** What to call it in a group header. */
   label: string;
   /** `shared` is the selected root as a project — the machine's, not a checkout. See `SHARED_SESSION`. */

@@ -125,6 +125,8 @@ export interface SidebarProject {
    */
   hue: string;
   counts: PillCounts;
+  /** Beside the name, always: how many machines and workspaces a grouped project spans (decision 0013 §4). */
+  where?: string;
   onSeen?: () => void;
 }
 
@@ -391,7 +393,11 @@ export function Sidebar({
                     column of paths, and only one of them is the one you are working in. It yields
                     the width first (`flex: 0 1 auto` against the name's `flex: none`), because the
                     name is the answer and this is the qualifier. */}
-                {open ? <span className="side-where ellip data-faint">{parentName(p.project)}</span> : null}
+                {p.where !== undefined ? (
+                  <span className="side-where ellip data-faint">{p.where}</span>
+                ) : open ? (
+                  <span className="side-where ellip data-faint">{parentName(p.project)}</span>
+                ) : null}
               </span>
             </button>
             <Pills counts={p.counts} budget={open ? OPEN_PILL_BUDGET : ROW_PILL_BUDGET} onClear={p.onSeen} />

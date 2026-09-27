@@ -317,7 +317,7 @@ function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Elem
   );
 }
 
-export function MachinesPane(): JSX.Element {
+export function MachinesPane({ grouped, onGrouped }: { grouped: boolean; onGrouped: (on: boolean) => void }): JSX.Element {
   const [view, setView] = useMachines();
   return (
     <SettingsLayerContext.Provider value={null}>
@@ -339,6 +339,17 @@ export function MachinesPane(): JSX.Element {
               )}
             </SettingsSection>
             <AddMachine onView={setView} />
+            <SettingsSection id="projects" title="Projects across machines" info="A project is known by its git remote: clones of the same repository, here and on your other machines, are its workspaces.">
+              <SettingsRow
+                name="One project per repository"
+                description={
+                  grouped
+                    ? "Clones of the same repository are one project in the sidebar and on the board, and each task's chip says which machine and folder it is in."
+                    : "Every clone is its own row, named by its machine and folder."
+                }
+                control={<Switch on={grouped} label="One project per repository" onChange={onGrouped} />}
+              />
+            </SettingsSection>
           </>
         )}
       </div>

@@ -1,0 +1,110 @@
+/**
+ * Another machine's workspaces, used from this one (decision 0013 §4, §7): two engines in one process,
+ * each its own base root, host, network listener and fleet, published on loopback. Once paired, A lists
+ * B's open project under B's name and the repository it is a clone of, reads its board through the
+ * remote key, creates a task on it that B has, and hears B's pushes keyed for A. With B gone, an answer
+ * for it waits in A's outbox.
+ */
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { initProject } from "@jaira/persistence";
+import { AppService, hostEngine, loopbackReach, serviceHandlers, type HostedEngine } from "@jaira/service";
+import { parseRemoteProjectKey, type ProjectSummary, type PushMessage } from "@jaira/shared";
+
+interface Machine {
+  base: string;
+  service: AppService;
+  hosted: HostedEngine;
+  pushes: PushMessage[];
+  call: (channel: string, request?: unknown) => Promise<unknown>;
+}
+
+const made: Machine[] = [];
+const dirs: string[] = [];
+
+afterEach(async () => {
+  for (const m of made.splice(0)) await m.hosted.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+async function machine(label: string): Promise<Machine> {
+  const base = mkdtempSync(join(tmpdir(), `jaira-fed-${label}-`));
+  dirs.push(base);
+  const pushes: PushMessage[] = [];
+  let hosted: HostedEngine | undefined;
+  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, watchWorkflows: false, publish: (m) => {
+    pushes.push(m);
+    hosted?.host.broadcast(m);
+  } });
+  hosted = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
+  service.fleet.rename(label);
+  await service.fleet.setReachable(true);
+  const handlers = serviceHandlers(service) as Record<string, (request: unknown) => unknown>;
+  const m: Machine = { base, service, hosted, pushes, call: async (channel, request) => handlers[channel]!(request) };
+  made.push(m);
+  return m;
+}
+
+function clone(): string {
+  const dir = mkdtempSync(join(tmpdir(), "jaira-fed-clone-"));
+  dirs.push(dir);
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["remote", "add", "origin", "git@github.com:ofersadgat/jaira.git"], { cwd: dir });
+  return dir;
+}
+
+const remotes = async (m: Machine): Promise<ProjectSummary[]> => ((await m.call("project:list")) as ProjectSummary[]).filter((p) => p.machine?.self !== true);
+
+describe("another machine's workspaces", () => {
+  it("are listed, read and written from here, and pushes come back keyed for here", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    const dir = clone();
+    initProject(dir, b.base);
+    await b.service.open(dir);
+    // A has a clone of its own: it must not come back to A through B, which lists it as remote.
+    const mine = clone();
+    initProject(mine, a.base);
+    await a.service.open(mine);
+    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+
+    await expect.poll(async () => (await remotes(a)).map((p) => [p.label, p.identity, p.machine?.label]), { timeout: 8000 }).toEqual([[expect.any(String), "github.com/ofersadgat/jaira", "mac-mini"]]);
+    const [remote] = await remotes(a);
+    expect(parseRemoteProjectKey(remote!.project)).toEqual({ machineId: b.service.fleet.identity().id, dir: expect.any(String) });
+    const local = ((await a.call("project:list")) as ProjectSummary[]).filter((p) => p.machine?.self === true);
+    expect(local.every((p) => p.machine?.label === "desk")).toBe(true);
+
+    // Read and written through the key.
+    const roots = await a.call("board:roots", { project: remote!.project });
+    expect(roots).toMatchObject({ columns: expect.any(Array) });
+    const made = (await a.call("task:create", { title: "from desk", workflow: "chat/session", project: remote!.project })) as { taskId: string };
+    expect(b.service.listTasks(dir).map((t) => t.taskId)).toContain(made.taskId);
+
+    // Asking every machine answers, rather than two machines asking each other for ever.
+    const all = (await a.call("task:all", {})) as Array<{ project: string }>;
+    expect(all.some((row) => row.project === remote!.project)).toBe(true);
+    expect(all.every((row) => parseRemoteProjectKey(row.project)?.machineId !== a.service.fleet.identity().id)).toBe(true);
+    expect((await remotes(a)).length).toBe(1);
+
+    // B's news, heard on A with A's key.
+    await expect.poll(() => a.pushes.some((m) => m.type === "store:invalidate" && (m as { project?: string }).project === remote!.project), { timeout: 5000 }).toBe(true);
+  });
+
+  it("keeps an answer for a machine that went away, and says it is waiting", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
+    const bId = b.service.fleet.identity().id;
+    await b.hosted.close();
+    made.splice(made.indexOf(b), 1);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("offline");
+    const answer = await a.call("task:cancel", { taskId: "t-1", project: `jaira-machine://${bId}/${encodeURIComponent("C:\\src\\jaira")}` });
+    expect(answer).toMatchObject({ queued: true, machine: "mac-mini" });
+    expect(a.service.federation.outbox()).toEqual([expect.objectContaining({ machineId: bId, channel: "task:cancel" })]);
+    await expect(a.call("board:roots", { project: `jaira-machine://${bId}/x` })).rejects.toThrow(/mac-mini is offline/);
+  });
+});

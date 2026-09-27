@@ -149,6 +149,11 @@ export interface JairaUiState {
    * still holds whenever one is added (`withNoticeRead`), so it never outgrows the backlog.
    */
   noticesRead: Record<string, number>;
+  /**
+   * Clones of one repository shown as ONE project, on this machine and on paired ones (decision 0013
+   * §4). Absent means yes; `false` lists each workspace on its own.
+   */
+  groupWorkspaces?: boolean;
 }
 
 export interface JairaSettings {
@@ -857,6 +862,7 @@ function parseUiState(raw: unknown): JairaUiState {
   for (const [id, at] of Object.entries(objectOf(doc["noticesRead"]))) {
     if (typeof at === "number" && Number.isFinite(at) && at > 0) ui.noticesRead[id] = at;
   }
+  if (doc["groupWorkspaces"] === false) ui.groupWorkspaces = false;
   return ui;
 }
 

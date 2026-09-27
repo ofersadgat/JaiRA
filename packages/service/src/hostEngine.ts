@@ -133,8 +133,9 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
             ((request: unknown) => (connectionsOf().handlersFor(client.id)[channel] as (request: unknown) => unknown)(request)) as Handler,
           ]),
         ),
-        // Another machine: what paired machines ask of each other.
-        ...(client.machine !== undefined ? engine().fleet.handlersFor(client.machine) : {}),
+        // Another machine: answered with this machine's own workspaces, and what paired machines ask of
+        // each other (decision 0013 §7).
+        ...(client.machine !== undefined ? { ...(serviceHandlers(engine(), { local: true }) as Record<string, Handler>), ...engine().fleet.handlersFor(client.machine) } : {}),
       },
       closed: () => connections?.drop(client.id),
     }),

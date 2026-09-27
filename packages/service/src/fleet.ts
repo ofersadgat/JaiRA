@@ -106,6 +106,7 @@ export class Fleet {
   private readonly tokens: MachineTokens;
   private readonly links = new Map<string, { client?: EngineClient; state: PeerView["state"]; reason?: string; timer?: ReturnType<typeof setTimeout>; wait: number }>();
   private readonly peerPushListeners = new Set<(machineId: string, message: unknown) => void>();
+  private readonly peerStateListeners = new Set<(machineId: string, online: boolean) => void>();
   private pairing: { code: string; expiresAt: number; attempts: number } | undefined;
   private reach: MachineReach = { state: "off" };
   private loopbackPort: number | undefined;
@@ -452,6 +453,26 @@ export class Fleet {
     return () => this.peerPushListeners.delete(listener);
   }
 
+  /** Hear a machine come online or go away: what federation refreshes and delivers on. */
+  onPeerState(listener: (machineId: string, online: boolean) => void): () => void {
+    this.peerStateListeners.add(listener);
+    return () => this.peerStateListeners.delete(listener);
+  }
+
+  private peerState(machineId: string, online: boolean): void {
+    for (const listener of this.peerStateListeners) listener(machineId, online);
+  }
+
+  /** The label a machine is known by here. */
+  labelOf(machineId: string): string {
+    return this.known().find((m) => m.id === machineId)?.label ?? machineId;
+  }
+
+  /** Every paired machine, with its link's state: what federation lists workspaces under. */
+  peers(): Array<{ id: string; label: string; state: PeerView["state"] }> {
+    return this.known().map((m) => ({ id: m.id, label: m.label, state: this.links.get(m.id)?.state ?? "offline" }));
+  }
+
   /** The live connection to a machine, if it is online now. */
   client(machineId: string): EngineClient | undefined {
     const client = this.links.get(machineId)?.client;
@@ -511,8 +532,10 @@ export class Fleet {
       client.onClose(() => {
         this.remember(machine, { lastSeenAt: Date.now() });
         retry("the connection dropped");
+        this.peerState(machineId, false);
       });
       this.changed();
+      if (!client.limited) this.peerState(machineId, true);
       if (!client.limited) {
         void client.invoke("fleet:update", { machine: this.selfPeer() }).catch(() => undefined);
         // Members met through this machine that are still strangers: meet them now.
