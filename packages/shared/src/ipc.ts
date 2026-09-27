@@ -37,7 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { FolderListing, MachinesView, PlacementView, QueuedPlacement } from "./machines";
+import type { FolderListing, MachinesView, OutboxView, PlacementView, QueuedPlacement } from "./machines";
 import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
@@ -2284,6 +2284,10 @@ export interface IpcContract {
    * what the folder picker shows when a project is opened or made on another machine.
    */
   "files:browse": { request: { dir?: string; machine?: string }; response: FolderListing };
+  /** Answers waiting for machines that are offline (decision 0013 §7). */
+  "machines:outbox": { request: void; response: OutboxView[] };
+  /** Take an answer back before it is delivered: its request is waiting again. */
+  "machines:withdraw": { request: { id: string }; response: OutboxView[] };
   /** The tasks waiting for a workspace, on this machine. */
   "placement:queue": { request: void; response: QueuedPlacement[] };
   /** Send a queued task to a workspace by hand, before it starts; `target` absent puts it back to waiting. */
@@ -2471,6 +2475,8 @@ export const IPC_CHANNELS = [
   "machines:forget",
   "placement:view",
   "files:browse",
+  "machines:outbox",
+  "machines:withdraw",
   "placement:setRules",
   "placement:queue",
   "placement:runOn",

@@ -193,9 +193,22 @@ export class Federation {
 
   // --- what other machines are waiting on a person for ---------------------------------------------
 
-  /** Other machines' pending requests of one kind, keyed for this one, for the inbox and the gates. */
+  /** Other machines' pending requests of one kind, keyed for this one — less the ones already answered and waiting in the outbox. */
   pendingOf(kind: "approval" | "question" | "interaction" | "userEvent"): Pending[] {
-    return [...this.pending.values()].filter((e) => e.kind === kind).map((e) => e.request);
+    const answered = new Set(this.outbox().flatMap((item) => (typeof (item.request as { requestId?: unknown })?.requestId === "string" ? [(item.request as { requestId: string }).requestId] : [])));
+    return [...this.pending.values()].filter((e) => e.kind === kind && !answered.has(e.request.requestId)).map((e) => e.request);
+  }
+
+  /** What waits in the outbox, as the Machines page lists it. */
+  outboxView(): Array<{ id: string; machine: string; what: string; at: number }> {
+    const words: Record<string, string> = {
+      "approval:submit": "an approval",
+      "question:submit": "an answer to an agent's question",
+      "interaction:submit": "a decision at a gate",
+      "chat:send": "a message",
+      "task:cancel": "a cancel",
+    };
+    return this.outbox().map((item) => ({ id: item.id, machine: this.fleet.labelOf(item.machineId), what: words[item.channel] ?? item.channel, at: item.at }));
   }
 
   private remember(machineId: string, kind: "approval" | "question" | "interaction" | "userEvent", request: Pending): Pending {

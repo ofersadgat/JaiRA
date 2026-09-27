@@ -3195,11 +3195,18 @@ export function useApp() {
           // The composer's picks ride the START, because for a conversation the first message IS the
           // run — see `StartTaskRequest.overrides`. Every later message carries them on `chat:send`
           // instead, which is the same settings reaching the same call by the route that call takes.
-          await actionsRef.current.startTaskAsking({
+          const started = await actionsRef.current.startTaskAsking({
             taskId: summary.taskId,
             ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
             project,
           });
+          // A conversation is a task, and is placed like one (decision 0013 §5, ruling 16): where it went
+          // to another workspace, the thread follows it there.
+          if (started?.project !== undefined && started.project !== project) {
+            patch({ chat: { ...ref.current.chat, taskId: started.taskId, project: started.project } });
+            actionsRef.current.select(started.taskId, started.project);
+            return started.taskId;
+          }
           return summary.taskId;
         } catch (e) {
           patch({ chat: { ...ref.current.chat, busy: false, error: (e as Error).message } });
@@ -4610,12 +4617,13 @@ export function useApp() {
        * its message and nothing else, so the service keeps the list and `functions:pending` hands it
        * back. When it comes back empty the failure was something else, and the error stands as it is.
        */
-      startTaskAsking: async (request: StartTaskRequest): Promise<void> => {
+      startTaskAsking: async (request: StartTaskRequest): Promise<{ taskId: string; project?: string } | undefined> => {
         try {
           const started = await invoke("task:start", request);
           // Placed (decision 0013 §5): said where it went, or that it waits.
           if (started.queued === true) patch({ notice: "No workspace has room for this task now: it waits, and starts as soon as one frees up." });
           else if (started.placedOn !== undefined) patch({ notice: `Runs on ${started.placedOn}.` });
+          return started;
         } catch (e) {
           // The WHOLE request is kept, not just the task id: a retry that dropped `fake` or
           // `overrides` would start a different run than the one the person asked for.
@@ -4625,6 +4633,7 @@ export function useApp() {
           }).catch(() => [] as ModuleApproval[]);
           if (files.length === 0) throw e;
           patch({ moduleApproval: { request, files }, busy: false });
+          return undefined;
         }
       },
 

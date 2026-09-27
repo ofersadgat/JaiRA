@@ -4,7 +4,7 @@
  * Not a layered page: everything here is this machine's own.
  */
 import { useEffect, useState, type JSX } from "react";
-import { PAIRING_CODE_MS, type MachinesView, type PeerView } from "@jaira/shared/browser";
+import { PAIRING_CODE_MS, type MachinesView, type OutboxView, type PeerView } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 import { SettingsLayerContext, Switch, TextInput } from "./controls";
 import { MachineChip, chipStateOf } from "./machineChip";
@@ -338,6 +338,35 @@ function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Elem
   );
 }
 
+/** Answers waiting for machines that are offline, each of which can be taken back (decision 0013 §7). */
+function Outbox(): JSX.Element | null {
+  const [items, setItems] = useState<OutboxView[]>([]);
+  useEffect(() => {
+    const read = (): void => void invoke("machines:outbox", undefined).then(setItems, () => undefined);
+    read();
+    return subscribePush((message) => {
+      if (message.type === "machines:changed" || (message.type === "store:invalidate" && message.scope === "tasks")) read();
+    });
+  }, []);
+  if (items.length === 0) return null;
+  return (
+    <SettingsSection id="outbox" title="Waiting to be delivered" info="What you answered for a machine that was offline. Each is delivered when its machine reconnects; until then it can be taken back, and the question is open again.">
+      {items.map((item) => (
+        <SettingsRow
+          key={item.id}
+          name={<MachineChip label={item.machine} state="off" />}
+          description={`${item.what.charAt(0).toUpperCase()}${item.what.slice(1)}, given ${new Date(item.at).toLocaleString()}.`}
+          control={
+            <button type="button" className="ghost" onClick={() => void invoke("machines:withdraw", { id: item.id }).then(setItems, () => undefined)}>
+              Take it back
+            </button>
+          }
+        />
+      ))}
+    </SettingsSection>
+  );
+}
+
 export function MachinesPane({ grouped, onGrouped }: { grouped: boolean; onGrouped: (on: boolean) => void }): JSX.Element {
   const [view, setView] = useMachines();
   return (
@@ -359,6 +388,7 @@ export function MachinesPane({ grouped, onGrouped }: { grouped: boolean; onGroup
                 [...view.machines].sort((a, b) => a.label.localeCompare(b.label)).map((peer) => <PeerRow key={peer.id} peer={peer} onView={setView} />)
               )}
             </SettingsSection>
+            <Outbox />
             <AddMachine onView={setView} />
             <SettingsSection id="projects" title="Projects across machines" info="A project is known by its git remote: clones of the same repository, here and on your other machines, are its workspaces.">
               <SettingsRow

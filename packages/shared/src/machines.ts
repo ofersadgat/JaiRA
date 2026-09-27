@@ -160,3 +160,13 @@ export interface FolderListing {
   /** The machine's roots to jump to: its home, and its drives on Windows. */
   roots: string[];
 }
+
+/** An answer waiting for a machine that is offline (decision 0013 §7). */
+export interface OutboxView {
+  id: string;
+  /** The machine it waits for. */
+  machine: string;
+  /** What it is, in words: "a decision at a gate". */
+  what: string;
+  at: number;
+}

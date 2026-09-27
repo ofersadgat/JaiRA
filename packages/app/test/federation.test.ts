@@ -122,6 +122,9 @@ describe("another machine's workspaces", () => {
     const answer = await a.call("task:cancel", { taskId: "t-1", project: `jaira-machine://${bId}/${encodeURIComponent("C:\\src\\jaira")}` });
     expect(answer).toMatchObject({ queued: true, machine: "mac-mini" });
     expect(a.service.federation.outbox()).toEqual([expect.objectContaining({ machineId: bId, channel: "task:cancel" })]);
+    const listed = (await a.call("machines:outbox")) as Array<{ id: string; machine: string; what: string }>;
+    expect(listed).toEqual([expect.objectContaining({ machine: "mac-mini", what: "a cancel" })]);
+    expect(await a.call("machines:withdraw", { id: listed[0]!.id })).toEqual([]);
     await expect(a.call("board:roots", { project: `jaira-machine://${bId}/x` })).rejects.toThrow(/mac-mini is offline/);
   });
 });

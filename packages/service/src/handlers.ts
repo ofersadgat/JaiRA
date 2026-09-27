@@ -238,6 +238,11 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
       service.setPlacementRules(request.project, request.order, request.caps)) as Handler,
     "placement:queue": (() => service.queuedPlacements()) as Handler,
     "files:browse": ((request: { dir?: string } | undefined) => service.browseDirectory(request?.dir)) as Handler,
+    "machines:outbox": (() => service.federation.outboxView()) as Handler,
+    "machines:withdraw": ((request: { id: string }) => {
+      service.federation.withdraw(request.id);
+      return service.federation.outboxView();
+    }) as Handler,
     "placement:runOn": ((request: { taskId: string; project: string; target: string }) => service.runQueuedOn(request.taskId, request.project, request.target)) as Handler,
     "health:dismissAll": (() => {
       service.health.dismissAll();
