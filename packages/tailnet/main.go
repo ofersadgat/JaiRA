@@ -55,11 +55,17 @@ func main() {
 	}
 
 	server := &tsnet.Server{Dir: *dir, Hostname: *hostname, Logf: func(string, ...any) {}}
-	// The sign-in link is only ever said in the library's user log.
+	// The sign-in link is only ever said in the library's user log, and said again every few seconds
+	// while nobody has signed in: passed on once per link.
+	lastLink := ""
 	server.UserLogf = func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)
 		if at := strings.Index(line, "https://login.tailscale.com/"); at >= 0 {
-			say(map[string]any{"state": "needs-login", "url": strings.Fields(line[at:])[0]})
+			link := strings.Fields(line[at:])[0]
+			if link != lastLink {
+				lastLink = link
+				say(map[string]any{"state": "needs-login", "url": link})
+			}
 		}
 	}
 	defer server.Close()

@@ -31,16 +31,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          # The version the module says (tailscale.com decides it), so the build here and there agree.
+          go-version-file: packages/tailnet/go.mod
+          cache-dependency-path: packages/tailnet/go.sum
       - name: Build
         working-directory: packages/tailnet
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: |
-          go mod tidy
-          go build -trimpath -ldflags="-s -w" -o "out/${{ matrix.exe }}" .
+        run: go build -trimpath -ldflags="-s -w" -o "out/${{ matrix.exe }}" .
       - name: Pack
         working-directory: packages/tailnet
         run: |

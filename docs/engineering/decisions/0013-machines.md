@@ -566,6 +566,12 @@ the workspace specific stuff remains in the the workspace".
   - **Near-live copies:** a push naming a task pulls that task within 250 ms (`replica:pull` `only`).
     Other pushes pull the machine 1.5 s later.
   - **The composer's preview** (`chat:plan`) is read from the copy while the machine is away.
+  - **The helper, compiled and run** (Go 1.27.1, portable, in the session's scratch space). Tailscale
+    v1.88 no longer builds with it, so the module moves to tailscale.com v1.102.5 (`go 1.26.6`), with
+    `go.sum` committed. CI takes its Go from `go.mod` and no longer tidies. Run against the real control
+    plane, the helper says its sign-in link once per link, where it used to repeat it every few
+    seconds, and `HelperReach` passes it on. Signing in needs a person, and publishing needs an
+    `NPM_TOKEN`.
   - **Out of usage per route:** placement judges a workspace by the accounts the task's models spend
     (the model ids its root state names, and the default executor's model, through `accountOfRoute`).
     With none known, it judges by every account being spent, as before.
