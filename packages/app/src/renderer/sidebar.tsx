@@ -160,7 +160,18 @@ const ACT_WIDTH = 20;
  * A row of the project list rather than a control beside it: "open another" is a sibling of the
  * projects it would join, and a button in the title row would be a second place to go somewhere.
  */
-function OpenAnother({ busy, onChooseProject }: { busy: boolean; onChooseProject: (mode: "open" | "init") => void }): JSX.Element {
+function OpenAnother({
+  busy,
+  onChooseProject,
+  machines = [],
+  onBrowse,
+}: {
+  busy: boolean;
+  onChooseProject: (mode: "open" | "init") => void;
+  /** Paired machines a project can be opened or made on (decision 0013 §8). */
+  machines?: ReadonlyArray<{ id: string; label: string; online: boolean }>;
+  onBrowse?: (machineId: string, mode: "open" | "init") => void;
+}): JSX.Element {
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   return (
     <>
@@ -177,6 +188,17 @@ function OpenAnother({ busy, onChooseProject }: { busy: boolean; onChooseProject
             items: [
               { label: "Open project…", onSelect: () => onChooseProject("open") },
               { label: "New project…", onSelect: () => onChooseProject("init") },
+              // On another machine: its folders, through its engine.
+              ...machines.flatMap((m, i) => [
+                {
+                  label: `Open project on ${m.label}…`,
+                  ...(i === 0 ? { separator: true } : {}),
+                  disabled: !m.online,
+                  ...(m.online ? {} : { note: "offline" }),
+                  onSelect: () => onBrowse?.(m.id, "open" as const),
+                },
+                { label: `New project on ${m.label}…`, disabled: !m.online, onSelect: () => onBrowse?.(m.id, "init" as const) },
+              ]),
             ],
           });
         }}
@@ -206,6 +228,8 @@ export function Sidebar({
   theme,
   onTheme,
   onChooseProject,
+  machines,
+  onBrowse,
   onProjectSettings,
   update,
 }: {
@@ -255,6 +279,9 @@ export function Sidebar({
   theme: "light" | "dark";
   onTheme: (theme: "light" | "dark") => void;
   onChooseProject: (mode: "open" | "init") => void;
+  /** Paired machines, for opening a project on one (decision 0013 §8). */
+  machines?: ReadonlyArray<{ id: string; label: string; online: boolean }>;
+  onBrowse?: (machineId: string, mode: "open" | "init") => void;
   /**
    * The ⚙ on a project's row: that project's settings. Shown only while the row is under the pointer
    * (or the button has focus) — it is a door out of the project, not something the row is about.
@@ -521,7 +548,7 @@ export function Sidebar({
               for a colour to be OF, which is the same fact "All projects" states in the crumb. */}
           <div className="side-roots">{roots.map((v) => rowOf(v, false, "root"))}</div>
           {projects.map(projectRow)}
-          <OpenAnother busy={busy} onChooseProject={onChooseProject} />
+          <OpenAnother busy={busy} onChooseProject={onChooseProject} machines={machines} {...(onBrowse !== undefined ? { onBrowse } : {})} />
         </div>
       )}
 

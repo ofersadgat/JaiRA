@@ -55,6 +55,10 @@ export function serviceHandlers(service: AppService, options: { local?: boolean 
   for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
     routed[channel] = ((request: unknown) => service.federation.route(channel, request) ?? (handler as (request: unknown) => unknown)(request)) as Handler;
   }
+  // Starting a task PLACES it, where its project has several workspaces (decision 0013 §5). Only a
+  // request made here: one forwarded from another machine was placed there already.
+  routed["task:start"] = ((request: Parameters<typeof service.startTask>[0]) =>
+    service.federation.route("task:start", request) ?? service.placeAndStart(request)) as Handler;
   // The root's lists span every machine: each online one's, keyed for forwarding.
   routed["task:all"] = (async (request: unknown) => {
     const local = (await (table["task:all"] as (request: unknown) => unknown)(request)) as unknown[];
@@ -229,6 +233,12 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "machines:pairCancel": (() => service.fleet.cancelPairing()) as Handler,
     "machines:add": ((request: { address: string; code: string }) => service.fleet.add(request.address, request.code)) as Handler,
     "machines:forget": ((request: { id: string }) => service.fleet.forget(request.id)) as Handler,
+    "placement:view": ((request: { project: string }) => service.placementView(request.project)) as Handler,
+    "placement:setRules": ((request: { project: string; order: string[]; caps: Record<string, number> }) =>
+      service.setPlacementRules(request.project, request.order, request.caps)) as Handler,
+    "placement:queue": (() => service.queuedPlacements()) as Handler,
+    "files:browse": ((request: { dir?: string } | undefined) => service.browseDirectory(request?.dir)) as Handler,
+    "placement:runOn": ((request: { taskId: string; project: string; target: string }) => service.runQueuedOn(request.taskId, request.project, request.target)) as Handler,
     "health:dismissAll": (() => {
       service.health.dismissAll();
       return service.health.list();

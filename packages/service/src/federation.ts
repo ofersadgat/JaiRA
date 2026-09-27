@@ -25,6 +25,7 @@ const BY_REQUEST = new Set(["approval:submit", "question:submit", "interaction:s
 
 /** Pushes that are about one machine and mean nothing on another. */
 const MACHINE_LOCAL = new Set([
+  "open:external",
   "log:entry",
   "health:changed",
   "update:changed",
@@ -147,6 +148,11 @@ export class Federation {
     const body = request !== null && typeof request === "object" ? (request as Record<string, unknown>) : undefined;
     const remote = parseRemoteProjectKey(typeof body?.["project"] === "string" ? (body["project"] as string) : undefined);
     if (remote !== undefined) return this.forward(remote.machineId, channel, { ...body, project: remote.dir });
+    // Addressed to a machine by id: browsing its folders, opening or making a project there (§8).
+    if (typeof body?.["machine"] === "string" && body["machine"] !== this.fleet.identity().id) {
+      const { machine, ...rest } = body;
+      return this.forward(machine as string, channel, rest);
+    }
     if (BY_REQUEST.has(channel) && typeof body?.["requestId"] === "string") {
       const owner = this.pending.get(body["requestId"] as string);
       if (owner !== undefined) return this.forward(owner.machineId, channel, body);

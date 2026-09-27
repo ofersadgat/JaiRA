@@ -120,3 +120,43 @@ export function parseRemoteProjectKey(key: string | undefined): { machineId: str
   if (slash <= 0) return undefined;
   return { machineId: rest.slice(0, slash), dir: decodeURIComponent(rest.slice(slash + 1)) };
 }
+
+/** One workspace in a project's placement order (decision 0013 §5). */
+export interface PlacementWorkspace {
+  /** The workspace's project key: a directory here, a remote key elsewhere. */
+  project: string;
+  /** `machineId|dir`, what the order and caps are written by. */
+  key: string;
+  machineId: string;
+  label: string;
+  dir: string;
+  self: boolean;
+  cap?: number;
+  running: number;
+  /** Why it would take no new run now; absent when it would. */
+  why?: string;
+}
+
+export interface PlacementView {
+  identity?: string;
+  workspaces: PlacementWorkspace[];
+  /** Whether the person has set an order, or it is the default (other machines first). */
+  ordered: boolean;
+}
+
+export interface QueuedPlacement {
+  taskId: string;
+  project: string;
+  requires: string[];
+  since: number;
+}
+
+/** One folder's folders, for the picker (decision 0013 §8). */
+export interface FolderListing {
+  dir: string;
+  /** The folder above, absent at a root. */
+  parent?: string;
+  entries: Array<{ name: string; path: string; project: boolean; git: boolean }>;
+  /** The machine's roots to jump to: its home, and its drives on Windows. */
+  roots: string[];
+}

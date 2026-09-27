@@ -19197,3 +19197,78 @@ button.chg-by {
   color: var(--text);
   border-color: var(--line);
 }
+
+/* Where tasks run (decision 0013 §5). */
+.placement-order {
+  display: inline-block;
+  width: 18px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.placement-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+}
+.placement-cap .cfg-input {
+  width: 56px;
+}
+
+/* Choosing a folder on another machine (decision 0013 §8). */
+.folder-browser {
+  width: min(560px, 90vw);
+  display: grid;
+  gap: 10px;
+}
+.folder-browser-title {
+  margin: 0;
+}
+.folder-crumbs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.folder-at {
+  color: var(--dim);
+  margin-left: 6px;
+  min-width: 0;
+}
+.folder-list {
+  display: grid;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+}
+.folder-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--panel);
+  text-align: left;
+  padding: 6px 10px;
+}
+.folder-row:last-child {
+  border-bottom: 0;
+}
+.folder-row.is-project {
+  background: var(--tint-accent);
+}
+.folder-glyph {
+  color: var(--dim);
+  width: 12px;
+}
+.folder-empty {
+  padding: 10px;
+}
+.folder-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

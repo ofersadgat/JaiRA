@@ -135,7 +135,7 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
         ),
         // Another machine: answered with this machine's own workspaces, and what paired machines ask of
         // each other (decision 0013 §7).
-        ...(client.machine !== undefined ? { ...(serviceHandlers(engine(), { local: true }) as Record<string, Handler>), ...engine().fleet.handlersFor(client.machine) } : {}),
+        ...(client.machine !== undefined ? { ...(serviceHandlers(engine(), { local: true }) as Record<string, Handler>), ...(engine().peerHandlers(client.machine) as Record<string, Handler>) } : {}),
       },
       closed: () => connections?.drop(client.id),
     }),

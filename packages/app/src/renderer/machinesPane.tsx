@@ -82,7 +82,20 @@ function reachWords(view: MachinesView): { description: JSX.Element | string; on
     case "off":
       return { on: false, description: "Off: your other machines cannot reach this one, and it cannot be paired with." };
     case "starting":
-      return { on: true, description: "Publishing this machine through Tailscale…" };
+      return {
+        on: true,
+        description:
+          reach.signInUrl !== undefined ? (
+            <>
+              JaiRA's Tailscale helper needs you to sign in to your tailnet once.{" "}
+              <a href={reach.signInUrl} target="_blank" rel="noreferrer">
+                Sign in to your tailnet
+              </a>
+            </>
+          ) : (
+            "Publishing this machine through Tailscale…"
+          ),
+      };
     case "on":
       return {
         on: true,
@@ -98,6 +111,14 @@ function reachWords(view: MachinesView): { description: JSX.Element | string; on
         description: (
           <>
             <span className="upd-err">{sentence(reach.reason ?? "It cannot be published.")}</span>
+            {(reach.reason ?? "").includes("not installed") ? (
+              <>
+                {" "}
+                <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">
+                  Get Tailscale
+                </a>
+              </>
+            ) : null}
             {reach.signInUrl !== undefined ? (
               <>
                 {" "}

@@ -37,7 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { MachinesView } from "./machines";
+import type { FolderListing, MachinesView, PlacementView, QueuedPlacement } from "./machines";
 import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
@@ -1512,7 +1512,7 @@ export interface SecretCapabilities {
  */
 export interface IpcContract {
   /** `remember: false`: open it without adding it to the projects a window re-opens (a `jaira` command's). */
-  "project:open": { request: { dir: string; remember?: boolean }; response: { dir: string; recovered: string[] } };
+  "project:open": { request: { dir: string; remember?: boolean; /** On a paired machine (decision 0013 §8). */ machine?: string }; response: { dir: string; recovered: string[] } };
   /**
    * Create `.jaira/` in a directory and open it — `jaira init`, reachable from the app.
    *
@@ -1521,7 +1521,7 @@ export interface IpcContract {
    * a folder chosen a moment ago, and a channel whose name says so is one a reviewer can find.
    * Idempotent, and it keeps an existing `settings.json`.
    */
-  "project:init": { request: { dir: string }; response: { dir: string; recovered: string[] } };
+  "project:init": { request: { dir: string; machine?: string }; response: { dir: string; recovered: string[] } };
   /**
    * Ask the OS for a directory. Null when the dialog was dismissed.
    *
@@ -1538,7 +1538,7 @@ export interface IpcContract {
    * `project:open` throws made the app's own "Open project…" produce a red toast for it. Asked
    * first, the renderer can offer `project:init` instead of reporting a failure.
    */
-  "project:inspect": { request: { dir: string }; response: { dir: string; exists: boolean; project: boolean; open: boolean } };
+  "project:inspect": { request: { dir: string; machine?: string }; response: { dir: string; exists: boolean; project: boolean; open: boolean } };
   "project:current": { request: void; response: { dir: string } | null };
   /**
    * One project's tasks. Absent `project` ⇒ the focused one, and no project open is an ERROR.
@@ -1564,7 +1564,12 @@ export interface IpcContract {
   "task:all": { request: { workflows?: string[] } | void; response: ProjectTask[] };
   "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
   "task:create": { request: CreateTaskRequest; response: TaskSummary };
-  "task:start": { request: StartTaskRequest; response: { taskId: string } };
+  /**
+   * Start a task. In a project with several workspaces it is PLACED first (decision 0013 §5): the answer
+   * says where it went — `project` and `placedOn` when it went to another workspace, as a new task
+   * there — or that it waits in the queue for one to free up.
+   */
+  "task:start": { request: StartTaskRequest; response: { taskId: string; project?: string; placedOn?: string; queued?: true } };
   "task:cancel": { request: { taskId: string; project?: ProjectRef }; response: { taskId: string } };
   /**
    * Run a task again. A startable task (queued / interrupted / failed) simply starts; a finished one
@@ -2271,6 +2276,18 @@ export interface IpcContract {
   "machines:add": { request: { address: string; code: string }; response: MachinesView };
   /** Forget a machine, here and across the fleet. */
   "machines:forget": { request: { id: string }; response: MachinesView };
+  /** A project's workspaces in the order tasks are placed, each with its cap and why it would be passed over now. */
+  "placement:view": { request: { project: string }; response: PlacementView };
+  "placement:setRules": { request: { project: string; order: string[]; caps: Record<string, number> }; response: PlacementView };
+  /**
+   * The folders in one folder, on this machine or — with `machine` — on a paired one (decision 0013 §8):
+   * what the folder picker shows when a project is opened or made on another machine.
+   */
+  "files:browse": { request: { dir?: string; machine?: string }; response: FolderListing };
+  /** The tasks waiting for a workspace, on this machine. */
+  "placement:queue": { request: void; response: QueuedPlacement[] };
+  /** Send a queued task to a workspace by hand, before it starts; `target` absent puts it back to waiting. */
+  "placement:runOn": { request: { taskId: string; project: string; target: string }; response: { taskId: string; project: string } };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2452,6 +2469,11 @@ export const IPC_CHANNELS = [
   "machines:pairCancel",
   "machines:add",
   "machines:forget",
+  "placement:view",
+  "files:browse",
+  "placement:setRules",
+  "placement:queue",
+  "placement:runOn",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -2768,6 +2790,11 @@ export type PushMessage =
   | { type: "plugin:changed"; plugins: PluginStatus[] }
   /** This window's engine moved: it became a client, or took the engine over when its host went. */
   | { type: "engine:changed"; status: EngineStatus }
+  /**
+   * A page to open in the person's browser — a sign-in's — from an engine with no screen of its own
+   * (`jaira serve`), for the window that is using it to open where the person is (decision 0013 §8).
+   */
+  | { type: "open:external"; url: string }
   /** The fleet changed: a machine came or went, paired or was forgotten, or this one was renamed or published. */
   | { type: "machines:changed"; view: MachinesView }
   /** Settings' warnings and errors changed; the whole board. */

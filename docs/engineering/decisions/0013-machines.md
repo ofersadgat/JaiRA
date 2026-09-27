@@ -330,6 +330,126 @@ Each UI step is drawn as a mockup first.
     (`shots/machines-real.mts`).
 - **Not verified:** a real tailnet, since neither Tailscale nor Go is installed on this machine.
 
+**Steps 3 and 5, 2026-09-27: one project across machines, used from here.**
+
+- **Identity.** A project summary carries its identity: the git remote (upstream over origin),
+  normalized by `repositoryIdentity`. It also carries its machine.
+- **`Federation`** lists every paired machine's own workspaces under keys that name the machine
+  (`remoteProjectKey`). The lists are cached on disk under `<base>/remote/<machineId>/`, so an offline
+  machine's projects stay listed.
+  - A request carrying such a key is forwarded, with the key put back to the directory.
+  - An answer to a gate, an approval or a question goes by request id to the machine that asked.
+  - The machine's pushes come back keyed for here.
+  - So the board, a conversation, a gate and the composer work on a remote task as on a local one.
+- **No echo.** A request from another machine is answered with this machine's own workspaces only
+  (`serviceHandlers(service, { local: true })` on network connections). A peer's lists keep only its
+  own entries, and a relayed push already about another machine is dropped.
+  - Found on the real app, where each machine sent the other its own project back.
+  - Two machines asking each other for "everything" would otherwise never stop.
+- **The outbox.** An answer for a machine that is offline waits in `fleet-outbox.json` and is delivered
+  when it reconnects. The window says so in a notice.
+- **In the window,** `workspaceGroups.ts`:
+  - groups workspaces by identity, this machine's first;
+  - merges a group's boards by column, stamping each card with its workspace and a machine chip. The chip
+    adds the folder where one machine has two, and is absent for a project of one workspace. Every verb
+    on a card goes to its own workspace.
+  - The sidebar row says how many machines and workspaces the project spans. Its pills, and its Tasks and
+    Chat rows, count all of them. The address bar names the group.
+  - The grouping switch (`ui.groupWorkspaces`) is on Settings → Machines.
+- **Not built:** the finer part of step 5's offline handling. An answer that waits shows as a notice,
+  not yet as the mockup's pending line under the gate with "Take it back"; `Federation.withdraw` exists
+  for it.
+
+**Step 6, 2026-09-27: placement.**
+
+- **Resources.** `ResourceSampler` measures cores, CPU (from `os.cpus()` times, since `loadavg` is zero
+  on Windows) and free memory every 3 s.
+- **Capacity.** `AppService.capacity()` adds the runs working per workspace and which accounts are
+  spent. Other machines ask for it with `fleet:capacity`.
+- **The rule, `whyNot`.** A workspace is passed over when it is:
+  - offline;
+  - missing a tag the workflow's root state `requires` (read from the state file, which the loader
+    tolerates);
+  - on a reading older than 15 s;
+  - at its cap;
+  - over 90% CPU;
+  - under 10% free memory;
+  - on a machine whose every account with a reading is spent.
+- **The order** (`Placement.ordered`) is the project's rules, then the default: other machines in
+  pairing order, this one last. The rules (order and caps, per identity) sync with `fleet:placement`,
+  newest wins.
+- **Starting.** `task:start` in a project of several workspaces is placed:
+  - here;
+  - or re-made on the chosen workspace (it has not started) and removed here;
+  - or queued in `placement-queue.json`.
+  - The queue is retried every 10 s and at any run's end, here or relayed.
+  - A task that ran before continues where it is. A request forwarded from another machine is not
+    placed again.
+- **In the window:**
+  - a notice says where a task went, or that it waits;
+  - a waiting card has a dashed "no machine yet" chip;
+  - its menu has "Run on…", listing every workspace with why it is passed over. Offline machines and
+    those missing a required tag cannot be chosen; a busy one can.
+  - "Where tasks run" sits on the Runs page of a project with several workspaces: the order with ↑/↓,
+    and an optional cap.
+- **Two simplifications, open:**
+  - "Out of usage" means every account with a reading on that machine is spent. A per-route check would
+    need the route a workflow's model resolves to.
+  - Chats go through their own channels and are not placed yet (ruling 16).
+- **Also:** "Where tasks run" sits on the layered Runs page, but placement rules are the project's on
+  every machine, whatever layer the switch is on.
+
+**Step 7, 2026-09-27: screen verbs across machines.**
+
+- **`files:browse`** lists one folder's folders, with roots: home, and the drives on Windows. A request
+  that names a `machine` is forwarded to it; so are `project:open`, `project:init` and `project:inspect`
+  there.
+- **"Open a project…"** offers "Open project on <machine>…" and "New project on <machine>…" for each
+  paired machine. They open a folder browser drawn in JaiRA; a folder that is not a project yet is set
+  up there.
+- **Sign-in pages.** An engine with no screen of its own (`jaira serve`) pushes `open:external`. The
+  window using it opens the page where the person is.
+
+**The Tailscale helper (step 1, second half), 2026-09-27.**
+
+- **`packages/tailnet`** is `jaira-tailnet`, Go on `tsnet`.
+  - It joins the tailnet as its own node (`jaira-<machine>`) after a one-time sign-in.
+  - It forwards its tailnet port to the engine's loopback listener: HTTPS where the tailnet has
+    certificates, plain HTTP on the tailnet otherwise.
+  - It reports `needs-login`, `running` or `error` as JSON lines.
+- **`HelperReach`** runs it and passes the sign-in link to Settings → Machines. `autoReach` uses the
+  installed app when its CLI is there, the helper when its binary is (`JAIRA_TAILNET_HELPER`, or
+  `<base>/plugins/tailnet/`), and otherwise says both are missing.
+- **`.github/workflows/tailnet.yml`** builds six platforms into `@jaira/tailnet-<platform>` packages, and
+  publishes them only when run by hand with an `NPM_TOKEN`.
+- **Not done:**
+  - the Go program has never been compiled: there is no Go on this machine;
+  - the packages are not published;
+  - the plugin-manifest entry that lets About download them waits on publishing.
+- **Verified:** with a script speaking the helper's lines (sign-in passed on, address published, error
+  said).
+
+**Verified (steps 3, 5–7):**
+
+- Two engines in one process, for federation: listing, reading and writing through the key, pushes
+  keyed for here, no echo, the outbox, browsing and opening on the other machine.
+- For placement: the rule's cases; a task re-made on the other machine by default; an order keeping it
+  here; a missing tag queuing it until a machine has it.
+- In the real app, with a second base root's `jaira serve` holding another clone
+  (`shots/machines-grouped.mts`):
+  - the merged board with chips;
+  - a waiting task;
+  - Where tasks run;
+  - the folder browser on the other machine;
+  - grouping off.
+- Found on the way:
+  - a CLI bundle built before new channels speaks another contract. A mismatch between builds of the
+    same version now says "another build".
+  - an `else` that bound to the wrong `if` listed "/" among the Windows drives.
+
+**Still open:** step 4, one index in `~/.jaira` with clone indexes retired, and replication. See the
+question that follows.
+
 ## Consequences
 
 **Easier:**

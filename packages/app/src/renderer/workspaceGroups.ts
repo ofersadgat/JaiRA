@@ -124,3 +124,21 @@ export function mergeBoards(group: ProjectGroup, boards: Readonly<Record<string,
     finished: present.flatMap(({ member, board }) => stamp(member, board.finished)).sort((a, b) => (b.endedAt ?? b.updatedAt) - (a.endedAt ?? a.updatedAt)),
   };
 }
+
+/** Cards waiting for a workspace, chipped so (decision 0013 §5): the dashed "no machine yet". */
+export function markQueued(board: BoardView | null, queue: ReadonlyArray<{ taskId: string; requires: string[] }>): BoardView | null {
+  if (board === null || queue.length === 0) return board;
+  const waiting = new Map(queue.map((q) => [q.taskId, q] as const));
+  const mark = (card: BoardCard): BoardCard => {
+    const q = waiting.get(card.taskId);
+    if (q === undefined) return card;
+    const needs = q.requires.length > 0 ? `needs ${q.requires.join(", ")} · ` : "";
+    return { ...card, where: { label: "no machine yet", state: "none", title: `${needs}waits for a workspace with room` } };
+  };
+  return {
+    ...board,
+    columns: board.columns.map((c) => ({ ...c, cards: c.cards.map(mark) })),
+    atLevel: board.atLevel.map(mark),
+    finished: board.finished.map(mark),
+  };
+}

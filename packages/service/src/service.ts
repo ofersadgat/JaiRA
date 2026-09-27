@@ -22,6 +22,7 @@ import {
   watch,
   writeFileSync,
   type FSWatcher,
+  type Dirent,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import { homedir } from "node:os";
@@ -414,6 +415,11 @@ import {
   parseUpdates,
   parseEngineConfig,
   repositoryIdentity,
+  parseRemoteProjectKey,
+  type PlacementView,
+  type PlacementWorkspace,
+  type QueuedPlacement,
+  type FolderListing,
   type JairaEngineConfig,
   type JairaUpdatesConfig,
   type JairaAppearanceConfig,
@@ -677,6 +683,9 @@ import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
 import { Fleet, type ReachPort } from "./fleet";
 import { Federation } from "./federation";
+import { machineTags } from "./machine";
+import { Placement, workspaceKey, type MachineCapacity, type PlacementRules } from "./placement";
+import { ResourceSampler } from "./resources";
 import { walkHiddenReport } from "./hiddenReport";
 import { layeredHiddenRules, whyHiddenPath, type ConfigLayer, type HiddenReport, type HiddenReportRequest, type HiddenRule, type HiddenVerdict } from "@jaira/shared";
 
@@ -1361,6 +1370,16 @@ export class AppService {
       log: (level, message) => this.log({ level, source: "machines", message }),
       ...(options.reach !== undefined ? { reach: options.reach } : {}),
     });
+    this.resources = new ResourceSampler();
+    this.placement = new Placement({
+      baseDir: this.baseDir,
+      fleet: this.fleet,
+      localCapacity: () => this.capacity(),
+      log: (level, message) => this.log({ level, source: "machines", message }),
+    });
+    // What waits for a workspace is tried again when one may have freed: now and then, and at every run's end.
+    this.placementTimer = setInterval(() => void this.tryQueue(), 10_000);
+    this.placementTimer.unref?.();
     this.federation = new Federation(this.fleet, {
       baseDir: this.baseDir,
       publish: (message) => this.publish(message),
@@ -2377,6 +2396,228 @@ export class AppService {
   /** Other machines' workspaces, used from here (decision 0013 §4, §7). */
   readonly federation: Federation;
 
+  /** How busy this machine is, for placement (decision 0013 §5). */
+  private readonly resources: ResourceSampler;
+  readonly placement: Placement;
+  private readonly placementTimer: ReturnType<typeof setInterval>;
+  private queueRunning: Promise<void> | undefined;
+
+  /** This machine's room to run, as placement on any machine reads it. */
+  capacity(): MachineCapacity {
+    const running: Record<string, number> = {};
+    for (const session of this.sessions.values()) running[session.dir] = session.live.size - session.parkedRuns().size;
+    const view = this.limits.view();
+    const accounts = view.accounts.filter((a) => a.reading !== null).map((a) => a.key);
+    const spent = view.accounts.filter((a) => isSpent(a.reading)).map((a) => a.key);
+    const me = this.fleet.identity();
+    return { machineId: me.id, tags: machineTags(me), resources: this.resources.current(), running, accounts, spent };
+  }
+
+  /** The tags a workflow's root state says it needs (`requires`, decision 0013 §5), from the layer that has it. */
+  private requiresOf(workflow: string, project: string): string[] {
+    for (const layer of ["project", "base", "system"] as const) {
+      try {
+        const source = this.readWorkflow({ stateId: workflow, layer, project });
+        if (!source.exists) continue;
+        const requires = (JSON.parse(source.text) as { requires?: unknown }).requires;
+        return Array.isArray(requires) ? requires.filter((t): t is string => typeof t === "string") : [];
+      } catch {
+        // Not readable in this layer: the next.
+      }
+    }
+    return [];
+  }
+
+  /** Every workspace of one repository: this machine's clones and the paired machines'. */
+  private workspacesOf(identity: string): ProjectSummary[] {
+    return this.listProjects().filter((p) => p.identity === identity && p.kind === "user");
+  }
+
+  /**
+   * `task:start`, placed (decision 0013 §5): in a project with several workspaces the task goes to the
+   * first with room — here, or re-made on another workspace, since it has not started yet — or waits.
+   */
+  async placeAndStart(request: StartRunRequest): Promise<{ taskId: string; project?: string; placedOn?: string; queued?: true }> {
+    const dir = request.project;
+    const identity = dir !== undefined && parseRemoteProjectKey(dir) === undefined ? this.repositoryOf(dir) : undefined;
+    const members = identity !== undefined ? this.workspacesOf(identity) : [];
+    if (identity === undefined || dir === undefined || members.length <= 1) return this.startTask(request);
+    const detail = this.taskDetail(request.taskId, dir);
+    // A task that ran before continues where it is: its records are there.
+    if (detail.runs.length > 0) return this.startTask(request);
+    const requires = this.requiresOf(detail.workflow, dir);
+    const { chosen } = await this.placement.choose(identity, members, requires, this.fleet.identity().id);
+    if (chosen === undefined) {
+      this.placement.enqueue({ taskId: request.taskId, project: dir, identity, requires, since: Date.now() });
+      this.log({ level: "info", source: "machines", message: `'${detail.title}' waits for a workspace with room`, project: sessionKey(dir), taskId: request.taskId });
+      this.publish({ type: "store:invalidate", scope: "tasks" });
+      return { taskId: request.taskId, queued: true };
+    }
+    if (chosen.project === dir) return this.startTask(request);
+    return this.relocate(request, chosen);
+  }
+
+  /** Re-make a task that has not started on another workspace, start it there, and remove it here. */
+  private async relocate(request: StartRunRequest, target: ProjectSummary): Promise<{ taskId: string; project: string; placedOn: string }> {
+    const from = request.project!;
+    const detail = this.taskDetail(request.taskId, from);
+    const create = {
+      title: detail.title,
+      workflow: detail.workflow,
+      ...(detail.description !== undefined ? { description: detail.description } : {}),
+      ...(detail.labels !== undefined ? { labels: detail.labels } : {}),
+      ...(detail.inputs !== undefined ? { inputs: detail.inputs } : {}),
+      ...(detail.branch !== undefined ? { branch: detail.branch } : {}),
+    };
+    const { taskId: _was, project: _from, ...rest } = request;
+    const remote = parseRemoteProjectKey(target.project);
+    let taskId: string;
+    if (remote !== undefined) {
+      const client = this.fleet.client(remote.machineId);
+      if (client === undefined) throw this.refusal("run", `${target.machine?.label ?? "that machine"} went offline`);
+      taskId = ((await client.invoke("task:create", { ...create, project: remote.dir })) as { taskId: string }).taskId;
+      await client.invoke("task:start", { ...rest, taskId, project: remote.dir });
+    } else {
+      taskId = this.createTask({ ...create, project: target.project }).taskId;
+      await this.startTask({ ...rest, taskId, project: target.project });
+    }
+    await this.deleteTask(request.taskId, from).catch(() => undefined);
+    const placedOn = target.machine?.label ?? "this machine";
+    this.log({ level: "info", source: "machines", message: `'${detail.title}' runs on ${placedOn}`, project: sessionKey(from) });
+    return { taskId, project: target.project, placedOn };
+  }
+
+  /** Try every waiting task, oldest first, while workspaces have room. */
+  tryQueue(): Promise<void> {
+    this.queueRunning ??= (async () => {
+      for (const item of this.placement.queue()) {
+        const members = this.workspacesOf(item.identity);
+        let status: string | undefined;
+        try {
+          status = this.taskDetail(item.taskId, item.project).status;
+        } catch {
+          status = undefined;
+        }
+        if (status !== "queued") {
+          this.placement.dequeue(item.taskId);
+          continue;
+        }
+        const { chosen } = await this.placement.choose(item.identity, members, item.requires, this.fleet.identity().id);
+        if (chosen === undefined) continue;
+        this.placement.dequeue(item.taskId);
+        try {
+          if (chosen.project === item.project) await this.startTask({ taskId: item.taskId, project: item.project });
+          else await this.relocate({ taskId: item.taskId, project: item.project }, chosen);
+        } catch (e) {
+          this.log({ level: "warn", source: "machines", message: `a waiting task could not be started: ${(e as Error).message}`, taskId: item.taskId });
+        }
+      }
+      this.publish({ type: "store:invalidate", scope: "tasks" });
+    })().finally(() => {
+      this.queueRunning = undefined;
+    });
+    return this.queueRunning;
+  }
+
+  /** A project's workspaces as placement orders them, with caps and why each would be passed over now. */
+  async placementView(project: string): Promise<PlacementView> {
+    const identity = parseRemoteProjectKey(project) === undefined ? this.repositoryOf(project) : this.listProjects().find((p) => p.project === project)?.identity;
+    if (identity === undefined) return { workspaces: [], ordered: false };
+    const selfId = this.fleet.identity().id;
+    const rules = this.placement.rules(identity);
+    const { considered } = await this.placement.choose(identity, this.workspacesOf(identity), [], selfId);
+    const workspaces: PlacementWorkspace[] = considered.map((c) => {
+      const dir = parseRemoteProjectKey(c.project)?.dir ?? c.project;
+      const key = workspaceKey(c.machineId, dir);
+      const cap = rules?.caps?.[key];
+      return {
+        project: c.project,
+        key,
+        machineId: c.machineId,
+        label: c.label,
+        dir,
+        self: c.machineId === selfId,
+        ...(cap !== undefined ? { cap } : {}),
+        running: 0,
+        ...(c.why !== undefined ? { why: c.why } : {}),
+      };
+    });
+    return { identity, workspaces, ordered: (rules?.order?.length ?? 0) > 0 };
+  }
+
+  async setPlacementRules(project: string, order: string[], caps: Record<string, number>): Promise<PlacementView> {
+    const identity = this.repositoryOf(project) ?? this.listProjects().find((p) => p.project === project)?.identity;
+    if (identity === undefined) throw this.refusal("project", "this project has no git remote, so it has no other workspaces to place tasks on");
+    this.placement.setRules(identity, { order, caps });
+    return this.placementView(project);
+  }
+
+  queuedPlacements(): QueuedPlacement[] {
+    return this.placement.queue().map((q) => ({ taskId: q.taskId, project: q.project, requires: q.requires, since: q.since }));
+  }
+
+  /** A queued task sent to a workspace by hand (ruled: "4a"): taken out of the queue and started there. */
+  async runQueuedOn(taskId: string, project: string, target: string): Promise<{ taskId: string; project: string }> {
+    const item = this.placement.dequeue(taskId);
+    if (item === undefined) throw this.refusal("run", "that task is not waiting for a workspace");
+    const members = this.workspacesOf(item.identity);
+    const chosen = members.find((m) => m.project === target);
+    if (chosen === undefined) throw this.refusal("run", "that workspace is not one of this project's");
+    if (chosen.project === project) {
+      await this.startTask({ taskId, project });
+      return { taskId, project };
+    }
+    const moved = await this.relocate({ taskId, project }, chosen);
+    return { taskId: moved.taskId, project: moved.project };
+  }
+
+  /**
+   * Open a page in the person's browser: here, where this engine has a screen; otherwise pushed to the
+   * windows using it, which open it where the person is (decision 0013 §8).
+   */
+  private openPage(url: string): void {
+    if (this.options.openExternal !== undefined) this.options.openExternal(url);
+    else this.publish({ type: "open:external", url });
+  }
+
+  /** One folder's folders, for the picker: this machine's, or — forwarded — a paired one's. */
+  browseDirectory(dir?: string): FolderListing {
+    const at = dir !== undefined && dir.trim() !== "" ? resolvePath(dir) : homedir();
+    let names: Dirent[];
+    try {
+      names = readdirSync(at, { withFileTypes: true });
+    } catch (e) {
+      throw this.refusal("project", `${at} cannot be read: ${(e as Error).message}`);
+    }
+    const entries = names
+      .filter((d) => d.isDirectory() && !d.name.startsWith(".") && !d.name.startsWith("$"))
+      .map((d) => {
+        const path = join(at, d.name);
+        return { name: d.name, path, project: existsSync(join(path, ".jaira")), git: existsSync(join(path, ".git")) };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const parent = dirname(at);
+    const roots = [homedir()];
+    if (process.platform === "win32") {
+      for (const letter of "CDEFGHIJ") if (existsSync(`${letter}:\\`)) roots.push(`${letter}:\\`);
+    } else {
+      roots.push("/");
+    }
+    return { dir: at, ...(parent !== at ? { parent } : {}), entries, roots };
+  }
+
+  /** What another machine asks of this one about placement: its capacity, and rules changed there. */
+  peerHandlers(caller: { id: string; label: string }): Record<string, (request: never) => unknown> {
+    return {
+      ...this.fleet.handlersFor(caller),
+      "fleet:capacity": () => this.capacity(),
+      "fleet:placement": ((request: { identity: string; rules: PlacementRules }) => {
+        if (this.placement.merge(request.identity, request.rules)) this.publish({ type: "store:invalidate", scope: "config" });
+        return null;
+      }) as (request: never) => unknown,
+    };
+  }
+
   /** Each open project's repository identity, read once from git. */
   private readonly repositories = new Map<string, string | null>();
 
@@ -2824,6 +3065,8 @@ export class AppService {
   async close(): Promise<void> {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
+    clearInterval(this.placementTimer);
+    this.resources.close();
     this.fleet.close();
     this.limits.close();
     this.waiting.close();
@@ -2987,6 +3230,8 @@ export class AppService {
 
   private publish(message: PushMessage): void {
     this.options.publish?.(message);
+    // A run ended — here or, relayed, on another machine: a workspace may have room for what waits.
+    if (message.type === "run:finished" && this.placement !== undefined && this.placement.queue().length > 0) void this.tryQueue();
     // Every workflow write says so here — the one place all of them pass (decision 0010 §4).
     if (message.type === "store:invalidate" && message.scope === "workflows") this.kickEventsSupervisor();
   }
@@ -9106,7 +9351,7 @@ export class AppService {
     const controller = new AbortController();
     this.forgeSignIns.set(name, { pending, controller });
     // The plain page, where the person types the code shown beside Sign in — see `ForgeSignInPending`.
-    this.options.openExternal?.(pending.verificationUri);
+    this.openPage(pending.verificationUri);
     void this.finishForgeSignIn(name, connection, endpoints, clientId, authorization, controller.signal);
     return { ok: true, pending };
   }

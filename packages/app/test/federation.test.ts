@@ -93,6 +93,23 @@ describe("another machine's workspaces", () => {
     await expect.poll(() => a.pushes.some((m) => m.type === "store:invalidate" && (m as { project?: string }).project === remote!.project), { timeout: 5000 }).toBe(true);
   });
 
+  it("browses another machine's folders and opens a project there", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
+    const dir = clone();
+    initProject(dir, b.base);
+    const bId = b.service.fleet.identity().id;
+    const parent = join(dir, "..");
+    const listing = (await a.call("files:browse", { machine: bId, dir: parent })) as { dir: string; entries: Array<{ path: string; project: boolean; git: boolean }> };
+    expect(listing.entries.find((e) => e.path === dir)).toMatchObject({ project: true, git: true });
+    expect(b.service.inspect(dir).open).toBe(false);
+    await a.call("project:open", { dir, machine: bId });
+    expect(b.service.inspect(dir).open).toBe(true);
+    await expect.poll(async () => (await remotes(a)).length, { timeout: 8000 }).toBe(1);
+  });
+
   it("keeps an answer for a machine that went away, and says it is waiting", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");

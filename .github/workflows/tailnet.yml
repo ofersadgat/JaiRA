@@ -1,0 +1,74 @@
+# jaira-tailnet (decision 0013 §2): JaiRA's own way onto a tailnet, one binary per platform, packed as
+# the per-platform npm packages the Tailscale plugin downloads (decision 0011 §6).
+#
+# Built on every change to packages/tailnet, with the binaries kept as run artifacts. Published only when
+# run by hand with `publish` ticked, and only with an NPM_TOKEN secret that may publish under @jaira.
+name: tailnet
+
+on:
+  push:
+    paths: ["packages/tailnet/**", ".github/workflows/tailnet.yml"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the per-platform packages to npm"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, npm: win32-x64, exe: jaira-tailnet.exe }
+          - { goos: windows, goarch: arm64, npm: win32-arm64, exe: jaira-tailnet.exe }
+          - { goos: darwin, goarch: arm64, npm: darwin-arm64, exe: jaira-tailnet }
+          - { goos: darwin, goarch: amd64, npm: darwin-x64, exe: jaira-tailnet }
+          - { goos: linux, goarch: amd64, npm: linux-x64, exe: jaira-tailnet }
+          - { goos: linux, goarch: arm64, npm: linux-arm64, exe: jaira-tailnet }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build
+        working-directory: packages/tailnet
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          go mod tidy
+          go build -trimpath -ldflags="-s -w" -o "out/${{ matrix.exe }}" .
+      - name: Pack
+        working-directory: packages/tailnet
+        run: |
+          os="${{ matrix.npm }}"; os="${os%%-*}"; cpu="${{ matrix.npm }}"; cpu="${cpu##*-}"
+          version="$(node -p "require('../app/package.json').version")"
+          mkdir -p "pkg/${{ matrix.npm }}"
+          cp "out/${{ matrix.exe }}" "pkg/${{ matrix.npm }}/"
+          cp README.md "pkg/${{ matrix.npm }}/"
+          cat > "pkg/${{ matrix.npm }}/package.json" <<EOF
+          {
+            "name": "@jaira/tailnet-${{ matrix.npm }}",
+            "version": "${version}",
+            "description": "JaiRA's Tailscale helper (tsnet) for ${{ matrix.npm }}",
+            "license": "BSD-3-Clause",
+            "os": ["${os}"],
+            "cpu": ["${cpu}"],
+            "files": ["${{ matrix.exe }}", "README.md"]
+          }
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tailnet-${{ matrix.npm }}
+          path: packages/tailnet/pkg/${{ matrix.npm }}
+      - name: Publish
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        working-directory: packages/tailnet/pkg/${{ matrix.npm }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
+          npm publish --access public

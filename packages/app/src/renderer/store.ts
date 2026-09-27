@@ -76,6 +76,7 @@ import type {
   ConfigPath,
   EventsNotice,
   SchemaFormat,
+  QueuedPlacement,
 } from "@jaira/shared/browser";
 import { withNoticeRead } from "./noticesModel";
 import {
@@ -250,6 +251,8 @@ export interface AppState {
   error: string | null;
   /** Something done that did not happen yet: an answer waiting for a machine that is offline (decision 0013 §7). */
   notice: string | null;
+  /** The tasks waiting here for a workspace with room (decision 0013 §5). */
+  queue: QueuedPlacement[];
   /**
    * A directory somebody chose to open that is not a project yet, held until they answer.
    *
@@ -820,6 +823,7 @@ const EMPTY: AppState = {
   prune: null,
   error: null,
   notice: null,
+  queue: [],
   initPrompt: null,
   busy: false,
   // The layout starts EMPTY rather than at the defaults: an absent id means "whatever this control
@@ -1496,7 +1500,8 @@ export function useApp() {
     // otherwise leave behind. Back to the listing, which always has something in it.
     const focus = ref.current.taskFocus;
     const gone = focus !== null && !projects.some((p) => p.project === focus);
-    patch({ projects, boards, ...(gone ? { taskFocus: null } : {}) });
+    const queue = await invoke("placement:queue", undefined).catch(() => [] as QueuedPlacement[]);
+    patch({ projects, boards, queue, ...(gone ? { taskFocus: null } : {}) });
   }, [patch]);
 
   /**
@@ -2804,6 +2809,29 @@ export function useApp() {
       },
       dismissError: () => patch({ error: null }),
       dismissNotice: () => patch({ notice: null }),
+      /**
+       * Open — or make — a project on another machine (decision 0013 §8). A folder that is not a project
+       * yet is set up there when opened, as the OS dialog's "Open" asks here.
+       */
+      openOnMachine: async (machine: string, dir: string, mode: "open" | "init") => {
+        patch({ busy: true, error: null });
+        try {
+          const what = mode === "open" ? await invoke("project:inspect", { dir, machine }) : null;
+          await invoke(mode === "init" || what?.project === false ? "project:init" : "project:open", { dir, machine });
+          patch({ busy: false });
+          await refreshAll();
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /** Send a task waiting for a workspace to one, by hand (decision 0013 §5, ruled "4a"). */
+      runQueuedOn: async (taskId: string, project: string, target: string) => {
+        try {
+          await invoke("placement:runOn", { taskId, project, target });
+        } catch (e) {
+          fail(e);
+        }
+      },
       /** Clones of one repository as one project, or each workspace on its own (decision 0013 §4). */
       setGroupWorkspaces: (on: boolean) => {
         const { groupWorkspaces: _was, ...rest } = ref.current.settings.ui;
@@ -4584,7 +4612,10 @@ export function useApp() {
        */
       startTaskAsking: async (request: StartTaskRequest): Promise<void> => {
         try {
-          await invoke("task:start", request);
+          const started = await invoke("task:start", request);
+          // Placed (decision 0013 §5): said where it went, or that it waits.
+          if (started.queued === true) patch({ notice: "No workspace has room for this task now: it waits, and starts as soon as one frees up." });
+          else if (started.placedOn !== undefined) patch({ notice: `Runs on ${started.placedOn}.` });
         } catch (e) {
           // The WHOLE request is kept, not just the task id: a retry that dropped `fake` or
           // `overrides` would start a different run than the one the person asked for.

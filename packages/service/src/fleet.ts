@@ -24,6 +24,7 @@ import type { Handler } from "./handlers";
 import { machineIdentity, updateMachineIdentity, type MachineIdentity } from "./machine";
 import { MachineTokens } from "./machineTokens";
 import { tailscaleServe, tailscaleStatus, tailscaleUnserve } from "./tailscale";
+import { autoReach } from "./tailnetHelper";
 
 /** A paired machine, as this one remembers it. */
 interface KnownMachine extends PeerMachine {
@@ -50,8 +51,11 @@ export interface SecretsPort {
 
 /** How Tailscale is driven — a seam for tests. */
 export interface ReachPort {
-  publish(loopbackPort: number): Promise<{ url: string; via: "tailscale" | "helper" }>;
+  /** `progress` hears a sign-in the reach needs first (the helper's one-time tailnet sign-in). */
+  publish(loopbackPort: number, progress?: (update: { signInUrl?: string }) => void): Promise<{ url: string; via: "tailscale" | "helper" }>;
   unpublish(loopbackPort: number): Promise<void>;
+  /** Stop anything the reach runs (the helper) with the engine. */
+  close?(): void;
   /** Why this machine cannot be published, or undefined when it can. */
   unavailable(): Promise<string | undefined>;
 }
@@ -75,8 +79,9 @@ export const loopbackReach: ReachPort = {
   unavailable: async () => undefined,
 };
 
-function defaultReach(): ReachPort {
-  return process.env["JAIRA_REACH"] === "loopback" ? loopbackReach : installedTailscale;
+/** Tailscale however this machine has it — the app or JaiRA's helper — or loopback in development. */
+function defaultReach(baseDir: string, hostname: () => string): ReachPort {
+  return process.env["JAIRA_REACH"] === "loopback" ? loopbackReach : autoReach(baseDir, hostname);
 }
 
 export interface FleetOptions {
@@ -258,7 +263,7 @@ export class Fleet {
   private async applyReach(): Promise<void> {
     const want = this.read().reachable === true;
     const port = this.loopbackPort;
-    const reach = this.options.reach ?? defaultReach();
+    const reach = this.reachPort();
     if (!want) {
       if (this.reach.state === "on" && port !== undefined) await reach.unpublish(port).catch(() => undefined);
       this.reach = { state: "off" };
@@ -275,7 +280,12 @@ export class Fleet {
     try {
       const why = await reach.unavailable();
       if (why !== undefined) throw new Error(why);
-      const published = await reach.publish(port);
+      const published = await reach.publish(port, (update) => {
+        if (update.signInUrl !== undefined) {
+          this.reach = { state: "starting", via: "helper", signInUrl: update.signInUrl, reason: "sign in to your tailnet to finish" };
+          this.changed();
+        }
+      });
       this.reach = { state: "on", url: published.url, via: published.via };
       const file = this.read();
       this.write({ ...file, url: engineUrlOf(published.url) });
@@ -286,6 +296,13 @@ export class Fleet {
       this.options.log?.("warn", `this machine could not be made reachable: ${(e as Error).message}`);
     }
     this.changed();
+  }
+
+  private reachInUse: ReachPort | undefined;
+
+  private reachPort(): ReachPort {
+    this.reachInUse ??= this.options.reach ?? defaultReach(this.options.baseDir, () => this.identity().label);
+    return this.reachInUse;
   }
 
   // --- pairing, the shown side ------------------------------------------------------------------------
@@ -523,7 +540,11 @@ export class Fleet {
       const client = await connectEngine({ baseDir: this.options.baseDir, client: `machine ${this.identity().label}`, version: this.options.version, address: { url: machine.url }, token, timeoutMs: 10_000 });
       link.client = client;
       link.state = client.limited ? "mismatch" : "online";
-      link.reason = client.limited ? `it runs JaiRA ${client.host.version}, which cannot share work with ${this.options.version}` : undefined;
+      link.reason = client.limited
+        ? client.host.version === this.options.version
+          ? `it runs another build of JaiRA ${client.host.version}, which cannot share work with this one: update both to the same build`
+          : `it runs JaiRA ${client.host.version}, which cannot share work with ${this.options.version}`
+        : undefined;
       link.wait = this.options.retryMs ?? 3000;
       this.remember(machine, { lastSeenAt: Date.now(), version: client.host.version });
       client.onPush((message) => {
@@ -564,6 +585,7 @@ export class Fleet {
   /** Stop linking and leave the tailnet mapping in place — it is the machine's, kept across restarts. */
   close(): void {
     this.stopped = true;
+    this.reachInUse?.close?.();
     for (const link of this.links.values()) {
       if (link.timer !== undefined) clearTimeout(link.timer);
       link.client?.close();

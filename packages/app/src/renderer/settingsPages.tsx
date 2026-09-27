@@ -8,6 +8,7 @@
  *  - **Data & history** — what a run leaves behind: where its artifacts land, how its records are
  *    stored, and — for the project that is open — how much there is and what pruning would free.
  */
+import { PlacementSection } from "./placementSection";
 import type { JSX, ReactNode } from "react";
 import type { ConfigLayer, ConfigView } from "@jaira/shared/browser";
 import { Artifacts, ConfigBlockSection, ExecEnvironment, configWriter } from "./configPane";
@@ -20,11 +21,14 @@ interface PageProps {
   onSave: (layer: ConfigLayer, doc: unknown) => void;
 }
 
-export function RunsPane({ config, layer, busy, editable, onSave }: PageProps): JSX.Element {
+export function RunsPane({ config, layer, busy, editable, onSave, project = null }: PageProps & { project?: string | null }): JSX.Element {
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
   const writer = configWriter(config, layer, busy || !editable, onSave);
   return (
     <div className="cfg-pane">
+      {/* Where the open project's tasks run, when it has workspaces on more than one machine or folder
+          (decision 0013 §5). The project's own rules, the same on every machine. */}
+      <PlacementSection project={project} />
       <ExecEnvironment {...writer} />
       <ConfigBlockSection writer={writer} block="memo" />
       {/* `autopilot` (decision 0005 §6): one number, and its description is the whole explanation —

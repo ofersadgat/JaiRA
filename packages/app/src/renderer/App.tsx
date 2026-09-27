@@ -68,8 +68,9 @@ import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSe
 import { Icon } from "./icons";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "./workSummaryView";
 import { AboutPane } from "./aboutPane";
-import { groupOf, groupProjects, mergeBoards } from "./workspaceGroups";
-import { MachinesPane } from "./machinesPane";
+import { groupOf, groupProjects, markQueued, mergeBoards } from "./workspaceGroups";
+import { MachinesPane, useMachines } from "./machinesPane";
+import { FolderBrowser } from "./folderBrowser";
 import { HealthCard, NeedsAttention } from "./healthView";
 import { healthCounts, logUnseen } from "./updatesModel";
 import { checkForUpdate, dismissHealth, installPlugin, useHealth } from "./updatesStore";
@@ -753,6 +754,9 @@ export default function App(): JSX.Element {
    * filed under JaiRA rather than mixed into a checkout.
    */
   const shownProjects = state.projects;
+  /** The paired machines, for opening a project on one (decision 0013 §8). */
+  const [machinesView] = useMachines();
+  const [browsing, setBrowsing] = useState<{ machineId: string; mode: "open" | "init" } | null>(null);
   /**
    * One project per repository, however many clones and machines it is on (decision 0013 §4) — or every
    * workspace on its own, when the person turned grouping off. What the sidebar and the board list.
@@ -1233,7 +1237,32 @@ export default function App(): JSX.Element {
       // Opening a card follows the same level rule as double-clicking it — see the Board's
       // `onOpenTask` below.
       const level = state.boards[project]?.level ?? "";
+      // Waiting for a workspace (decision 0013 §5): sent to one by hand, before it starts (ruled "4a").
+      const waiting = state.queue.some((q) => q.taskId === card.taskId);
+      const runOn: MenuItem[] = waiting
+        ? [
+            {
+              label: "Run on…",
+              note: "choose a workspace",
+              onSelect: () =>
+                void invoke("placement:view", { project }).then((view) =>
+                  setTaskMenu({
+                    ...at,
+                    title: "Run on",
+                    items: view.workspaces.map((w) => ({
+                      label: `${w.label} · ${w.dir}`,
+                      note: w.why ?? "has room",
+                      // Offline, or missing a tag its workflow needs: it could not run there at all.
+                      disabled: w.why === "offline" || (w.why ?? "").startsWith("not "),
+                      onSelect: () => void actions.runQueuedOn(card.taskId, project, w.project),
+                    })),
+                  }),
+                ),
+            },
+          ]
+        : [];
       const items: MenuItem[] = [
+        ...runOn,
         {
           label: "Open",
           onSelect: () => actions.openTask(card.taskId, project, level === "" ? card.workflow : level),
@@ -1285,7 +1314,7 @@ export default function App(): JSX.Element {
       ];
       setTaskMenu({ ...at, items });
     },
-    [actions, boardCardsOf, groupItems, picked, state.boards],
+    [actions, boardCardsOf, groupItems, picked, state.boards, state.queue],
   );
 
   /**
@@ -2373,6 +2402,8 @@ export default function App(): JSX.Element {
         theme={resolveTheme(look.mode, systemDark)}
         onTheme={actions.setTheme}
         onChooseProject={(mode) => void actions.chooseProject(mode)}
+        machines={(machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }))}
+        onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
         // The ⚙ on a project's row: stand on it, and open Settings on ITS layer — the shared root's
         // own row edits Shared, whose file it is.
         onProjectSettings={(p) => {
@@ -2562,7 +2593,7 @@ export default function App(): JSX.Element {
                   .map((g, i) => {
                     // One board for the project's workspaces, merged by column (decision 0013 §4); a
                     // card knows its own workspace, and every verb on it goes there.
-                    const board = mergeBoards(g, state.boards);
+                    const board = markQueued(mergeBoards(g, state.boards), state.queue);
                     const p = { project: g.key };
                     const own = (card: { project?: string }): string => card.project ?? g.key;
                     const owner = (taskId: string): string =>
@@ -2930,6 +2961,7 @@ export default function App(): JSX.Element {
                     busy={state.busy}
                     editable={state.configLayer !== "project" || state.at !== null}
                     onSave={actions.saveConfig}
+                    project={state.at}
                   />
                 ) : null}
                 {state.section === "data" ? (
@@ -3068,6 +3100,18 @@ export default function App(): JSX.Element {
           menu that exists in some views and not others is one people stop reaching for. */}
       <PointerMenus />
 
+      {browsing !== null && machinesView !== undefined ? (
+        <FolderBrowser
+          machines={machinesView.machines.filter((m) => m.state === "online").map((m) => ({ id: m.id, label: m.label }))}
+          initial={browsing.machineId}
+          mode={browsing.mode}
+          onClose={() => setBrowsing(null)}
+          onChosen={(machine, dir) => {
+            setBrowsing(null);
+            void actions.openOnMachine(machine.id, dir, browsing.mode);
+          }}
+        />
+      ) : null}
       {state.error ? (
         <div className="toast" onClick={actions.dismissError}>
           {state.error}

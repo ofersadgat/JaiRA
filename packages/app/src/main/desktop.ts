@@ -223,6 +223,9 @@ function pushToWindow(message: PushMessage): void {
     reportCrash("push", new Error(`'${message.type}' could not be sent on the engine's pipe: ${(e as Error).message}`));
   }
   if (message.type === "store:invalidate" && message.scope === "config") afterConfigWrite();
+  // A sign-in page from an engine with no screen of its own (`jaira serve`): opened here, where the
+  // person is (decision 0013 §8). Only http(s), for the reason `openExternal` gives.
+  if (message.type === "open:external" && /^https?:\/\//i.test(message.url)) void shell.openExternal(message.url).catch(() => undefined);
 }
 
 /**

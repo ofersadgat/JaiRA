@@ -20,3 +20,6 @@ export * from "./machineTokens";
 export * from "./fleet";
 export * from "./tailscale";
 export * from "./federation";
+export * from "./placement";
+export * from "./resources";
+export * from "./tailnetHelper";
