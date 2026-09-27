@@ -993,10 +993,15 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       return false;
     } catch (e) {
       const message = String((e as Error).message);
-      if (!message.includes("UNIQUE") || isSeatConflict(e)) throw e;
+      if (!message.includes("UNIQUE")) throw e;
+      // The record's OWN row first. SQLite names whichever unique index it checked first, and for a
+      // re-insert of a row that still holds its seat that is the seat index — so a conflict with
+      // ourselves read as a live competitor's claim, and the re-dispatch forked away from its own
+      // conversation. Only a seat conflict with no row of our own is somebody else's seat.
       const existing = this.db
         .prepare(`SELECT status FROM operation_records WHERE id = ?`)
         .get(stub.id) as { status: string } | undefined;
+      if (existing === undefined && isSeatConflict(e)) throw e;
       if (existing === undefined || existing.status === "completed") {
         throw new Error(
           `record '${stub.id}' has already settled — an identical scoped request cannot be dispatched twice`,

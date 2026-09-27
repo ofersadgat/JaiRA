@@ -101,7 +101,7 @@ describe("stoppedAction", () => {
   const plan = (over: Partial<ResumePlan>): ResumePlan => ({
     taskId: "t",
     kind: "none",
-    replayed: 0,
+    loaded: 0,
     frontier: [],
     ...over,
   });
@@ -109,7 +109,7 @@ describe("stoppedAction", () => {
   it("says Resume where instances were still live", () => {
     const action = stoppedAction({
       status: "interrupted",
-      resume: plan({ kind: "continue", replayed: 4, frontier: [{ stateId: "feature/build", stopped: "mid-operation" }] }),
+      resume: plan({ kind: "continue", loaded: 4, frontier: [{ stateId: "feature/build", stopped: "mid-operation" }] }),
     })!;
     expect(action.verb).toBe("Resume");
     expect(action.act).toBe("resume");
@@ -120,7 +120,7 @@ describe("stoppedAction", () => {
   });
 
   it("says Retry where the run ended and nothing is live", () => {
-    const action = stoppedAction({ status: "failed", resume: plan({ kind: "retry", replayed: 1 }) })!;
+    const action = stoppedAction({ status: "failed", resume: plan({ kind: "retry", loaded: 1 }) })!;
     expect(action.verb).toBe("Retry");
     expect(action.hint).toContain("state that failed");
     // Singular reads as singular. A hint that says "1 operations" is a hint nobody wrote.

@@ -629,6 +629,18 @@ export const MIGRATIONS: Migration[] = [
       addColumn(db, "task_runtime", "archived_at", "INTEGER");
     },
   },
+  {
+    version: 24,
+    note: "where a call landed is indexed, so a session's head is a lookup and not a scan",
+    // Every session read asks for rows by `EFFECTIVE_SESSION` / `EFFECTIVE_SEQ` (sessionStore.ts) —
+    // the landed position over the asked one — and nothing indexed that expression, so each was a
+    // full scan of operation_records: 45–60 ms a probe at 200k rows, several probes a call. SQLite uses
+    // an expression index only for the SAME expression, so this spells them exactly as the readers do.
+    sql: `
+      CREATE INDEX IF NOT EXISTS op_effective
+        ON operation_records(COALESCE(landed_session_id, session_id), COALESCE(landed_seq, session_seq));
+    `,
+  },
 ];
 
 /**

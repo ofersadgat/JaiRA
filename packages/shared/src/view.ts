@@ -509,7 +509,7 @@ export interface ResumePlan {
    */
   kind: "continue" | "retry" | "fresh" | "none";
   /** How many operations would be taken from the record rather than run again. */
-  replayed: number;
+  loaded: number;
   /** Where it would pick up — for `retry`, the state that gets another go. Empty otherwise. */
   frontier: Array<{ stateId: string; stopped: "mid-operation" | "between-children" }>;
   /**

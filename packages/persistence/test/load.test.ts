@@ -390,6 +390,22 @@ describe("recorded call sites and answers", () => {
     expect(load.answers(sid)).toEqual({ value: "yes" });
   });
 
+  it("leaves out a completed call whose value cannot be read, so the re-ask mints a fresh site", () => {
+    begin();
+    entered("i-root", "root");
+    const key = hashOperation(callOp as never);
+    const sid = scopedOperationId(key, { instanceId: "i-root", sequence: 1 });
+    record(sid, "yes", { ...callOp, scope: { instanceId: "i-root", sequence: 1 } });
+    // Its value gone: loaded as a site, the engine would reuse sequence 1, compute this id, find no
+    // answer, and dispatch into a row that already settled.
+    project.db.prepare(`UPDATE operation_records SET result_json = NULL WHERE id = ?`).run(sid);
+
+    const load = buildTaskLoad(project, "t", SHAPE);
+    expect(load.answers(sid)).toBeUndefined();
+    expect(load.loaded!.sites).toBeUndefined();
+    expect(load.loaded!.nextSite).toBe(2);
+  });
+
   it("never answers a deferred call — an event is not a memo", () => {
     begin();
     entered("i-root", "root");

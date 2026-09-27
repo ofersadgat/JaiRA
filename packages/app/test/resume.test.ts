@@ -168,7 +168,7 @@ describe("resuming an interrupted task", () => {
 
     const plan = service.resumable(taskId);
     expect(plan.kind).toBe("continue");
-    expect(plan.replayed).toBe(2);
+    expect(plan.loaded).toBe(2);
     expect(plan.frontier).toEqual([{ stateId: `${ROOT}/c`, stopped: "mid-operation" }]);
 
     pushes = [];
@@ -230,7 +230,7 @@ describe("what the strip is told", () => {
     // description knows it, and hiding it would make the plan say less than the fold does.
     expect(plan.frontier).toEqual([{ stateId: `${ROOT}/b`, stopped: "between-children" }]);
     // `a` completed and is kept; `b`'s record settled failed, so it is not an answer and will run.
-    expect(plan.replayed).toBe(1);
+    expect(plan.loaded).toBe(1);
   }, 30000);
 
   it("gives a STOPPED task a plan, keeping what it finished before someone pressed stop", async () => {
@@ -248,7 +248,7 @@ describe("what the strip is told", () => {
     const plan = service.resumable(taskId);
     expect(plan.kind).not.toBe("none");
     // The two answered gates are kept. Re-running from the top would put them again.
-    expect(plan.replayed).toBe(2);
+    expect(plan.loaded).toBe(2);
   }, 30000);
 
   it("says a task that never ran simply STARTS — there is nothing to resume and nothing to copy", async () => {
@@ -256,7 +256,7 @@ describe("what the strip is told", () => {
     // A task with no journal has said nothing, so beginning it in place is legal (`beginTaskRun`
     // refuses only where there IS history) — where `none` sends the caller off to mint a copy.
     const { taskId } = service.createTask({ title: "Fresh", workflow: ROOT });
-    expect(service.resumable(taskId)).toMatchObject({ kind: "fresh", replayed: 0, frontier: [] });
+    expect(service.resumable(taskId)).toMatchObject({ kind: "fresh", loaded: 0, frontier: [] });
   });
 
   it("says a task whose start died before it journaled anything starts IN PLACE", async () => {
@@ -362,6 +362,6 @@ describe("a workflow whose calls take a seat in a conversation", () => {
     // a fork's wording — about a task whose first call is sitting in the record, readable.
     expect(plan.kind).toBe("retry");
     expect(plan.blocked).toBeUndefined();
-    expect(plan.replayed).toBe(1);
+    expect(plan.loaded).toBe(1);
   }, 30000);
 });

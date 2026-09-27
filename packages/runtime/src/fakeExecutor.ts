@@ -50,6 +50,8 @@ export interface FakeRule {
   output?: JsonValue;
   /** Fail the operation with this reason instead of returning output. */
   error?: string;
+  /** How that failure is classified — `permanent` unless a test is about a stop (`interrupted`, `canceled`). */
+  classification?: "permanent" | "canceled" | "interrupted";
   /** USD cost to report, so cost roll-up is exercised headlessly. */
   cost?: number;
 }
@@ -80,7 +82,7 @@ function promptTail(op: PromptOp<InlineFamily>): string {
   return at < 0 ? prompt.trim() : prompt.slice(at + marker.length).trim();
 }
 
-const failed = (reason: string, classification: "permanent" | "canceled" = "permanent"): ExecResult<ResolvedValue, WorkflowMetrics> => ({
+const failed = (reason: string, classification: "permanent" | "canceled" | "interrupted" = "permanent"): ExecResult<ResolvedValue, WorkflowMetrics> => ({
   error: { classification, reason },
   metrics: { durationMs: 0, costUsd: 0, costSource: "unknown" },
 });
@@ -110,7 +112,7 @@ export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetr
     if (!rule) {
       return failed(`no fake rule matched model '${model}', prompt '${tail.slice(0, 80)}'`);
     }
-    if (rule.error !== undefined) return failed(rule.error);
+    if (rule.error !== undefined) return failed(rule.error, rule.classification);
     // Token counts belong to the model payload (`LlmOutput`), which stops at the
     // prompt executor — a workflow measurement is duration plus spend.
     return {

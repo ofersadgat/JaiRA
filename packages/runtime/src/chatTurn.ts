@@ -253,9 +253,13 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
   };
 }
 
-/** A cancel reads as cancelled rather than failed — the person stopped it, nothing went wrong. */
+/**
+ * A cancel reads as cancelled rather than failed — the person stopped it, nothing went wrong. A stopped
+ * turn arrives `interrupted` (the executor's word for a call we ended, whose turns may exist remotely),
+ * and within a live turn that can only be a stop: a process that died under it never gets here.
+ */
 function outcomeOf(failure: { classification?: string }): TerminationOutcome {
-  return failure.classification === "canceled" ? "canceled" : "error";
+  return failure.classification === "canceled" || failure.classification === "interrupted" ? "canceled" : "error";
 }
 
 /** The route a failure names in its detail (upstream puts it there on a refusal for an empty balance). */

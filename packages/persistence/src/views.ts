@@ -464,10 +464,15 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
    * is released, and the next call in that conversation claims the same seq. Its record is still
    * on disk under that seq, though, and it must not be mistaken for the call now sitting there:
    * counting it as "accounted for" hid the reclaiming call for as long as it ran, and counting it
-   * as a record made the pairing below ambiguous. Set aside by instance, which is the one thing a
-   * failed record and the live claimant of its seat never share.
+   * as a record made the pairing below ambiguous.
+   *
+   * COUNTED per instance, and each failure accounts for one settled record of its instance, oldest
+   * first. It used to set the whole instance aside, and a chat child takes every turn on one
+   * instance: one stopped turn hid every later interrupted turn of that conversation. The live
+   * claimant is never taken for a failure — it is `open`, and a failure accounts only for a record
+   * that settled some other way than completing.
    */
-  const failed = new Set<string>();
+  const failed = new Map<string, number>();
   for (const row of events) {
     const event = JSON.parse(row.payload_json) as { instanceId?: string; stateId?: string };
     if (event.instanceId === undefined) continue;
@@ -481,7 +486,8 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
     if (open.length > 0) started.set(event.instanceId, open);
     else started.delete(event.instanceId);
     if (row.type === "operation.failed") {
-      failed.add(String(event.instanceId)); // as TEXT: the generated column below has text affinity
+      const id = String(event.instanceId); // as TEXT: the generated column below has text affinity
+      failed.set(id, (failed.get(id) ?? 0) + 1);
       continue;
     }
     // Only a COMPLETED call occupies a position.
@@ -501,44 +507,49 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
         ORDER BY rowid`,
       )
       .all(taskId) as Array<{ session_id: string; seq: number; status: string; instance_id: string | null }>
-  ).filter(
-    (record) =>
-      (record.instance_id === null || !failed.has(String(record.instance_id))) &&
-      !listed.has(`${record.session_id}@${record.seq}`),
-  );
-  // Each instance's newest start, in the order the instances first started: the pairing for the
-  // ordinary case, one unsettled call per instance.
-  let inFlight: Array<[string, { stateId: string; at: number }]> = [...started].map(([id, starts]) => [id, starts[starts.length - 1]!]);
-  if (records.length !== inFlight.length) {
-    /**
-     * More records than instances: an instance holding two unsettled calls of its own. Each record is
-     * then paired with a start OF ITS INSTANCE, in order — an instance's unsettled records take its
-     * newest starts, one each. More starts than records is a call re-dispatched on a continuation (its
-     * record reopened rather than doubled), and the older start is the one that was cut off; fewer is
-     * a record nothing started, and a record that names no instance cannot be placed at all — the
-     * honest answer to either is no rows.
-     */
-    const perInstance = new Map<string, number>();
-    for (const record of records) {
-      if (record.instance_id === null) return []; // ambiguous — see the header
-      perInstance.set(record.instance_id, (perInstance.get(record.instance_id) ?? 0) + 1);
+  ).filter((record) => {
+    if (listed.has(`${record.session_id}@${record.seq}`)) return false;
+    const id = record.instance_id === null ? undefined : String(record.instance_id);
+    const owed = id === undefined ? 0 : (failed.get(id) ?? 0);
+    if (owed > 0 && record.status !== "completed" && record.status !== "open") {
+      failed.set(id!, owed - 1);
+      return false;
     }
-    // As TEXT, like `failed`: the record's generated column has text affinity, the journal's id may not.
-    const byText = new Map([...started].map(([id, starts]) => [String(id), { id, starts }]));
-    const taken = new Map<string, number>();
-    inFlight = [];
-    for (const record of records) {
-      const instance = byText.get(record.instance_id!);
-      const wanted = perInstance.get(record.instance_id!)!;
-      if (instance === undefined || instance.starts.length < wanted) return []; // ambiguous — see the header
-      const k = taken.get(record.instance_id!) ?? 0;
-      taken.set(record.instance_id!, k + 1);
-      inFlight.push([instance.id, instance.starts[instance.starts.length - wanted + k]!]);
-    }
+    return true;
+  });
+  /**
+   * Each record with a start OF ITS INSTANCE, in order: an instance's unsettled records take its
+   * newest starts, one each. More starts than records is a call re-dispatched on a continuation (its
+   * record reopened rather than doubled), and the older start is the one that was cut off. A record
+   * that names no instance, or more records than its instance started, cannot be placed — and is
+   * left out ALONE: it used to empty the whole task's list, taking every other interrupted call off
+   * the screen with it.
+   */
+  // The ordinary case first: one unsettled call per instance, paired in start order — which is also
+  // how a record that names no instance is placed. Taken only when no record contradicts its pair.
+  const newest: Array<[string, { stateId: string; at: number }]> = [...started].map(([id, starts]) => [id, starts[starts.length - 1]!]);
+  const inOrder =
+    records.length === newest.length && records.every((record, i) => record.instance_id === null || String(record.instance_id) === String(newest[i]![0]))
+      ? records.map((record, i) => ({ record, instanceId: newest[i]![0], where: newest[i]![1] }))
+      : undefined;
+  const perInstance = new Map<string, number>();
+  for (const record of records) if (record.instance_id !== null) perInstance.set(String(record.instance_id), (perInstance.get(String(record.instance_id)) ?? 0) + 1);
+  // As TEXT: the record's generated column has text affinity, the journal's id may not.
+  const byText = new Map([...started].map(([id, starts]) => [String(id), { id, starts }]));
+  const taken = new Map<string, number>();
+  const placed: Array<{ record: (typeof records)[number]; instanceId: string; where: { stateId: string; at: number } }> = [];
+  for (const record of records) {
+    if (record.instance_id === null) continue;
+    const key = String(record.instance_id);
+    const instance = byText.get(key);
+    const wanted = perInstance.get(key)!;
+    if (instance === undefined || instance.starts.length < wanted) continue;
+    const k = taken.get(key) ?? 0;
+    taken.set(key, k + 1);
+    placed.push({ record, instanceId: instance.id, where: instance.starts[instance.starts.length - wanted + k]! });
   }
   const out: StateSession[] = [];
-  for (const [i, record] of records.entries()) {
-    const [instanceId, where] = inFlight[i]!;
+  for (const { record, instanceId, where } of inOrder ?? placed) {
     out.push({
       instanceId,
       stateId: where.stateId,

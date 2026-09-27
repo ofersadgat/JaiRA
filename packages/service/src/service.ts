@@ -8133,21 +8133,21 @@ export class AppService {
     if (row === undefined || !isStartableStatus(row.status)) {
       // Nothing to offer: a finished task cannot re-enter its own lifecycle at all, so what it gets
       // is a copy. Deliberately not `fresh` — `fresh` is a promise that a plain start will work.
-      return { taskId, kind: "none", replayed: 0, frontier: [] };
+      return { taskId, kind: "none", loaded: 0, frontier: [] };
     }
     // A task that has said nothing simply STARTS — no snapshot pinned yet, or a start that died
     // before the engine journaled anything. Asked with `hasJournalHistory`, which is the predicate
     // `beginTaskRun`'s own guard refuses on, so the button and the lifecycle cannot disagree.
     if (row.snapshotHash === undefined || !hasJournalHistory(open.project, taskId)) {
-      return { taskId, kind: "fresh", replayed: 0, frontier: [] };
+      return { taskId, kind: "fresh", loaded: 0, frontier: [] };
     }
     const bundle = loadPinnedBundle(open.project, row);
     const load = buildTaskLoad(open.project, taskId, bundle.states);
     if (load.blocked !== undefined || load.loaded === undefined) {
-      return { taskId, kind: "none", replayed: 0, frontier: [], ...(load.blocked !== undefined ? { blocked: load.blocked } : {}) };
+      return { taskId, kind: "none", loaded: 0, frontier: [], ...(load.blocked !== undefined ? { blocked: load.blocked } : {}) };
     }
     if (load.unreadable.length > 0) {
-      return { taskId, kind: "none", replayed: 0, frontier: [], blocked: load.unreadable[0]!.reason };
+      return { taskId, kind: "none", loaded: 0, frontier: [], blocked: load.unreadable[0]!.reason };
     }
     return {
       taskId,
@@ -8155,7 +8155,7 @@ export class AppService {
       // it — is somewhere to CONTINUE, and a task whose every live leaf is a revived failure has
       // nothing in flight at all; what is left is the state that ended it, which is a retry.
       kind: load.frontier.some((entry) => entry.cause === "interrupted") ? "continue" : "retry",
-      replayed: load.loadedOps,
+      loaded: load.loadedOps,
       frontier: load.frontier.map((entry) => ({ stateId: entry.stateId, stopped: entry.stopped })),
     };
   }

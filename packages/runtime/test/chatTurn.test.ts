@@ -81,7 +81,7 @@ async function send(
  * turn resolves against — pairing a decorated session store with someone else's records would claim
  * positions in a conversation nobody can read.
  */
-function harness(rules: Array<{ value?: string; error?: string }> = [{ value: "because the offset drifted" }]) {
+function harness(rules: Array<{ value?: string; error?: string; classification?: string }> = [{ value: "because the offset drifted" }]) {
   const log = journal();
   const stores = sessionServicesFor();
   const executor = withSessionLayers(stores, new ScriptedFakeExecutor(rules as never));
@@ -188,6 +188,16 @@ describe("a turn that failed", () => {
     const tree = projectRun(h.log.events, {}, h.log.atMs);
     const chat = tree.instances.flatMap((r) => r.children).find((c) => isChatInstance(c.instanceId));
     expect(chat!.status).toBe("failed");
+  });
+
+  it("draws a stopped turn as stopped, not failed", async () => {
+    // A stop arrives `interrupted` from the executor; the person stopped it and nothing went wrong.
+    const h = harness([{ error: "stopped", classification: "interrupted" }]);
+    await send(h, { message: "never mind", position: "s@1" });
+    const ended = chatEvents(h.log).find((e) => e.type === "instance.terminated") as { outcome?: string };
+    expect(ended.outcome).toBe("canceled");
+    const tree = projectRun(h.log.events, {}, h.log.atMs);
+    expect(tree.instances.flatMap((r) => r.children).find((c) => isChatInstance(c.instanceId))!.status).not.toBe("failed");
   });
 
   it("says WHERE it failed, which is what makes the turn findable afterwards", async () => {

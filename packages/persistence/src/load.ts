@@ -614,13 +614,17 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     // fires before any scope is claimed), while `row.id` is the scoped id — comparing those two
     // spellings matched nothing, and recorded human answers loaded as memo hits.
     if (deferredOps.has(key)) continue;
+    // A COMPLETED record whose value cannot be read is not a site: loaded as one, the engine would
+    // reuse its sequence, compute the same scoped id, find no answer, and dispatch into a row that
+    // already settled. Left out, the ask mints a fresh site above the burned sequence and is paid again.
+    const value =
+      row.status === "completed" ? recordValue(project.db, row.result_json, (op as { kind?: string }).kind === "prompt" ? "prompt" : "function") : undefined;
+    if (row.status === "completed" && value === undefined) continue;
     const sites = sitesByInstance.get(row.instance_id);
     const site = [key, row.sequence] as const;
     if (sites === undefined) sitesByInstance.set(row.instance_id, [site]);
     else sites.push(site);
-    if (row.status !== "completed") continue;
-    const value = recordValue(project.db, row.result_json, (op as { kind?: string }).kind === "prompt" ? "prompt" : "function");
-    if (value === undefined) continue;
+    if (row.status !== "completed" || value === undefined) continue;
     answers.set(scopedOperationId(key, { instanceId: row.instance_id, sequence: row.sequence }), {
       value: value as ResolvedValue,
     });

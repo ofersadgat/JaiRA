@@ -409,11 +409,14 @@ function stampAddresses(roots: readonly InstanceNode[], prefix: InstanceAddress 
 }
 
 /**
- * Whether an instance still counts as somewhere the run IS.
+ * Whether an instance still counts as somewhere the run IS — the BOARD's question: running, or
+ * parked on a person or a dependency, and not superseded.
  *
- * Exported because a resume asks the same question the board does and must get the same answer. A
- * second definition of "live" is a second chance for the two to disagree about whether a run has
- * anything left to do.
+ * A resume asks a different question and answers it with its own rule (`buildTaskLoad`'s revival
+ * rule in load.ts): there, a child that ended unhandled and without success — nothing advanced past
+ * it — is presented live so it re-enters, where the board draws the same child as failed. The two
+ * disagree on purpose: the board says what happened, the resume says what to do next. Exported for
+ * the callers that want the board's answer (a connect's legality check).
  */
 export function isLive(node: MutableNode | InstanceNode): boolean {
   return !node.superseded && (node.status === "running" || node.status === "waiting_for_user" || node.status === "blocked");

@@ -153,7 +153,7 @@ export function stoppedAction(
   return {
     said: stopped.said,
     verb: shape.verb,
-    hint: shape.hint(plan!.replayed, where.length > 0 ? where : "this run"),
+    hint: shape.hint(plan!.loaded, where.length > 0 ? where : "this run"),
     tone: stopped.tone,
     act,
   };

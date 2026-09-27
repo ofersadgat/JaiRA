@@ -58,7 +58,8 @@ function clone(): string {
 
 const remotes = async (m: Machine): Promise<ProjectSummary[]> => ((await m.call("project:list")) as ProjectSummary[]).filter((p) => p.machine?.self !== true);
 
-describe("another machine's workspaces", () => {
+// Two engines, a network listener each, pairing and pushes: under a full suite's load the defaults are short.
+describe("another machine's workspaces", { timeout: 60_000 }, () => {
   it("are listed, read and written from here, and pushes come back keyed for here", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");

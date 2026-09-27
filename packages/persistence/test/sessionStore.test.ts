@@ -421,6 +421,19 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
     expect(() => store.append(stub)).toThrow(/already settled/);
   });
 
+  it("knows its own seat: a seated re-dispatch reopens its row, and never reads it as a competitor", async () => {
+    // SQLite names the SEAT index when a row that still holds its seat is inserted again, which used
+    // to surface as PositionTaken — a fork away from the call's own conversation.
+    const store = new SqliteSessionStore(db, { taskId: "t-seat" });
+    const at = await store.resolve({ ref: "seated" });
+    const stub = { id: "seated-ask", source: undefined as never, session: at.at, startMs: 1 };
+    store.append(stub);
+    expect(() => store.append(stub)).not.toThrow();
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE id = 'seated-ask'`).get()).toEqual({ n: 1 });
+    store.finish({ id: "seated-ask" }, { sessionOutcome: { messages: [turn("answered")] } });
+    expect(() => store.append(stub)).toThrow(/already settled/);
+  });
+
 });
 
 /**
@@ -971,6 +984,37 @@ describe("stateSessions — a run the process died inside", () => {
     expect(stateSessions({ db } as never, "t3")).toEqual([
       { instanceId: 1, stateId: "wf/draft", sessionId: "chat", seq: 0, at: 21, outcome: "error" },
       { instanceId: 2, stateId: "wf/draft", sessionId: "chat", seq: 0, at: 30, outcome: "running" },
+    ]);
+  });
+
+  it("still lists a conversation's later cut-off turn after one of its turns was stopped", () => {
+    // A chat takes every turn on ONE instance. A stopped turn (its failure journaled) must account
+    // for its own record only — it used to set the whole instance aside, hiding every later turn
+    // the process died inside.
+    db.prepare(`INSERT INTO task_runtime (task_id, status, started_at, ended_at, created_at, updated_at) VALUES ('t4','completed',1,99,1,1)`).run();
+    const turn = (seq: number, status: string): void =>
+      void db
+        .prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at) VALUES (?, 't4', ?, ?, 5)`)
+        .run(`turn-${seq}`, status, JSON.stringify({ session: { id: "talk", seq }, scope: { instanceId: 7, sequence: seq } }));
+    const event = (type: string, at: number, extra: object = {}): void =>
+      void db
+        .prepare(`INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t4', ?, ?, ?)`)
+        .run(type, JSON.stringify({ instanceId: 7, stateId: "chat", ...extra }), at);
+    event("operation.started", 10);
+    turn(0, "interrupted");
+    event("operation.failed", 11, { metrics: { sessionRef: "talk@1" } });
+    event("operation.started", 20);
+    turn(1, "interrupted");
+    // …and a record that names no instance, which cannot be placed and must not take the rest with it.
+    db.prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at) VALUES ('stray', 't4', 'interrupted', ?, 5)`).run(
+      JSON.stringify({ session: { id: "other", seq: 0 } }),
+    );
+
+    expect(stateSessions({ db } as never, "t4").filter((s) => s.sessionId === "talk")).toEqual([
+      // The stopped turn, as its journaled failure lists it…
+      { instanceId: 7, stateId: "chat", sessionId: "talk", seq: 0, at: 11, outcome: "error" },
+      // …and the later one the process died inside, which the stop no longer hides.
+      { instanceId: 7, stateId: "chat", sessionId: "talk", seq: 1, at: 20, outcome: "interrupted" },
     ]);
   });
 });
