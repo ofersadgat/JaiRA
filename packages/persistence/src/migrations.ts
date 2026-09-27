@@ -618,6 +618,17 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS replica_seqs_local ON replica_seqs(local_seq);
     `,
   },
+  {
+    version: 23,
+    note: "an archived task remembers how it finished, and when it was put away",
+    // The person, 2026-09-27: "the state should be archived … it might be useful when you're looking at
+    // archived tasks what state they were in when they were archived". `status` says archived; these
+    // two say from what and since when, so Unarchive restores the finish exactly.
+    run: (db) => {
+      addColumn(db, "task_runtime", "archived_from", "TEXT");
+      addColumn(db, "task_runtime", "archived_at", "INTEGER");
+    },
+  },
 ];
 
 /**

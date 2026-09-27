@@ -167,14 +167,30 @@ export function exportTask(project: Project, taskId: string, known?: ReplicaKnow
  * What changed since what the replica holds, a page at a time: bundles until `budget` characters of
  * JSON or `limit` tasks, whichever comes first, and `more` when some were left for the next ask.
  */
-export function exportChanges(project: Project, known: Record<string, ReplicaKnown>, opts: { limit?: number; budget?: number } = {}): ReplicaPage {
+export function exportChanges(
+  project: Project,
+  known: Record<string, ReplicaKnown>,
+  opts: {
+    limit?: number;
+    budget?: number;
+    archived?: boolean;
+    /** Only these tasks are looked at for changes — a push named them. `present` is still every task. */
+    only?: readonly string[];
+  } = {},
+): ReplicaPage {
   const limit = opts.limit ?? 25;
   const budget = opts.budget ?? 8_000_000;
-  const present = project.runtime.list().map((row) => row.taskId);
+  // Archived tasks only when the replica copies everything: otherwise one archived here is not in
+  // `present`, which is what takes it out of the copy (the person, 2026-09-27).
+  const present = project.runtime
+    .list()
+    .filter((row) => opts.archived !== false || row.status !== "archived")
+    .map((row) => row.taskId);
   const tasks: TaskBundle[] = [];
   let used = 0;
   let more = false;
-  for (const taskId of present) {
+  const looked = opts.only === undefined ? present : present.filter((taskId) => opts.only!.includes(taskId));
+  for (const taskId of looked) {
     const held = known[taskId];
     if (held !== undefined && held.v === taskVersion(project, taskId)) continue;
     if (tasks.length >= limit || used >= budget) {
@@ -387,6 +403,15 @@ export function applyPage(db: JairaDb, page: ReplicaPage, blobs: Record<string, 
     }
   }
   return changed;
+}
+
+/** Take a whole workspace out of the copies: every task of it, its files, and its registration. */
+export function dropReplicaWorkspace(db: JairaDb, workspace: string, dirs: ReplicaDirs): number {
+  const tasks = Object.keys(replicaKnown(db, workspace));
+  for (const taskId of tasks) removeReplicaTask(db, workspace, taskId, dirs);
+  db.prepare(`DELETE FROM replica_seqs WHERE workspace = ?`).run(workspace);
+  db.prepare(`DELETE FROM workspaces WHERE id = ? AND machine IS NOT NULL`).run(workspace);
+  return tasks.length;
 }
 
 /** The tasks a replica holds of a workspace, for a caller that wants to count them. */

@@ -132,6 +132,7 @@ import {
   loadLayeredConfig,
   openProject,
   exportChanges,
+  autoArchive,
   snapshotFiles,
   type ReplicaKnown,
   openSharedProject,
@@ -1379,7 +1380,7 @@ export class AppService {
       publish: (view) => this.publish({ type: "machines:changed", view }),
       log: (level, message) => this.log({ level, source: "machines", message }),
       ...(options.reach !== undefined ? { reach: options.reach } : {}),
-      replicateByDefault: options.replicate === true,
+      copyByDefault: options.replicate === true ? "not-archived" : "nothing",
     });
     this.resources = new ResourceSampler();
     this.placement = new Placement({
@@ -1390,6 +1391,10 @@ export class AppService {
     });
     // What waits for a workspace is tried again when one may have freed: now and then, and at every run's end.
     this.placementTimer = setInterval(() => void this.tryQueue(), 10_000);
+    // Finished work leaves the board by itself (`archive` in settings): looked at now and then, as
+    // well as at every open and every run's end.
+    this.archiveTimer = setInterval(() => this.sweepArchive(), 15 * 60_000);
+    this.archiveTimer.unref?.();
     this.placementTimer.unref?.();
     this.federation = new Federation(this.fleet, {
       baseDir: this.baseDir,
@@ -1399,6 +1404,12 @@ export class AppService {
     });
     this.replicator = new Replicator(this.fleet, this.federation, {
       baseDir: this.baseDir,
+      // A copy removed from under a session reading it: the session goes with it.
+      onDropped: (machineId, dir) => {
+        const key = remoteProjectKey(machineId, dir);
+        this.replicaSessions.get(key)?.project.close();
+        this.replicaSessions.delete(key);
+      },
       log: (level, message) => this.log({ level, source: "machines", message }),
     });
     // Settings' warnings and errors: before the log below, whose errors it counts.
@@ -2420,6 +2431,7 @@ export class AppService {
   private readonly resources: ResourceSampler;
   readonly placement: Placement;
   private readonly placementTimer: ReturnType<typeof setInterval>;
+  private readonly archiveTimer: ReturnType<typeof setInterval>;
   private queueRunning: Promise<void> | undefined;
 
   /** This machine's room to run, as placement on any machine reads it. */
@@ -2448,6 +2460,33 @@ export class AppService {
     return [];
   }
 
+  /**
+   * The accounts a workflow's models spend (`accountOfRoute`), from the model ids its root state file
+   * names and the project's default model — what "out of usage" is judged by when it is placed. Empty
+   * when none names a route, and then the whole machine's accounts are.
+   */
+  private accountsOf(workflow: string, project: string): string[] {
+    const models = new Set<string>();
+    for (const layer of ["project", "base", "system"] as const) {
+      try {
+        const source = this.readWorkflow({ stateId: workflow, layer, project });
+        if (!source.exists) continue;
+        for (const match of source.text.matchAll(/"model"\s*:\s*"([^"]+)"/g)) models.add(match[1]!);
+        break;
+      } catch {
+        // Not readable in this layer: the next.
+      }
+    }
+    try {
+      // The default executor's prompt model: what a state naming none runs on.
+      const fallback = (this.p(project).config.executors["default"] as { prompt?: { defaults?: { model?: unknown } } } | undefined)?.prompt?.defaults?.model;
+      if (typeof fallback === "string") models.add(fallback);
+    } catch {
+      // No default.
+    }
+    return [...new Set([...models].map(routeOfModel).filter((r): r is string => r !== undefined).map(accountOfRoute))];
+  }
+
   /** Every workspace of one repository: this machine's clones and the paired machines'. */
   private workspacesOf(identity: string): ProjectSummary[] {
     return this.listProjects().filter((p) => p.identity === identity && p.kind === "user");
@@ -2466,9 +2505,10 @@ export class AppService {
     // A task that ran before continues where it is: its records are there.
     if (detail.runs.length > 0) return this.startTask(request);
     const requires = this.requiresOf(detail.workflow, dir);
-    const { chosen } = await this.placement.choose(identity, members, requires, this.fleet.identity().id);
+    const needs = this.accountsOf(detail.workflow, dir);
+    const { chosen } = await this.placement.choose(identity, members, requires, this.fleet.identity().id, needs);
     if (chosen === undefined) {
-      this.placement.enqueue({ taskId: request.taskId, project: dir, identity, requires, since: Date.now() });
+      this.placement.enqueue({ taskId: request.taskId, project: dir, identity, requires, needs, since: Date.now() });
       this.log({ level: "info", source: "machines", message: `'${detail.title}' waits for a workspace with room`, project: sessionKey(dir), taskId: request.taskId });
       this.publish({ type: "store:invalidate", scope: "tasks" });
       return { taskId: request.taskId, queued: true };
@@ -2522,7 +2562,7 @@ export class AppService {
           this.placement.dequeue(item.taskId);
           continue;
         }
-        const { chosen } = await this.placement.choose(item.identity, members, item.requires, this.fleet.identity().id);
+        const { chosen } = await this.placement.choose(item.identity, members, item.requires, this.fleet.identity().id, item.needs ?? []);
         if (chosen === undefined) continue;
         this.placement.dequeue(item.taskId);
         try {
@@ -2633,7 +2673,10 @@ export class AppService {
       "fleet:capacity": () => this.capacity(),
       // A machine keeping a copy of this one's tasks (decision 0013 §6): what changed since what it
       // holds, the big strings it lacks, and a snapshot's files.
-      "replica:pull": ((request: { project: string; known?: Record<string, ReplicaKnown> }) => exportChanges(this.p(request.project), request.known ?? {})) as (request: never) => unknown,
+      "replica:pull": ((request: { project: string; known?: Record<string, ReplicaKnown>; archived?: boolean; only?: string[] }) =>
+        exportChanges(this.p(request.project), request.known ?? {}, { archived: request.archived !== false, ...(request.only !== undefined ? { only: request.only } : {}) })) as (
+        request: never,
+      ) => unknown,
       "replica:blobs": ((request: { hashes: string[] }) => this.replicator.blobs((request.hashes ?? []).slice(0, 2_000))) as (request: never) => unknown,
       "replica:snapshot": ((request: { project: string; hash: string }) => snapshotFiles(this.p(request.project), request.hash)) as (request: never) => unknown,
       "fleet:placement": ((request: { identity: string; rules: PlacementRules }) => {
@@ -2790,6 +2833,7 @@ export class AppService {
     session.resuming = this.resumeSuspended(session).then(() => this.finishOpenConnects(session));
     // Then its events task (decision 0010 §4) — after the resumes, which may already have resumed it.
     void session.resuming.then(() => this.superviseEvents(session));
+    void session.resuming.then(() => this.autoArchive(session));
     this.wakeSharedEvents();
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
@@ -3091,6 +3135,7 @@ export class AppService {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
     clearInterval(this.placementTimer);
+    clearInterval(this.archiveTimer);
     this.resources.close();
     this.replicator.close();
     for (const replica of this.replicaSessions.values()) replica.project.close();
@@ -3280,6 +3325,7 @@ export class AppService {
     this.options.publish?.(message);
     // A run ended — here or, relayed, on another machine: a workspace may have room for what waits.
     if (message.type === "run:finished" && this.placement !== undefined && this.placement.queue().length > 0) void this.tryQueue();
+    if (message.type === "run:finished" && this.archiveTimer !== undefined) queueMicrotask(() => this.sweepArchive());
     // Every workflow write says so here — the one place all of them pass (decision 0010 §4).
     if (message.type === "store:invalidate" && message.scope === "workflows") this.kickEventsSupervisor();
   }
@@ -4286,6 +4332,28 @@ export class AppService {
       }
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /**
+   * The tasks of machines that are offline, read from this machine's copies (decision 0013 §6) and
+   * keyed for here — what the root's lists add to the online machines' own answers.
+   */
+  offlineTasks(request?: { workflows?: string[] }): ProjectTask[] {
+    const wanted = request?.workflows === undefined ? undefined : new Set(request.workflows);
+    const out: ProjectTask[] = [];
+    for (const peer of this.fleet.peers()) {
+      if (peer.state === "online") continue;
+      for (const dir of this.federation.projectsOf(peer.id)) {
+        const key = remoteProjectKey(peer.id, dir);
+        const session = this.replicaSession(key, peer.id, dir);
+        if (session === undefined) continue;
+        for (const task of taskSummaries(session.project)) {
+          if (wanted !== undefined && !wanted.has(task.workflow) && ![...wanted].some((w) => w.endsWith("/") && task.workflow.startsWith(w))) continue;
+          out.push({ ...task, project: key });
+        }
+      }
+    }
+    return out;
   }
 
   /**
@@ -8121,6 +8189,51 @@ export class AppService {
     });
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
     return this.startTask({ ...request, taskId: copy.id });
+  }
+
+  /**
+   * Archive finished tasks ("task:archive"), or put archived ones back ("task:unarchive"). What cannot
+   * be — a task not finished, or not archived — is left as it is and not named in the answer.
+   */
+  archiveTasks(request: { taskIds: string[]; project?: string; undo?: boolean }): { changed: string[] } {
+    const session = this.session(request.project);
+    const now = Date.now();
+    const changed = request.taskIds.filter((taskId) => (request.undo === true ? session.project.runtime.unarchive(taskId, now) : session.project.runtime.archive(taskId, now)));
+    if (changed.length > 0) {
+      this.log({ level: "info", source: "run", message: `${request.undo === true ? "unarchived" : "archived"} ${changed.join(", ")}`, project: session.key });
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(session, { type: "store:invalidate", scope: "board" });
+    }
+    return { changed };
+  }
+
+  /**
+   * The rule in `archive` (settings), over one project (the person, 2026-09-27: "leave the latest 5
+   * tasks in terminal state visible, but those aside, if a task is failed leave it for 2 days, but if
+   * it is successful leave it for 1 day"). Newest finished first; the latest `keepLatest` stay whatever
+   * their age; past those, each is archived once it has been finished longer than its outcome allows.
+   * Conversations and JaiRA's own tasks are left alone: a chat is read from the Chat list, not the board.
+   */
+  autoArchive(session: ProjectSession, nowMs = Date.now()): string[] {
+    if (this.closed || session.closing) return [];
+    const archived = autoArchive(session.project, session.project.config.archive, nowMs);
+    if (archived.length > 0) {
+      this.log({ level: "info", source: "run", message: `archived ${archived.length} finished task(s) by the archive rule: ${archived.join(", ")}`, project: session.key });
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(session, { type: "store:invalidate", scope: "board" });
+    }
+    return archived;
+  }
+
+  /** {@link autoArchive} over every open project. */
+  private sweepArchive(): void {
+    for (const session of this.userSessions()) {
+      try {
+        this.autoArchive(session);
+      } catch (e) {
+        this.log({ level: "warn", source: "run", message: `could not archive finished tasks: ${(e as Error).message}`, project: session.key });
+      }
+    }
   }
 
   /**

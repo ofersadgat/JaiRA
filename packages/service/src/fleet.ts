@@ -16,7 +16,7 @@
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { PAIRING_CODE_MS, engineUrlOf, normalizePairingCode, type MachineReach, type MachinesView, type PeerView } from "@jaira/shared";
+import { PAIRING_CODE_MS, engineUrlOf, normalizePairingCode, type MachineReach, type MachinesView, type PeerView, type CopyChoice } from "@jaira/shared";
 import { askOnce, connectEngine, type EngineClient } from "./engineClient";
 import type { EngineHost, PreAuthHandler } from "./engineHost";
 import type { HostFrame, PeerMachine } from "./enginePipe";
@@ -92,10 +92,10 @@ export interface FleetOptions {
   log?: (level: "info" | "warn", message: string) => void;
   reach?: ReachPort;
   /**
-   * Whether this machine keeps a copy of the fleet's tasks when the person has not said (decision 0013
-   * §6): a window's engine does, a `jaira serve` with no window does not (ruling 7).
+   * What this machine keeps a copy of when the person has not said (decision 0013 §6): a window's engine
+   * what is not archived, a `jaira serve` with no window nothing (ruling 7).
    */
-  replicateByDefault?: boolean;
+  copyByDefault?: CopyChoice["mode"];
   /** Tests: how long the first retry waits. */
   retryMs?: number;
 }
@@ -229,20 +229,28 @@ export class Fleet {
     });
     const pairing = this.pairing !== undefined && this.pairing.expiresAt > Date.now() ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt } : undefined;
     return {
-      self: { id: me.id, label: me.label, os: me.os, tags: me.tags, reach: this.reach, version: this.options.version, replicate: this.replicating() },
+      self: { id: me.id, label: me.label, os: me.os, tags: me.tags, reach: this.reach, version: this.options.version, copy: this.copying() },
       machines,
       ...(pairing !== undefined ? { pairing } : {}),
     };
   }
 
-  /** Whether this machine keeps a copy of the fleet's tasks: the person's choice, else the host's default. */
-  replicating(): boolean {
-    return this.identity().replicate ?? this.options.replicateByDefault === true;
+  /** What this machine keeps a copy of: the person's choice, else the host's default. */
+  copying(): CopyChoice {
+    return this.identity().copy ?? { mode: this.options.copyByDefault ?? "nothing" };
   }
 
-  /** Keep a copy of the fleet's tasks here, or stop. */
-  setReplicate(on: boolean): MachinesView {
-    updateMachineIdentity(this.options.baseDir, { replicate: on });
+  /** Whether it keeps a copy of anything. */
+  replicating(): boolean {
+    return this.copying().mode !== "nothing";
+  }
+
+  /** Choose what to keep a copy of. */
+  setCopy(choice: CopyChoice): MachinesView {
+    const modes: ReadonlyArray<CopyChoice["mode"]> = ["everything", "not-archived", "chosen", "nothing"];
+    if (!modes.includes(choice.mode)) throw new Error(`'${String(choice.mode)}' is not a choice of what to copy`);
+    const copy: CopyChoice = choice.mode === "chosen" ? { mode: "chosen", projects: [...new Set(choice.projects ?? [])] } : { mode: choice.mode };
+    updateMachineIdentity(this.options.baseDir, { copy });
     this.changed();
     return this.view();
   }

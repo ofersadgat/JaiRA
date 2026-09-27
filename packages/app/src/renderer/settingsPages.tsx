@@ -37,6 +37,8 @@ export function RunsPane({ config, layer, busy, editable, onSave, project = null
       {/* When usage runs out: whether "Try again at …" starts checked on a message or a run the
           provider refused because the account ran out (usage-readings contract). */}
       <ConfigBlockSection writer={writer} block="limits" />
+      {/* When finished tasks leave the board by themselves (the person, 2026-09-27). */}
+      <ConfigBlockSection writer={writer} block="archive" />
       <ConfigBlockSection writer={writer} block="workflows" />
     </div>
   );

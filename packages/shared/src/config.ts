@@ -320,6 +320,8 @@ export interface JairaConfig {
   autopilot: JairaAutopilotConfig;
   /** What a message or a run does when an account's allowance runs out (usage readings). */
   limits: JairaLimitsConfig;
+  /** When finished tasks are archived by themselves (see {@link JairaArchiveConfig}). */
+  archive: JairaArchiveConfig;
   /** The app's own updates (decision 0011 §5): the machine's to decide, so read from the base and personal layers. */
   updates: JairaUpdatesConfig;
   /** Where the engine runs when the desktop starts it (decision 0012 §5): the machine's, like `updates`. */
@@ -428,6 +430,43 @@ export interface JairaAutopilotConfig {
 export const DEFAULT_ASK_BELOW = 0.2;
 
 /** What happens when an account has no allowance left (usage-readings contract, "What the screens show"). */
+/**
+ * Finished tasks put away by themselves (the person, 2026-09-27: "leave the latest 5 tasks in terminal
+ * state visible, but those aside, if a task is failed leave it for 2 days, but if it is successful
+ * leave it for 1 day. this should be configurable").
+ *
+ * Per project, newest first: the latest {@link keepLatest} finished tasks stay on the board whatever
+ * their age; past those, a task that did not succeed (failed or canceled) is archived
+ * {@link failedAfterDays} after it finished, and one that succeeded {@link succeededAfterDays} after.
+ * Conversations and JaiRA's own tasks are never archived by this.
+ */
+export interface JairaArchiveConfig {
+  auto: boolean;
+  keepLatest: number;
+  failedAfterDays: number;
+  succeededAfterDays: number;
+}
+
+export const DEFAULT_ARCHIVE: JairaArchiveConfig = { auto: true, keepLatest: 5, failedAfterDays: 2, succeededAfterDays: 1 };
+
+function parseArchive(raw: unknown): JairaArchiveConfig {
+  if (raw === undefined) return { ...DEFAULT_ARCHIVE };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.archive must be an object");
+  const doc = raw as Record<string, unknown>;
+  const out = { ...DEFAULT_ARCHIVE };
+  if (doc["auto"] !== undefined) {
+    if (typeof doc["auto"] !== "boolean") throw new Error("config.archive.auto must be true or false");
+    out.auto = doc["auto"];
+  }
+  for (const key of ["keepLatest", "failedAfterDays", "succeededAfterDays"] as const) {
+    const value = doc[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`config.archive.${key} must be a number, 0 or more`);
+    out[key] = value;
+  }
+  return out;
+}
+
 export interface JairaLimitsConfig {
   /**
    * Whether "Try again at …" starts CHECKED on a message or a run the provider refused because the
@@ -670,6 +709,7 @@ export function defaultConfig(): JairaConfig {
     integrations: defaultIntegrations(),
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
     limits: { retryOnReset: true },
+    archive: { ...DEFAULT_ARCHIVE },
     updates: {},
     engine: {},
     functions: defaultFunctions(),
@@ -1348,6 +1388,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     integrations: parseIntegrations(cfg["integrations"]),
     autopilot: parseAutopilot(cfg["autopilot"]),
     limits: parseLimits(cfg["limits"]),
+    archive: parseArchive(cfg["archive"]),
     updates: parseUpdates(cfg["updates"]),
     engine: parseEngineConfig(cfg["engine"]),
     functions: parseFunctions(cfg["functions"]),

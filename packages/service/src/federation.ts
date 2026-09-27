@@ -19,7 +19,7 @@ import { parseRemoteProjectKey, remoteProjectKey, type ProjectSummary, type Push
 import type { Fleet } from "./fleet";
 
 /** Answers that may wait for an offline machine: the ones a person gives, which have nowhere else to go. */
-export const QUEUEABLE = new Set(["approval:submit", "question:submit", "interaction:submit", "chat:send", "task:cancel"]);
+export const QUEUEABLE = new Set(["approval:submit", "question:submit", "interaction:submit", "chat:send", "task:cancel", "task:archive", "task:unarchive"]);
 
 /** Answers addressed by request id alone, found on the machine that asked. */
 const BY_REQUEST = new Set(["approval:submit", "question:submit", "interaction:submit", "userEvent:deliver"]);
@@ -47,6 +47,8 @@ export const REPLICA_READS = new Set([
   "state:view",
   "state:slots",
   "state:effective",
+  // The composer's preview: what a message would go to. Sent, it waits in the outbox.
+  "chat:plan",
 ]);
 
 /** Pushes that are about one machine and mean nothing on another. */
@@ -259,6 +261,8 @@ export class Federation {
       "interaction:submit": "a decision at a gate",
       "chat:send": "a message",
       "task:cancel": "a cancel",
+      "task:archive": "an archive",
+      "task:unarchive": "an unarchive",
     };
     return this.outbox().map((item) => ({ id: item.id, machine: this.fleet.labelOf(item.machineId), what: words[item.channel] ?? item.channel, at: item.at }));
   }

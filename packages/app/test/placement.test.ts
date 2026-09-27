@@ -39,6 +39,14 @@ describe("whether a machine takes a run", () => {
     expect(why(capacity({ resources: { cores: 8, cpu: 0.2, freeMemory: 1, totalMemory: 16, at: now } }))).toMatch(/low on memory/);
     expect(why(capacity({ spent: ["claude"] }))).toBe("out of usage");
   });
+  it("judges usage by the accounts the task spends, when they are known", () => {
+    const both = capacity({ accounts: ["claude", "codex"], spent: ["claude"] });
+    const at = (needs: string[]): string | undefined => whyNot(both, "/src/jaira", [], undefined, DEFAULT_THRESHOLDS, now, needs);
+    expect(at(["codex"])).toBeUndefined();
+    expect(at(["claude"])).toBe("out of usage (claude)");
+    // Nothing known: out only when every account is.
+    expect(at([])).toBeUndefined();
+  });
 });
 
 interface Machine {

@@ -3072,6 +3072,17 @@ export function useApp() {
        * delete may remove a git worktree, and racing several `git worktree remove` against one
        * repository is a lock contest git sometimes loses.
        */
+      /**
+       * Put finished tasks away, or bring archived ones back (the person, 2026-09-27). A task that
+       * cannot be — not finished, or not archived — is skipped by the engine, not refused.
+       */
+      archiveTasks: async (taskIds: readonly string[], project: string | undefined, undo = false) => {
+        try {
+          waited(await invoke(undo ? "task:unarchive" : "task:archive", { taskIds: [...taskIds], ...(project !== undefined ? { project } : {}) }));
+        } catch (e) {
+          fail(e);
+        }
+      },
       deleteTasks: async (taskIds: readonly string[], project?: string) => {
         patch({ busy: true, error: null });
         try {

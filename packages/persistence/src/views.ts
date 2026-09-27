@@ -7,7 +7,7 @@
  * from the same code. Anything that *runs* a workflow lives above this.
  */
 import { createLogger } from "@declarative-ai/log";
-import { ANSWERED_EVENT, isTaskId, refusal, SUPPLIED_EVENT, type AnsweredEvent, type SuppliedEvent } from "@jaira/shared";
+import { ANSWERED_EVENT, isTaskId, refusal, SUPPLIED_EVENT, type AnsweredEvent, type SuppliedEvent, type TaskArchived, type TaskStatus } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent, StateDef, WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./permissionSets";
@@ -89,6 +89,7 @@ export function taskSummaries(project: Project): TaskSummary[] {
       taskId: row.taskId,
       title: meta?.title ?? "(missing task file)",
       status: row.status,
+      ...archivedOf(row),
       workflow: meta?.workflow ?? "",
       ...(meta?.labels !== undefined ? { labels: meta.labels } : {}),
       ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
@@ -781,6 +782,7 @@ export function boardView(project: Project, level?: string, options?: ViewOption
     taskId: summary.taskId,
     title: summary.title,
     status: summary.status,
+    ...(summary.archived !== undefined ? { archived: summary.archived } : {}),
     workflow: summary.workflow,
     ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
     ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
@@ -790,6 +792,11 @@ export function boardView(project: Project, level?: string, options?: ViewOption
     run: taskRun(project, summary.taskId, shape),
   }));
   return projectBoard(shape, target, projections, { breadcrumb: breadcrumbOf(shape, rootId, target) });
+}
+
+/** An archived task's finish and when, as a view carries it — nothing for one that is not archived. */
+export function archivedOf(row: { status: TaskStatus; archivedFrom?: TaskStatus; archivedAt?: number }): { archived?: TaskArchived } {
+  return row.status === "archived" ? { archived: { from: row.archivedFrom ?? "completed", at: row.archivedAt ?? 0 } } : {};
 }
 
 /** Timeline entries returned by default (newest kept). */
@@ -826,6 +833,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     ...(meta?.labels !== undefined ? { labels: meta.labels } : {}),
     workflow: meta?.workflow ?? "",
     status: row.status,
+    ...archivedOf(row),
     ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
     ...(row.branch !== undefined ? { branch: row.branch } : {}),
     ...(row.worktreePath !== undefined ? { worktreePath: row.worktreePath } : {}),

@@ -13,10 +13,11 @@
  *
  * The owner's side is `replica.ts` in persistence, answered from its peer handlers.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import {
   applyPage,
+  dropReplicaWorkspace,
   hasSnapshot,
   missingBlobs,
   openDb,
@@ -28,7 +29,7 @@ import {
   type ReplicaDirs,
   type ReplicaPage,
 } from "@jaira/persistence";
-import { jairaBasePaths, jairaPaths } from "@jaira/shared";
+import { jairaBasePaths, jairaPaths, remoteProjectKey } from "@jaira/shared";
 import type { Fleet } from "./fleet";
 import { MACHINE_LOCAL, type Federation } from "./federation";
 
@@ -36,6 +37,8 @@ export interface ReplicatorOptions {
   baseDir: string;
   /** Something changed in a machine's copy: the window's views of it are stale. */
   changed?: (machineId: string) => void;
+  /** A workspace's copy was removed: a session reading it must let it go. */
+  onDropped?: (machineId: string, dir: string) => void;
   log?: (level: "info" | "warn", message: string) => void;
   /** How often every online machine is asked, besides its pushes. */
   everyMs?: number;
@@ -57,7 +60,12 @@ export class Replicator {
       if (online) this.schedule(machineId, 1_000);
     });
     fleet.onPeerPush((machineId, message) => {
-      if (!MACHINE_LOCAL.has((message as { type?: string }).type ?? "")) this.schedule(machineId, 1_500);
+      const push = message as { type?: string; taskId?: unknown; project?: unknown };
+      if (MACHINE_LOCAL.has(push.type ?? "")) return;
+      // News about one task is applied to that task at once — a turn streaming there reads here as
+      // it goes; anything else asks the whole machine again, a little later.
+      if (typeof push.taskId === "string" && typeof push.project === "string") this.soon(machineId, push.project, push.taskId);
+      else this.schedule(machineId, 1_500);
     });
     this.timer = setInterval(() => {
       for (const peer of this.fleet.peers()) if (peer.state === "online") this.schedule(peer.id, 0);
@@ -96,6 +104,115 @@ export class Replicator {
     return this.db;
   }
 
+  /** The directories of a machine's workspaces this machine copies, by the person's choice. */
+  private wanted(machineId: string): string[] {
+    const choice = this.fleet.copying();
+    if (choice.mode === "nothing") return [];
+    const dirs = this.federation.projectsOf(machineId);
+    if (choice.mode !== "chosen") return dirs;
+    const chosen = new Set(choice.projects ?? []);
+    return dirs.filter((dir) => chosen.has(remoteProjectKey(machineId, dir)));
+  }
+
+  /** Remove the copies of a machine's workspaces that are not in `wanted`. */
+  private dropUnwanted(machineId: string, wanted: readonly string[]): void {
+    const keep = new Set(wanted);
+    const db = this.database();
+    const held = db.prepare(`SELECT id, dir FROM workspaces WHERE machine = ?`).all(machineId) as Array<{ id: string; dir: string }>;
+    for (const workspace of held) {
+      if (keep.has(workspace.dir)) continue;
+      const root = this.replicaDir(machineId, workspace.id);
+      const paths = jairaPaths(root, this.options.baseDir);
+      const dropped = dropReplicaWorkspace(db, workspace.id, { tasksDir: paths.tasksDir, snapshotsDir: paths.snapshotsDir });
+      this.options.onDropped?.(machineId, workspace.dir);
+      rmSync(root, { recursive: true, force: true });
+      this.options.log?.("info", `removed the copy of ${workspace.dir} from ${this.fleet.labelOf(machineId)} (${dropped} task(s)): it is no longer copied`);
+    }
+  }
+
+  /**
+   * Apply the choice of what to copy now: every online machine is asked again, and every machine's
+   * copies no longer wanted are removed — an offline one's too, which a pull would not reach.
+   */
+  async apply(): Promise<void> {
+    for (const peer of this.fleet.peers()) {
+      if (peer.state === "online") await this.pull(peer.id);
+      else this.dropUnwanted(peer.id, this.wanted(peer.id));
+    }
+  }
+
+  /** How much the copies take on disk, and of how many machines. */
+  onDisk(): { bytes: number; machines: number; dir: string } {
+    const dir = join(this.options.baseDir, "remote");
+    let bytes = 0;
+    const machines = new Set<string>();
+    const walk = (path: string, machine: string | undefined): void => {
+      let entries: Dirent[];
+      try {
+        entries = readdirSync(path, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const child = join(path, entry.name);
+        if (entry.isDirectory()) walk(child, machine ?? entry.name);
+        else if (entry.isFile() && entry.name !== "projects.json") {
+          try {
+            bytes += statSync(child).size;
+            if (machine !== undefined) machines.add(machine);
+          } catch {
+            // Gone meanwhile.
+          }
+        }
+      }
+    };
+    walk(dir, undefined);
+    // The rows are in the one database, and are the larger part: counted from the copies' own tables.
+    const db = this.database();
+    const rows = db
+      .prepare(
+        `SELECT COALESCE(SUM(LENGTH(payload_json)), 0) AS n FROM state_machine_events
+          WHERE task_id IN (SELECT o.task_id FROM task_owners o JOIN workspaces w ON w.id = o.workspace WHERE w.machine IS NOT NULL)`,
+      )
+      .get() as { n: number };
+    const records = db
+      .prepare(
+        `SELECT COALESCE(SUM(LENGTH(result_json) + LENGTH(request_json)), 0) AS n FROM operation_records
+          WHERE task_id IN (SELECT o.task_id FROM task_owners o JOIN workspaces w ON w.id = o.workspace WHERE w.machine IS NOT NULL)`,
+      )
+      .get() as { n: number };
+    return { bytes: bytes + rows.n + records.n, machines: machines.size, dir };
+  }
+
+  /** Tasks a push named, by machine and directory, waiting for the next quick pull. */
+  private readonly named = new Map<string, { machineId: string; dir: string; tasks: Set<string>; timer: ReturnType<typeof setTimeout> }>();
+
+  /** Pull one task of one workspace within a quarter of a second — pushes about it arrive in bursts. */
+  private soon(machineId: string, dir: string, taskId: string): void {
+    if (this.closed || !this.wanted(machineId).includes(dir)) return;
+    const key = `${machineId}\u0000${dir}`;
+    const waiting = this.named.get(key);
+    if (waiting !== undefined) {
+      waiting.tasks.add(taskId);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const entry = this.named.get(key);
+      this.named.delete(key);
+      if (entry === undefined || this.closed) return;
+      // Behind a full pull of the same machine, not beside it: both lay rows over one copy.
+      const before = this.running.get(machineId) ?? Promise.resolve();
+      const run = before
+        .then(() => this.pullWorkspace(machineId, dir, [...entry.tasks]))
+        .catch((e: unknown) => this.options.log?.("warn", `could not copy ${dir} from ${this.fleet.labelOf(machineId)}: ${(e as Error).message}`));
+      this.running.set(machineId, run.finally(() => {
+        if (this.running.get(machineId) === run) this.running.delete(machineId);
+      }) as Promise<void>);
+    }, 250);
+    timer.unref?.();
+    this.named.set(key, { machineId, dir, tasks: new Set([taskId]), timer });
+  }
+
   /** Ask a machine again, shortly: many pushes arrive together. */
   schedule(machineId: string, delayMs: number): void {
     if (this.closed || !this.fleet.replicating() || this.scheduled.has(machineId)) return;
@@ -112,7 +229,11 @@ export class Replicator {
     const already = this.running.get(machineId);
     if (already !== undefined) return already;
     const run = (async () => {
-      for (const dir of this.federation.projectsOf(machineId)) {
+      const wanted = this.wanted(machineId);
+      // What is no longer wanted leaves the copies first: a project taken off the chosen list, or all
+      // of them when nothing is copied.
+      this.dropUnwanted(machineId, wanted);
+      for (const dir of wanted) {
         if (this.closed) return;
         try {
           await this.pullWorkspace(machineId, dir);
@@ -125,7 +246,7 @@ export class Replicator {
     return run;
   }
 
-  private async pullWorkspace(machineId: string, dir: string): Promise<void> {
+  private async pullWorkspace(machineId: string, dir: string, only?: readonly string[]): Promise<void> {
     const db = this.database();
     let workspace = this.workspaceOf(machineId, dir);
     let changed = 0;
@@ -133,7 +254,10 @@ export class Replicator {
       const client = this.fleet.client(machineId);
       if (client === undefined || this.closed) return;
       const known = workspace !== undefined ? replicaKnown(db, workspace) : {};
-      const page = (await client.invoke("replica:pull", { project: dir, known })) as ReplicaPage;
+      // Archived tasks come only when everything is copied; otherwise the owner leaves them out, and
+      // one archived there leaves the copy here.
+      const archived = this.fleet.copying().mode === "everything";
+      const page = (await client.invoke("replica:pull", { project: dir, known, archived, ...(only !== undefined ? { only } : {}) })) as ReplicaPage;
       if (this.closed) return;
       workspace = page.workspace;
       registerWorkspace(db, workspace, dir, machineId);
@@ -169,6 +293,8 @@ export class Replicator {
     clearInterval(this.timer);
     for (const timer of this.scheduled.values()) clearTimeout(timer);
     this.scheduled.clear();
+    for (const entry of this.named.values()) clearTimeout(entry.timer);
+    this.named.clear();
     this.db?.close();
     this.db = undefined;
   }

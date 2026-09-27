@@ -6,7 +6,7 @@
  * for it waits in A's outbox.
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -113,7 +113,7 @@ describe("another machine's workspaces", () => {
   it("keeps a copy of another machine's tasks, and reads it while that machine is away", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");
-    a.service.fleet.setReplicate(true);
+    a.service.fleet.setCopy({ mode: "not-archived" });
     const dir = clone();
     initProject(dir, b.base);
     await b.service.open(dir);
@@ -124,6 +124,10 @@ describe("another machine's workspaces", () => {
     const bId = b.service.fleet.identity().id;
     await a.service.replicator.pull(bId);
     expect(a.service.replicator.hasReplica(bId, parseRemoteProjectKey(remote!.project)!.dir)).toBe(true);
+    // Later work reaches the copy by itself, following the machine's pushes.
+    const later = (await b.call("task:create", { title: "written after", workflow: "chat/session", project: dir })) as { taskId: string };
+    const copied = join(a.service.replicator.replicaDir(bId, a.service.replicator.workspaceOf(bId, dir)!), ".jaira", "system", "tasks", `${later.taskId}.json`);
+    await expect.poll(() => existsSync(copied), { timeout: 8000 }).toBe(true);
 
     await b.hosted.close();
     made.splice(made.indexOf(b), 1);
@@ -133,14 +137,18 @@ describe("another machine's workspaces", () => {
     await expect(a.call("board:roots", { project: remote!.project })).resolves.toMatchObject({ columns: expect.any(Array) });
     // And only read: what would change it waits for the machine, or is refused.
     await expect(a.call("task:rename", { taskId: task.taskId, title: "x", project: remote!.project })).rejects.toThrow(/mac-mini is offline/);
-    // Nothing of the copy is this machine's own.
-    expect(((await a.call("task:all", {})) as Array<{ taskId: string }>).some((t) => t.taskId === task.taskId)).toBe(false);
+    // The root's list has it too, keyed for its machine — never as this machine's own.
+    expect(((await a.call("task:all", {})) as Array<{ taskId: string; project: string }>).filter((t) => t.taskId === task.taskId)).toEqual([expect.objectContaining({ project: remote!.project })]);
+    // The choice is kept, and choosing to copy nothing removes the copy — its machine offline or not.
+    expect(a.service.fleet.view().self.copy).toEqual({ mode: "not-archived" });
+    await a.call("machines:copy", { mode: "nothing" });
+    await expect.poll(() => a.service.replicator.hasReplica(bId, parseRemoteProjectKey(remote!.project)!.dir)).toBe(false);
   });
 
   it("offers the gate an offline machine was holding, and keeps the answer for it until it is back", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");
-    a.service.fleet.setReplicate(true);
+    a.service.fleet.setCopy({ mode: "not-archived" });
     const dir = clone();
     initProject(dir, b.base);
     await b.service.open(dir);

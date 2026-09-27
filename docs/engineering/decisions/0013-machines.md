@@ -558,12 +558,17 @@ the workspace specific stuff remains in the the workspace".
     its machine chip and its conversation opens with every step, from the copy.
   - `app/test/federation.test.ts`: two engines; A copies B's task, B goes away, and A still reads its
     conversation and board, refuses a rename, and does not count the copy among its own tasks.
-- **Not yet:**
-  - the setting limits nothing by project or age (ruling 11 asked for both), only on or off;
-  - `task:all` does not list an offline machine's copied tasks;
-  - live pushes are not applied as they arrive: a push only schedules the next pull;
-  - the composer's preview (`chat:plan`) is refused while the machine is away, though a message sent then
-    waits in the outbox as before.
+- **Then, the same day** (the person: "we should implement all the still remaining things too"):
+  - **What is copied** is a choice (decision 0014): Everything, Not archived (a window's default),
+    Chosen projects, or Nothing (the default for `jaira serve`). Kept in `machine.json` as `copy`. The
+    first build dropped the setting on every read, so yesterday's switch never saved.
+  - **All tasks** includes an offline machine's copied tasks (`offlineTasks`), keyed for their machine.
+  - **Near-live copies:** a push naming a task pulls that task within 250 ms (`replica:pull` `only`).
+    Other pushes pull the machine 1.5 s later.
+  - **The composer's preview** (`chat:plan`) is read from the copy while the machine is away.
+  - **Out of usage per route:** placement judges a workspace by the accounts the task's models spend
+    (the model ids its root state names, and the default executor's model, through `accountOfRoute`).
+    With none known, it judges by every account being spent, as before.
 
 ## Consequences
 

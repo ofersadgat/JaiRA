@@ -54,6 +54,8 @@ export interface QueuedTask {
   project: string;
   identity: string;
   requires: string[];
+  /** The accounts its models spend — see `whyNot`. */
+  needs?: string[];
   since: number;
 }
 
@@ -154,7 +156,13 @@ export class Placement {
    * The first workspace with room, and what was said about each one considered — what a queued task's
    * "Run on" menu shows beside every choice.
    */
-  async choose(identity: string, members: readonly ProjectSummary[], requires: readonly string[], selfId: string): Promise<{ chosen?: ProjectSummary; considered: Considered[] }> {
+  async choose(
+    identity: string,
+    members: readonly ProjectSummary[],
+    requires: readonly string[],
+    selfId: string,
+    needs: readonly string[] = [],
+  ): Promise<{ chosen?: ProjectSummary; considered: Considered[] }> {
     const thresholds = this.options.thresholds?.() ?? DEFAULT_THRESHOLDS;
     const caps = this.rules(identity)?.caps ?? {};
     const capacities = new Map<string, MachineCapacity | undefined>();
@@ -166,7 +174,7 @@ export class Placement {
       const dir = parseRemoteProjectKey(member.project)?.dir ?? member.project;
       if (!capacities.has(machineId)) capacities.set(machineId, await this.capacityOf(machineId, selfId));
       const capacity = capacities.get(machineId);
-      const why = whyNot(capacity, dir, requires, caps[workspaceKey(machineId, dir)], thresholds);
+      const why = whyNot(capacity, dir, requires, caps[workspaceKey(machineId, dir)], thresholds, Date.now(), needs);
       considered.push({ project: member.project, machineId, label, ...(why !== undefined ? { why } : {}) });
       if (why === undefined && chosen === undefined) chosen = member;
     }
@@ -206,8 +214,22 @@ export class Placement {
   }
 }
 
-/** Why a workspace takes no new run now, or undefined when it can. */
-export function whyNot(capacity: MachineCapacity | undefined, dir: string, requires: readonly string[], cap: number | undefined, thresholds: PlacementThresholds, now = Date.now()): string | undefined {
+/**
+ * Why a workspace takes no new run now, or undefined when it can.
+ *
+ * `needs` is the accounts the task's models spend (`accountOfRoute`): the workspace is out of usage
+ * when one of THOSE is spent there. With nothing known about what it spends, out of usage is every
+ * account the machine has a reading for being spent.
+ */
+export function whyNot(
+  capacity: MachineCapacity | undefined,
+  dir: string,
+  requires: readonly string[],
+  cap: number | undefined,
+  thresholds: PlacementThresholds,
+  now = Date.now(),
+  needs: readonly string[] = [],
+): string | undefined {
   if (capacity === undefined) return "offline";
   const missing = requires.filter((tag) => !capacity.tags.includes(tag));
   if (missing.length > 0) return `not ${missing.join(", ")}`;
@@ -217,6 +239,8 @@ export function whyNot(capacity: MachineCapacity | undefined, dir: string, requi
   if (capacity.resources.cpu >= thresholds.cpuLimit) return `busy (${Math.round(capacity.resources.cpu * 100)}% CPU)`;
   const free = capacity.resources.totalMemory > 0 ? capacity.resources.freeMemory / capacity.resources.totalMemory : 1;
   if (free <= thresholds.memoryFloor) return `low on memory (${Math.round(free * 100)}% free)`;
-  if (capacity.accounts.length > 0 && capacity.accounts.every((a) => capacity.spent.includes(a))) return "out of usage";
+  const spentNeeded = needs.filter((account) => capacity.spent.includes(account));
+  if (spentNeeded.length > 0) return `out of usage (${spentNeeded.join(", ")})`;
+  if (needs.length === 0 && capacity.accounts.length > 0 && capacity.accounts.every((a) => capacity.spent.includes(a))) return "out of usage";
   return undefined;
 }

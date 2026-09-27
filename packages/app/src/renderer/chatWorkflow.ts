@@ -43,34 +43,10 @@
  * position chain and the edit-and-resend below all address a PROMPT op's session. A prompt state
  * whose route is an agent CLI is the same agent, in a conversation this app can continue.
  */
-/**
- * What the Chat view STARTS (decisions 0005 §3, 0006): a person began a conversation, and it may work
- * in the project, start a workflow, or only talk — the project's tools and the workflow tools, under
- * `chat/ask-first`.
- */
-export const CHAT_SESSION = "chat/session";
-/**
- * What a task gets when a person MOVES it and the move makes a dynamic workflow: the conversation
- * that steers that work, holding the task and workflow tools and nothing of the project. Never
- * started from the Chat view, and never what a session turns into.
- */
-export const CHAT_CONTROL = "chat/control";
-/** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): a conversation with children. */
-export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
-
-/** Every state a Chat-view conversation can be. Both ship in the built-in layer. */
-export const CHAT_STATES = [CHAT_SESSION, CHAT_CONTROL] as const;
-
-/** Which conversation a task is: the workflow it was created from, or `null` for a task that is not one. */
-export type ChatKind = (typeof CHAT_STATES)[number];
-
-/**
- * True for a task the Chat view owns — its workflow is one of {@link CHAT_STATES}, or a dynamic
- * workflow, which IS a conversation: a row in the Chat list and not a column of its own.
- */
-export function isChatWorkflow(workflow: string | undefined): boolean {
-  return workflow !== undefined && ((CHAT_STATES as readonly string[]).includes(workflow) || workflow.startsWith(DYNAMIC_WORKFLOW_PREFIX));
-}
+// Which tasks are conversations lives in `@jaira/shared` (`task.ts`): the engine archives tasks by themselves
+// and leaves conversations alone, so it has to ask the same question the Chat view does.
+export { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, isChatWorkflow, type ChatKind } from "@jaira/shared/browser";
+import { CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX } from "@jaira/shared/browser";
 
 /** What `task:all` is asked for to list every conversation — the states, and the dynamic namespace. */
 export const CHAT_LIST_WORKFLOWS: readonly string[] = [...CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX];

@@ -9,7 +9,7 @@
  * every channel (checked where they meet, in the desktop's `index.ts`).
  */
 import { resolve } from "node:path";
-import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest } from "@jaira/shared";
+import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest, CopyChoice } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { HealthItem, LogLevel } from "@jaira/shared";
 import type { EngineHostInfo } from "./enginePipe";
@@ -59,11 +59,12 @@ export function serviceHandlers(service: AppService, options: { local?: boolean 
   // request made here: one forwarded from another machine was placed there already.
   routed["task:start"] = ((request: Parameters<typeof service.startTask>[0]) =>
     service.federation.route("task:start", request) ?? service.placeAndStart(request)) as Handler;
-  // The root's lists span every machine: each online one's, keyed for forwarding.
+  // The root's lists span every machine: each online one's, keyed for forwarding, and each offline
+  // one's from this machine's copy of it.
   routed["task:all"] = (async (request: unknown) => {
     const local = (await (table["task:all"] as (request: unknown) => unknown)(request)) as unknown[];
     const remote = await service.federation.everyMachine("task:all", request);
-    return [...local, ...remote];
+    return [...local, ...remote, ...service.offlineTasks(request as { workflows?: string[] } | undefined)];
   }) as Handler;
   return routed;
 }
@@ -89,6 +90,8 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
       service.resumable(request.taskId, request.project)) as Handler,
     "task:rewind": ((request: Parameters<typeof service.rewindTask>[0]) => service.rewindTask(request)) as Handler,
     "task:fork": ((request: Parameters<typeof service.forkTask>[0]) => service.forkTask(request)) as Handler,
+    "task:archive": ((request: { taskIds: string[]; project?: string }) => service.archiveTasks(request)) as Handler,
+    "task:unarchive": ((request: { taskIds: string[]; project?: string }) => service.archiveTasks({ ...request, undo: true })) as Handler,
     "task:delete": ((request: { taskId: string; project?: string }) =>
       service.deleteTask(request.taskId, request.project)) as Handler,
     "task:rename": ((request: Parameters<typeof service.renameTask>[0]) => service.renameTask(request)) as Handler,
@@ -229,12 +232,14 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "machines:rename": ((request: { label: string }) => service.fleet.rename(request.label)) as Handler,
     "machines:tags": ((request: { tags: string[] }) => service.fleet.setTags(request.tags)) as Handler,
     "machines:reach": ((request: { on: boolean }) => service.fleet.setReachable(request.on === true)) as Handler,
-    "machines:replicate": ((request: { on: boolean }) => {
-      const view = service.fleet.setReplicate(request.on === true);
-      // Switched on: every online machine is copied now rather than at the next minute.
-      if (request.on === true) for (const peer of service.fleet.peers()) if (peer.state === "online") service.replicator.schedule(peer.id, 0);
+    "machines:copy": ((request: CopyChoice) => {
+      const view = service.fleet.setCopy(request);
+      // Applied now rather than at the next minute: what is newly wanted is copied, what is no longer
+      // wanted leaves the copies.
+      void service.replicator.apply();
       return view;
     }) as Handler,
+    "machines:copies": (() => service.replicator.onDisk()) as Handler,
     "machines:pairCode": (() => service.fleet.pairingCode()) as Handler,
     "machines:pairCancel": (() => service.fleet.cancelPairing()) as Handler,
     "machines:add": ((request: { address: string; code: string }) => service.fleet.add(request.address, request.code)) as Handler,

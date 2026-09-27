@@ -46,6 +46,7 @@ import type {
   PermissionSetsView as PermissionSetsData,
   WorkflowLayer,
 } from "@jaira/shared/browser";
+import { isArchivableStatus } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
 import { dragOffersOf, undoableOn } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
@@ -1159,6 +1160,8 @@ export default function App(): JSX.Element {
       const cancelable = cards.filter(
         (c) => c.status === "queued" || c.status === "running" || c.status === "interrupted",
       );
+      const archivable = cards.filter((c) => isArchivableStatus(c.status));
+      const archived = cards.filter((c) => c.status === "archived");
       return [
         {
           label: `Re-run ${plural(notRunning.length)}`,
@@ -1180,6 +1183,21 @@ export default function App(): JSX.Element {
               project,
             ),
         },
+        // Archive what is finished, or bring back what is archived — whichever the selection holds.
+        archived.length > archivable.length
+          ? {
+              label: `Unarchive ${plural(archived.length)}`,
+              separator: true,
+              note: "back on the board",
+              onSelect: () => void actions.archiveTasks(archived.map((c) => c.taskId), project, true),
+            }
+          : {
+              label: `Archive ${plural(archivable.length)}`,
+              separator: true,
+              disabled: archivable.length === 0,
+              note: archivable.length < n ? "unfinished skipped" : "off the board",
+              onSelect: () => void actions.archiveTasks(archivable.map((c) => c.taskId), project),
+            },
         {
           label: "Copy task ids",
           separator: true,
@@ -1233,7 +1251,7 @@ export default function App(): JSX.Element {
       setPicked({ project, ids: [card.taskId], anchor: card.taskId });
       actions.select(card.taskId, project);
       const running = card.status === "running";
-      const terminal = card.status === "completed" || card.status === "failed" || card.status === "canceled";
+      const terminal = card.status === "completed" || card.status === "failed" || card.status === "canceled" || card.status === "archived";
       // Opening a card follows the same level rule as double-clicking it — see the Board's
       // `onOpenTask` below.
       const level = state.boards[project]?.level ?? "";
@@ -1294,6 +1312,12 @@ export default function App(): JSX.Element {
           onSelect: () => void actions.cancelTask(card.taskId, project),
         },
         { label: "Copy task id", separator: true, onSelect: () => void navigator.clipboard?.writeText(card.taskId) },
+        // Archive once it has finished; an archived one comes back (the person, 2026-09-27).
+        ...(card.status === "archived"
+          ? [{ label: "Unarchive", separator: true, note: "back on the board", onSelect: () => void actions.archiveTasks([card.taskId], project, true) }]
+          : isArchivableStatus(card.status)
+            ? [{ label: "Archive", separator: true, note: "off the board", onSelect: () => void actions.archiveTasks([card.taskId], project) }]
+            : []),
         {
           label: "Delete…",
           separator: true,

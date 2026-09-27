@@ -41,11 +41,26 @@ export interface PeerView extends MachineView {
 }
 
 export interface MachinesView {
-  /** `replicate`: this machine keeps a copy of the other machines' tasks (decision 0013 §6). */
-  self: MachineView & { reach: MachineReach; version: string; replicate: boolean };
+  /** `copy`: what of the other machines' tasks this one keeps a copy of (decision 0013 §6). */
+  self: MachineView & { reach: MachineReach; version: string; copy: CopyChoice };
   machines: PeerView[];
   /** The code being shown under Pair a machine, while it is valid. */
   pairing?: { code: string; expiresAt: number };
+}
+
+/**
+ * What of the other machines' tasks this machine keeps a copy of (decision 0013 §6; the person,
+ * 2026-09-27: "we can do not archived with everything as a choice"):
+ *
+ *  - `everything` — every task of every workspace;
+ *  - `not-archived` — every task that is not archived: one archived on its machine leaves the copy;
+ *  - `chosen` — the tasks that are not archived, of the projects in {@link projects} only;
+ *  - `nothing` — no copy, and the one kept so far is removed.
+ */
+export interface CopyChoice {
+  mode: "everything" | "not-archived" | "chosen" | "nothing";
+  /** For `chosen`: the remote project keys (`jaira-machine://…`) to copy. */
+  projects?: string[];
 }
 
 /** How long a pairing code works. */

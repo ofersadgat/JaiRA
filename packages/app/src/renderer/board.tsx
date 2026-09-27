@@ -52,7 +52,7 @@ export const LANE_LABEL: Record<Lane, string> = {
  * parked on a question has task status `running` and says so nowhere else.
  */
 export function laneOf(card: BoardCard): Lane {
-  if (card.status === "completed" || card.status === "failed" || card.status === "canceled") return "finished";
+  if (card.status === "completed" || card.status === "failed" || card.status === "canceled" || card.status === "archived") return "finished";
   // HOLDING for a dependency (decision 0003) is waiting on something other than itself, whatever
   // else the task is doing — queued and never started, or running and parked at the split until
   // the task it requires completes — which is what this lane is for. One holding for nothing and
@@ -182,9 +182,12 @@ export function Tile({
   onDragStart,
   onDragEnd,
   child = false,
+  archived = false,
 }: {
   /** Filed BENEATH the card above it — an adopted task under the task that adopted it (decision 0005). */
   child?: boolean;
+  /** Archived — drawn faded, among the ones shown at the foot of the Finished lane. */
+  archived?: boolean;
   /** Colours the stripe and picks the badge glyph. Absent ⇒ neither, for a card of something with
       no state of its own to report. */
   status?: string;
@@ -220,7 +223,7 @@ export function Tile({
       // No `card-${status}` any more: every rule that read it was colouring the left stripe or the
       // status word, and both are the trailing pill's job now. A class nothing styles is a hook the
       // next person has to check before they can change anything.
-      className={`card${selected === true ? " card-selected is-active" : ""}${draggable ? " card-draggable" : ""}${child ? " card-child" : ""}`}
+      className={`card${selected === true ? " card-selected is-active" : ""}${draggable ? " card-draggable" : ""}${child ? " card-child" : ""}${archived ? " is-archived" : ""}`}
       // The pill's KIND, which is what the status wash colours the whole card by (Appearance → status
       // wash, `:root[data-wash]` in `styles.css`). The kind rather than the status, so the wash and the
       // pill can never disagree about which colour a status is.
@@ -589,10 +592,38 @@ const LANE_HEADED: ReadonlySet<Lane> = new Set<Lane>(["not-started", "finished"]
 export function Lanes({
   cards,
   render,
+  archived,
 }: {
   cards: readonly BoardCard[];
   render: (card: BoardCard) => ReactNode;
+  /**
+   * Whether archived cards are shown, and how to change that. They are left out of the lanes either
+   * way and held at the foot, behind one line saying how many (the person, 2026-09-27).
+   */
+  archived?: { shown: boolean; onToggle: () => void } | undefined;
 }): JSX.Element {
+  const put = cards.filter((card) => card.status === "archived").sort((a, b) => (b.archived?.at ?? 0) - (a.archived?.at ?? 0));
+  const live = put.length === 0 ? cards : cards.filter((card) => card.status !== "archived");
+  const foot =
+    put.length === 0 ? null : (
+      <>
+        <button type="button" className="lane-archived" title={archived?.shown === true ? "Hide the archived tasks" : "Show the archived tasks, kept with their history"} onClick={archived?.onToggle} disabled={archived === undefined}>
+          <span>{put.length} archived</span>
+          <span className="rule" />
+          {archived !== undefined ? <span>{archived.shown ? "Hide" : "Show"}</span> : null}
+        </button>
+        {archived?.shown === true ? put.map((card) => <Fragment key={card.taskId}>{render(card)}</Fragment>) : null}
+      </>
+    );
+  return (
+    <>
+      <LiveLanes cards={live} render={render} />
+      {foot}
+    </>
+  );
+}
+
+function LiveLanes({ cards, render }: { cards: readonly BoardCard[]; render: (card: BoardCard) => ReactNode }): JSX.Element {
   // An adopted task files BENEATH the task that adopted it (decision 0005 §2), wherever its own
   // status would have put it: what relates the two is not a lane.
   const { top, beneath } = nestUnder(cards);
@@ -730,10 +761,14 @@ export function Card({
 }): JSX.Element {
   // The card's own status — the one the board is actually about, which for a task inside a workflow
   // is where it is NOW rather than what the task as a whole is doing.
-  const status = card.activeStatus ?? card.status;
+  //
+  // An ARCHIVED card wears the pill of how it finished (the person, 2026-09-27: "it might be useful
+  // when you're looking at archived tasks what state they were in when they were archived").
+  const status = card.archived !== undefined ? card.archived.from : (card.activeStatus ?? card.status);
   return (
     <Tile
       status={status}
+      archived={card.archived !== undefined}
       // The name the task's path gives it where a state declares a title (SPEC §5.2), drawn as a
       // placeholder while that title is still settling — see `TaskName`.
       title={<TaskName task={card} />}
@@ -770,7 +805,13 @@ export function Card({
             {card.where !== undefined ? <MachineChip label={card.where.label} state={card.where.state} {...(card.where.title !== undefined ? { title: card.where.title } : {})} /> : null}
             {/* An ADOPTED task says so, and says what it ran: its status is on its pill, and "where it
                 is" is under the task above it. */}
-            <span className="ellip">{card.under !== undefined ? `adopted · ${card.workflow}` : (card.activeStateId ?? card.status)}</span>
+            <span className="ellip" {...(card.archived !== undefined ? { title: `archived ${new Date(card.archived.at).toLocaleString()}` } : {})}>
+              {card.archived !== undefined
+                ? `archived ${endedLabel(card.archived.at)}`
+                : card.under !== undefined
+                  ? `adopted · ${card.workflow}`
+                  : (card.activeStateId ?? card.status)}
+            </span>
             <span className="card-status" title={new Date(card.endedAt).toLocaleString()}>
               {onUndo !== undefined ? <UndoLink onUndo={onUndo} /> : endedLabel(card.endedAt)}
             </span>
@@ -939,6 +980,8 @@ export function Board({
    * A move the table ASKS about before it commits (a working task sent back, or into another
    * workflow): the question, drawn in the column it will land in until the person answers it.
    */
+  // Archived cards are held at the foot of each Finished lane; one Show here shows them in every column.
+  const [showArchived, setShowArchived] = useState(false);
   const [confirming, setConfirming] = useState<{ column: string; sentence: string; yes: string; go: () => void } | null>(null);
   /** A chip's move: taken at once, or — where the table asks — once the person said yes. */
   const moveFrom = (card: BoardCard) =>
@@ -1036,7 +1079,7 @@ export function Board({
             key={column.key}
             name={column.label ?? column.key}
             {...(numbered ? { seq: index + 1 } : {})}
-            count={column.cards.length}
+            count={column.cards.filter((card) => card.status !== "archived").length}
             empty="—"
             tip={
               onSelectColumn === undefined
@@ -1067,6 +1110,7 @@ export function Board({
           >
             <Lanes
               cards={column.cards}
+              archived={{ shown: showArchived, onToggle: () => setShowArchived((v) => !v) }}
               render={(card) => {
                 const drill = drillOf(card);
                 return (
@@ -1096,10 +1140,10 @@ export function Board({
       {/* The one tray left. "Finished / not started" is gone: a task that ended still ran somewhere,
           and the projection now files it in the column it came to rest in — a card belongs under a
           PLACE, and the lane inside that column is what says it is done. See `BoardView.finished`. */}
-      {trays && board.atLevel.length > 0 ? (
+      {trays && board.atLevel.some((card) => card.status !== "archived") ? (
         <Tray
           label="At this level"
-          cards={board.atLevel}
+          cards={board.atLevel.filter((card) => card.status !== "archived")}
           selected={selected}
           selectedSet={selectedSet}
           onSelectTask={onSelectTask}

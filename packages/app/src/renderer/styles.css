@@ -19294,3 +19294,39 @@ button.chg-by {
   border: 1.5px solid var(--warn);
   flex: none;
 }
+
+/*
+ * Archived tasks (the person, 2026-09-27): held at the foot of a Finished lane behind one quiet line
+ * saying how many, and — shown — drawn faded until the pointer is on one.
+ */
+.lane-archived {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  justify-content: flex-start;
+  margin-top: 2px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+.lane-archived:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  border-color: transparent;
+  color: var(--text);
+}
+.lane-archived .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.card.is-archived {
+  opacity: 0.62;
+}
+.card.is-archived:hover,
+.card.is-archived.card-selected {
+  opacity: 1;
+}

@@ -190,6 +190,40 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
     },
   },
   {
+    key: "archive",
+    title: "Finished tasks",
+    hint: "When finished tasks leave the board by themselves. Archived tasks are kept, and shown again from the foot of the Finished lane.",
+    schema: {
+      $type: "archive",
+      type: "object",
+      properties: {
+        auto: {
+          type: "boolean",
+          title: "archive by themselves",
+          description: "Off, a task is archived only when you archive it.",
+        },
+        keepLatest: {
+          type: "integer",
+          minimum: 0,
+          title: "always keep the latest",
+          description: "How many of a project's newest finished tasks stay on the board, however old they are.",
+        },
+        failedAfterDays: {
+          type: "number",
+          minimum: 0,
+          title: "failed or canceled, after (days)",
+          description: "How long after it finished a task that did not succeed is archived, when it is not among the latest.",
+        },
+        succeededAfterDays: {
+          type: "number",
+          minimum: 0,
+          title: "succeeded, after (days)",
+          description: "How long after it finished a task that succeeded is archived, when it is not among the latest.",
+        },
+      },
+    },
+  },
+  {
     key: "updates",
     title: "Updates",
     hint: "Which releases this machine follows (decision 0011).",

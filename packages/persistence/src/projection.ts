@@ -36,6 +36,7 @@ import type {
   TaskHeading,
   TaskOrigin,
   TaskStartedBy,
+  TaskArchived,
   TaskStatus,
 } from "@jaira/shared";
 import type { StoredEvent } from "./eventLog";
@@ -558,6 +559,8 @@ export interface TaskProjection {
   status: TaskStatus;
   workflow: string;
   labels?: string[];
+  /** Set when archived: the card carries it, and the board decides whether to show it. */
+  archived?: TaskArchived;
   updatedAt: number;
   run: ProjectedRun;
   /** How a fan-out made this task, when one did (decision 0003) — what files a mount task in its parent's column. */
@@ -572,7 +575,7 @@ export interface TaskProjection {
   undoable?: true;
 }
 
-const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);
+const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled", "archived"]);
 
 /**
  * `levelIndex` is where this board's level sits on the task's active path. The
@@ -597,6 +600,7 @@ function cardOf(
     taskId: task.taskId,
     title: task.title,
     status: task.status,
+    ...(task.archived !== undefined ? { archived: task.archived } : {}),
     workflow: task.workflow,
     ...(activeStatus !== undefined ? { activeStatus } : {}),
     ...(deepest !== undefined ? { activeStateId: deepest.stateId } : {}),

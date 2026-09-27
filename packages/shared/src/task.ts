@@ -24,7 +24,14 @@ export type TaskStatus =
   | "completed"
   | "failed"
   | "canceled"
-  | "interrupted";
+  | "interrupted"
+  /**
+   * Put away by a person, or by the rule that tidies finished work (`tasks.autoArchive`): kept, with
+   * its history, and left off the board (the person, 2026-09-27: "the state should be archived"). Only
+   * a FINISHED task is archived, and the row remembers which finish (`archived_from`), so a card can
+   * say what it was and Unarchive puts it back exactly.
+   */
+  | "archived";
 
 export interface TaskMeta {
   id: string;
@@ -174,7 +181,14 @@ export interface TaskProvenance {
   formerParentTaskId?: string;
 }
 
-const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);
+const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled", "archived"]);
+
+/** What can be archived: a task that finished, whichever way. */
+const ARCHIVABLE: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);
+
+export function isArchivableStatus(status: TaskStatus): boolean {
+  return ARCHIVABLE.has(status);
+}
 
 export function isTerminalStatus(status: TaskStatus): boolean {
   return TERMINAL.has(status);
@@ -226,4 +240,33 @@ export function parseTaskMeta(raw: unknown, expectedId?: string): TaskMeta {
   }
   if (typeof meta.createdAt !== "string") throw new Error("task metadata missing 'createdAt'");
   return meta as TaskMeta;
+}
+
+/**
+ * What the Chat view STARTS (decisions 0005 §3, 0006): a person began a conversation, and it may work
+ * in the project, start a workflow, or only talk — the project's tools and the workflow tools, under
+ * `chat/ask-first`.
+ */
+export const CHAT_SESSION = "chat/session";
+/**
+ * What a task gets when a person MOVES it and the move makes a dynamic workflow: the conversation
+ * that steers that work, holding the task and workflow tools and nothing of the project. Never
+ * started from the Chat view, and never what a session turns into.
+ */
+export const CHAT_CONTROL = "chat/control";
+/** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): a conversation with children. */
+export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
+
+/** Every state a Chat-view conversation can be. Both ship in the built-in layer. */
+export const CHAT_STATES = [CHAT_SESSION, CHAT_CONTROL] as const;
+
+/** Which conversation a task is: the workflow it was created from, or `null` for a task that is not one. */
+export type ChatKind = (typeof CHAT_STATES)[number];
+
+/**
+ * True for a task the Chat view owns — its workflow is one of {@link CHAT_STATES}, or a dynamic
+ * workflow, which IS a conversation: a row in the Chat list and not a column of its own.
+ */
+export function isChatWorkflow(workflow: string | undefined): boolean {
+  return workflow !== undefined && ((CHAT_STATES as readonly string[]).includes(workflow) || workflow.startsWith(DYNAMIC_WORKFLOW_PREFIX));
 }

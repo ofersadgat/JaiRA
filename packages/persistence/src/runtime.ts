@@ -50,6 +50,10 @@ export interface TaskRuntimeRow {
   forkedAtSeq?: number;
   /** The copy's own last journaled event — the seam, in this task's coordinates. */
   forkBoundarySeq?: number;
+  /** How it had finished, when it is `archived` — what Unarchive puts back. */
+  archivedFrom?: TaskStatus;
+  /** When it was archived. */
+  archivedAt?: number;
   createdAt: number;
   updatedAt: number;
   /** When the machine last started executing. Absent for a task that never ran. */
@@ -72,6 +76,8 @@ interface RawRuntime {
   parent_task_id: string | null;
   forked_at_seq?: number | null;
   fork_boundary_seq?: number | null;
+  archived_from?: string | null;
+  archived_at?: number | null;
   created_at: number;
   updated_at: number;
   started_at: number | null;
@@ -93,6 +99,8 @@ function toRuntime(row: RawRuntime): TaskRuntimeRow {
     parentTaskId: row.parent_task_id ?? undefined,
     forkedAtSeq: row.forked_at_seq ?? undefined,
     forkBoundarySeq: row.fork_boundary_seq ?? undefined,
+    archivedFrom: (row.archived_from as TaskStatus | null | undefined) ?? undefined,
+    archivedAt: row.archived_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at ?? undefined,
@@ -407,6 +415,33 @@ export class RuntimeStore {
     });
     settle();
     return ids;
+  }
+
+  /**
+   * Put a finished task away (see `TaskStatus` `archived`). Returns false for one that is not
+   * finished or not this workspace's — archiving a task still running would hide work in progress.
+   */
+  archive(taskId: string, nowMs: number): boolean {
+    const res = this.db
+      .prepare(
+        `UPDATE task_runtime SET archived_from = status, archived_at = ?, status = 'archived', updated_at = ?
+          WHERE task_id = ? AND status IN ('completed', 'failed', 'canceled') AND ${OWNED_BY}`,
+      )
+      .run(nowMs, nowMs, taskId, this.workspace);
+    if (res.changes > 0) this.logTask(taskId);
+    return res.changes > 0;
+  }
+
+  /** Back on the board, finished as it was before. */
+  unarchive(taskId: string, nowMs: number): boolean {
+    const res = this.db
+      .prepare(
+        `UPDATE task_runtime SET status = COALESCE(archived_from, 'completed'), archived_from = NULL, archived_at = NULL, updated_at = ?
+          WHERE task_id = ? AND status = 'archived' AND ${OWNED_BY}`,
+      )
+      .run(nowMs, taskId, this.workspace);
+    if (res.changes > 0) this.logTask(taskId);
+    return res.changes > 0;
   }
 
   assertCancelable(taskId: string): TaskRuntimeRow {

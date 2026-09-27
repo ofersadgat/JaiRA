@@ -141,6 +141,21 @@ describe("a replica of another machine's workspace", () => {
     expect(replica.tasks.tryRead(gone.id)).toBeUndefined();
   });
 
+  it("drops a task archived on its machine unless everything is copied", () => {
+    const task = createTask(owner, { title: "put away there", workflow: "w" });
+    owner.runtime.setStatus(task.id, "completed", 1);
+    const pullWith = (archived: boolean): void => {
+      const page = exportChanges(owner, replicaKnown(here, owner.workspace), { archived });
+      applyPage(here, page, readBlobs(owner.db, missingBlobs(here, page)), replicaDir().dirs);
+    };
+    pullWith(false);
+    owner.runtime.archive(task.id, 5);
+    pullWith(true);
+    expect(readReplica().runtime.get(task.id)).toMatchObject({ status: "archived", archivedFrom: "completed" });
+    pullWith(false);
+    expect(Object.keys(replicaKnown(here, owner.workspace))).toEqual([]);
+  });
+
   it("leaves a task this machine already owns alone", () => {
     const task = createTask(owner, { title: "t", workflow: "w" });
     here.prepare(`INSERT INTO task_owners (task_id, workspace) VALUES (?, 'a-local-clone')`).run(task.id);

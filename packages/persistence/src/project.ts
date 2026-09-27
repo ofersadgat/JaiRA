@@ -234,7 +234,8 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     // `personal-settings.json` or the shared root, and a project states a look only to change it.
     //
     // `limits` likewise: whether a refused message tries again when the allowance resets is yours.
-    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, appearance: _yourLook, limits: _yourLimits, ...starter } = defaultConfig();
+    // `archive` too: when finished work leaves the board is a habit of yours, not of a checkout.
+    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, appearance: _yourLook, limits: _yourLimits, archive: _yourArchive, ...starter } = defaultConfig();
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");

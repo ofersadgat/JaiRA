@@ -275,6 +275,8 @@ export interface BoardCard {
   where?: { label: string; state: "on" | "off" | "warn" | "none"; title?: string };
   /** Task-level status (the runtime row), not the instance status. */
   status: TaskStatus;
+  /** Set when {@link status} is `archived`: left off the board unless archived tasks are shown. */
+  archived?: TaskArchived;
   workflow: string;
   /** The deepest active instance's status — what the badge shows. */
   activeStatus?: InstanceStatus;
@@ -428,6 +430,7 @@ export interface TaskDetail {
   labels?: string[];
   workflow: string;
   status: TaskStatus;
+  archived?: TaskArchived;
   snapshotHash?: string;
   branch?: string;
   /** Git worktree this task runs in, when bound to a branch (DESIGN §9.2). */
@@ -1207,11 +1210,20 @@ export interface ProjectTask extends TaskSummary {
   project: string;
 }
 
+/** An archived task's finish, and when it was put away. */
+export interface TaskArchived {
+  /** What it was when it was archived — `completed`, `failed` or `canceled`. */
+  from: TaskStatus;
+  at: number;
+}
+
 /** A row in the task list. */
 export interface TaskSummary {
   taskId: string;
   title: string;
   status: TaskStatus;
+  /** Set when {@link status} is `archived`. */
+  archived?: TaskArchived;
   workflow: string;
   labels?: string[];
   snapshotHash?: string;

@@ -37,7 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { FolderListing, MachinesView, OutboxView, PlacementView, QueuedPlacement } from "./machines";
+import type { FolderListing, CopyChoice, MachinesView, OutboxView, PlacementView, QueuedPlacement } from "./machines";
 import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
@@ -1637,6 +1637,10 @@ export interface IpcContract {
    * Delete a task outright — its runs, its journal, its worktree, its file. Refused while it is
    * running (here or in another process); everything else may go, and none of it comes back.
    */
+  /** Put finished tasks away: off the board, kept with their history. Answers the ones that were. */
+  "task:archive": { request: { taskIds: string[]; project?: ProjectRef }; response: { changed: string[] } };
+  /** Archived tasks back on the board, finished as they were. */
+  "task:unarchive": { request: { taskIds: string[]; project?: ProjectRef }; response: { changed: string[] } };
   "task:delete": { request: { taskId: string; project?: ProjectRef }; response: { taskId: string } };
   /**
    * One board level. `level` is any state id — not only one on the newest task's workflow — so the
@@ -2276,8 +2280,10 @@ export interface IpcContract {
   "machines:tags": { request: { tags: string[] }; response: MachinesView };
   /** Publish this machine on the tailnet, or stop. */
   "machines:reach": { request: { on: boolean }; response: MachinesView };
-  /** Keep a copy of the other machines' tasks here, or stop (decision 0013 §6). */
-  "machines:replicate": { request: { on: boolean }; response: MachinesView };
+  /** What of the other machines' tasks to keep a copy of here (decision 0013 §6). */
+  "machines:copy": { request: CopyChoice; response: MachinesView };
+  /** How much the copies take, and where: what the Machines page's On disk row says. */
+  "machines:copies": { request: undefined; response: { bytes: number; machines: number; dir: string } };
   /** Show a one-time pairing code, or stop showing it. */
   "machines:pairCode": { request: void; response: MachinesView };
   "machines:pairCancel": { request: void; response: MachinesView };
@@ -2338,6 +2344,8 @@ export const IPC_CHANNELS = [
   "task:resumable",
   "task:rewind",
   "task:fork",
+  "task:archive",
+  "task:unarchive",
   "task:delete",
   "task:rename",
   "board:view",
@@ -2478,7 +2486,8 @@ export const IPC_CHANNELS = [
   "machines:rename",
   "machines:tags",
   "machines:reach",
-  "machines:replicate",
+  "machines:copy",
+  "machines:copies",
   "machines:pairCode",
   "machines:pairCancel",
   "machines:add",

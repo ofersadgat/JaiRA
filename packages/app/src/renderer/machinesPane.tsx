@@ -4,12 +4,104 @@
  * Not a layered page: everything here is this machine's own.
  */
 import { useEffect, useState, type JSX } from "react";
-import { PAIRING_CODE_MS, type MachinesView, type OutboxView, type PeerView, type PluginStatus } from "@jaira/shared/browser";
+import { PAIRING_CODE_MS, type CopyChoice, type MachinesView, type OutboxView, type PeerView, type PluginStatus, type ProjectSummary } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 import { SettingsLayerContext, Switch, TextInput } from "./controls";
 import { MachineChip, chipStateOf } from "./machineChip";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { Segmented, SettingsRow, SettingsSection } from "./settingsLayout";
 import { SchemaForm } from "./schemaForm/SchemaForm";
+
+/** Bytes, for the On disk row. */
+function sizeOf(bytes: number): string {
+  if (bytes < 1_000_000) return `${Math.max(1, Math.round(bytes / 1000))} KB`;
+  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0)} MB`;
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+}
+
+const COPY_WORDS: Record<CopyChoice["mode"], string> = {
+  everything: "Every task and conversation from every paired machine, archived ones too.",
+  "not-archived": "Every task that is not archived, from every paired machine. A task archived on its machine leaves this copy.",
+  chosen: "The tasks that are not archived, of the projects switched on below.",
+  nothing: "No copy. Other machines' tasks are read from them while they are online.",
+};
+
+/**
+ * Copies of other machines' work (decision 0013 §6; the approved mockup, with archive as a choice —
+ * the person, 2026-09-27: "we can do not archived with everything as a choice").
+ */
+function Copies({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
+  const choice = view.self.copy;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [disk, setDisk] = useState<{ bytes: number; machines: number; dir: string } | undefined>(undefined);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  useEffect(() => {
+    void invoke("machines:copies", undefined).then(setDisk, () => undefined);
+    void invoke("project:list", undefined).then((all) => setProjects(all.filter((p) => p.machine !== undefined && p.machine.self !== true)), () => undefined);
+  }, [choice]);
+  const choose = (next: CopyChoice): void => {
+    setBusy(true);
+    setError(undefined);
+    invoke("machines:copy", next)
+      .then(onView, (e: unknown) => setError(errorOf(e)))
+      .finally(() => setBusy(false));
+  };
+  const chosen = new Set(choice.projects ?? []);
+  return (
+    <SettingsSection
+      id="copies"
+      title="Copies of other machines' work"
+      info="Kept so you can read and answer other machines' tasks here while they are off. Deleting a task anywhere deletes it everywhere; a machine clearing old history for space does not delete your copies."
+    >
+      <SettingsRow
+        name="Copy"
+        description={error !== undefined ? <span className="upd-err">{sentence(error)}</span> : COPY_WORDS[choice.mode]}
+        control={
+          <Segmented
+            label="Copy"
+            value={choice.mode}
+            disabled={busy}
+            options={[
+              ["Everything", "everything"],
+              ["Not archived", "not-archived"],
+              ["Chosen projects", "chosen"],
+              ["Nothing", "nothing"],
+            ]}
+            onChange={(mode) => choose(mode === "chosen" ? { mode, projects: choice.projects ?? [] } : { mode })}
+          />
+        }
+      />
+      {choice.mode === "chosen"
+        ? projects.map((p) => (
+            <SettingsRow
+              key={p.project}
+              name={p.label}
+              description={`on ${p.machine?.label ?? "another machine"}`}
+              control={
+                <Switch
+                  on={chosen.has(p.project)}
+                  label={`Copy ${p.label} from ${p.machine?.label ?? "another machine"}`}
+                  disabled={busy}
+                  onChange={(on) => choose({ mode: "chosen", projects: on ? [...chosen, p.project] : [...chosen].filter((k) => k !== p.project) })}
+                />
+              }
+            />
+          ))
+        : null}
+      <SettingsRow
+        name="On disk"
+        description={disk === undefined ? "…" : disk.bytes === 0 ? "Nothing copied yet." : `${sizeOf(disk.bytes)} from ${disk.machines} machine${disk.machines === 1 ? "" : "s"}, under ~/.jaira/remote.`}
+        control={
+          disk !== undefined && disk.bytes > 0 ? (
+            <button type="button" className="ghost" onClick={() => void invoke("shell:reveal", { file: disk.dir }).catch(() => undefined)}>
+              Show
+            </button>
+          ) : undefined
+        }
+      />
+    </SettingsSection>
+  );
+}
 
 /** The fleet, fetched once and kept current by `machines:changed`. */
 export function useMachines(): [MachinesView | undefined, (next: MachinesView) => void] {
@@ -231,19 +323,6 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
         control={<Switch on={reach.on} label="Reachable from my other machines" disabled={busy} onChange={(on) => act(invoke("machines:reach", { on }))} />}
       />
       <SettingsRow
-        name="Keep a copy of my other machines' tasks"
-        description="Their boards and conversations stay readable here while a machine is off. What you answer meanwhile waits for it."
-        info="Copied into this machine's JaiRA folder as each machine's tasks change. A task deleted on its machine is deleted here too; history pruned there to save space is kept here."
-        control={
-          <Switch
-            on={view.self.replicate}
-            label="Keep a copy of my other machines' tasks"
-            disabled={busy}
-            onChange={(on) => act(invoke("machines:replicate", { on }))}
-          />
-        }
-      />
-      <SettingsRow
         name="Pair a machine"
         description={
           view.self.reach.state === "on"
@@ -446,6 +525,7 @@ export function MachinesPane({ grouped, onGrouped }: { grouped: boolean; onGroup
             </SettingsSection>
             <Outbox />
             <AddMachine onView={setView} />
+            <Copies view={view} onView={setView} />
             <SettingsSection id="projects" title="Projects across machines" info="A project is known by its git remote: clones of the same repository, here and on your other machines, are its workspaces.">
               <SettingsRow
                 name="One project per repository"

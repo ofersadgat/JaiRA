@@ -326,7 +326,7 @@ export function RunHistorySection({
               key={task.taskId}
               taskId={task.taskId}
               title={task.title}
-              status={task.status}
+              status={task.archived?.from ?? task.status}
               at={task.updatedAt}
               selected={task.taskId === selected}
               project={target.project}

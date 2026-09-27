@@ -679,6 +679,7 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
       taskId: summary.taskId,
       title: summary.title,
       status: summary.status,
+      ...(summary.archived !== undefined ? { archived: summary.archived } : {}),
       workflow: summary.workflow,
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
       ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
@@ -880,7 +881,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
     const path = boardPathOf(run);
     const deepest = path[path.length - 1];
     const live = run.activePath.length > 0;
-    const over = summary.status === "completed" || summary.status === "failed" || summary.status === "canceled";
+    const over = summary.status === "completed" || summary.status === "failed" || summary.status === "canceled" || summary.status === "archived";
     // When it ended, for a run that has. See `BoardCard.endedAt` — the task row's own clock moves for
     // anything that touches the record, and this is the journal's answer.
     const ended = over ? endedAtOf(run) : undefined;
@@ -890,6 +891,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       taskId: summary.taskId,
       title: summary.title,
       status: summary.status,
+      ...(summary.archived !== undefined ? { archived: summary.archived } : {}),
       workflow: summary.workflow,
       ...(live && deepest !== undefined ? { activeStateId: deepest.stateId } : {}),
       activePath: path,
