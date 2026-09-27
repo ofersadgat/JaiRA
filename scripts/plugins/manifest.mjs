@@ -29,7 +29,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The packages a plugin is built around. */
-export const PLUGIN_ROOTS = ["@anthropic-ai/claude-agent-sdk", "node-llama-cpp"];
+export const PLUGIN_ROOTS = ["@anthropic-ai/claude-agent-sdk", "node-llama-cpp", "@jaira/tailnet"];
+
+/**
+ * Roots that may be missing from the lockfile: JaiRA's own packages, published by CI
+ * (`.github/workflows/tailnet.yml`) before a checkout can lock them. Left out of the manifest until then,
+ * so their plugin shows as not available rather than failing the build.
+ */
+export const OPTIONAL_ROOTS = new Set(["@jaira/tailnet"]);
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -100,6 +107,7 @@ export function buildPluginManifest(lockFile = join(repo, "package-lock.json")) 
   for (const root of PLUGIN_ROOTS) {
     const path = `node_modules/${root}`;
     const entry = lock[path];
+    if (entry === undefined && OPTIONAL_ROOTS.has(root)) continue;
     if (entry === undefined) throw new Error(`${root} is not in the lockfile — it has to stay a dependency of the workspace for its plugin to be built`);
     const key = visit(path, false);
     const platforms = {};

@@ -4,7 +4,7 @@
  * Not a layered page: everything here is this machine's own.
  */
 import { useEffect, useState, type JSX } from "react";
-import { PAIRING_CODE_MS, type MachinesView, type OutboxView, type PeerView } from "@jaira/shared/browser";
+import { PAIRING_CODE_MS, type MachinesView, type OutboxView, type PeerView, type PluginStatus } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 import { SettingsLayerContext, Switch, TextInput } from "./controls";
 import { MachineChip, chipStateOf } from "./machineChip";
@@ -139,6 +139,43 @@ function sentence(text: string): string {
   return /[.!?]$/.test(c) ? c : `${c}.`;
 }
 
+/**
+ * Tailscale for JaiRA, offered in one line where this machine has no Tailscale (decision 0013 §2): the
+ * plugin is downloaded from npm like the SDK and local models (decision 0011 §6), then the machine is
+ * published through it.
+ */
+function DownloadTailnet({ onView }: { onView: (v: MachinesView) => void }): JSX.Element | null {
+  const [status, setStatus] = useState<PluginStatus | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    void invoke("plugin:list", undefined).then((all) => setStatus(all.find((p) => p.id === "tailnet")), () => undefined);
+  }, []);
+  if (status === undefined) return null;
+  if (!status.available) return <span className="cfg-hint"> Tailscale for JaiRA is not in this build yet.</span>;
+  const install = (): void => {
+    setBusy(true);
+    setError(undefined);
+    invoke("plugin:install", { id: "tailnet" })
+      .then(async (all) => {
+        const now = all.find((p) => p.id === "tailnet");
+        if (now?.error !== undefined) throw new Error(now.error);
+        onView(await invoke("machines:reach", { on: true }));
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <>
+      {" "}
+      <button type="button" className="ghost" disabled={busy} onClick={install}>
+        {busy ? "Downloading…" : `Download Tailscale for JaiRA${status.downloadBytes !== undefined ? ` (${Math.max(1, Math.round(status.downloadBytes / 1_000_000))} MB)` : ""}`}
+      </button>
+      {error !== undefined ? <span className="upd-err"> {error}</span> : null}
+    </>
+  );
+}
+
 function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
   const [label, setLabel] = useState(view.self.label);
   const [busy, setBusy] = useState(false);
@@ -153,6 +190,7 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
     if (label.trim() !== "" && label.trim() !== view.self.label) act(invoke("machines:rename", { label: label.trim() }));
   };
   const reach = reachWords(view);
+  const noTailscale = view.self.reach.state === "unavailable" && (view.self.reach.reason ?? "").includes("not installed");
   const pairing = view.pairing;
   return (
     <SettingsSection
@@ -183,8 +221,13 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
       />
       <SettingsRow
         name="Reachable from my other machines"
-        description={reach.description}
-        info="JaiRA publishes its own port on your tailnet with Tailscale (tailscale serve), and turns it off again with this switch. Funnel is never used."
+        description={
+          <>
+            {reach.description}
+            {noTailscale ? <DownloadTailnet onView={onView} /> : null}
+          </>
+        }
+        info="JaiRA publishes its own port on your tailnet with Tailscale (tailscale serve) — or, without the Tailscale app, with Tailscale for JaiRA — and turns it off again with this switch. Funnel is never used."
         control={<Switch on={reach.on} label="Reachable from my other machines" disabled={busy} onChange={(on) => act(invoke("machines:reach", { on }))} />}
       />
       <SettingsRow

@@ -303,8 +303,9 @@ const USAGE = `usage:
   jaira workflow check [<description.md>] [--workflow <rootStateId>]... [--model <id>]
             [--json] [--fake <json|@file>] [--repair-turns <n>] [--project <dir>]
   jaira plugin list
-  jaira plugin install <plugin>     claude-agent-sdk, llama, or a llama variant (llama-cpu,
-                                    llama-vulkan, llama-cuda, llama-cuda-ext, llama-metal)
+  jaira plugin install <plugin>     claude-agent-sdk, llama, a llama variant (llama-cpu,
+                                    llama-vulkan, llama-cuda, llama-cuda-ext, llama-metal), or
+                                    tailnet (Tailscale for JaiRA)
   jaira plugin remove <plugin>
   jaira serve [--detach]              host the engine until stopped (jaira server stop)
   jaira server status | stop

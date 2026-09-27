@@ -72,3 +72,35 @@ jobs:
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
           npm publish --access public
+
+  # The root the plugin is built around (decision 0011 §6): one package whose optional dependencies are
+  # the six platform packages, as esbuild does, so the lockfile resolves every platform and the manifest
+  # can list them. Published after them.
+  root:
+    needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack and publish @jaira/tailnet
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version="$(node -p "require('./packages/app/package.json').version")"
+          mkdir -p root && cd root
+          cp ../packages/tailnet/README.md .
+          node -e '
+            const v = process.argv[1];
+            const platforms = ["win32-x64", "win32-arm64", "darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
+            const pkg = {
+              name: "@jaira/tailnet",
+              version: v,
+              description: "JaiRA\u0027s Tailscale helper (tsnet): the root of the Tailscale for JaiRA plugin",
+              license: "BSD-3-Clause",
+              files: ["README.md"],
+              optionalDependencies: Object.fromEntries(platforms.map((p) => ["@jaira/tailnet-" + p, v])),
+            };
+            require("fs").writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          ' "$version"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
+          npm publish --access public
