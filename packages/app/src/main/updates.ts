@@ -57,10 +57,10 @@ export interface UpdateManagerOptions {
   /** How long after start the first check waits, and how often checks repeat. */
   firstCheckMs?: number;
   intervalMs?: number;
-  /** What is going now: runs in flight and chat turns being answered. */
-  busy?: () => UpdateBusy;
+  /** What is going now: runs in flight and chat turns being answered — asked of the engine, which may be another process's. */
+  busy?: () => UpdateBusy | Promise<UpdateBusy>;
   /** Mark every run so the next start resumes it, before a "Pause + update" quits. */
-  suspendForUpdate?: () => void;
+  suspendForUpdate?: () => unknown;
   /** Quit the app the ordinary way (drain, close); `installOnQuit` then finishes it. */
   quit?: () => void;
   /** The version whose notice the person dismissed, as remembered; and how to remember a new one. */
@@ -220,7 +220,7 @@ export class UpdateManager {
   async apply(choice: RestartChoice): Promise<RestartAnswer> {
     if (this.state.manual === true) return { installing: false };
     if (this.state.status === "available") await this.download();
-    return this.restart(choice);
+    return await this.restart(choice);
   }
 
   /** Whether an install can happen: only a downloaded update. */
@@ -239,34 +239,38 @@ export class UpdateManager {
    *  - `wait` ("Wait + update") restarts by itself once nothing is going, and can be canceled.
    *  - `cancel` stops waiting and nothing more: Restart to update is back, and any quit still installs it.
    */
-  restart(choice: RestartChoice): RestartAnswer {
+  async restart(choice: RestartChoice): Promise<RestartAnswer> {
     if (!this.canInstall()) return { installing: false };
     this.stopWaiting();
     const { busy: _busy, pending: _pending, ...rest } = this.state;
     switch (choice) {
       case "now": {
-        const busy = this.options.busy?.() ?? { runs: 0, turns: 0 };
+        const busy = await this.busyNow();
         if (busy.runs + busy.turns > 0) return { installing: false, busy };
         return this.quitToInstall();
       }
       case "pause":
-        this.options.suspendForUpdate?.();
+        await this.options.suspendForUpdate?.();
         return this.quitToInstall();
       case "wait": {
-        const now = this.options.busy?.() ?? { runs: 0, turns: 0 };
+        const now = await this.busyNow();
         if (now.runs + now.turns === 0) return this.quitToInstall();
         this.set({ ...rest, pending: "waiting", busy: now });
-        this.waiting = setInterval(() => {
-          const busy = this.options.busy?.() ?? { runs: 0, turns: 0 };
-          if (busy.runs + busy.turns === 0) {
-            this.stopWaiting();
-            this.quitToInstall();
-            return;
-          }
-          const was = this.state.busy;
-          if (was?.runs !== busy.runs || was?.turns !== busy.turns) this.set({ ...this.state, busy });
+        const waiting = setInterval(() => {
+          void this.busyNow().then((busy) => {
+            // Canceled, or answered twice, while the engine was being asked.
+            if (this.waiting !== waiting) return;
+            if (busy.runs + busy.turns === 0) {
+              this.stopWaiting();
+              this.quitToInstall();
+              return;
+            }
+            const was = this.state.busy;
+            if (was?.runs !== busy.runs || was?.turns !== busy.turns) this.set({ ...this.state, busy });
+          });
         }, this.options.pollMs ?? 2000);
-        this.waiting.unref?.();
+        this.waiting = waiting;
+        waiting.unref?.();
         return { installing: false, pending: "waiting" };
       }
       case "later":
@@ -281,6 +285,16 @@ export class UpdateManager {
   }
 
   private waiting: ReturnType<typeof setInterval> | undefined;
+
+  /** What is going, or nothing when the engine cannot say: a failed ask must not hold an update forever. */
+  private async busyNow(): Promise<UpdateBusy> {
+    try {
+      return (await this.options.busy?.()) ?? { runs: 0, turns: 0 };
+    } catch (e) {
+      this.options.log?.("warn", "could not ask the engine what is running", { message: (e as Error).message });
+      return { runs: 0, turns: 0 };
+    }
+  }
 
   private stopWaiting(): void {
     if (this.waiting !== undefined) clearInterval(this.waiting);

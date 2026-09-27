@@ -118,3 +118,20 @@ export interface CliCommandStatus {
   /** Whether About can put it there (again). */
   canInstall: boolean;
 }
+
+/**
+ * Where the engine this window uses runs (decision 0012 §5), for About's Engine section: in this
+ * window's own process, in another process it is a client of, or nowhere yet.
+ */
+export interface EngineStatus {
+  /** `local`: this window's process hosts it; `remote`: another process does; `starting`: neither yet. */
+  mode: "local" | "remote" | "starting";
+  /** The host, when there is one: this window's own for `local`. */
+  host?: { kind: "desktop" | "server" | "cli"; pid: number; version: string; startedAt: number };
+  /** This window's process. */
+  pid: number;
+  /** This window started the separate server it uses (`engine.separateServer`). */
+  startedServer: boolean;
+  /** Why this window is not using the engine it would have chosen: a pipe that could not be made, a server that did not start. */
+  note?: string;
+}

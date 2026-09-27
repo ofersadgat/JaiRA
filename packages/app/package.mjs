@@ -228,30 +228,52 @@ function probe(exe) {
 }
 
 /**
- * Run the packaged `jaira` command through its wrapper (decision 0011 §7): `plugin list` needs the CLI
- * bundle to load from the asar in Node mode, reach SQLite-free code paths, and find its plugin
- * manifest, and answers with JSON.
+ * Run the packaged `jaira` command through its wrapper (decision 0011 §7), and the engine it starts
+ * (decision 0012 §5):
+ *
+ *  - `plugin list` needs the CLI bundle to load from the asar in Node mode, reach SQLite-free code
+ *    paths, and find its plugin manifest, and answers with JSON;
+ *  - `serve --detach` starts the app's own Electron as a windowless main (`--serve`) — the one path a
+ *    development build cannot take — and `server status` / `server stop` reach it over the pipe.
  */
 function commandSmoke(exe) {
   const resources = process.platform === "darwin" ? join(dirname(exe), "..", "Resources") : join(dirname(exe), "resources");
   const home = mkdtempSync(join(tmpdir(), "jaira-smoke-cli-"));
   const wrapper = join(resources, "bin", process.platform === "win32" ? "jaira.cmd" : "jaira");
-  const run =
-    process.platform === "win32"
-      ? // `/s` strips the outermost pair of quotes, so the whole line is quoted once more.
-        spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `""${wrapper}" --home "${home}" plugin list"`], { encoding: "utf8", timeout: 60_000, windowsVerbatimArguments: true })
-      : spawnSync(wrapper, ["--home", home, "plugin", "list"], { encoding: "utf8", timeout: 60_000 });
-  rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
-  let listed;
+  const jaira = (...args) => {
+    const run =
+      process.platform === "win32"
+        ? // `/s` strips the outermost pair of quotes, so the whole line is quoted once more.
+          spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `""${wrapper}" --home "${home}" ${args.join(" ")}"`], { encoding: "utf8", timeout: 90_000, windowsVerbatimArguments: true })
+        : spawnSync(wrapper, ["--home", home, ...args], { encoding: "utf8", timeout: 90_000 });
+    let answer;
+    try {
+      answer = JSON.parse(run.stdout ?? "");
+    } catch {
+      answer = undefined;
+    }
+    return { run, answer, said: `exit ${run.status ?? run.signal}
+${run.stdout ?? ""}${run.stderr ?? ""}` };
+  };
   try {
-    listed = JSON.parse(run.stdout ?? "");
-  } catch {
-    listed = undefined;
+    const listed = jaira("plugin", "list");
+    if (listed.run.status !== 0 || !Array.isArray(listed.answer) || listed.answer.length === 0) throw new Error(`the jaira command failed: ${listed.said}`);
+    console.log(`command: jaira plugin list answered ${listed.answer.length} plugins`);
+
+    const served = jaira("serve", "--detach");
+    if (served.run.status !== 0 || served.answer?.serving !== true) throw new Error(`jaira serve --detach failed: ${served.said}`);
+    const status = jaira("server", "status");
+    if (status.run.status !== 0 || status.answer?.host?.kind !== "server") throw new Error(`jaira server status failed: ${status.said}`);
+    const stopped = jaira("server", "stop");
+    if (stopped.run.status !== 0 || stopped.answer?.stopped !== true) throw new Error(`jaira server stop failed: ${stopped.said}`);
+    console.log(`command: jaira serve hosted the engine windowless (pid ${served.answer.pid}), and jaira server stop ended it`);
+  } finally {
+    try {
+      rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    } catch (e) {
+      console.warn(`left the command smoke test's scratch home at ${home}: ${e.message}`);
+    }
   }
-  if (run.status !== 0 || !Array.isArray(listed) || listed.length === 0) {
-    throw new Error(`the jaira command failed: exit ${run.status ?? run.signal}\n${run.stdout ?? ""}${run.stderr ?? ""}`);
-  }
-  console.log(`command: jaira plugin list answered ${listed.length} plugins`);
 }
 
 /**

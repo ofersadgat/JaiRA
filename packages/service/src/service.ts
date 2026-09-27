@@ -26,7 +26,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
-import { Ajv2020 } from "ajv/dist/2020";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import {
   DirectedTransitions,
   InMemoryPersistence,
@@ -411,6 +411,8 @@ import {
   type ModelAvailability,
   parseAppearanceConfig,
   parseUpdates,
+  parseEngineConfig,
+  type JairaEngineConfig,
   type JairaUpdatesConfig,
   type JairaAppearanceConfig,
   mimeOfPath,
@@ -2420,7 +2422,7 @@ export class AppService {
 
   // --- lifecycle -------------------------------------------------------------
 
-  async open(dir: string): Promise<{ dir: string; recovered: string[] }> {
+  async open(dir: string, options: { remember?: boolean } = {}): Promise<{ dir: string; recovered: string[] }> {
     // Opening a project ADDS a session; it does not evict one (SHELL.md §2.3). What used to close
     // every other user project here was answering a question the shell has since answered a better
     // way: "which project do the project-free channels answer for?" is now "none of them, because
@@ -2476,7 +2478,7 @@ export class AppService {
     // Last, and only once the open has actually worked: the list is "what this window had open", and
     // remembering a directory the open threw on would be a project that fails to open on every start
     // from now on.
-    this.remember(project.paths.projectDir);
+    if (options.remember !== false) this.remember(project.paths.projectDir);
     return { dir: project.paths.projectDir, recovered: project.recovered };
   }
 
@@ -11692,13 +11694,7 @@ export class AppService {
    * frame must be painted whatever state the settings files are in, and Settings says what is wrong.
    */
   windowAppearance(): JairaAppearanceConfig {
-    const base = jairaBasePaths(this.baseDir);
-    try {
-      const merged = mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]);
-      return parseAppearanceConfig((merged as { appearance?: unknown } | undefined)?.appearance);
-    } catch {
-      return parseAppearanceConfig(undefined);
-    }
+    return machineSettings(this.baseDir).appearance;
   }
 
   /**
@@ -11732,13 +11728,7 @@ export class AppService {
    * checkout's to say. A layer that does not parse leaves the running build's own channel.
    */
   updateSettings(): JairaUpdatesConfig {
-    const base = jairaBasePaths(this.baseDir);
-    try {
-      const merged = mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]);
-      return parseUpdates((merged as { updates?: unknown } | undefined)?.updates);
-    } catch {
-      return {};
-    }
+    return machineSettings(this.baseDir).updates;
   }
 
   /**
@@ -11827,6 +11817,45 @@ function gitEventsOn(config: Pick<JairaConfigOf, "events">): boolean {
 function readJsonIfPresent(file: string): JsonValue | null {
   if (!existsSync(file)) return null;
   return JSON.parse(readFileSync(file, "utf8")) as JsonValue;
+}
+
+/**
+ * The machine's settings — the window's look, the update track, where the engine runs — read from the
+ * built-in, base and personal layers, never a project's: they are the same whichever projects are open,
+ * and the desktop reads them before it knows whether the engine is its own (decision 0012 §5). Each
+ * block that does not parse is its defaults: the frame must be painted whatever state the files are in,
+ * and Settings says what is wrong.
+ */
+export function machineSettings(baseDir: string): { appearance: JairaAppearanceConfig; updates: JairaUpdatesConfig; engine: JairaEngineConfig } {
+  const base = jairaBasePaths(baseDir);
+  let merged: Record<string, unknown> | undefined;
+  try {
+    merged = mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]) as
+      | Record<string, unknown>
+      | undefined;
+  } catch {
+    merged = undefined;
+  }
+  const block = <T>(parse: (raw: unknown) => T, raw: unknown, fallback: T): T => {
+    try {
+      return parse(raw);
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    appearance: block(parseAppearanceConfig, merged?.["appearance"], parseAppearanceConfig(undefined)),
+    updates: block(parseUpdates, merged?.["updates"], {}),
+    engine: block(parseEngineConfig, merged?.["engine"], {}),
+  };
+}
+
+/**
+ * The shared root this process uses: the one given, else `JAIRA_HOME`, else the saved preference, else
+ * `~/.jaira` — what the service resolves, for a host or client that must agree with it before one exists.
+ */
+export function resolveBaseDir(explicit?: string): string {
+  return jairaBasePaths(explicit ?? settingsBaseDir()).baseDir;
 }
 
 /** Where the shared root lives when the service was given no explicit override. */

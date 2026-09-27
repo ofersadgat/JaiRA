@@ -322,6 +322,8 @@ export interface JairaConfig {
   limits: JairaLimitsConfig;
   /** The app's own updates (decision 0011 §5): the machine's to decide, so read from the base and personal layers. */
   updates: JairaUpdatesConfig;
+  /** Where the engine runs when the desktop starts it (decision 0012 §5): the machine's, like `updates`. */
+  engine: JairaEngineConfig;
   /** Each shipped function's defaults, by the function's name — one place per function (decision 0007, amended 2026-09-23). */
   functions: JairaFunctionsConfig;
   /** The MCP servers every agent run is handed, by the name their tools are called under (`./mcp`). */
@@ -444,6 +446,17 @@ export interface JairaUpdatesConfig {
    * when that is an older version — which is how nightly goes back to stable.
    */
   channel?: UpdateChannel;
+}
+
+/**
+ * Where the desktop runs the engine (decision 0012 §5, ruled 2026-09-26: "1a (with a setting that allows
+ * the user to choose b)" and "2 setting"). Both off by default: the desktop hosts the engine itself.
+ */
+export interface JairaEngineConfig {
+  /** Start a separate `jaira serve` and connect to it, rather than running the engine in the window's process. */
+  separateServer?: boolean;
+  /** Leave that server running when the desktop quits. Only means something with `separateServer`. */
+  keepServerRunning?: boolean;
 }
 
 /**
@@ -658,6 +671,7 @@ export function defaultConfig(): JairaConfig {
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
     limits: { retryOnReset: true },
     updates: {},
+    engine: {},
     functions: defaultFunctions(),
     mcp: defaultMcp(),
     appearance: defaultAppearanceConfig(),
@@ -769,6 +783,20 @@ export function parseUpdates(raw: unknown): JairaUpdatesConfig {
     throw new Error(`config.updates.channel must be one of ${UPDATE_CHANNELS.join(", ")}`);
   }
   return { channel: channel as UpdateChannel };
+}
+
+/** Parse the engine block: two booleans, each absent or true/false. */
+export function parseEngineConfig(raw: unknown): JairaEngineConfig {
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.engine must be an object");
+  const out: JairaEngineConfig = {};
+  for (const key of ["separateServer", "keepServerRunning"] as const) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") throw new Error(`config.engine.${key} must be true or false`);
+    out[key] = value;
+  }
+  return out;
 }
 
 function parseAutopilot(raw: unknown): JairaAutopilotConfig {
@@ -1321,6 +1349,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     autopilot: parseAutopilot(cfg["autopilot"]),
     limits: parseLimits(cfg["limits"]),
     updates: parseUpdates(cfg["updates"]),
+    engine: parseEngineConfig(cfg["engine"]),
     functions: parseFunctions(cfg["functions"]),
     mcp: parseMcp(cfg["mcp"]),
     appearance: parseAppearanceConfig(cfg["appearance"]),

@@ -15,6 +15,21 @@ import { registerCliChangesetReviewer } from "./changesetReviewer";
 import { cliApprovals, governRun, type ApproveMode, type AskLine, type CliApprovals } from "./commandApprover";
 import { wireRemotes } from "./remoteWiring";
 import {
+  hostBoard,
+  hostPrune,
+  hostRunTask,
+  hostTaskCancel,
+  hostTaskCreate,
+  hostTaskList,
+  hostTaskMove,
+  hostTaskStatus,
+  serveCommand,
+  serverCommand,
+  withEngine,
+  type HostGate,
+  type HostRunWiring,
+} from "./viaEngine";
+import {
   beginTaskRun,
   boardView,
   browseWorkflows,
@@ -74,6 +89,7 @@ import {
   type JairaPaths,
   type ModuleApproval,
   type TaskMoveRequest,
+  type TaskConnectRequest,
   isPluginId,
   pluginSpec,
 } from "@jaira/shared";
@@ -214,6 +230,29 @@ function approvalGateOf(values: { "non-interactive"?: boolean; "approve-function
   return { nonInteractive, approveFunctions: values["approve-functions"] === true, ...(approve !== undefined ? { approve } : {}) };
 }
 
+/** The gate as a run through the engine's host applies it (`viaEngine.ts`). */
+function hostGateOf(gate: ApprovalGate): HostGate {
+  return { deny: gate.approve === "deny", nonInteractive: gate.nonInteractive, approveFunctions: gate.approveFunctions };
+}
+
+/**
+ * What a run through the host is started with: `--fake` and `--interactions` in the shapes `task:start`
+ * takes. `--repair-turns` is this process's engine's alone, so with a host it is refused, not dropped.
+ */
+function hostWiringOf(values: { fake?: string; interactions?: string; "repair-turns"?: string }, cwd: string): HostRunWiring {
+  if (values["repair-turns"] !== undefined) {
+    throw new UsageError("--repair-turns applies only to a run in this process, and the engine is running elsewhere; stop it (jaira server stop) or leave the flag out");
+  }
+  const interactions = values.interactions !== undefined ? jsonValue("interactions", values.interactions, cwd) : undefined;
+  if (interactions !== undefined && (interactions === null || typeof interactions !== "object" || Array.isArray(interactions))) {
+    throw new UsageError("--interactions must be a JSON object");
+  }
+  return {
+    ...(values.fake !== undefined ? { fake: jsonValue("fake", values.fake, cwd) as JsonValue } : {}),
+    ...(interactions !== undefined ? { interactions: interactions as Record<string, JsonValue[]> } : {}),
+  };
+}
+
 /** Commands that start a run without the approval flags still answer a run's approvals: at a terminal when there is one. */
 const DEFAULT_GATE: ApprovalGate = { nonInteractive: false, approveFunctions: false };
 
@@ -266,6 +305,12 @@ const USAGE = `usage:
   jaira plugin install <plugin>     claude-agent-sdk, llama, or a llama variant (llama-cpu,
                                     llama-vulkan, llama-cuda, llama-cuda-ext, llama-metal)
   jaira plugin remove <plugin>
+  jaira serve [--detach]              host the engine until stopped (jaira server stop)
+  jaira server status | stop
+
+  With the JaiRA window, jaira serve or another command running, run, task, board and prune go
+  through that engine: its window shows the run, and its approvals can be answered here or there.
+  Otherwise they run in this process, which holds the engine for their duration.
 
   A run is held to the project's policy (.jaira/settings.json → policy) and each state's permission set, as
   in the app. A tool call or shell line the policy asks about is put to you at the terminal; with no
@@ -343,10 +388,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
  * — tests, `tsx` — has no bundle and reaches the adapter package's own copy instead.
  */
 let bridgeHost: McpBridgeHost | undefined;
-const startBridge: StartMcpBridge = (spec) => {
+/** The one bridge host: this process's runs, and an engine built here for a client (`viaEngine.ts`). */
+function sharedBridgeHost(): McpBridgeHost {
   bridgeHost ??= createMcpBridgeHost({ workerFile: bridgeWorkerFile() });
-  return bridgeHost.start(spec);
-};
+  return bridgeHost;
+}
+const startBridge: StartMcpBridge = (spec) => sharedBridgeHost().start(spec);
 function bridgeWorkerFile(): URL {
   const bundled = new URL("./mcpBridgeWorker.mjs", import.meta.url);
   if (existsSync(bundled)) return bundled;
@@ -425,6 +472,16 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
     }
     case "plugin":
       return cmdPlugin(rest, io);
+    case "serve": {
+      const { values } = parseArgs({ args: rest, options: { detach: { type: "boolean" } } });
+      return serveCommand({ detach: values.detach === true }, io, sharedBridgeHost);
+    }
+    case "server": {
+      const [sub, ...extra] = rest;
+      if (sub !== "status" && sub !== "stop") throw new UsageError(`unknown server subcommand '${sub ?? ""}'`);
+      if (extra.length > 0) throw new UsageError(`unexpected '${extra.join(" ")}'`);
+      return serverCommand(sub, io);
+    }
     case undefined:
     case "help":
     case "--help":
@@ -797,6 +854,28 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
   // machinery `task start` uses — a run row, the journal, run-scoped conversations, the job claim,
   // artifacts. "Ad-hoc" now means only that nobody had to name it first; the invariant it upholds
   // is that everything durable has a run.
+  const root = values.root;
+  return withEngine(
+    "run",
+    async (engine) => {
+      const hostWiring = hostWiringOf(values, io.cwd);
+      const project = (await engine.invoke("project:open", { dir: projectDir, remember: false })) as { dir: string };
+      const task = (await engine.invoke("task:create", {
+        title: `run · ${root}`,
+        workflow: root,
+        ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
+        labels: ["adhoc"],
+        project: project.dir,
+      })) as { taskId: string };
+      return hostRunTask(engine, projectDir, task.taskId, hostWiring, hostGateOf(gate), io, (pending) => answerApproval(pending, gate, io));
+    },
+    () => runAdhocInProcess(projectDir, root, inputs, wiring, io, gate),
+    { bridgeHost: sharedBridgeHost },
+  );
+}
+
+async function runAdhocInProcess(projectDir: string, root: string, inputs: Record<string, JsonValue>, wiring: RunWiring, io: CliIo, gate: ApprovalGate): Promise<number> {
+  const values = { root };
   const project = await openWithRecoveryNote(projectDir, io);
   try {
     // Validate against the LIVE files before minting anything: a broken workflow should fail here,
@@ -940,24 +1019,30 @@ async function cmdTaskCreate(argv: string[], io: CliIo): Promise<number> {
   });
   if (values.title === undefined) throw new UsageError("task create requires --title");
   if (values.workflow === undefined) throw new UsageError("task create requires --workflow <rootStateId>");
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
-  try {
-    const meta = createTask(project, {
-      title: values.title,
-      workflow: values.workflow,
-      description: values.description,
-      labels: values.label,
-      inputs:
-        values.inputs !== undefined
-          ? recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd))
-          : undefined,
-      branch: values.branch,
-    });
-    io.stdout(JSON.stringify({ taskId: meta.id, status: "queued" }, null, 2) + "\n");
-    return 0;
-  } finally {
-    project.close();
-  }
+  const dir = projectDirOf(values, io);
+  const request = {
+    title: values.title,
+    workflow: values.workflow,
+    ...(values.description !== undefined ? { description: values.description } : {}),
+    ...(values.label !== undefined ? { labels: values.label } : {}),
+    ...(values.inputs !== undefined ? { inputs: recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd)) } : {}),
+    ...(values.branch !== undefined ? { branch: values.branch } : {}),
+  };
+  return withEngine(
+    "task create",
+    (engine) => hostTaskCreate(engine, dir, request, io),
+    async () => {
+      const project = await openWithRecoveryNote(dir, io);
+      try {
+        const meta = createTask(project, request);
+        io.stdout(JSON.stringify({ taskId: meta.id, status: "queued" }, null, 2) + "\n");
+        return 0;
+      } finally {
+        project.close();
+      }
+    },
+    { bridgeHost: sharedBridgeHost },
+  );
 }
 
 async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
@@ -976,12 +1061,20 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   if (taskId === undefined) throw new UsageError("task start requires a task id");
   const wiring = runWiringOf(values, io.cwd);
   const gate = approvalGateOf(values, io);
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
-  try {
-    return await runTaskNow(project, taskId, wiring, io, gate);
-  } finally {
-    project.close();
-  }
+  const dir = projectDirOf(values, io);
+  return withEngine(
+    "task start",
+    (engine) => hostRunTask(engine, dir, taskId, hostWiringOf(values, io.cwd), hostGateOf(gate), io, (pending) => answerApproval(pending, gate, io)),
+    async () => {
+      const project = await openWithRecoveryNote(dir, io);
+      try {
+        return await runTaskNow(project, taskId, wiring, io, gate);
+      } finally {
+        project.close();
+      }
+    },
+    { bridgeHost: sharedBridgeHost },
+  );
 }
 
 /**
@@ -1064,13 +1157,40 @@ async function cmdTaskMove(argv: string[], io: CliIo): Promise<number> {
   if (values.to === undefined) throw new UsageError("task move requires --to <stateId>");
   const wiring = runWiringOf(values, io.cwd);
   const gate = approvalGateOf(values, io);
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
+  const dir = projectDirOf(values, io);
+  const target = values.to;
+  const connect: TaskConnectRequest = {
+    taskId,
+    target,
+    ...(values.workflow !== undefined ? { workflow: values.workflow } : {}),
+    ...(values.skip === true ? { skip: true } : {}),
+    ...(values.yes === true ? { confirmed: true } : {}),
+    ...(values["dry-run"] === true ? { dryRun: true } : {}),
+  };
+  return withEngine(
+    "task move",
+    (engine) => hostTaskMove(engine, dir, connect, hostWiringOf(values, io.cwd), hostGateOf(gate), io, (pending) => answerApproval(pending, gate, io)),
+    () => moveInProcess(dir, taskId, target, values, wiring, io, gate),
+    { bridgeHost: sharedBridgeHost },
+  );
+}
+
+async function moveInProcess(
+  dir: string,
+  taskId: string,
+  target: string,
+  values: { workflow?: string; skip?: boolean; yes?: boolean; "dry-run"?: boolean },
+  wiring: RunWiring,
+  io: CliIo,
+  gate: ApprovalGate,
+): Promise<number> {
+  const project = await openWithRecoveryNote(dir, io);
   try {
     // The move a connect ends in is not taken by a service here: it is kept, and handed to the run below.
     let pending: TaskMoveRequest | undefined;
     const result = await connectTask(
       project,
-      { taskId, target: values.to, ...(values.workflow !== undefined ? { workflow: values.workflow } : {}), ...(values.skip === true ? { skip: true } : {}), ...(values.yes === true ? { confirmed: true } : {}), ...(values["dry-run"] === true ? { dryRun: true } : {}) },
+      { taskId, target, ...(values.workflow !== undefined ? { workflow: values.workflow } : {}), ...(values.skip === true ? { skip: true } : {}), ...(values.yes === true ? { confirmed: true } : {}), ...(values["dry-run"] === true ? { dryRun: true } : {}) },
       {
         running: (id) => project.jobs.liveRunJob(id, Date.now()) !== undefined,
         adopt: (request) => adoptTaskIn(project, request),
@@ -1381,18 +1501,26 @@ async function cmdBoard(argv: string[], io: CliIo): Promise<number> {
     args: argv,
     options: { project: { type: "string" }, level: { type: "string" }, json: { type: "boolean" } },
   });
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
-  try {
-    const board = boardView(project, values.level);
-    if (values.json) {
-      io.stdout(JSON.stringify(board, null, 2) + "\n");
-      return 0;
-    }
-    io.stdout(renderBoard(board));
-    return 0;
-  } finally {
-    project.close();
-  }
+  const dir = projectDirOf(values, io);
+  return withEngine(
+    "board",
+    (engine) => hostBoard(engine, dir, values.level, io, renderBoard, values.json === true),
+    async () => {
+      const project = await openWithRecoveryNote(dir, io);
+      try {
+        const board = boardView(project, values.level);
+        if (values.json) {
+          io.stdout(JSON.stringify(board, null, 2) + "\n");
+          return 0;
+        }
+        io.stdout(renderBoard(board));
+        return 0;
+      } finally {
+        project.close();
+      }
+    },
+    { bridgeHost: sharedBridgeHost },
+  );
 }
 
 const BADGE: Record<string, string> = {
@@ -1829,7 +1957,18 @@ async function cmdPrune(argv: string[], io: CliIo): Promise<number> {
   });
   const days = values["older-than"] !== undefined ? Number(values["older-than"]) : 0;
   if (!Number.isFinite(days) || days < 0) throw new UsageError("--older-than must be a non-negative number of days");
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
+  const dir = projectDirOf(values, io);
+  return withEngine(
+    "prune",
+    (engine) => hostPrune(engine, dir, days, values.apply === true, io),
+    () => pruneInProcess(dir, days, values.apply === true, io),
+    { bridgeHost: sharedBridgeHost },
+  );
+}
+
+async function pruneInProcess(dir: string, days: number, apply: boolean, io: CliIo): Promise<number> {
+  const values = { apply };
+  const project = await openWithRecoveryNote(dir, io);
   try {
     const before = Date.now() - days * 86_400_000;
     const result = pruneHistory(project, { before, dryRun: values.apply !== true });
@@ -1857,7 +1996,12 @@ async function cmdPrune(argv: string[], io: CliIo): Promise<number> {
 
 async function cmdTaskList(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({ args: argv, options: { project: { type: "string" } } });
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
+  const dir = projectDirOf(values, io);
+  return withEngine("task list", (engine) => hostTaskList(engine, dir, io), () => taskListInProcess(dir, io), { bridgeHost: sharedBridgeHost });
+}
+
+async function taskListInProcess(dir: string, io: CliIo): Promise<number> {
+  const project = await openWithRecoveryNote(dir, io);
   try {
     const rows = project.runtime.list().map((row) => {
       const meta = project.tasks.tryRead(row.taskId);
@@ -1884,7 +2028,21 @@ async function cmdTaskStatus(argv: string[], io: CliIo): Promise<number> {
   });
   const taskId = positionals[0];
   if (taskId === undefined) throw new UsageError("task status requires a task id");
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
+  const dir = projectDirOf(values, io);
+  return withEngine(
+    "task status",
+    async (engine) => {
+      // The journal's events are the in-process reader's; through the engine the status says so.
+      if (values.events !== undefined) io.stderr("note: --events reads the journal in this process; the engine is running elsewhere, so they are left out\n");
+      return hostTaskStatus(engine, dir, taskId, io);
+    },
+    () => taskStatusInProcess(dir, taskId, values, io),
+    { bridgeHost: sharedBridgeHost },
+  );
+}
+
+async function taskStatusInProcess(dir: string, taskId: string, values: { events?: string }, io: CliIo): Promise<number> {
+  const project = await openWithRecoveryNote(dir, io);
   try {
     const runtime = project.runtime.get(taskId);
     if (!runtime) throw new Error(`unknown task '${taskId}'`);
@@ -1933,7 +2091,12 @@ async function cmdTaskCancel(argv: string[], io: CliIo): Promise<number> {
   });
   const taskId = positionals[0];
   if (taskId === undefined) throw new UsageError("task cancel requires a task id");
-  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
+  const dir = projectDirOf(values, io);
+  return withEngine("task cancel", (engine) => hostTaskCancel(engine, dir, taskId, io), () => taskCancelInProcess(dir, taskId, io), { bridgeHost: sharedBridgeHost });
+}
+
+async function taskCancelInProcess(dir: string, taskId: string, io: CliIo): Promise<number> {
+  const project = await openWithRecoveryNote(dir, io);
   try {
     // A run another process is driving cannot be canceled by writing a status here
     // — that process owns the engine. Raise the flag its heartbeat polls instead

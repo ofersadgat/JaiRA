@@ -43,6 +43,7 @@
     "@declarative-ai/hw": "file:../../../declarative-ai/packages/hw",
     "@jaira/persistence": "*",
     "@jaira/runtime": "*",
+    "@jaira/service": "*",
     "@jaira/shared": "*",
     "esbuild": "^0.28.1"
   }

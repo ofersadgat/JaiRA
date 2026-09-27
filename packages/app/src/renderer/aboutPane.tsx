@@ -20,9 +20,20 @@
  *  - **Third-party notices** — `licensesPane.tsx`.
  */
 import { useEffect, useState, type JSX, type ReactNode } from "react";
-import { channelOfVersion, inheritedValue, statesPath, type CliCommandStatus, type ConfigView, type HealthItem, type UpdateChannel, type UpdateState } from "@jaira/shared/browser";
-import { invoke } from "./store";
-import { Disclosure, SettingsLayerContext } from "./controls";
+import {
+  channelOfVersion,
+  inheritedValue,
+  statesPath,
+  type CliCommandStatus,
+  type ConfigView,
+  type EngineStatus,
+  type HealthItem,
+  type JairaEngineConfig,
+  type UpdateChannel,
+  type UpdateState,
+} from "@jaira/shared/browser";
+import { invoke, subscribe as subscribePush } from "./store";
+import { Disclosure, SettingsLayerContext, Switch } from "./controls";
 import { NeedsAttention } from "./healthView";
 import { SOURCE_WORDS } from "./layerLabels";
 import { ThirdPartyNotices } from "./licensesPane";
@@ -513,11 +524,104 @@ function CommandLineSection(): JSX.Element {
   );
 }
 
+// --- engine -------------------------------------------------------------------------------------------
+
+/** Where this window's engine runs, as the row names it. */
+function engineWhere(status: EngineStatus): { name: string; description: string } {
+  const host = status.host;
+  if (status.mode === "starting" || host === undefined) return { name: "Starting…", description: "Finding the engine, or starting it." };
+  const who = `process ${host.pid}, JaiRA ${host.version}`;
+  if (status.mode === "local") {
+    return { name: "This window", description: "The engine runs in this window's process. The jaira command and other JaiRA windows use it while this window is open." };
+  }
+  switch (host.kind) {
+    case "server":
+      return {
+        name: status.startedServer ? "A separate server this window started" : "A separate server",
+        description: `jaira serve (${who}). Runs carry on when this window closes.`,
+      };
+    case "desktop":
+      return { name: "Another JaiRA window", description: `It started first (${who}), so this window uses its engine. Quitting that window moves the engine here.` };
+    case "cli":
+      return { name: "A jaira command", description: `It is running (${who}); when it ends, this window runs the engine itself.` };
+  }
+}
+
+function useEngineStatus(): EngineStatus | undefined {
+  const [status, setStatus] = useState<EngineStatus | undefined>(undefined);
+  useEffect(() => {
+    void invoke("engine:status", undefined).then(setStatus, () => undefined);
+    return subscribePush((message) => {
+      if (message.type === "engine:changed") setStatus(message.status);
+    });
+  }, []);
+  return status;
+}
+
+/**
+ * Where the engine runs (decision 0012 §5): now, and where it starts next time — in this window by
+ * default, or a separate server the window starts and connects to. Both switches are the machine's, in
+ * the personal layer like the update track, and both take effect at the next start: moving a running
+ * engine would cut its runs.
+ */
+function EngineSection({ config, onEngine }: { config: ConfigView | null; onEngine: (patch: Partial<Record<keyof JairaEngineConfig, boolean | undefined>>) => void }): JSX.Element {
+  const status = useEngineStatus();
+  const effective = (config?.effective as { engine?: JairaEngineConfig } | undefined)?.engine ?? {};
+  const separate = effective.separateServer === true;
+  const keep = effective.keepServerRunning === true;
+  const reset = (path: "engine.separateServer" | "engine.keepServerRunning", key: keyof JairaEngineConfig) => {
+    if (config === null || !statesPath(config.you, path)) return undefined;
+    const below = inheritedValue(config, path, "you");
+    const label = below === undefined || below.value === undefined ? "Back to the default, off" : `Back to ${below.value === true ? "on" : "off"}, from ${SOURCE_WORDS[below.from]}`;
+    return { label, onReset: () => onEngine({ [key]: undefined }) };
+  };
+  const where = status !== undefined ? engineWhere(status) : undefined;
+  return (
+    <SettingsSection id="engine" title="Engine" info="The engine runs workflows and keeps the projects' records. There is one per person on this machine: every JaiRA window and jaira command uses the one that is running.">
+      <SettingsRow
+        name="Runs in"
+        description={
+          where === undefined ? (
+            "Checking…"
+          ) : (
+            <>
+              {where.description}
+              {status?.note !== undefined ? <span className="upd-err"> {sentenceOf(status.note)}</span> : null}
+            </>
+          )
+        }
+        control={where !== undefined ? <span className="upd-running">{where.name}</span> : undefined}
+      />
+      <SettingsRow
+        name="Separate server"
+        description={separate ? "At the next start, this window starts jaira serve and connects to it." : "At the next start, the engine runs in this window's process."}
+        info="Kept on this machine, in personal-settings.json. Either way, a window that finds an engine already running uses that one."
+        reset={reset("engine.separateServer", "separateServer")}
+        control={<Switch on={separate} label="Separate server" disabled={config === null} onChange={(on) => onEngine({ separateServer: on })} />}
+      />
+      <SettingsRow
+        name="Keep the server running"
+        description={keep ? "The server this window starts keeps running after the window quits; jaira server stop ends it." : "The server this window starts stops when the window quits."}
+        reset={reset("engine.keepServerRunning", "keepServerRunning")}
+        control={<Switch on={keep} label="Keep the server running" disabled={config === null || !separate} onChange={(on) => onEngine({ keepServerRunning: on })} />}
+      />
+    </SettingsSection>
+  );
+}
+
+/** A note from main as a sentence: capitalised, with its full stop. */
+function sentenceOf(text: string): string {
+  const trimmed = text.trim();
+  const capital = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
+}
+
 export function AboutPane({
   config,
   health,
   onFix,
   onTrack,
+  onEngine,
   notesOpen = false,
 }: {
   /** Every layer's document: the Update track row reads the personal layer's, and what it inherits. */
@@ -526,6 +630,8 @@ export function AboutPane({
   onFix: (item: HealthItem) => void;
   /** Write the track into the personal layer; `undefined` takes it out. */
   onTrack: (channel: UpdateChannel | undefined) => void;
+  /** Write the engine switches into the personal layer; `undefined` takes one out. */
+  onEngine: (patch: Partial<Record<keyof JairaEngineConfig, boolean | undefined>>) => void;
   /** Open with the release notes showing — the sidebar menu's Release notes. */
   notesOpen?: boolean;
 }): JSX.Element {
@@ -536,6 +642,7 @@ export function AboutPane({
         <NeedsAttention items={health} page="about" onFix={onFix} />
         <UpdatesSection config={config} onTrack={onTrack} notesOpen={notesOpen} />
         <PluginsSection />
+        <EngineSection config={config} onEngine={onEngine} />
         <CommandLineSection />
         <ThirdPartyNotices />
       </div>

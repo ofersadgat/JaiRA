@@ -10,7 +10,11 @@
  */
 import { resolve } from "node:path";
 import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest } from "@jaira/shared";
-import type { AppService } from "./service";
+import type { JsonValue } from "@declarative-ai/json";
+import type { HealthItem, LogLevel } from "@jaira/shared";
+import type { EngineHostInfo } from "./enginePipe";
+import type { EngineClientInfo } from "./engineHost";
+import type { AppService, CrashKind } from "./service";
 
 /** A channel's handler: its request in, its answer (or a promise of it) out. */
 export type Handler = (request: never) => unknown;
@@ -32,6 +36,7 @@ export const HOST_CHANNELS = [
   "plugin:remove",
   "cli:status",
   "cli:install",
+  "engine:status",
 ] as const satisfies readonly IpcChannel[];
 
 export type HostChannel = (typeof HOST_CHANNELS)[number];
@@ -40,7 +45,8 @@ export type ServiceChannel = Exclude<IpcChannel, HostChannel>;
 /** Every request the service answers, by channel. */
 export function serviceHandlers(service: AppService): Record<ServiceChannel, Handler> {
   return {
-    "project:open": ((request: { dir: string }) => service.open(resolve(request.dir))) as Handler,
+    "project:open": ((request: { dir: string; remember?: boolean }) =>
+      service.open(resolve(request.dir), request.remember === false ? { remember: false } : {})) as Handler,
     "project:init": ((request: { dir: string }) => service.init(resolve(request.dir))) as Handler,
     "project:choose": ((request: { mode?: "open" | "init" } | undefined) =>
       service.chooseProject(request?.mode ?? "open")) as Handler,
@@ -198,5 +204,53 @@ export function serviceHandlers(service: AppService): Record<ServiceChannel, Han
       service.health.dismissAll();
       return service.health.list();
     }) as Handler,
+  };
+}
+
+/**
+ * What one engine host's PEERS ask of it over the pipe (decision 0012 §3): the desktop's main process
+ * when another process hosts the engine, and `jaira server status|stop`. Never the renderer's — these
+ * are not IPC channels, and a client admitted with another contract may still ask them (`limited`).
+ *
+ * The desktop's main process uses the engine for more than the window's requests: it logs its own
+ * launch and crashes, keeps the updater's and plugins' items on the health board, asks what a quit
+ * would cut, and serves artifacts to its frames. In-process those are method calls; as a client they
+ * are these.
+ */
+export interface EngineControl {
+  /** This host and who is connected to it. */
+  info(): { host: EngineHostInfo; clients: EngineClientInfo[] };
+  /** Stop hosting: a server drains and exits; a desktop or a CLI command refuses. */
+  stop(): Promise<{ stopping: true }>;
+}
+
+/** An error as the pipe carries it, back into one whose stack the log keeps. */
+function errorOf(raw: { message: string; name?: string; stack?: string }): Error {
+  const error = new Error(raw.message);
+  if (raw.name !== undefined) error.name = raw.name;
+  if (raw.stack !== undefined) error.stack = raw.stack;
+  return error;
+}
+
+export function enginePeerHandlers(service: AppService, control: EngineControl): Record<string, Handler> {
+  return {
+    "engine:info": (() => control.info()) as Handler,
+    "engine:stop": (() => control.stop()) as Handler,
+    "engine:recordApp": ((request: { level: LogLevel; message: string; detail?: JsonValue; raised?: string }) =>
+      service.recordApp(request.level, request.message, request.detail, request.raised)) as Handler,
+    "engine:recordCrash": ((request: { kind: CrashKind; error: { message: string; name?: string; stack?: string } }) =>
+      service.recordCrash(request.kind, errorOf(request.error))) as Handler,
+    "engine:recordWarning": ((request: { error: { message: string; name?: string; stack?: string } }) => service.recordWarning(errorOf(request.error))) as Handler,
+    "engine:recordIpcFailure": ((request: { channel: string; error: { message: string; name?: string; stack?: string } }) =>
+      service.recordIpcFailure(request.channel, errorOf(request.error))) as Handler,
+    "engine:healthSet": ((request: Omit<HealthItem, "since">) => service.health.set(request)) as Handler,
+    "engine:healthClear": ((request: { id: string }) => service.health.clear(request.id)) as Handler,
+    "engine:activeWork": (() => service.activeWork()) as Handler,
+    "engine:suspendForUpdate": (() => service.suspendForUpdate()) as Handler,
+    "engine:probeExecutors": (() => service.probeExecutors()) as Handler,
+    "engine:kickRemotes": (() => service.kickRemotes()) as Handler,
+    "engine:kickRepoWatch": (() => service.kickRepoWatch()) as Handler,
+    "engine:servedArtifact": ((request: { token: string }) => service.servedArtifact(request.token) ?? null) as Handler,
+    "engine:restore": (() => service.restore()) as Handler,
   };
 }

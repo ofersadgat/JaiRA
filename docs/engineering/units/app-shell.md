@@ -7,7 +7,7 @@ implements: [ui/surfaces/app-window, ui/components/context-menu, product/find-ou
 layer: service
 owns_contracts: [engineering/contracts/artifact-frame-protocol]
 requires: [engineering/units/ipc-bridge, engineering/units/project-sessions, engineering/units/app-log, engineering/units/user-settings, engineering/units/project-config, engineering/units/uri-and-artifact-reads, engineering/units/project-layout, engineering/units/project-store]
-implemented_by: [packages/app/src/main/index.ts, packages/app/entry.cjs, packages/app/build.mjs, packages/app/src/renderer/index.html]
+implemented_by: [packages/app/src/main/index.ts, packages/app/src/main/desktop.ts, packages/app/src/main/serve.ts, packages/app/src/main/engineLink.ts, packages/app/src/main/keychain.ts, packages/app/entry.cjs, packages/app/build.mjs, packages/app/src/renderer/index.html]
 verified_by: [packages/app/test/csp.test.ts, packages/app/test/service.test.ts, packages/cli/test/home.test.ts]
 siblings: [engineering/units/ipc-bridge, engineering/units/project-sessions, engineering/units/app-log, engineering/units/uri-and-artifact-reads]
 ---

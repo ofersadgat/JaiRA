@@ -75,5 +75,6 @@ export * from "./refusal";
 export { DEFAULT_SMART_PROMPT } from "./config";
 // Which events are on — what Settings → Tools → Events and Automations read of the merged document.
 export { isEventEnabled, enabledEvents, type JairaEventsConfig, type JairaEventSetting, type EnabledEvent } from "./config";
+export type { JairaEngineConfig } from "./config";
 // What the Licenses page reads: the build's manifest of third-party notices, its decoder and search.
 export * from "./thirdPartyLicenses";

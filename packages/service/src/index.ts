@@ -10,3 +10,6 @@ export * from "./handlers";
 export * from "./enginePipe";
 export * from "./engineHost";
 export * from "./engineClient";
+export * from "./engineDiscovery";
+export * from "./connections";
+export * from "./hostEngine";

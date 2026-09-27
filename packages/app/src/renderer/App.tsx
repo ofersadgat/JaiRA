@@ -2890,6 +2890,10 @@ export default function App(): JSX.Element {
                       if (state.config === null) return;
                       void actions.saveConfig("you", withPaths(state.config.you, [["updates.channel", channel]]));
                     }}
+                    onEngine={(patch) => {
+                      if (state.config === null) return;
+                      void actions.saveConfig("you", withPaths(state.config.you, Object.entries(patch).map(([key, value]) => [`engine.${key}`, value] as [string, unknown])));
+                    }}
                   />
                 ) : null}
                 {state.section === "runs" ? (

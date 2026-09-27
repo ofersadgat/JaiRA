@@ -208,6 +208,28 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
     },
   },
   {
+    key: "engine",
+    title: "Engine",
+    hint: "Where the desktop runs the engine (decision 0012).",
+    schema: {
+      $type: "engine",
+      type: "object",
+      properties: {
+        separateServer: {
+          type: "boolean",
+          title: "separate server",
+          description:
+            "Off, the desktop runs the engine in its own process. On, it starts jaira serve and connects to it, so runs carry on without a window. Either way, a desktop that finds an engine already running connects to that one.",
+        },
+        keepServerRunning: {
+          type: "boolean",
+          title: "keep the server running",
+          description: "Whether the server the desktop started keeps running after the desktop quits. Only with a separate server.",
+        },
+      },
+    },
+  },
+  {
     key: "functions",
     title: "Functions",
     hint: "The defaults of the functions JaiRA ships — each function's settings, in one place.",

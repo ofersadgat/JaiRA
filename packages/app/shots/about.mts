@@ -69,6 +69,11 @@ async function main(): Promise<void> {
     await sleep(300);
     await app.shot("plugins");
 
+    // Where the engine runs (decision 0012 §5): this window's own, and the two switches for the next start.
+    await app.evaluate(`(() => { document.querySelector('[data-part="engine"]')?.scrollIntoView({ block: "start" }); return true; })()`);
+    await sleep(300);
+    await app.shot("engine");
+
     // The notices, searched as a person would: React's own setter, so React sees the input event.
     await app.evaluate(`(() => {
       const input = document.querySelector(".lic-search");

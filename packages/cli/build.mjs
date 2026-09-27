@@ -40,7 +40,12 @@ const common = {
   // ESM bundle and throw at import time ("Dynamic require is not supported"). Its `module` entry is
   // real ESM. Alias just that package rather than flipping mainFields for every dependency.
   alias: { "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
-  define: { "process.env.NODE_ENV": '"production"' },
+  define: { "process.env.NODE_ENV": '"production"', JAIRA_CLI_VERSION: JSON.stringify(pkg.version) },
+  // The engine (`@jaira/service`) finds its worker files beside its bundle through `__dirname`, which an
+  // ESM bundle does not have (decision 0012: a command hosts the engine when nothing else does).
+  banner: {
+    js: 'import { fileURLToPath as __jairaFileURLToPath } from "node:url"; import { dirname as __jairaDirname } from "node:path"; const __dirname = __jairaDirname(__jairaFileURLToPath(import.meta.url));',
+  },
   logLevel: "info",
 };
 
@@ -55,6 +60,10 @@ await build({
   entryPoints: { mcpBridgeWorker: fileURLToPath(import.meta.resolve("@declarative-ai/agents-cli/mcpBridgeWorker")) },
 });
 
+// The engine's TypeScript worker, loaded by path from beside the bundle (`tsCheck.ts`) — CommonJS, as the
+// app builds it, so `typescript` stays the one external it requires.
+await build({ ...common, format: "cjs", outExtension: { ".js": ".cjs" }, banner: {}, entryPoints: { tsProjectWorker: "../service/src/tsProjectWorker.ts" } });
+
 // The built-in layer (`$SYSTEM`, decision 0006): state files, prompts, functions and toolsets that
 // ship with JaiRA and sit at the end of every search path. They are DATA the bundle reads with
 // `node:fs`, not code it imports, so esbuild does not carry them — they are copied beside the bundle,
@@ -68,4 +77,4 @@ if (existsSync(builtIn)) await cp(builtIn, "dist/builtin", { recursive: true });
 const { buildPluginManifest, withSizes } = await import("../../scripts/plugins/manifest.mjs");
 await writeFile("dist/plugins.json", `${JSON.stringify(await withSizes(buildPluginManifest()))}\n`);
 
-console.log("built dist/cli.mjs, dist/mcpBridgeWorker.mjs, dist/builtin/ and dist/plugins.json");
+console.log("built dist/cli.mjs, dist/mcpBridgeWorker.mjs, dist/tsProjectWorker.cjs, dist/builtin/ and dist/plugins.json");

@@ -37,7 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { CliCommandStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
+import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
 import type { CommandApproval } from "./commandParts";
@@ -1510,7 +1510,8 @@ export interface SecretCapabilities {
  * declares its argument and result.
  */
 export interface IpcContract {
-  "project:open": { request: { dir: string }; response: { dir: string; recovered: string[] } };
+  /** `remember: false`: open it without adding it to the projects a window re-opens (a `jaira` command's). */
+  "project:open": { request: { dir: string; remember?: boolean }; response: { dir: string; recovered: string[] } };
   /**
    * Create `.jaira/` in a directory and open it — `jaira init`, reachable from the app.
    *
@@ -2254,6 +2255,8 @@ export interface IpcContract {
   "cli:status": { request: void; response: CliCommandStatus };
   /** Put it there where the app can (macOS asks for an administrator's password). */
   "cli:install": { request: void; response: CliCommandStatus };
+  /** Where this window's engine runs (decision 0012 §5). */
+  "engine:status": { request: void; response: EngineStatus };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2426,6 +2429,7 @@ export const IPC_CHANNELS = [
   "health:dismissAll",
   "cli:status",
   "cli:install",
+  "engine:status",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -2740,6 +2744,8 @@ export type PushMessage =
   | { type: "update:changed"; state: UpdateState }
   /** A plugin download moved, ended or failed, or a plugin was removed. */
   | { type: "plugin:changed"; plugins: PluginStatus[] }
+  /** This window's engine moved: it became a client, or took the engine over when its host went. */
+  | { type: "engine:changed"; status: EngineStatus }
   /** Settings' warnings and errors changed; the whole board. */
   | { type: "health:changed"; items: HealthItem[] }
   /** An events task posted a notice (decision 0010 §4, `notify`). Also written to the log. */

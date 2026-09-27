@@ -2,7 +2,7 @@
 id: engineering/decisions/0012-local-server
 type: decision
 status: accepted
-updated: 2026-09-26
+updated: 2026-09-27
 decides_for: [engineering/units/ipc-bridge, engineering/units/app-shell, engineering/units/cli, engineering/units/secret-chain]
 ---
 
@@ -266,6 +266,86 @@ If every step finds nothing, there is no host.
     asked `project:current`, was refused `shell:saveFile`, and heard the pushes.
   - A second instance logged the holder, and a relaunch after a hard kill reclaimed the pipe.
   - The full suite.
+
+**Steps 3–7, 2026-09-27 (the person: "do all the steps").**
+
+- **Discovery (step 3), `engineDiscovery.ts`**, in the ruled order:
+  - The process list is STARTED first. On Windows it is `Get-Process` through PowerShell, which reads the kernel's list without WMI: about 0.5 s measured, against 2 s for `tasklist`. Elsewhere it is `ps`.
+  - The list is awaited only to judge a host that does not answer. When a host answers, it is aborted, so a command does not wait on it. `server status` awaits it to name other JaiRA processes.
+  - Then `who` on the pipe, and `who` on the loopback port (`ENGINE_PORT` 47317). A host listens on that port only when it cannot create its pipe. Each host says which base root it serves (`home`), because the port is shared by every root.
+  - Then `engine.json`: the pipe or port it names, when those are not the ones already tried. A host started under another `XDG_RUNTIME_DIR` is found this way.
+  - The verdicts:
+    - `found`.
+    - `stuck`: `engine.json` names a live JaiRA process that answers nothing, and no second engine starts beside it.
+    - `none`: a leftover `engine.json` whose process is gone is removed.
+- **The host (steps 2–3, extended):**
+  - `who` is answered before `hello`, with the host's info and no token.
+  - A client with another contract is admitted `limited`. It may ask only the `engine:*` channels, which is enough to say who runs what and to stop a server. It hears no pushes.
+  - A connection gets its own answers (`EngineConnections`, `connections.ts`):
+    - `project:current` is the project that connection opened last, while it is open.
+    - `limits:watch` watches while ANY connection does.
+    - The desktop's own window is one connection too.
+  - `hostEngine.ts` is the one way to host. The engine is built before the claim or after it, and each `engine:*` channel of `enginePeerHandlers` is added.
+  - Those channels are the desktop main process's needs as a client: its launch and crash records, the health board items of the updater and plugins, `activeWork`, `suspendForUpdate`, probes, served artifacts and `restore`. Plus `engine:info` and `engine:stop`.
+  - The desktop, the Electron server and the npm server use `hostEngine`, and so does a CLI command's claim. That claim builds no engine unless a client asks it something.
+- **The desktop as a client (step 4):**
+  - `index.ts` now only chooses: `--serve` starts `serve.ts`, and everything else starts `desktop.ts`. Both are in one bundle and evaluated lazily.
+  - The window reaches the engine through an `EngineLink` (`engineLink.ts`): `localLink` over this process's `AppService`, or `remoteLink` over an `EngineClient`. IPC answers `HOST_CHANNELS` itself and forwards everything else.
+  - `establishEngine` runs in this order:
+    1. A found host is used whatever the setting says.
+    2. With `engine.separateServer` on, the window starts the server and connects to it.
+    3. Otherwise it claims the engine and only then builds its own. A claim lost to a process that started at the same moment is looked for again.
+    4. With no pipe and no port at all, the window runs its engine anyway and says why.
+  - A host running another contract:
+    - A server gets a dialog, "Restart it on <version>". The server drains, and its runs resume.
+    - A window or a command gets "Try again / Quit".
+  - A `stuck` host gets "End it and continue / Try again / Quit".
+  - A host that goes away (`takeOver`): the window looks again and becomes the host or another host's client, re-opens the remembered projects and reloads the page.
+  - The frame's look, the update track and the engine choice come from `machineSettings(baseDir)`, which needs no engine. `resolveBaseDir` is the service's own resolution, used before an engine exists.
+  - The updater's `busy` is now async. Runs in another process count only when an install would replace the executable they run on (`sameInstall`).
+  - On quit, a server this window started stops unless `keepServerRunning` is on. A server on this very executable stops when an update is about to install.
+- **`jaira serve` (step 5):**
+  - `serve.ts` is the app's Electron as a windowless main. It has the keychain (`keychain.ts`, shared with the desktop), no GPU and no renderer sandbox. It re-opens the remembered projects and hosts until `engine:stop` or a signal, then drains like a quit.
+  - The installed command's `jaira serve` runs it: in the foreground, or with `--detach` returning once it answers. The npm command hosts on plain Node, with no keychain.
+  - `jaira server status` prints the host, how it was found and who else is connected. `jaira server stop` waits for the host's process to end. A window or a command refuses to be stopped this way.
+  - Plugins still download where a window or command asks. The store is on disk and shared, and a server loads what is there.
+- **Commands through the host (step 6), `viaEngine.ts`:**
+  - `run` (durable), `task create|start|list|status|cancel|move`, `board` and `prune` go through a found host. They open their project with `remember: false`, so a command does not add it to the window's remembered projects (a new field on `project:open`).
+  - Runs are started with `--fake` and `--interactions` as `task:start` takes them, and followed by pushes:
+    - Approvals and questions are asked at the terminal, one at a time.
+    - A prompt is dropped when another client answers first.
+    - Everything is refused at once under `--approve deny`.
+    - Nothing is answered with no terminal: the window answers.
+    - Ctrl-C cancels the run.
+  - Refused function files are approved as `task start` approves them, and the start is tried again.
+  - Two things are refused or left out through a host:
+    - `--repair-turns` belongs to this process's engine, so it is refused rather than dropped.
+    - `task status --events` reads the journal in-process, so through a host the events are left out, with a note.
+  - With no host, the old in-process path runs, holding the claim: ruling "a".
+  - The CLI bundles now carry the engine: `__dirname` in the banner, the TypeScript worker beside the bundle, and a version define.
+  - `ajv/dist/2020` became `ajv/dist/2020.js`, which an ESM bundle needs for an external package.
+- **The settings (step 7):**
+  - `engine.separateServer` and `engine.keepServerRunning` are machine settings (`JairaEngineConfig`, `parseEngineConfig`, a `configSchema` entry). The window reads them from the built-in, base and personal layers.
+  - About → Engine shows where the engine runs now (`engine:status`, pushed as `engine:changed`) and the two switches. They are written to the personal layer, with ↺ like the update track.
+  - They take effect at the next start, because moving a running engine would cut its runs. Keep is disabled unless Separate is on.
+  - This was drawn with the page's existing row and switch, not mocked up first: the person had asked for all the steps.
+- **Verified:**
+  - Tests: 11 hosting tests, 3 CLI-through-a-host tests, 3 run-following tests, the updater's with async `busy`, and the full suite.
+  - On the dev build:
+    - A windowless server hosted the engine, and a window became its client and drew from it.
+    - `engine:stop` on the server made the window take the engine over.
+    - With `separateServer` the window started a server and stopped it on quit. With `keepServerRunning` too, the server stayed up.
+  - The npm CLI:
+    - With no host, a run went in-process.
+    - `serve --detach`, then a run, `task list`, `task status`, `board`, `prune` and `task cancel` all went through the server.
+    - `server stop` drained it.
+  - The packaged app's smoke test: `jaira serve --detach` started JaiRA.exe windowless, and `server status` and `server stop` reached it and ended it.
+  - The About page was photographed (`shots/about.mts`, `engine.png`).
+- **Not yet exercised:**
+  - The contract-mismatch and stuck dialogs by hand.
+  - POSIX sockets and the loopback port on a real machine without pipes.
+  - macOS.
+  - A desktop connecting to a command's claim mid-run. The lazily built engine is covered by a test.
 
 ## Consequences
 

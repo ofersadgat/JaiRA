@@ -24,7 +24,7 @@ import { IPC_CHANNELS, type PushMessage } from "@jaira/shared";
 /** Which contract a side speaks: the channels it knows, hashed. Two sides agree when this does. */
 export const ENGINE_CONTRACT = createHash("sha256").update([...IPC_CHANNELS].sort().join("\n")).digest("hex").slice(0, 12);
 
-/** What a host says about itself, in `engine.json` and in its welcome. */
+/** What a host says about itself, in `engine.json`, in its welcome, and to `who` without a token. */
 export interface EngineHostInfo {
   /** `desktop`: the app hosting the engine in its own process; `server`: `jaira serve`; `cli`: a CLI command running in-process. */
   kind: "desktop" | "server" | "cli";
@@ -32,7 +32,14 @@ export interface EngineHostInfo {
   /** The JaiRA version the host runs. */
   version: string;
   contract: string;
+  /** The pipe it listens on; for a host that could not create one, where it would have been. */
   pipe: string;
+  /** The loopback port it listens on instead, when it could not create its pipe (§4 step 3). */
+  port?: number;
+  /** Which base root it serves: {@link homeHash} of it, so a port shared by every root can be told apart. */
+  home: string;
+  /** The executable it runs on: a desktop that installs an update over it must stop it first. */
+  exe: string;
   startedAt: number;
 }
 
@@ -41,21 +48,30 @@ export interface EngineFile extends EngineHostInfo {
   token: string;
 }
 
-/** Client → host. */
+/** Client → host. `who` needs no token and is answered with the host's info alone. */
 export type ClientFrame =
-  | { t: "hello"; token: string; contract: string; version: string; client: string }
+  | { t: "who" }
+  | { t: "hello"; token: string; contract: string; version: string; client: string; pid?: number }
   | { t: "req"; id: number; channel: string; request: unknown };
 
 /** Host → client. */
 export type HostFrame =
-  | { t: "welcome"; host: EngineHostInfo }
+  | { t: "info"; host: EngineHostInfo }
+  /** `limited`: the contracts differ, so only the `engine:*` channels answer — enough to say so and to stop the host. */
+  | { t: "welcome"; host: EngineHostInfo; limited?: true }
   | { t: "refused"; reason: string }
   | { t: "res"; id: number; ok: true; result: unknown }
   | { t: "res"; id: number; ok: false; error: { message: string; name?: string } }
   | { t: "push"; message: PushMessage };
 
+/**
+ * The loopback port a host listens on when it cannot create its pipe (a sandbox without pipes), and
+ * the one discovery tries third. The same for every person and root: `home` and the token tell them apart.
+ */
+export const ENGINE_PORT = 47_317;
+
 /** A short, stable name for a base root, for the pipe's name. */
-function homeHash(baseDir: string): string {
+export function homeHash(baseDir: string): string {
   const key = process.platform === "win32" ? baseDir.toLowerCase() : baseDir;
   return createHash("sha256").update(key).digest("hex").slice(0, 10);
 }

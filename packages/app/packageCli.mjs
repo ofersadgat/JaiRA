@@ -47,14 +47,19 @@ export async function stageCli(stage, externals) {
     external: [...externals, "electron"],
     // As the CLI's own build.mjs: jsonc-parser's UMD `main` breaks an ESM bundle.
     alias: { "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
-    define: { "process.env.NODE_ENV": '"production"' },
-    // An ESM bundle has no `require`, and a few inlined CommonJS packages still call it.
-    banner: { js: 'import { createRequire as __jairaCreateRequire } from "node:module"; const require = __jairaCreateRequire(import.meta.url);' },
+    define: { "process.env.NODE_ENV": '"production"', JAIRA_CLI_VERSION: JSON.stringify(JSON.parse(readFileSync(join(here, "package.json"), "utf8")).version) },
+    // An ESM bundle has no `require`, and a few inlined CommonJS packages still call it; nor `__dirname`,
+    // which the engine finds its worker files by.
+    banner: {
+      js: 'import { createRequire as __jairaCreateRequire } from "node:module"; const require = __jairaCreateRequire(import.meta.url); import { fileURLToPath as __jairaFileURLToPath } from "node:url"; import { dirname as __jairaDirname } from "node:path"; const __dirname = __jairaDirname(__jairaFileURLToPath(import.meta.url));',
+    },
     logLevel: "warning",
     absWorkingDir: cliDir,
   };
   await build({ ...common, entryPoints: { cli: join(cliDir, "src", "main.ts") } });
   await build({ ...common, entryPoints: { mcpBridgeWorker: fileURLToPath(import.meta.resolve("@declarative-ai/agents-cli/mcpBridgeWorker")) } });
+  // The engine's TypeScript worker, for an engine a command builds for a client (decision 0012).
+  await build({ ...common, format: "cjs", outExtension: { ".js": ".cjs" }, banner: {}, entryPoints: { tsProjectWorker: join(here, "..", "service", "src", "tsProjectWorker.ts") } });
   // The plugin manifest, beside the bundle where `startPlugins` looks — the app's copy, sizes and all.
   copyFileSync(join(here, "dist", "plugins.json"), join(out, "plugins.json"));
   writeFileSync(

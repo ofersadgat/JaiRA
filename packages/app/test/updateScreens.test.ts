@@ -24,7 +24,7 @@ const at = (extra: Partial<UpdateState>): UpdateState => ({
 });
 
 const row = (): string => renderToStaticMarkup(h(SidebarUpdateRow, { collapsed: false, onOpenAbout: noop, onNotes: noop, onRetry: noop }));
-const about = (): string => renderToStaticMarkup(h(AboutPane, { config: null, health: [], onFix: noop, onTrack: noop }));
+const about = (): string => renderToStaticMarkup(h(AboutPane, { config: null, health: [], onFix: noop, onTrack: noop, onEngine: noop }));
 
 describe("the sidebar's Update row, drawn", () => {
   it("reads 'nightly' for a nightly, with the × and the chevron", () => {
