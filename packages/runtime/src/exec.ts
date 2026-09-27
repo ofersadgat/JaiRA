@@ -15,7 +15,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { delimiter } from "node:path";
-import { resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
+import { hostNode, resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
 import { isWslEnv, toWslPath, type ExecEnv } from "./paths";
 import { killTree, type KillTreeOptions } from "./killTree";
 
@@ -102,10 +102,12 @@ export interface ExecObserver<T = unknown> {
  * syntax), and an npm-installed CLI on Windows *is* a `.cmd` shim. `codex` is one.
  */
 function programDeps(overrides: Partial<ProgramDeps> = {}): ProgramDeps {
+  const pathDirs = (process.env["PATH"] ?? "").split(delimiter).filter((d) => d.length > 0);
   return {
     platform: process.platform,
-    pathDirs: (process.env["PATH"] ?? "").split(delimiter).filter((d) => d.length > 0),
-    node: process.execPath,
+    pathDirs,
+    // A real node.exe inside the app, not Electron — or `codex` pops a terminal window (see `hostNode`).
+    ...hostNode(pathDirs, existsSync),
     exists: existsSync,
     readText: (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : undefined),
     ...overrides,
@@ -117,12 +119,12 @@ export function resolveInvocation(
   command: string,
   args: readonly string[],
   options: ExecOptions = {},
-): { file: string; argv: string[]; cwd?: string } {
+): { file: string; argv: string[]; cwd?: string; env?: Record<string, string> } {
   const execEnv: ExecEnv = options.execEnv ?? "windows";
   if (!isWslEnv(execEnv)) {
     // A WSL command is a LINUX command; only a native one goes through Windows program resolution.
-    const { file, prefix } = resolveProgram(command, programDeps(options.program));
-    return { file, argv: [...prefix, ...args], ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) };
+    const { file, prefix, env } = resolveProgram(command, programDeps(options.program));
+    return { file, argv: [...prefix, ...args], ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(env !== undefined ? { env } : {}) };
   }
   // `--cd` sets the working directory inside the distro, so the Windows cwd is
   // never handed to a Linux process. `--` ends wsl.exe's own option parsing, which
@@ -165,13 +167,13 @@ export class NodeExec implements Exec {
         ? { env: { ...this.defaults.env, ...options.env } }
         : {}),
     };
-    const { file, argv, cwd } = resolveInvocation(command, args, merged);
+    const { file, argv, cwd, env: needs } = resolveInvocation(command, args, merged);
     const printable = [file, ...argv].join(" ");
 
     return new Promise<ExecResult>((resolve, reject) => {
       const child = spawn(file, argv, {
         ...(cwd !== undefined ? { cwd } : {}),
-        env: merged.env ? { ...process.env, ...merged.env } : process.env,
+        env: merged.env || needs ? { ...process.env, ...merged.env, ...needs } : process.env,
         windowsHide: true,
         // No shell: arguments stay literal (see the module note).
         shell: false,

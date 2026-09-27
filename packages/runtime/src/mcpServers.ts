@@ -187,8 +187,8 @@ export function mcpServersIn(servers: Record<string, ResolvedMcpServer>, execEnv
       out[name] = server;
       continue;
     }
-    const { file, argv } = resolveInvocation(server.command, server.args, { execEnv, ...(server.cwd !== undefined ? { cwd: server.cwd } : {}) });
-    out[name] = { command: file, args: argv, env: { ...server.env, ...wslenvOf(server.env) } };
+    const { file, argv, env: needs } = resolveInvocation(server.command, server.args, { execEnv, ...(server.cwd !== undefined ? { cwd: server.cwd } : {}) });
+    out[name] = { command: file, args: argv, env: { ...server.env, ...wslenvOf(server.env), ...needs } };
   }
   return out;
 }

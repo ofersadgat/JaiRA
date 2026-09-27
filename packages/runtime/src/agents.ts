@@ -116,12 +116,13 @@ export function nativeNamesByRoute(standard: string): Record<string, string> {
 export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver } = {}): SpawnProcess {
   return (argv, opts) => {
     const [agentCommand, ...agentArgs] = argv;
-    const { file: command, argv: args, cwd } = resolveInvocation(agentCommand!, agentArgs, {
+    const { file: command, argv: args, cwd, env: needs } = resolveInvocation(agentCommand!, agentArgs, {
       ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     });
     const child = spawn(command, args, {
       ...(cwd !== undefined ? { cwd } : {}),
+      ...(needs !== undefined ? { env: { ...process.env, ...needs } } : {}),
       // stdin is PIPED whenever the adapter may speak again, not only when it has a prompt to hand
       // over. That is what makes steering possible at all: a closed channel is why the only mid-run
       // signal this transport used to have was `kill()`.
