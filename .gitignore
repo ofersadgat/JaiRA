@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Installers and unpacked apps from `npm run app:dist` (packages/app/package.mjs).
+packages/app/release/
 *.tsbuildinfo
 
 # Secrets. Provider keys live in the environment (see README) — never in a commit.

@@ -298,6 +298,49 @@ starting the server", which keeps the npm package too.
    dependencies.
 8. The installer's `jaira` command.
 
+## Built
+
+**Step 1, 2026-09-26:** Electron 44.4.5 (see §1).
+
+**Step 2 on Windows, 2026-09-26:** `npm run app:dist` runs `packages/app/package.mjs`, which builds for
+the machine it runs on.
+
+- **The stage** is a temporary directory holding:
+  - `entry.cjs` and `dist/`, without `builtin/`, the snapshot output or `main-modules.json`;
+  - a generated `package.json` whose dependencies are `RUNTIME_MODULES`, at the versions the workspace
+    resolved.
+- **`RUNTIME_MODULES`** is what the bundles load by name at run time, found by reading them:
+  - `better-sqlite3` and `typescript`, the two externals in build.mjs;
+  - `@modelcontextprotocol/sdk`, which declarative-ai imports by a constant specifier in the MCP bridge
+    worker, for host tools and for MCP clients;
+  - `undici`, which `@ai-sdk/provider-utils` loads through `createRequire`.
+- **Neither plugin is staged.** A route that needs one reports it as not installed.
+- **Pruning:** better-sqlite3 keeps only this platform's prebuild. Its C sources and `binding.gyp` are
+  removed.
+- **electron-builder:**
+  - `appId: com.mistlabs.jaira`;
+  - `builtin/` as an `extraResources` entry;
+  - asar, unpacking `**/*.node` and `typescript/**`;
+  - no rebuild;
+  - `publish: null` until the updater step.
+- **Two traps found:**
+  - `require("<pkg>/package.json")` answers with the wrong file for a package whose `exports` hides it.
+    The MCP SDK then came back without a version and was **silently left out** of the stage. Versions
+    are now read by walking the resolution paths, and the stage is checked for every runtime module.
+  - electron-builder drops every `*.d.ts` in `node_modules`, **all of TypeScript's `lib.*.d.ts`**
+    included. A `files` pattern does not bring them back, because the copier excludes first. The
+    `onNodeModuleFile` hook does.
+- **The smoke test** runs after every build:
+  - `packageProbe.cjs` runs under the packaged executable in Node mode. It checks that each runtime
+    module resolves from the asar, that SQLite opens, that the compiler's lib file exists, and that both
+    workers start.
+  - Then the app itself launches against a scratch `JAIRA_HOME` and must render and capture a
+    screenshot.
+- **The result:** `JaiRA Setup 0.1.0.exe`, 129 MB, unsigned, with a blockmap. The unpacked app is
+  467 MB, of which `app.asar` is 76 MB and the unpacked addon and compiler 24 MB. The rest is Electron.
+- **Still to do for step 2:** macOS and Linux run in CI in step 3. The app has no icon yet, so
+  electron-builder uses Electron's default.
+
 ## Consequences
 
 **Easier:**

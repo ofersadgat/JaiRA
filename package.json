@@ -17,6 +17,7 @@
     "cli:build": "npm --workspace @jaira/cli run build",
     "app": "npm --workspace @jaira/app run start",
     "app:build": "npm --workspace @jaira/app run build",
+    "app:dist": "npm --workspace @jaira/app run dist",
     "licenses:sync": "tsx packages/app/licenses/sync.ts",
     "schemas:sync": "node packages/shared/scripts/vendorSchemas.mjs"
   },
