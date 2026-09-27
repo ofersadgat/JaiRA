@@ -146,7 +146,8 @@ packages/
 - Fonts: the woff2 files are converted to TTF for native (expo-font) and used as-is on web.
 - **To verify in the spike:** that Tamagui's theme CSS variables on web do not collide with the same
   names in `styles.css`, since both trees may share a page once the desktop starts switching
-  components.
+  components. *They do.* Tamagui names a theme's variables after its keys (`--accent`), so the spike
+  built it differently; see [What the spike found](#what-the-spike-found).
 
 ### The fidelity gate (ruling 6)
 
@@ -355,6 +356,59 @@ drops its own Vite. Until then, the two must not be hoisted into one copy.
 
 **Move to 2 when** it has a published release or a non-draft announcement, or when 1.x stops building
 against a Tamagui or react-native-webview release we need.
+
+## What the spike found
+
+Built on `spike/one-client`, 2026-09-27, on this Windows machine.
+
+| Part | State | Evidence |
+|---|---|---|
+| S0 toolchain (web) | done | `packages/client`, One 1.27.1, SPA; `one build` on Windows after two workarounds (below) |
+| S0 toolchain (native) | **blocked** | no Android SDK or JDK here; EAS needs an Expo account |
+| S1 One hosts the renderer | done | `shots/parity.mts`: board, task, settings and the Monaco file-types preview (TextMate over WASM) pixel-identical to the Vite build, light and dark; `app:dist` builds the installer and its probe and smoke test pass |
+| S2 throwaway transport | done | `shots/remote.mts`: headless Chrome loads the client from the desktop's port, draws its board, and sees a task the desktop starts appear by push |
+| S3 universal copy (web) | done for `Pill` | `shots/parity.mts universal`: `/` against `/universal`, identical; a DOM probe confirms `/universal` draws 0 DOM pills and 5 Tamagui ones |
+| S4 desktop switched | done for `Pill` | `/` draws the Tamagui pill; the S1 gate (Vite's DOM pill against it) is identical in all 8 pairs |
+| S3 native, S5 islands | not started | need the native toolchain |
+
+**Windows, as the docs warned.** Three things broke, none of them Windows-hostile by design:
+
+- `fast-flow-transform` 0.0.3 (One's Flow stripper, web patch step and Metro alike) ships a win32
+  binary that panics on every input. A Rust panic aborts the process, so no caller can catch it.
+  `packages/fast-flow-transform` stands in for it, on Babel and the Hermes parser.
+- One's client tree-shake filters with an unanchored `/\.(js|jsx|ts|tsx)/`, so it parses `.json` as
+  JavaScript and fails on the shared package's vendored schemas. That affects every platform. The
+  client's `vite.config.ts` wraps the plugin to skip JSON. **Worth an upstream fix.**
+- `@vxrn/color-scheme` pins React to exactly 19.2.3, so React and react-dom are pinned to 19.2.3
+  workspace-wide.
+
+**Deviations from the plan above:**
+
+- **The renderer was not moved.** `@jaira/ui` is an alias for `packages/app/src/renderer`. Moving it
+  touches every test and shot that imports it, and a spike should not. It moves at go.
+- **Tamagui carries no themes.** A copy reads colours through `useTokens()`:
+  - **On web** it returns the CSS variable itself (`var(--accent)`), so a copy resolves against the
+    same cascade as the CSS beside it, sidebar overrides included. Palette switches need no code.
+  - **On native** it replays `styles.css`'s cascade (`packages/universal/src/cssTokens.ts`) from
+    declarations `scripts/tokens.mjs` extracts and `typecheck` keeps fresh.
+  - Tamagui brings the component model and one tree for both platforms. Themes can return for native
+    if the resolver proves slow.
+- **Palettes override components, not only variables.** `styles.css` has selector-level palette
+  rules (`[data-palette="ink"] .card`, `.column h4`, …). The extractor keeps variables scoped to a
+  subtree (`:root[data-palette="ink"] .sidebar { --panel: … }`). Rule-level overrides are hand-carried
+  by each copy that needs them, and the pill needed none.
+- **The gate photographs each scene on both pages back to back, from a fresh load.** Reaching a
+  scene changes state (opening a task marks its counts seen), and a whole pass on one page before
+  the other compared two different states.
+- **The DOM pill stays for now.** The Vite renderer, which is the S1 gate's baseline, still draws
+  it. Both go when the Vite renderer is retired.
+
+**Still open:**
+
+- The Monaco preview sometimes never colours itself on a load, under either renderer. That is why
+  `run.mts` hangs, and the gate reloads to work around it.
+- The copy's cost per component. The pill took well under a day, but it is the simplest leaf.
+  `task-card` is the real measure.
 
 ## Native desktop, later
 
