@@ -18,7 +18,8 @@
 # build, `scripts/release/publish.mjs` publishes), so the two agree on versions
 # and on what is already released. A release pipeline runs for:
 #
-# - a pushed `vX.Y.Z` tag: that commit, as stable;
+# - a pushed `vX.Y.Z` tag: that commit, as stable; a `vX.Y.Z-nightly.YYYYMMDD.N`
+#   tag: that commit, as that nightly (`npm run release-*-version -- --gitlab`);
 # - Build > Pipelines > Run pipeline with RELEASE_CHANNEL = nightly (this
 #   branch's commit) or stable (promotes the latest nightly's commit;
 #   RELEASE_VERSION overrides its X.Y.Z);
@@ -51,7 +52,7 @@ variables:
 
 workflow:
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+(-nightly\.\d{8}\.\d+)?$/
       variables:
         RELEASE_EVENT: push
     - if: $CI_COMMIT_TAG

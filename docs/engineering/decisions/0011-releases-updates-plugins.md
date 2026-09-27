@@ -398,6 +398,31 @@ process", choosing that GitLab builds and publishes itself).**
   which has no hosted runner.
 - **A protected `RELEASES_TOKEN`** reaches tag pipelines only when `v*` tags are protected.
 
+**Releasing from a checkout (the person, 2026-09-26: "`npm run release-major-version`, …
+`release-nightly-version` which each bump the version of the app, commit, tag, and start a release.
+these should default to releases on github").**
+
+- **The scripts:** `npm run release-major-version`, `release-minor-version`, `release-patch-version` and
+  `release-nightly-version` all run `scripts/release/bump.mjs`.
+- **A stable release:**
+  - sets the new version in every workspace `package.json` and the lockfile (they move together);
+  - moves a sibling pinned to the old version with it (`jaira` pins `@jaira/cli`);
+  - commits `release: X.Y.Z` and tags `vX.Y.Z`;
+  - pushes `main` and the tag in one atomic push.
+- **A nightly** changes no file. It tags the commit with the version CI would give it and pushes the
+  tag.
+- **The pushed tag is what starts the release.** Both pipelines now also accept a
+  `vX.Y.Z-nightly.YYYYMMDD.N` tag, so the scripts need no token.
+- **Options:** `-- --gitlab` pushes to the `gitlab` remote instead of GitHub, and `-- --dry-run`
+  changes nothing.
+- **Refusals:** anything but `main`, uncommitted changes to tracked files, being behind the remote, or a
+  version already released.
+- **Why not `npm version`:** it is npm's own convention, but in a workspace it bumps only the root
+  package, while the app's version is `packages/app`'s.
+- **The version rules are shared:** they live in `scripts/release/versions.mjs`, used by `plan.mjs` and
+  `bump.mjs`. The released versions are read with `git ls-remote --tags` on the releases repository, not
+  the API, whose anonymous limit is 60 requests an hour.
+
 ## Consequences
 
 **Easier:**

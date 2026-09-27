@@ -4,7 +4,8 @@ name: Release
 # (decision 0011 §3). What to build is decided by `scripts/release/plan.mjs`,
 # and `scripts/release/publish.mjs` publishes; GitLab's `.gitlab-ci.yml` runs the same two scripts:
 #
-# - a pushed `vX.Y.Z` tag releases that commit as stable;
+# - a pushed `vX.Y.Z` tag releases that commit as stable, and a `vX.Y.Z-nightly.YYYYMMDD.N` tag as that
+#   nightly (`npm run release-<major|minor|patch|nightly>-version` pushes them);
 # - a manual `stable` run promotes the latest nightly's commit;
 # - a nightly builds `main`, from the schedule (skipped with no new commits or within six hours of the
 #   last nightly) or by hand.
@@ -34,7 +35,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event_name == 'push' && 'stable' || inputs.channel || 'nightly' }}
+  group: release-${{ github.event_name == 'push' && (contains(github.ref_name, '-nightly.') && 'nightly' || 'stable') || inputs.channel || 'nightly' }}
   cancel-in-progress: false
 
 env:

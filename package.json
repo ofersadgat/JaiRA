@@ -18,6 +18,10 @@
     "app": "npm --workspace @jaira/app run start",
     "app:build": "npm --workspace @jaira/app run build",
     "app:dist": "npm --workspace @jaira/app run dist",
+    "release-major-version": "node scripts/release/bump.mjs major",
+    "release-minor-version": "node scripts/release/bump.mjs minor",
+    "release-patch-version": "node scripts/release/bump.mjs patch",
+    "release-nightly-version": "node scripts/release/bump.mjs nightly",
     "licenses:sync": "tsx packages/app/licenses/sync.ts",
     "schemas:sync": "node packages/shared/scripts/vendorSchemas.mjs"
   },

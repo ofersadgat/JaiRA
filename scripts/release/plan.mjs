@@ -6,7 +6,8 @@
  * writes it to `$GITHUB_OUTPUT` (GitHub) and/or into `$PLAN_DIR` as `plan.env` (dotenv, `PLAN_*`)
  * and `notes.md` (GitLab, whose dotenv reports cannot hold the multi-line notes).
  *
- * - A pushed `vX.Y.Z` tag is a stable release of the tagged commit.
+ * - A pushed `vX.Y.Z` tag is a stable release of the tagged commit, and a pushed
+ *   `vX.Y.Z-nightly.YYYYMMDD.N` tag a nightly of it (both from `npm run release-*-version`).
  * - A manual stable release promotes the latest published nightly's commit, so what ships as stable is
  *   what ran as nightly. Its version is the `version` input, or the nightly's own `X.Y.Z`.
  * - A nightly builds `main`. On the schedule it is skipped unless there are commits since the last
@@ -25,49 +26,11 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { NIGHTLY, RELEASES_REPO, STABLE, commitOf, github, nextNightly, nightliesOf, publishedReleases, stablesOf, versionOf } from "./versions.mjs";
 
 const env = process.env;
-const RELEASES_REPO = env.RELEASES_REPO ?? "ofersadgat/releases";
 const UPSTREAM_REPO = "ofersadgat/declarative-ai";
 const NIGHTLY_GAP_MS = 6 * 60 * 60 * 1000;
-const STABLE = /^(\d+)\.(\d+)\.(\d+)$/;
-const NIGHTLY = /^(\d+\.\d+\.\d+)-nightly\.(\d{8})\.(\d+)$/;
-const COMMIT_LINE = /^jaira-commit: ([0-9a-f]{40})$/m;
-
-async function github(path) {
-  const response = await fetch(`https://api.github.com${path}`, {
-    headers: {
-      accept: "application/vnd.github+json",
-      "x-github-api-version": "2022-11-28",
-      ...(env.GH_TOKEN ? { authorization: `Bearer ${env.GH_TOKEN}` } : {}),
-    },
-  });
-  if (!response.ok) throw new Error(`GET ${path}: ${response.status} ${await response.text()}`);
-  return response.json();
-}
-
-/** Every published release in the releases repository, newest first. An empty repository has none. */
-async function releases() {
-  const all = await github(`/repos/${RELEASES_REPO}/releases?per_page=100`);
-  return all.filter((r) => !r.draft).sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
-}
-
-const versionOf = (release) => release.tag_name.replace(/^v/, "");
-const commitOf = (release) => COMMIT_LINE.exec(release.body ?? "")?.[1];
-
-/** `a > b` for two `X.Y.Z`. */
-function newer(a, b) {
-  const [x, y] = [STABLE.exec(a), STABLE.exec(b)];
-  for (let i = 1; i <= 3; i += 1) if (Number(x[i]) !== Number(y[i])) return Number(x[i]) > Number(y[i]);
-  return false;
-}
-
-/** The next patch after both the app's own version and the newest stable release. */
-function nextPatch(appVersion, stables) {
-  const base = stables.map(versionOf).filter((v) => STABLE.test(v)).reduce((best, v) => (newer(v, best) ? v : best), appVersion);
-  const [, major, minor, patch] = STABLE.exec(base);
-  return `${major}.${minor}.${Number(patch) + 1}`;
-}
 
 function output(values) {
   const lines = Object.entries(values).map(([key, value]) => {
@@ -106,16 +69,19 @@ function changes(from, to) {
 
 async function plan() {
   const appVersion = JSON.parse(readFileSync("packages/app/package.json", "utf8")).version;
-  const published = await releases();
-  const stables = published.filter((r) => !r.prerelease && STABLE.test(versionOf(r)));
-  const nightlies = published.filter((r) => NIGHTLY.test(versionOf(r)));
-  const channel = env.EVENT === "push" ? "stable" : env.EVENT === "schedule" ? "nightly" : (env.INPUT_CHANNEL || "nightly");
+  const published = await publishedReleases();
+  const stables = stablesOf(published);
+  const nightlies = nightliesOf(published);
+  const pushedTag = (env.REF_NAME ?? "").replace(/^v/, "");
+  const channel =
+    env.EVENT === "push" ? (NIGHTLY.test(pushedTag) ? "nightly" : "stable") : env.EVENT === "schedule" ? "nightly" : env.INPUT_CHANNEL || "nightly";
 
   let version;
   let commit;
   if (env.EVENT === "push") {
-    version = (env.REF_NAME ?? "").replace(/^v/, "");
-    if (!STABLE.test(version)) throw new Error(`tag '${env.REF_NAME}' is not vX.Y.Z`);
+    // `npm run release-*-version` pushes the tag: a stable one after bumping, a nightly one as it is.
+    version = pushedTag;
+    if (!STABLE.test(version) && !NIGHTLY.test(version)) throw new Error(`tag '${env.REF_NAME}' is neither vX.Y.Z nor vX.Y.Z-nightly.YYYYMMDD.N`);
     commit = env.GITHUB_SHA;
   } else if (channel === "stable") {
     const nightly = nightlies[0];
@@ -132,9 +98,7 @@ async function plan() {
       const age = Date.now() - Date.parse(last.published_at);
       if (age < NIGHTLY_GAP_MS) return skip(`${last.tag_name} is only ${Math.round(age / 60000)} minutes old`);
     }
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const today = nightlies.map((r) => NIGHTLY.exec(versionOf(r))).filter((m) => m[2] === day).map((m) => Number(m[3]));
-    version = `${nextPatch(appVersion, stables)}-nightly.${day}.${Math.max(0, ...today) + 1}`;
+    version = nextNightly(appVersion, published.map(versionOf));
   }
 
   const tag = `v${version}`;
