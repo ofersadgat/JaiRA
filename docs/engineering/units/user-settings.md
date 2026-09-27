@@ -7,7 +7,7 @@ implements: [product/all-projects-in-one-place, product/see-what-changed-since-y
 layer: data
 owns_contracts: [engineering/contracts/user-settings-json]
 requires: [engineering/units/project-layout, engineering/units/app-log]
-implemented_by: [packages/shared/src/settings.ts, packages/app/src/main/service.ts, packages/persistence/src/userSettingsMigration.ts]
+implemented_by: [packages/shared/src/settings.ts, packages/service/src/service.ts, packages/persistence/src/userSettingsMigration.ts]
 verified_by: [packages/app/test/settings.test.ts, packages/app/test/service.test.ts, packages/app/test/diagnostics.test.ts, packages/persistence/test/userSettingsMigration.test.ts]
 siblings: [engineering/units/project-config, engineering/units/ui-layout-state, engineering/units/renderer-store]
 ---

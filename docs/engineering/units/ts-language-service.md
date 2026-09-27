@@ -7,7 +7,7 @@ implements: [product/catch-process-mistakes-before-running, product/review-chang
 layer: service
 owns_contracts: [engineering/contracts/ts-check-worker-protocol]
 requires: [engineering/units/workflow-authoring, engineering/units/project-sessions, engineering/units/task-worktrees]
-implemented_by: [packages/app/src/main/tsProject.ts, packages/app/src/main/tsCheck.ts, packages/app/src/main/tsProjectWorker.ts, packages/app/src/main/service.ts, packages/app/build.mjs]
+implemented_by: [packages/service/src/tsProject.ts, packages/service/src/tsCheck.ts, packages/service/src/tsProjectWorker.ts, packages/service/src/service.ts, packages/app/build.mjs]
 verified_by: [packages/app/test/tsProject.test.ts]
 siblings: [engineering/units/workflow-authoring, engineering/units/changesets, engineering/units/module-approvals]
 ---

@@ -7,7 +7,7 @@ implements: [product/complete-record-of-every-run, product/chat-with-agents, ui/
 layer: data
 owns_contracts: []
 requires: [engineering/units/operation-record-store, engineering/units/event-journal, engineering/units/board-projection]
-implemented_by: [packages/persistence/src/views.ts, packages/persistence/src/sessionStore.ts, packages/persistence/src/recordMessages.ts, packages/app/src/main/service.ts]
+implemented_by: [packages/persistence/src/views.ts, packages/persistence/src/sessionStore.ts, packages/persistence/src/recordMessages.ts, packages/service/src/service.ts]
 verified_by: [packages/persistence/test/sessionStore.test.ts, packages/persistence/test/recordCorners.test.ts, packages/app/test/service.test.ts, packages/app/test/chatConversation.test.ts, packages/app/test/chatDurability.test.ts]
 siblings: [engineering/units/operation-record-store, engineering/units/live-turns, engineering/units/chat-turns, engineering/units/board-projection]
 ---

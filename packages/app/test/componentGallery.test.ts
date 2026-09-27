@@ -29,7 +29,7 @@ import {
   validateComponentResult,
   type ComponentName,
 } from "@jaira/shared";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

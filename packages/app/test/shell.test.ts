@@ -12,7 +12,7 @@ import { initProject } from "@jaira/persistence";
 import { happyRules, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import { SHARED_SESSION, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

@@ -16,7 +16,7 @@ import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
 import { writeWorkflowFiles, type FakeRule } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 const ITEM = { type: "object", required: ["id", "title"], properties: { id: { type: "string" }, title: { type: "string" } } };
 const ITEMS: JsonValue = [

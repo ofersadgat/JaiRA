@@ -27,7 +27,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type PushMessage, type WorkflowSource } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 import { layerBarOf } from "../src/renderer/builtIn";
 import { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, titleOf } from "../src/renderer/chatWorkflow";
 import { debugFileStatus } from "../src/renderer/debugPane";

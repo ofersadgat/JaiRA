@@ -25,6 +25,8 @@
       "@jaira/shared": ["./packages/shared/src/index.ts"],
       "@jaira/runtime": ["./packages/runtime/src/index.ts"],
       "@jaira/persistence": ["./packages/persistence/src/index.ts"],
+      "@jaira/service": ["./packages/service/src/index.ts"],
+      "@jaira/service/*": ["./packages/service/src/*"],
       "@jaira/testing": ["./test/testing.ts"]
     }
   }

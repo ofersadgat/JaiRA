@@ -17,8 +17,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
-import { TsCheckers, TsProjects } from "../src/main/tsProject";
+import { AppService } from "@jaira/service";
+import { TsCheckers, TsProjects } from "@jaira/service/tsProject";
 
 let dir: string;
 let projects: TsProjects;

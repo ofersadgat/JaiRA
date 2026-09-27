@@ -7,7 +7,7 @@ implements: [product/everything-waiting-on-you-together, product/decisions-stay-
 layer: service
 owns_contracts: [engineering/contracts/inbox-channels]
 requires: [engineering/units/interaction-hub, engineering/units/component-contracts, engineering/units/task-lifecycle, engineering/units/run-load, engineering/units/executor-tree, engineering/units/engine-wiring, engineering/units/scripted-doubles, engineering/units/project-sessions, engineering/units/app-log]
-implemented_by: [packages/app/src/main/service.ts, packages/app/src/main/fastForward.ts, packages/persistence/src/interactions.ts]
+implemented_by: [packages/service/src/service.ts, packages/service/src/fastForward.ts, packages/persistence/src/interactions.ts]
 verified_by: [packages/app/test/service.test.ts, packages/app/test/gateDurability.test.ts, packages/app/test/artifactGateReload.test.ts, packages/app/test/followUp.test.ts, packages/app/test/fastForward.test.ts]
 siblings: [engineering/units/interaction-hub, engineering/units/component-contracts, engineering/units/task-lifecycle, engineering/units/ipc-bridge]
 ---

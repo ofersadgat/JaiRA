@@ -7,7 +7,7 @@ implements: [product/all-projects-in-one-place, product/see-what-changed-since-y
 layer: service
 owns_contracts: []
 requires: [engineering/units/project-sessions, engineering/units/board-projection, engineering/units/files-view-models, engineering/units/workflow-browser, engineering/units/task-lifecycle, engineering/units/history-pruning, engineering/units/conversation-lookup, engineering/units/operation-record-store, engineering/units/agent-executors, engineering/units/interaction-hub, engineering/units/project-layout]
-implemented_by: [packages/app/src/main/service.ts]
+implemented_by: [packages/service/src/service.ts]
 verified_by: [packages/app/test/service.test.ts, packages/app/test/shell.test.ts, packages/app/test/maintenance.test.ts, packages/app/test/workflowSync.test.ts]
 siblings: [engineering/units/project-sessions, engineering/units/board-projection, engineering/units/files-view-models, engineering/units/ipc-bridge]
 ---

@@ -12,7 +12,7 @@ siblings: [engineering/contracts/journal-events, engineering/contracts/task-file
 
 # Fan-out host answers
 
-How JaiRA's `fanOutHostFor` in `packages/app/src/main/fanOut.ts` reads an upstream `FanOutRequest`, and the `FanOutOutcome` it answers for each case.
+How JaiRA's `fanOutHostFor` in `packages/service/src/fanOut.ts` reads an upstream `FanOutRequest`, and the `FanOutOutcome` it answers for each case.
 
 ## The engine asks this host only for a hosted mount, and nothing else calls it
 

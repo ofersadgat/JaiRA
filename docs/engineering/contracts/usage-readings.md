@@ -5,7 +5,7 @@ status: shipped
 updated: 2026-09-24
 visibility: internal
 kind: api
-owned_by: ["declarative-ai: json/src/usage.ts, exec/src/limits.ts, agents-api/src/claudeUsage.ts, agents-cli/src/claudeUsageProbe.ts, agents-cli/src/codexUsage.ts", "packages/shared/src/usage.ts", "packages/app/src/main/limits.ts, packages/app/src/main/waiting.ts", "packages/app/src/renderer/usageMeters.tsx, packages/app/src/renderer/limitsStore.ts"]
+owned_by: ["declarative-ai: json/src/usage.ts, exec/src/limits.ts, agents-api/src/claudeUsage.ts, agents-cli/src/claudeUsageProbe.ts, agents-cli/src/codexUsage.ts", "packages/shared/src/usage.ts", "packages/service/src/limits.ts, packages/service/src/waiting.ts", "packages/app/src/renderer/usageMeters.tsx, packages/app/src/renderer/limitsStore.ts"]
 consumers: ["the preset rule `most-left` (`coder`, `planner`) — a preset's candidate with the most allowance left", "the composer: the conversation's ring and the account's number after the model chip", "the conversation view: each answer's reading on its rail, the compaction line, each state header's delta", "Settings → Connections: each sign-in card's weekly ring", "`model_limits` for a `$pick` expression (NAMES.md §6) — not built yet"]
 siblings: [engineering/contracts/exec-observer]
 ---

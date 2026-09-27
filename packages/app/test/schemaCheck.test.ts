@@ -14,7 +14,7 @@ import { SchemaValidator } from "@declarative-ai/validate";
 import type { JsonValue } from "@declarative-ai/json";
 import { initProject } from "@jaira/persistence";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

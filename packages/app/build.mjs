@@ -115,7 +115,7 @@ record(await build({
 // exactly the reason the note above gives — a bundled compiler cannot find its own `lib.*.d.ts`.
 record(await build({
   ...common,
-  entryPoints: { tsProjectWorker: "src/main/tsProjectWorker.ts" },
+  entryPoints: { tsProjectWorker: "../service/src/tsProjectWorker.ts" },
   outdir,
   outExtension: { ".js": ".cjs" },
   // As for the preload: `paths.ts` is parsed on the way to a constant and shaken out entirely.

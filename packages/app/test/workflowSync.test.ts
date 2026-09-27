@@ -22,7 +22,7 @@ import { initProject } from "@jaira/persistence";
 import { specPlanningFiles, syncRules, REVIEW_ARTIFACTS, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
 import { WORKFLOW_DESCRIPTION, WORKFLOW_DESCRIPTION_PATH } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

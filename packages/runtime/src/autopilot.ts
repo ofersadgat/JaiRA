@@ -9,7 +9,7 @@
  * This module builds that one call and reads its reply. It decides nothing:
  *
  *  - **which questions are even offered** is the host's, and it is the approval exclusion
- *    ([workflowHost](../../app/src/main/workflowHost.ts)): the two pending lists this reaches are
+ *    ([workflowHost](../../service/src/workflowHost.ts)): the two pending lists this reaches are
  *    filtered to `ANSWERABLE_COMPONENTS`, and an approval hub is not a dependency of either half.
  *    Nothing here could reach an approval if it wanted to;
  *  - **whether the answer stands** is `autopilot.askBelow`, applied by the host to the confidence

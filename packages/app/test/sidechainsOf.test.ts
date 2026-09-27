@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@declarative-ai/json";
-import { sidechainsOf } from "../src/main/service";
+import { sidechainsOf } from "@jaira/service";
 
 const record = (marker: Record<string, string>): JsonValue => ({
   value: {

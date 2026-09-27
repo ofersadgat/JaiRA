@@ -31,7 +31,7 @@ import { initProject, SqliteSessionStore } from "@jaira/persistence";
 import { chatInstanceIdOf } from "@jaira/runtime";
 import { CUT_OFF_EVENT, type PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 import { kept } from "../src/renderer/chatPane";
 import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 

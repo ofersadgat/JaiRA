@@ -15,7 +15,7 @@ import { initProject } from "@jaira/persistence";
 import { specPlanningFiles } from "@jaira/runtime";
 import { listSchemas, matchesFile, mergeSkeleton, propertiesOf, schemaById, schemaForFile, skeletonOf, withMissingFields } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

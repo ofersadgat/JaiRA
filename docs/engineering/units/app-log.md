@@ -7,7 +7,7 @@ implements: [product/find-out-why-the-app-misbehaves, product/failures-explain-t
 layer: service
 owns_contracts: []
 requires: [engineering/units/user-settings, engineering/units/project-layout, engineering/units/project-sessions, engineering/units/process-claims]
-implemented_by: [packages/app/src/main/diagnostics.ts, packages/app/src/main/service.ts]
+implemented_by: [packages/service/src/diagnostics.ts, packages/service/src/service.ts]
 verified_by: [packages/app/test/diagnostics.test.ts, packages/app/test/service.test.ts]
 siblings: [engineering/units/process-claims, engineering/units/user-settings, engineering/units/app-shell]
 ---

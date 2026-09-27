@@ -80,7 +80,7 @@ It deliberately does not own:
 ## The budgets are the repair turns and the chat wait
 
 - `DEFAULT_REPAIR_TURNS = 2` in `wiring.ts`; the CLI overrides it with `--repair-turns`.
-- `CHAT_WAIT_MS = 120_000` in `packages/app/src/main/service.ts`, the bound chat send passes to `LiveCalls.settle`.
+- `CHAT_WAIT_MS = 120_000` in `packages/service/src/service.ts`, the bound chat send passes to `LiveCalls.settle`.
 
 ## The wiring departs from the session design's layer order, and records every operation
 

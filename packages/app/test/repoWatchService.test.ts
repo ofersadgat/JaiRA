@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initProject } from "@jaira/persistence";
 import type { JsonValue } from "@declarative-ai/json";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 import { replayForge, type Replay } from "../../runtime/test/forgeReplay";
 import { buildRig, type Rig } from "../../runtime/test/remoteRig";
 

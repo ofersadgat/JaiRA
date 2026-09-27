@@ -7,7 +7,7 @@ implements: [product/watch-agents-work-live, ux/patterns/stream-then-settle, ux/
 layer: service
 owns_contracts: [engineering/contracts/session-live-protocol]
 requires: [engineering/units/engine-wiring, engineering/units/operation-record-store]
-implemented_by: [packages/app/src/main/liveTurns.ts, packages/app/src/renderer/liveTurnFold.ts]
+implemented_by: [packages/service/src/liveTurns.ts, packages/app/src/renderer/liveTurnFold.ts]
 verified_by: [packages/app/test/liveTurns.test.ts]
 siblings: [engineering/units/chat-turns, engineering/units/native-session-capture, engineering/units/renderer-store, engineering/units/conversation-lookup]
 ---
@@ -16,7 +16,7 @@ siblings: [engineering/units/chat-turns, engineering/units/native-session-captur
 
 ## Live turns hold the call a task is streaming, in main and in the renderer, until the settled record replaces it
 
-In main, `packages/app/src/main/liveTurns.ts`:
+In main, `packages/service/src/liveTurns.ts`:
 
 - `LiveTurnLog`, one per `ProjectSession`, folds each `TurnDelta` into one `LiveTurnSnapshot` per task. `apply(taskId, delta)` returns the delta's ordinal `n` and the entry stamped with host-clock times; `snapshot` returns a copy or `null`; `clear` drops the tail and keeps the counter; `drop` forgets both.
 - `LiveTurnFlusher` writes the snapshot into the open record at most once per interval through `SqliteSessionStore.update`, and `flush()` writes it at once for a stop. `dispose()` cancels the timer and writes nothing.

@@ -37,6 +37,7 @@
     "@declarative-ai/log": "file:../../../declarative-ai/packages/log",
     "@jaira/persistence": "*",
     "@jaira/runtime": "*",
+    "@jaira/service": "*",
     "@jaira/shared": "*",
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "^1.7.2",

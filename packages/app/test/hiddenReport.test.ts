@@ -14,8 +14,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { layeredHiddenRules } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
-import { walkHiddenReport } from "../src/main/hiddenReport";
+import { AppService } from "@jaira/service";
+import { walkHiddenReport } from "@jaira/service/hiddenReport";
 
 let dir: string;
 let baseDir: string;

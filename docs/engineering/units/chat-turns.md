@@ -7,7 +7,7 @@ implements: [product/chat-with-agents, product/steer-agents-mid-task, ui/compone
 layer: service
 owns_contracts: [engineering/contracts/chat-channels]
 requires: [engineering/units/engine-wiring, engineering/units/live-turns, engineering/units/native-session-capture, engineering/units/tool-policy, engineering/units/host-tools, engineering/units/executor-tree, engineering/units/event-journal, engineering/units/operation-record-store, engineering/units/conversation-lookup, engineering/units/board-projection, engineering/units/interaction-hub]
-implemented_by: [packages/runtime/src/chatOperation.ts, packages/runtime/src/chatTurn.ts, packages/app/src/main/service.ts, packages/app/src/main/session.ts]
+implemented_by: [packages/runtime/src/chatOperation.ts, packages/runtime/src/chatTurn.ts, packages/service/src/service.ts, packages/service/src/session.ts]
 verified_by: [packages/runtime/test/chatOperation.test.ts, packages/runtime/test/chatOperationLoaded.test.ts, packages/runtime/test/chatTurn.test.ts, packages/app/test/chatMessage.test.ts, packages/app/test/chatConversation.test.ts, packages/app/test/chatDurability.test.ts]
 siblings: [engineering/units/live-turns, engineering/units/conversation-lookup, engineering/units/rewind-and-fork, engineering/units/task-lifecycle]
 ---

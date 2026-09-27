@@ -26,8 +26,8 @@ import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
-import { SUSPENDED_WAITING } from "../src/main/session";
+import { AppService } from "@jaira/service";
+import { SUSPENDED_WAITING } from "@jaira/service/session";
 
 const ROOT = "gates";
 

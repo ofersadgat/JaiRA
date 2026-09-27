@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@declarative-ai/json";
 import type { SessionTurn } from "@jaira/shared";
-import { structuredOutputOf } from "../src/main/service";
+import { structuredOutputOf } from "@jaira/service";
 
 const SCHEMA: JsonValue = {
   type: "object",

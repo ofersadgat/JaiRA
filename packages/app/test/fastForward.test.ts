@@ -35,8 +35,8 @@ import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
 import { ANSWERED_EVENT, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, LEFT_EVENT, type InstanceNode, type PendingInteraction, type TaskConnectResult } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
-import { SkipWithdrawals } from "../src/main/fastForward";
+import { AppService } from "@jaira/service";
+import { SkipWithdrawals } from "@jaira/service/fastForward";
 
 const DECISION = { decision: { schema: { type: "string" } } };
 

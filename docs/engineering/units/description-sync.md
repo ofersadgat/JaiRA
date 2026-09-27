@@ -7,7 +7,7 @@ implements: [product/keep-process-and-description-in-step, product/review-change
 layer: service
 owns_contracts: [engineering/contracts/sync-record, engineering/contracts/workflow-sync-channels]
 requires: [engineering/units/changesets, engineering/units/workflow-browser, engineering/units/task-lifecycle, engineering/units/project-sessions, engineering/units/host-tools, engineering/units/task-worktrees, engineering/units/board-projection, engineering/units/drafts, engineering/units/app-log]
-implemented_by: [packages/persistence/src/descriptions.ts, packages/persistence/src/workflowSync.ts, packages/persistence/src/digest.ts, packages/runtime/src/conformanceWorkflow.ts, packages/runtime/src/syncWorkflow.ts, packages/app/src/main/service.ts, packages/app/src/main/session.ts, packages/app/src/renderer/syncState.ts, packages/app/src/renderer/store.ts]
+implemented_by: [packages/persistence/src/descriptions.ts, packages/persistence/src/workflowSync.ts, packages/persistence/src/digest.ts, packages/runtime/src/conformanceWorkflow.ts, packages/runtime/src/syncWorkflow.ts, packages/service/src/service.ts, packages/service/src/session.ts, packages/app/src/renderer/syncState.ts, packages/app/src/renderer/store.ts]
 verified_by: [packages/persistence/test/descriptions.test.ts, packages/persistence/test/workflowSync.test.ts, packages/persistence/test/digest.test.ts, packages/runtime/test/syncWorkflow.test.ts, packages/app/test/workflowSync.test.ts, packages/app/test/reviewSync.test.ts, packages/app/test/reviewChanges.test.ts, packages/app/test/syncState.test.ts, packages/cli/test/workflowCheck.test.ts]
 siblings: [engineering/units/workflow-authoring, engineering/units/workflow-browser, engineering/units/changesets, engineering/units/drafts]
 ---

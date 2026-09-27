@@ -18,7 +18,7 @@ import { jairaBasePaths, SHARED_SESSION, type PushMessage } from "@jaira/shared"
 import { testHome } from "@jaira/testing";
 import type { JsonValue } from "@declarative-ai/json";
 import { createLogger } from "@declarative-ai/log";
-import { AppService, Refusal } from "../src/main/service";
+import { AppService, Refusal } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

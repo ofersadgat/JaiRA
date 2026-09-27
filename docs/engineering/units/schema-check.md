@@ -7,7 +7,7 @@ implements: [product/author-processes-without-memorising-the-format, ux/patterns
 layer: service
 owns_contracts: [engineering/contracts/schema-check-channels]
 requires: [engineering/units/document-types, engineering/units/app-log]
-implemented_by: [packages/app/src/main/service.ts]
+implemented_by: [packages/service/src/service.ts]
 verified_by: [packages/app/test/schemaCheck.test.ts, packages/app/test/schemas.test.ts]
 siblings: [engineering/units/document-types, engineering/units/component-contracts, engineering/units/ipc-bridge]
 ---

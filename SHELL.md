@@ -43,7 +43,7 @@ thing stopping a second user project from staying open is one line in
 > is written for that, but letting a second one STAY open is a UI decision (which
 > project do the project-free channels answer for?) and is made separately.
 >
-> — `packages/app/src/main/service.ts:848`
+> — `packages/service/src/service.ts:848`
 
 This document is that decision.
 

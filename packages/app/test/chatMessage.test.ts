@@ -16,7 +16,7 @@ import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, chatInstanceIdOf, isChatInstance } from "@jaira/runtime";
 import { READ_ONLY_PRESET_TOOLS, subjectKindOf, type ChatSettings, type InstanceNode, type PushMessage, type PermissionMode, type PermissionSetDecl } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 /** The permission set files that ship — the source of truth the built-in layer is copied from. */
 const SHIPPED_PERMISSION_SETS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "shared", "builtin", "permission-sets");

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HealthItem } from "@jaira/shared";
-import { HealthBoard } from "../src/main/health";
+import { HealthBoard } from "@jaira/service/health";
 
 let dir: string;
 let pushed: HealthItem[][];

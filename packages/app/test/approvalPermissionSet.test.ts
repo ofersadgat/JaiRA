@@ -18,7 +18,7 @@ import type { PermissionDecision, PermissionRequest } from "@declarative-ai/perm
 import { initProject } from "@jaira/persistence";
 import { compilePolicy, type ApprovalHub } from "@jaira/runtime";
 import { lowerPermissionSet, parsePermissionSet, setBuiltInDir, type PermissionsDecl, type PushMessage } from "@jaira/shared";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 const REF = "$/permission-sets/chat/ask-first";
 const SHIPPED = { bash: "ask", read_file: "allow", write_file: "allow", "git commit": "ask", "git log": "allow", other: "deny" } as const;

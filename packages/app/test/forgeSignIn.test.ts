@@ -15,7 +15,7 @@ import { initProject } from "@jaira/persistence";
 import { testHome } from "@jaira/testing";
 import { DeviceFlowError, type ForgeHttp, type ForgeRequest, type ForgeResponse, type LocalFetch } from "@jaira/runtime";
 import { BUILTIN_OAUTH_APPS, parseSettings, type ForgeSignInOutcome, type PushMessage } from "@jaira/shared";
-import { AppService, type KeychainPort } from "../src/main/service";
+import { AppService, type KeychainPort } from "@jaira/service";
 
 let dir: string;
 let home: string;

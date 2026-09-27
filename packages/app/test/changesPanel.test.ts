@@ -4,7 +4,7 @@
  * part, and folders that hold only a folder merged into one row.
  */
 import { describe, expect, it } from "vitest";
-import { categoryOf, judgedCallsOf, rawCallsOf, type ReadOnlyJudge } from "../src/main/changeLog";
+import { categoryOf, judgedCallsOf, rawCallsOf, type ReadOnlyJudge } from "@jaira/service/changeLog";
 import { treeOf } from "../src/renderer/changesPanel";
 import type { FileChange } from "@jaira/shared";
 

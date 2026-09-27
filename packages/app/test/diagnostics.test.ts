@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LogEntry, LogPolicy } from "@jaira/shared";
-import { Diagnostics } from "../src/main/diagnostics";
+import { Diagnostics } from "@jaira/service/diagnostics";
 
 /** A directory that lives as long as one test. The mirror is the thing under test in most of these. */
 const withDir = (body: (dir: string) => void): void => {

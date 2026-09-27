@@ -7,7 +7,7 @@ implements: [product/share-processes-across-projects, product/bring-your-own-mod
 layer: data
 owns_contracts: [engineering/contracts/settings-json]
 requires: [engineering/units/project-store, engineering/units/project-layout, engineering/units/project-sessions, engineering/units/executor-tree, engineering/units/model-routing]
-implemented_by: [packages/shared/src/config.ts, packages/shared/src/configSchema.ts, packages/shared/src/configLayers.ts, packages/shared/src/appearanceConfig.ts, packages/app/src/main/service.ts]
+implemented_by: [packages/shared/src/config.ts, packages/shared/src/configSchema.ts, packages/shared/src/configLayers.ts, packages/shared/src/appearanceConfig.ts, packages/service/src/service.ts]
 verified_by: [packages/shared/test/configLayering.test.ts, packages/shared/test/configLayers.test.ts, packages/shared/test/shared.test.ts, packages/shared/test/configScopes.test.ts, packages/shared/test/executorTree.test.ts, packages/runtime/test/modelRoutes.test.ts, packages/app/test/settings.test.ts, packages/app/test/appearance.test.ts, packages/app/test/editorLook.test.ts, packages/app/test/fileTypes.test.ts, packages/persistence/test/userSettingsMigration.test.ts]
 siblings: [engineering/units/user-settings, engineering/units/secret-chain, engineering/units/executor-tree, engineering/units/project-store]
 ---

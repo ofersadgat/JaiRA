@@ -12,10 +12,10 @@ import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import type { LimitReading, PushMessage, WaitingItem } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { LimitsService } from "../src/main/limits";
-import { WaitingQueue, type WaitingHost } from "../src/main/waiting";
-import { LiveTurnLog } from "../src/main/liveTurns";
-import { AppService } from "../src/main/service";
+import { LimitsService } from "@jaira/service/limits";
+import { WaitingQueue, type WaitingHost } from "@jaira/service/waiting";
+import { LiveTurnLog } from "@jaira/service/liveTurns";
+import { AppService } from "@jaira/service";
 
 const spent = (resets = new Date(Date.now() + 3_600_000).toISOString()): LimitReading => ({
   route: "claude-cli",

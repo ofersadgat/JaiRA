@@ -7,7 +7,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { parseConfig, withPaths, type EventsStatusView, type JairaEventsConfig } from "@jaira/shared";
-import { EventTally } from "../src/main/eventTally";
+import { EventTally } from "@jaira/service/eventTally";
 import { writeLine, type AutomationLine, type ShownLine } from "../src/renderer/automationsModel";
 import { AutomationsView, type AutomationsViewProps } from "../src/renderer/automationsPane";
 import { connectionBadgeOf, eventGroupsOf, eventStatusLine, eventSwitchPath, eventSwitchWrites, eventsConfigOf } from "../src/renderer/eventsModel";

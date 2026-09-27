@@ -7,7 +7,7 @@ implements: [product/bring-your-own-models-and-agents, ux/patterns/secret-goes-i
 layer: core
 owns_contracts: [engineering/contracts/secret-sources]
 requires: [engineering/units/project-layout, engineering/units/project-sessions, engineering/units/app-shell]
-implemented_by: [packages/runtime/src/secrets.ts, packages/shared/src/executors.ts, packages/app/src/main/service.ts]
+implemented_by: [packages/runtime/src/secrets.ts, packages/shared/src/executors.ts, packages/service/src/service.ts]
 verified_by: [packages/runtime/test/secrets.test.ts, packages/app/test/settings.test.ts]
 siblings: [engineering/units/model-routing, engineering/units/agent-executors, engineering/units/project-config]
 ---

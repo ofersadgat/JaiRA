@@ -26,7 +26,7 @@ import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
 import type { BoardCard, TaskActivity, TaskConnectResult } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 const BOOLEAN = { type: "boolean" };
 

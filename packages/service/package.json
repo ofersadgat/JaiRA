@@ -1,0 +1,32 @@
+{
+  "name": "@jaira/service",
+  "version": "0.1.0",
+  "description": "JaiRA's engine as a service: every request the app, the CLI and (decision 0012) a local server make, with no Electron in it.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ofersadgat/JaiRA.git",
+    "directory": "packages/service"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",
+    "@declarative-ai/hw": "file:../../../declarative-ai/packages/hw",
+    "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
+    "@declarative-ai/llm": "file:../../../declarative-ai/packages/llm",
+    "@declarative-ai/log": "file:../../../declarative-ai/packages/log",
+    "@declarative-ai/permissions": "file:../../../declarative-ai/packages/permissions",
+    "@jaira/persistence": "*",
+    "@jaira/runtime": "*",
+    "@jaira/shared": "*",
+    "ajv": "^8.20.0",
+    "typescript": "^5.7.2"
+  }
+}

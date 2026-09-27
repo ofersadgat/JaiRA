@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { defaultAppearanceConfig, defaultLogPolicy, type JairaAppearanceConfig, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService, type KeychainPort } from "../src/main/service";
+import { AppService, type KeychainPort } from "@jaira/service";
 
 let dir: string;
 let baseDir: string;

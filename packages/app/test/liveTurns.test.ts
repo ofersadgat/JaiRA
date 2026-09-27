@@ -9,7 +9,7 @@
  * assistant turn — plus the `n` protocol that makes seed-then-push merging exact.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LiveTurnFlusher, LiveTurnLog, partialRecordValue } from "../src/main/liveTurns";
+import { LiveTurnFlusher, LiveTurnLog, partialRecordValue } from "@jaira/service/liveTurns";
 import type { JsonValue } from "@declarative-ai/json";
 
 const at = (id: string, seq: number) => ({ session: { id, seq } });

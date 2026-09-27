@@ -7,7 +7,7 @@ implements: [product/author-processes-without-memorising-the-format, product/sha
 layer: service
 owns_contracts: []
 requires: [engineering/units/project-sessions, engineering/units/workflow-browser, engineering/units/files-view-models, engineering/units/description-sync, engineering/units/git-cli, engineering/units/document-types, engineering/units/app-log]
-implemented_by: [packages/app/src/main/service.ts]
+implemented_by: [packages/service/src/service.ts]
 verified_by: [packages/app/test/settings.test.ts, packages/app/test/shell.test.ts, packages/app/test/fileIo.test.ts, packages/app/test/chatConversation.test.ts]
 siblings: [engineering/units/files-view-models, engineering/units/workflow-browser, engineering/units/description-sync, engineering/units/ts-language-service, engineering/units/uri-and-artifact-reads]
 ---

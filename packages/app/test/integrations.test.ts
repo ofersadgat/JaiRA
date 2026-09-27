@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { testHome } from "@jaira/testing";
 import type { ForgeCheck } from "@jaira/shared";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 import { forgeState } from "../src/renderer/integrationsPane";
 import { replayForge, type Replay } from "../../runtime/test/forgeReplay";
 

@@ -30,8 +30,8 @@ import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
 import { ANSWERED_EVENT, MOVED_EVENT, type AnsweredEvent, type MovedEvent, type MoveResult, type StartResult, type TasksResult, type WorkflowsResult } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
-import { ANSWERABLE_COMPONENTS } from "../src/main/workflowHost";
+import { AppService } from "@jaira/service";
+import { ANSWERABLE_COMPONENTS } from "@jaira/service/workflowHost";
 import { APPROVAL_PROMPT_FUNCTION } from "@jaira/shared";
 
 const BOOL: JsonValue = { type: "boolean" };

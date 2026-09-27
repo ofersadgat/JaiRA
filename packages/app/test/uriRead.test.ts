@@ -13,7 +13,7 @@ import { initProject, openProject } from "@jaira/persistence";
 import { SqliteSessionStore } from "@jaira/persistence";
 import { NodeExec, Git } from "@jaira/runtime";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

@@ -17,8 +17,8 @@ import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import { automationStateIdOf, automationStateOf, jairaBasePaths, type AutomationStep, type JairaEvent, type PushMessage, type TaskSummary } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
-import { SUSPENDED_WAITING } from "../src/main/session";
+import { AppService } from "@jaira/service";
+import { SUSPENDED_WAITING } from "@jaira/service/session";
 
 vi.setConfig({ testTimeout: 60_000 });
 

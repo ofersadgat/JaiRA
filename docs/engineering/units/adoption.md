@@ -7,7 +7,7 @@ implements: [product/large-work-splits-into-independent-pieces, product/pick-up-
 layer: service
 owns_contracts: []
 requires: [engineering/units/fan-out-host, engineering/units/run-load, engineering/units/task-lifecycle, engineering/units/rewind-and-fork, engineering/units/task-worktrees, engineering/units/workflow-snapshots, engineering/units/event-journal, engineering/units/schema-check]
-implemented_by: [packages/persistence/src/adopt.ts, packages/persistence/src/load.ts, packages/shared/src/adopt.ts, packages/app/src/main/service.ts]
+implemented_by: [packages/persistence/src/adopt.ts, packages/persistence/src/load.ts, packages/shared/src/adopt.ts, packages/service/src/service.ts]
 verified_by: [packages/app/test/taskAdopt.test.ts, packages/app/test/taskAdoptFanOut.test.ts, packages/persistence/test/adopt.test.ts, packages/persistence/test/adoptFanOut.test.ts]
 siblings: [engineering/units/fan-out-host, engineering/units/run-load, engineering/units/task-lifecycle, engineering/units/board-projection]
 ---

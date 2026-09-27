@@ -7,7 +7,7 @@ implements: [product/all-projects-in-one-place, product/pick-up-where-it-left-of
 layer: service
 owns_contracts: []
 requires: [engineering/units/project-store, engineering/units/project-layout, engineering/units/module-approvals, engineering/units/interaction-gateway, engineering/units/interaction-hub, engineering/units/task-lifecycle, engineering/units/native-session-capture, engineering/units/user-settings, engineering/units/agent-executors, engineering/units/app-log]
-implemented_by: [packages/app/src/main/service.ts, packages/app/src/main/session.ts]
+implemented_by: [packages/service/src/service.ts, packages/service/src/session.ts]
 verified_by: [packages/app/test/service.test.ts, packages/app/test/settings.test.ts, packages/app/test/maintenance.test.ts, packages/app/test/gateDurability.test.ts]
 siblings: [engineering/units/view-addressing, engineering/units/project-store, engineering/units/app-shell, engineering/units/interaction-gateway]
 ---

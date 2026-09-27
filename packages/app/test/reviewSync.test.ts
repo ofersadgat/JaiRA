@@ -17,7 +17,7 @@ import { REVIEW_ARTIFACTS } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { Changeset, PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
-import { AppService } from "../src/main/service";
+import { AppService } from "@jaira/service";
 
 let dir: string;
 let service: AppService;

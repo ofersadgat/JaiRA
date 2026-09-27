@@ -7,7 +7,7 @@ implements: [product/rewind-to-where-it-went-wrong, product/try-another-directio
 layer: service
 owns_contracts: [engineering/contracts/task-channels]
 requires: [engineering/units/task-lifecycle, engineering/units/run-load, engineering/units/operation-record-store, engineering/units/event-journal, engineering/units/storage-policy, engineering/units/interaction-gateway, engineering/units/interaction-hub, engineering/units/process-claims, engineering/units/chat-turns, engineering/units/app-log]
-implemented_by: [packages/persistence/src/cut.ts, packages/app/src/main/service.ts]
+implemented_by: [packages/persistence/src/cut.ts, packages/service/src/service.ts]
 verified_by: [packages/persistence/test/cut.test.ts, packages/persistence/test/holding.test.ts, packages/app/test/runCut.test.ts, packages/app/test/chatCut.test.ts]
 siblings: [engineering/units/run-load, engineering/units/task-lifecycle, engineering/units/operation-record-store, engineering/units/fan-out-host]
 ---

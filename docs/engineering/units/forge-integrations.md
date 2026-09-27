@@ -7,7 +7,7 @@ implements: [product/review-changes-before-they-land, ux/patterns/checked-status
 layer: core
 owns_contracts: []
 requires: [engineering/units/secret-chain, engineering/units/project-config, engineering/units/user-settings, engineering/units/ipc-bridge]
-implemented_by: [packages/shared/src/forge.ts, packages/runtime/src/forge/index.ts, packages/runtime/src/forge/http.ts, packages/runtime/src/forge/github.ts, packages/runtime/src/forge/gitlab.ts, packages/runtime/src/forge/deviceFlow.ts, packages/app/src/main/service.ts]
+implemented_by: [packages/shared/src/forge.ts, packages/runtime/src/forge/index.ts, packages/runtime/src/forge/http.ts, packages/runtime/src/forge/github.ts, packages/runtime/src/forge/gitlab.ts, packages/runtime/src/forge/deviceFlow.ts, packages/service/src/service.ts]
 verified_by: [packages/shared/test/forge.test.ts, packages/runtime/test/forge.test.ts, packages/runtime/test/deviceFlow.test.ts, packages/app/test/integrations.test.ts, packages/app/test/forgeSignIn.test.ts]
 siblings: [engineering/units/secret-chain, engineering/units/model-routing, engineering/units/agent-executors]
 ---

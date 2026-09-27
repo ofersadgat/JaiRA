@@ -13,7 +13,7 @@ connections"). The person's rulings of 2026-09-26 are quoted where they settle s
 
 ## Context
 
-The engine is `AppService` (`packages/app/src/main/service.ts`, about 12k lines). It imports no Electron.
+The engine is `AppService` (`packages/service/src/service.ts`, about 12k lines). It imports no Electron.
 The capabilities only Electron has are injected: `publish`, `keychain`, `reveal` and `openExternal`.
 
 The desktop reaches it through one bridge:
@@ -184,6 +184,38 @@ If every step finds nothing, there is no host.
    plain Node from npm.
 6. CLI commands through the host, with terminal approvals over pushes.
 7. `engine.separateServer` and `engine.keepServerRunning`. Their Settings rows are drawn first.
+
+## Built
+
+**Step 1, 2026-09-27: the engine is `@jaira/service`, with no change in behaviour.**
+
+- **What moved:** everything in `packages/app/src/main` without Electron in it went to
+  `packages/service/src`: `service.ts`, `session.ts`, `limits.ts`, `waiting.ts`, `health.ts`,
+  `diagnostics.ts`, the TypeScript worker and the rest. Only `index.ts` and `preload.ts` import
+  Electron.
+- **What stayed with the desktop:** `index.ts` and `preload.ts`, plus the updater (`updates.ts`) and the
+  `jaira` command's status (`cliCommand.ts`), which are the installed app's concerns.
+- **How it is reached:** the package exports `.` and `./*`. Tests reach a module as
+  `@jaira/service/<module>` (70 imports rewritten). `tsconfig.base.json` paths and the vitest aliases
+  resolve it to this checkout's sources, as for the other `@jaira/*` packages, and `npm run typecheck`
+  checks it.
+- **The one dispatch:** `serviceHandlers(service)` (`handlers.ts`) answers the 136 channels that are the
+  service's. `HOST_CHANNELS` lists the 15 a host answers itself:
+  - Electron's save dialog, download, image copy and editor launch;
+  - the licence file;
+  - the updater;
+  - plugins;
+  - the `jaira` command.
+  
+  The desktop merges its own over the service's, typed `Record<IpcChannel, Handler>`, so a channel
+  missing from both still fails to compile.
+- **Plugins stay a host channel for now.** Their downloads, and the progress main keeps for them, move
+  when a server needs them (step 5).
+- **The worker bundle:** the app's `build.mjs` now builds the TypeScript worker from
+  `../service/src/tsProjectWorker.ts`. The workers are still found beside whichever bundle includes the
+  service (`__dirname`).
+- **Verified:** typecheck, the full suite (351 files), and the packaged app's probe, command and smoke
+  test.
 
 ## Consequences
 

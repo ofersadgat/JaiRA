@@ -7,7 +7,7 @@ implements: [product/large-work-splits-into-independent-pieces, ux/patterns/nest
 layer: service
 owns_contracts: [engineering/contracts/fan-out-host-answers]
 requires: [engineering/units/event-journal, engineering/units/task-lifecycle, engineering/units/rewind-and-fork, engineering/units/task-worktrees, engineering/units/app-log]
-implemented_by: [packages/app/src/main/fanOut.ts]
+implemented_by: [packages/service/src/fanOut.ts]
 verified_by: [packages/app/test/eachHosted.test.ts]
 siblings: [engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/run-load, engineering/units/adoption]
 ---

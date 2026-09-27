@@ -7,7 +7,7 @@ implements: [product/read-what-work-produced, product/review-changes-before-they
 layer: service
 owns_contracts: [engineering/contracts/uri-read, engineering/contracts/artifact-frame-protocol]
 requires: [engineering/units/project-sessions, engineering/units/artifact-placement, engineering/units/git-cli, engineering/units/operation-record-store, engineering/units/changesets, engineering/units/document-types]
-implemented_by: [packages/app/src/main/service.ts]
+implemented_by: [packages/service/src/service.ts]
 verified_by: [packages/app/test/uriRead.test.ts, packages/app/test/artifactServe.test.ts]
 siblings: [engineering/units/app-shell, engineering/units/artifact-placement, engineering/units/workflow-authoring, engineering/units/changesets]
 ---

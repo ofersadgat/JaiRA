@@ -7,7 +7,7 @@ implements: [product/read-what-work-produced, product/agents-act-only-where-allo
 layer: core
 owns_contracts: [engineering/contracts/host-tool-vocabulary]
 requires: [engineering/units/tool-policy, engineering/units/artifact-placement, engineering/units/process-exec]
-implemented_by: [packages/runtime/src/tools.ts, packages/runtime/src/fileTools.ts, packages/runtime/src/searchTools.ts, packages/runtime/src/webTools.ts, packages/runtime/src/workflowTools.ts, packages/app/src/main/workflowHost.ts]
+implemented_by: [packages/runtime/src/tools.ts, packages/runtime/src/fileTools.ts, packages/runtime/src/searchTools.ts, packages/runtime/src/webTools.ts, packages/runtime/src/workflowTools.ts, packages/service/src/workflowHost.ts]
 verified_by: [packages/runtime/test/tools.test.ts, packages/runtime/test/fileTools.test.ts, packages/runtime/test/artifactAgent.test.ts, packages/runtime/test/searchTools.test.ts, packages/runtime/test/scopeWalkAndCommand.test.ts, packages/runtime/test/webTools.test.ts, packages/runtime/test/webSearch.test.ts, packages/runtime/test/agentToolPlan.test.ts, packages/runtime/test/workflowTools.test.ts, packages/app/test/workflowTools.test.ts]
 siblings: [engineering/units/tool-policy, engineering/units/artifact-placement, engineering/units/agent-executors, engineering/units/process-exec]
 ---
