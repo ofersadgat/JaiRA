@@ -32,7 +32,18 @@ import {
 } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { autoUpdater } from "electron-updater";
-import { AppService, serviceHandlers, stackDetail, type CrashKind, type Handler, type HostChannel, type KeychainPort } from "@jaira/service";
+import {
+  AppService,
+  claimEngine,
+  readEngineFile,
+  serviceHandlers,
+  stackDetail,
+  type CrashKind,
+  type EngineHost,
+  type Handler,
+  type HostChannel,
+  type KeychainPort,
+} from "@jaira/service";
 import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { startPlugins } from "@jaira/runtime";
@@ -248,7 +259,16 @@ function pushToWindow(message: PushMessage): void {
     // this frame is in no position to answer.
     reportCrash("push", new Error(`'${message.type}' could not be delivered: ${(e as Error).message}`));
   }
+  // …and to every client of the engine's pipe (decision 0012 §3), under the same rule: news.
+  try {
+    engineHost?.broadcast(message);
+  } catch (e) {
+    reportCrash("push", new Error(`'${message.type}' could not be sent on the engine's pipe: ${(e as Error).message}`));
+  }
 }
+
+/** This process's hold on the engine's pipe, once claimed; undefined while another process holds it. */
+let engineHost: EngineHost | undefined;
 
 const service = new AppService({
   ...(home !== undefined ? { baseDir: home } : {}),
@@ -600,6 +620,53 @@ const hostHandlers: Record<HostChannel, Handler> = {
 const handlers: Record<IpcChannel, Handler> = { ...serviceHandlers(service), ...hostHandlers };
 
 /**
+ * What a settings write means to this process besides the write: the window controls are drawn by the
+ * OS, so a theme switch has to be pushed out to them, and the update channel is read here, not by the window.
+ */
+function afterConfigWrite(): void {
+  repaintTitleBar();
+  updates.configure(service.updateSettings());
+}
+
+/**
+ * Claim the engine's pipe (decision 0012 §2–§3), so the CLI and a second window's process reach this
+ * engine rather than opening the databases beside it. The pipe answers the SERVICE's channels only: the
+ * host's own (dialogs, the clipboard, the updater, plugins) are this window's. Another process holding
+ * the pipe is said in the log; using its engine instead of this one is step 4.
+ */
+async function hostEngine(): Promise<void> {
+  const pipeHandlers: Partial<Record<string, Handler>> = {
+    ...serviceHandlers(service),
+    "config:write": (async (request: unknown) => {
+      const answer = await (handlers["config:write"] as (request: unknown) => unknown)(request);
+      afterConfigWrite();
+      return answer;
+    }) as Handler,
+  };
+  try {
+    engineHost = await claimEngine({
+      baseDir: service.baseRoot(),
+      kind: "desktop",
+      version: app.getVersion(),
+      handlers: pipeHandlers,
+      onFailure: (channel, error) => service.recordIpcFailure(channel, error),
+      log: (level, message) => service.recordApp(level, message),
+    });
+    if (engineHost === undefined) {
+      const other = readEngineFile(service.baseRoot());
+      service.recordApp(
+        "warn",
+        other === undefined
+          ? "another process holds the engine's pipe; this window runs its own engine beside it"
+          : `another process (${other.kind}, pid ${other.pid}, JaiRA ${other.version}) holds the engine's pipe; this window runs its own engine beside it`,
+      );
+    }
+  } catch (e) {
+    service.recordApp("warn", `the engine's pipe could not be opened: ${(e as Error).message}`);
+  }
+}
+
+/**
  * The Licenses page's manifest, written beside the renderer by its build (`licenses/thirdPartyLicenses.ts`).
  * Read on each ask rather than kept: the page is opened rarely, and the file is half a megabyte.
  */
@@ -626,10 +693,7 @@ function registerIpc(): void {
         // OS, so a theme switch — a write to a settings layer's `appearance` — has to be pushed back
         // out to it.
         // …and the update channel is the machine's setting, read by the main process, not the window.
-        if (channel === "config:write") {
-          repaintTitleBar();
-          updates.configure(service.updateSettings());
-        }
+        if (channel === "config:write") afterConfigWrite();
         return answer;
       } catch (e) {
         // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
@@ -909,7 +973,8 @@ async function captureAndExit(win: BrowserWindow, file: string): Promise<void> {
 function startupProject(): string | undefined {
   const fromEnv = process.env["JAIRA_PROJECT"];
   if (fromEnv) return resolve(fromEnv);
-  const fromArgv = process.argv.slice(app.isPackaged ? 1 : 2).find((a) => !a.startsWith("-"));
+  // Past `--home <dir>`, whose value is a base root, not a project.
+  const fromArgv = takeHomeFlag(process.argv.slice(app.isPackaged ? 1 : 2)).rest.find((a) => !a.startsWith("-"));
   if (fromArgv && existsSync(fromArgv)) return resolve(fromArgv);
   return isProject(process.cwd()) ? process.cwd() : undefined;
 }
@@ -974,6 +1039,7 @@ void app.whenReady().then(async () => {
   // controls are drawn by the OS from a colour we hand it, so they have to be handed the new one.
   nativeTheme.on("updated", () => repaintTitleBar());
   registerIpc();
+  void hostEngine();
   // The projects this window had open when it was last quit, before the one the command line names:
   // restoring first keeps the list's own order (oldest to newest) and leaves an explicitly requested
   // directory opened LAST, which is what `service.current()` hands the window to stand at.
@@ -1055,7 +1121,10 @@ app.on("before-quit", (event) => {
   // is a quit, and telling those two apart in yesterday's file is most of reading it.
   service.recordApp("info", "quitting: draining runs and closing the databases");
   updates.stop();
-  void service.close().finally(() => {
+  // The pipe goes first: nothing should start a run on an engine that is draining.
+  const host = engineHost;
+  engineHost = undefined;
+  void (host?.close() ?? Promise.resolve()).then(() => service.close()).finally(() => {
     // A downloaded update installs at the end of EVERY quit (the person, 2026-09-26: "if not now is
     // pressed or the app is otherwise closed, the update happens on restart"): the runs have drained and
     // the databases are closed before anything replaces the app. It starts the app again only when the

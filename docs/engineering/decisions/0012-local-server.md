@@ -83,7 +83,8 @@ at most one per user and per `JAIRA_HOME`.
 - Windows grants a named pipe's first instance only with `FILE_FLAG_FIRST_PIPE_INSTANCE`. It must be
   confirmed that Node's `net` listen refuses a second host.
 - **Windows' default named-pipe DACL lets other accounts read.** The pipe must be created with a DACL
-  for the current user only, or connections from another user refused.
+  for the current user only, or connections from another user refused. (As built, they are refused:
+  Node cannot set the DACL, so `hello` needs a token only the person can read. See Built, step 2.)
 - A stale Unix socket file is replaced only after a connect to it fails.
 
 **When a client loses its host,** for example because `jaira serve` was stopped, it runs discovery (§4)
@@ -216,6 +217,55 @@ If every step finds nothing, there is no host.
   service (`__dirname`).
 - **Verified:** typecheck, the full suite (351 files), and the packaged app's probe, command and smoke
   test.
+
+**Step 2, 2026-09-27: the desktop hosts the engine on the pipe.**
+
+- **The pieces** are three modules in `@jaira/service`:
+  - `enginePipe.ts`: the paths, `engine.json`, the frames and `ENGINE_CONTRACT`;
+  - `engineHost.ts`: `claimEngine` and `EngineHost`;
+  - `engineClient.ts`: `connectEngine` and `EngineClient`, for steps 4 and 6.
+- **The claim is the listen, measured.** On Windows a second `listen` on the same pipe name fails with
+  `EADDRINUSE`, in the same process and from another one, so `claimEngine` answers `undefined` and
+  nothing else is needed.
+  - On POSIX a socket file that nothing answers on is removed and the listen tried once more.
+  - A Windows pipe goes with its process. A hard-killed desktop left its `engine.json` behind, and the
+    next launch claimed the pipe and wrote over it.
+- **Other accounts are kept out by a token, not a DACL.** Node's `net` cannot set a pipe's DACL.
+  - The host writes a random 32-byte token into `engine.json`, in the person's profile, `0600` where
+    modes exist.
+  - The host sends nothing until a client's `hello` carries that token; it is compared in constant time.
+  - So a client that cannot read the person's files cannot get past `hello`.
+- **The frames:**
+  - Client to host: `hello {token, contract, version, client}`, then `req {id, channel, request}`.
+  - Host to client: `welcome {host}` or `refused {reason}`, then `res {id, ok, result | error}` and
+    `push {message}`.
+  - Every frame is length-prefixed JSON (4 bytes, big-endian), at most 256 MB.
+- **The contract** is a hash of the sorted channel names. A client with another is refused, with both
+  versions named. Offering to restart the host on the client's version is the desktop client's job
+  (step 4).
+- **What the pipe answers:**
+  - The pipe answers the service's channels (`serviceHandlers`), plus the desktop's follow-up to
+    `config:write` (the title bar and the update channel).
+  - It does not answer the host's own channels (dialogs, the clipboard, the updater, plugins), which
+    belong to the window.
+  - Every push to the window also goes to every client that is past `hello`.
+- **The desktop:**
+  - It claims the pipe once IPC is registered, and closes it first on quit, before the service drains.
+  - A second desktop logs which process holds the pipe, and runs its own engine beside it until step 4.
+  - Per-connection state (`project:current`, `limits:watch`) is left for step 4, which has more than one
+    window to keep apart.
+- **Found on the real app:**
+  - The host used to log "`client` connected" before sending the welcome. That log line is itself a
+    push, so a client's first frame was not its welcome. The welcome now goes first, and a test holds
+    that order.
+  - Separately, `--home <dir>`'s value was being opened as the startup project. The project is now
+    read from the arguments left once `--home` is taken out.
+- **Verified:**
+  - Six pipe tests.
+  - Against the built app: a separate process said hello with `engine.json`'s token, got the welcome,
+    asked `project:current`, was refused `shell:saveFile`, and heard the pushes.
+  - A second instance logged the holder, and a relaunch after a hard kill reclaimed the pipe.
+  - The full suite.
 
 ## Consequences
 

@@ -7,3 +7,6 @@
 export * from "./service";
 export { stackDetail } from "./diagnostics";
 export * from "./handlers";
+export * from "./enginePipe";
+export * from "./engineHost";
+export * from "./engineClient";
