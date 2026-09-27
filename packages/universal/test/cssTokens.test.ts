@@ -26,6 +26,14 @@ describe("styles.css tokens, replayed for native", () => {
     expect(sidebar.panel).toBe("rgb(39, 42, 61)");
   });
 
+  it("resolves a reference where it is DECLARED: a subtree's --accent does not recolour the root's --focus-ring", () => {
+    // Found by shots/tokens-check.mts against Chromium: custom properties inherit computed values.
+    const root = resolveAt({ palette: "blueprint", scheme: "light" });
+    const sidebar = resolveAt({ palette: "blueprint", scheme: "light", scopes: ["sidebar"] });
+    expect(sidebar.accent).not.toBe(root.accent);
+    expect(sidebar["focus-ring"]).toBe(root["focus-ring"]);
+  });
+
   it("reads px lengths as numbers, and evaluates calc() over them", () => {
     const ink = resolveAt({ palette: "ink", scheme: "light" });
     expect(ink["size-data"]).toBe(12);

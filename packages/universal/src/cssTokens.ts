@@ -53,23 +53,49 @@ export function declarationsAt(where: Where, blocks: readonly TokenBlock[] = BLO
 /** A resolved value: a number for a length in px or a bare number, a string for anything else. */
 export type TokenValue = string | number;
 
-/** Every custom property at `where`, evaluated as far as native can use it. */
+/**
+ * Every custom property at `where`, evaluated as far as native can use it.
+ *
+ * Level by level, as the browser does it: a custom property INHERITS ITS COMPUTED VALUE, so a
+ * reference is resolved on the element that declares it, not where it is used. `--focus-ring:
+ * color-mix(… var(--accent) …)` is computed on the root, and the sidebar redefining `--accent` does not
+ * change the ring the sidebar inherits. So the root's declarations are evaluated first, and each scope's
+ * over what it inherits from the level above.
+ */
 export function resolveAt(where: Where, blocks: readonly TokenBlock[] = BLOCKS): Record<string, TokenValue> {
-  const raw = declarationsAt(where, blocks);
+  const scopes = where.scopes ?? [];
+  let inherited: Record<string, TokenValue> = {};
+  for (let level = 0; level <= scopes.length; level++) {
+    const here = { ...where, scopes: scopes.slice(0, level) };
+    const all = declarationsAt(here, blocks);
+    // Only what THIS level declares; everything else arrives computed from the level above.
+    const declared = level === 0 ? all : declaredOnlyAt(here, scopes[level - 1]!, blocks);
+    inherited = computeLevel(declared, inherited);
+  }
+  return inherited;
+}
+
+/** The declarations the innermost scope `scope` adds at `where`. */
+function declaredOnlyAt(where: Where, scope: string, blocks: readonly TokenBlock[]): Record<string, string> {
+  return declarationsAt(where, blocks.filter((b) => b.scope === scope));
+}
+
+function computeLevel(declared: Record<string, string>, inherited: Record<string, TokenValue>): Record<string, TokenValue> {
   const done: Record<string, TokenValue> = {};
   const busy = new Set<string>();
   const get = (name: string): TokenValue | undefined => {
     if (name in done) return done[name];
-    const value = raw[name];
-    if (value === undefined || busy.has(name)) return undefined;
+    const value = declared[name];
+    if (value === undefined) return inherited[name];
+    if (busy.has(name)) return undefined;
     busy.add(name);
     const out = evaluate(value, get);
     busy.delete(name);
     done[name] = out;
     return out;
   };
-  for (const name of Object.keys(raw)) get(name);
-  return done;
+  for (const name of Object.keys(declared)) get(name);
+  return { ...inherited, ...done };
 }
 
 /** Substitute `var()`s, then evaluate a whole-value `color-mix()` or `calc()`. */
@@ -123,6 +149,13 @@ export function parseColor(text: string): Rgba | undefined {
     const full = hex.length <= 4 ? [...hex].map((c) => c + c).join("") : hex;
     const n = (i: number): number => parseInt(full.slice(i, i + 2), 16);
     return { r: n(0), g: n(2), b: n(4), a: full.length === 8 ? n(6) / 255 : 1 };
+  }
+  // What Chromium reports for a `color-mix()` result: `color(srgb 0.14 0.38 0.78 / 0.1)`, channels 0–1.
+  const srgb = /^color\(srgb\s+([^)]*)\)$/.exec(t)?.[1];
+  if (srgb !== undefined) {
+    const [rgb = "", alpha] = srgb.split("/");
+    const [r = 0, g = 0, b = 0] = rgb.trim().split(/\s+/).map(Number);
+    return { r: r * 255, g: g * 255, b: b * 255, a: alpha === undefined ? 1 : Number(alpha.trim()) };
   }
   const fn = /^rgba?\(([^)]*)\)$/.exec(t)?.[1];
   if (fn !== undefined) {
