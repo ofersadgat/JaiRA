@@ -24,7 +24,8 @@
 #   branch's commit) or stable (promotes the latest nightly's commit;
 #   RELEASE_VERSION overrides its X.Y.Z);
 # - a pipeline schedule with RELEASE_CHANNEL = nightly, skipped when nothing is
-#   new since the last nightly, or when that is under six hours old.
+#   new since the last nightly, and at any hour but 2am Pacific. Set the schedule
+#   (Build > Pipeline schedules) to "7 2 * * *" in America/Los_Angeles.
 #
 # GitLab.com's hosted runners build Linux x64, Linux arm64 and Windows x64. There
 # is no macOS (it needs a Premium plan) and no Windows arm64, so GitLab's releases

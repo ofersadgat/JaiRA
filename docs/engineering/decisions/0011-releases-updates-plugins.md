@@ -140,8 +140,8 @@ electron-builder runs with `--publish never`.
 - **Triggers:**
   - **A `vX.Y.Z` tag on JaiRA** releases stable. Stable builds the commit of the latest published
     nightly, as t3code does, so what ships as stable is what ran as nightly.
-  - **A schedule** checks whether a nightly is due. One is due when at least six hours have passed since
-    the last nightly and there are new commits.
+  - **A schedule** checks whether a nightly is due. One is due once a day, at 2am Pacific, when there are
+    new commits (the person, 2026-09-27: "once a day at 2am").
   - **A manual run** can release any channel.
 - **Versions:**
   - Stable is `X.Y.Z`.
@@ -352,8 +352,9 @@ the machine it runs on.
   - A `vX.Y.Z` tag releases that commit as stable.
   - A manual stable run promotes the latest nightly's commit, with the nightly's `X.Y.Z` unless a
     version is given.
-  - A nightly builds `main`. The schedule is every six hours, and it skips a run with no new commit
-    since the last nightly or within six hours of it.
+  - A nightly builds `main`. The schedule fires at 09:07 and 10:07 UTC, and the plan builds only on the
+    run where it is 2am in America/Los_Angeles (`NIGHTLY_ZONE`, `NIGHTLY_HOUR`). It skips a run with no
+    new commit since the last nightly, or within 20 hours of it.
   - The nightly version is the next patch after both the app's `package.json` and the newest stable
     release, so nothing is committed back.
   - The notes record `jaira-commit:` and `declarative-ai-commit:` (read back to promote a nightly),

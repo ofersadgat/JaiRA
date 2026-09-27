@@ -30,7 +30,20 @@ import { NIGHTLY, RELEASES_REPO, STABLE, commitOf, github, nextNightly, nightlie
 
 const env = process.env;
 const UPSTREAM_REPO = "ofersadgat/declarative-ai";
-const NIGHTLY_GAP_MS = 6 * 60 * 60 * 1000;
+/** Never two nightlies in a day, whatever a schedule does. */
+const NIGHTLY_GAP_MS = 20 * 60 * 60 * 1000;
+/**
+ * A scheduled nightly is built at 2am in this zone, and at no other hour (the person, 2026-09-27: "once
+ * a day at 2am (as they say...nothing good ever happens after 2am)"). A cron has no zone and daylight
+ * saving moves 2am across UTC, so the schedules fire at both candidate hours and this picks the one.
+ */
+const NIGHTLY_ZONE = env.NIGHTLY_ZONE || "America/Los_Angeles";
+const NIGHTLY_HOUR = Number(env.NIGHTLY_HOUR || 2);
+
+/** The hour it is now in a zone, 0-23. */
+export function hourIn(zone, at = new Date()) {
+  return Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", hourCycle: "h23" }).format(at));
+}
 
 function output(values) {
   const lines = Object.entries(values).map(([key, value]) => {
@@ -93,6 +106,9 @@ async function plan() {
   } else {
     commit = env.GITHUB_SHA;
     const last = nightlies[0];
+    if (env.EVENT === "schedule" && hourIn(NIGHTLY_ZONE) !== NIGHTLY_HOUR) {
+      return skip(`a nightly is built at ${NIGHTLY_HOUR}:00 in ${NIGHTLY_ZONE}, and it is ${hourIn(NIGHTLY_ZONE)}:00 there`);
+    }
     if (env.EVENT === "schedule" && last !== undefined) {
       if (commitOf(last) === commit) return skip(`${last.tag_name} already built ${commit.slice(0, 8)}`);
       const age = Date.now() - Date.parse(last.published_at);

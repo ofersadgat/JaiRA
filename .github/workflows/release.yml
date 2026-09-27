@@ -7,8 +7,8 @@ name: Release
 # - a pushed `vX.Y.Z` tag releases that commit as stable, and a `vX.Y.Z-nightly.YYYYMMDD.N` tag as that
 #   nightly (`npm run release-<major|minor|patch|nightly>-version` pushes them);
 # - a manual `stable` run promotes the latest nightly's commit;
-# - a nightly builds `main`, from the schedule (skipped with no new commits or within six hours of the
-#   last nightly) or by hand.
+# - a nightly builds `main`, from the schedule (once a day at 2am Pacific; skipped with no new commits) or
+#   by hand.
 #
 # Needs one secret: RELEASES_TOKEN, a fine-grained token with Contents read/write on the releases
 # repository and nothing else.
@@ -19,7 +19,9 @@ on:
   push:
     tags: ["v*.*.*"]
   schedule:
-    - cron: "17 */6 * * *"
+    # 2am in Los Angeles is 09:00 UTC in summer and 10:00 in winter: both fire, and the plan builds only
+    # on the one where it is 2am there (`NIGHTLY_ZONE`, `NIGHTLY_HOUR` in scripts/release/plan.mjs).
+    - cron: "7 9,10 * * *"
   workflow_dispatch:
     inputs:
       channel:
