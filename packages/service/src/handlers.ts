@@ -200,6 +200,14 @@ export function serviceHandlers(service: AppService): Record<ServiceChannel, Han
       service.health.dismiss(request.id);
       return service.health.list();
     }) as Handler,
+    "machines:view": (() => service.fleet.view()) as Handler,
+    "machines:rename": ((request: { label: string }) => service.fleet.rename(request.label)) as Handler,
+    "machines:tags": ((request: { tags: string[] }) => service.fleet.setTags(request.tags)) as Handler,
+    "machines:reach": ((request: { on: boolean }) => service.fleet.setReachable(request.on === true)) as Handler,
+    "machines:pairCode": (() => service.fleet.pairingCode()) as Handler,
+    "machines:pairCancel": (() => service.fleet.cancelPairing()) as Handler,
+    "machines:add": ((request: { address: string; code: string }) => service.fleet.add(request.address, request.code)) as Handler,
+    "machines:forget": ((request: { id: string }) => service.fleet.forget(request.id)) as Handler,
     "health:dismissAll": (() => {
       service.health.dismissAll();
       return service.health.list();

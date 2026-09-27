@@ -37,6 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
+import type { MachinesView } from "./machines";
 import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
@@ -2257,6 +2258,19 @@ export interface IpcContract {
   "cli:install": { request: void; response: CliCommandStatus };
   /** Where this window's engine runs (decision 0012 §5). */
   "engine:status": { request: void; response: EngineStatus };
+  /** This machine and the ones it is paired with (decision 0013 §1–§3). */
+  "machines:view": { request: void; response: MachinesView };
+  "machines:rename": { request: { label: string }; response: MachinesView };
+  "machines:tags": { request: { tags: string[] }; response: MachinesView };
+  /** Publish this machine on the tailnet, or stop. */
+  "machines:reach": { request: { on: boolean }; response: MachinesView };
+  /** Show a one-time pairing code, or stop showing it. */
+  "machines:pairCode": { request: void; response: MachinesView };
+  "machines:pairCancel": { request: void; response: MachinesView };
+  /** Pair with the machine at an address, by the code it shows. */
+  "machines:add": { request: { address: string; code: string }; response: MachinesView };
+  /** Forget a machine, here and across the fleet. */
+  "machines:forget": { request: { id: string }; response: MachinesView };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2430,6 +2444,14 @@ export const IPC_CHANNELS = [
   "cli:status",
   "cli:install",
   "engine:status",
+  "machines:view",
+  "machines:rename",
+  "machines:tags",
+  "machines:reach",
+  "machines:pairCode",
+  "machines:pairCancel",
+  "machines:add",
+  "machines:forget",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -2746,6 +2768,8 @@ export type PushMessage =
   | { type: "plugin:changed"; plugins: PluginStatus[] }
   /** This window's engine moved: it became a client, or took the engine over when its host went. */
   | { type: "engine:changed"; status: EngineStatus }
+  /** The fleet changed: a machine came or went, paired or was forgotten, or this one was renamed or published. */
+  | { type: "machines:changed"; view: MachinesView }
   /** Settings' warnings and errors changed; the whole board. */
   | { type: "health:changed"; items: HealthItem[] }
   /** An events task posted a notice (decision 0010 §4, `notify`). Also written to the log. */

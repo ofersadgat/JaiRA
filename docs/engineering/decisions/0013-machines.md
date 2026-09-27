@@ -275,6 +275,61 @@ Each UI step is drawn as a mockup first.
    - the queue, and moving a queued task.
 7. The remote folder browser, and sign-in pages opened locally.
 
+## Built
+
+**Steps 1–2, 2026-09-27: machines, the network transport, pairing and the fleet.**
+
+- **The transport.**
+  - `engineChannel.ts`: the host and client speak over a `FrameChannel` — length-prefixed frames on the
+    pipe, or one JSON frame per WebSocket message — so `EngineHost` and `EngineClient` never see
+    which.
+  - `wsServer.ts` is the server half of RFC 6455, as much as the engine needs: the handshake, masked
+    client frames, fragments, 16- and 64-bit lengths, ping and pong, and close. It was written rather
+    than taken as a dependency. The client half is Node's own `WebSocket`.
+  - `engineNet.ts` listens on loopback only (port 47318, else any free one):
+    - `/.well-known/jaira` says which machine it is;
+    - `/engine` upgrades to the engine's frames.
+    - Its upgraded sockets are ended on close; a closing HTTP server otherwise waits on them for ever.
+  - Network clients prove themselves with a machine token in `hello`, never in a URL.
+  - `who` over the network leaves out this machine's paths.
+- **Identity and tokens.**
+  - `machine.ts` keeps `machine.json`: id, name, OS, and tags (the OS is always one).
+  - `machineTokens.ts` keeps only the hashes of the tokens this machine issued, verified in constant
+    time and revocable. A revocation also drops the machine's live connections.
+- **Tailscale.** `tailscale.ts` finds the CLI on the PATH or where each installer puts it.
+  - It reads `status --json`.
+  - It serves the loopback port on the first free HTTPS port of 443, 8443 and 10000, never touching one
+    that serves something else.
+  - It unserves only its own mapping.
+  - `JAIRA_REACH=loopback` publishes the loopback address instead, for trying a fleet of several base
+    roots on one machine.
+- **The fleet** (`fleet.ts`, owned by `AppService`, attached by `hostEngine` for the desktop and both
+  servers):
+  - **Pairing** is a two-word code plus four characters, valid 10 minutes, for one use. After five
+    wrong tries the code is void.
+  - Pairing is **mutual**: the asker sends a token it issued, and gets one back.
+  - **Introductions**: the paired machine's fleet comes back with the answer, and each stranger is met
+    through it (`fleet:introduce` → `fleet:meet`). A member that is offline is met at the next
+    connection.
+  - **Links** to every known machine retry with growing waits (3 s doubling to 60 s). A machine on
+    another contract shows as mismatched.
+  - Renames and tags are **announced**.
+  - **Forget** revokes the machine here and on every member.
+  - Tokens this machine holds live in the keychain, or in a 0600 file where there is none.
+- **Settings → Machines**, as the approved mockup has it:
+  - this machine's name, tags and reach switch;
+  - the pairing code, with Copy and Stop;
+  - the paired machines with their state, version, address and tags, and Forget;
+  - Add a machine, a `SchemaForm`.
+- **The command line:** `jaira machine list | pair | add | forget | reach | rename | tags`, always
+  through the running engine.
+- **Verified:**
+  - Network tests with Node's own client: a 200 KB message each way, refusal, and revocation.
+  - Three machines in one process: pairing, introduction, a void code, forgetting across the fleet.
+  - A real window paired with a second base root running the npm `jaira serve`, and showed it online
+    (`shots/machines-real.mts`).
+- **Not verified:** a real tailnet, since neither Tailscale nor Go is installed on this machine.
+
 ## Consequences
 
 **Easier:**

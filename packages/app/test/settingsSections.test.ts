@@ -8,12 +8,12 @@ import { DEFAULT_CONFIG_LAYER, SECTIONS, settingsLayersFor } from "../src/render
 
 describe("the Settings pages", () => {
   it("are one list, in the order a person sets things up", () => {
-    expect(SECTIONS.map((page) => page.id)).toEqual(["appearance", "connections", "models", "tools", "runs", "data", "about"]);
-    expect(SECTIONS.map((page) => page.label)).toEqual(["Appearance", "Connections", "Models", "Tools", "Runs", "Data & history", "About"]);
+    expect(SECTIONS.map((page) => page.id)).toEqual(["appearance", "connections", "machines", "models", "tools", "runs", "data", "about"]);
+    expect(SECTIONS.map((page) => page.label)).toEqual(["Appearance", "Connections", "Machines", "Models", "Tools", "Runs", "Data & history", "About"]);
   });
 
-  it("are all layered but About, the last, whose one setting is always the personal layer's", () => {
-    expect(SECTIONS.filter((page) => !page.layered).map((page) => page.id)).toEqual(["about"]);
+  it("are all layered but Machines and About, the last — both this machine's own", () => {
+    expect(SECTIONS.filter((page) => !page.layered).map((page) => page.id)).toEqual(["machines", "about"]);
     expect(SECTIONS.at(-1)?.id).toBe("about");
   });
 

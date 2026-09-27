@@ -12,6 +12,7 @@ export * from "./executorTree";
 export * from "./presetModels";
 export * from "./usage";
 export * from "./updates";
+export * from "./machines";
 export * from "./plugins";
 export * from "./health";
 export * from "./configSchema";

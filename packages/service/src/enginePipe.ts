@@ -52,7 +52,22 @@ export interface EngineFile extends EngineHostInfo {
 export type ClientFrame =
   | { t: "who" }
   | { t: "hello"; token: string; contract: string; version: string; client: string; pid?: number }
-  | { t: "req"; id: number; channel: string; request: unknown };
+  | { t: "req"; id: number; channel: string; request: unknown }
+  /**
+   * Pairing (decision 0013 §3), before any hello: the code this machine was shown, who the asker is,
+   * and the token the asker issued for this machine to use back.
+   */
+  | { t: "pair"; code: string; machine: PeerMachine; token: string };
+
+/** A machine as another one remembers it (decision 0013 §1). */
+export interface PeerMachine {
+  id: string;
+  label: string;
+  os: "windows" | "mac" | "linux";
+  tags: string[];
+  /** Where its engine is reached: `wss://…/engine`. Absent while it is not reachable. */
+  url?: string;
+}
 
 /** Host → client. */
 export type HostFrame =
@@ -62,7 +77,9 @@ export type HostFrame =
   | { t: "refused"; reason: string }
   | { t: "res"; id: number; ok: true; result: unknown }
   | { t: "res"; id: number; ok: false; error: { message: string; name?: string } }
-  | { t: "push"; message: PushMessage };
+  | { t: "push"; message: PushMessage }
+  /** Paired: who this machine is, the token it issued for the asker, and the machines it knows, for introductions. */
+  | { t: "paired"; machine: PeerMachine; token: string; fleet: PeerMachine[] };
 
 /**
  * The loopback port a host listens on when it cannot create its pipe (a sandbox without pipes), and

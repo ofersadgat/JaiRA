@@ -68,6 +68,7 @@ import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSe
 import { Icon } from "./icons";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "./workSummaryView";
 import { AboutPane } from "./aboutPane";
+import { MachinesPane } from "./machinesPane";
 import { HealthCard, NeedsAttention } from "./healthView";
 import { healthCounts, logUnseen } from "./updatesModel";
 import { checkForUpdate, dismissHealth, installPlugin, useHealth } from "./updatesStore";
@@ -362,6 +363,7 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
 const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
   appearance: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 3v18"],
   connections: ["M9 3v5", "M15 3v5", "M6 8h12v3a6 6 0 0 1-12 0Z", "M12 17v4"],
+  machines: ["M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z", "M8 20h8", "M12 16v4"],
   models: ["m12 3 8 4.5v9L12 21l-8-4.5v-9Z", "M12 12l8-4.5", "M12 12v9", "M12 12 4 7.5"],
   tools: ["M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"],
   runs: ["M7 4.5v15l12-7.5Z"],
@@ -2879,6 +2881,7 @@ export default function App(): JSX.Element {
                     />
                   </>
                 ) : null}
+                {state.section === "machines" ? <MachinesPane /> : null}
                 {state.section === "about" ? (
                   <AboutPane
                     config={state.config}

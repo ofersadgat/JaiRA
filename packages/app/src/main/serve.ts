@@ -61,9 +61,11 @@ void app.whenReady().then(async () => {
       kind: "server",
       version: app.getVersion(),
       eager: true,
+      network: {},
       service: (publish) =>
         new AppService({
           baseDir,
+          version: app.getVersion(),
           publish,
           keychain: electronKeychain(),
           // A server keeps the settings honest and the catalog current for every window it serves.

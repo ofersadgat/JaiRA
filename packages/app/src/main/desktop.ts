@@ -950,6 +950,7 @@ function registerArtifactProtocol(): void {
 function buildService(): AppService {
   return new AppService({
     baseDir,
+    version: app.getVersion(),
     publish: pushToWindow,
     keychain: electronKeychain(),
     // The app checks what can actually answer a prompt — by itself, at startup, at project open, and
@@ -994,6 +995,8 @@ async function hostLocally(): Promise<EngineLink | undefined> {
       kind: "desktop",
       version: app.getVersion(),
       service: () => buildService(),
+      // Other machines reach this engine through Tailscale, to loopback (decision 0013 §2).
+      network: {},
       stopRefusal: "this engine is a JaiRA window's own; quit that window to stop it",
       onFailure: (channel, error) => link?.recordIpcFailure(channel, error),
       log: (level, message) => link?.recordApp(level, message),

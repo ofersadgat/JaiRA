@@ -12,7 +12,8 @@
 import { IPC_CHANNELS, type PushMessage } from "@jaira/shared";
 import { CONNECTION_CHANNELS, EngineConnections } from "./connections";
 import type { EngineHostInfo } from "./enginePipe";
-import { claimEngine, type EngineHost, type EngineHostOptions } from "./engineHost";
+import { claimEngine, type EngineHost, type EngineHostOptions, type PreAuthHandler } from "./engineHost";
+import { listenNetwork, type NetworkListener } from "./engineNet";
 import { HOST_CHANNELS, enginePeerHandlers, serviceHandlers, type EngineControl, type Handler } from "./handlers";
 import type { AppService } from "./service";
 
@@ -33,6 +34,11 @@ export interface HostEngineOptions {
   handlers?: Partial<Record<string, Handler>>;
   onFailure?: (channel: string, error: unknown) => void;
   log?: EngineHostOptions["log"];
+  /**
+   * Listen for other machines on loopback (decision 0013 §2) and attach the engine's fleet: the desktop
+   * and `jaira serve` do; a command's claim does not. `port` for tests; 0 takes any free one.
+   */
+  network?: { port?: number };
   /** Tests. */
   pipe?: string;
   port?: number;
@@ -49,6 +55,8 @@ export interface HostedEngine {
   connection(id: string): Partial<Record<string, Handler>>;
   /** Close the pipe, then the engine if one was built. */
   close(): Promise<void>;
+  /** The loopback port other machines reach this engine through, when it listens for them. */
+  networkPort(): number | undefined;
 }
 
 /** The `engine:*` channels (`enginePeerHandlers`), named without building an engine to ask. */
@@ -118,14 +126,24 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
     version: options.version,
     handlers: lazy,
     connect: (client) => ({
-      handlers: Object.fromEntries(
-        CONNECTION_CHANNELS.map((channel) => [
-          channel,
-          ((request: unknown) => (connectionsOf().handlersFor(client.id)[channel] as (request: unknown) => unknown)(request)) as Handler,
-        ]),
-      ),
+      handlers: {
+        ...Object.fromEntries(
+          CONNECTION_CHANNELS.map((channel) => [
+            channel,
+            ((request: unknown) => (connectionsOf().handlersFor(client.id)[channel] as (request: unknown) => unknown)(request)) as Handler,
+          ]),
+        ),
+        // Another machine: what paired machines ask of each other.
+        ...(client.machine !== undefined ? engine().fleet.handlersFor(client.machine) : {}),
+      },
       closed: () => connections?.drop(client.id),
     }),
+    ...(options.network !== undefined
+      ? {
+          authorizeNetwork: (token: string) => engine().fleet.authorize(token),
+          preAuth: ((frame, transport) => (transport === "network" ? engine().fleet.preAuth(frame, transport) : Promise.resolve(undefined))) as PreAuthHandler,
+        }
+      : {}),
     ...(options.onFailure !== undefined ? { onFailure: options.onFailure } : {}),
     ...(options.log !== undefined ? { log: options.log } : {}),
     ...(options.pipe !== undefined ? { pipe: options.pipe } : {}),
@@ -134,14 +152,33 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
   });
   if (host === undefined) return undefined;
   const claimed = host;
+  let net: NetworkListener | undefined;
+  if (options.network !== undefined) {
+    const service = engine();
+    try {
+      net = await listenNetwork({
+        host: claimed,
+        identity: () => service.fleet.identity(),
+        version: options.version,
+        ...(options.network.port !== undefined ? { port: options.network.port } : {}),
+        ...(options.log !== undefined ? { log: options.log } : {}),
+      });
+      await service.fleet.attach(claimed, net.port);
+    } catch (e) {
+      options.log?.("warn", `other machines cannot reach this engine: ${(e as Error).message}`);
+    }
+  }
   return {
     host: claimed,
     built: () => service,
     engine,
     connection: (id) => connectionsOf().handlersFor(id),
     close: async () => {
+      service?.fleet?.close();
+      await net?.close();
       await claimed.close();
       await service?.close();
     },
+    networkPort: () => net?.port,
   };
 }

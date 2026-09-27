@@ -1,32 +1,51 @@
 /**
- * A client of the engine on the local pipe (decision 0012 §3): the desktop when another process hosts
- * the engine (step 4), and the CLI when the app or `jaira serve` is running (step 6). It says hello with
- * the token from `engine.json`, then sends requests by channel and hears every push.
+ * A client of an engine (decisions 0012 §3, 0013 §2): the desktop when another process hosts the
+ * engine, the CLI when the app or `jaira serve` is running, and another machine's engine over the
+ * network. It says hello with a token — `engine.json`'s on this machine, a machine token over the
+ * network — then sends requests by channel and hears every push.
  */
-import { createConnection, type Socket } from "node:net";
+import { createConnection } from "node:net";
 import type { PushMessage } from "@jaira/shared";
-import { ENGINE_CONTRACT, FrameReader, encodeFrame, enginePipePath, readEngineFile, type EngineHostInfo, type HostFrame } from "./enginePipe";
+import { streamChannel, wsClientChannel, type FrameChannel } from "./engineChannel";
+import { ENGINE_CONTRACT, enginePipePath, readEngineFile, type EngineHostInfo, type HostFrame } from "./enginePipe";
 
-/** Where a host listens: its pipe (or Unix socket), or the loopback port. */
-export type EngineAddress = { pipe: string } | { port: number };
+/** Where a host listens: its pipe (or Unix socket), the loopback port, or another machine's URL. */
+export type EngineAddress = { pipe: string } | { port: number } | { url: string };
 
 export function describeAddress(address: EngineAddress): string {
-  return "pipe" in address ? address.pipe : `127.0.0.1:${address.port}`;
+  return "pipe" in address ? address.pipe : "port" in address ? `127.0.0.1:${address.port}` : address.url;
 }
 
-function open(address: EngineAddress): Socket {
-  return "pipe" in address ? createConnection(address.pipe) : createConnection(address.port, "127.0.0.1");
+/** Open a channel to an address. */
+export function openChannel(address: EngineAddress, timeoutMs = 10_000): Promise<FrameChannel> {
+  if ("url" in address) return wsClientChannel(address.url, timeoutMs);
+  return new Promise((resolve, reject) => {
+    const socket = "pipe" in address ? createConnection(address.pipe) : createConnection(address.port, "127.0.0.1");
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new EngineUnavailable(`nothing answered on ${describeAddress(address)}`));
+    }, timeoutMs);
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      resolve(streamChannel(socket, "pipe"));
+    });
+    socket.once("error", (e) => {
+      clearTimeout(timer);
+      reject(new EngineUnavailable(`nothing answers on ${describeAddress(address)}: ${e.message}`));
+    });
+  });
 }
 
 export interface EngineClientOptions {
   baseDir: string;
-  /** Who is connecting, for the host's log and `jaira server status`: `desktop`, `jaira task start`, … */
+  /** Who is connecting, for the host's log and `jaira server status`: `desktop`, `jaira run`, … */
   client: string;
   version: string;
   /** Where to connect. Default: this base root's pipe. */
   address?: EngineAddress;
-  /** Tests: another token (otherwise it comes from `engine.json`), another contract. */
+  /** The token to say hello with: `engine.json`'s by default; a machine token for a network address. */
   token?: string;
+  /** Tests: another contract. */
   contract?: string;
   /** How long to wait for the host's answer to hello. */
   timeoutMs?: number;
@@ -43,7 +62,7 @@ export class EngineClient {
   private closed = false;
 
   constructor(
-    private readonly socket: Socket,
+    private readonly channel: FrameChannel,
     readonly host: EngineHostInfo,
     /** The host speaks another contract: only `engine:*` channels answer (see `HostFrame`). */
     readonly limited: boolean,
@@ -60,7 +79,7 @@ export class EngineClient {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.socket.write(encodeFrame({ t: "req", id, channel, request: request === undefined ? null : request }));
+      this.channel.send({ t: "req", id, channel, request: request === undefined ? null : request });
     });
   }
 
@@ -69,18 +88,18 @@ export class EngineClient {
     return () => this.listeners.delete(listener);
   }
 
-  /** The host went away (it quit, or was stopped). */
+  /** The host went away (it quit, was stopped, or the network dropped). */
   onClose(listener: () => void): () => void {
     this.closeListeners.add(listener);
     return () => this.closeListeners.delete(listener);
   }
 
   close(): void {
-    this.socket.end();
+    this.channel.end();
     this.ended();
   }
 
-  /** @internal — the socket's frames after the welcome. */
+  /** @internal — the channel's frames after the welcome. */
   handle(frame: HostFrame): void {
     if (frame.t === "push") {
       for (const listener of this.listeners) listener(frame.message);
@@ -108,89 +127,87 @@ export class EngineClient {
   }
 }
 
-/** Read frames off a socket until `take` settles; a malformed stream ends it. */
-function frames(socket: Socket, onFrame: (frame: HostFrame) => void, onBad: (error: Error) => void): void {
-  const reader = new FrameReader();
-  socket.on("data", (chunk) => {
-    let got: unknown[];
-    try {
-      got = reader.push(chunk);
-    } catch (e) {
-      socket.destroy();
-      onBad(e as Error);
-      return;
-    }
-    for (const frame of got) onFrame(frame as HostFrame);
+/**
+ * Send one frame before `hello` and read the one answer: `who`, and pairing (decision 0013 §3). No token
+ * is needed, and the channel is closed after.
+ */
+export async function askOnce(address: EngineAddress, frame: Record<string, unknown>, timeoutMs = 5000): Promise<HostFrame> {
+  const channel = await openChannel(address, timeoutMs).catch((e: unknown) => {
+    throw e instanceof EngineUnavailable ? e : new EngineUnavailable((e as Error).message);
+  });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      channel.destroy();
+      reject(new EngineUnavailable(`no answer from ${describeAddress(address)}`));
+    }, timeoutMs);
+    channel.onFrame((answer) => {
+      clearTimeout(timer);
+      channel.end();
+      resolve(answer as HostFrame);
+    });
+    channel.onBroken((reason) => {
+      clearTimeout(timer);
+      reject(new EngineUnavailable(reason));
+    });
+    channel.onClose(() => {
+      clearTimeout(timer);
+      reject(new EngineUnavailable(`${describeAddress(address)} closed the connection`));
+    });
+    channel.send(frame);
   });
 }
 
 /**
  * Ask whoever listens at an address who it is — no token needed, and nothing but the host's info in
- * return (§4 steps 2–3). Rejects when nothing answers, or something that is not a JaiRA engine does.
+ * return. Rejects when nothing answers, or something that is not a JaiRA engine does.
  */
-export function whoAt(address: EngineAddress, timeoutMs = 1500): Promise<EngineHostInfo> {
-  return new Promise((resolve, reject) => {
-    const socket = open(address);
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new EngineUnavailable(`nothing answered on ${describeAddress(address)}`));
-    }, timeoutMs);
-    const done = (outcome: () => void): void => {
-      clearTimeout(timer);
-      socket.destroy();
-      outcome();
-    };
-    socket.once("connect", () => socket.write(encodeFrame({ t: "who" })));
-    frames(
-      socket,
-      (frame) => done(() => (frame.t === "info" ? resolve(frame.host) : reject(new EngineUnavailable("the answer was not a JaiRA engine's")))),
-      (e) => done(() => reject(new EngineUnavailable(e.message))),
-    );
-    socket.on("error", (e) => done(() => reject(new EngineUnavailable(`nothing answers on ${describeAddress(address)}: ${e.message}`))));
-  });
+export async function whoAt(address: EngineAddress, timeoutMs = 1500): Promise<EngineHostInfo> {
+  const answer = await askOnce(address, { t: "who" }, timeoutMs);
+  if (answer.t !== "info") throw new EngineUnavailable("the answer was not a JaiRA engine's");
+  return answer.host;
 }
 
-/** Connect to the engine hosted for this base root, or fail with {@link EngineUnavailable} saying why. */
-export function connectEngine(options: EngineClientOptions): Promise<EngineClient> {
+/** Connect to an engine, or fail with {@link EngineUnavailable} saying why. */
+export async function connectEngine(options: EngineClientOptions): Promise<EngineClient> {
   const address = options.address ?? { pipe: enginePipePath(options.baseDir) };
-  const token = options.token ?? readEngineFile(options.baseDir)?.token;
-  if (token === undefined) return Promise.reject(new EngineUnavailable("no engine.json: nothing hosts the engine, or it cannot be read"));
+  const token = options.token ?? ("url" in address ? undefined : readEngineFile(options.baseDir)?.token);
+  if (token === undefined) {
+    throw new EngineUnavailable("url" in address ? "no token for that machine: pair with it first" : "no engine.json: nothing hosts the engine, or it cannot be read");
+  }
+  const channel = await openChannel(address, options.timeoutMs ?? 5000).catch((e: unknown) => {
+    throw e instanceof EngineUnavailable ? e : new EngineUnavailable((e as Error).message);
+  });
   return new Promise((resolve, reject) => {
-    const socket = open(address);
     let client: EngineClient | undefined;
     const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new EngineUnavailable(`the engine on ${describeAddress(address)} did not answer`));
+      channel.destroy();
+      reject(new EngineUnavailable(`the engine at ${describeAddress(address)} did not answer`));
     }, options.timeoutMs ?? 5000);
-    socket.once("connect", () => {
-      socket.write(encodeFrame({ t: "hello", token, contract: options.contract ?? ENGINE_CONTRACT, version: options.version, client: options.client, pid: process.pid }));
-    });
-    frames(
-      socket,
-      (frame) => {
-        if (client !== undefined) {
-          client.handle(frame);
-          return;
-        }
-        clearTimeout(timer);
-        if (frame.t === "welcome") {
-          client = new EngineClient(socket, frame.host, frame.limited === true);
-          resolve(client);
-        } else {
-          socket.destroy();
-          reject(new EngineUnavailable(frame.t === "refused" ? frame.reason : "the engine did not say welcome"));
-        }
-      },
-      (e) => {
-        clearTimeout(timer);
-        if (client === undefined) reject(new EngineUnavailable(e.message));
-        else client.ended();
-      },
-    );
-    socket.on("error", (e) => {
+    channel.onFrame((raw) => {
+      const frame = raw as HostFrame;
+      if (client !== undefined) {
+        client.handle(frame);
+        return;
+      }
       clearTimeout(timer);
-      if (client === undefined) reject(new EngineUnavailable(`nothing answers on ${describeAddress(address)}: ${e.message}`));
+      if (frame.t === "welcome") {
+        client = new EngineClient(channel, frame.host, frame.limited === true);
+        resolve(client);
+      } else {
+        channel.destroy();
+        reject(new EngineUnavailable(frame.t === "refused" ? frame.reason : "the engine did not say welcome"));
+      }
     });
-    socket.on("close", () => client?.ended());
+    channel.onBroken((reason) => {
+      clearTimeout(timer);
+      if (client === undefined) reject(new EngineUnavailable(reason));
+      else client.ended();
+    });
+    channel.onClose(() => {
+      clearTimeout(timer);
+      if (client === undefined) reject(new EngineUnavailable(`${describeAddress(address)} closed the connection`));
+      else client.ended();
+    });
+    channel.send({ t: "hello", token, contract: options.contract ?? ENGINE_CONTRACT, version: options.version, client: options.client, pid: process.pid });
   });
 }

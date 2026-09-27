@@ -1,18 +1,17 @@
 /**
- * Hosting the engine on the local pipe (decision 0012 §2–§3): the process that claims the pipe answers
- * every client's requests with the same dispatch Electron's IPC uses (`serviceHandlers`), and sends every
- * push to every client that has said hello. The protocol and the paths are `enginePipe.ts`.
+ * Hosting the engine (decisions 0012 §2–§3, 0013 §2): the process that claims the pipe answers every
+ * client's requests with the same dispatch Electron's IPC uses (`serviceHandlers`), and sends every push
+ * to every client that has said hello — clients on the local pipe, and other machines over the network
+ * listener (`engineNet.ts`), each a `FrameChannel`. The protocol and the paths are `enginePipe.ts`.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
-import { createConnection, createServer, type Server, type Socket } from "node:net";
+import { createConnection, createServer, type Server } from "node:net";
 import { dirname } from "node:path";
 import type { PushMessage } from "@jaira/shared";
 import {
   ENGINE_CONTRACT,
   ENGINE_PORT,
-  FrameReader,
-  encodeFrame,
   enginePipePath,
   homeHash,
   removeEngineFile,
@@ -21,6 +20,7 @@ import {
   type EngineHostInfo,
   type HostFrame,
 } from "./enginePipe";
+import { streamChannel, type EngineTransport, type FrameChannel } from "./engineChannel";
 import { whoAt } from "./engineClient";
 import type { Handler } from "./handlers";
 
@@ -32,6 +32,9 @@ export interface EngineClientInfo {
   pid?: number;
   version: string;
   connectedAt: number;
+  transport: EngineTransport;
+  /** The machine a network client proved it is, by its token. */
+  machine?: { id: string; label: string };
 }
 
 /** What one connection adds over the host's handlers, and what to forget when it goes (§3, "per connection"). */
@@ -39,6 +42,9 @@ export interface EngineConnection {
   handlers?: Partial<Record<string, Handler>>;
   closed?: () => void;
 }
+
+/** A frame before `hello` other than `who` — pairing (decision 0013 §3) — and its answer. */
+export type PreAuthHandler = (frame: { t: string } & Record<string, unknown>, transport: EngineTransport) => Promise<HostFrame | undefined>;
 
 export interface EngineHostOptions {
   baseDir: string;
@@ -49,6 +55,10 @@ export interface EngineHostOptions {
   handlers: Partial<Record<string, Handler>>;
   /** A connection's own answers — `project:current`, `limits:watch` — over {@link handlers}. */
   connect?: (client: EngineClientInfo) => EngineConnection;
+  /** Which machine a network client's token belongs to; undefined refuses it. */
+  authorizeNetwork?: (token: string) => { id: string; label: string } | undefined;
+  /** Frames a client may send before `hello`: pairing. */
+  preAuth?: PreAuthHandler;
   /** A handler that threw: the IPC path records it the same way. */
   onFailure?: (channel: string, error: unknown) => void;
   log?: (level: "info" | "warn", message: string) => void;
@@ -59,8 +69,7 @@ export interface EngineHostOptions {
 }
 
 interface Client {
-  socket: Socket;
-  reader: FrameReader;
+  channel: FrameChannel;
   /** Past `hello`: may send requests and hears pushes. */
   admitted: boolean;
   /** Admitted with another contract: only `engine:*` answers. */
@@ -92,7 +101,9 @@ export class EngineHost {
       exe: process.execPath,
       startedAt: Date.now(),
     };
-    server.on("connection", (socket) => this.accept(socket));
+    // The pipe, and the loopback port a host without a pipe listens on: both local, both proved by
+    // `engine.json`'s token.
+    server.on("connection", (socket) => this.accept(streamChannel(socket, "pipe")));
   }
 
   /** How many clients are past `hello`. */
@@ -100,40 +111,36 @@ export class EngineHost {
     return [...this.clients].filter((c) => c.admitted).length;
   }
 
-  /** The clients past `hello`, for `jaira server status`. */
+  /** The clients past `hello`, for `jaira server status` and Settings → Machines. */
   connected(): EngineClientInfo[] {
     return [...this.clients].flatMap((c) => (c.admitted && c.info !== undefined ? [c.info] : []));
   }
 
   /** Send a push to every client past `hello` with this host's contract. */
   broadcast(message: PushMessage): void {
-    const frame = encodeFrame({ t: "push", message });
-    for (const client of this.clients) if (client.admitted && !client.limited && !client.socket.destroyed) client.socket.write(frame);
+    for (const client of this.clients) if (client.admitted && !client.limited && !client.channel.destroyed) client.channel.send({ t: "push", message });
+  }
+
+  /** Disconnect every network client of one machine: its token was revoked. */
+  dropMachine(machineId: string): void {
+    for (const client of [...this.clients]) if (client.info?.machine?.id === machineId) this.drop(client);
   }
 
   /** Stop answering: every client is disconnected, the pipe goes, and so does `engine.json`. */
   async close(): Promise<void> {
-    for (const client of this.clients) this.drop(client);
+    for (const client of [...this.clients]) this.drop(client);
     this.clients.clear();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     removeEngineFile(this.options.baseDir, process.pid);
   }
 
-  private accept(socket: Socket): void {
-    const client: Client = { socket, reader: new FrameReader(), admitted: false, limited: false };
+  /** Take one connection, from the pipe or from the network listener. */
+  accept(channel: FrameChannel): void {
+    const client: Client = { channel, admitted: false, limited: false };
     this.clients.add(client);
-    socket.on("data", (chunk) => {
-      let frames: unknown[];
-      try {
-        frames = client.reader.push(chunk);
-      } catch (e) {
-        this.refuse(client, (e as Error).message);
-        return;
-      }
-      for (const frame of frames) void this.receive(client, frame as ClientFrame);
-    });
-    socket.on("close", () => this.drop(client));
-    socket.on("error", () => this.drop(client));
+    channel.onFrame((frame) => void this.receive(client, frame as ClientFrame));
+    channel.onBroken((reason) => this.refuse(client, reason));
+    channel.onClose(() => this.drop(client));
   }
 
   /** A client that went: its connection's state is forgotten once. */
@@ -141,7 +148,7 @@ export class EngineHost {
     if (!this.clients.delete(client) && client.connection === undefined) return;
     const connection = client.connection;
     client.connection = undefined;
-    client.socket.destroy();
+    client.channel.destroy();
     try {
       connection?.closed?.();
     } catch {
@@ -151,27 +158,43 @@ export class EngineHost {
   }
 
   private send(client: Client, frame: HostFrame): void {
-    if (!client.socket.destroyed) client.socket.write(encodeFrame(frame));
+    if (!client.channel.destroyed) client.channel.send(frame);
   }
 
   private refuse(client: Client, reason: string): void {
     this.send(client, { t: "refused", reason });
-    client.socket.end();
+    client.channel.end();
     this.clients.delete(client);
+  }
+
+  /** What `who` tells a machine on the network: not this machine's paths. */
+  private publicInfo(transport: EngineTransport): EngineHostInfo {
+    return transport === "pipe" ? this.info : { ...this.info, pipe: "", exe: "" };
   }
 
   private async receive(client: Client, frame: ClientFrame): Promise<void> {
     if (!client.admitted) {
       if (frame.t === "who") {
-        this.send(client, { t: "info", host: this.info });
+        this.send(client, { t: "info", host: this.publicInfo(client.channel.transport) });
         return;
       }
-      if (frame.t !== "hello") return this.refuse(client, "say hello first");
-      if (!sameToken(frame.token, this.token)) return this.refuse(client, "the token does not match this engine's");
+      if (frame.t !== "hello") {
+        const answer = await this.options.preAuth?.(frame as unknown as { t: string } & Record<string, unknown>, client.channel.transport);
+        if (answer === undefined) return this.refuse(client, "say hello first");
+        this.send(client, answer);
+        return;
+      }
+      let machine: { id: string; label: string } | undefined;
+      if (client.channel.transport === "pipe") {
+        if (!sameToken(frame.token, this.token)) return this.refuse(client, "the token does not match this engine's");
+      } else {
+        machine = this.options.authorizeNetwork?.(String(frame.token));
+        if (machine === undefined) return this.refuse(client, "this machine is not paired with that one, or its pairing was removed");
+      }
       const limited = frame.contract !== ENGINE_CONTRACT;
       // Welcome BEFORE admitting and logging: the log line is itself a push, broadcast to the admitted,
       // and a client's first frame must be its welcome.
-      this.send(client, { t: "welcome", host: this.info, ...(limited ? { limited: true as const } : {}) });
+      this.send(client, { t: "welcome", host: this.publicInfo(client.channel.transport), ...(limited ? { limited: true as const } : {}) });
       client.admitted = true;
       client.limited = limited;
       client.info = {
@@ -180,13 +203,14 @@ export class EngineHost {
         ...(typeof frame.pid === "number" ? { pid: frame.pid } : {}),
         version: frame.version,
         connectedAt: Date.now(),
+        transport: client.channel.transport,
+        ...(machine !== undefined ? { machine } : {}),
       };
       if (!limited) client.connection = this.options.connect?.(client.info);
+      const who = machine !== undefined ? `${frame.client} on ${machine.label}` : frame.client;
       this.options.log?.(
         "info",
-        limited
-          ? `${frame.client} (JaiRA ${frame.version}) connected to the engine with another contract; it may only ask about it or stop it`
-          : `${frame.client} connected to the engine`,
+        limited ? `${who} (JaiRA ${frame.version}) connected to the engine with another contract; it may only ask about it or stop it` : `${who} connected to the engine`,
       );
       return;
     }
@@ -215,6 +239,7 @@ export class EngineHost {
     }
   }
 }
+
 
 function sameToken(given: string, expected: string): boolean {
   const a = Buffer.from(String(given));

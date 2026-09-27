@@ -23,6 +23,7 @@ import {
   hostTaskList,
   hostTaskMove,
   hostTaskStatus,
+  machineCommand,
   serveCommand,
   serverCommand,
   withEngine,
@@ -307,6 +308,10 @@ const USAGE = `usage:
   jaira plugin remove <plugin>
   jaira serve [--detach]              host the engine until stopped (jaira server stop)
   jaira server status | stop
+  jaira machine list | pair | add <address> <code> | forget <machine>
+  jaira machine reach on|off | rename <name> | tags <tag,...>
+                                      your machines (decision 0013): pair once, and tasks and
+                                      conversations are shared between them
 
   With the JaiRA window, jaira serve or another command running, run, task, board and prune go
   through that engine: its window shows the run, and its approvals can be answered here or there.
@@ -475,6 +480,10 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
     case "serve": {
       const { values } = parseArgs({ args: rest, options: { detach: { type: "boolean" } } });
       return serveCommand({ detach: values.detach === true }, io, sharedBridgeHost);
+    }
+    case "machine": {
+      const [sub, ...machineRest] = rest;
+      return machineCommand(sub, machineRest, io);
     }
     case "server": {
       const [sub, ...extra] = rest;

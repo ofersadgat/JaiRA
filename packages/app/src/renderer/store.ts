@@ -798,7 +798,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "
  * them is layered; the raw `settings.json` page and the Files page are gone (the Files tree's patterns
  * are the last section of Appearance).
  */
-export type SettingsSection = "appearance" | "connections" | "models" | "tools" | "runs" | "data" | "about";
+export type SettingsSection = "appearance" | "connections" | "machines" | "models" | "tools" | "runs" | "data" | "about";
 
 const EMPTY: AppState = {
   at: null,

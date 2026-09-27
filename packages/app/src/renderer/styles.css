@@ -19113,3 +19113,80 @@ button.chg-by {
     transition: none;
   }
 }
+
+/*
+ * Machines (decision 0013): the chip that says where something runs, and the Machines page's own pieces.
+ * The chip's dot carries the state — filled online, hollow offline, amber on another JaiRA, dashed for
+ * "no machine yet" — so a column of cards reads at a glance without a colour on the card itself.
+ */
+.mchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+}
+.mchip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+.mchip-off {
+  color: var(--dim);
+}
+.mchip-off .mchip-dot {
+  background: transparent;
+  border: 1px solid var(--dim);
+}
+.mchip-warn .mchip-dot {
+  background: var(--warn);
+}
+.mchip-none {
+  color: var(--dim);
+  border-style: dashed;
+}
+.mchip-none .mchip-dot {
+  background: transparent;
+  border: 1px dashed var(--dim);
+}
+.machine-tags {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.machine-tag-os {
+  border-style: dashed;
+}
+.machine-tag-x {
+  border: 0;
+  background: transparent;
+  padding: 0 0 0 4px;
+  color: var(--dim);
+}
+.machine-tag-add .cfg-input {
+  width: 80px;
+}
+.pair-code-row {
+  background: var(--tint-accent);
+}
+.pair-code {
+  font-family: var(--font-data);
+  letter-spacing: 0.08em;
+  font-size: calc(var(--size-app) * 15 / 12.5);
+  padding: 4px 10px;
+  border: 1px dashed var(--line);
+  border-radius: var(--control-radius);
+  user-select: all;
+}
+.machine-add {
+  display: grid;
+  gap: 10px;
+  padding-top: 6px;
+}
+.machine-add-foot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}

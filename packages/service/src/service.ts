@@ -673,6 +673,7 @@ import type {
 import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from "@jaira/shared";
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
+import { Fleet, type ReachPort } from "./fleet";
 import { walkHiddenReport } from "./hiddenReport";
 import { layeredHiddenRules, whyHiddenPath, type ConfigLayer, type HiddenReport, type HiddenReportRequest, type HiddenRule, type HiddenVerdict } from "@jaira/shared";
 
@@ -681,6 +682,10 @@ export type Publish = (message: PushMessage) => void;
 export interface AppServiceOptions {
   /** Where pushes go — the Electron main process forwards them to the renderer. */
   publish?: Publish;
+  /** The JaiRA version this engine runs, as other machines are told it. */
+  version?: string;
+  /** How this machine is published on the tailnet. Default: the installed Tailscale app. */
+  reach?: ReachPort;
   /**
    * The persistent MCP bridge CLI agent runs register on. Default: a worker-thread host reading its
    * worker file from beside `main.cjs` — right for the bundled app, and a seam here so a test that
@@ -1343,6 +1348,16 @@ export class AppService {
   constructor(private readonly options: AppServiceOptions = {}) {
     this.baseDir = jairaBasePaths(options.baseDir ?? settingsBaseDir()).baseDir;
     const basePaths = jairaBasePaths(this.baseDir);
+    // The machines this one is paired with (decision 0013). It only links and publishes once a host
+    // that listens for other machines attaches it (`hostEngine`).
+    this.fleet = new Fleet({
+      baseDir: this.baseDir,
+      version: options.version ?? "dev",
+      ...(options.keychain !== undefined ? { secrets: options.keychain } : {}),
+      publish: (view) => this.publish({ type: "machines:changed", view }),
+      log: (level, message) => this.log({ level, source: "machines", message }),
+      ...(options.reach !== undefined ? { reach: options.reach } : {}),
+    });
     // Settings' warnings and errors: before the log below, whose errors it counts.
     this.health = new HealthBoard({
       file: join(basePaths.systemDir, "health.json"),
@@ -2348,6 +2363,9 @@ export class AppService {
    */
   readonly health: HealthBoard;
 
+  /** This machine and the machines it is paired with (decision 0013 §1–§3). */
+  readonly fleet: Fleet;
+
   /**
    * Messages and runs waiting for an account's allowance to reset — held because the account had
    * none left, or refused and set to try again. Remembered in `~/.jaira/system/waiting.json`.
@@ -2771,6 +2789,7 @@ export class AppService {
   async close(): Promise<void> {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
+    this.fleet.close();
     this.limits.close();
     this.waiting.close();
     this.remoteWatcher?.dispose();

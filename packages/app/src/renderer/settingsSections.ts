@@ -17,7 +17,7 @@ import type { ConfigLayer } from "@jaira/shared/browser";
 import type { SettingsSection } from "./store";
 
 /** The glyph each page wears in the sidebar — `App.tsx` draws them. */
-export type SettingsIconName = "appearance" | "connections" | "models" | "tools" | "runs" | "data" | "about";
+export type SettingsIconName = "appearance" | "connections" | "machines" | "models" | "tools" | "runs" | "data" | "about";
 
 export interface SettingsPageMeta {
   id: SettingsSection;
@@ -32,6 +32,8 @@ export interface SettingsPageMeta {
 export const SECTIONS: readonly SettingsPageMeta[] = [
   { id: "appearance", label: "Appearance", icon: "appearance", purpose: "How JaiRA looks.", layered: true },
   { id: "connections", label: "Connections", icon: "connections", purpose: "What JaiRA can reach, and as whom.", layered: true },
+  // The machines that share your projects (decision 0013): this machine's own, so not layered, like About.
+  { id: "machines", label: "Machines", icon: "machines", purpose: "The machines that share your projects: this one, and the ones it is paired with.", layered: false },
   { id: "models", label: "Models", icon: "models", purpose: "What answers a state that names nothing, and how.", layered: true },
   { id: "tools", label: "Tools", icon: "tools", purpose: "What an agent may do, and every function a run can call.", layered: true },
   { id: "runs", label: "Runs", icon: "runs", purpose: "How a run behaves while it is going.", layered: true },

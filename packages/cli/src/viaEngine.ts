@@ -27,6 +27,7 @@ import {
 import type { JsonValue } from "@declarative-ai/exec";
 import type { McpBridgeHost } from "@jaira/runtime";
 import type {
+  MachinesView,
   BoardView,
   CreateTaskRequest,
   ModuleApproval,
@@ -479,7 +480,8 @@ export async function serveCommand(options: { detach: boolean; home?: string }, 
     kind: "server",
     version: cliVersion(),
     eager: true,
-    service: (publish) => new AppService({ baseDir, publish, bridgeHost: bridgeHost(), probeOnStart: true, refreshCatalog: true }),
+    network: {},
+    service: (publish) => new AppService({ baseDir, publish, version: cliVersion(), bridgeHost: bridgeHost(), probeOnStart: true, refreshCatalog: true }),
     stop,
     log: (_level, message) => io.stderr(`${message}\n`),
   });
@@ -535,6 +537,87 @@ export async function serverCommand(sub: string | undefined, io: EngineIo): Prom
       }),
     );
     return 0;
+  } finally {
+    client.close();
+  }
+}
+
+// --- jaira machine ---------------------------------------------------------------------------------------
+
+/**
+ * `jaira machine list | pair | add <address> <code> | forget <machine> | reach on|off | rename <name> |
+ * tags <tag,...>` (decision 0013 §1–§3). Always through the running engine: pairing codes and the
+ * connections to other machines live there, and a command that ends would take them with it.
+ */
+export async function machineCommand(sub: string | undefined, args: string[], io: EngineIo): Promise<number> {
+  const baseDir = resolveBaseDir(process.env["JAIRA_HOME"] || undefined);
+  const found = await discoverEngine({ baseDir });
+  if (found.kind !== "found") {
+    io.stderr("error: nothing hosts the engine here: start JaiRA or `jaira serve --detach` first — it keeps this machine's pairings and connections\n");
+    return 1;
+  }
+  const client = await connectEngine({ baseDir, client: `jaira machine ${sub ?? ""}`.trim(), version: cliVersion(), address: found.address });
+  try {
+    const view = async (): Promise<MachinesView> => (await client.invoke("machines:view")) as MachinesView;
+    switch (sub) {
+      case undefined:
+      case "list": {
+        const v = await view();
+        io.stdout(
+          json({
+            self: { id: v.self.id, label: v.self.label, os: v.self.os, tags: v.self.tags, reach: v.self.reach },
+            machines: v.machines.map((m) => ({ id: m.id, label: m.label, os: m.os, tags: m.tags, state: m.state, ...(m.url !== undefined ? { url: m.url } : {}), ...(m.version !== undefined ? { version: m.version } : {}) })),
+          }),
+        );
+        return 0;
+      }
+      case "pair": {
+        const v = (await client.invoke("machines:pairCode")) as MachinesView;
+        if (v.pairing === undefined) throw new Error("no code was made");
+        if (v.self.reach.state !== "on") io.stderr("warning: this machine is not reachable, so the other one cannot use the code yet — `jaira machine reach on`\n");
+        io.stderr(`On the other machine: jaira machine add ${v.self.reach.url ?? "<this machine's address>"} "${v.pairing.code}"\n`);
+        io.stdout(json({ code: v.pairing.code, address: v.self.reach.url ?? null, expiresAt: new Date(v.pairing.expiresAt).toISOString() }));
+        return 0;
+      }
+      case "add": {
+        const [address, ...code] = args;
+        if (address === undefined || code.length === 0) throw new Error("usage: jaira machine add <address> <code>");
+        const v = (await client.invoke("machines:add", { address, code: code.join(" ") })) as MachinesView;
+        io.stdout(json({ paired: true, machines: v.machines.map((m) => m.label) }));
+        return 0;
+      }
+      case "forget": {
+        const [which] = args;
+        const v = await view();
+        const target = v.machines.find((m) => m.id === which || m.label === which);
+        if (target === undefined) throw new Error(`no paired machine is called '${which ?? ""}'`);
+        await client.invoke("machines:forget", { id: target.id });
+        io.stdout(json({ forgot: target.label }));
+        return 0;
+      }
+      case "reach": {
+        const [state] = args;
+        if (state !== "on" && state !== "off") throw new Error("usage: jaira machine reach on|off");
+        const v = (await client.invoke("machines:reach", { on: state === "on" })) as MachinesView;
+        io.stdout(json(v.self.reach));
+        return v.self.reach.state === "unavailable" ? 1 : 0;
+      }
+      case "rename": {
+        const name = args.join(" ").trim();
+        if (name === "") throw new Error("usage: jaira machine rename <name>");
+        const v = (await client.invoke("machines:rename", { label: name })) as MachinesView;
+        io.stdout(json({ label: v.self.label }));
+        return 0;
+      }
+      case "tags": {
+        const tags = args.join(",").split(",").map((t) => t.trim()).filter((t) => t !== "");
+        const v = (await client.invoke("machines:tags", { tags })) as MachinesView;
+        io.stdout(json({ tags: [v.self.os, ...v.self.tags] }));
+        return 0;
+      }
+      default:
+        throw new Error(`unknown machine subcommand '${sub}'`);
+    }
   } finally {
     client.close();
   }
