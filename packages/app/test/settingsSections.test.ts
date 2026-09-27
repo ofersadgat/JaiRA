@@ -8,13 +8,13 @@ import { DEFAULT_CONFIG_LAYER, SECTIONS, settingsLayersFor } from "../src/render
 
 describe("the Settings pages", () => {
   it("are one list, in the order a person sets things up", () => {
-    expect(SECTIONS.map((page) => page.id)).toEqual(["appearance", "connections", "models", "tools", "runs", "data", "licenses"]);
-    expect(SECTIONS.map((page) => page.label)).toEqual(["Appearance", "Connections", "Models", "Tools", "Runs", "Data & history", "Licenses"]);
+    expect(SECTIONS.map((page) => page.id)).toEqual(["appearance", "connections", "models", "tools", "runs", "data", "about"]);
+    expect(SECTIONS.map((page) => page.label)).toEqual(["Appearance", "Connections", "Models", "Tools", "Runs", "Data & history", "About"]);
   });
 
-  it("are all layered but Licenses, the last, which holds no setting", () => {
-    expect(SECTIONS.filter((page) => !page.layered).map((page) => page.id)).toEqual(["licenses"]);
-    expect(SECTIONS.at(-1)?.id).toBe("licenses");
+  it("are all layered but About, the last, whose one setting is always the personal layer's", () => {
+    expect(SECTIONS.filter((page) => !page.layered).map((page) => page.id)).toEqual(["about"]);
+    expect(SECTIONS.at(-1)?.id).toBe("about");
   });
 
   it("no longer offer the raw document or a page of their own for the Files tree", () => {

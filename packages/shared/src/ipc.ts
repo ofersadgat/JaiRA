@@ -37,7 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
+import type { UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
 import type { CommandApproval } from "./commandParts";
@@ -2229,6 +2229,12 @@ export interface IpcContract {
   "update:install": { request: { when?: UpdateRestartChoice } | void; response: UpdateRestartAnswer };
   /** Hide the notice for this version; a newer one shows it again. */
   "update:dismiss": { request: { version: string }; response: UpdateState };
+  /**
+   * What is going now — runs working and chat turns being answered — which is what the Update menu
+   * offers its choices by ("Wait + update" with work going, "Update now" with none). Asked when the
+   * menu opens; `busy` in the state is only kept while an update is waiting.
+   */
+  "update:busy": { request: void; response: UpdateBusy };
   /** The downloadable plugins (decision 0011 §6), as this machine sees them. Empty when the build ships no manifest. */
   "plugin:list": { request: void; response: PluginStatus[] };
   /**
@@ -2407,6 +2413,7 @@ export const IPC_CHANNELS = [
   "update:download",
   "update:install",
   "update:dismiss",
+  "update:busy",
   "plugin:list",
   "plugin:install",
   "plugin:remove",

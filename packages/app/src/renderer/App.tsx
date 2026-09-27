@@ -28,7 +28,7 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
-import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, statesPath, withPaths, SHARED_SESSION } from "@jaira/shared/browser";
+import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, statesPath, withPaths, isPluginId, SHARED_SESSION, type HealthItem, type HealthPage } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
@@ -67,7 +67,12 @@ import { SettingsLayerContext, SettingsRowsContext } from "./controls";
 import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSections";
 import { Icon } from "./icons";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "./workSummaryView";
-import { LicensesPane } from "./licensesPane";
+import { AboutPane } from "./aboutPane";
+import { HealthCard, NeedsAttention } from "./healthView";
+import { healthCounts } from "./updatesModel";
+import { checkForUpdate, installPlugin, useHealth } from "./updatesStore";
+import { SidebarUpdateRow } from "./updatesView";
+import { Popover, usePopover } from "./popover";
 import { lookOf } from "./appearanceLayer";
 import { useSystemDark } from "./appearance";
 import { FilesTreeSection } from "./filesTreePane";
@@ -76,6 +81,7 @@ import {
   hueOf,
   minusCounts,
   Pill,
+  Pills,
   projectCounts,
   taskCounts,
   unseenRows,
@@ -349,8 +355,8 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
 /**
  * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models and
  * Tools borrow its model and tool; the other five are its own: a disc half filled (how a thing looks),
- * a plug (what it connects to), a play mark (a run), stacked disks (stored), a page of text with its
- * corner folded (a notice). The pages themselves, in
+ * a plug (what it connects to), a play mark (a run), stacked disks (stored), an i in a circle (about
+ * this build). The pages themselves, in
  * the sidebar's one list, are `settingsSections.ts`.
  */
 const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
@@ -360,7 +366,7 @@ const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
   tools: ["M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"],
   runs: ["M7 4.5v15l12-7.5Z"],
   data: ["M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z", "M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6", "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"],
-  licenses: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z", "M14 3v5h5", "M9 13h6", "M9 17h6"],
+  about: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 11v5.5", "M12 7.6v.1"],
 };
 
 function SettingsIcon({ name }: { name: SettingsIconName }): JSX.Element {
@@ -557,6 +563,64 @@ export default function App(): JSX.Element {
         (e: unknown) => forgeError(connection, e instanceof Error ? e.message : String(e)),
       );
     },
+  };
+  /**
+   * Settings' warnings and errors (the person's rulings, 2026-09-26): the board main keeps, the card
+   * the Settings row's pills open, and what each item's button does. A sign-in goes to the page it
+   * belongs to as well, because that is where the flow shows its progress (a forge's device code, an
+   * agent's "waiting for the browser").
+   */
+  const health = useHealth();
+  const healthPop = usePopover<HTMLElement>();
+  const openHealthCard = (from: HTMLElement): void => {
+    healthPop.anchor.current = from;
+    healthPop.toggle();
+  };
+  // Emptied — dismissed or cleared by itself — the card has nothing to be placed against: its pills are gone.
+  useEffect(() => {
+    if (health.length === 0) healthPop.close();
+  }, [health.length, healthPop.close]);
+  const toHealthPage = (page: HealthPage): void => {
+    if (page === "logs") return actions.setView("logs");
+    actions.setSection(page);
+    actions.setView("settings");
+  };
+  const fixHealth = (item: HealthItem): void => {
+    switch (item.action) {
+      case "sign-in":
+        if (item.subject !== undefined) {
+          if (item.id.startsWith("forge:")) {
+            if (forgeOAuth.viaOAuth.has(item.subject)) forgeOAuth.onSignIn(item.subject);
+          } else void actions.signIn(item.subject);
+        }
+        toHealthPage(item.page);
+        return;
+      case "check":
+        void actions.recheckAvailability();
+        return;
+      case "retry-plugin":
+        if (item.subject !== undefined && isPluginId(item.subject)) installPlugin(item.subject);
+        return;
+      case "retry-update":
+        checkForUpdate();
+        return;
+      case "open-logs":
+        actions.setView("logs");
+        return;
+      case undefined:
+        toHealthPage(item.page);
+    }
+  };
+  /** About, opened from the sidebar's Update row — with the release notes showing, from its menu. */
+  const [notesOpen, setNotesOpen] = useState(false);
+  // Only for the one opening: About opened from its list later starts with the notes folded.
+  useEffect(() => {
+    if (state.view !== "settings" || state.section !== "about") setNotesOpen(false);
+  }, [state.view, state.section]);
+  const openAbout = (notes: boolean): void => {
+    setNotesOpen(notes);
+    actions.setSection("about");
+    actions.setView("settings");
   };
   const permissionSetsProject = state.at;
   /**
@@ -2192,12 +2256,18 @@ export default function App(): JSX.Element {
     id: "settings",
     glyph: "⚙",
     label: "Settings",
+    // Errors red, warnings amber — the pills project rows carry — and a click opens everything they count.
+    counts: healthCounts(health),
+    onSeen: openHealthCard,
+    seenTitle: "What needs attention",
     panel: (
       // ONE list, in the order a person sets things up (`settingsSections.ts`): which layer a page
       // edits is its switch's to say, so the sidebar no longer groups the pages by it.
       <ul className="sections icons">
         {SECTIONS.flatMap(({ id, label, icon }) => {
           const open = view === "settings" && state.section === id;
+          // What needs attention on this page, as the Settings row's pills say it for all of them.
+          const problems = id === "connections" || id === "about" ? healthCounts(health, id) : {};
           const row = (
             <li
               key={id}
@@ -2213,6 +2283,11 @@ export default function App(): JSX.Element {
             >
               <SettingsIcon name={icon} />
               <span className="sections-label">{label}</span>
+              {problems.error !== undefined || problems.warning !== undefined ? (
+                <span className="prob-li-pills">
+                  <Pills counts={problems} budget={60} />
+                </span>
+              ) : null}
             </li>
           );
           // The open page's own sections, indented under it: lit as the page is scrolled past
@@ -2260,8 +2335,10 @@ export default function App(): JSX.Element {
       <Sidebar
         views={rows}
         roots={rootRows}
-        footer={FOOTER_VIEWS}
+        // The log's errors and warnings since they were last dismissed, on its row as on Settings'.
+        footer={FOOTER_VIEWS.map((row) => (row.id === "logs" ? { ...row, counts: healthCounts(health, "logs"), onSeen: openHealthCard, seenTitle: "What needs attention" } : row))}
         settings={settingsRow}
+        update={(collapsed) => <SidebarUpdateRow collapsed={collapsed} onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />}
         onLeaveSettings={() => actions.setView(beforeSettings.current)}
         view={view}
         onView={(id) => actions.setView(id as View)}
@@ -2284,6 +2361,21 @@ export default function App(): JSX.Element {
           actions.setView("settings");
         }}
       />
+      {healthPop.open ? (
+        <Popover at={healthPop} side="right" align="end" className="prob-card" role="dialog" aria-label="Everything that needs attention">
+          <HealthCard
+            items={health}
+            onFix={(item) => {
+              healthPop.close();
+              fixHealth(item);
+            }}
+            onOpenPage={(page) => {
+              healthPop.close();
+              toHealthPage(page);
+            }}
+          />
+        </Popover>
+      ) : null}
 
       {/* No divider on a collapsed sidebar: the rail is a fixed strip of glyphs, and a handle that
           dragged it wider would be a handle that undid the collapse without saying so. */}
@@ -2658,6 +2750,7 @@ export default function App(): JSX.Element {
                 >
                 {state.section === "connections" ? (
                   <ConnectionsPage
+                    attention={<NeedsAttention items={health} page="connections" onFix={fixHealth} />}
                     config={state.config}
                     executors={state.executors}
                     routeProbes={state.modelProbes}
@@ -2777,7 +2870,19 @@ export default function App(): JSX.Element {
                     />
                   </>
                 ) : null}
-                {state.section === "licenses" ? <LicensesPane /> : null}
+                {state.section === "about" ? (
+                  <AboutPane
+                    config={state.config}
+                    health={health}
+                    onFix={fixHealth}
+                    notesOpen={notesOpen}
+                    // The machine's own, whatever layer another page is on: always the personal layer.
+                    onTrack={(channel) => {
+                      if (state.config === null) return;
+                      void actions.saveConfig("you", withPaths(state.config.you, [["updates.channel", channel]]));
+                    }}
+                  />
+                ) : null}
                 {state.section === "runs" ? (
                   <RunsPane
                     config={state.config}

@@ -15353,7 +15353,7 @@ button.set-rail-fold:hover {
 }
 
 /* =================================================================================================
- * SETTINGS → LICENSES (`licensesPane.tsx`): one card of third-party notices, a row per package that
+ * SETTINGS → ABOUT → THIRD-PARTY NOTICES (`licensesPane.tsx`): one card of third-party notices, a row per package that
  * opens onto its text. t3code's open-source licenses panel, in this page's row metrics (13px × 16px)
  * and tokens only, so it reads in every palette and both modes.
  * ================================================================================================= */
@@ -15474,6 +15474,388 @@ button.set-rail-fold:hover {
   margin: 0;
   padding: 18px 16px;
   color: var(--dim);
+}
+
+/* =================================================================================================
+ * THE UPDATE, THE PLUGINS, AND SETTINGS' WARNINGS AND ERRORS (decision 0011 §4–§6; the person's
+ * rulings on the three rounds of mockups, 2026-09-26): the sidebar's Update row (`updatesView.tsx`),
+ * Settings → About (`aboutPane.tsx`), and the Needs attention section and card (`healthView.tsx`).
+ * Tokens only; the menus and cards are floats (`popover.tsx`), so none of their rules places them.
+ * ================================================================================================= */
+
+/* The sidebar row, above Settings: in the accent while there is an update to take, washed in it once
+   the update is downloaded and a restart is all that is left, in red when a check or download failed. */
+.upd-side .side-hit,
+.upd-side .side-hit .side-glyph {
+  color: var(--accent);
+}
+.upd-side.ready {
+  background: var(--tint-accent);
+}
+.upd-side.ready .side-hit {
+  color: var(--text);
+}
+.upd-side.bad .side-hit,
+.upd-side.bad .side-glyph {
+  color: var(--bad);
+}
+/* The version, short — "nightly" for a nightly — and it gives way before the word does. */
+.upd-side-ver {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 58%;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: calc(var(--size-data) * 11 / 12) / 1 var(--font-data);
+  color: var(--dim);
+}
+.upd-side-bar {
+  width: 44px;
+  height: 4px;
+  flex: none;
+  margin-left: auto;
+}
+.upd-side-bar + .upd-side-ver {
+  margin-left: 0;
+}
+/* The chevron is the row's own verb and always there; the × only while the row is under the pointer. */
+.upd-side .upd-caret,
+.upd-side .upd-retry {
+  opacity: 1;
+  margin-right: 3px;
+}
+.upd-side .upd-caret svg {
+  width: 12px;
+  height: 12px;
+}
+.upd-side .upd-caret.on {
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+}
+.upd-side .upd-dismiss {
+  opacity: 0;
+  font-size: calc(var(--size-app) * 14 / 12.5);
+}
+.upd-side .upd-dismiss:focus-visible {
+  opacity: 1;
+}
+.upd-side.open .side-hit {
+  color: var(--text);
+}
+/* The full version beside the row, while it is under the pointer. */
+.upd-tip {
+  display: grid;
+  gap: 3px;
+  width: 250px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--lift);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  line-height: 1.4;
+  color: var(--dim);
+  pointer-events: none;
+}
+.upd-tip code {
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  color: var(--text);
+}
+.upd-tip b {
+  color: var(--text);
+  font-weight: 600;
+}
+/* The menu behind a chevron: the approval card's answer menu, narrower, with what is going at its head. */
+.cx-submenu.answer-menu.upd-menu {
+  min-width: 0;
+  width: 300px;
+}
+/* A hint is a sentence, and wraps inside the narrower menu rather than running past its edge. */
+.upd-menu .cx-opt-hint {
+  white-space: normal;
+}
+.upd-menu-head {
+  padding: 5px 8px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
+
+/* About → Updates. */
+.upd-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.upd-running code {
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  color: var(--text);
+}
+.upd-chan {
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  line-height: 18px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+.upd-ver {
+  white-space: nowrap;
+}
+.upd-bar {
+  width: 180px;
+  height: 6px;
+}
+.upd-err {
+  color: var(--bad);
+}
+.upd-under {
+  margin-top: 10px;
+}
+/* The release notes, as published: the release body line for line, in the data face. */
+.upd-notes-pub {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  font: calc(var(--size-data) * 11 / 12) / 1.6 var(--font-data);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* About → Plugins. */
+.plg-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--ok);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  white-space: nowrap;
+}
+.plg-ok code {
+  color: var(--text);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+}
+.plg-size {
+  color: var(--dim);
+  font: calc(var(--size-data) * 11 / 12) var(--font-data);
+  white-space: nowrap;
+}
+.plg-old,
+.plg-old code {
+  color: var(--warn);
+}
+.plg-check {
+  padding: 2px 8px;
+}
+.plg-more {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: calc(var(--size-app) * 14 / 12.5);
+  line-height: 1;
+}
+.plg-more.on {
+  background: var(--fill-ghost-selected);
+  color: var(--text);
+}
+.plg-prog {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.plg-bar {
+  width: 120px;
+  height: 6px;
+}
+.plg-err {
+  margin: 6px 0 0;
+  color: var(--bad);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  line-height: 1.45;
+}
+/* Local models' builds, indented under it — the indent, not an edge, says they belong to it. */
+.plg-vars {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0 0 0 14px;
+  display: grid;
+}
+.plg-var {
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+.plg-var-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  min-height: 26px;
+}
+.plg-var-say {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.plg-var-name {
+  font-weight: 550;
+  color: var(--text);
+}
+.plg-var-note {
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+}
+.plg-var-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.plg-var .plg-err {
+  margin-top: 4px;
+}
+.plg-tag {
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  line-height: 17px;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--tint-accent);
+}
+
+/* Needs attention: each row WASHED red or amber — never striped — with the pill's glyph before its
+   name, and an × at its right end while it is under the pointer. */
+.prob {
+  background: var(--tint-bad);
+}
+.prob.prob-warning {
+  background: var(--tint-warn);
+}
+.set-group > .prob:first-child {
+  border-radius: 11px 11px 0 0;
+}
+.set-group > .prob:last-child {
+  border-radius: 0 0 11px 11px;
+}
+.set-group > .prob:only-child {
+  border-radius: 11px;
+}
+.prob-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.prob-mark {
+  flex: none;
+}
+/* One width for both glyphs, so the card's lines start at one edge. */
+.prob-card-row .prob-mark {
+  width: 18px;
+  justify-content: center;
+}
+.prob-since {
+  color: var(--text);
+}
+.prob-x {
+  opacity: 0;
+  font-size: calc(var(--size-app) * 15 / 12.5);
+}
+.prob:hover .prob-x,
+.prob-card-row:hover .prob-x,
+.prob-x:focus-visible {
+  opacity: 1;
+}
+/* A page's pills in the Settings panel's list, at the row's far end. */
+.prob-li-pills {
+  margin-left: auto;
+  display: inline-flex;
+}
+/* The one place listing them all: the card the Settings row's pills open. */
+.prob-card {
+  display: grid;
+  gap: 4px;
+  width: 400px;
+  max-width: calc(100vw - 16px);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--lift);
+}
+.prob-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 4px 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+}
+.prob-card-title {
+  color: var(--text);
+  font-weight: 600;
+}
+.prob-card-tally {
+  margin-left: auto;
+}
+.prob-card-empty {
+  margin: 0;
+  padding: 8px;
+  color: var(--dim);
+}
+.prob-card-group {
+  display: grid;
+  gap: 2px;
+  padding: 2px 0;
+}
+/* A group's name is the way to its page. */
+.prob-card-where {
+  justify-self: start;
+  padding: 4px 8px 2px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+  cursor: pointer;
+}
+.prob-card-where:hover:not(:disabled) {
+  color: var(--text);
+  background: none;
+  text-decoration: underline;
+}
+.prob-card-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 8px;
+  border-radius: 6px;
+}
+.prob-card-row:hover {
+  background: var(--fill-ghost-hover);
+}
+.prob-card-say {
+  display: grid;
+  min-width: 0;
+}
+.prob-card-what {
+  color: var(--text);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prob-card-since {
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 
 /* =================================================================================================

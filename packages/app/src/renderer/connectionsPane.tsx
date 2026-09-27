@@ -15,7 +15,7 @@
  * Every row has one shape: what it is and whether it works on the left; who it connects as on the
  * right, as boxes — a login, an OAuth account, a stored key — with a + box at the end to add one.
  */
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type {
   ConfigLayer,
   ConfigView,
@@ -34,6 +34,8 @@ import { McpServerRows } from "./mcpServersRows";
 import { SettingsSection } from "./settingsLayout";
 
 export interface ConnectionsPageProps {
+  /** What stopped working here (Settings' warnings and errors) — the page's first section while there is any. */
+  attention?: ReactNode;
   config: ConfigView | null;
   executors: ExecutorInfo[];
   routeProbes: Record<string, ProbeResult>;
@@ -97,6 +99,7 @@ export function ConnectionsPage(props: ConnectionsPageProps): JSX.Element {
   };
   return (
     <div className="cfg-pane">
+      {props.attention}
       <SettingsSection
         id="agents"
         title="Agents"

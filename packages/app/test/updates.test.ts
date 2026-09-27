@@ -206,7 +206,8 @@ describe("updates", () => {
 
       busy = { runs: 3, turns: 0 };
       updates.restart("wait");
-      expect(updates.restart("cancel")).toEqual({ installing: false, pending: "on-quit" });
+      expect(updates.restart("cancel")).toEqual({ installing: false });
+      expect(updates.current().pending).toBeUndefined();
       busy = { runs: 0, turns: 0 };
       vi.advanceTimersByTime(500);
       expect(quits).toBe(1);

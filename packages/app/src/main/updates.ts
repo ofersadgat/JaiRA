@@ -237,7 +237,7 @@ export class UpdateManager {
    *    quit once an update is downloaded (`installOnQuit`); this only says so on screen.
    *  - `pause` ("Pause + update") suspends every run so the next start resumes it, then restarts.
    *  - `wait` ("Wait + update") restarts by itself once nothing is going, and can be canceled.
-   *  - `cancel` stops waiting; the update still installs on quit.
+   *  - `cancel` stops waiting and nothing more: Restart to update is back, and any quit still installs it.
    */
   restart(choice: RestartChoice): RestartAnswer {
     if (!this.canInstall()) return { installing: false };
@@ -270,9 +270,13 @@ export class UpdateManager {
         return { installing: false, pending: "waiting" };
       }
       case "later":
-      case "cancel":
         this.set({ ...rest, pending: "on-quit" });
         return { installing: false, pending: "on-quit" };
+      case "cancel":
+        // Stop waiting, and nothing more: the update is ready again, Restart to update is back, and any
+        // quit still installs it.
+        this.set(rest);
+        return { installing: false };
     }
   }
 

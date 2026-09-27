@@ -1,5 +1,7 @@
 /**
- * Settings → Licenses: every third-party notice JaiRA ships, after t3code's `OpenSourceLicenses.tsx`.
+ * Settings → About → Third-party notices: every third-party notice JaiRA ships, after t3code's
+ * `OpenSourceLicenses.tsx`. The last section of the About page (it was a Licenses page of its own until
+ * the person's rulings on the update screens, 2026-09-26).
  *
  * The list is the build's (`packages/app/licenses/thirdPartyLicenses.ts` writes it beside the renderer,
  * main reads it on `licenses:read`), decoded here so a manifest from a different build is refused
@@ -8,7 +10,7 @@
  * a link to the project's source. A search at the section's head narrows by name, version, license or
  * bundle; the count beside it says how many of how many.
  *
- * Not layered: nothing here is a setting, so the page has no switch and no "Just you" view.
+ * Nothing here is a setting, so it takes no layer.
  */
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import {
@@ -75,7 +77,7 @@ function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuer
   );
 }
 
-export function LicensesPane(): JSX.Element {
+export function ThirdPartyNotices(): JSX.Element {
   const [state, setState] = useState<ManifestState>({ status: "loading" });
   const [query, setQuery] = useState("");
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -107,44 +109,42 @@ export function LicensesPane(): JSX.Element {
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   return (
-    <div className="cfg-pane">
-      <SettingsSection
-        id="notices"
-        title="Third-party notices"
-        info="Every package the app bundles or loads, and the fonts, theme and runtime it ships with. Written by the build from each package's own LICENSE and NOTICE files."
-        action={state.status === "ready" ? <LicenseSearch query={query} onQuery={setQuery} shown={shown.length} total={entries.length} /> : undefined}
-      >
-        {state.status === "ready" ? (
-          shown.length > 0 ? (
-            <div className="lic-list">
-              {shown.map((entry) => {
-                const key = thirdPartyLicenseEntryKey(entry);
-                return <LicenseRow key={key} entry={entry} open={openKey === key} onOpen={(open) => setOpenKey(open ? key : null)} />;
-              })}
-            </div>
-          ) : (
-            <p className="lic-empty">No licenses match that search.</p>
-          )
-        ) : state.status === "error" ? (
-          <div className="set-row">
-            <div className="set-row-line">
-              <div className="set-row-say">
-                <div className="set-name" role="heading" aria-level={3}>
-                  Open-source notices are unavailable
-                </div>
-                <p className="set-desc">{state.message}</p>
-              </div>
-              <div className="set-ctl">
-                <button type="button" onClick={retry}>
-                  Try again
-                </button>
-              </div>
-            </div>
+    <SettingsSection
+      id="notices"
+      title="Third-party notices"
+      info="Every package the app bundles or loads, and the fonts, theme and runtime it ships with. Written by the build from each package's own LICENSE and NOTICE files."
+      action={state.status === "ready" ? <LicenseSearch query={query} onQuery={setQuery} shown={shown.length} total={entries.length} /> : undefined}
+    >
+      {state.status === "ready" ? (
+        shown.length > 0 ? (
+          <div className="lic-list">
+            {shown.map((entry) => {
+              const key = thirdPartyLicenseEntryKey(entry);
+              return <LicenseRow key={key} entry={entry} open={openKey === key} onOpen={(open) => setOpenKey(open ? key : null)} />;
+            })}
           </div>
         ) : (
-          <p className="lic-empty">Loading open-source notices…</p>
-        )}
-      </SettingsSection>
-    </div>
+          <p className="lic-empty">No licenses match that search.</p>
+        )
+      ) : state.status === "error" ? (
+        <div className="set-row">
+          <div className="set-row-line">
+            <div className="set-row-say">
+              <div className="set-name" role="heading" aria-level={3}>
+                Open-source notices are unavailable
+              </div>
+              <p className="set-desc">{state.message}</p>
+            </div>
+            <div className="set-ctl">
+              <button type="button" onClick={retry}>
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="lic-empty">Loading open-source notices…</p>
+      )}
+    </SettingsSection>
   );
 }

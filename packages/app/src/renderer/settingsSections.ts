@@ -7,8 +7,9 @@
  * LAYER: every page now has the same switch, `Just you | This project | Shared`, and which of them
  * you are editing is the switch's to say, not the sidebar's. The order is the order a person sets
  * things up in: how it looks, what it can reach, which model answers, what the tools may do, how a
- * run behaves, and what it leaves behind. Licenses comes last and is the one page that is not layered:
- * it lists what JaiRA is built from, and nothing on it is a setting.
+ * run behaves, and what it leaves behind. About comes last and is the one page that is not layered: the
+ * build, its updates, its plugins and what it is built from — its one setting, the update track, is
+ * the machine's own and always the personal layer's (the person's ruling, 2026-09-26: "no layer switch").
  *
  * Pure data, so the list is testable without drawing the sidebar.
  */
@@ -16,7 +17,7 @@ import type { ConfigLayer } from "@jaira/shared/browser";
 import type { SettingsSection } from "./store";
 
 /** The glyph each page wears in the sidebar — `App.tsx` draws them. */
-export type SettingsIconName = "appearance" | "connections" | "models" | "tools" | "runs" | "data" | "licenses";
+export type SettingsIconName = "appearance" | "connections" | "models" | "tools" | "runs" | "data" | "about";
 
 export interface SettingsPageMeta {
   id: SettingsSection;
@@ -36,10 +37,10 @@ export const SECTIONS: readonly SettingsPageMeta[] = [
   { id: "runs", label: "Runs", icon: "runs", purpose: "How a run behaves while it is going.", layered: true },
   { id: "data", label: "Data & history", icon: "data", purpose: "Where runs keep what they produce, and how much there is.", layered: true },
   {
-    id: "licenses",
-    label: "Licenses",
-    icon: "licenses",
-    purpose: "The open-source software JaiRA is built from, and the notices its licenses ask to be shown.",
+    id: "about",
+    label: "About",
+    icon: "about",
+    purpose: "The build you are running, how it updates, the plugins it can download, and the open-source software it is built from.",
     layered: false,
   },
 ];

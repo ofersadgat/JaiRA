@@ -368,11 +368,18 @@ export function Pills({
   counts,
   budget,
   onClear,
+  clearTitle = "mark these seen",
 }: {
   counts: PillCounts;
   budget: number;
-  /** Marking this row's share seen — see §4.3. Absent where the pills are live facts only. */
-  onClear?: (() => void) | undefined;
+  /**
+   * Marking this row's share seen — see §4.3. Absent where the pills are live facts only. Handed the
+   * pills' own element, for a row whose click opens something placed against them (the Settings row's
+   * card of warnings and errors).
+   */
+  onClear?: ((from: HTMLElement) => void) | undefined;
+  /** What a click does, where it is not "mark these seen". */
+  clearTitle?: string;
 }): JSX.Element | null {
   const { fit, rest, worst } = layoutPills(counts, budget);
   if (fit.length === 0) return null;
@@ -380,7 +387,7 @@ export function Pills({
     <span
       className="pills"
       {...(onClear !== undefined
-        ? { role: "button", title: "mark these seen", onClick: onClear }
+        ? { role: "button", title: clearTitle, onClick: (e: { currentTarget: HTMLElement }) => onClear(e.currentTarget) }
         : {})}
     >
       {fit.map(({ kind, n }) => (

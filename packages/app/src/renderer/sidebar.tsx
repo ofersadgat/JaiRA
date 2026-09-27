@@ -99,8 +99,14 @@ export interface SidebarView {
   acts?: readonly SidebarAct[];
   /** What this view has waiting in the open project — see SHELL.md §4.3. */
   counts?: PillCounts;
-  /** Marking this view's share seen, which is what clears its status pills. */
-  onSeen?: () => void;
+  /**
+   * Marking this view's share seen, which is what clears its status pills — or, for a row whose pills
+   * are not a count of unseen work (Settings' warnings and errors), what a click on them opens,
+   * placed against `from`.
+   */
+  onSeen?: (from: HTMLElement) => void;
+  /** What a click on the pills does, where it is not "mark these seen". */
+  seenTitle?: string;
 }
 
 /** One project the window can stand on. */
@@ -199,6 +205,7 @@ export function Sidebar({
   onTheme,
   onChooseProject,
   onProjectSettings,
+  update,
 }: {
   /** The rows nested under the OPEN project. Empty when the address is standing at the root. */
   views: readonly SidebarView[];
@@ -251,6 +258,12 @@ export function Sidebar({
    * (or the button has focus) — it is a door out of the project, not something the row is about.
    */
   onProjectSettings: (project: SidebarProject) => void;
+  /**
+   * The app's Update row, drawn above Settings in the foot (decision 0011 §4) — the caller's render
+   * function, which draws nothing while there is no update to act on. Not in the Settings panel: About
+   * says everything the row would, one click away.
+   */
+  update?: ((collapsed: boolean) => ReactNode) | undefined;
 }): JSX.Element {
   /**
    * One nav row.
@@ -338,7 +351,7 @@ export function Sidebar({
             </button>
           ))}
           {v.counts !== undefined && !collapsed ? (
-            <Pills counts={v.counts} budget={ROW_PILL_BUDGET - acts.length * ACT_WIDTH} onClear={v.onSeen} />
+            <Pills counts={v.counts} budget={ROW_PILL_BUDGET - acts.length * ACT_WIDTH} onClear={v.onSeen} {...(v.seenTitle !== undefined ? { clearTitle: v.seenTitle } : {})} />
           ) : null}
         </div>
         {drawer ? <div className="side-drawer">{v.panel}</div> : null}
@@ -518,6 +531,7 @@ export function Sidebar({
       <div className="side-foot">
         {collapsed ? footer.map((v) => rowOf(v, false)) : null}
         {collapsed ? themeRow : null}
+        {settingsPanel ? null : update?.(collapsed)}
         {/* Not drawn while the panel is: the panel's header IS this row, and the second copy under
             it would be a row that cannot be seen and cannot be reached. */}
         {settingsPanel ? null : rowOf(settings, false, "any", collapsed ? { expand: () => onCollapsed(false) } : undefined)}

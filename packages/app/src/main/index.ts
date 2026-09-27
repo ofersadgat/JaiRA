@@ -729,6 +729,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "update:download": (() => updates.download()) as Handler,
   "update:install": ((request: { when?: RestartChoice } | undefined) => updates.apply(request?.when ?? "wait")) as Handler,
   "update:dismiss": ((request: { version: string }) => updates.dismiss(request.version)) as Handler,
+  "update:busy": (() => service.activeWork()) as Handler,
   "plugin:list": (() => pluginStatuses()) as Handler,
   "plugin:install": ((request: { id: PluginId }) => installPlugin(request.id)) as Handler,
   "plugin:remove": ((request: { id: PluginId }) => removePlugin(request.id)) as Handler,
