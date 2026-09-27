@@ -54,6 +54,8 @@ import {
 import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { localLink, remoteLink, type EngineLink } from "./engineLink";
+import { CLIENT_SCHEME_PRIVILEGES, CLIENT_URL, registerClientProtocol } from "./clientProtocol";
+import { startSpikeSocket, type SpikeSocket } from "./spikeSocket";
 import { electronKeychain } from "./keychain";
 import { tailChromiumLog } from "./chromiumLog";
 import { startPlugins } from "@jaira/runtime";
@@ -65,6 +67,15 @@ import { startPlugins } from "@jaira/runtime";
 /** `dist/` layout produced by the build (see build.mjs / vite.config.ts). */
 const DIST = __dirname;
 const RENDERER_HTML = join(DIST, "renderer", "index.html");
+/** One's `dist/client`, copied here by `build:client` (decision 0013, S1). */
+const CLIENT_DIR = join(DIST, "client");
+/**
+ * Which renderer the window loads: the One client (the default), or the Vite build it replaced, kept
+ * while the spike compares the two (`JAIRA_RENDERER=vite`).
+ */
+const RENDERER: "one" | "vite" = process.env.JAIRA_RENDERER === "vite" ? "vite" : "one";
+/** The throwaway remote transport (0013 S2), when `JAIRA_SPIKE_WS` asks for it. */
+let spike: SpikeSocket | undefined;
 const PRELOAD = join(DIST, "preload.cjs");
 
 let window: BrowserWindow | undefined;
@@ -197,6 +208,7 @@ const plugins = startPlugins(home ?? defaultBaseDir(), __dirname);
 
 /** Tell the window something. The service's pushes and the updater's both go this way. */
 function pushToWindow(message: PushMessage): void {
+  spike?.publish(message);
   // GUARDED, because this is a send into another process and the service treats it as a statement.
   //
   // `webContents.send` structure-clones its argument and throws on anything it cannot represent, and
@@ -606,25 +618,28 @@ async function readLicenseManifest(): Promise<unknown> {
   return fromPlugins.length === 0 || !Array.isArray(manifest.entries) ? manifest : { ...manifest, entries: [...manifest.entries, ...fromPlugins] };
 }
 
+/** One request, from whichever transport carried it: the window's IPC, or the spike socket (0013 S2). */
+async function dispatch(channel: IpcChannel, request: unknown): Promise<unknown> {
+  try {
+    // Errors surface as rejections the renderer can display; the service's
+    // messages are already human-facing ("unknown task 't-1'").
+    // The host's own answers here; the rest are the engine's, wherever it runs. A settings write is
+    // followed by its `store:invalidate` push, which repaints the frame (`pushToWindow`).
+    if (HOST_ONLY.has(channel)) return await (hostHandlers[channel as HostChannel] as (request: unknown) => unknown)(request);
+    if (link === undefined) throw new Error("the engine is not reachable yet — JaiRA is finding or starting it");
+    return await link.invoke(channel, request);
+  } catch (e) {
+    // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
+    // and still shows the message — but the failure is no longer invisible to everyone else. Every
+    // handler failure in the app becomes one line naming the channel, for six lines here.
+    link?.recordIpcFailure(channel, e);
+    throw e;
+  }
+}
+
 function registerIpc(): void {
   for (const channel of IPC_CHANNELS) {
-    ipcMain.handle(channel, async (_event: IpcMainInvokeEvent, request: unknown) => {
-      try {
-        // Errors surface as rejections the renderer can display; the service's
-        // messages are already human-facing ("unknown task 't-1'").
-        // The host's own answers here; the rest are the engine's, wherever it runs. A settings write is
-        // followed by its `store:invalidate` push, which repaints the frame (`pushToWindow`).
-        if (HOST_ONLY.has(channel)) return await (hostHandlers[channel as HostChannel] as (request: unknown) => unknown)(request);
-        if (link === undefined) throw new Error("the engine is not reachable yet — JaiRA is finding or starting it");
-        return await link.invoke(channel, request);
-      } catch (e) {
-        // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
-        // and still shows the message — but the failure is no longer invisible to everyone else. Every
-        // handler failure in the app becomes one line naming the channel, for six lines here.
-        link?.recordIpcFailure(channel, e);
-        throw e;
-      }
-    });
+    ipcMain.handle(channel, (_event: IpcMainInvokeEvent, request: unknown) => dispatch(channel, request));
   }
 }
 
@@ -830,7 +845,8 @@ async function createWindow(): Promise<BrowserWindow> {
     reportCrash("renderer", new Error(at));
   });
 
-  await win.loadFile(RENDERER_HTML);
+  if (RENDERER === "one") await win.loadURL(CLIENT_URL);
+  else await win.loadFile(RENDERER_HTML);
   win.show();
   return win;
 }
@@ -912,6 +928,7 @@ function startupProject(): string | undefined {
  */
 protocol.registerSchemesAsPrivileged([
   { privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false }, scheme: ARTIFACT_SCHEME },
+  CLIENT_SCHEME_PRIVILEGES,
 ]);
 
 /**
@@ -1187,6 +1204,7 @@ function takeOver(): Promise<void> {
 
 void app.whenReady().then(async () => {
   registerArtifactProtocol();
+  if (RENDERER === "one") registerClientProtocol(CLIENT_DIR);
   // No menu bar. Left alone, Electron installs a default File/Edit/View/Window menu whose every item
   // is either a no-op here or something the app offers better elsewhere — and on Windows and Linux
   // it takes a row across the top of the window to say so. Nulling it also disables the Alt key that
@@ -1196,6 +1214,8 @@ void app.whenReady().then(async () => {
   // controls are drawn by the OS from a colour we hand it, so they have to be handed the new one.
   nativeTheme.on("updated", () => repaintTitleBar());
   registerIpc();
+  const spikePort = Number(process.env.JAIRA_SPIKE_WS);
+  if (Number.isInteger(spikePort) && spikePort > 0) spike = startSpikeSocket(spikePort, CLIENT_DIR, dispatch, (line) => console.log(line));
   const established = await establishEngine();
   if (established === "quit") {
     app.quit();

@@ -72,6 +72,8 @@ export class App {
   private readonly pending = new Map<number, (reply: Reply) => void>();
   /** Anything that went wrong and did not throw. A non-empty list is a failed run. */
   readonly complaints: string[] = [];
+  /** Everything the process printed to stdout, for a script that needs something it said. */
+  said = "";
 
   private constructor(
     private readonly child: ChildProcess,
@@ -98,9 +100,37 @@ export class App {
       env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    return App.attach(child, port, options);
+  }
+
+  /**
+   * A plain browser, headless, on `url` — the One client served by the desktop's spike socket (0013
+   * S2), photographed with the same verbs as the app. `browser` is the executable (Chrome, Edge).
+   */
+  static async browse(browser: string, url: string, options: Options): Promise<App> {
+    const port = options.port ?? 9229;
+    mkdirSync(options.out, { recursive: true });
+    const profile = join(options.out, `.profile-${port}`);
+    const child = spawn(
+      browser,
+      ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--hide-scrollbars", url],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return App.attach(child, port, options, true);
+  }
+
+  private static async attach(child: ChildProcess, port: number, options: Options, quiet = false): Promise<App> {
+    // Assigned once attached; stdout that arrives before then is kept here and handed over.
+    let app: App | undefined;
+    let early = "";
+    child.stdout?.on("data", (d: Buffer) => {
+      if (app === undefined) early += String(d);
+      else app.said += String(d);
+    });
 
     const complaints: string[] = [];
     child.stderr?.on("data", (d: Buffer) => {
+      if (quiet) return;
       const line = String(d).trim();
       // The endpoint announcement is not news, and neither is an empty flush.
       if (line === "" || line.includes("DevTools listening")) return;
@@ -131,8 +161,9 @@ export class App {
       ws.onerror = () => reject(new Error("could not attach to the app's page target"));
     });
 
-    const app = new App(child, ws, options.out);
+    app = new App(child, ws, options.out);
     app.complaints.push(...complaints);
+    app.said = early;
     ws.onmessage = (e: MessageEvent) => app.receive(String(e.data));
 
     await app.send("Page.enable");
@@ -370,6 +401,39 @@ export class App {
     if (data === undefined) throw new Error(`the capture of ${name} returned nothing`);
     writeFileSync(join(this.out, `${name}.png`), Buffer.from(data, "base64"));
     console.log(`  ${name}.png`);
+  }
+
+  /**
+   * Hold still, for a comparison of two renderers of one state (`parity.mts`).
+   *
+   * From the next document on: every page starts its clock at `epochMs` and lets it run from there,
+   * so "36 seconds ago" says the same thing at the same step of both passes, and animations and
+   * transitions are off, so neither picture catches a spinner mid-turn. The clock RUNS rather than
+   * stopping: Monaco's tokenizer budgets its work by the clock, and a stopped one never colours a
+   * line.
+   */
+  async holdStill(epochMs: number): Promise<void> {
+    await this.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `(() => {
+        const T = ${epochMs};
+        const Real = Date;
+        const now = () => T + Math.floor(performance.now());
+        class Held extends Real { constructor(...a) { if (a.length === 0) super(now()); else super(...a); } static now() { return now(); } }
+        globalThis.Date = Held;
+        const still = () => {
+          const s = document.createElement("style");
+          s.textContent = "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}";
+          document.documentElement.appendChild(s);
+        };
+        if (document.documentElement) still(); else document.addEventListener("DOMContentLoaded", still);
+      })()`,
+    });
+  }
+
+  /** Load `url` in the window, and wait for it to finish loading. */
+  async navigate(url: string): Promise<void> {
+    await this.send("Page.navigate", { url });
+    await this.until("document.readyState === 'complete'", `${url} to load`);
   }
 
   async close(): Promise<void> {

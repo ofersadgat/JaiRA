@@ -49,7 +49,8 @@ const common = {
   // §6.2's check with "producer type 'object' not allowed by consumer array". Nothing else in the
   // app notices, because the app is the only surface that bundled the compiler: the CLI derives
   // `external` from its own `dependencies`, which is what kept it correct.
-  external: ["electron", "better-sqlite3", "typescript"],
+  // `bufferutil` and `utf-8-validate` are `ws`'s optional speed-ups, required inside a try: absent is fine.
+  external: ["electron", "better-sqlite3", "typescript", "bufferutil", "utf-8-validate"],
   // jsonc-parser's `main` is a UMD build whose internal `require("./impl/…")` calls survive
   // bundling and throw at load ("Cannot find module './impl/format'"). Its `module` entry is real
   // ESM, which esbuild folds into a CJS bundle cleanly. Same alias the CLI's build.mjs carries.

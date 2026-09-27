@@ -157,8 +157,20 @@ declare global {
   }
 }
 
+/** A bridge installed by the host page, which wins over `window.jaira` (decision 0013). */
+let installed: JairaBridge | undefined;
+
+/**
+ * Talk to an engine over something other than Electron's preload: the One client in a browser or on a
+ * phone installs its socket bridge here before the first render. Nothing else in the store changes,
+ * because nothing else in it knows what carries a request.
+ */
+export function setBridge(api: JairaBridge): void {
+  installed = api;
+}
+
 function bridge(): JairaBridge {
-  const api = window.jaira;
+  const api = installed ?? window.jaira;
   if (!api) throw new Error("the JaiRA bridge is unavailable (preload did not run)");
   return api;
 }

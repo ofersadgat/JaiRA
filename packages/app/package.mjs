@@ -89,7 +89,7 @@ function prune(stage) {
 
 function stageApp() {
   const dist = join(here, "dist");
-  for (const file of ["main.cjs", "preload.cjs", "tsProjectWorker.cjs", "mcpBridgeWorker.cjs", "renderer/index.html", "builtin"]) {
+  for (const file of ["main.cjs", "preload.cjs", "tsProjectWorker.cjs", "mcpBridgeWorker.cjs", "renderer/index.html", "client/index.html", "builtin"]) {
     if (!existsSync(join(dist, file))) throw new Error(`dist/${file} is missing — run the build first (npm run build)`);
   }
 
