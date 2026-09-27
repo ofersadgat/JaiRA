@@ -15657,6 +15657,10 @@ button.set-rail-fold:hover {
   color: var(--text);
   font-size: calc(var(--size-data) * 11.5 / 12);
 }
+/* An inline-flex row drops the space between "from this checkout" and its version. */
+.plg-ok code:not(:first-child) {
+  margin-left: 0.35em;
+}
 .plg-size {
   color: var(--dim);
   font: calc(var(--size-data) * 11 / 12) var(--font-data);

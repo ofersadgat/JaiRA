@@ -557,8 +557,37 @@ these should default to releases on github").**
   - A plugin install collects what it replaced, as far as it can: a native file the app has loaded
     cannot be deleted on Windows, so it waits for the next collection.
   - The embedded probe reports Local models with no build installed.
-- **Still to do:** the screens themselves, after the round-2 answers, and the About page listing
-  installed plugins' notices.
+- **The screens were built after round 3** (ed721cb6), with the bug round's fixes after them (226315a8,
+  f08f10ed).
+
+**Step 8 and the last two plugin details, 2026-09-27.**
+
+- **The installer's `jaira` command** (`packages/app/packageCli.mjs`):
+  - `stageCli` bundles the CLI into `app.asar/cli/` with the app's externals (`RUNTIME_MODULES`; the npm
+    CLI leaves its dependencies to npm). An ESM banner defines `require` for the inlined CommonJS
+    packages. The plugin manifest and a launcher `jaira.mjs` go beside it.
+  - `commandFiles` writes `<resources>/bin/jaira.cmd` / `jaira`, which run the CLI on the app's own
+    Electron with `ELECTRON_RUN_AS_NODE=1`.
+  - **Windows:** an NSIS include (`customInstall` / `customUnInstall`) writes and removes
+    `%LOCALAPPDATA%\Microsoft\WindowsApps\jaira.cmd`. That directory is on every user's PATH, so the
+    PATH is never edited; NSIS's string limit is how installers truncate it.
+  - **Linux:** the app's executable is now `jaira-app`, and the `.deb`'s install scripts are
+    electron-builder's own with a `/usr/bin/jaira` link added.
+  - **macOS:** About's Command line row runs "Install the jaira command", which links
+    `/usr/local/bin/jaira` behind macOS's administrator prompt. On Windows the same action writes the
+    forwarding script again.
+  - **The AppImage** has no fixed place to run a command from, so the row says so.
+  - Status and install are in `main/cliCommand.ts`, over `cli:status` / `cli:install`.
+  - **Verified 2026-09-27:** the smoke test runs `jaira plugin list` through the wrapper. A silent
+    per-user install of the built NSIS installer wrote the forwarding script; `jaira plugin list` ran
+    from the PATH, from the installed app; the silent uninstall removed the app and the script.
+    Tests: `cliCommand.test.ts`.
+- **Installed plugins' notices:** `PluginStore.notices()` reads each stored package's licence and its
+  LICENSE / LICENCE / NOTICE / COPYING files, tagged "<plugin> plugin" (a shared package lists every
+  plugin that holds it). Main adds them to the build's notice list on `licenses:read`, so About's
+  Third-party notices include them.
+- **Anthropic's terms:** until the Claude Agent SDK is installed, its About row says it is downloaded
+  from npm under Anthropic's legal agreements, linked to the page the SDK's own `LICENSE.md` names.
 
 ## Consequences
 

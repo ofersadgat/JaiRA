@@ -37,7 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
+import type { CliCommandStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
 import type { CommandApproval } from "./commandParts";
@@ -2250,6 +2250,10 @@ export interface IpcContract {
   "health:dismiss": { request: { id: string }; response: HealthItem[] };
   /** Dismiss everything shown (the card's "Dismiss all"). */
   "health:dismissAll": { request: void; response: HealthItem[] };
+  /** Whether the `jaira` command is on this machine's PATH (decision 0011 §7). */
+  "cli:status": { request: void; response: CliCommandStatus };
+  /** Put it there where the app can (macOS asks for an administrator's password). */
+  "cli:install": { request: void; response: CliCommandStatus };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2420,6 +2424,8 @@ export const IPC_CHANNELS = [
   "health:list",
   "health:dismiss",
   "health:dismissAll",
+  "cli:status",
+  "cli:install",
 ] as const satisfies readonly IpcChannel[];
 
 /**

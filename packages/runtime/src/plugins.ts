@@ -28,7 +28,7 @@ import { pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
 import { x as untar } from "tar";
 import { setLlamaModuleLoader } from "@declarative-ai/llm";
-import { PLUGINS, pluginSpec, type PluginId, type PluginSpec, type PluginStatus } from "@jaira/shared";
+import { PLUGINS, pluginSpec, type PluginId, type PluginSpec, type PluginStatus, type ThirdPartyLicenseEntry } from "@jaira/shared";
 
 export interface PluginPackage {
   name: string;
@@ -301,6 +301,32 @@ export class PluginStore {
     return key !== undefined ? this.packageDir(key) : undefined;
   }
 
+  /**
+   * The licence notices of every package an installed plugin holds (decision 0011 §6): the installer
+   * does not ship these packages, so its own notice list leaves them out, and About adds these to it.
+   * Each carries its declared licence and the text of its LICENSE / LICENCE / NOTICE / COPYING files,
+   * tagged with the plugins that hold it.
+   */
+  notices(): ThirdPartyLicenseEntry[] {
+    const byKey = new Map<string, { entry: ThirdPartyLicenseEntry; bundles: Set<string> }>();
+    for (const [id, record] of Object.entries(this.read().plugins)) {
+      if (record === undefined) continue;
+      const bundle = `${pluginSpec(id as PluginId).title} plugin`;
+      for (const key of record.keys) {
+        const known = byKey.get(key);
+        if (known !== undefined) {
+          known.bundles.add(bundle);
+          continue;
+        }
+        const entry = noticeOf(this.packageDir(key));
+        if (entry !== undefined) byKey.set(key, { entry, bundles: new Set([bundle]) });
+      }
+    }
+    return [...byKey.values()]
+      .map(({ entry, bundles }) => ({ ...entry, bundles: [...bundles].sort() }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   /** Where a stored package's files are. */
   packageDir(key: string): string {
     const pkg = this.options.manifest.packages[key];
@@ -442,6 +468,41 @@ export class PluginStore {
     if (dir === undefined) throw new Error(`${root} is not installed`);
     return import(/* @vite-ignore */ pathToFileURL(entryFile(dir)).href);
   }
+}
+
+/** One stored package's notice, read from its package.json and notice files; nothing when it is not readable. */
+function noticeOf(dir: string): Omit<ThirdPartyLicenseEntry, "bundles"> & { bundles: string[] } | undefined {
+  let manifest: { name?: unknown; version?: unknown; license?: unknown; repository?: unknown };
+  try {
+    manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as typeof manifest;
+  } catch {
+    return undefined;
+  }
+  if (typeof manifest.name !== "string") return undefined;
+  const texts: string[] = [];
+  try {
+    for (const file of readdirSync(dir).sort()) {
+      if (!/^(licen[cs]e|notice|copying)(\.|-|$)/i.test(file)) continue;
+      try {
+        texts.push(readFileSync(join(dir, file), "utf8").trim());
+      } catch {
+        // a directory, or unreadable: not a notice
+      }
+    }
+  } catch {
+    // nothing listed
+  }
+  const repository = typeof manifest.repository === "string" ? manifest.repository : (manifest.repository as { url?: unknown } | undefined)?.url;
+  const url = typeof repository === "string" ? repository.replace(/^git\+/, "").replace(/\.git$/, "").replace(/^git:\/\//, "https://") : null;
+  return {
+    bundles: [],
+    kind: "package",
+    license: typeof manifest.license === "string" ? manifest.license : "UNKNOWN",
+    name: manifest.name,
+    noticeText: texts.join("\n\n"),
+    sourceUrl: url !== null && /^https?:\/\//.test(url) ? url : null,
+    version: typeof manifest.version === "string" ? manifest.version : null,
+  };
 }
 
 /** A package's ESM entry: its `exports["."]` under the `node`/`import`/`default` conditions, else `main`. */

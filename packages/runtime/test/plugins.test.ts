@@ -194,6 +194,19 @@ describe("the plugin store", () => {
   });
 });
 
+describe("the notices of what the plugins installed", () => {
+  it("lists each stored package once, tagged with every plugin that holds it", async () => {
+    const store = storeOf(await manifestOf());
+    expect(store.notices()).toEqual([]);
+    await store.install("claude-agent-sdk");
+    await store.install("llama");
+    const notices = Object.fromEntries(store.notices().map((n) => [n.name, n]));
+    expect(notices["@anthropic-ai/claude-agent-sdk"]).toMatchObject({ kind: "package", version: "0.3.1", bundles: ["Claude Agent SDK plugin"] });
+    expect(notices["shared-dep"]?.bundles).toEqual(["Claude Agent SDK plugin", "Local models plugin"]);
+    expect(notices["node-llama-cpp"]?.bundles).toEqual(["Local models plugin"]);
+  });
+});
+
 describe("moving a download into the store", () => {
   // Windows refuses to rename a directory while a file in it is open — what a virus scanner reading a
   // fresh `.node` binary does, and what failed the person's first CUDA download (EPERM on rename).

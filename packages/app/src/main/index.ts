@@ -41,6 +41,7 @@ import { autoUpdater } from "electron-updater";
 import { stackDetail } from "./diagnostics";
 import { AppService, type CrashKind, type KeychainPort } from "./service";
 import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
+import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { startPlugins } from "@jaira/runtime";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
@@ -355,6 +356,17 @@ function noteUpdateHealth(state: UpdateState): void {
   updateHealth = problem;
   if (problem === undefined) service.health.clear("update");
   else service.health.set({ id: "update", level: "warning", page: "about", title: "Updates", detail: problem, action: "retry-update" });
+}
+
+/** What the `jaira` command's status and install need to know about this app (`cliCommand.ts`). */
+function cliContext(): CliCommandContext {
+  return {
+    packaged: app.isPackaged,
+    platform: process.platform,
+    resources: process.resourcesPath,
+    ...(process.env["LOCALAPPDATA"] !== undefined ? { localAppData: process.env["LOCALAPPDATA"] } : {}),
+    ...(process.env["APPIMAGE"] !== undefined ? { appImage: process.env["APPIMAGE"] } : {}),
+  };
 }
 
 /** Where the updater remembers the version whose notice was dismissed: the machine's, beside `limits.json`. */
@@ -739,6 +751,8 @@ const handlers: Record<IpcChannel, Handler> = {
     service.health.dismiss(request.id);
     return service.health.list();
   }) as Handler,
+  "cli:status": (() => cliCommandStatus(cliContext())) as Handler,
+  "cli:install": (() => installCliCommand(cliContext())) as Handler,
   "health:dismissAll": (() => {
     service.health.dismissAll();
     return service.health.list();
@@ -754,7 +768,11 @@ async function readLicenseManifest(): Promise<unknown> {
   if (!existsSync(file)) {
     throw new Error(`The renderer was built without its license manifest (${file}). Rebuild the app: npm run app:build.`);
   }
-  return JSON.parse(await readFile(file, "utf8")) as unknown;
+  const manifest = JSON.parse(await readFile(file, "utf8")) as { schemaVersion?: unknown; entries?: unknown[] };
+  // The downloaded plugins' packages are not in the build's manifest — the installer does not ship them —
+  // so their notices are added from the store (decision 0011 §6), each tagged with its plugin.
+  const fromPlugins = plugins?.notices() ?? [];
+  return fromPlugins.length === 0 || !Array.isArray(manifest.entries) ? manifest : { ...manifest, entries: [...manifest.entries, ...fromPlugins] };
 }
 
 function registerIpc(): void {

@@ -21,6 +21,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { commandFiles, stageCli } from "./packageCli.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "package.json"));
@@ -141,13 +142,13 @@ function stageApp() {
 }
 
 /** The electron-builder configuration: same app id and layout on every platform. */
-function builderConfig(stage, output) {
+function builderConfig(stage, output, command) {
   return {
     appId: "com.mistlabs.jaira",
     productName: "JaiRA",
     electronVersion,
     directories: { app: stage, output },
-    files: ["entry.cjs", "dist/**", "node_modules/**", "package.json"],
+    files: ["entry.cjs", "dist/**", "cli/**", "node_modules/**", "package.json"],
     // electron-builder leaves every `*.d.ts` under `node_modules` out by default, which for
     // `typescript` is its `lib.*.d.ts`: the silent, wrong-not-absent signature failure build.mjs
     // describes. A `files` pattern does not bring them back (the node_modules copier applies its
@@ -155,7 +156,11 @@ function builderConfig(stage, output) {
     onNodeModuleFile: (file) => /[\\/]typescript[\\/]lib[\\/][^\\/]+\.d\.ts$/.test(file),
     // Read with plain `node:fs` from worker threads and by the TypeScript compiler host, so a real
     // directory: `defaultBuiltInDir` looks in `<resources>/builtin` first.
-    extraResources: [{ from: join(here, "dist", "builtin"), to: "builtin" }],
+    // `bin/` holds the `jaira` command's wrapper (packageCli.mjs, decision 0011 §7).
+    extraResources: [
+      { from: join(here, "dist", "builtin"), to: "builtin" },
+      { from: command.bin, to: "bin" },
+    ],
     asar: true,
     // The addon must be a real file to be loaded; the compiler reads its lib files off the real disk
     // (from a worker thread too).
@@ -177,7 +182,7 @@ function builderConfig(stage, output) {
     // electron-builder's defaults name an x64 and an arm64 installer the same.
     artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
     win: { target: [{ target: "nsis", arch: [process.arch] }] },
-    nsis: { differentialPackage: true },
+    nsis: { differentialPackage: true, ...(command.nsisInclude !== undefined ? { include: command.nsisInclude } : {}) },
     mac: {
       target: [{ target: "dmg", arch: [process.arch] }, { target: "zip", arch: [process.arch] }],
       category: "public.app-category.developer-tools",
@@ -185,7 +190,14 @@ function builderConfig(stage, output) {
       // with no signature at all, and packaging invalidates Electron's own, so it is signed ad hoc.
       ...(process.env.CSC_LINK === undefined ? { identity: "-" } : {}),
     },
-    linux: { target: [{ target: "AppImage", arch: [process.arch] }, { target: "deb", arch: [process.arch] }], category: "Development", maintainer: "JaiRA" },
+    linux: {
+      target: [{ target: "AppImage", arch: [process.arch] }, { target: "deb", arch: [process.arch] }],
+      category: "Development",
+      maintainer: "JaiRA",
+      // The app is `jaira-app`, so `jaira` on the PATH is the command line and not the window.
+      executableName: "jaira-app",
+    },
+    deb: command.afterInstall !== undefined ? { afterInstall: command.afterInstall, afterRemove: command.afterRemove } : {},
   };
 }
 
@@ -195,7 +207,7 @@ function packagedExecutable(output) {
   if (dir === undefined) throw new Error(`no unpacked app under ${output}`);
   if (process.platform === "win32") return join(dir, "JaiRA.exe");
   if (process.platform === "darwin") return join(dir, "JaiRA.app", "Contents", "MacOS", "JaiRA");
-  return join(dir, "jaira");
+  return join(dir, "jaira-app");
 }
 
 /** Run `packageProbe.cjs` with the packaged executable in Node mode; it says what it checks. */
@@ -216,6 +228,33 @@ function probe(exe) {
 }
 
 /**
+ * Run the packaged `jaira` command through its wrapper (decision 0011 §7): `plugin list` needs the CLI
+ * bundle to load from the asar in Node mode, reach SQLite-free code paths, and find its plugin
+ * manifest, and answers with JSON.
+ */
+function commandSmoke(exe) {
+  const resources = process.platform === "darwin" ? join(dirname(exe), "..", "Resources") : join(dirname(exe), "resources");
+  const home = mkdtempSync(join(tmpdir(), "jaira-smoke-cli-"));
+  const wrapper = join(resources, "bin", process.platform === "win32" ? "jaira.cmd" : "jaira");
+  const run =
+    process.platform === "win32"
+      ? // `/s` strips the outermost pair of quotes, so the whole line is quoted once more.
+        spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `""${wrapper}" --home "${home}" plugin list"`], { encoding: "utf8", timeout: 60_000, windowsVerbatimArguments: true })
+      : spawnSync(wrapper, ["--home", home, "plugin", "list"], { encoding: "utf8", timeout: 60_000 });
+  rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  let listed;
+  try {
+    listed = JSON.parse(run.stdout ?? "");
+  } catch {
+    listed = undefined;
+  }
+  if (run.status !== 0 || !Array.isArray(listed) || listed.length === 0) {
+    throw new Error(`the jaira command failed: exit ${run.status ?? run.signal}\n${run.stdout ?? ""}${run.stderr ?? ""}`);
+  }
+  console.log(`command: jaira plugin list answered ${listed.length} plugins`);
+}
+
+/**
  * Probe the packaged app's modules, then launch it against a scratch base root, let it open that
  * project (which opens its SQLite database) and render, and require a screenshot back. A wrong or
  * missing native binary, a runtime module left out of the stage, or a renderer that fails to load all
@@ -224,6 +263,7 @@ function probe(exe) {
 function smoke(output) {
   const exe = packagedExecutable(output);
   probe(exe);
+  commandSmoke(exe);
   const home = mkdtempSync(join(tmpdir(), "jaira-smoke-home-"));
   const shot = join(output, "smoke.png");
   rmSync(shot, { force: true });
@@ -255,12 +295,14 @@ const output = join(here, "release", version);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 const stage = stageApp();
+await stageCli(stage, Object.keys(RUNTIME_MODULES));
+const command = commandFiles(stage);
 try {
   const { build, Platform } = require("electron-builder");
   const platform = { win32: Platform.WINDOWS, darwin: Platform.MAC, linux: Platform.LINUX }[process.platform];
   await build({
     targets: args.has("--dir") ? platform.createTarget("dir") : platform.createTarget(),
-    config: builderConfig(stage, output),
+    config: builderConfig(stage, output, command),
     publish: "never",
   });
 } finally {

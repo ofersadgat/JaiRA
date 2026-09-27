@@ -104,3 +104,17 @@ export interface UpdateBusy {
   runs: number;
   turns: number;
 }
+
+/**
+ * The `jaira` command on this machine's PATH (decision 0011 §7), for About's Command line row: the
+ * installer puts it there on Windows and with the .deb; macOS gets an install action.
+ */
+export interface CliCommandStatus {
+  state: "installed" | "missing" | "development" | "unavailable";
+  /** Where the command is, when installed. */
+  path?: string;
+  /** Why it is not there, or how to get it, when that is not an action here. */
+  reason?: string;
+  /** Whether About can put it there (again). */
+  canInstall: boolean;
+}

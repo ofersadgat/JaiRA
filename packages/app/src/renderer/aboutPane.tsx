@@ -19,8 +19,9 @@
  *    machine can use under it. Plugins follow the app: there is no other version to pick;
  *  - **Third-party notices** — `licensesPane.tsx`.
  */
-import { useState, type JSX, type ReactNode } from "react";
-import { channelOfVersion, inheritedValue, statesPath, type ConfigView, type HealthItem, type UpdateChannel, type UpdateState } from "@jaira/shared/browser";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { channelOfVersion, inheritedValue, statesPath, type CliCommandStatus, type ConfigView, type HealthItem, type UpdateChannel, type UpdateState } from "@jaira/shared/browser";
+import { invoke } from "./store";
 import { Disclosure, SettingsLayerContext } from "./controls";
 import { NeedsAttention } from "./healthView";
 import { SOURCE_WORDS } from "./layerLabels";
@@ -312,6 +313,9 @@ function Get({ row, bytes, verb, primary, small }: { row: PluginRow; bytes: numb
   );
 }
 
+/** What the Agent SDK's own licence (`LICENSE.md`) points its use to. */
+const ANTHROPIC_TERMS = "https://code.claude.com/docs/en/legal-and-compliance";
+
 function BaseRow({ family, checked }: { family: PluginFamily; checked: Partial<Record<string, number>> }): JSX.Element {
   const row = family.base;
   const local = family.builds.length > 0;
@@ -320,7 +324,23 @@ function BaseRow({ family, checked }: { family: PluginFamily; checked: Partial<R
       ? "Loads GGUF weights into JaiRA itself. Add another build beside the one you have."
       : "Loads GGUF weights into JaiRA itself. Pick the build for your hardware; the suggested one fits this machine."
     : row.id === "claude-agent-sdk"
-      ? "Runs the Claude route on an API key, and reads the claude-cli route's usage."
+      ? (
+          <>
+            Runs the Claude route on an API key, and reads the claude-cli route's usage.
+            {row.status.installed === undefined ? (
+              // Downloaded from npm by the person, under Anthropic's terms, which JaiRA does not redistribute
+              // (decision 0011 §6) — so the terms are shown before the Download, where the choice is made.
+              <>
+                {" "}
+                Downloaded from npm under{" "}
+                <a href={ANTHROPIC_TERMS} target="_blank" rel="noreferrer noopener">
+                  Anthropic's legal agreements
+                </a>
+                .
+              </>
+            ) : null}
+          </>
+        )
       : row.note;
   let control: ReactNode;
   if (row.busy) control = <Progress row={row} />;
@@ -443,6 +463,56 @@ function PluginsSection(): JSX.Element {
 
 // --- the page -------------------------------------------------------------------------------------------
 
+// --- the jaira command --------------------------------------------------------------------------------
+
+/** What the Command line row says for each state of the `jaira` command. */
+function commandWords(status: CliCommandStatus): string {
+  switch (status.state) {
+    case "installed":
+      return `On your PATH (${status.path ?? "installed"}), running this JaiRA.`;
+    case "missing":
+      return status.canInstall ? "Not on your PATH yet." : `Not on your PATH: ${status.reason ?? "reinstall JaiRA"}.`;
+    case "development":
+    case "unavailable":
+      return `Not here: ${status.reason ?? "this build has no command"}.`;
+  }
+}
+
+/**
+ * The `jaira` command (decision 0011 §7): the CLI, run on this app's own Electron. The installer puts
+ * it on the PATH on Windows and with the .deb; on macOS this row does, with an administrator prompt.
+ */
+function CommandLineSection(): JSX.Element {
+  const [status, setStatus] = useState<CliCommandStatus | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    void invoke("cli:status", undefined).then(setStatus, () => undefined);
+  }, []);
+  const install = (): void => {
+    setBusy(true);
+    setError(undefined);
+    invoke("cli:install", undefined)
+      .then(setStatus, (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <SettingsSection id="command-line" title="Command line" info="The jaira command runs workflows, tasks and plugins from a terminal, on this app, its plugins and its version.">
+      <SettingsRow
+        name={<code>jaira</code>}
+        description={error !== undefined ? <span className="upd-err">{error}</span> : status === undefined ? "Checking…" : commandWords(status)}
+        control={
+          status?.canInstall === true ? (
+            <button type="button" disabled={busy} onClick={install}>
+              {status.state === "installed" ? "Install again" : "Install the jaira command"}
+            </button>
+          ) : undefined
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 export function AboutPane({
   config,
   health,
@@ -466,6 +536,7 @@ export function AboutPane({
         <NeedsAttention items={health} page="about" onFix={onFix} />
         <UpdatesSection config={config} onTrack={onTrack} notesOpen={notesOpen} />
         <PluginsSection />
+        <CommandLineSection />
         <ThirdPartyNotices />
       </div>
     </SettingsLayerContext.Provider>
