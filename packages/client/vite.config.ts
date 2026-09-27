@@ -43,6 +43,7 @@ export default {
   resolve: {
     alias: [
       { find: "@jaira/ui", replacement: local("../app/src/renderer") },
+      { find: "@jaira/universal", replacement: local("../universal/src/index.ts") },
       { find: "@jaira/shared/browser", replacement: local("../shared/src/browser.ts") },
       { find: "@jaira/shared", replacement: local("../shared/src/index.ts") },
     ],

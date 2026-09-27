@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "paths": {
+      "@jaira/ui/*": ["./packages/app/src/renderer/*"],
+      "@jaira/shared/browser": ["./packages/shared/src/browser.ts"],
+      "@jaira/shared": ["./packages/shared/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../app/src/renderer/*.d.ts"]
+}

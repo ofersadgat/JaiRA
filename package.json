@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/persistence && tsc --noEmit -p packages/runtime && tsc --noEmit -p packages/service && tsc --noEmit -p packages/cli && tsc --noEmit -p packages/app && tsc --noEmit -p packages/client",
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/persistence && tsc --noEmit -p packages/runtime && tsc --noEmit -p packages/service && tsc --noEmit -p packages/cli && tsc --noEmit -p packages/app && tsc --noEmit -p packages/client && tsc --noEmit -p packages/universal && node packages/universal/scripts/tokens.mjs --check",
     "pretest": "npm run cli:build",
     "test": "vitest run",
     "pretest:watch": "npm run cli:build",

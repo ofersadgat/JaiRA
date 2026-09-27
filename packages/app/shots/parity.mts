@@ -1,20 +1,22 @@
 /**
- * The S1 gate of decision 0013: does the One client draw exactly what the Vite renderer drew?
+ * The fidelity gates of decision 0013: two pages that must draw the same pixels, photographed in the
+ * same states and compared.
  *
  *   npm --workspace @jaira/app run build
- *   npx tsx packages/app/shots/parity.mts
+ *   npx tsx packages/app/shots/parity.mts              S1: the Vite renderer against the One client
+ *   npx tsx packages/app/shots/parity.mts universal    S3: the One client's `/` against `/universal`,
+ *                                                      where every universal copy stands in for its DOM
+ *                                                      original (`@jaira/universal`'s `COPIES`)
  *
- * One world, seeded once. Then, per theme, ONE launch photographs the same scenes twice: first in the
- * Vite renderer (`dist/renderer`, loaded from `file://`), then — the same window reloaded — in the One
- * client (`app://jaira/`). One launch rather than two, because a launch changes the state being
- * photographed: it interrupts the parked run's pending call and re-registers it, which adds lines to
- * the transcript. The clock is held and animations are off (`holdStill`), so the only thing that
- * differs between a pair is the renderer. Pairs are compared pixel by pixel, and every pair that
- * differs gets a diff image in `shots/parity/`.
+ * One world, seeded once. Then, per theme, ONE launch photographs the same scenes twice: once on the
+ * first page, then — the same window navigated — on the second. One launch rather than two, because a
+ * launch changes the state being photographed: it interrupts the parked run's pending call and
+ * re-registers it, which adds lines to the transcript. The clock starts from the same instant on each
+ * page and animations are off (`holdStill`), so the only thing that differs between a pair is the page.
+ * Pairs are compared pixel by pixel, and every pair that differs gets a diff image in `shots/parity/`.
  *
- * Not `run.mts`: that pass waits for the Appearance preview's Monaco to colour its tokens, which on
- * this machine it never does under either renderer (a separate problem), and a gate that cannot finish
- * on the baseline cannot say anything about the change.
+ * Not `run.mts`: that pass can wait forever for the Appearance preview's Monaco to colour its tokens,
+ * because it never scrolls the preview into view (see the file-types scene below).
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -30,15 +32,32 @@ const WORLD = join(import.meta.dirname, ".world-parity");
 const PARKED = "tighten the changeset lint";
 const says = (text: string): string => `document.body.innerText.includes(${JSON.stringify(text)})`;
 const settle = (ms = 1200): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-type Renderer = "vite" | "one";
-
-const VITE_URL = pathToFileURL(join(import.meta.dirname, "..", "dist", "renderer", "index.html")).href;
-const ONE_URL = "app://jaira/";
 const drawn = "window.jaira && document.getElementById('root') && document.getElementById('root').children.length > 0";
 
-async function launch(world: World, renderer: Renderer, port: number): Promise<App> {
-  process.env.JAIRA_RENDERER = renderer;
+interface Page {
+  /** Names the output folder. */
+  readonly label: string;
+  readonly url: string;
+  /** What `location.protocol + ' ' + location.pathname + marker` must read: proof the page is the one meant. */
+  readonly proof: string;
+}
+
+const VITE: Page = {
+  label: "vite",
+  url: pathToFileURL(join(import.meta.dirname, "..", "dist", "renderer", "index.html")).href,
+  proof: "file: vite",
+};
+const ONE: Page = { label: "one", url: "app://jaira/", proof: "app: / one" };
+const UNIVERSAL: Page = { label: "universal", url: "app://jaira/universal", proof: "app: /universal one" };
+
+const PAIR: readonly [Page, Page] = process.argv[2] === "universal" ? [{ ...ONE, label: "dom" }, UNIVERSAL] : [VITE, ONE];
+/** The page's own account of itself. One's SPA shell sets `__vxrnIsSPA`; Vite's does not. */
+const PROOF =
+  "location.protocol + (location.protocol === 'app:' ? ' ' + location.pathname : '') + (globalThis.__vxrnIsSPA === true ? ' one' : ' vite')";
+
+async function launch(world: World, port: number): Promise<App> {
+  // The One client is the window's default renderer; the other pages are reached by navigation.
+  process.env.JAIRA_RENDERER = "one";
   const app = await App.launch(world, { out: OUT, port });
   await app.until(drawn, "the window to draw");
   return app;
@@ -54,7 +73,7 @@ async function start(app: App, title: string, fake: unknown): Promise<void> {
 }
 
 async function seed(world: World): Promise<void> {
-  const app = await launch(world, "vite", 9239);
+  const app = await launch(world, 9239);
   try {
     await start(app, "add dark mode", happyRules());
     await start(app, "rework the sync lint", [happyRules()[0]]);
@@ -67,50 +86,47 @@ async function seed(world: World): Promise<void> {
   }
 }
 
-/** The scenes, in order. Each is reached from the one before, the same way under both renderers. */
-async function scenes(app: App, renderer: Renderer, theme: string): Promise<string[]> {
-  const names: string[] = [];
-  const shot = async (name: string, of?: string): Promise<void> => {
-    await settle();
-    await app.shot(`${renderer}/${name}-${theme}`, of);
-    names.push(`${name}-${theme}`);
-  };
-  // The pointer where the last pass left it would hover something different at the start of this one.
-  await app.hover(2, 2);
-  await app.until(says("Awaiting you"), "the gate to still be parked");
-  await shot("board");
-  await app.clickText(PARKED);
-  await shot("task");
-  await app.clickText("Settings");
-  await shot("settings");
-  // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the
-  // renderer most likely to break under a new origin and a new content policy.
-  await app.clickText("Appearance");
-  // Scrolled into view, and again on every try: Monaco draws no lines for an editor nobody can see
-  // (which is also why `run.mts`'s wait for the same colours can hang), and the page lays out after it
-  // mounts, undoing a scroll made before that. Forty seconds, because under either renderer the
-  // grammar sometimes takes more than twenty to arrive on this machine.
-  await app.until(`document.querySelector(".ft-preview-body") !== null`, "the preview to mount");
-  try {
-    await app.until(
-      `(document.querySelector(".ft-preview-body").scrollIntoView({ block: "center" }),
-        [...document.querySelectorAll(".ft-preview-body .view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
-      "the preview's editor to colour itself",
-      160,
-    );
-  } catch (e) {
-    // What the editor had drawn, for whoever reads the failure.
-    console.log(await app.evaluate<string>(`(() => { const v = document.querySelector(".ft-preview-body .view-lines"); const b = document.querySelector(".ft-preview-body"); const r = b.getBoundingClientRect(); return JSON.stringify({ rect: [r.x, r.y, r.width, r.height], inner: innerHeight, lines: v ? v.children.length : null, text: v ? v.innerText.slice(0, 80) : null, mtk: v ? [...v.querySelectorAll("span[class^=mtk]")].slice(0, 5).map((s) => s.className + ":" + getComputedStyle(s).color) : null, host: b.innerHTML.length }); })()`));
-    await app.shot(`${renderer}/failed-file-types-${theme}`);
-    throw e;
-  }
-  await shot("file-types", ".ft");
-  return names;
+/**
+ * The scenes. Each is reached from a freshly loaded page, and each is photographed on BOTH pages before
+ * the next begins: reaching a scene can change what the next one shows (opening a task marks its
+ * unseen counts seen), so the two pictures of a pair must be taken from the same state, back to back.
+ */
+interface Scene {
+  readonly name: string;
+  /** Selector to frame, or the whole window. */
+  readonly of?: string;
+  reach(app: App): Promise<void>;
 }
 
+const SCENES: readonly Scene[] = [
+  { name: "board", reach: async (app) => void (await app.until(says("Awaiting you"), "the gate to still be parked")) },
+  { name: "task", reach: (app) => app.clickText(PARKED) },
+  { name: "settings", reach: (app) => app.clickText("Settings") },
+  {
+    // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the
+    // renderer most likely to break under a new origin and a new content policy.
+    name: "file-types",
+    of: ".ft",
+    reach: async (app) => {
+      await app.clickText("Settings");
+      await app.clickText("Appearance");
+      // Scrolled into view, and again on every try: Monaco draws no lines for an editor nobody can
+      // see, and the page lays out after it mounts, undoing a scroll made before that. Forty seconds,
+      // because the grammar sometimes takes more than twenty to arrive on this machine.
+      await app.until(`document.querySelector(".ft-preview-body") !== null`, "the preview to mount");
+      await app.until(
+        `(document.querySelector(".ft-preview-body").scrollIntoView({ block: "center" }),
+          [...document.querySelectorAll(".ft-preview-body .view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
+        "the preview's editor to colour itself",
+        80,
+      );
+    },
+  },
+];
+
 function compare(name: string): { name: string; differing: number; total: number } {
-  const a = PNG.sync.read(readFileSync(join(OUT, "vite", `${name}.png`)));
-  const b = PNG.sync.read(readFileSync(join(OUT, "one", `${name}.png`)));
+  const a = PNG.sync.read(readFileSync(join(OUT, PAIR[0].label, `${name}.png`)));
+  const b = PNG.sync.read(readFileSync(join(OUT, PAIR[1].label, `${name}.png`)));
   if (a.width !== b.width || a.height !== b.height) {
     return { name: `${name} (size ${a.width}x${a.height} vs ${b.width}x${b.height})`, differing: -1, total: a.width * a.height };
   }
@@ -122,50 +138,77 @@ function compare(name: string): { name: string; differing: number; total: number
 
 async function main(): Promise<void> {
   rmSync(OUT, { recursive: true, force: true });
-  mkdirSync(join(OUT, "vite"), { recursive: true });
-  mkdirSync(join(OUT, "one"), { recursive: true });
+  for (const page of PAIR) mkdirSync(join(OUT, page.label), { recursive: true });
   const world = buildWorld(WORLD);
   await seed(world);
 
-  const complaints: Record<Renderer, string[]> = { vite: [], one: [] };
+  const complaints = new Map<string, string[]>(PAIR.map((p) => [p.label, []]));
   const names = new Set<string>();
   let port = 9240;
   for (const theme of ["light", "dark"] as const) {
     // The theme is read at startup, so it is chosen by a launch of its own before the pair.
-    const chooser = await launch(world, "vite", port++);
+    const chooser = await launch(world, port++);
     await chooser.preferTheme(theme);
     await chooser.close();
-    const app = await launch(world, "one", port++);
+    const app = await launch(world, port++);
     try {
+      // A launch recovers the parked run (interrupts its pending call, re-registers it) a moment after
+      // the window draws. Photographed before that settles, the two pages see two different runs.
+      await settle(5000);
       await app.holdStill(Date.UTC(2026, 8, 27, 21, 0, 0));
-      for (const [renderer, url] of [["vite", VITE_URL], ["one", ONE_URL]] as const) {
-        const before = app.complaints.length;
-        await app.navigate(url);
-        await app.until(drawn, `the ${renderer} renderer to draw`);
-        // Proof the pair is two renderers, not one twice: One's SPA shell sets `__vxrnIsSPA`, Vite's does not.
-        const which = await app.evaluate<string>("location.protocol + (globalThis.__vxrnIsSPA === true ? ' one' : ' vite')");
-        if (which !== (renderer === "one" ? "app: one" : "file: vite")) throw new Error(`expected the ${renderer} renderer, found ${which}`);
-        console.log(`  ${renderer}: ${which}`);
-        for (const n of await scenes(app, renderer, theme)) names.add(n);
-        complaints[renderer].push(...app.complaints.slice(before));
+      for (const scene of SCENES) {
+        for (const page of PAIR) {
+          const before = app.complaints.length;
+          // Three tries: the Monaco preview sometimes never colours itself on a load, under either
+          // renderer (it is why `run.mts` hangs), and a fresh load is what brings it back.
+          for (let attempt = 1; ; attempt++) {
+            await app.navigate(page.url);
+            await app.until(drawn, `${page.label} to draw`);
+            const which = await app.evaluate<string>(PROOF);
+            if (which !== page.proof) throw new Error(`expected ${page.label} (${page.proof}), found ${which}`);
+            // The pointer where the last scene left it would hover something different on this load.
+            await app.hover(2, 2);
+            try {
+              await scene.reach(app);
+              break;
+            } catch (e) {
+              const state = await app.evaluate<string>(
+                `(() => { const v = document.querySelector(".ft-preview-body .view-lines"); return JSON.stringify({ lines: v ? v.children.length : null, colours: v ? [...new Set([...v.querySelectorAll("span[class^=mtk]")].map((s) => getComputedStyle(s).color))] : null }); })()`,
+              );
+              await app.shot(`${page.label}/failed-${scene.name}-${theme}-${attempt}`);
+              if (attempt === 3) throw e;
+              console.log(`  ${scene.name} on ${page.label}: ${(e as Error).message} (${state}); reloading`);
+            }
+          }
+          await settle();
+          await app.shot(`${page.label}/${scene.name}-${theme}`, scene.of);
+          complaints.get(page.label)!.push(...app.complaints.slice(before));
+        }
+        names.add(`${scene.name}-${theme}`);
       }
     } finally {
       await app.close();
     }
   }
 
-  console.log("\nparity:");
+  console.log(`\n${PAIR[0].label} against ${PAIR[1].label}:`);
   let failed = false;
   for (const name of names) {
     const r = compare(name);
-    const verdict = r.differing === 0 ? "identical" : r.differing < 0 ? "DIFFERENT SIZE" : `${r.differing} px differ (${((100 * r.differing) / r.total).toFixed(3)}%)`;
+    const verdict =
+      r.differing === 0
+        ? "identical"
+        : r.differing < 0
+          ? "DIFFERENT SIZE"
+          : `${r.differing} px differ (${((100 * r.differing) / r.total).toFixed(3)}%)`;
     if (r.differing !== 0) failed = true;
     console.log(`  ${r.name}: ${verdict}`);
   }
-  for (const renderer of ["vite", "one"] as const) {
-    if (complaints[renderer].length === 0) continue;
-    console.log(`\n${renderer} spoke up ${complaints[renderer].length} time(s):`);
-    for (const c of complaints[renderer].slice(0, 8)) console.log(`  ${c}`);
+  for (const [label, said] of complaints) {
+    const real = said.filter((c) => !/disk_cache|gpu_disk|Gpu Cache/.test(c));
+    if (real.length === 0) continue;
+    console.log(`\n${label} spoke up ${real.length} time(s):`);
+    for (const c of real.slice(0, 8)) console.log(`  ${c}`);
   }
   console.log(`\nwrote ${OUT}`);
   if (failed) process.exitCode = 1;
