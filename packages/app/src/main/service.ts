@@ -515,6 +515,17 @@ import { WaitingQueue } from "./waiting";
 import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
+import { HealthBoard } from "./health";
+import { EXECUTOR_TITLES } from "@jaira/shared";
+
+/** What Settings calls each model route when one it could use stops working. */
+const ROUTE_TITLES: Readonly<Record<string, string>> = {
+  anthropic: "Anthropic API",
+  openai: "OpenAI API",
+  openrouter: "OpenRouter",
+  local: "Local server",
+  embedded: "Local models",
+};
 import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
 import { EventsSupervisor } from "./eventsSupervisor";
 import { arrivedAt, fastForwardView, labelOfTarget, leftKeyOf, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
@@ -1330,6 +1341,11 @@ export class AppService {
   constructor(private readonly options: AppServiceOptions = {}) {
     this.baseDir = jairaBasePaths(options.baseDir ?? settingsBaseDir()).baseDir;
     const basePaths = jairaBasePaths(this.baseDir);
+    // Settings' warnings and errors: before the log below, whose errors it counts.
+    this.health = new HealthBoard({
+      file: join(basePaths.systemDir, "health.json"),
+      publish: (items) => this.publish({ type: "health:changed", items }),
+    });
     this.limits = new LimitsService({
       file: basePaths.limitsFile,
       publish: (message) => this.publish(message),
@@ -1377,7 +1393,11 @@ export class AppService {
       // Under the root's `system/` with the rest of what JaiRA writes for itself, rather than beside
       // the workflows a person authors — see `SYSTEM_DIR_NAME`.
       dir: jairaBasePaths(this.baseDir).logsDir,
-      publish: (entry) => this.publish({ type: "log:entry", entry }),
+      publish: (entry) => {
+        this.publish({ type: "log:entry", entry });
+        // An error in the log is one of Settings' errors until the person opens Logs.
+        if (entry.level === "error") this.health.logError();
+      },
     });
     // What is worth keeping, from the setting that says so. BEFORE the sink is installed below, so
     // the first record of the launch is already gated by the policy rather than by the default.
@@ -2318,6 +2338,12 @@ export class AppService {
    * renderer's meters; remembered in `~/.jaira/system/limits.json`.
    */
   readonly limits: LimitsService;
+  /**
+   * Settings' warnings and errors (`@jaira/shared` `health.ts`): a tool that worked and stopped, log
+   * errors not yet seen, and the warnings the main process raises for downloads. Remembered in
+   * `~/.jaira/system/health.json`.
+   */
+  readonly health: HealthBoard;
 
   /**
    * Messages and runs waiting for an account's allowance to reset — held because the account had
@@ -8696,6 +8722,12 @@ export class AppService {
       }),
     ]);
     this.scheduleForgeRenewal(marks);
+    // A route or a forge connection that worked and now does not (a key revoked, a sign-in expired).
+    this.health.observe("route", routes, (name) => ({ title: ROUTE_TITLES[name] ?? name, action: "check", subject: name }));
+    this.health.observe("forge", forges ?? [], (name) => {
+      const forge = forges?.find((f) => f.name === name);
+      return { title: forge !== undefined ? `${name} (${forge.host})` : name, action: "sign-in", subject: name };
+    });
     // What the DEFAULT executor's tree resolves to, derived from both halves and only here: an
     // executor whose binary is missing is not a route, which is the difference between "it routes to
     // claude-cli" and "it routes to claude-cli and the run then fails to start it".
@@ -8805,6 +8837,12 @@ export class AppService {
     // A workflow whose executor just came back to life should stop showing an error, so this is a
     // reason to re-lint the authoring surface.
     for (const result of results) this.lastProbes.set(result.name, result);
+    // An agent that worked and now does not — a token that expired — is one of Settings' errors.
+    this.health.observe("executor", results, (name) => ({
+      title: EXECUTOR_TITLES[name] ?? name,
+      ...(signInCommand(name, wanted.find((info) => info.name === name)?.command) !== undefined ? { action: "sign-in" as const } : { action: "check" as const }),
+      subject: name,
+    }));
     // A login that was not there before — signed in here or in a terminal — has its usage read now.
     this.limits.noticeAccounts();
     this.publish({ type: "store:invalidate", scope: "workflows" });
@@ -11662,14 +11700,16 @@ export class AppService {
   }
 
   /**
-   * What is going right now, across every open project: runs in flight and chat turns being
-   * answered — what a quit would stop, and so what "Restart to update" asks about (decision 0011 §4).
+   * What is going right now, across every open project: runs WORKING and chat turns being answered —
+   * what a quit would cut, and so what "Restart to update" waits for (decision 0011 §4). A run parked
+   * on a person or on the world counts as paused, not going: a quit suspends it and the next open picks
+   * it up (`ProjectSession.parkedRuns`).
    */
   activeWork(): { runs: number; turns: number } {
     let runs = 0;
     let turns = 0;
     for (const session of this.sessions.values()) {
-      runs += session.live.size;
+      runs += session.live.size - session.parkedRuns().size;
       for (const set of session.chatTurns.values()) turns += set.size;
     }
     return { runs, turns };

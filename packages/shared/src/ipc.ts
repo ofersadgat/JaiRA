@@ -39,6 +39,7 @@ import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
 import type { UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
+import type { HealthItem } from "./health";
 import type { CommandApproval } from "./commandParts";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
@@ -2218,10 +2219,12 @@ export interface IpcContract {
   /** Download the available update. A platform that installs by hand (`manual`) downloads nothing. */
   "update:download": { request: void; response: UpdateState };
   /**
-   * "Restart to update". `now` quits the ordinary way — runs drain, the databases close — and the
-   * installer replaces the app and starts it again; with runs or chat turns going it does nothing and
-   * answers `busy`, for "Not now" (`later`), "Pause + update" (`pause`, the runs resume after the
-   * restart) and "Wait + update" (`wait`, `cancel` to stop). Any quit installs a downloaded update.
+   * The Update button: downloads the available update if it is not yet, then restarts to install it
+   * the way `when` says. `wait` (the default, the button itself) restarts once no run is working and
+   * no chat turn is being answered — at once when nothing is — and `cancel` stops waiting; `pause`
+   * suspends the runs, which resume after the restart; `later` ("Not now") leaves it to the next quit;
+   * `now` restarts only when nothing is going, and otherwise answers `busy`. Any quit installs a
+   * downloaded update. A run waiting on a person counts as paused, not going.
    */
   "update:install": { request: { when?: UpdateRestartChoice } | void; response: UpdateRestartAnswer };
   /** Hide the notice for this version; a newer one shows it again. */
@@ -2235,6 +2238,12 @@ export interface IpcContract {
   "plugin:install": { request: { id: PluginId }; response: PluginStatus[] };
   /** Remove a plugin (a base takes its variants with it), and every package nothing else uses. */
   "plugin:remove": { request: { id: PluginId }; response: PluginStatus[] };
+  /** Settings' warnings and errors (`./health`), errors first. */
+  "health:list": { request: void; response: HealthItem[] };
+  /** Hide one until its condition clears. */
+  "health:dismiss": { request: { id: string }; response: HealthItem[] };
+  /** The person opened Logs: the errors logged so far have been seen. */
+  "logs:seen": { request: void; response: HealthItem[] };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2401,6 +2410,9 @@ export const IPC_CHANNELS = [
   "plugin:list",
   "plugin:install",
   "plugin:remove",
+  "health:list",
+  "health:dismiss",
+  "logs:seen",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -2715,6 +2727,8 @@ export type PushMessage =
   | { type: "update:changed"; state: UpdateState }
   /** A plugin download moved, ended or failed, or a plugin was removed. */
   | { type: "plugin:changed"; plugins: PluginStatus[] }
+  /** Settings' warnings and errors changed; the whole board. */
+  | { type: "health:changed"; items: HealthItem[] }
   /** An events task posted a notice (decision 0010 §4, `notify`). Also written to the log. */
   | { type: "notice:posted"; notice: EventsNotice }
 

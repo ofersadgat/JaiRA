@@ -210,6 +210,19 @@ export class UpdateManager {
     return this.state;
   }
 
+  /**
+   * The Update button: download what is available if it is not yet, then {@link restart} with the
+   * choice (the person, 2026-09-26: "the update button in the sidebar should wait and update. there
+   * should be a dropdown button that allows you to select the other options including not now"). The
+   * button's own choice is `wait`; the dropdown's are `pause` and `later`. A platform that installs by
+   * hand has nothing to download or restart into.
+   */
+  async apply(choice: RestartChoice): Promise<RestartAnswer> {
+    if (this.state.manual === true) return { installing: false };
+    if (this.state.status === "available") await this.download();
+    return this.restart(choice);
+  }
+
   /** Whether an install can happen: only a downloaded update. */
   canInstall(): boolean {
     return this.state.status === "downloaded";
@@ -240,7 +253,9 @@ export class UpdateManager {
         this.options.suspendForUpdate?.();
         return this.quitToInstall();
       case "wait": {
-        this.set({ ...rest, pending: "waiting", busy: this.options.busy?.() ?? { runs: 0, turns: 0 } });
+        const now = this.options.busy?.() ?? { runs: 0, turns: 0 };
+        if (now.runs + now.turns === 0) return this.quitToInstall();
+        this.set({ ...rest, pending: "waiting", busy: now });
         this.waiting = setInterval(() => {
           const busy = this.options.busy?.() ?? { runs: 0, turns: 0 };
           if (busy.runs + busy.turns === 0) {

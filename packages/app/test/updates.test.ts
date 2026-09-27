@@ -215,6 +215,34 @@ describe("updates", () => {
     }
   });
 
+  it("Wait + update with nothing going restarts at once", async () => {
+    let quits = 0;
+    const { updates } = await downloaded({ busy: () => ({ runs: 0, turns: 0 }), quit: () => (quits += 1) });
+    expect(updates.restart("wait")).toEqual({ installing: true });
+    expect(quits).toBe(1);
+  });
+
+  it("the Update button downloads first, then waits and restarts", async () => {
+    const port = new FakeUpdater();
+    port.feed = { latest: { version: "0.2.0" } };
+    let quits = 0;
+    const { updates } = manager("0.1.0", port, { busy: () => ({ runs: 0, turns: 0 }), quit: () => (quits += 1) });
+    await updates.check();
+    expect(await updates.apply("wait")).toEqual({ installing: true });
+    expect(port.downloads).toBe(1);
+    expect(quits).toBe(1);
+  });
+
+  it("Not now from the button downloads, and leaves the install to the next quit", async () => {
+    const port = new FakeUpdater();
+    port.feed = { latest: { version: "0.2.0" } };
+    const { updates } = manager("0.1.0", port, { busy: () => ({ runs: 1, turns: 0 }) });
+    await updates.check();
+    expect(await updates.apply("later")).toEqual({ installing: false, pending: "on-quit" });
+    updates.installOnQuit();
+    expect(port.installs).toEqual([[true, false]]);
+  });
+
   it("remembers the version whose notice was dismissed", async () => {
     const saved: string[] = [];
     const { updates } = manager("0.1.0", new FakeUpdater(), { dismissed: "0.1.9", saveDismissed: (v) => saved.push(v) });

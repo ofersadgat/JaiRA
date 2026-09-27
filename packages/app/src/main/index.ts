@@ -20,6 +20,7 @@ import {
   pluginSpec,
   type PluginId,
   type PluginStatus,
+  type UpdateState,
   releasePageOf,
   resolveTheme,
   takeHomeFlag,
@@ -343,6 +344,19 @@ function buildInfo(): { macSigned?: boolean } {
   }
 }
 
+/**
+ * A check or download that failed is one of Settings' warnings, on About, until one succeeds. Only a
+ * change is reported: the updater publishes on every step, the board need not hear each.
+ */
+let updateHealth: string | undefined;
+function noteUpdateHealth(state: UpdateState): void {
+  const problem = state.status === "error" ? (state.error ?? "the update could not be checked or downloaded") : undefined;
+  if (problem === updateHealth) return;
+  updateHealth = problem;
+  if (problem === undefined) service.health.clear("update");
+  else service.health.set({ id: "update", level: "warning", page: "about", title: "Updates", detail: problem, action: "retry-update" });
+}
+
 /** Where the updater remembers the version whose notice was dismissed: the machine's, beside `limits.json`. */
 const updatesFile = join(service.baseRoot(), "system", "updates.json");
 
@@ -373,7 +387,10 @@ const updates = (() => {
     // build checks and points at the release page.
     manual: process.platform === "darwin" && buildInfo().macSigned !== true,
     releaseUrl: releasePageOf,
-    publish: (state) => pushToWindow({ type: "update:changed", state }),
+    publish: (state) => {
+      pushToWindow({ type: "update:changed", state });
+      noteUpdateHealth(state);
+    },
     log: (level, message, data) => service.recordApp(level, message, data as JsonValue | undefined),
     busy: () => service.activeWork(),
     suspendForUpdate: () => service.suspendForUpdate(),
@@ -423,8 +440,20 @@ async function installPlugin(id: PluginId): Promise<PluginStatus[]> {
       publishPlugins();
     });
     service.recordApp("info", `installed the ${pluginSpec(id).title} plugin`);
+    service.health.clear(`plugin:${id}`);
   } catch (e) {
     pluginErrors.set(id, (e as Error).message);
+    // A download that did not happen is one of Settings' warnings (the person, 2026-09-26: "failed
+    // download should be a warning"), on About, with Try again.
+    service.health.set({
+      id: `plugin:${id}`,
+      level: "warning",
+      page: "about",
+      title: pluginSpec(id).title,
+      detail: `download failed: ${(e as Error).message}`,
+      action: "retry-plugin",
+      subject: id,
+    });
     service.recordApp("warn", `could not install the ${pluginSpec(id).title} plugin`, { message: (e as Error).message });
   } finally {
     pluginProgress.delete(id);
@@ -698,11 +727,20 @@ const handlers: Record<IpcChannel, Handler> = {
   "update:state": (() => updates.current()) as Handler,
   "update:check": (() => updates.check()) as Handler,
   "update:download": (() => updates.download()) as Handler,
-  "update:install": ((request: { when?: RestartChoice } | undefined) => updates.restart(request?.when ?? "now")) as Handler,
+  "update:install": ((request: { when?: RestartChoice } | undefined) => updates.apply(request?.when ?? "wait")) as Handler,
   "update:dismiss": ((request: { version: string }) => updates.dismiss(request.version)) as Handler,
   "plugin:list": (() => pluginStatuses()) as Handler,
   "plugin:install": ((request: { id: PluginId }) => installPlugin(request.id)) as Handler,
   "plugin:remove": ((request: { id: PluginId }) => removePlugin(request.id)) as Handler,
+  "health:list": (() => service.health.list()) as Handler,
+  "health:dismiss": ((request: { id: string }) => {
+    service.health.dismiss(request.id);
+    return service.health.list();
+  }) as Handler,
+  "logs:seen": (() => {
+    service.health.logsSeen();
+    return service.health.list();
+  }) as Handler,
 };
 
 /**

@@ -350,6 +350,31 @@ export class ProjectSession {
    * connection is not open" from inside the engine's event tee — an unhandled rejection, and a task
    * row left `running`.
    */
+  /**
+   * The live runs that are PARKED: waiting on a person (a gate, a drag) or on the world (a forge rule,
+   * an `on_event` guard). A parked run is as good as paused — closing the app suspends it and the next
+   * open asks the same question again — so it is not work a quit would cut (the person, 2026-09-26:
+   * "if a run is waiting for the user, it should be considered paused and its ok to update").
+   *
+   * A rule waiting on the world is waiting too — on the forge (`on_remote_event`) or for an event
+   * (`on_event`): resumed on the next open, its guard is armed again, the forge's row keeping its cursor
+   * and the event hub's durable starts keeping what the watcher catches up on. An AGENT's
+   * `wait_git_event` is not this: its turn is cut like any other work in flight.
+   *
+   * A tool approval or an agent's question is NOT counted: the agent that asked is a process mid-turn,
+   * and a quit cuts that turn.
+   */
+  parkedRuns(): Set<string> {
+    const parked = new Set<string>();
+    for (const request of [...this.hub.list(), ...this.userEvents.list()]) {
+      if (request.taskId !== undefined && this.live.has(request.taskId)) parked.add(request.taskId);
+    }
+    for (const request of [...this.remoteEvents.list(), ...this.events.list().filter((r) => r.waiter === "guard")]) {
+      if (this.live.has(request.taskId)) parked.add(request.taskId);
+    }
+    return parked;
+  }
+
   async close(reason = "the project was closed"): Promise<void> {
     this.closing = true;
     for (const taskId of this.fastForwards.keys()) if (this.live.has(taskId)) this.forwardingAtClose.add(taskId);
@@ -357,20 +382,10 @@ export class ProjectSession {
     this.watchTimer = undefined;
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
-    // Which live runs are parked on a person, noted before the hubs below let go of the question.
-    // Closing the app is not an answer to a gate or a drag, and the next open resumes these so the
-    // person finds the same question where they left it — see `Service.resumeSuspended`.
-    for (const request of [...this.hub.list(), ...this.userEvents.list()]) {
-      if (request.taskId !== undefined && this.live.has(request.taskId)) this.suspendedAtClose.add(request.taskId);
-    }
-    // A rule waiting on the world is waiting too — on the forge (`on_remote_event`) or for an event
-    // (`on_event`) — and closing the app is not the world answering. Resumed on the next open, its
-    // guard is armed again: the forge's row keeps its cursor, and the event hub's durable starts keep
-    // what the watcher catches up on as having arrived while it waited. An AGENT's `wait_git_event`
-    // is not this: its turn is cut like any other work in flight.
-    for (const request of [...this.remoteEvents.list(), ...this.events.list().filter((r) => r.waiter === "guard")]) {
-      if (this.live.has(request.taskId)) this.suspendedAtClose.add(request.taskId);
-    }
+    // Which live runs are parked, noted before the hubs below let go of the question. Closing the app
+    // is not an answer, and the next open resumes these so the person finds the same question where
+    // they left it — see `Service.resumeSuspended`.
+    for (const taskId of this.parkedRuns()) this.suspendedAtClose.add(taskId);
     // ABANDONED, not settled — the default, and stated here because it is the whole of what makes a
     // gate durable. The promise has to settle or the engine never unwinds and the database never
     // closes; that is a fact about this process and not an answer to the question, so the row stays
