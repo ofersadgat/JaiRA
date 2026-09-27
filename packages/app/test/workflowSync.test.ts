@@ -331,7 +331,9 @@ describe("runSync towards the states", () => {
     // is applied by its continuation.
     const file = join(dir, ".jaira", "workflows", "feature", "plan", "gate.json");
     const deadline = Date.now() + 8000;
-    while (!existsSync(file)) {
+    // Its content, not merely its existence: a file is seen the moment it is created, before it is
+    // written, and on Linux a read landed in between.
+    while (!existsSync(file) || readFileSync(file, "utf8") === "") {
       if (Date.now() > deadline) throw new Error("the merged review never wrote the file");
       await new Promise((r) => setTimeout(r, 10));
     }

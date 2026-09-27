@@ -165,7 +165,8 @@ describe("a CLI command's claim", () => {
 describe("discovery", () => {
   it("reads the real process list, which has this process in it", async () => {
     const processes = await listProcesses();
-    expect(processes.find((p) => p.pid === process.pid)?.name).toMatch(/^node(\.exe)?$/i);
+    // `node`, or on Linux the title a test runner gives its worker (`node (vitest 3)`).
+    expect(processes.find((p) => p.pid === process.pid)?.name).toMatch(/^node(\.exe)?( \(.*\))?$/i);
   }, 20_000);
 
   it("finds a host on its pipe", async () => {
