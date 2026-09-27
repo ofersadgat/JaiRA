@@ -93,14 +93,16 @@ async function seed(world: World): Promise<void> {
  */
 interface Scene {
   readonly name: string;
+  /** Photographed in every look, not only the two base ones. */
+  readonly everyLook?: boolean;
   /** Selector to frame, or the whole window. */
   readonly of?: string;
   reach(app: App): Promise<void>;
 }
 
 const SCENES: readonly Scene[] = [
-  { name: "board", reach: async (app) => void (await app.until(says("Awaiting you"), "the gate to still be parked")) },
-  { name: "task", reach: (app) => app.clickText(PARKED) },
+  { name: "board", everyLook: true, reach: async (app) => void (await app.until(says("Awaiting you"), "the gate to still be parked")) },
+  { name: "task", everyLook: true, reach: (app) => app.clickText(PARKED) },
   { name: "settings", reach: (app) => app.clickText("Settings") },
   {
     // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the
@@ -136,6 +138,32 @@ function compare(name: string): { name: string; differing: number; total: number
   return { name, differing, total: a.width * a.height };
 }
 
+/**
+ * The looks each gate runs in. The first two (the default palette, both modes) take every scene; the
+ * rest take the scenes that draw the components copied so far, in the palettes whose rules those
+ * components carry by hand (`--quick` skips them).
+ */
+interface Look {
+  theme: "light" | "dark";
+  palette: string;
+  wash: boolean;
+}
+const LOOKS: readonly Look[] = [
+  { theme: "light", palette: "ink", wash: false },
+  { theme: "dark", palette: "ink", wash: false },
+  ...(process.argv.includes("--quick")
+    ? []
+    : ([
+        { theme: "light", palette: "classic", wash: false },
+        { theme: "dark", palette: "classic", wash: true },
+        { theme: "light", palette: "contrast", wash: false },
+        { theme: "dark", palette: "pastel", wash: false },
+        { theme: "light", palette: "blueprint", wash: false },
+        { theme: "light", palette: "ink", wash: true },
+      ] as const)),
+];
+const lookName = (l: Look): string => (l.palette === "ink" && !l.wash ? l.theme : `${l.palette}${l.wash ? "-wash" : ""}-${l.theme}`);
+
 async function main(): Promise<void> {
   rmSync(OUT, { recursive: true, force: true });
   for (const page of PAIR) mkdirSync(join(OUT, page.label), { recursive: true });
@@ -144,11 +172,13 @@ async function main(): Promise<void> {
 
   const complaints = new Map<string, string[]>(PAIR.map((p) => [p.label, []]));
   const names = new Set<string>();
+  const census: string[] = [];
   let port = 9240;
-  for (const theme of ["light", "dark"] as const) {
-    // The theme is read at startup, so it is chosen by a launch of its own before the pair.
+  for (const [index, look] of LOOKS.entries()) {
+    const theme = lookName(look);
+    // The theme is read at startup, so the look is chosen by a launch of its own before the pair.
     const chooser = await launch(world, port++);
-    await chooser.preferTheme(theme);
+    await chooser.preferLook(look);
     await chooser.close();
     const app = await launch(world, port++);
     try {
@@ -156,7 +186,10 @@ async function main(): Promise<void> {
       // the window draws. Photographed before that settles, the two pages see two different runs.
       await settle(5000);
       await app.holdStill(Date.UTC(2026, 8, 27, 21, 0, 0));
-      for (const scene of SCENES) {
+      // The Monaco scene answers S1's question (does Monaco work under the new origin and policy) and
+      // draws nothing a copy replaces, so the universal gate skips it.
+      const relevant = SCENES.filter((s) => (index < 2 || s.everyLook === true) && (PAIR[0] === VITE || s.name !== "file-types"));
+      for (const scene of relevant) {
         for (const page of PAIR) {
           const before = app.complaints.length;
           // Three tries: the Monaco preview sometimes never colours itself on a load, under either
@@ -173,7 +206,7 @@ async function main(): Promise<void> {
               break;
             } catch (e) {
               const state = await app.evaluate<string>(
-                `(() => { const v = document.querySelector(".ft-preview-body .view-lines"); return JSON.stringify({ lines: v ? v.children.length : null, colours: v ? [...new Set([...v.querySelectorAll("span[class^=mtk]")].map((s) => getComputedStyle(s).color))] : null }); })()`,
+                `(() => { const b = document.querySelector(".ft-preview-body"); const v = b?.querySelector(".view-lines"); const ed = b?.querySelector(".monaco-editor"); const r = b?.getBoundingClientRect(); return JSON.stringify({ lines: v ? v.children.length : null, colours: v ? [...new Set([...v.querySelectorAll("span[class^=mtk]")].map((s) => getComputedStyle(s).color))] : null, editor: ed ? ed.style.width + "x" + ed.style.height : null, body: r ? [r.x, r.y, r.width, r.height].map(Math.round) : null, view: [innerWidth, innerHeight], text: b?.innerText.slice(0, 120) }); })()`,
               );
               await app.shot(`${page.label}/failed-${scene.name}-${theme}-${attempt}`);
               if (attempt === 3) throw e;
@@ -182,6 +215,15 @@ async function main(): Promise<void> {
           }
           await settle();
           await app.shot(`${page.label}/${scene.name}-${theme}`, scene.of);
+          // What this page actually drew, so an "identical" cannot hide a copy that never rendered.
+          if (scene.everyLook === true) {
+            census.push(
+              `${scene.name}-${theme} ${page.label}: ` +
+                (await app.evaluate<string>(
+                  `(() => { const r = document.documentElement.dataset; return "palette=" + (r.palette ?? "classic") + " theme=" + r.theme + " wash=" + (r.wash ?? "off") + " | DOM cards " + document.querySelectorAll(".card").length + ", DOM pills " + document.querySelectorAll("span.pill:not(.pill-more)").length + ", Tamagui views " + document.querySelectorAll(".is_View").length; })()`,
+                )),
+            );
+          }
           complaints.get(page.label)!.push(...app.complaints.slice(before));
         }
         names.add(`${scene.name}-${theme}`);
@@ -191,6 +233,8 @@ async function main(): Promise<void> {
     }
   }
 
+  console.log("\nwhat each page drew:");
+  for (const line of census) console.log(`  ${line}`);
   console.log(`\n${PAIR[0].label} against ${PAIR[1].label}:`);
   let failed = false;
   for (const name of names) {

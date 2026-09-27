@@ -17,6 +17,7 @@ import { canConnect, ConnectDrag, nestUnder, ownColumnOf, previewOf, type Connec
 import { MachineChip } from "./machineChip";
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
+import { slotted } from "./slots";
 import { cardRemoteWord } from "./remoteStrip";
 import { canDrag, requestFor, NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
 import { TaskName } from "./taskName";
@@ -524,7 +525,7 @@ export function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; 
 }
 
 /** What pressing a chip does, in the words its tooltip says it. */
-function chipTip(move: NextMove, name: string): string {
+export function chipTip(move: NextMove, name: string): string {
   if (move.blocked !== undefined) return move.blocked;
   switch (move.way) {
     case "event":
@@ -595,7 +596,11 @@ export function Lanes({
   archived,
 }: {
   cards: readonly BoardCard[];
-  render: (card: BoardCard) => ReactNode;
+  /**
+   * `last`: the card is the last in its lane, which the CSS says with `.card:last-child`. Passed as a
+   * fact because a universal copy (decision 0013) cannot see its siblings; the DOM card ignores it.
+   */
+  render: (card: BoardCard, last: boolean) => ReactNode;
   /**
    * Whether archived cards are shown, and how to change that. They are left out of the lanes either
    * way and held at the foot, behind one line saying how many (the person, 2026-09-27).
@@ -612,33 +617,49 @@ export function Lanes({
           <span className="rule" />
           {archived !== undefined ? <span>{archived.shown ? "Hide" : "Show"}</span> : null}
         </button>
-        {archived?.shown === true ? put.map((card) => <Fragment key={card.taskId}>{render(card)}</Fragment>) : null}
+        {archived?.shown === true ? put.map((card, i) => <Fragment key={card.taskId}>{render(card, i === put.length - 1)}</Fragment>) : null}
       </>
     );
   return (
     <>
-      <LiveLanes cards={live} render={render} />
+      <LiveLanes cards={live} render={render} trailing={put.length > 0} />
       {foot}
     </>
   );
 }
 
-function LiveLanes({ cards, render }: { cards: readonly BoardCard[]; render: (card: BoardCard) => ReactNode }): JSX.Element {
+/**
+ * `trailing`: something follows the lanes (the archived foot), so with one lane the last live card is not
+ * the `:last-child` it would otherwise be. With several, each lane is its own box and ends in its card.
+ */
+function LiveLanes({
+  cards,
+  render,
+  trailing = false,
+}: {
+  cards: readonly BoardCard[];
+  render: (card: BoardCard, last: boolean) => ReactNode;
+  trailing?: boolean;
+}): JSX.Element {
   // An adopted task files BENEATH the task that adopted it (decision 0005 §2), wherever its own
   // status would have put it: what relates the two is not a lane.
   const { top, beneath } = nestUnder(cards);
-  const withBeneath = (card: BoardCard): ReactNode => (
-    <Fragment key={card.taskId}>
-      {render(card)}
-      {(beneath.get(card.taskId) ?? []).map(render)}
-    </Fragment>
-  );
+  const withBeneath = (card: BoardCard, lastInLane: boolean): ReactNode => {
+    const under = beneath.get(card.taskId) ?? [];
+    return (
+      <Fragment key={card.taskId}>
+        {render(card, lastInLane && under.length === 0)}
+        {under.map((child, i) => render(child, lastInLane && i === under.length - 1))}
+      </Fragment>
+    );
+  };
+  const inOrder = (list: readonly BoardCard[], followed = false): ReactNode[] => list.map((card, i) => withBeneath(card, !followed && i === list.length - 1));
   const lanes = lanesOf(top);
   // One lane: no heading, because a rule saying "Finished" over a column of nothing but finished
   // cards says what every card under it says. The lane's OWN cards, not the ones passed in — a
   // column that is all finished is the commonest case there is, and it is the one whose order the
   // lane fixed.
-  if (lanes.length <= 1) return <>{(lanes[0]?.cards ?? []).map(withBeneath)}</>;
+  if (lanes.length <= 1) return <>{inOrder(lanes[0]?.cards ?? [], trailing)}</>;
   return (
     <>
       {lanes.map(({ lane, cards: inLane }) => (
@@ -649,7 +670,7 @@ function LiveLanes({ cards, render }: { cards: readonly BoardCard[]; render: (ca
               <span className="count data-num">{inLane.length}</span>
             </h5>
           ) : null}
-          {inLane.map(withBeneath)}
+          {inOrder(inLane)}
         </div>
       ))}
     </>
@@ -723,7 +744,18 @@ export function holdingLabelOf(card: Pick<BoardCard, "waitingFor">): string | un
   return `waiting for ${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
 }
 
-export function Card({
+/**
+ * Slotted (decision 0013): the One client's universal tree draws `@jaira/universal`'s copy instead.
+ */
+export const Card = slotted("TaskCard", DomCard);
+
+/** The DOM card, for a universal copy to fall back on where it does not cover a case yet. */
+export { DomCard as CardDom };
+
+/** What a card is drawn from — the contract a universal copy fills (`slots.tsx`). */
+export type CardProps = Parameters<typeof DomCard>[0];
+
+function DomCard({
   card,
   selected,
   onSelect,
@@ -737,6 +769,8 @@ export function Card({
   onOrigin,
 }: {
   card: BoardCard;
+  /** Last in its lane — see {@link Lanes}. The DOM card has `:last-child` and does not need it. */
+  last?: boolean;
   /** The origin line was clicked: open the events task it names, at the automation (decision 0010 §4). */
   onOrigin?: ((taskId: string, e: ReactMouseEvent, stateId?: string) => void) | undefined;
   /**
@@ -1111,12 +1145,13 @@ export function Board({
             <Lanes
               cards={column.cards}
               archived={{ shown: showArchived, onToggle: () => setShowArchived((v) => !v) }}
-              render={(card) => {
+              render={(card, last) => {
                 const drill = drillOf(card);
                 return (
                   <Card
                     key={card.taskId}
                     card={card}
+                    last={last}
                     selected={isSelected(card)}
                     onSelect={(e) => onSelectTask(card.taskId, e)}
                     onOrigin={(taskId, e, stateId) => (onOpenAt !== undefined ? onOpenAt(taskId, stateId) : onSelectTask(taskId, e))}
@@ -1216,10 +1251,11 @@ function Tray({
       <div className="tray-cards">
         <Lanes
           cards={cards}
-          render={(card) => (
+          render={(card, last) => (
             <Card
               key={card.taskId}
               card={card}
+              last={last}
               selected={selectedSet !== undefined ? selectedSet.has(card.taskId) : card.taskId === selected}
               onSelect={(e) => onSelectTask(card.taskId, e)}
               onOrigin={(taskId, e, stateId) => (onOpenAt !== undefined ? onOpenAt(taskId, stateId) : onSelectTask(taskId, e))}

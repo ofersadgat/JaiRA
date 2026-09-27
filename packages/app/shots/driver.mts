@@ -263,6 +263,17 @@ export class App {
     await this.ipc("config:write", { layer: "you", config: { ...you, appearance } });
   }
 
+  /**
+   * The whole look the NEXT launch opens in: the mode, the palette, and the status wash (Appearance),
+   * written the way {@link preferTheme} writes the mode alone.
+   */
+  async preferLook(look: { theme: "light" | "dark"; palette: string; wash: boolean }): Promise<void> {
+    const view = await this.ipc<{ you: Record<string, unknown> | null }>("config:read", {});
+    const you = view.you ?? {};
+    const appearance = { ...((you["appearance"] as Record<string, unknown> | undefined) ?? {}), mode: look.theme, palette: look.palette, statusWash: look.wash };
+    await this.ipc("config:write", { layer: "you", config: { ...you, appearance } });
+  }
+
   /** What this window actually opened in, for the caller to name its pictures by. */
   theme(): Promise<"light" | "dark"> {
     return this.evaluate<"light" | "dark">(`document.documentElement.dataset.theme`);

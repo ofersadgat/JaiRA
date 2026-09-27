@@ -1,4 +1,5 @@
 import { createContext, useContext, type ComponentProps, type ComponentType, type JSX, type ReactNode } from "react";
+import type { CardProps } from "./board";
 
 /**
  * Where a universal copy stands in for a DOM component (decision 0013).
@@ -10,7 +11,10 @@ import { createContext, useContext, type ComponentProps, type ComponentType, typ
  */
 export interface Slots {
   Pill: ComponentType<PillSlotProps>;
+  TaskCard: ComponentType<CardProps>;
 }
+
+export type { CardProps };
 
 /** `pill.tsx`'s `Pill` props, restated so this file needs nothing from the component it replaces. */
 export interface PillSlotProps {
