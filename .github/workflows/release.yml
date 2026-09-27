@@ -1,7 +1,8 @@
 name: Release
 
 # Builds installers on six machines and publishes them to the public releases repository
-# (decision 0011 §3). What to build is decided by `.github/scripts/release-plan.mjs`:
+# (decision 0011 §3). What to build is decided by `scripts/release/plan.mjs`,
+# and `scripts/release/publish.mjs` publishes; GitLab's `.gitlab-ci.yml` runs the same two scripts:
 #
 # - a pushed `vX.Y.Z` tag releases that commit as stable;
 # - a manual `stable` run promotes the latest nightly's commit;
@@ -70,13 +71,12 @@ jobs:
           node-version: 22
 
       - id: plan
-        run: node .github/scripts/release-plan.mjs
+        run: node scripts/release/plan.mjs
         env:
           EVENT: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           INPUT_CHANNEL: ${{ inputs.channel }}
           INPUT_VERSION: ${{ inputs.version }}
-          RUN_NUMBER: ${{ github.run_number }}
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
 
   build:
@@ -166,38 +166,28 @@ jobs:
     needs: [plan, build]
     runs-on: ubuntu-latest
     steps:
+      # For scripts/release/publish.mjs, which GitLab's pipeline runs too.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: actions/download-artifact@v4
         with:
           pattern: installer-*
           path: installers
           merge-multiple: true
 
-      # A release needs a commit to tag, and a new repository has none. Creating a file through the
-      # contents API makes the first commit; after that this finds the README and does nothing.
-      - name: Give the releases repository its first commit
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-        run: |
-          if ! gh api "repos/$RELEASES_REPO/contents/README.md" --silent 2>/dev/null; then
-            printf '# JaiRA releases\n\nInstallers for JaiRA, built from ofersadgat/JaiRA. Each release names the commits it was built from.\n' \
-              | base64 -w0 > readme.b64
-            gh api -X PUT "repos/$RELEASES_REPO/contents/README.md" \
-              -f message="Add README" -f content="$(cat readme.b64)" --silent
-          fi
-
       - name: Write the notes
         env:
           NOTES: ${{ needs.plan.outputs.notes }}
         run: printf '%s\n' "$NOTES" > notes.md
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.RELEASES_REPO }}
-          token: ${{ secrets.RELEASES_TOKEN }}
-          tag_name: ${{ needs.plan.outputs.tag }}
-          name: JaiRA ${{ needs.plan.outputs.version }}
-          body_path: notes.md
-          prerelease: ${{ needs.plan.outputs.prerelease == 'true' }}
-          make_latest: ${{ needs.plan.outputs.prerelease == 'true' && 'false' || 'true' }}
-          files: installers/*
-          fail_on_unmatched_files: true
+      - name: Publish
+        run: node scripts/release/publish.mjs installers notes.md
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          PLAN_TAG: ${{ needs.plan.outputs.tag }}
+          PLAN_VERSION: ${{ needs.plan.outputs.version }}
+          PLAN_PRERELEASE: ${{ needs.plan.outputs.prerelease }}

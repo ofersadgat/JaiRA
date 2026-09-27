@@ -373,6 +373,31 @@ the machine it runs on.
   - the `RELEASES_TOKEN` secret;
   - declarative-ai pushed to GitHub, since its `main` there is what gets built.
 
+**GitLab releases too (the person, 2026-09-26: "gitlab should also be able to trigger the release
+process", choosing that GitLab builds and publishes itself).**
+
+- **Shared scripts.** The plan and publish steps are scripts both systems run, `scripts/release/plan.mjs`
+  and `scripts/release/publish.mjs`, so the two agree on versions and on what is already released.
+  - A nightly's last number counts that day's nightlies in the releases repository, not either
+    system's run counter, so their builds order correctly.
+  - Publishing creates a draft, uploads every file, then publishes, so a half-finished run never shows
+    an updater a release without its installers.
+  - GitHub's publish job uses the same script.
+- **`.gitlab-ci.yml` starts a release pipeline** for:
+  - a pushed `vX.Y.Z` tag;
+  - **Run pipeline** with `RELEASE_CHANNEL` set to `nightly` or `stable`, plus `RELEASE_VERSION`;
+  - a pipeline schedule whose `RELEASE_CHANNEL` is `nightly`.
+  
+  Ordinary pipelines keep running the checks, as before.
+- **What each part uses:**
+  - The plan resolves declarative-ai `main` from GitLab.
+  - The builds run on GitLab.com's hosted runners: `saas-linux-small-amd64`, `saas-linux-small-arm64`
+    and `saas-windows-medium-amd64`.
+  - Publishing uses the `RELEASES_TOKEN` CI variable.
+- **Platforms missing from GitLab's releases:** macOS, which needs a Premium plan, and Windows arm64,
+  which has no hosted runner.
+- **A protected `RELEASES_TOKEN`** reaches tag pipelines only when `v*` tags are protected.
+
 ## Consequences
 
 **Easier:**

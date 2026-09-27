@@ -1,4 +1,4 @@
-# JaiRA CI.
+# JaiRA CI, and GitLab's release pipeline.
 #
 # JaiRA's packages depend on the sibling declarative-ai repo via
 # `file:../../../declarative-ai/packages/*`. CI clones declarative-ai next to the
@@ -11,14 +11,68 @@
 #
 # The clone uses CI_JOB_TOKEN, which requires this project on declarative-ai's
 # Settings > CI/CD > Job token allowlist (granted).
+#
+# RELEASES (decision 0011 §3). GitLab builds and publishes on its own runners, to
+# the same releases repository GitHub's `.github/workflows/release.yml` publishes
+# to, with the same two scripts (`scripts/release/plan.mjs` decides what to
+# build, `scripts/release/publish.mjs` publishes), so the two agree on versions
+# and on what is already released. A release pipeline runs for:
+#
+# - a pushed `vX.Y.Z` tag: that commit, as stable;
+# - Build > Pipelines > Run pipeline with RELEASE_CHANNEL = nightly (this
+#   branch's commit) or stable (promotes the latest nightly's commit;
+#   RELEASE_VERSION overrides its X.Y.Z);
+# - a pipeline schedule with RELEASE_CHANNEL = nightly, skipped when nothing is
+#   new since the last nightly, or when that is under six hours old.
+#
+# GitLab.com's hosted runners build Linux x64, Linux arm64 and Windows x64. There
+# is no macOS (it needs a Premium plan) and no Windows arm64, so GitLab's releases
+# lack those. Needs the RELEASES_TOKEN variable (a GitHub token with Contents
+# read/write on the releases repository); if it is protected, the release tags
+# must be protected too (Settings > Repository > Protected tags, `v*`).
 default:
   image: node:22
 
 stages:
   - test
+  - plan
+  - build
+  - publish
+
+variables:
+  RELEASE_CHANNEL:
+    value: "none"
+    options: ["none", "nightly", "stable"]
+    description: "none runs the checks. nightly builds this branch's commit; stable promotes the latest nightly."
+  RELEASE_VERSION:
+    value: ""
+    description: "stable only: X.Y.Z (default: the latest nightly's X.Y.Z)"
+  RELEASES_REPO: ofersadgat/releases
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      variables:
+        RELEASE_EVENT: push
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $RELEASE_CHANNEL == "nightly"
+      variables:
+        RELEASE_EVENT: schedule
+    - if: $CI_PIPELINE_SOURCE == "web" && $RELEASE_CHANNEL != "none"
+      variables:
+        RELEASE_EVENT: workflow_dispatch
+    # As before release pipelines existed: branch pipelines only, no merge-request duplicates.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: always
 
 build:
   stage: test
+  rules:
+    - if: $RELEASE_EVENT
+      when: never
+    - when: on_success
   before_script:
     - git clone --depth 1 "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" ../declarative-ai
     - cd ../declarative-ai && npm install && npm run build && cd "$CI_PROJECT_DIR"
@@ -31,3 +85,107 @@ build:
     # measured: it dies at 2048 MB and builds at 3072 — and Node sizes its default
     # from the machine, which on the shared runner is about 2 GB.
     - NODE_OPTIONS=--max-old-space-size=4096 npm run app:build
+
+release:plan:
+  stage: plan
+  rules:
+    - if: $RELEASE_EVENT
+  variables:
+    # The notes list the commits since the last release, and a stable release may promote an older one.
+    GIT_DEPTH: 0
+  script:
+    - |
+      if [ -z "$RELEASES_TOKEN" ]; then
+        echo "Add a RELEASES_TOKEN variable: a GitHub token with Contents read/write on $RELEASES_REPO."
+        exit 1
+      fi
+    # declarative-ai's main as GitLab has it, resolved once so every build uses the same commit (unpinned).
+    - export UPSTREAM_COMMIT="$(git ls-remote "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" refs/heads/main | cut -f1)"
+    - EVENT="$RELEASE_EVENT" REF_NAME="$CI_COMMIT_TAG" GITHUB_SHA="$CI_COMMIT_SHA" INPUT_CHANNEL="$RELEASE_CHANNEL" INPUT_VERSION="$RELEASE_VERSION" GH_TOKEN="$RELEASES_TOKEN" PLAN_DIR=plan node scripts/release/plan.mjs
+  artifacts:
+    paths: [plan/]
+    reports:
+      dotenv: plan/plan.env
+
+.release-build-linux:
+  stage: build
+  needs: [release:plan]
+  rules:
+    - if: $RELEASE_EVENT
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - if [ "$PLAN_SKIP" = "true" ]; then echo "nothing to release"; exit 0; fi
+    - git checkout --quiet "$PLAN_COMMIT"
+    # xvfb for the smoke test, which launches the packaged app; the rest is what Electron needs to start.
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends xvfb xauth fakeroot libgtk-3-0 libnss3 libasound2 libgbm1 libxss1 libxtst6 libnotify4 libsecret-1-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libcups2 > /dev/null
+    - git clone --quiet --filter=blob:none "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" ../declarative-ai
+    - git -C ../declarative-ai checkout --quiet "$PLAN_UPSTREAM"
+    - cd ../declarative-ai && npm install && npm run build && cd "$CI_PROJECT_DIR"
+    - npm install
+    - JAIRA_BUILD_VERSION="$PLAN_VERSION" NODE_OPTIONS=--max-old-space-size=4096 xvfb-run -a npm run app:dist
+  after_script:
+    - mkdir -p installers smoke
+    - find "packages/app/release/$PLAN_VERSION" -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) -exec cp {} installers/ \; 2>/dev/null || true
+    - cp "packages/app/release/$PLAN_VERSION/smoke.png" "smoke/$CI_JOB_NAME_SLUG.png" 2>/dev/null || true
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths: [installers/, smoke/]
+
+release:build:linux-x64:
+  extends: .release-build-linux
+  tags: [saas-linux-small-amd64]
+
+release:build:linux-arm64:
+  extends: .release-build-linux
+  tags: [saas-linux-small-arm64]
+
+release:build:win-x64:
+  stage: build
+  needs: [release:plan]
+  rules:
+    - if: $RELEASE_EVENT
+  tags: [saas-windows-medium-amd64]
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - if ($env:PLAN_SKIP -eq "true") { Write-Output "nothing to release"; exit 0 }
+    - git checkout --quiet $env:PLAN_COMMIT
+    # Node 22, the latest 22.x release, from nodejs.org: the runner image is not guaranteed to have it.
+    - $node = (Invoke-RestMethod https://nodejs.org/dist/index.json | Where-Object { $_.version -like 'v22.*' } | Select-Object -First 1).version
+    - Invoke-WebRequest "https://nodejs.org/dist/$node/node-$node-win-x64.zip" -OutFile "$env:TEMP\node.zip"
+    - Expand-Archive "$env:TEMP\node.zip" -DestinationPath "$env:TEMP\node" -Force
+    - $env:PATH = "$env:TEMP\node\node-$node-win-x64;$env:PATH"
+    - git clone --quiet --filter=blob:none "https://gitlab-ci-token:$($env:CI_JOB_TOKEN)@gitlab.com/mistlabs/declarative-ai.git" ..\declarative-ai
+    - git -C ..\declarative-ai checkout --quiet $env:PLAN_UPSTREAM
+    - Push-Location ..\declarative-ai
+    - npm install
+    - npm run build
+    - Pop-Location
+    - npm install
+    - $env:JAIRA_BUILD_VERSION = $env:PLAN_VERSION
+    - $env:NODE_OPTIONS = "--max-old-space-size=4096"
+    - npm run app:dist
+  after_script:
+    - New-Item -ItemType Directory -Force installers, smoke | Out-Null
+    - Get-ChildItem "packages\app\release\$env:PLAN_VERSION\*" -File -Include *.exe, *.blockmap -ErrorAction SilentlyContinue | Copy-Item -Destination installers
+    - Copy-Item "packages\app\release\$env:PLAN_VERSION\smoke.png" "smoke\$env:CI_JOB_NAME_SLUG.png" -ErrorAction SilentlyContinue
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths: [installers/, smoke/]
+
+release:publish:
+  stage: publish
+  needs:
+    - release:plan
+    - release:build:linux-x64
+    - release:build:linux-arm64
+    - release:build:win-x64
+  rules:
+    - if: $RELEASE_EVENT
+  script:
+    - if [ "$PLAN_SKIP" = "true" ]; then echo "nothing to release"; exit 0; fi
+    - GH_TOKEN="$RELEASES_TOKEN" node scripts/release/publish.mjs installers plan/notes.md

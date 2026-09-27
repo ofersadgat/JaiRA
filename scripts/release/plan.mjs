@@ -1,7 +1,10 @@
 /**
- * Decide what the release workflow builds (decision 0011 §3): the channel, the version, the JaiRA
- * commit and the declarative-ai commit, or that there is nothing to build. Writes its answer to
- * `$GITHUB_OUTPUT` and prints it.
+ * Decide what a release pipeline builds (decision 0011 §3): the channel, the version, the JaiRA
+ * commit and the declarative-ai commit, or that there is nothing to build. Both CI systems run it —
+ * GitHub's `.github/workflows/release.yml` and GitLab's `.gitlab-ci.yml` — against the one releases
+ * repository, so they agree on versions and on what is already released. It prints its answer and
+ * writes it to `$GITHUB_OUTPUT` (GitHub) and/or into `$PLAN_DIR` as `plan.env` (dotenv, `PLAN_*`)
+ * and `notes.md` (GitLab, whose dotenv reports cannot hold the multi-line notes).
  *
  * - A pushed `vX.Y.Z` tag is a stable release of the tagged commit.
  * - A manual stable release promotes the latest published nightly's commit, so what ships as stable is
@@ -10,20 +13,25 @@
  *   nightly and at least six hours have passed since it was published; run by hand it always builds.
  *
  * The releases live in another repository (`RELEASES_REPO`), so a release's JaiRA commit is read back
- * from its notes (`jaira-commit: <sha>`), which this same workflow writes.
+ * from its notes (`jaira-commit: <sha>`), which the plan writes. A nightly's last number counts that
+ * day's nightlies in the releases repository, not either system's run counter, so builds from the two
+ * systems order correctly.
  *
- * Environment: EVENT, REF_NAME, GITHUB_SHA, INPUT_CHANNEL, INPUT_VERSION, RUN_NUMBER, RELEASES_REPO,
- * GH_TOKEN, GITHUB_OUTPUT. Node 22, no dependencies.
+ * Environment: EVENT (push | schedule | workflow_dispatch), REF_NAME (the tag), GITHUB_SHA (the commit
+ * the pipeline runs on), INPUT_CHANNEL, INPUT_VERSION, RELEASES_REPO, GH_TOKEN; UPSTREAM_COMMIT when the
+ * caller resolved declarative-ai itself (GitLab clones it from GitLab); GITHUB_OUTPUT and/or PLAN_DIR.
+ * Node 22, no dependencies.
  */
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const env = process.env;
 const RELEASES_REPO = env.RELEASES_REPO ?? "ofersadgat/releases";
 const UPSTREAM_REPO = "ofersadgat/declarative-ai";
 const NIGHTLY_GAP_MS = 6 * 60 * 60 * 1000;
 const STABLE = /^(\d+)\.(\d+)\.(\d+)$/;
-const NIGHTLY = /^(\d+\.\d+\.\d+)-nightly\.\d{8}\.\d+$/;
+const NIGHTLY = /^(\d+\.\d+\.\d+)-nightly\.(\d{8})\.(\d+)$/;
 const COMMIT_LINE = /^jaira-commit: ([0-9a-f]{40})$/m;
 
 async function github(path) {
@@ -67,6 +75,13 @@ function output(values) {
     return text.includes("\n") ? `${key}<<__PLAN__\n${text}\n__PLAN__` : `${key}=${text}`;
   });
   if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
+  if (env.PLAN_DIR) {
+    mkdirSync(env.PLAN_DIR, { recursive: true });
+    const { notes, ...rest } = values;
+    const dotenv = Object.entries(rest).map(([key, value]) => `PLAN_${key.toUpperCase()}=${String(value ?? "")}`);
+    writeFileSync(join(env.PLAN_DIR, "plan.env"), `${dotenv.join("\n")}\n`);
+    writeFileSync(join(env.PLAN_DIR, "notes.md"), `${notes ?? ""}\n`);
+  }
   console.log(lines.join("\n"));
 }
 
@@ -118,13 +133,14 @@ async function plan() {
       if (age < NIGHTLY_GAP_MS) return skip(`${last.tag_name} is only ${Math.round(age / 60000)} minutes old`);
     }
     const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    version = `${nextPatch(appVersion, stables)}-nightly.${day}.${env.RUN_NUMBER ?? "0"}`;
+    const today = nightlies.map((r) => NIGHTLY.exec(versionOf(r))).filter((m) => m[2] === day).map((m) => Number(m[3]));
+    version = `${nextPatch(appVersion, stables)}-nightly.${day}.${Math.max(0, ...today) + 1}`;
   }
 
   const tag = `v${version}`;
   if (published.some((r) => r.tag_name === tag)) throw new Error(`${tag} is already released in ${RELEASES_REPO}`);
 
-  const upstream = (await github(`/repos/${UPSTREAM_REPO}/commits/main`)).sha;
+  const upstream = env.UPSTREAM_COMMIT || (await github(`/repos/${UPSTREAM_REPO}/commits/main`)).sha;
   const previous = (channel === "stable" ? stables : nightlies)[0];
   const notes = [
     channel === "stable" ? `JaiRA ${version}.` : `JaiRA nightly ${version}. Nightly builds are what the next stable release is promoted from.`,
