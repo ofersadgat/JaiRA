@@ -1395,8 +1395,8 @@ export class AppService {
       dir: jairaBasePaths(this.baseDir).logsDir,
       publish: (entry) => {
         this.publish({ type: "log:entry", entry });
-        // An error in the log is one of Settings' errors until the person opens Logs.
-        if (entry.level === "error") this.health.logError();
+        // Errors and warnings in the log are counted among Settings' until the person dismisses them.
+        if (entry.level === "error" || entry.level === "warn") this.health.logged(entry.level);
       },
     });
     // What is worth keeping, from the setting that says so. BEFORE the sink is installed below, so

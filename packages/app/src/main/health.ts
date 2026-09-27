@@ -8,7 +8,9 @@
  * tool off is not losing it.
  *
  * Dismissing an item hides it until its condition clears; the same problem coming back after that is
- * news again. Log errors are one item counting the errors written since the person last opened Logs.
+ * news again. The log is two items, the errors and the warnings written since the person last
+ * dismissed them (the person, 2026-09-26: "every warning/error since the last time we cleared/dismissed
+ * the log messages"): dismissing one clears its count rather than hiding it.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -39,11 +41,15 @@ interface HealthFile {
 
 export type HealthKind = "executor" | "route" | "forge";
 
+/** The log's two items. */
+export const LOG_ERRORS = "log:errors";
+export const LOG_WARNINGS = "log:warnings";
+
 export class HealthBoard {
   private readonly items = new Map<string, HealthItem>();
   private readonly worked: Set<string>;
   private readonly dismissed: Set<string>;
-  private logErrors = 0;
+  private readonly logCounts = { error: 0, warn: 0 };
 
   constructor(private readonly options: HealthBoardOptions) {
     const saved = this.read();
@@ -103,34 +109,41 @@ export class HealthBoard {
     if (this.drop(id)) this.changed();
   }
 
-  /** An error was written to the log. */
-  logError(): void {
-    this.logErrors += 1;
-    this.items.set("log", {
-      id: "log",
-      level: "error",
+  /** An error or a warning was written to the log. */
+  logged(level: "error" | "warn"): void {
+    const count = (this.logCounts[level] += 1);
+    const id = level === "error" ? LOG_ERRORS : LOG_WARNINGS;
+    const noun = level === "error" ? "error" : "warning";
+    this.items.set(id, {
+      id,
+      level: level === "error" ? "error" : "warning",
       page: "logs" satisfies HealthPage,
       title: "Log",
-      detail: this.logErrors === 1 ? "1 error was logged" : `${this.logErrors} errors were logged`,
+      detail: count === 1 ? `1 ${noun} was logged` : `${count} ${noun}s were logged`,
       action: "open-logs",
-      since: this.items.get("log")?.since ?? this.now(),
+      since: this.items.get(id)?.since ?? this.now(),
     });
-    // A new error after a dismissal is news again.
-    this.dismissed.delete("log");
     this.changed();
   }
 
-  /** The person opened Logs: what was logged has been seen. */
-  logsSeen(): void {
-    this.logErrors = 0;
-    this.clear("log");
-  }
-
-  /** Hide an item until its condition clears. */
+  /**
+   * Dismiss one item. A problem is hidden until its condition clears; a log count is CLEARED — the
+   * next entry starts it again from one.
+   */
   dismiss(id: string): void {
     if (!this.items.has(id)) return;
-    this.dismissed.add(id);
+    if (id === LOG_ERRORS || id === LOG_WARNINGS) {
+      this.logCounts[id === LOG_ERRORS ? "error" : "warn"] = 0;
+      this.items.delete(id);
+    } else {
+      this.dismissed.add(id);
+    }
     this.changed();
+  }
+
+  /** Dismiss everything shown. */
+  dismissAll(): void {
+    for (const item of this.list()) this.dismiss(item.id);
   }
 
   private drop(id: string): boolean {

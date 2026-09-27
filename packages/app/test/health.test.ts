@@ -1,7 +1,8 @@
 /**
  * Settings' warnings and errors: a tool is only lost if it once worked; working, switched off or
- * never-configured tools raise nothing; a dismissal lasts until the condition clears; log errors count
- * until Logs is opened; and what worked is remembered across a restart.
+ * never-configured tools raise nothing; a dismissal lasts until the condition clears; log errors and
+ * warnings count until they are dismissed; everything can be dismissed at once; and what worked is
+ * remembered across a restart.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,22 +73,40 @@ describe("the health board", () => {
     expect(health.list()).toHaveLength(1);
   });
 
-  it("counts log errors until Logs is opened", () => {
+  it("counts log errors and warnings since they were last dismissed, which clears the count", () => {
     const health = board();
-    health.logError();
-    health.logError();
-    expect(health.list()).toMatchObject([{ id: "log", level: "error", page: "logs", detail: "2 errors were logged", action: "open-logs" }]);
-    health.logsSeen();
+    health.logged("error");
+    health.logged("error");
+    health.logged("warn");
+    expect(health.list()).toMatchObject([
+      { id: "log:errors", level: "error", page: "logs", detail: "2 errors were logged", action: "open-logs" },
+      { id: "log:warnings", level: "warning", page: "logs", detail: "1 warning was logged" },
+    ]);
+    health.dismiss("log:errors");
+    expect(health.list().map((i) => i.id)).toEqual(["log:warnings"]);
+    health.logged("error");
+    expect(health.list()[0]).toMatchObject({ id: "log:errors", detail: "1 error was logged" });
+  });
+
+  it("dismisses everything at once", () => {
+    const health = board();
+    health.observe("executor", [{ name: "claude-cli", status: "ok", detail: "" }], claude);
+    health.observe("executor", [{ name: "claude-cli", status: "failed", detail: "signed out" }], claude);
+    health.logged("warn");
+    health.set({ id: "update", level: "warning", page: "about", title: "Updates", detail: "offline" });
+    health.dismissAll();
     expect(health.list()).toEqual([]);
+    health.logged("warn");
+    expect(health.list()).toMatchObject([{ id: "log:warnings", detail: "1 warning was logged" }]);
   });
 
   it("puts errors before warnings, and pushes the whole board on every change", () => {
     const health = board();
     health.set({ id: "plugin:llama-cuda", level: "warning", page: "about", title: "Local models: CUDA", detail: "download failed — offline", action: "retry-plugin", subject: "llama-cuda" });
-    health.logError();
+    health.logged("error");
     expect(health.list().map((i) => i.level)).toEqual(["error", "warning"]);
-    expect(pushed.at(-1)?.map((i) => i.id)).toEqual(["log", "plugin:llama-cuda"]);
+    expect(pushed.at(-1)?.map((i) => i.id)).toEqual(["log:errors", "plugin:llama-cuda"]);
     health.clear("plugin:llama-cuda");
-    expect(pushed.at(-1)?.map((i) => i.id)).toEqual(["log"]);
+    expect(pushed.at(-1)?.map((i) => i.id)).toEqual(["log:errors"]);
   });
 });

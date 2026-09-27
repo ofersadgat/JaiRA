@@ -737,8 +737,8 @@ const handlers: Record<IpcChannel, Handler> = {
     service.health.dismiss(request.id);
     return service.health.list();
   }) as Handler,
-  "logs:seen": (() => {
-    service.health.logsSeen();
+  "health:dismissAll": (() => {
+    service.health.dismissAll();
     return service.health.list();
   }) as Handler,
 };

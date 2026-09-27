@@ -2242,8 +2242,8 @@ export interface IpcContract {
   "health:list": { request: void; response: HealthItem[] };
   /** Hide one until its condition clears. */
   "health:dismiss": { request: { id: string }; response: HealthItem[] };
-  /** The person opened Logs: the errors logged so far have been seen. */
-  "logs:seen": { request: void; response: HealthItem[] };
+  /** Dismiss everything shown (the card's "Dismiss all"). */
+  "health:dismissAll": { request: void; response: HealthItem[] };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2412,7 +2412,7 @@ export const IPC_CHANNELS = [
   "plugin:remove",
   "health:list",
   "health:dismiss",
-  "logs:seen",
+  "health:dismissAll",
 ] as const satisfies readonly IpcChannel[];
 
 /**

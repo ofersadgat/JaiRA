@@ -5,7 +5,8 @@
  * should be a warning").
  *
  * An ERROR is something that worked and stopped: an agent, a model route or a forge connection a check
- * once found working and now finds failing, or errors written to the log since the person last looked.
+ * once found working and now finds failing, or errors written to the log since the person last dismissed
+ * them (warnings written to the log count as warnings).
  * A tool that never worked on this machine is not one — it was never available to lose. A WARNING is a
  * thing that did not happen and can be tried again: a plugin or update download, an update check.
  *
@@ -32,7 +33,7 @@ export type HealthAction =
   | "open-logs";
 
 export interface HealthItem {
-  /** Stable per problem: `executor:<name>`, `route:<name>`, `forge:<name>`, `plugin:<id>`, `update`, `log`. */
+  /** Stable per problem: `executor:<name>`, `route:<name>`, `forge:<name>`, `plugin:<id>`, `update`, `log:errors`, `log:warnings`. */
   id: string;
   level: HealthLevel;
   page: HealthPage;
