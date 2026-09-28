@@ -37,7 +37,7 @@ It deliberately does not own:
 
 - Reading the layers at open and writing the initial project document: [project-store](project-store.md) `loadLayeredConfig` and `initProject`.
 - Resolving the overlay into a tree and enforcing function rules: [executor-tree](executor-tree.md). Probing routes and the availability snapshot: [model-routing](model-routing.md).
-- Compiling `policy`, which it passes through unchecked: [tool-policy](tool-policy.md). Checking `artifacts.destination`: [artifact-placement](artifact-placement.md).
+- What a permission set allows and how a call is judged against it: [tool-policy](tool-policy.md); this unit parses only the `functions` block's defaults. Checking `artifacts.destination`: [artifact-placement](artifact-placement.md).
 - Credential values, which a document only names: [secret-chain](secret-chain.md). The window's own state — layout, read marks, open projects, the log policy: [user-settings](user-settings.md), which does not hold the look; that is the `appearance` block, usually in the personal layer.
 - Painting the look: the renderer through `lookOf` and `writeLook` ([renderer-store](renderer-store.md)), the frame through `windowAppearance` ([app-shell](app-shell.md)).
 - What a storage mode does: [storage-policy](storage-policy.md). Where the files live: [project-layout](project-layout.md).

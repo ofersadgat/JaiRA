@@ -59,7 +59,7 @@ No default model: `executors.default.prompt.defaults.model` stays unset.
 
 `inheritedDoc(view, layer)` is the merge of the layers weaker than `layer`; `statingLayer(view, path, below?)` is the strongest layer (below a given one) whose document states a dotted path, or `"built in"`; `inheritedValue` pairs the two, and is what a Settings row's "instead of … from …" line reads.
 
-### The top-level keys are thirteen blocks, and an unknown top-level key is ignored
+### The top-level keys are nineteen blocks, and an unknown top-level key is ignored
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -75,9 +75,13 @@ No default model: `executors.default.prompt.defaults.model` stays unset.
 | `integrations` | `{forges?: object, oauth?: object}` | no | connections to forges, one per host ([decision 0004](../decisions/0004-remote-review.md)), and the OAuth apps a forge sign-in uses, see below; left out of the file `initProject` writes, so the shared root's connections are not shadowed |
 | `autopilot` | `{askBelow?: number}` | no, default `{askBelow: 0.2}` | how sure a fast-forward's controlling conversation must be before its answer stands in for the person's ([decision 0005](../decisions/0005-connect.md) §6); `0`–`1`, `1` never answers for you and `0` always. It is no workflow's threshold and names no workflow input. Left out of the file `initProject` writes, because it is a person's setting and belongs in the shared root |
 | `limits` | `{retryOnReset?: boolean}` | no, default `{retryOnReset: true}` | whether "Try again at …" starts checked on a message or a run the provider refused because the account ran out ([usage-readings](usage-readings.md)); a message sent while the account is KNOWN to be spent always waits for the reset. Left out of the file `initProject` writes, for the reason `autopilot` is |
+| `archive` | `{auto?: boolean, keepLatest?: number, failedAfterDays?: number, succeededAfterDays?: number}` | no, default `{auto: true, keepLatest: 5, failedAfterDays: 2, succeededAfterDays: 1}` | when finished tasks are archived by themselves ([decision 0014](../decisions/0014-archived-tasks.md)): per project, the latest `keepLatest` finished tasks stay on the board whatever their age; past those, one that did not succeed (failed or canceled) is archived `failedAfterDays` after it finished and one that succeeded `succeededAfterDays` after. Each number is 0 or more. Conversations and JaiRA's own tasks are never archived by this |
+| `updates` | `{channel?: "stable" \| "nightly"}` | no, default `{}` | the release channel the app follows ([decision 0011](../decisions/0011-releases-updates-plugins.md) §5); absent, the running build's own channel. Switching installs the other channel's newest version at the next check, even when it is older — which is how nightly goes back to stable. Any other channel is refused |
+| `engine` | `{separateServer?: boolean, keepServerRunning?: boolean}` | no, both off | where the desktop runs the engine ([decision 0012](../decisions/0012-local-server.md) §5): off, in the window's own process; `separateServer`, a separate `jaira serve` it connects to; `keepServerRunning`, that server outlives the desktop, and means nothing without `separateServer` |
 | `functions` | object | no, every default | each shipped function's defaults, by the function's name; below. Left out of the file `initProject` writes, for the reason `autopilot` is |
 | `mcp` | `{servers?: object}` | no, default `{servers: {}}` | the MCP servers every agent run is handed, by the name their tools are called under; below ([mcp-servers](../units/mcp-servers.md)) |
 | `appearance` | object | no, every default | how the app looks — mode, palette, board options, typography, the conversation's layout, the editors and the renderer choices; below. Usually stated in the personal layer, and left out of the file `initProject` writes |
+| `events` | object of `{enabled?: boolean, branches?: string[], remotes?: {[remote]: boolean}}`, by event name | no; the built-in layer states every event, on | which events start tasks ([decision 0010](../decisions/0010-git-tools-and-events.md)): an event a layer does not state is off, and a stated one with no `enabled` is off. A name that is not an event is refused, naming the events there are; `branches` (non-empty branch globs, absent for every branch) and `remotes` are allowed only on a `git.*` event |
 
 ### A route block's allowed fields follow from its key
 
