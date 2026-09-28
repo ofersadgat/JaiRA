@@ -10,7 +10,13 @@ import type { IslandProps } from "./types";
 const MonacoDiffPane = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
 const MarkdownEditor = lazy(() => import("@jaira/ui/markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
 
-export function Island({ component, props: p, height, onEvent }: IslandProps): JSX.Element {
+export function Island(props: IslandProps): JSX.Element {
+  // Marked, so the fidelity gate can leave it out: an island is the desktop's own component by
+  // construction, and on `/rn` it stands without the stylesheet a phone's island page carries.
+  return <div data-island={props.component}>{inline(props)}</div>;
+}
+
+function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Element {
   const event = (name: string) => (value: unknown) => onEvent?.(name, value);
   const box = height !== undefined ? { height } : undefined;
   switch (component) {

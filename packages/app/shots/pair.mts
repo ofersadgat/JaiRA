@@ -38,6 +38,23 @@ const REGIONS: Record<string, string> = {
 
 type Rect = { x: number; y: number; width: number; height: number };
 
+/** Paint a box out of a picture, the same on both pages, so it cannot count either way. */
+function mask(png: PNG, r: Rect, scale: number): void {
+  const x0 = Math.max(0, Math.floor(r.x * scale));
+  const y0 = Math.max(0, Math.floor(r.y * scale));
+  const x1 = Math.min(png.width, Math.ceil((r.x + r.width) * scale));
+  const y1 = Math.min(png.height, Math.ceil((r.y + r.height) * scale));
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * png.width + x) * 4;
+      png.data[i] = 255;
+      png.data[i + 1] = 0;
+      png.data[i + 2] = 255;
+      png.data[i + 3] = 255;
+    }
+  }
+}
+
 function crop(png: PNG, r: Rect, scale: number): PNG {
   const x = Math.round(r.x * scale);
   const y = Math.round(r.y * scale);
@@ -204,12 +221,19 @@ async function main(): Promise<void> {
           `[...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => r.selectorText === ".sidebar" || r.selectorText === ".card"); } catch { return false; } })`,
         );
         if (helped) throw new Error("styles.css is on the /rn page: it would draw what the copies should");
+        // Islands (Monaco, CodeMirror) are the desktop's own components by construction, and on `/rn`
+        // they stand without the stylesheet the phone's island page brings: painted out of both pictures.
+        const islands = await app.evaluate<(Rect & { name: string })[]>(
+          `[...document.querySelectorAll("[data-island]")].map((e) => { const r = e.getBoundingClientRect(); return { name: e.getAttribute("data-island"), x: r.x, y: r.y, width: r.width, height: r.height }; })`,
+        );
         const uncopied = await app.evaluate<string[]>(`[...document.querySelectorAll("[data-testid^=uncopied-]")].map((e) => e.getAttribute("data-testid").slice(9))`);
         const rn = await capture(app);
+        const ratio = dom.width / (await app.evaluate<number>("innerWidth"));
+        for (const r of islands) for (const png of [dom, rn]) mask(png, r, ratio);
         writeFileSync(join(OUT, `${name}.dom.png`), PNG.sync.write(dom));
         writeFileSync(join(OUT, `${name}.rn.png`), PNG.sync.write(rn));
         const scale = dom.width / (await app.evaluate<number>("innerWidth"));
-        console.log(`${name}${uncopied.length > 0 ? `  (not copied yet: ${uncopied.join(", ")})` : ""}`);
+        console.log(`${name}${uncopied.length > 0 ? `  (not copied yet: ${uncopied.join(", ")})` : ""}${islands.length > 0 ? `  (islands left out: ${islands.map((i) => i.name).join(", ")})` : ""}`);
         if (unreached !== undefined) {
           failed = true;
           console.log(`  the scene could not be reached on /rn: ${unreached}`);

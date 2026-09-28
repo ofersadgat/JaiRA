@@ -114,3 +114,14 @@ export function taskVerbsOf(host: VerbHost, detail: TaskDetail, project: string 
   if (adopt) verbs.push({ icon: "adopt", label: "Show the conversation in the main view", onClick: () => host.adoptTask(detail.taskId, project, detail.workflow) });
   return verbs;
 }
+
+/**
+ * The panel beside a conversation (a `chat` entry): its tabs — what the conversation produced, what it
+ * changed, and what has been held out of it — and its head's words. Shared by `panelFaces.tsx` and the
+ * universal Chat room (decision 0015).
+ */
+export function chatTabs(held: number): PanelTabSpec[] {
+  return [tab("produced", "Produced"), tab("changes", "Changes"), tab("held", "Held", held > 0 ? { count: held } : {})];
+}
+export const chatPanelTitleOf = (detail: TaskDetail | null): string => detail?.title ?? "This conversation";
+export const CHAT_PANEL_SUB = "beside the conversation";

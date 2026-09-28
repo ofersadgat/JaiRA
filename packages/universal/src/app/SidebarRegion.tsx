@@ -9,10 +9,12 @@ import { healthCounts, logUnseen } from "@jaira/ui/updatesModel";
 import { useHealth } from "@jaira/ui/updatesStore";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
 import { settingsPageProblems } from "@jaira/ui/settingsSections";
-import { FileTreePanel } from "../components/files/FileTreePanel";
+import { FileTreePanel, type FileTreePanelProps } from "../components/files/FileTreePanel";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../components/Menu";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsSections } from "../components/settings/SettingsSections";
+import { ChatListPanel } from "../components/chat/ChatListPanel";
+import { useChatSurface } from "../components/chat/surface";
 import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
 
@@ -49,6 +51,7 @@ export function ShellSidebar(): JSX.Element {
    * The `+` on the Files row: the menu it drops, and the row in the tree it starts — `App.tsx`'s
    * `newMenu` and `newDraft`, held here because the row and the drawer are both this region's.
    */
+  // The tree's own right-click menus are drawn here too: outside the sidebar, in the window's tokens.
   const [newMenu, setNewMenu] = useState<MenuAt | null>(null);
   const [newDraft, setNewDraft] = useState<TreeDraft | null>(null);
   const newFile: SidebarAct = {
@@ -79,15 +82,15 @@ export function ShellSidebar(): JSX.Element {
           counts: rooms.rootChat,
           onSeen: () => actions.markSeenAll(rooms.seenRootChat),
           acts: [{ ...newChat, onAct: (from) => (actions.standOn(null), newChat.onAct(from)) }, find("conversations")],
-          panel: <Uncopied name="ChatListPanel" flex={1} />,
+          panel: <ChatDrawer find={finding.conversations === true} />,
         },
   );
   const views: SidebarView[] = VIEWS.map((v) =>
     v.id === "tasks"
       ? { ...v, counts: rooms.atTasks, onSeen: () => actions.markSeenAll(rooms.seenAtTasks) }
       : v.id === "chat"
-        ? { ...v, counts: rooms.atChat, onSeen: () => actions.markSeenAll(rooms.seenAtChat), acts: [newChat, find("chat")], panel: <Uncopied name="ChatListPanel" flex={1} /> }
-        : { ...v, acts: [newFile, find("files")], panel: <FilesDrawer find={finding.files === true} draft={newDraft} onDraft={setNewDraft} /> },
+        ? { ...v, counts: rooms.atChat, onSeen: () => actions.markSeenAll(rooms.seenAtChat), acts: [newChat, find("chat")], panel: <ChatDrawer find={finding.chat === true} /> }
+        : { ...v, acts: [newFile, find("files")], panel: <FilesDrawer find={finding.files === true} draft={newDraft} onDraft={setNewDraft} floats={{ menu: setNewMenu }} /> },
   );
   const footer = FOOTER_VIEWS.map((row) => (row.id === "logs" ? { ...row, counts: logUnseen(health)?.counts ?? {}, seenTitle: "What needs attention" } : row));
   const settings: SidebarView = {
@@ -141,9 +144,9 @@ export function ShellSidebar(): JSX.Element {
 }
 
 /**
- * Where the row's `+` stands, for the menu it drops. The DOM sidebar hands its act the button; this
- * one's `Sidebar` hands it nothing yet, so on web the button is found by its label, and on native the
- * menu hangs from the top of the column.
+ * Where the row's `+` stands, for the menu it drops. On web `Sidebar` hands the act its button, as the
+ * DOM sidebar does (the label lookup is a fallback); a phone has no element to hand, and the menu hangs
+ * from the top of the column.
  */
 function anchorBox(from: unknown, label: string): { right: number; bottom: number } {
   const el =
@@ -158,7 +161,7 @@ function anchorBox(from: unknown, label: string): { right: number; bottom: numbe
 }
 
 /** The Files drawer (`FileTreePanel`), with the props `App.tsx` gives its own. */
-function FilesDrawer({ find, draft, onDraft }: { find: boolean; draft: TreeDraft | null; onDraft: (draft: TreeDraft | null) => void }): JSX.Element {
+function FilesDrawer({ find, draft, onDraft, floats }: { find: boolean; draft: TreeDraft | null; onDraft: (draft: TreeDraft | null) => void; floats: FileTreePanelProps["floats"] }): JSX.Element {
   const { state, actions } = useShell();
   const ui = state.settings.ui;
   const openFolders = useMemo(() => unfoldedOf(ui, OPENED.folders), [ui]);
@@ -173,11 +176,24 @@ function FilesDrawer({ find, draft, onDraft }: { find: boolean; draft: TreeDraft
       onSelect={actions.selectFile}
       onCreate={actions.createWorkflow}
       onCreateFile={actions.createFile}
+      hasProject={state.at !== null}
+      onOpen={actions.openWorkflow}
+      onMove={actions.moveWorkflow}
+      onDelete={actions.deleteWorkflow}
+      onRenameFile={actions.renameFile}
+      onDeleteFile={actions.deleteFile}
+      onReveal={actions.revealFile}
       find={find}
       draft={draft}
       onDraft={onDraft}
+      floats={floats}
       onUnfold={(keys) => actions.unfold(OPENED.folders, keys)}
       project={state.at}
     />
   );
+}
+
+/** The Chat drawer (`ChatListPanel`), with the surface `App.tsx` gives its own. */
+function ChatDrawer({ find }: { find: boolean }): JSX.Element {
+  return <ChatListPanel surface={useChatSurface()} find={find} />;
 }

@@ -7,6 +7,8 @@ export { Replayed, TokenRoot, TokenScope, useLook, useTokens, type Look, type To
 export { Island, type IslandProps } from "./islands";
 export { Connect } from "./screens/Connect";
 export { Markdown, registerFenceRenderer } from "./components/Markdown";
+export { DataView } from "./components/files/DataView";
+export { FileInspector } from "./components/files/FileAddressBar";
 export { UniversalApp } from "./app/UniversalApp";
 export { useShell } from "./app/shell";
 export { Uncopied } from "./app/Uncopied";

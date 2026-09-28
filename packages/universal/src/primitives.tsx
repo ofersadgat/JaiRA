@@ -286,3 +286,14 @@ export function padToken(t: Tokens, name: string, fallback: [number, number]): [
     .map((one) => parseFloat(one));
   return [Number.isFinite(v) ? v! : fallback[0], Number.isFinite(h) ? h! : Number.isFinite(v) ? v! : fallback[1]];
 }
+
+/**
+ * A `ScrollView`'s style on web without what react-native-web gives every scroller — `translateZ(0)`
+ * and a `z-index: 0` stacking context — either of which lets Chromium composite the scroller, where it
+ * draws text greyscale instead of the subpixel text the DOM's own `overflow: auto` boxes get: every
+ * glyph an anti-aliasing pair apart. Native keeps its own.
+ */
+export const PLAIN_SCROLLER: Record<string, unknown> = isWeb ? { transform: "none", zIndex: "auto", position: "static" } : {};
+
+/** Chromium's own placeholder colour (`::placeholder`, which `styles.css` leaves alone): #757575, or #a9a9a9 in a dark scheme. */
+export const placeholderColor = (scheme: "light" | "dark"): string => (scheme === "dark" ? "#a9a9a9" : "#757575");

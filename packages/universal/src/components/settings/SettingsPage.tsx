@@ -255,11 +255,12 @@ export function SettingsSection({
   const hidden = at?.onlyStated === true && layer?.stated !== true && count === 0;
   const [y, setY] = useState<number | null>(null);
   const origin = page?.origin ?? 0;
+  const gone = hidden || (layer !== undefined && layered.hidden);
   useEffect(() => {
-    if (hidden || y === null || (layer !== undefined && layered.hidden)) return undefined;
+    if (gone || y === null) return undefined;
     placePart(id, title, origin + y);
     return () => dropPart(id);
-  }, [id, title, origin, y, hidden, layer, layered.hidden]);
+  }, [id, title, origin, y, gone]);
   if (layer !== undefined && layered.hidden) return null;
   const body = plain ? children : <SettingsGroup>{children}</SettingsGroup>;
   return (
@@ -322,7 +323,8 @@ export function SettingsGroup({ children }: { children: ReactNode }): JSX.Elemen
           if (!hidden.has(i)) before = true;
           return (
             <SlotContext.Provider key={i} value={setters[i]!}>
-              {line ? <View height={1} backgroundColor={t.v("line") as never} /> : null}
+              {/* A border, not a 1px box: Chromium draws a 1px border a whole device pixel wide (⅔ of a px at 1.5×), as the DOM's `border-top` is. */}
+              {line ? <View height={0} {...(edge(t, { top: 1 }) as object)} /> : null}
               {item}
             </SlotContext.Provider>
           );
@@ -388,7 +390,14 @@ export function SettingsRow({
             {reset !== undefined ? <ResetButton {...reset} /> : null}
             {info !== undefined ? <InfoIcon info={info} /> : null}
           </View>
-          {description !== undefined ? desc(description) : null}
+          {description === undefined ? null : typeof description === "string" ? (
+            desc(description)
+          ) : (
+            // Words and a block under them (a font row's resolved stack): the row lays them out.
+            <View marginTop={3} maxWidth={chOf(t, 62, 1.03)}>
+              {description}
+            </View>
+          )}
           {layered.instead !== undefined ? desc(layered.instead, true) : null}
         </View>
         {control !== undefined && !full ? (

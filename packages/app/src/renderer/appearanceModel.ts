@@ -211,3 +211,16 @@ export function appearanceLayeringOf(
     locked,
   };
 }
+
+/** The Conversation section's preview: two elements of one fan-out, each a file and what was said of it. */
+export const BATCH_PREVIEW = [
+  { session: "reviewer", file: "auth.ts", text: "The token is refreshed after it is read, so a request can go out with a stale one." },
+  { session: "reviewer", file: "session.ts", text: "Nothing to change: the lock is taken before the session is written." },
+] as const;
+
+/** The Text section's preview: a file surface's three runs, and a task row's. */
+export const TEXT_PREVIEW = {
+  band: "Files",
+  file: { title: "declarative-ai", path: "prompts/review.md", size: "4.2 kB" },
+  task: { title: "tighten the sync lint", word: "running", meta: "40s · 3 turns" },
+} as const;

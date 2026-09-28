@@ -126,3 +126,14 @@ rules on a specimen page.
   12.5/12.5 in a value view), `lineHeight`, `trimEnd`, `padding`. `registerFenceRenderer` for fenced
   blocks, as the desktop's.
 - **`Pill`**, **`Pills`**, **`TaskCard`**, **`ProjectChip`** (the inbox strip's), **`Sidebar`**.
+- **Settings** (`components/settings/`) — `settingsLayout.tsx`'s page, section and row
+  (`SettingsPage`, `SettingsSection`, `SettingsRow`, with the ↺ and ⓘ), and the controls every page is
+  made of: `Switch`, `Segmented`, `SelectInput` (a closed `<select>`, arrow and all), `SizeStep`,
+  `TextField` (`.cfg-input`), `Button` (`button` and its `ghost`, `quiet`, `primary`, `danger`),
+  `LayerPicker`. A section says it is one to `parts.ts`, which is what the sidebar's accordion lists —
+  there is no DOM to query for `data-part`.
+- **`PLAIN_SCROLLER`** (`primitives.tsx`) on a `ScrollView`'s style and content style: without it
+  react-native-web's `translateZ(0)` and `z-index: 0` composite the scroller and Chromium draws its
+  text greyscale, where the DOM's `overflow: auto` keeps subpixel text. That fixed the sidebar's
+  sections list; a Settings page scrolled away from its top still draws greyscale on `/rn` (the DOM's
+  stays subpixel), for a reason not found yet — `pair.mts` counts it as anti-aliasing.

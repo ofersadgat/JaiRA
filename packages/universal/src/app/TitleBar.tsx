@@ -6,8 +6,11 @@ import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
 import { NewTask } from "../components/NewTask";
 import { RunModeToggle } from "../components/RunModeToggle";
 import { TaskAddressBar } from "../components/TaskAddressBar";
+import { FilesAddress } from "./FilesView";
 import { Uncopied } from "./Uncopied";
 import { useShell } from "./shell";
+import { ChatTitle } from "../components/chat/ChatTitle";
+import { useChatSurface } from "../components/chat/surface";
 import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
 
 /**
@@ -19,6 +22,15 @@ import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
  */
 export function ShellTitleBar(): JSX.Element {
   const { state } = useShell();
+  if (state.view === "chat") return <ChatAddress />;
+  if (state.view === "files") {
+    return (
+      <>
+        <FilesAddress />
+        <View flex={1} minWidth={8} />
+      </>
+    );
+  }
   if (state.view !== "tasks") return <Uncopied name={`${state.view} address`} flex={1} />;
   return (
     <>
@@ -83,5 +95,15 @@ function TasksAddress(): JSX.Element {
         </>
       }
     />
+  );
+}
+
+/** In Chat, the conversation's name (`span.chat-title`), then `.title-drag`. */
+function ChatAddress(): JSX.Element {
+  return (
+    <>
+      <ChatTitle surface={useChatSurface()} />
+      <View flex={1} minWidth={8} />
+    </>
   );
 }

@@ -281,7 +281,7 @@ function PanelRail({ stack, face, onStack, onUnfold }: { stack: PanelStack; face
                   </View>
                 ) : null}
               </View>
-              <Txt spec={{ voice: "app", scale: 1, weight: 500, lineHeight: 1.2, color: t.mix(t.v("text"), 80, "transparent") }} fontSize={9.5} ellip maxWidth="100%">
+              <Txt spec={{ voice: "app", scale: 1, weight: 500, lineHeight: { px: 11.4 }, color: t.mix(t.v("text"), 80, "transparent") }} fontSize={9.5} ellip maxWidth="100%">
                 {tab.label}
               </Txt>
             </Press>

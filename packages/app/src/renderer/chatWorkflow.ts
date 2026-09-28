@@ -46,7 +46,7 @@
 // Which tasks are conversations lives in `@jaira/shared` (`task.ts`): the engine archives tasks by themselves
 // and leaves conversations alone, so it has to ask the same question the Chat view does.
 export { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, isChatWorkflow, type ChatKind } from "@jaira/shared/browser";
-import { CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, SHARED_SESSION } from "@jaira/shared/browser";
+import { CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, SHARED_SESSION, isChatWorkflow, type TaskSummary } from "@jaira/shared/browser";
 
 /** What `task:all` is asked for to list every conversation — the states, and the dynamic namespace. */
 export const CHAT_LIST_WORKFLOWS: readonly string[] = [...CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX];
@@ -88,4 +88,9 @@ export function titleOf(message: string): string {
  */
 export function chatProjectOf(open: string | null, at: string | null): string {
   return open ?? at ?? SHARED_SESSION;
+}
+
+/** Which of a project's tasks are conversations — the list the Chat drawer shows. */
+export function conversationsOf(tasks: readonly TaskSummary[]): TaskSummary[] {
+  return tasks.filter((task) => isChatWorkflow(task.workflow));
 }

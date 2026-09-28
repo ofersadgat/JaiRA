@@ -48,25 +48,18 @@
  */
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import {
-  declaresTools,
   declOfPermissionSet,
-  DEFAULT_PERMISSION_SET_BUCKET,
-  heldTools,
   holdsTool,
-  matchPermissionSet,
   MODE_WHEN_UNSET,
   parsePermissionSet,
   PERMISSION_MODES,
   REASONING_EFFORTS,
   SCRIPT_SUBJECT,
   SHELL_TOOL,
-  permissionSetBuckets,
   permissionSetGlyph,
   permissionSetHint,
-  permissionSetsOfBucket,
   permissionSetLabel,
   permissionSetNameProblem,
-  permissionSetOfSettings,
   PERMISSION_SET_LAYER_LABELS,
   type ChatPlanView,
   type ChatSettings,
@@ -78,7 +71,6 @@ import {
   type ToolImplementation,
   type PermissionSet,
   type PermissionSetBucket,
-  type PermissionSetChoice,
   type ToolSpec,
   type WritableLayer,
   TOOL_CATEGORIES,
@@ -112,6 +104,7 @@ import { useKeptDraft } from "./composerDrafts";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import { AllowanceNumber, ContextMeter, ModelWindow, RouteLeft, SpentNotice, useSpent } from "./usageMeters";
 import { levelsFooter, useModelParameters } from "./modelParameters";
+import { ROUTE_BORROWS, canSendOf, chipValuesOf, composerFactsOf, routeOf, sendTitleOf } from "./composerModel";
 import type { ContextReading } from "@jaira/shared/browser";
 import type { Schema } from "./schemaForm/types";
 
@@ -168,11 +161,6 @@ function withFiles(text: string, files: readonly ComposerFile[]): string {
   return [text, ...blocks].filter((part) => part !== "").join("\n\n");
 }
 
-/** The half before the first slash — who answers. Empty when the id names no route. */
-function routeOf(model: string): string {
-  const cut = model.indexOf("/");
-  return cut > 0 ? model.slice(0, cut) : "";
-}
 
 /**
  * Re-point an id at another route, keeping the model it named — when that route actually has it.
@@ -279,19 +267,6 @@ const VENDOR_NAMES: Record<string, string> = { anthropic: "Anthropic", openai: "
  * special cases: a route whose ids carry a second slash grows a middle column, and one whose ids do
  * not goes straight to models. Local and any other aggregating route get it for free.
  */
-/**
- * The provider whose models an AGENT route can be asked for.
- *
- * `claude-cli` runs Anthropic's models on a subscription and `codex-cli` passes `-c model=…` through
- * to OpenAI's, so "which model" is a real question for both — they just have no catalog rows of their
- * own, because what they publish is a binary rather than a price list. Borrowing the provider's list
- * is what makes them choosable instead of a dead end reading "picks its own".
- */
-const ROUTE_BORROWS: Record<string, string> = {
-  "claude-cli": "anthropic",
-  "claude-code": "anthropic",
-  "codex-cli": "openai",
-};
 
 function tierOf(id: string): { route: string; group?: string; leaf: string } {
   const parts = id.split("/");
@@ -960,45 +935,16 @@ export function Composer({
   const [picked, setPicked] = useState<string | undefined>(undefined);
   /** What an unticked tool would run under if ticked again — see {@link Parked}. Never sent. */
   const [parked, setParked] = useState<Parked>({});
-  const settings = plan?.settings ?? {};
-  const origin = plan?.origin ?? {
-    model: "unset" as const,
-    reasoning: "unset" as const,
-    tools: "unset" as const,
-    permissions: "unset" as const,
-    implementations: "unset" as const,
-    permissionSet: "unset" as const,
-  };
-  // What this project can hold a line for, and THE MAP in force over it: one permission set, read from
-  // wherever the settings keep it — the map an earlier edit here wrote, or the list, block and
-  // implementations a state's own declaration arrives as. The map is what reaches the executor; a
-  // permission set's name is only what to CALL it, and no match means the map is nobody's — `custom`.
-  const offered = plan?.available.tools ?? [];
-  const registered = offered.map((tool) => tool.name);
-  const map = permissionSetOfSettings(settings).permissionSet;
-  const tools = heldTools(map);
-  const permissionSets: readonly PermissionSetChoice[] = plan?.available.permissionSets ?? [];
-  const buckets = permissionSetBuckets(permissionSets);
-  const openedOn = plan?.available.bucket ?? DEFAULT_PERMISSION_SET_BUCKET;
-  const bucket = picked !== undefined && buckets.some((row) => row.path === picked) ? picked : openedOn;
-  const rows = permissionSetsOfBucket(permissionSets, bucket);
-  const matched = matchPermissionSet(map, permissionSets, bucket, registered);
-  // Never blank. A control with nothing in it cannot be read as "this is what will happen", which is
-  // the only question this row exists to answer.
-  const effective = plan?.effective ?? { reasoning: "…", permissions: "…" };
-  // Which CLI is answering, if one is — it changes what "default" means for both model and tools.
-  const cliRoute = ROUTE_BORROWS[routeOf(effective.model ?? "")] !== undefined ? routeOf(effective.model ?? "") : undefined;
-  // What the box edits: the override if there is one, else the resolved value it would replace.
-  const current = settings.model ?? effective.model ?? "";
-  // The route the message would go out on — whose account's allowance the number beside the model
-  // reads, and whether a message sent now waits for a reset (usage-readings contract).
-  const route = routeOf(effective.model ?? "") || undefined;
+  // What the plan says, read once — `composerModel.ts`, shared with the universal composer.
+  const facts = composerFactsOf(plan, picked);
+  const { settings, origin, offered, map, tools, buckets, bucket, rows, matched, effective, cliRoute, current, route } = facts;
   const spent = useSpent(route);
   // What the model in force takes for reasoning — the Thinking chip's levels.
   const thinking = useModelParameters(effective.model);
+  const chips = chipValuesOf(plan, facts, thinking);
 
   /** Whether Enter does anything right now — see {@link joinable} for the two hosts that say no. */
-  const canSend = disabled === undefined && (busy !== true || joinable === true);
+  const canSend = canSendOf(disabled, busy, joinable);
 
   const send = (): void => {
     const message = withFiles(draft.trim(), files);
@@ -1101,11 +1047,8 @@ export function Composer({
     setPicked(undefined);
     onOverrides(next);
   };
-  // One origin for both cards, for the same reason: a map chosen here is the person's choice on
-  // both, and otherwise each says where its half of the state's declaration came from.
-  const chosen = origin.permissionSet === "override";
-  const permissionsOrigin: SettingOrigin = chosen ? "override" : origin.permissions;
-  const toolsOrigin: SettingOrigin = chosen ? "override" : origin.tools;
+  // One origin for both cards — see `composerFactsOf`.
+  const { permissionsOrigin, toolsOrigin } = facts;
   const toggleCat = (id: string): void =>
     setOpenCats((was) => {
       const next = new Set(was);
@@ -1186,7 +1129,7 @@ export function Composer({
               brand={routeOf(effective.model ?? "")}
               label="Model"
               startOpen={startOpen?.card === "Model"}
-              value={effective.model ?? "no model configured"}
+              value={chips.model}
               origin={origin.model}
               from={plan?.from}
               onReset={() => clear("model")}
@@ -1206,8 +1149,7 @@ export function Composer({
               icon="think"
               label="Thinking"
               startOpen={startOpen?.card === "Thinking"}
-              // "—" for a model that takes no level: a level shown there would be one nothing sends.
-              value={thinking?.reasoning === false ? "—" : effective.reasoning}
+              value={chips.thinking}
               origin={origin.reasoning}
               from={plan?.from}
               onReset={() => clear("reasoning")}
@@ -1239,10 +1181,8 @@ export function Composer({
             <Chip
               icon="shield"
               label="Permissions"
-              // A MATCH, never a memory: the permission set's name while the map is exactly that permission set's,
-              // `custom` the moment a line differs. A call that declares no tools has no map to
-              // match, and says what decides instead — main words that, from the compiled policy.
-              value={plan === null || tools.length === 0 ? effective.permissions : matched !== undefined ? permissionSetLabel(matched) : "custom"}
+              // A MATCH, never a memory — see `chipValuesOf`.
+              value={chips.permissions}
               origin={permissionsOrigin}
               from={plan?.from}
               onReset={resetPermissionSet}
@@ -1296,18 +1236,8 @@ export function Composer({
             <Chip
               icon="tool"
               label="Tools"
-              // An empty list means two different things and the chip has to say which. On a CLI
-              // route with nothing declared it is the DEFAULT — leave the agent its own tools — and
-              // reading "no tools" there was the chip contradicting what would run.
-              value={
-                tools.length === 0
-                  ? cliRoute !== undefined && !declaresTools(settings)
-                    ? "default tools"
-                    : "no tools"
-                  : tools.length === 1
-                    ? tools[0]!
-                    : `${tools.length} tools`
-              }
+              // "default tools" on a CLI route with nothing declared — see `chipValuesOf`.
+              value={chips.tools}
               origin={toolsOrigin}
               from={plan?.from}
               onReset={resetPermissionSet}
@@ -1530,13 +1460,7 @@ export function Composer({
                 type="button"
                 className="cx-send"
                 aria-label="Send"
-                title={
-                  spent
-                    ? "Enter to send — it waits until the limit resets"
-                    : busy === true
-                      ? "Enter to send — this joins the turn in flight"
-                      : "Enter to send, Shift+Enter for a new line"
-                }
+                title={sendTitleOf(spent, busy)}
                 // Attachments alone are a message. A dropped file with no covering note is a
                 // perfectly ordinary thing to send, and the button used to refuse what Enter allowed.
                 disabled={(draft.trim() === "" && files.length === 0) || !canSend}

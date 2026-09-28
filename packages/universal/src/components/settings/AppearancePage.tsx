@@ -1,15 +1,37 @@
-import { useState, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import { View } from "@tamagui/core";
-import { PALETTES, surfaceOf, type Appearance, type ThemeMode } from "@jaira/shared/browser";
+import { PALETTES, SIZE_LIMITS, surfaceOf, type Appearance, type ConversationLook, type ThemeMode, type WorkNotes, type WorkRows } from "@jaira/shared/browser";
+import { DEFAULT_APP_STACK, DEFAULT_DATA_STACK, SHIPPED_APP_FAMILY, SHIPPED_DATA_FAMILY, isMonospace, shownFamilies, stackOf } from "@jaira/ui/appearance";
 import { lookOf } from "@jaira/ui/appearanceLayer";
-import { APPEARANCE_ROWS as ROWS, BUCKET_CHOICES, MODES, appearanceLayeringOf, appearanceRowLayer, boardPreviewWords, settingsLocked } from "@jaira/ui/appearanceModel";
+import {
+  APPEARANCE_ROWS as ROWS,
+  BATCH_CHOICES,
+  BATCH_PREVIEW,
+  BUCKET_CHOICES,
+  MODES,
+  SUGGESTED_APP,
+  SUGGESTED_DATA,
+  TEXT_PREVIEW,
+  USAGE_CHOICES,
+  WORK_NOTE_CHOICES,
+  WORK_ROW_CHOICES,
+  appearanceLayeringOf,
+  appearanceRowLayer,
+  boardPreviewWords,
+  editorThemeChoices,
+  settingsLocked,
+} from "@jaira/ui/appearanceModel";
 import { PALETTE_CARDS } from "@jaira/ui/paletteCardsModel";
 import { useShell } from "../../app/shell";
 import { Uncopied } from "../../app/Uncopied";
-import { Press, Txt, edge } from "../../primitives";
-import { useTokens } from "../../tokens";
+import { Press, Txt, edge, lengthToken } from "../../primitives";
+import { useLook, useTokens } from "../../tokens";
+import { Markdown } from "../Markdown";
+import { Pill } from "../Pill";
 import { Segmented, Switch } from "./controls";
+import { FamilyStack } from "./FamilyStack";
+import { SelectInput, SizeStep } from "./fields";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
 import { ThemeMini } from "./ThemeMini";
 
@@ -34,6 +56,12 @@ import { ThemeMini } from "./ThemeMini";
  *   .theme-desc          0.92, line 1.4, --dim
  *   .theme-check         18 round at 7 7 from the top right, --fill-accent, --on-accent 800 at 0.84,
  *                        a 0 1 3 shadow at 25%
+ *   .set-font            a font row's control: the stack and its size, 340 wide, gap 8, stretched
+ *   .set-inherit         app at 0.96, --dim
+ *
+ * Not copied yet, each drawn as an {@link Uncopied} box where it stands: the Board preview (the board's
+ * own `Column` and `Tile`), the usage figures' and the work summary's previews, File types and the
+ * Files tree.
  */
 export function AppearancePage(): JSX.Element {
   const { state, actions } = useShell();
@@ -44,8 +72,15 @@ export function AppearancePage(): JSX.Element {
   const rowLayer = (...fields: string[]) => appearanceRowLayer(layered, ...fields);
   const onChange = (patch: Partial<Appearance>): void => void actions.setAppearance(patch, layer);
   const onTheme = (mode: ThemeMode): void => void actions.setTheme(mode, layer);
+  const onConversation = (patch: Partial<ConversationLook>): void => void actions.setConversation(patch, layer);
   const appearance = look as unknown as Appearance;
   const surface = surfaceOf(appearance);
+  // Which chosen data faces are not monospaced — measured where a canvas can say (web), as the DOM does.
+  const proportional = useMemo(() => {
+    if (typeof document === "undefined") return new Set<string>();
+    const ctx = document.createElement("canvas").getContext("2d");
+    return new Set(appearance.dataFamily.filter((f) => !isMonospace(f, ctx)));
+  }, [appearance.dataFamily]);
   return (
     <>
       <SettingsSection id="mode" title="Mode" layer={rowLayer("mode")}>
@@ -53,6 +88,7 @@ export function AppearancePage(): JSX.Element {
       </SettingsSection>
 
       <SettingsSection id="theme" title="Theme" layer={rowLayer("palette")}>
+        {/* Choosing a palette puts the board options back to what it was designed with. */}
         <ThemeCards palette={appearance.palette} mode={look.mode} busy={busy} onPick={(palette) => onChange({ palette, laneColors: null, buckets: null, statusWash: null })} />
       </SettingsSection>
 
@@ -65,21 +101,144 @@ export function AppearancePage(): JSX.Element {
         />
         <SettingsRow {...ROWS.statusWash} layer={rowLayer("statusWash")} control={<Switch on={surface.statusWash} label={ROWS.statusWash.name} disabled={busy} onChange={(statusWash) => onChange({ statusWash })} />} />
         <SettingsRow {...boardPreviewWords(appearance.palette)} full>
-          <Uncopied name="TaskPreview" height={260} />
+          <Later name="TaskPreview" height={177.6354} />
         </SettingsRow>
       </SettingsSection>
 
       <SettingsSection id="conversation" title="Conversation">
-        <SettingsRow name="Conversation" full>
-          <Uncopied name="Conversation section" height={400} />
+        <SettingsRow
+          {...ROWS.sequentialBatches}
+          layer={rowLayer("conversation.sequentialBatches")}
+          control={
+            <Segmented
+              label={ROWS.sequentialBatches.name}
+              value={look.conversation.sequentialBatches}
+              options={BATCH_CHOICES}
+              disabled={busy}
+              onChange={(sequentialBatches) => onConversation({ sequentialBatches })}
+            />
+          }
+        />
+        <SettingsRow {...ROWS.batchPreview} full>
+          <ConversationPreview layout={look.conversation.sequentialBatches} />
+        </SettingsRow>
+        <SettingsRow
+          {...ROWS.usageFigures}
+          layer={rowLayer("conversation.usageFigures")}
+          control={<Segmented label={ROWS.usageFigures.name} value={look.conversation.usageFigures} options={USAGE_CHOICES} disabled={busy} onChange={(usageFigures) => onConversation({ usageFigures })} />}
+        />
+        <SettingsRow {...ROWS.usagePreview} full>
+          <Later name="UsageFiguresPreview" height={111.1667} />
+        </SettingsRow>
+        <SettingsRow
+          {...ROWS.workPhases}
+          layer={rowLayer("conversation.workPhases")}
+          control={<Switch on={look.conversation.workPhases} label={ROWS.workPhases.name} disabled={busy} onChange={(workPhases) => onConversation({ workPhases })} />}
+        />
+        <SettingsRow
+          {...ROWS.workRows}
+          layer={rowLayer("conversation.workRows")}
+          control={
+            <Segmented
+              label={ROWS.workRows.name}
+              value={`${look.conversation.workRows}` as `${WorkRows}`}
+              options={WORK_ROW_CHOICES}
+              disabled={busy}
+              onChange={(rows) => onConversation({ workRows: Number(rows) as WorkRows })}
+            />
+          }
+        />
+        <SettingsRow
+          {...ROWS.workThinking}
+          layer={rowLayer("conversation.workThinking")}
+          control={<Switch on={look.conversation.workThinking} label={ROWS.workThinking.name} disabled={busy} onChange={(workThinking) => onConversation({ workThinking })} />}
+        />
+        <SettingsRow
+          {...ROWS.workNotes}
+          layer={rowLayer("conversation.workNotes")}
+          control={<SelectInput value={look.conversation.workNotes} options={WORK_NOTE_CHOICES} disabled={busy} onChange={(workNotes) => onConversation({ workNotes: workNotes as WorkNotes })} />}
+        />
+        <SettingsRow {...ROWS.workPreview} full>
+          <Later name="WorkPreview" height={830.5834} />
         </SettingsRow>
       </SettingsSection>
 
       <SettingsSection id="text" title="Text">
-        <SettingsRow name="Text" full>
-          <Uncopied name="Text section" height={400} />
+        <SettingsRow
+          name={ROWS.appFont.name}
+          description={<FontWords words={ROWS.appFont.description} families={appearance.appFamily} voice="app" fallback={DEFAULT_APP_STACK} />}
+          layer={rowLayer("appFamily", "sizeApp")}
+          control={
+            <View flexDirection="row" alignItems="stretch" gap={8} width={340} maxWidth="100%">
+              <FamilyStack
+                families={appearance.appFamily}
+                ours={SHIPPED_APP_FAMILY}
+                fallback={DEFAULT_APP_STACK}
+                suggested={SUGGESTED_APP}
+                voice="app"
+                disabled={busy}
+                onChange={(appFamily) => onChange({ appFamily })}
+              />
+              <SizeStep value={appearance.sizeApp} limits={SIZE_LIMITS.sizeApp} disabled={busy} onChange={(sizeApp) => onChange({ sizeApp })} />
+            </View>
+          }
+        />
+        <SettingsRow
+          name={ROWS.dataFont.name}
+          description={<FontWords words={ROWS.dataFont.description} families={appearance.dataFamily} voice="data" fallback={DEFAULT_DATA_STACK} />}
+          layer={rowLayer("dataFamily", "sizeData")}
+          control={
+            <View flexDirection="row" alignItems="stretch" gap={8} width={340} maxWidth="100%">
+              <FamilyStack
+                families={appearance.dataFamily}
+                ours={SHIPPED_DATA_FAMILY}
+                fallback={DEFAULT_DATA_STACK}
+                suggested={SUGGESTED_DATA}
+                voice="data"
+                disabled={busy}
+                // OURS, and a note rather than a block (§6): it is their app.
+                warn={(family) => (proportional.has(family) ? "not monospaced — columns will not line up" : undefined)}
+                onChange={(dataFamily) => onChange({ dataFamily })}
+              />
+              <SizeStep value={appearance.sizeData} limits={SIZE_LIMITS.sizeData} disabled={busy} onChange={(sizeData) => onChange({ sizeData })} />
+            </View>
+          }
+        />
+        <SettingsRow
+          {...ROWS.editorSize}
+          layer={rowLayer("advanced", "sizeEditor")}
+          control={
+            <>
+              {appearance.advanced ? (
+                <SizeStep value={appearance.sizeEditor} limits={SIZE_LIMITS.sizeEditor} disabled={busy} onChange={(sizeEditor) => onChange({ sizeEditor })} />
+              ) : (
+                <Txt spec={{ voice: "app", scale: 0.96, color: "dim" }}>follows the data font</Txt>
+              )}
+              <Switch on={appearance.advanced} label="Separate editor size" disabled={busy} onChange={(advanced) => onChange({ advanced })} />
+            </>
+          }
+        />
+        <SettingsRow
+          {...ROWS.editorTheme}
+          layer={rowLayer("editorTheme")}
+          control={<SelectInput value={appearance.editorTheme} options={editorThemeChoices()} disabled={busy} onChange={(editorTheme) => onChange({ editorTheme })} />}
+        />
+        <SettingsRow {...ROWS.smoothing} layer={rowLayer("smoothing")} control={<Switch on={appearance.smoothing} label={ROWS.smoothing.name} disabled={busy} onChange={(smoothing) => onChange({ smoothing })} />} />
+        <SettingsRow {...ROWS.textPreview} full>
+          <TextPreview />
         </SettingsRow>
       </SettingsSection>
+
+      {/* A workspace of its own (a tree beside a stage beside a live Monaco): not copied yet, but a
+          section the accordion lists, as the DOM's is. */}
+      <SettingsSection id="file-types" title="File types" plain wide layer={rowLayer("renderers", "editors")}>
+        <Uncopied name="FileTypesPane" height={846.2084} />
+      </SettingsSection>
+      {state.config !== null ? (
+        <SettingsSection id="files-tree" title="Files tree" plain>
+          <Uncopied name="FilesTreeSection" height={795.0834} />
+        </SettingsSection>
+      ) : null}
     </>
   );
 }
@@ -194,6 +353,147 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
             </View>
           ))
         : null}
+    </View>
+  );
+}
+
+/** A preview not copied yet, where the DOM's `.set-preview` stands (10 under its row's words). */
+function Later({ name, height }: { name: string; height: number }): JSX.Element {
+  return (
+    <View marginTop={10}>
+      <Uncopied name={name} height={height} />
+    </View>
+  );
+}
+
+/** A font row's words: its sentence, and the stack the stylesheet receives (`Resolved`) — one line, cut. */
+function FontWords({ words, families, voice, fallback }: { words: string; families: readonly string[]; voice: "app" | "data"; fallback: string }): JSX.Element {
+  return (
+    <>
+      <Txt spec={{ voice: "app", scale: 1.03, lineHeight: 1.45, color: "dim" }}>{words}</Txt>
+      <Txt register="data-faint" spec={{ lineHeight: 1.45 }} ellip marginTop={2}>
+        → {stackOf(shownFamilies(families, voice), fallback) ?? fallback}
+      </Txt>
+    </>
+  );
+}
+
+/**
+ * The Text section's preview: a file surface beside a task row (`appearancePane.tsx`'s `Preview`).
+ *
+ *   .ap-preview          1px --line, radius --card-radius, clipped, 10 under the row's words
+ *   .ap-preview-band     app-label on --panel-3, a --line under, padding 5 9
+ *   .ap-preview-files    column, flex 1, start, gap 3, padding 7 9, --panel-2; its runs one line each
+ *   .ap-preview-task     the same on --bg
+ */
+function TextPreview(): JSX.Element {
+  const t = useTokens();
+  const pane = { flex: 1, flexBasis: 0, minWidth: 0, alignItems: "flex-start", gap: 3, paddingVertical: 7, paddingHorizontal: 9, overflow: "hidden" } as const;
+  return (
+    <View marginTop={10} borderRadius={lengthToken(t, "card-radius", 10)} overflow="hidden" {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
+      <View backgroundColor={t.v("panel-3") as never} paddingVertical={5} paddingHorizontal={9} {...(edge(t, { bottom: 1 }) as object)}>
+        <Txt register="app-label">{TEXT_PREVIEW.band}</Txt>
+      </View>
+      <View flexDirection="row">
+        <View {...pane} backgroundColor={t.v("panel-2") as never}>
+          <Txt register="data-title" ellip maxWidth="100%">
+            {TEXT_PREVIEW.file.title}
+          </Txt>
+          <Txt register="data-text" ellip maxWidth="100%">
+            {TEXT_PREVIEW.file.path}
+          </Txt>
+          <Txt register="data-secondary" ellip maxWidth="100%">
+            {TEXT_PREVIEW.file.size}
+          </Txt>
+        </View>
+        <View {...pane} backgroundColor={t.v("bg") as never}>
+          <Txt register="data-text" ellip maxWidth="100%">
+            {TEXT_PREVIEW.task.title}
+          </Txt>
+          <Pill kind="running" word={TEXT_PREVIEW.task.word} />
+          <Txt register="data-secondary" ellip maxWidth="100%">
+            {TEXT_PREVIEW.task.meta}
+          </Txt>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Two elements of one fan-out, in the conversation's own sheet, laid out as chosen
+ * (`appearancePane.tsx`'s `ConversationPreview`). The rules, from `styles.css`:
+ *
+ *   .convo-preview       a `.set-preview` (1px --line, radius 10, --bg, 10 under the words), column,
+ *                        gap 10, padding 12
+ *   .sb-columns          side by side: equal columns, top-aligned, gap 12
+ *   .sb-gutter           row, centred, gap 8, padding 0 4 4: the session (app 11/12.5, --dim, one line)
+ *                        and the span (the same, tabular, pushed right, 8 before it)
+ *   .sb-sheet            --panel, 1px --line, radius 12, 0 1 3 rgba(15, 20, 30, .06) — dark: 0 1 3 at
+ *                        35% black; contrast: 1.5px --rule, a 3 3 0 --rule shadow, radius 4;
+ *                        pastel(-rail): radius 16 (as `RunTranscript.tsx`'s `sheetLookOf`)
+ *   .sb-body             padding 13 15 15; the message 10 above, 14 below; its markdown at 13.5/12.5,
+ *                        line 1.65, padding 2 2 12
+ */
+function ConversationPreview({ layout }: { layout: "stacked" | "band" }): JSX.Element {
+  const t = useTokens();
+  const look = useLook();
+  const contrast = look.palette === "contrast";
+  const sheet = {
+    radius: contrast ? 4 : look.palette === "pastel" || look.palette === "pastel-rail" ? 16 : 12,
+    width: contrast ? 1.5 : 1,
+    edge: contrast ? "rule" : "line",
+    shadow: contrast ? `3px 3px 0px ${String(t.v("rule"))}` : look.scheme === "dark" ? "0px 1px 3px rgba(0, 0, 0, 0.35)" : "0px 1px 3px rgba(15, 20, 30, 0.06)",
+  };
+  const panel = ({ session, file, text }: (typeof BATCH_PREVIEW)[number], grow: boolean): JSX.Element => (
+    <View key={file} minWidth={0} {...(grow ? { flex: 1, flexBasis: 0 } : {})}>
+      <View flexDirection="row" alignItems="center" gap={8} minWidth={0} paddingHorizontal={4} paddingBottom={4}>
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} ellip minWidth={0} flexShrink={1}>
+          {session}
+        </Txt>
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", tabular: true }} ellip flexShrink={0} marginLeft="auto" paddingLeft={8}>
+          each · {file}
+        </Txt>
+      </View>
+      <View
+        minWidth={0}
+        overflow="hidden"
+        borderRadius={sheet.radius}
+        backgroundColor={t.v("panel") as never}
+        {...(edge(t, { top: sheet.width, right: sheet.width, bottom: sheet.width, left: sheet.width }, sheet.edge) as object)}
+        {...({ boxShadow: sheet.shadow } as object)}
+      >
+        <View paddingTop={13} paddingHorizontal={15} paddingBottom={15}>
+          <View marginTop={10} marginBottom={14} minWidth={0}>
+            <Markdown text={text} scale={13.5 / 12.5} lineHeight={1.65} trimEnd />
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+  return (
+    <View
+      marginTop={10}
+      gap={10}
+      padding={12}
+      overflow="hidden"
+      borderRadius={10}
+      backgroundColor={t.v("bg") as never}
+      {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
+      pointerEvents="none"
+      aria-hidden
+    >
+      {layout === "band" ? (
+        <View flexDirection="row" alignItems="flex-start" gap={12} minWidth={0}>
+          {panel(BATCH_PREVIEW[0], true)}
+          {panel(BATCH_PREVIEW[1], true)}
+        </View>
+      ) : (
+        <>
+          {panel(BATCH_PREVIEW[0], false)}
+          {panel(BATCH_PREVIEW[1], false)}
+        </>
+      )}
     </View>
   );
 }

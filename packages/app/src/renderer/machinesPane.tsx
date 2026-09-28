@@ -4,26 +4,57 @@
  * Not a layered page: everything here is this machine's own.
  */
 import { useEffect, useState, type JSX } from "react";
-import { PAIRING_CODE_MS, type CopyChoice, type MachinesView, type OutboxView, type PeerView, type ProjectSummary } from "@jaira/shared/browser";
+import type { CopyChoice, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
+import {
+  ADD_SCHEMA,
+  COPY_CHOICES,
+  COPY_WORDS,
+  MACHINES_WORDS as W,
+  diskWords,
+  errorOf,
+  groupedWords,
+  pairCodeWords,
+  pairWords,
+  peerWords,
+  reachWords,
+  sentence,
+  useMachines,
+  type WordPart,
+} from "./machinesModel";
 import { invoke, subscribe as subscribePush } from "./store";
 import { SettingsLayerContext, Switch, TextInput } from "./controls";
 import { MachineChip, chipStateOf } from "./machineChip";
 import { Segmented, SettingsRow, SettingsSection } from "./settingsLayout";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 
-/** Bytes, for the On disk row. */
-function sizeOf(bytes: number): string {
-  if (bytes < 1_000_000) return `${Math.max(1, Math.round(bytes / 1000))} KB`;
-  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0)} MB`;
-  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-}
+export { ago, useMachines } from "./machinesModel";
 
-const COPY_WORDS: Record<CopyChoice["mode"], string> = {
-  everything: "Every task and conversation from every paired machine, archived ones too.",
-  "not-archived": "Every task that is not archived, from every paired machine. A task archived on its machine leaves this copy.",
-  chosen: "The tasks that are not archived, of the projects switched on below.",
-  nothing: "No copy. Other machines' tasks are read from them while they are online.",
-};
+/** A sentence of the model's parts, as the DOM draws each. */
+function Words({ parts }: { parts: readonly WordPart[] }): JSX.Element {
+  return (
+    <>
+      {parts.map((part, i) =>
+        typeof part === "string" ? (
+          part
+        ) : "code" in part ? (
+          <code key={i}>{part.code}</code>
+        ) : "error" in part ? (
+          <span key={i} className="upd-err">
+            {part.error}
+          </span>
+        ) : "hint" in part ? (
+          <span key={i} className="cfg-hint">
+            {part.hint}
+          </span>
+        ) : (
+          <a key={i} href={part.href} target="_blank" rel="noreferrer">
+            {part.link}
+          </a>
+        ),
+      )}
+    </>
+  );
+}
 
 /**
  * Copies of other machines' work (decision 0013 §6; the approved mockup, with archive as a choice —
@@ -48,25 +79,16 @@ function Copies({ view, onView }: { view: MachinesView; onView: (v: MachinesView
   };
   const chosen = new Set(choice.projects ?? []);
   return (
-    <SettingsSection
-      id="copies"
-      title="Copies of other machines' work"
-      info="Kept so you can read and answer other machines' tasks here while they are off. Deleting a task anywhere deletes it everywhere; a machine clearing old history for space does not delete your copies."
-    >
+    <SettingsSection id="copies" title={W.copies.title} info={W.copies.info}>
       <SettingsRow
-        name="Copy"
+        name={W.copy.name}
         description={error !== undefined ? <span className="upd-err">{sentence(error)}</span> : COPY_WORDS[choice.mode]}
         control={
           <Segmented
-            label="Copy"
+            label={W.copy.name}
             value={choice.mode}
             disabled={busy}
-            options={[
-              ["Everything", "everything"],
-              ["Not archived", "not-archived"],
-              ["Chosen projects", "chosen"],
-              ["Nothing", "nothing"],
-            ]}
+            options={COPY_CHOICES}
             onChange={(mode) => choose(mode === "chosen" ? { mode, projects: choice.projects ?? [] } : { mode })}
           />
         }
@@ -89,8 +111,8 @@ function Copies({ view, onView }: { view: MachinesView; onView: (v: MachinesView
           ))
         : null}
       <SettingsRow
-        name="On disk"
-        description={disk === undefined ? "…" : disk.bytes === 0 ? "Nothing copied yet." : `${sizeOf(disk.bytes)} from ${disk.machines} machine${disk.machines === 1 ? "" : "s"}, under ~/.jaira/remote.`}
+        name={W.disk.name}
+        description={diskWords(disk)}
         control={
           disk !== undefined && disk.bytes > 0 ? (
             <button type="button" className="ghost" onClick={() => void invoke("shell:reveal", { file: disk.dir }).catch(() => undefined)}>
@@ -101,30 +123,6 @@ function Copies({ view, onView }: { view: MachinesView; onView: (v: MachinesView
       />
     </SettingsSection>
   );
-}
-
-/** The fleet, fetched once and kept current by `machines:changed`. */
-export function useMachines(): [MachinesView | undefined, (next: MachinesView) => void] {
-  const [view, setView] = useState<MachinesView | undefined>(undefined);
-  useEffect(() => {
-    void invoke("machines:view", undefined).then(setView, () => undefined);
-    return subscribePush((message) => {
-      if (message.type === "machines:changed") setView(message.view);
-    });
-  }, []);
-  return [view, setView];
-}
-
-const errorOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
-export function ago(at: number | undefined): string {
-  if (at === undefined) return "never seen";
-  const minutes = Math.round((Date.now() - at) / 60_000);
-  if (minutes < 1) return "last seen now";
-  if (minutes < 60) return `last seen ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `last seen ${hours} hour${hours === 1 ? "" : "s"} ago`;
-  return `last seen ${Math.round(hours / 24)} days ago`;
 }
 
 function Tags({ os, tags, onChange, disabled }: { os: string; tags: string[]; onChange?: (tags: string[]) => void; disabled?: boolean }): JSX.Element {
@@ -168,69 +166,6 @@ function Tags({ os, tags, onChange, disabled }: { os: string; tags: string[]; on
   );
 }
 
-function reachWords(view: MachinesView): { description: JSX.Element | string; on: boolean } {
-  const reach = view.self.reach;
-  switch (reach.state) {
-    case "off":
-      return { on: false, description: "Off: your other machines cannot reach this one, and it cannot be paired with." };
-    case "starting":
-      return {
-        on: true,
-        description:
-          reach.signInUrl !== undefined ? (
-            <>
-              JaiRA's Tailscale helper needs you to sign in to your tailnet once.{" "}
-              <a href={reach.signInUrl} target="_blank" rel="noreferrer">
-                Sign in to your tailnet
-              </a>
-            </>
-          ) : (
-            "Publishing this machine through Tailscale…"
-          ),
-      };
-    case "on":
-      return {
-        on: true,
-        description: (
-          <>
-            On, through {reach.via === "helper" ? "JaiRA's Tailscale helper" : "Tailscale"}: <code>{reach.url}</code>. Nothing is opened to the internet, and only paired machines get in.
-          </>
-        ),
-      };
-    case "unavailable":
-      return {
-        on: true,
-        description: (
-          <>
-            <span className="upd-err">{sentence(reach.reason ?? "It cannot be published.")}</span>
-            {(reach.reason ?? "").includes("not installed") ? (
-              <>
-                {" "}
-                <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">
-                  Get Tailscale
-                </a>
-              </>
-            ) : null}
-            {reach.signInUrl !== undefined ? (
-              <>
-                {" "}
-                <a href={reach.signInUrl} target="_blank" rel="noreferrer">
-                  Sign in to your tailnet
-                </a>
-              </>
-            ) : null}
-          </>
-        ),
-      };
-  }
-}
-
-function sentence(text: string): string {
-  const t = text.trim();
-  const c = t.charAt(0).toUpperCase() + t.slice(1);
-  return /[.!?]$/.test(c) ? c : `${c}.`;
-}
-
 function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
   const [label, setLabel] = useState(view.self.label);
   const [busy, setBusy] = useState(false);
@@ -247,14 +182,10 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
   const reach = reachWords(view);
   const pairing = view.pairing;
   return (
-    <SettingsSection
-      id="this"
-      title="This machine"
-      info="Every machine you use JaiRA on runs its own engine. Paired machines see each other's projects and tasks, and tasks go to whichever has room."
-    >
+    <SettingsSection id="this" title={W.this.title} info={W.this.info}>
       <SettingsRow
-        name="Name"
-        description={error !== undefined ? <span className="upd-err">{sentence(error)}</span> : "How other machines and the task chips call this one."}
+        name={W.name.name}
+        description={error !== undefined ? <span className="upd-err">{sentence(error)}</span> : W.name.description}
         control={
           <TextInput
             value={label}
@@ -269,27 +200,23 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
         }
       />
       <SettingsRow
-        name="Tags"
-        description="What a workflow can ask for. The operating system is added by itself."
+        name={W.tags.name}
+        description={W.tags.description}
         control={<Tags os={view.self.os} tags={view.self.tags} disabled={busy} onChange={(tags) => act(invoke("machines:tags", { tags }))} />}
       />
       <SettingsRow
-        name="Reachable from my other machines"
-        description={reach.description}
-        info="JaiRA publishes its own port on your tailnet with Tailscale (tailscale serve) — or, without the Tailscale app, with the Tailscale helper it ships with — and turns it off again with this switch. Funnel is never used."
-        control={<Switch on={reach.on} label="Reachable from my other machines" disabled={busy} onChange={(on) => act(invoke("machines:reach", { on }))} />}
+        name={W.reach.name}
+        description={<Words parts={reach.description} />}
+        info={W.reach.info}
+        control={<Switch on={reach.on} label={W.reach.name} disabled={busy} onChange={(on) => act(invoke("machines:reach", { on }))} />}
       />
       <SettingsRow
-        name="Pair a machine"
-        description={
-          view.self.reach.state === "on"
-            ? `Show a code to type on the other machine. It works once, for ${PAIRING_CODE_MS / 60_000} minutes.`
-            : "Turn on Reachable first: the other machine connects to this one to pair."
-        }
+        name={W.pair.name}
+        description={pairWords(view)}
         control={
           pairing === undefined ? (
             <button type="button" disabled={busy || view.self.reach.state !== "on"} onClick={() => act(invoke("machines:pairCode", undefined))}>
-              Show a code
+              {W.pair.button}
             </button>
           ) : undefined
         }
@@ -299,11 +226,10 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
           <div className="set-row-line">
             <div className="set-row-say">
               <div className="set-name">
-                <span>Code for pairing</span>
+                <span>{W.pairCode.name}</span>
               </div>
               <p className="set-desc">
-                On the other machine: Settings → Machines → Add a machine, with <code>{view.self.reach.url}</code>. Works until{" "}
-                {new Date(pairing.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+                <Words parts={pairCodeWords(view, pairing.expiresAt)} />
               </p>
             </div>
             <div className="set-ctl">
@@ -322,34 +248,6 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
   );
 }
 
-function peerWords(peer: PeerView): JSX.Element {
-  const where = peer.url !== undefined ? <code>{new URL(peer.url).host}</code> : null;
-  switch (peer.state) {
-    case "online":
-      return (
-        <>
-          Online · JaiRA {peer.version ?? "?"}
-          {where !== null ? <> · {where}</> : null}
-        </>
-      );
-    case "connecting":
-      return <>Connecting…</>;
-    case "mismatch":
-      return (
-        <>
-          <span className="upd-err">{sentence(peer.reason ?? `It runs JaiRA ${peer.version ?? "?"}`)}</span> {ago(peer.lastSeenAt)}
-        </>
-      );
-    case "offline":
-      return (
-        <>
-          Offline · {ago(peer.lastSeenAt)}
-          {peer.reason !== undefined ? <span className="cfg-hint"> · {peer.reason}</span> : null}
-        </>
-      );
-  }
-}
-
 function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) => void }): JSX.Element {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -362,7 +260,7 @@ function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) =
   return (
     <SettingsRow
       name={<MachineChip label={peer.label} state={chipStateOf(peer.state)} />}
-      description={peerWords(peer)}
+      description={<Words parts={peerWords(peer)} />}
       control={
         <>
           <Tags os={peer.os} tags={peer.tags} />
@@ -386,15 +284,6 @@ function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) =
   );
 }
 
-const ADD_SCHEMA = {
-  type: "object",
-  properties: {
-    address: { type: "string", title: "address", minLength: 1, description: "The other machine's address, shown on its Machines page: mac-mini.tail4c2e.ts.net" },
-    code: { type: "string", title: "code", minLength: 1, description: "The code the other machine shows under Pair a machine." },
-  },
-  required: ["address", "code"],
-} as const;
-
 function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Element {
   const [value, setValue] = useState<{ address?: string; code?: string }>({});
   const [busy, setBusy] = useState(false);
@@ -409,13 +298,13 @@ function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Elem
       .then((view) => {
         onView(view);
         setValue({});
-        setDone("Paired. It is listed under Your machines, with any machines it was already paired with.");
+        setDone(W.paired);
       }, (e: unknown) => setError(errorOf(e)))
       .finally(() => setBusy(false));
   };
   return (
-    <SettingsSection id="add" title="Add a machine" info="Pairing is once per machine: after that they find each other by themselves, and a machine paired with any of yours joins all of them.">
-      <SettingsRow name="The other machine" full>
+    <SettingsSection id="add" title={W.add.title} info={W.add.info}>
+      <SettingsRow name={W.other.name} full>
         <div className="machine-add">
           <SchemaForm schema={ADD_SCHEMA as never} value={value} onChange={(next) => setValue(next as typeof value)} ctx={{ path: "", labels: "keys", disabled: busy }} />
           <div className="machine-add-foot">
@@ -442,7 +331,7 @@ function Outbox(): JSX.Element | null {
   }, []);
   if (items.length === 0) return null;
   return (
-    <SettingsSection id="outbox" title="Waiting to be delivered" info="What you answered for a machine that was offline. Each is delivered when its machine reconnects; until then it can be taken back, and the question is open again.">
+    <SettingsSection id="outbox" title={W.outbox.title} info={W.outbox.info}>
       {items.map((item) => (
         <SettingsRow
           key={item.id}
@@ -465,17 +354,13 @@ export function MachinesPane({ grouped, onGrouped }: { grouped: boolean; onGroup
     <SettingsLayerContext.Provider value={null}>
       <div className="cfg-pane">
         {view === undefined ? (
-          <p className="cfg-hint">Reading this machine…</p>
+          <p className="cfg-hint">{W.reading}</p>
         ) : (
           <>
             <ThisMachine view={view} onView={setView} />
-            <SettingsSection
-              id="yours"
-              title="Your machines"
-              info="Remembered on every machine you pair: pairing one new machine with any of these introduces it to the rest."
-            >
+            <SettingsSection id="yours" title={W.yours.title} info={W.yours.info}>
               {view.machines.length === 0 ? (
-                <SettingsRow name="None yet" description="Pair a machine below, or show a code here and type it there." />
+                <SettingsRow {...W.none} />
               ) : (
                 [...view.machines].sort((a, b) => a.label.localeCompare(b.label)).map((peer) => <PeerRow key={peer.id} peer={peer} onView={setView} />)
               )}
@@ -483,15 +368,8 @@ export function MachinesPane({ grouped, onGrouped }: { grouped: boolean; onGroup
             <Outbox />
             <AddMachine onView={setView} />
             <Copies view={view} onView={setView} />
-            <SettingsSection id="projects" title="Projects across machines" info="A project is known by its git remote: clones of the same repository, here and on your other machines, are its workspaces.">
-              <SettingsRow
-                name="One project per repository"
-                description={
-                  grouped
-                    ? "Clones of the same repository are one project in the sidebar and on the board, and each task's chip says which machine and folder it is in."
-                    : "Every clone is its own row, named by its machine and folder."
-                }
-                control={<Switch on={grouped} label="One project per repository" onChange={onGrouped} />}
+            <SettingsSection id="projects" title={W.projects.title} info={W.projects.info}>
+              <SettingsRow name={W.grouped.name} description={groupedWords(grouped)} control={<Switch on={grouped} label={W.grouped.name} onChange={onGrouped} />}
               />
             </SettingsSection>
           </>

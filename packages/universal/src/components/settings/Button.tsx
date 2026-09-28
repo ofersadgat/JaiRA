@@ -12,10 +12,12 @@ import { useTokens } from "../../tokens";
  *                       Disabled: half opacity, no shadow.
  *   button.ghost        transparent, no shadow; hovered --fill-ghost-hover (the ring still --rule)
  *   button.quiet        transparent, no ring, --dim; hovered --fill-ghost-hover and --text
+ *   button.danger       transparent, --bad text, ring --bad 40% into --line; hovered --tint-bad and
+ *                       --bad 60% into --line
  *   button.primary      --fill-accent ground and ring, --on-accent at 600, --sheen; hovered
  *   button.layer-on       --fill-accent-hover ground and ring
  */
-export type ButtonKind = "plain" | "ghost" | "quiet" | "primary";
+export type ButtonKind = "plain" | "ghost" | "quiet" | "primary" | "danger";
 
 export function Button({
   kind = "plain",
@@ -64,6 +66,7 @@ export function Button({
             ...(disabled ? {} : { boxShadow: t.v("sheen") }),
           };
         }
+        if (kind === "danger") return { backgroundColor: hover ? t.v("tint-bad") : "transparent", borderColor: t.mix(t.v("bad"), hover ? 60 : 40, t.v("line")) };
         if (kind === "quiet") return { backgroundColor: hover ? t.v("fill-ghost-hover") : "transparent", borderColor: "transparent" };
         if (kind === "ghost") return { backgroundColor: hover ? t.v("fill-ghost-hover") : "transparent", borderColor: t.v(hover ? "rule" : "line") };
         return { backgroundColor: t.v(hover ? "panel-3" : "panel-2"), borderColor: t.v(hover ? "rule" : "line") };
@@ -77,7 +80,7 @@ export function Button({
               voice: "app",
               scale: 13 / 12.5,
               weight: filled ? 600 : 400,
-              color: filled ? "on-accent" : kind === "quiet" && !(hovered && !disabled) ? "dim" : "text",
+              color: filled ? "on-accent" : kind === "danger" ? "bad" : kind === "quiet" && !(hovered && !disabled) ? "dim" : "text",
               ...font,
             }}
             numberOfLines={1}

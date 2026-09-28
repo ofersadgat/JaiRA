@@ -47,7 +47,7 @@ import { ChangesPanel } from "./changesPanel";
 import { RunPanel, type RunSurface } from "./runPanel";
 import { RunConversation, SidechainConversation, askingInstanceOf, hasAsking } from "./runViews";
 import type { PanelFace } from "./sidePanel";
-import { countSteps, isEventsTask, tab, taskTabs as taskTabsOf, taskVerbsOf } from "./panelFaceModel";
+import { CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, isEventsTask, tab, taskTabs as taskTabsOf, taskVerbsOf } from "./panelFaceModel";
 import { StatePanel } from "./statePanel";
 import { TaskName } from "./taskName";
 import { nodeAt, type TrailStep } from "./trail";
@@ -403,13 +403,14 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
 
     case "chat": {
       const project = entry.project ?? host.project;
-      const title = detail?.title ?? "This conversation";
+      const title = chatPanelTitleOf(detail);
       return {
         glyph: <Icon name="comment" />,
         title,
         titleText: title,
-        sub: "beside the conversation",
-        tabs: [tab("produced", "Produced"), tab("changes", "Changes"), tab("held", "Held", host.held.length > 0 ? { count: host.held.length } : {})],
+        sub: CHAT_PANEL_SUB,
+        // `panelFaceModel.ts`, shared with the universal Chat room.
+        tabs: chatTabs(host.held.length),
         tab: entry.tab,
         body:
           entry.tab === "produced" ? (

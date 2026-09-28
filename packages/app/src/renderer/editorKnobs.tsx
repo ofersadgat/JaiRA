@@ -24,6 +24,7 @@ import {
   type EditorLook,
 } from "@jaira/shared/browser";
 import { Chip, Switch } from "./controls";
+import { steppedSize } from "./sizeStep";
 
 /**
  * A size, as a number with a stepper — not a slider.
@@ -56,12 +57,8 @@ export function SizeStep({
   disabled?: boolean;
   onChange: (size: number) => void;
 }): JSX.Element {
-  const step = (direction: number): void => {
-    // Rounded to the step so a value typed into the box, or arrived at from an older default, joins
-    // the grid on the first press instead of carrying its offset forever.
-    const next = Math.round((value + direction * by) / by) * by;
-    onChange(Math.min(limits.max, Math.max(limits.min, Number(next.toFixed(2)))));
-  };
+  // Rounded to the step, and kept inside the limits (`sizeStep.ts`).
+  const step = (direction: number): void => onChange(steppedSize(value, direction, by, limits));
   return (
     <div className={`size-box${disabled === true ? " off" : ""}`}>
       <input

@@ -12,10 +12,6 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import {
-  CONFIG_JSON,
-  WORKFLOW_DESCRIPTION,
-  WORKFLOW_JSON,
-  WORKFLOW_YAML,
   delimiterOf,
   isWritableLayer,
   hasGrammar,
@@ -40,7 +36,8 @@ import { nodeAt } from "./trail";
 import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
 import { EditorActions, type EditorTab } from "./editorChrome";
-import { isReading, registerFileSurface, type FileSurfaceContext, type FileSurfaceProps } from "./fileTypes";
+import { isReading, type FileSurfaceContext, type FileSurfaceProps } from "./fileTypes";
+import { registerSurfaceTable } from "./fileSurfaceTable";
 import { ReadOnlyContext } from "./reading";
 import { MarkdownView } from "./fenceRender";
 import { CodeDocument, MarkdownDocument } from "./documents";
@@ -924,132 +921,24 @@ function CodeSourceView({ doc }: FileSurfaceProps): JSX.Element {
   );
 }
 
-/**
- * "Draw nothing at all" — a renderer, offered under `preview` wherever there is a rendering to
- * decline.
- *
- * It is not the absence of a registration and must not be confused with one. An unregistered kind
- * falls through the chain to a vaguer type; THIS stops the walk, and the answer is that this type
- * has no view of that kind at all — which is exactly what somebody means when they say they would
- * rather just see the source.
- *
- * What a SURFACE does with that is the surface's business: one drawing both views gets its space
- * back, one drawing a single view has nothing to draw. This says what the type has, never where it
- * goes.
- */
-const NOTHING = { id: "none", label: "Nothing", note: "no view of this kind — a surface that would show one shows none" };
-
-/**
- * The two renderers every text type has, under the names the value viewer already uses for them.
- *
- * Registered at the floor of the chain, so a `.ts`, a `.py`, a `.rs` and a `.toml` all reach them
- * with nothing to write per type. A type that wants an editor of its own — markdown's live preview,
- * JSON's schema-aware editor — registers its own list and states these two again after it, because a
- * more specific list REPLACES rather than extends (see `fileRenderers`): a config file inheriting the
- * plain JSON editor would be a way to save an unvalidated settings file, and that is the one thing
- * this chain must not quietly hand out.
- */
-const MONACO = { id: "monaco", label: "Monaco", note: "a real editor — typing, a caret, its own selection", writes: true, themed: true, look: "code" as const, surface: TextEdit };
-const CODEVIEW = { id: "codeview", label: "Code view", note: "coloured, but not an editor — a selection can be dragged through it", themed: true, look: "code" as const, surface: CodeSourceView };
-
-// --- text: the characters as they are on disk ---------------------------------
-
-registerFileSurface("text/plain", "text", MONACO);
-registerFileSurface("text/plain", "text", CODEVIEW);
-
-// Markdown, edited in the live preview by default: the marks are drawn as what they mean, which is
-// the better surface for prose and the worse one for a document you are treating as source — a table
-// you are aligning by hand, front matter you are rewriting. Neither is right for everybody, so both
-// are here, and the plain pair follows because a `.md` file is still text.
-registerFileSurface("text/markdown", "text", { id: "live", label: "Live preview", note: "CodeMirror, marks drawn as what they mean", writes: true, themed: true, look: "markdown" as const, surface: MarkdownFileEdit });
-registerFileSurface("text/markdown", "text", MONACO);
-registerFileSurface("text/markdown", "text", CODEVIEW);
-
-// The schema-aware editor, not the plain one: a `.json` file is the one place a picker of known
-// document shapes has something to offer. It is a TEXT renderer — it draws the characters, with
-// completion and validation over them — which is what the data tree beside it is not.
-registerFileSurface("application/json", "text", { id: "schema", label: "Schema-aware", note: "completion and validation against a known shape", writes: true, themed: true, look: "json" as const, surface: JsonEdit });
-registerFileSurface("application/json", "text", MONACO);
-registerFileSurface("application/json", "text", CODEVIEW);
-
-// YAML gets the same editor for the same reason, now that there are YAML files with a known shape — a
-// Compose file, a GitLab pipeline, a state written as YAML. Validation, the field reference, the hints
-// at the ends of lines and "Add missing fields" work as they do for JSON; completion at the cursor
-// does not yet, because it reads JSON's syntax. First, as JSON's is: a file whose schema is detected
-// should open held to it, and one with none is still a coloured editor.
-registerFileSurface("application/yaml", "text", { id: "schema", label: "Schema-aware", note: "validation and a field reference against a known shape", writes: true, themed: true, look: "json" as const, surface: JsonEdit });
-registerFileSurface("application/yaml", "text", MONACO);
-registerFileSurface("application/yaml", "text", CODEVIEW);
-
-// ONE text renderer, and deliberately no second: this editor writes through `config:write`, which
-// parses and validates the document, and every alternative writes bytes. Offering another here would
-// be offering a way to save a settings file that stops the app from opening.
-registerFileSurface(CONFIG_JSON, "text", { id: "validated", label: "Validated", note: "parsed and checked before it is written", writes: true, themed: true, look: "json" as const, surface: ConfigEdit });
-
-// --- data: the value the document denotes -------------------------------------
-
-registerFileSurface("application/json", "data", { id: "tree", label: "Data", note: "the value, as a tree", surface: JsonView });
-// The same value, as the fields its schema declares — see {@link JsonFormView}. Second rather than
-// first, because it is the reading that can decline to draw: a document answering to no schema this
-// app knows has no fields, and a default that renders nothing for most `.json` files on disk would
-// be a worse default than a tree that always works.
-registerFileSurface("application/json", "data", { id: "form", label: "Form", note: "the fields the document's schema declares, in the order it declares them", surface: JsonFormView });
-registerFileSurface("application/json", "data", { ...NOTHING, surface: null });
-registerFileSurface("application/yaml", "data", { id: "tree", label: "Data", note: "the value, as a tree", surface: YamlView });
-registerFileSurface("application/yaml", "data", { id: "form", label: "Form", note: "the fields the document's schema declares, in the order it declares them", surface: JsonFormView });
-registerFileSurface("application/yaml", "data", { ...NOTHING, surface: null });
-registerFileSurface("text/csv", "data", { id: "table", label: "Table", note: "rows and columns, rather than the delimiters", surface: DelimitedView });
-registerFileSurface("text/csv", "data", { ...NOTHING, surface: null });
-registerFileSurface("text/tab-separated-values", "data", { id: "table", label: "Table", note: "rows and columns, rather than the delimiters", surface: DelimitedView });
-registerFileSurface("text/tab-separated-values", "data", { ...NOTHING, surface: null });
-
-registerFileSurface(CONFIG_JSON, "data", { id: "effective", label: "Effective", note: "both layers, merged as a run would read them", surface: ConfigEffectiveView });
-registerFileSurface(CONFIG_JSON, "data", { ...NOTHING, surface: null });
-
-// The authoring form is a data renderer that WRITES, which is what puts it in the panel's lower half
-// rather than its upper one — a state's fields are where the state is written, not a reading of it.
-// Choosing `Nothing` here is how you ask for the source instead: the panel falls through to the text
-// renderer, which for a JSON state is the schema-aware editor and validates against the same shape.
-//
-// Registered for JSON states only. A YAML state inherits YAML's data renderers and edits as text —
-// the form serialises JSON, and offering it for a document it would rewrite in another syntax is
-// worse than offering an editor.
-registerFileSurface(WORKFLOW_JSON, "data", { id: "form", label: "Authoring form", note: "fields, with the JSON behind a tab", writes: true, surface: WorkflowEdit });
-registerFileSurface(WORKFLOW_JSON, "data", { ...NOTHING, surface: null });
-
-// --- preview: what the document means, rendered -------------------------------
-
-// Markdown reads above the editor that changes it. It used to have no viewer at all, on the argument
-// that the live-preview editor IS the rendering, so a second one would be two renderings of one
-// document that could disagree. That was true while both were the same thing: markdown turned into
-// styled text. It stopped being true when a fenced block became a READING rather than a coloured
-// quotation — the viewer draws a ```yaml block as the value viewer, with its toggle, its table for a
-// CSV and its diff for a patch, and an editor structurally cannot: those are components, and
-// CodeMirror's document is text with decorations over it rather than a place to mount one.
-registerFileSurface("text/markdown", "preview", { id: "rendered", label: "Rendered", surface: MarkdownView });
-registerFileSurface("text/markdown", "preview", { ...NOTHING, surface: null });
-
-// Any markdown under `workflows/` — each describes the workflow it is named for, and `workflow.md`
-// describes the whole layer. Its preview is the sync panel, which keeps the markdown rendering behind
-// a toggle; the plain rendering is offered beside it for somebody who writes descriptions far more
-// often than they reconcile them. The TEXT renderers come from `text/markdown` through the chain,
-// because a description is edited exactly like any other document.
-registerFileSurface(WORKFLOW_DESCRIPTION, "preview", { id: "sync", label: "Sync panel", note: "which side has moved, and what to do about it", surface: WorkflowSyncPanel });
-registerFileSurface(WORKFLOW_DESCRIPTION, "preview", { id: "rendered", label: "Rendered", surface: MarkdownView });
-registerFileSurface(WORKFLOW_DESCRIPTION, "preview", { ...NOTHING, surface: null });
-
-// A page and a drawing both have a rendering, and neither had a viewer — an `.html` in a layer root
-// fell all the way to the plain text editor, which is the one surface that cannot show what it is.
-registerFileSurface("text/html", "preview", { id: "rendered", label: "Rendered", surface: RenderedFileView });
-registerFileSurface("text/html", "preview", { ...NOTHING, surface: null });
-registerFileSurface("image/svg+xml", "preview", { id: "drawn", label: "Drawn", surface: RenderedFileView });
-registerFileSurface("image/svg+xml", "preview", { ...NOTHING, surface: null });
-
-registerFileSurface("text/x-diff", "preview", { id: "changes", label: "Changes", note: "the edit it describes, not the columns it describes it in", surface: PatchFileSurface });
-registerFileSurface("text/x-diff", "preview", { id: "sidebyside", label: "Side by side", note: "the two revisions it is between, in the panes a review uses", themed: true, look: "diff", surface: PatchSideBySide });
-registerFileSurface("text/x-diff", "preview", { ...NOTHING, surface: null });
-
-registerFileSurface(WORKFLOW_JSON, "preview", { id: "board", label: "Board", note: "what this state is doing right now", surface: WorkflowRunView });
-registerFileSurface(WORKFLOW_JSON, "preview", { ...NOTHING, surface: null });
-registerFileSurface(WORKFLOW_YAML, "preview", { id: "board", label: "Board", note: "what this state is doing right now", surface: WorkflowRunView });
-registerFileSurface(WORKFLOW_YAML, "preview", { ...NOTHING, surface: null });
+// The table — which renderers each type has, in order — is `fileSurfaceTable.ts`, shared with the
+// universal copy; importing this module registers it with these components.
+registerSurfaceTable({
+  TextEdit,
+  CodeSourceView,
+  MarkdownFileEdit,
+  JsonEdit,
+  ConfigEdit,
+  JsonView,
+  JsonFormView,
+  YamlView,
+  DelimitedView,
+  ConfigEffectiveView,
+  WorkflowEdit,
+  MarkdownView,
+  WorkflowSyncPanel,
+  RenderedFileView,
+  PatchFileSurface,
+  PatchSideBySide,
+  WorkflowRunView,
+});

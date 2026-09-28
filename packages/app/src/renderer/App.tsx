@@ -50,7 +50,9 @@ import { isArchivableStatus } from "@jaira/shared/browser";
 import { Board } from "./board";
 import { boardCardOrderOf, pickCard } from "./boardModel";
 import { dragOffersOf, undoableOn } from "./taskDrag";
-import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
+import { ChatListPanel, ChatView, chatProjectOf, type ChatSurface } from "./chatPane";
+import { chatSurfaceOf, conversationsAt } from "./chatSurface";
+import { chatTitleOf } from "./chatListModel";
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, ModuleApprovalDialog, type ApprovalAnswerExtras } from "./components";
 import {
@@ -703,42 +705,12 @@ export default function App(): JSX.Element {
    * only while exactly one user project is open.
    */
   const chatProject = chatProjectOf(state.chat.project, state.at);
-  const chat: ChatSurface = {
-    // At the ROOT: every project's conversations, newest first, each stamped with its own project —
-    // "all conversations" is a place, and this is what it holds. Inside a project: that project's.
-    conversations: useMemo(
-      () => (state.at === null ? state.allConversations : conversationsOf(state.tasks)),
-      [state.at, state.allConversations, state.tasks],
-    ),
-    hues: projectHues,
-    names: projectNames,
-    taskId: state.chat.taskId,
-    project: chatProject,
-    busy: state.chat.busy,
-    opening: state.chat.opening,
-    error: state.chat.error,
-    // The detail, journal and live tail are the SELECTED task's — opening a conversation selects it,
-    // so these are about the thread on screen. Guarded on that rather than assumed: a selection made
-    // in the Tasks view would otherwise lend this panel another task's transcript.
-    detail: state.selected === state.chat.taskId ? detail : null,
-    journal: state.selected === state.chat.taskId ? state.conversation : null,
-    live: state.selected === state.chat.taskId ? state.liveTurn : null,
-    hasProject: state.at !== null,
-    producing: state.producing,
-    seen: ui.seen,
-    onSeen: actions.markSeen,
-    onOpen: actions.openConversation,
-    onNew: actions.newConversation,
-    onRename: actions.renameTask,
-    onDelete: actions.deleteTasks,
-    onCancelRun: actions.cancelTask,
-    onRewind: actions.rewindConversation,
-    onFork: actions.forkConversation,
-    approval: state.chat.taskId === null ? undefined : state.approvals.find((a) => a.taskId === state.chat.taskId),
-    onApproval: actions.decideApproval,
-    question: state.chat.taskId === null ? undefined : state.questions.find((q) => q.taskId === state.chat.taskId),
-    onQuestion: actions.answerQuestion,
-  };
+  // Assembled by `chatSurface.ts`, which the universal shell's Chat room builds its own from too.
+  const chatConversations = useMemo(
+    () => conversationsAt({ at: state.at, allConversations: state.allConversations, tasks: state.tasks }),
+    [state.at, state.allConversations, state.tasks],
+  );
+  const chat: ChatSurface = chatSurfaceOf(state, actions, { conversations: chatConversations, hues: projectHues, names: projectNames });
 
   /**
    * What the shell can lend a changeset reviewer beyond the defaults (CHANGESETS.md §8.2): the
@@ -2256,7 +2228,7 @@ export default function App(): JSX.Element {
           {view === "chat" ? (
             <span className="chat-title">
               <Icon name="comment" className="chat-title-glyph" />
-              <span className="ellip">{chat.conversations.find((c) => c.taskId === chat.taskId)?.title ?? "New conversation"}</span>
+              <span className="ellip">{chatTitleOf(chat.conversations, chat.taskId)}</span>
             </span>
           ) : null}
           <span className="title-drag" />

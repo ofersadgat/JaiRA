@@ -64,6 +64,18 @@ export interface SplitterProps {
   reset: number;
 }
 
+/**
+ * A dragged size, held between `min` and `max` — and, with a `reserve`, to what leaves the rest of the
+ * container that much (`extent` is the container along the drag). Shared with the universal copy.
+ */
+export function clampSplit(next: number, min: number, max: number, reserve: number | undefined, extent: number): number {
+  let ceiling = max;
+  // A container that has not been laid out yet measures 0, and clamping to `min` on the
+  // strength of that would collapse the pane on the first frame.
+  if (reserve !== undefined && extent > 0) ceiling = Math.min(ceiling, Math.max(min, extent - reserve));
+  return Math.min(ceiling, Math.max(min, next));
+}
+
 const DEFAULT_MIN = 140;
 const DEFAULT_MAX = 720;
 
@@ -89,15 +101,9 @@ export function Splitter({
     horizontal ? event.clientY : event.clientX;
 
   const clamp = (next: number): number => {
-    let ceiling = max;
     const container = self.current?.parentElement;
-    if (reserve !== undefined && container) {
-      const extent = horizontal ? container.clientHeight : container.clientWidth;
-      // A container that has not been laid out yet measures 0, and clamping to `min` on the
-      // strength of that would collapse the pane on the first frame.
-      if (extent > 0) ceiling = Math.min(ceiling, Math.max(min, extent - reserve));
-    }
-    return Math.min(ceiling, Math.max(min, next));
+    const extent = container ? (horizontal ? container.clientHeight : container.clientWidth) : 0;
+    return clampSplit(next, min, max, reserve, extent);
   };
 
   const move = (event: ReactPointerEvent<HTMLDivElement>): void => {

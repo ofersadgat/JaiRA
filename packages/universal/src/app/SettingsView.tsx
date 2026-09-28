@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { JUST_YOU_VIEWS, SECTIONS, settingsFrameOf, settingsLayersFor, settingsLeadParts, settingsProjectLabel, type JustYouView } from "@jaira/ui/settingsSections";
-import { scrollbarProps } from "../primitives";
+import { PLAIN_SCROLLER, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
 import { AppearancePage } from "../components/settings/AppearancePage";
 import { SettingsLayerContext } from "../components/settings/layers";
 import { LayerPicker } from "../components/settings/LayerPicker";
+import { MachinesPage } from "../components/settings/MachinesPage";
 import { newPage, scrolled } from "../components/settings/parts";
 import { SettingsPage } from "../components/settings/SettingsPage";
 import { Segmented } from "../components/settings/controls";
@@ -44,6 +45,8 @@ export function SettingsView(): JSX.Element {
   const page: ReactNode =
     section === "appearance" ? (
       <AppearancePage />
+    ) : section === "machines" ? (
+      <MachinesPage />
     ) : (
       <Uncopied name={`${SECTIONS.find((s) => s.id === section)?.label ?? section} page`} height={320} />
     );
@@ -53,8 +56,8 @@ export function SettingsView(): JSX.Element {
       // A new page is a new scroll box, at its top (`useSettingsParts` sets `scrollTop = 0` on a new key).
       key={section}
       ref={attach}
-      style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string }}
-      contentContainerStyle={{ paddingVertical: 14, paddingHorizontal: 16 }}
+      style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER } as never}
+      contentContainerStyle={{ paddingVertical: 14, paddingHorizontal: 16, ...PLAIN_SCROLLER } as never}
       onScroll={onScroll}
       scrollEventThrottle={16}
       onLayout={(e) => scrolled({ height: e.nativeEvent.layout.height })}

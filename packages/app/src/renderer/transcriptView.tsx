@@ -40,17 +40,13 @@
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
 import {
   artifactOf,
-  detectedMime,
   mimeOfFenceLang,
   mimeOfPath,
-  mimeOfSchema,
-  OFFERED_TYPES,
   typeNameOf,
   viewsFor,
   type InstanceNode,
   type ServedArtifact,
   type SessionView,
-  type ViewHint,
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
@@ -136,58 +132,21 @@ export interface EditMessage {
 }
 
 
-/**
- * The whole moment, for the tooltip behind the clock — every field, in the reader's own format.
- */
-function fullClockOf(at: number | undefined): string | undefined {
-  return at === undefined || at === 0 ? undefined : new Date(at).toLocaleString();
-}
 
-/**
- * What the rail says about WHEN, which has to be a complete answer on its own.
- *
- * A bare clock is complete only for today. Hovering a message from Tuesday and reading `14:22:31`
- * tells you the minute and leaves the day to be worked out from the floating chip, which is at the
- * top of the scroller and may not even be on screen — so the two devices between them answered the
- * question only if you used both. The date joins the clock the moment the message is not from today,
- * which is exactly when it stops being redundant.
- */
-function stampOf(at: number | undefined): string {
-  if (at === undefined || at === 0) return "";
-  const when = new Date(at);
-  const now = new Date();
-  const sameDay =
-    when.getFullYear() === now.getFullYear() && when.getMonth() === now.getMonth() && when.getDate() === now.getDate();
-  if (sameDay) return when.toLocaleTimeString();
-  return `${when.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${when.toLocaleTimeString()}`;
-}
 
-/** Bytes as a person reads them — what a size looks like beside a name. */
-export function sizeOf(bytes: number): string {
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${bytes} B`;
-}
+// How a message is read, its rail's menus and its clock — `messageReading.ts`, shared with the universal
+// copy (decision 0015).
+import { READING, copyTextOf, cutTitleOf, fullClockOf, messageReadingOf, readingMenuOf, stampOf, typeMenuOf } from "./messageReading";
+
+// `sizeOf`, `thoughtTime` and what the live status line says live in `liveStatusModel.ts`, shared with the
+// universal copy (decision 0015).
+import { sizeOf, statusFigureOf, thoughtTime, verbOf, whatOf } from "./liveStatusModel";
+export { sizeOf, thoughtTime };
 
 // `durationOf` and `useElapsed` live in `runActivityModel.ts`, shared with the universal copy (decision 0015).
 import { clockOf, durationOf, useElapsed } from "./runActivityModel";
 export { clockOf, durationOf, useElapsed };
 
-/**
- * How long a model thought, said the way a person waiting would say it — `0.4 seconds`,
- * `12.4 seconds`, `2 m 5.3 s`.
- *
- * Its own formatter rather than {@link durationOf}, which serves run cards and switches units under
- * a second: a thinking block that reports `840 ms` and then `1.2 s` a moment later is a counter that
- * changes shape while you are reading it. Tenths all the way down, so the number only ever grows,
- * and the word spelled out because this is a sentence about a wait, not a figure in a table.
- */
-export function thoughtTime(ms: number): string {
-  const seconds = Math.max(0, ms) / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)} seconds`;
-  if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} m`;
-  return `${Math.floor(seconds / 60)} m ${(seconds % 60).toFixed(1)} s`;
-}
 
 /**
  * The type a tool call's OWN arguments say its payload is.
@@ -1115,35 +1074,9 @@ function Message({
   const said = entry.text !== undefined && entry.text.length > 0;
   const value = entry.output !== undefined ? entry.output.value : (entry.text ?? "");
 
-  /**
-   * What the app would say this is if nobody had corrected it.
-   *
-   * The declared type first, because a slot saying `contentMediaType` is a statement and everything
-   * under it is a default. Then DETECTION, which now runs on both sides of the conversation — an
-   * instruction is markdown about as often as an answer is, and until this ran on user messages the
-   * app's answer for one was "text" whatever was in it.
-   *
-   * The ROLE is the floor under detection rather than a rule over it. An answer with no structural
-   * marks is still markdown, because that is what an answer is written as; anything else with no
-   * marks is what somebody typed. That is the fact the transcript has relied on since it was written
-   * — one side through a markdown renderer, the other through a `<pre>` — said out loud, so the chip
-   * has something true to report and `viewsFor` cannot quietly re-decide it.
-   */
-  const given =
-    detectedMime(value, entry.output?.schema !== undefined ? { schema: entry.output.schema } : {}) ??
-    (entry.role === "assistant" ? "text/markdown" : "text/plain");
-  const mime = override ?? given;
-  const named = typeNameOf(mime);
-
-  const hint: ViewHint = {
-    mime,
-    ...(entry.output?.schema !== undefined ? { schema: entry.output.schema } : {}),
-  };
-  const views = viewsFor(value, hint);
-  // A reading you chose survives a change of type, and stops surviving the moment the new type has
-  // no such reading — which is what makes "set it to Markdown" land on the rendering rather than on
-  // the source you were trying to get away from.
-  const view = picked !== null && views.includes(picked) ? picked : views[0]!;
+  // What the app says this is, what it is read as, and how — `messageReading.ts`, shared with the
+  // universal copy (decision 0015).
+  const { given, mime, named, hint, views, view } = messageReadingOf(entry, value, override, picked);
 
   const assert = (next: string, everywhere = false): void => {
     setMenu(null);
@@ -1176,7 +1109,7 @@ function Message({
 
   const copy = (): void => {
     void navigator.clipboard
-      .writeText(entry.text ?? (typeof value === "string" ? value : JSON.stringify(value, null, 2)))
+      .writeText(copyTextOf(entry, value))
       .then(() => setCopied(true))
       .catch(() => undefined);
   };
@@ -1189,65 +1122,13 @@ function Message({
   }, [copied]);
 
   const openTypes = (at: DOMRect): void => {
-    const rows = OFFERED_TYPES.map((candidate) => {
-      const name = typeNameOf(candidate);
-      // Where the app's own answer came from, said in a word. Only ever on the row it is true of:
-      // a column of provenance beside every option would be a column that is blank most of the way
-      // down, which reads as data missing rather than as a fact about two of the rows.
-      const note =
-        candidate === own
-          ? "yours"
-          : candidate === override
-            ? "this thread"
-            : candidate === given
-              ? (mimeOfSchema(entry.output?.schema) === candidate ? "declared" : "detected")
-              : undefined;
-      return {
-        label: name.label,
-        icon: familyIcon(name.family),
-        ...(note !== undefined ? { note } : {}),
-        checked: candidate === mime,
-        onSelect: () => assert(candidate),
-      };
-    });
     setMenu({
       // Under the chip and aligned to its left edge: the menu is about the control, and a list of
       // types that grew leftwards away from the word it is replacing would be pointing at nothing.
       x: at.left,
       y: at.bottom + 3,
       title: "This text is",
-      items: [
-        ...rows,
-        ...(convKey === undefined
-          ? []
-          : [
-              {
-                label: "Use for every message here",
-                separator: true,
-                note: "until you say otherwise",
-                onSelect: () => assert(mime, true),
-              },
-            ]),
-        ...(override === undefined
-          ? []
-          : [
-              // Named for the layer it clears, because they are different acts: one puts this message
-              // back, the other stops the whole conversation being read that way.
-              own !== undefined
-                ? {
-                    label: "Back to what JaiRA detected",
-                    separator: convKey === undefined,
-                    note: typeNameOf(given).label,
-                    onSelect: clear,
-                  }
-                : {
-                    label: "Stop using it for every message",
-                    separator: false,
-                    note: `back to ${typeNameOf(given).label}`,
-                    onSelect: clear,
-                  },
-            ]),
-      ],
+      items: typeMenuOf({ entry, own, override, given, mime, conversation: convKey !== undefined, assert, clear }),
     });
   };
 
@@ -1264,12 +1145,7 @@ function Message({
       x: at.left,
       y: at.bottom + 3,
       title: "Read it as",
-      items: views.map((id) => ({
-        label: READING[id].label,
-        note: READING[id].hint,
-        checked: id === view,
-        onSelect: () => setPicked(id),
-      })),
+      items: readingMenuOf(views, view, setPicked),
     });
   };
 
@@ -1325,12 +1201,8 @@ function Message({
         <button
           type="button"
           className="ts-act"
-          title={
-            cut === "before"
-              ? "Rewind to before this message — it and everything after it are deleted"
-              : "Rewind to this reply — everything after it is deleted"
-          }
-          aria-label={cut === "before" ? "Rewind to before this message" : "Rewind to this reply"}
+          title={cutTitleOf("rewind", cut).title}
+          aria-label={cutTitleOf("rewind", cut).label}
           onClick={() => onEdit.rewind!(entry.turn!, entry.text ?? "")}
         >
           <Icon name="rewind" />
@@ -1340,12 +1212,8 @@ function Message({
         <button
           type="button"
           className="ts-act"
-          title={
-            cut === "before"
-              ? "Fork before this message — a new conversation that shares everything up to here"
-              : "Fork after this reply — a new conversation that shares everything up to here"
-          }
-          aria-label={cut === "before" ? "Fork before this message" : "Fork after this reply"}
+          title={cutTitleOf("fork", cut).title}
+          aria-label={cutTitleOf("fork", cut).label}
           onClick={() => onEdit.fork!(entry.turn!, entry.text ?? "")}
         >
           <Icon name="choice" />
@@ -1509,20 +1377,6 @@ const MESSAGE_SOURCE: Record<MessageAuthor, { label: string; title: string; icon
   workflow: { label: "From the workflow", title: "The workflow's words for this call — written by its author, not typed here", icon: "workflow" },
 };
 
-/** What each reading is called in the rail, and what its tooltip says it does. */
-const READING: Record<ViewId, { label: string; hint: string }> = {
-  markdown: { label: "Rendered", hint: "As markdown, rendered" },
-  html: { label: "Rendered", hint: "As HTML, rendered" },
-  media: { label: "Preview", hint: "Play or show it" },
-  changes: { label: "Files", hint: "The files this changes, as a diff" },
-  code: { label: "Code", hint: "Highlighted, in an editor" },
-  text: { label: "Source", hint: "The text exactly as it was written" },
-  json: { label: "JSON", hint: "Highlighted, with what each key means" },
-  data: { label: "Data", hint: "Parsed — the value this document denotes" },
-  patch: { label: "Diff", hint: "The change this patch describes" },
-  table: { label: "Table", hint: "As rows and columns" },
-  form: { label: "Form", hint: "As the fields its schema declares" },
-};
 
 /**
  * The pause between two messages — space sized to the silence, with a word in it.
@@ -1643,16 +1497,7 @@ export function Pulse(): JSX.Element {
 export function LiveStatusBar({ status, onJump }: { status: LiveStatus; onJump?: (() => void) | undefined }): JSX.Element {
   const since = status.kind === "writing" || status.kind === "working" ? undefined : status.since;
   const elapsed = useElapsed(since, true);
-  // Sized, not timed. The question asked of a page being written is how big it is getting; the
-  // question asked of everything else is how long it has been.
-  const figure =
-    status.kind === "writing"
-      ? status.chars > 0
-        ? sizeOf(status.chars)
-        : undefined
-      : elapsed !== undefined
-        ? thoughtTime(elapsed)
-        : undefined;
+  const figure = statusFigureOf(status, elapsed);
   return (
     <div className="ts-status">
       <Pulse />
@@ -1668,27 +1513,6 @@ export function LiveStatusBar({ status, onJump }: { status: LiveStatus; onJump?:
       ) : null}
     </div>
   );
-}
-
-/** The verb, present tense — the whole of what the line is for. */
-function verbOf(status: LiveStatus): string {
-  if (status.kind === "writing") return "Writing";
-  if (status.kind === "answering") return "Answering";
-  if (status.kind === "thinking") return "Thinking";
-  // The approval prompt is the turn waiting on the PERSON, not on a program.
-  if (status.kind === "running") return status.name === APPROVAL_PROMPT_FUNCTION ? "Waiting for you" : "Running";
-  return "Working";
-}
-
-/** What it is doing it TO, when there is something to name. */
-function whatOf(status: LiveStatus): string {
-  if (status.kind === "writing") return status.path ?? toolDisplayOf(status.name).title;
-  if (status.kind === "running" && status.name === APPROVAL_PROMPT_FUNCTION) return status.summary.length > 0 ? `to approve · ${status.summary}` : "to approve a command";
-  if (status.kind === "running") {
-    const title = toolDisplayOf(status.name).title;
-    return status.summary.length > 0 ? `${title} · ${status.summary}` : title;
-  }
-  return "";
 }
 
 /**

@@ -67,10 +67,12 @@ import { SelectInput, Switch } from "./controls";
 import {
   APPEARANCE_ROWS as ROWS,
   BATCH_CHOICES,
+  BATCH_PREVIEW,
   BUCKET_CHOICES,
   MODES,
   SUGGESTED_APP,
   SUGGESTED_DATA,
+  TEXT_PREVIEW,
   USAGE_CHOICES,
   WORK_NOTE_CHOICES,
   WORK_ROW_CHOICES,
@@ -278,17 +280,17 @@ function FaceMenu({
 function Preview(): JSX.Element {
   return (
     <div className="ap-preview">
-      <div className="ap-preview-band app-label">Files</div>
+      <div className="ap-preview-band app-label">{TEXT_PREVIEW.band}</div>
       <div className="ap-preview-panes">
         <div className="ap-preview-files">
-          <span className="data-title">declarative-ai</span>
-          <span className="data-text">prompts/review.md</span>
-          <span className="data-secondary">4.2 kB</span>
+          <span className="data-title">{TEXT_PREVIEW.file.title}</span>
+          <span className="data-text">{TEXT_PREVIEW.file.path}</span>
+          <span className="data-secondary">{TEXT_PREVIEW.file.size}</span>
         </div>
         <div className="ap-preview-task">
-          <span className="data-text">tighten the sync lint</span>
-          <Pill kind="running" word="running" />
-          <span className="data-secondary">40s · 3 turns</span>
+          <span className="data-text">{TEXT_PREVIEW.task.title}</span>
+          <Pill kind="running" word={TEXT_PREVIEW.task.word} />
+          <span className="data-secondary">{TEXT_PREVIEW.task.meta}</span>
         </div>
       </div>
     </div>
@@ -371,10 +373,10 @@ function TaskPreview(): JSX.Element {
 
 /** Two elements of one fan-out, in the conversation's own sheet markup, laid out as chosen. */
 function ConversationPreview({ layout }: { layout: SequentialBatchLayout }): JSX.Element {
-  const panel = (file: string, text: string): JSX.Element => (
+  const panel = ({ session, file, text }: (typeof BATCH_PREVIEW)[number]): JSX.Element => (
     <div className="sb-panel" key={file}>
       <div className="sb-gutter">
-        <span className="sb-session mono ellip">reviewer</span>
+        <span className="sb-session mono ellip">{session}</span>
         <span className="sb-span ellip">each · {file}</span>
       </div>
       <section className="sb-sheet">
@@ -388,8 +390,8 @@ function ConversationPreview({ layout }: { layout: SequentialBatchLayout }): JSX
       </section>
     </div>
   );
-  const first = panel("auth.ts", "The token is refreshed after it is read, so a request can go out with a stale one.");
-  const second = panel("session.ts", "Nothing to change: the lock is taken before the session is written.");
+  const first = panel(BATCH_PREVIEW[0]);
+  const second = panel(BATCH_PREVIEW[1]);
   return (
     <div className="set-preview convo-preview" aria-hidden="true">
       {layout === "band" ? (

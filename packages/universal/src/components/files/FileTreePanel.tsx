@@ -1,7 +1,8 @@
+import { copyText } from "../../clipboard";
 import { useRef, useState, type JSX } from "react";
 import { ScrollView, TextInput, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { FileNode, FileRoot, FileTree, WorkflowLayer } from "@jaira/shared/browser";
+import type { FileMutationResult, FileNode, FileRoot, FileTree, MoveWorkflowRequest, WorkflowLayer, WorkflowMutationResult } from "@jaira/shared/browser";
 import { isWritableLayer } from "@jaira/shared/browser";
 import {
   KIND_GLYPH,
@@ -10,13 +11,16 @@ import {
   rootEmptyText,
   rootNeedsName,
   treeMatches,
+  treeMenus,
   treeRowOf,
   type FileSelection,
   type TreeDraft,
 } from "@jaira/ui/filesModel";
 import { Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
+import type { AskSpec } from "@jaira/ui/menu";
 import { ContextMenu, type MenuAt } from "../Menu";
+import { AskDialog } from "./AskDialog";
 import { Chip } from "./Chip";
 
 /**
@@ -48,8 +52,9 @@ import { Chip } from "./Chip";
  *                     --text, a --accent rule under it
  *   input.tree-find   --bg, 1px --line (--rule hovered), radius --control-radius, padding 5 9
  *
- * Not copied: the right-click menus (rename, duplicate, delete, override, copy path) and their
- * confirmations — `FileTreePanel` builds them in the component, beside `AskDialog`.
+ * A row's and a root's own menu (open, new, rename, duplicate, delete, override, copy path) is
+ * `treeMenus` — the desktop's right-click; here a long press, or a right-click on web — with the second
+ * ask a refused one makes, in {@link AskDialog}.
  */
 export interface FileTreePanelProps {
   tree: FileTree | null;
@@ -60,11 +65,25 @@ export interface FileTreePanelProps {
   onSelect: (node: FileNode) => void;
   onCreate: (stateId: string, layer: WorkflowLayer, project?: string) => void;
   onCreateFile: (layer: WorkflowLayer, path: string, kind: "file" | "directory", text?: string, project?: string) => void;
+  hasProject: boolean;
+  onOpen: (stateId: string, layer: WorkflowLayer) => void;
+  onMove: (request: MoveWorkflowRequest) => Promise<WorkflowMutationResult | null>;
+  onDelete: (stateId: string, layer: WorkflowLayer, force?: boolean) => Promise<WorkflowMutationResult | null>;
+  onRenameFile: (layer: WorkflowLayer, path: string, to: string, force?: boolean) => Promise<FileMutationResult | null>;
+  onDeleteFile: (layer: WorkflowLayer, path: string, force?: boolean) => Promise<FileMutationResult | null>;
+  onReveal: (file: string) => void;
   find?: boolean;
   draft: TreeDraft | null;
   onDraft: (draft: TreeDraft | null) => void;
   onUnfold: (keys: readonly string[]) => void;
   project?: string | null;
+  /**
+   * Where the tree's menus are drawn, when the host draws them: outside the sidebar, as the desktop's
+   * `Popover` portals a menu into `<body>` — so it takes the window's tokens, not the sidebar's
+   * (`.sidebar` redefines --panel, --text …). Drawn here if absent. The ASK is drawn here always: the
+   * desktop's `AskDialog` is not portalled, and wears the sidebar's variables.
+   */
+  floats?: { menu: (menu: MenuAt | null) => void };
 }
 
 const NONE: ReadonlySet<string> = new Set();
@@ -78,15 +97,26 @@ export function FileTreePanel({
   onSelect,
   onCreate,
   onCreateFile,
+  hasProject,
+  onOpen,
+  onMove,
+  onDelete,
+  onRenameFile,
+  onDeleteFile,
+  onReveal,
   find = false,
   draft,
   onDraft,
   onUnfold,
   project = null,
+  floats,
 }: FileTreePanelProps): JSX.Element {
   const t = useTokens();
   const [filter, setFilter] = useState("");
-  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const [ownMenu, setOwnMenu] = useState<MenuAt | null>(null);
+  const [ownAsk, setOwnAsk] = useState<AskSpec | null>(null);
+  const setMenu = floats?.menu ?? setOwnMenu;
+  const setAsk = setOwnAsk;
 
   /** Start typing a name, having first made the place it lands visible (`FileTreePanel.startDraft`). */
   const startDraft = (next: TreeDraft): void => {
@@ -111,6 +141,7 @@ export function FileTreePanel({
     return at.under === key ? <DraftRow key="draft" draft={draft} depth={at.depth} missing={at.missing} onCommit={commitDraft} onCancel={() => onDraft(null)} /> : null;
   };
   const openNew = (root: FileRoot, dir: string, x: number, y: number): void => setMenu({ x, y, items: newItems(root, dir, startDraft) });
+  const { itemsFor, rootItems } = treeMenus({ hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, copy: copyText, setAsk, startDraft });
 
   return (
     <View flexDirection="column" flex={1} minHeight={0} gap={8} paddingTop={2} paddingBottom={4}>
@@ -123,9 +154,11 @@ export function FileTreePanel({
           }}
         />
       ) : null}
-      <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0 } as never} contentContainerStyle={{ flexDirection: "column" }}>
+      <ScrollView {...(scrollbarProps(t) as object)} // No layer of its own on web: react-native-web's `translateZ(0)` makes one, over a transparent
+        // ground, and Chromium then draws the names in greyscale rather than the page's LCD antialiasing.
+        style={{ flex: 1, minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never} contentContainerStyle={{ flexDirection: "column" }}>
         {tree === null ? (
-          <Txt spec={{ voice: "app", scale: 1, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 1) as number}>
+          <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 13 / 12.5) as number}>
             Open a project to browse its files.
           </Txt>
         ) : (
@@ -134,7 +167,7 @@ export function FileTreePanel({
             const named = !writable || rootNeedsName(root, project);
             return (
               <View key={root.dir} flexDirection="column" marginBottom={10}>
-                {named ? <RootRow root={root} writable={writable} onNew={(x, y) => openNew(root, "", x, y)} /> : null}
+                {named ? <RootRow root={root} writable={writable} onNew={(x, y) => openNew(root, "", x, y)} onMenu={(x, y) => setMenu({ x, y, items: rootItems(root, writable) })} /> : null}
                 {draftIn(root, null)}
                 {(filter.length > 0 ? treeMatches(root.nodes, filter) : root.nodes).map((node) => (
                   <TreeNode
@@ -147,6 +180,11 @@ export function FileTreePanel({
                     onToggle={onToggleExpanded}
                     onSelect={onSelect}
                     onNew={(folder, x, y) => openNew(root, folder.path, x, y)}
+                    // Right-click selects too, so the menu always acts on the row that is highlighted.
+                    onMenu={(node, x, y) => {
+                      if (node.kind !== "directory") onSelect(node);
+                      setMenu({ x, y, items: itemsFor(node, root) });
+                    }}
                     draftUnder={(key) => draftIn(root, key)}
                   />
                 ))}
@@ -160,19 +198,20 @@ export function FileTreePanel({
           })
         )}
       </ScrollView>
-      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+      {ownMenu !== null ? <ContextMenu anchor={ownMenu} onClose={() => setOwnMenu(null)} /> : null}
+      {ownAsk !== null ? <AskDialog spec={ownAsk} onCancel={() => setOwnAsk(null)} /> : null}
     </View>
   );
 }
 
 /** `li.tree-root`: a root the drawer is not standing in — its name, and its `+` (or Built in's chip). */
-function RootRow({ root, writable, onNew }: { root: FileRoot; writable: boolean; onNew: (x: number, y: number) => void }): JSX.Element {
+function RootRow({ root, writable, onNew, onMenu }: { root: FileRoot; writable: boolean; onNew: (x: number, y: number) => void; onMenu: (x: number, y: number) => void }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
   // The root's own letter spacing (0.08em of its 10.5/12.5), which its name inherits at a smaller size.
   const spacing = t.replayed ? Number(t.scaled("size-app", 10.5 / 12.5)) * 0.08 : "calc(var(--size-app) * 10.5 / 12.5 * 0.08)";
   return (
-    <View {...(hover as object)} {...((isWeb ? { title: root.dir } : {}) as object)} flexDirection="row" alignItems="center" gap={5} paddingTop={8} paddingHorizontal={6} paddingBottom={4}>
+    <View {...(hover as object)} {...(rightClick(onMenu) as object)} {...((isWeb ? { title: root.dir } : {}) as object)} flexDirection="row" alignItems="center" gap={5} paddingTop={8} paddingHorizontal={6} paddingBottom={4}>
       <Txt register="data-secondary" spec={{ upper: true }} letterSpacing={spacing as never} ellip {...(writable ? { flexGrow: 1, flexShrink: 1, flexBasis: 0 } : { flexShrink: 0 })} minWidth={0}>
         {root.label}
       </Txt>
@@ -233,6 +272,7 @@ function TreeNode({
   onToggle,
   onSelect,
   onNew,
+  onMenu,
   draftUnder,
 }: {
   node: FileNode;
@@ -243,6 +283,7 @@ function TreeNode({
   onToggle: (key: string) => void;
   onSelect: (node: FileNode) => void;
   onNew: (node: FileNode, x: number, y: number) => void;
+  onMenu: (node: FileNode, x: number, y: number) => void;
   draftUnder: (key: string) => JSX.Element | null;
 }): JSX.Element {
   const t = useTokens();
@@ -255,6 +296,8 @@ function TreeNode({
     <>
       <Press
         onPress={() => (row.isDir ? onToggle(row.key) : onSelect(node))}
+        onLongPress={(e: { nativeEvent: { pageX: number; pageY: number } }) => onMenu(node, e.nativeEvent.pageX, e.nativeEvent.pageY)}
+        {...(rightClick((x, y) => onMenu(node, x, y)) as object)}
         title={row.title}
         label={node.name}
         flexDirection="row"
@@ -321,6 +364,7 @@ function TreeNode({
               onToggle={onToggle}
               onSelect={onSelect}
               onNew={onNew}
+              onMenu={onMenu}
               draftUnder={draftUnder}
             />
           ))
@@ -360,6 +404,7 @@ function DraftRow({ draft, depth, missing, onCommit, onCancel }: { draft: TreeDr
         spellCheck={false}
         value={name}
         placeholder={kind === "directory" ? "folder name" : kind === "state" ? "state id" : "file name"}
+        placeholderTextColor="#757575"
         accessibilityLabel={kind === "state" ? "new state id" : `new ${kind} name`}
         onChangeText={setName}
         onBlur={() => finish(true)}
@@ -385,18 +430,23 @@ function DraftRow({ draft, depth, missing, onCommit, onCancel }: { draft: TreeDr
 function FindField({ value, onChange }: { value: string; onChange: (value: string) => void }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
+  const [focused, setFocused] = useState(false);
   return (
     <View {...(hover as object)} flexShrink={0}>
       <TextInput
         autoFocus
         value={value}
         placeholder="Filter…"
+        // Chromium's own placeholder ink (`::placeholder`: #757575), which the desktop's field keeps.
+        placeholderTextColor="#757575"
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onChangeText={onChange}
         onKeyPress={(e) => {
           if (e.nativeEvent.key === "Escape") onChange("");
         }}
         style={{
-          ...(font(t, { voice: "app", scale: 1, color: "text" }) as object),
+          ...(font(t, { voice: "app", scale: 13 / 12.5, color: "text" }) as object),
           width: "100%",
           paddingVertical: 5,
           paddingHorizontal: 9,
@@ -405,8 +455,27 @@ function FindField({ value, onChange }: { value: string; onChange: (value: strin
           borderStyle: "solid",
           borderColor: t.v(hovered ? "rule" : "line"),
           borderRadius: t.v("control-radius"),
+          // `:focus-visible`: a 2px --focus-ring outline, 1 outside the box (web; a phone draws none).
+          ...(isWeb ? (focused ? { outlineWidth: 2, outlineStyle: "solid", outlineColor: t.v("focus-ring"), outlineOffset: 1 } : { outlineStyle: "none" }) : {}),
         } as never}
       />
     </View>
   );
+}
+
+
+
+/**
+ * The desktop's gesture for a row's menu, on web: a right-click, at the pointer. A phone has none; a
+ * row takes a long press instead (a root row's menu is the desktop's only).
+ */
+function rightClick(onMenu: (x: number, y: number) => void): Record<string, unknown> {
+  if (!isWeb) return {};
+  return {
+    onContextMenu: (e: { preventDefault: () => void; stopPropagation: () => void; clientX: number; clientY: number }) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onMenu(e.clientX, e.clientY);
+    },
+  };
 }

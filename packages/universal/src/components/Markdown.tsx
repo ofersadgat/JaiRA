@@ -50,6 +50,12 @@ export interface MarkdownProps {
   /** The container's padding: top, right, bottom, left. */
   padding?: readonly [number, number, number, number];
   color?: string;
+  /**
+   * What a single newline in a paragraph is. In the DOM it is whitespace (`breaks: false`), drawn as a
+   * space — unless a container around the markdown says `white-space: pre-wrap`. A native `Text` draws
+   * a newline as a line break, so a host whose DOM original collapses it (the Files viewer) says `space`.
+   */
+  softbreak?: "newline" | "space";
 }
 
 // --- the tree -------------------------------------------------------------------------------------
@@ -60,7 +66,7 @@ type Child = Node | string;
 const TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "em", "strong", "s", "a", "code"]);
 
 /** markdown-it's flat stream as a tree, as `markdown.tsx`'s `fold` builds elements — same rules, no DOM. */
-function treeOf(tokens: readonly Token[]): Child[] {
+function treeOf(tokens: readonly Token[], softbreak: "\n" | " " = "\n"): Child[] {
   const root: Child[] = [];
   const stack: Extract<Node, { attrs: unknown }>[] = [];
   const into = (): Child[] => (stack.length > 0 ? stack[stack.length - 1]!.children : root);
@@ -89,7 +95,7 @@ function treeOf(tokens: readonly Token[]): Child[] {
     const out = into();
     switch (token.type) {
       case "inline":
-        out.push(...treeOf(token.children ?? []));
+        out.push(...treeOf(token.children ?? [], softbreak));
         break;
       case "text":
         out.push(token.content);
@@ -110,7 +116,7 @@ function treeOf(tokens: readonly Token[]): Child[] {
         out.push("\n");
         break;
       case "softbreak":
-        out.push("\n");
+        out.push(softbreak);
         break;
       case "image": {
         const src = safeUrl(attr(token, "src"), SRC_SCHEMES);
@@ -152,9 +158,9 @@ interface Ctx {
 
 const HEADING: Record<string, number> = { h1: 18, h2: 15, h3: 13, h4: 13, h5: 13, h6: 13 };
 
-export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, trimEnd = false, padding = [2, 2, 12, 2], color = "text" }: MarkdownProps): JSX.Element {
+export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, trimEnd = false, padding = [2, 2, 12, 2], color = "text", softbreak = "newline" }: MarkdownProps): JSX.Element {
   const { front, body } = useMemo(() => splitFrontMatter(text), [text]);
-  const tree = useMemo(() => treeOf(parseMarkdown(body)), [body]);
+  const tree = useMemo(() => treeOf(parseMarkdown(body), softbreak === "space" ? " " : "\n"), [body, softbreak]);
   const drawn = fence ?? DEFAULT_FENCE;
   const ctx: Ctx = { ink: { scale, lineHeight, color, weight: 400 }, fence: drawn, depth: 0 };
   const blocks = blocksOf(tree, ctx);

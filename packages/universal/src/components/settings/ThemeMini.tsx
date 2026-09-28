@@ -11,7 +11,7 @@ import { useTokens } from "../../tokens";
  * the DOM's are, and every box placed in percentages of the miniature as the DOM places its spans.
  *
  * Where the DOM needs CSS a phone has not got, the copy draws it: the blueprint's graph paper
- * (`linear-gradient` 8px squares) is its lines, the sidebar's `inset -1px 0 0` shadow a 1px edge, and
+ * (`linear-gradient` 8px squares) is its lines, and
  * `system`'s `clip-path` halves are two boxes that clip, 2px apart, measured from the miniature's width.
  */
 export function ThemeMini({ palette, theme, ...box }: { palette: Palette; theme: JairaTheme | "system" } & Record<string, unknown>): JSX.Element {
@@ -19,7 +19,9 @@ export function ThemeMini({ palette, theme, ...box }: { palette: Palette; theme:
   const surface = PALETTE_SURFACE[palette];
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   return (
-    <View position="relative" overflow="hidden" onLayout={(e: LayoutChangeEvent) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })} aria-hidden {...box}>
+    <View position="relative" overflow="hidden" aria-hidden {...box}>
+      {/* The inside of the miniature's own border: what its percentages, and `system`'s halves, are of. */}
+      <View position="absolute" left={0} top={0} right={0} bottom={0} onLayout={(e: LayoutChangeEvent) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })} />
       {theme !== "system" ? (
         <Pane c={card[theme]} buckets={surface.buckets} lanes={surface.laneColors} size={size} />
       ) : size !== null ? (
@@ -51,9 +53,8 @@ function Pane({ c, buckets, lanes, size }: { c: MiniColors; buckets: BucketStyle
   return (
     <View position="absolute" left={0} top={0} right={0} bottom={0} backgroundColor={c.bg as never}>
       {c.grid !== undefined && size !== null ? <Grid color={c.grid} w={size.w} h={size.h} /> : null}
-      <View position="absolute" left={0} top={0} bottom={0} width="21%" backgroundColor={c.chrome as never}>
-        {c.sideEdge !== undefined ? <View position="absolute" right={0} top={0} bottom={0} width={1} backgroundColor={c.sideEdge as never} /> : null}
-      </View>
+      {/* The sidebar's edge is an inset shadow, as the DOM's is: a 1px border would be snapped to a whole device pixel, a shadow is not. */}
+      <View position="absolute" left={0} top={0} bottom={0} width="21%" backgroundColor={c.chrome as never} {...({ boxShadow: `inset -1px 0 0 ${c.sideEdge ?? "transparent"}` } as object)} />
       {[22, 36, 50].map((top, i) => (
         <View
           key={top}

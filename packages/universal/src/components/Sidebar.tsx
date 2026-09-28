@@ -1,5 +1,5 @@
 import { Fragment, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { parentName } from "@jaira/ui/projects";
 import type { SidebarProject, SidebarView } from "@jaira/ui/sidebar";
 import { Glyph, Press, Txt, edge, useHover } from "../primitives";
@@ -160,7 +160,9 @@ function Column({
               {acts.map((act) => (
                 <Press
                   key={act.id}
-                  onPress={() => act.onAct(undefined as never)}
+                  // The button itself, for a verb that opens a menu under it (`SidebarAct.onAct`): on web the
+                  // press event's element; a phone has none, and the menu takes its own place.
+                  onPress={(e) => act.onAct((isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget : undefined) as never)}
                   label={act.label}
                   title={act.label}
                   width={20}

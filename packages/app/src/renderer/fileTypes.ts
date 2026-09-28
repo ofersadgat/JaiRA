@@ -699,7 +699,17 @@ export interface FileRenderer {
  * Appearance, and a kind with only one entry has nothing to pick between — which is why the settings
  * table can be derived from this map rather than written out beside it and left to drift.
  */
-const REGISTRY = new Map<string, Partial<Record<RenderKind, FileRenderer[]>>>();
+export type SurfaceRegistry = Map<string, Partial<Record<RenderKind, FileRenderer[]>>>;
+const REGISTRY: SurfaceRegistry = new Map();
+
+/**
+ * A registry of a shell's own — the universal copy's, which registers the same table
+ * (`fileSurfaceTable.ts`) with its native surfaces. Every lookup below takes one as its last
+ * argument and defaults to the app's.
+ */
+export function newSurfaceRegistry(): SurfaceRegistry {
+  return new Map();
+}
 
 /** How a choice is addressed, in settings and in the picker. One spelling, used by everything. */
 export function rendererKey(mime: string, kind: RenderKind): string {
@@ -804,10 +814,11 @@ export function enabledRenderers(
   mime: string,
   kind: RenderKind,
   chosen?: RendererChoices | undefined,
+  from: SurfaceRegistry = REGISTRY,
 ): readonly FileRenderer[] {
   const off = rendererChoiceFor(mime, kind, chosen).off;
-  if (off.length === 0) return fileRenderers(mime, kind);
-  return fileRenderers(mime, kind).filter((renderer) => !off.includes(renderer.id));
+  if (off.length === 0) return fileRenderers(mime, kind, from);
+  return fileRenderers(mime, kind, from).filter((renderer) => !off.includes(renderer.id));
 }
 
 /**
@@ -827,8 +838,9 @@ export function viewRenderer(
   kind: RenderKind,
   view: RenderView,
   chosen?: RendererChoices | undefined,
+  from: SurfaceRegistry = REGISTRY,
 ): FileRenderer | null {
-  const offered = enabledRenderers(mime, kind, chosen);
+  const offered = enabledRenderers(mime, kind, chosen, from);
   // `Nothing` belongs to both views, but only where there is something to decline. It is not a
   // renderer that writes, it is the ABSENCE of one — "do not give me the authoring form to type
   // into" is a statement a person must be able to make, and "the editor for this preview is
@@ -875,14 +887,14 @@ export function viewTheme(
  * can name in a settings file. A registration whose id is already present REPLACES it in place — so
  * overriding a built-in is still one call, it just has to say which renderer it is overriding.
  */
-export function registerFileSurface(mime: string, kind: RenderKind, renderer: FileRenderer): void {
-  const entry = REGISTRY.get(mime) ?? {};
+export function registerFileSurface(mime: string, kind: RenderKind, renderer: FileRenderer, into: SurfaceRegistry = REGISTRY): void {
+  const entry = into.get(mime) ?? {};
   const list = entry[kind] ?? [];
   const at = list.findIndex((known) => known.id === renderer.id);
   if (at === -1) list.push(renderer);
   else list[at] = renderer;
   entry[kind] = list;
-  REGISTRY.set(mime, entry);
+  into.set(mime, entry);
 }
 
 /**
@@ -895,9 +907,9 @@ export function registerFileSurface(mime: string, kind: RenderKind, renderer: Fi
  * which is what stops a config file from inheriting the plain JSON editor that would write it
  * unvalidated.
  */
-export function fileRenderers(mime: string, kind: RenderKind): readonly FileRenderer[] {
+export function fileRenderers(mime: string, kind: RenderKind, from: SurfaceRegistry = REGISTRY): readonly FileRenderer[] {
   for (const candidate of mimeFallbacks(mime)) {
-    const list = REGISTRY.get(candidate)?.[kind];
+    const list = from.get(candidate)?.[kind];
     if (list !== undefined && list.length > 0) return list;
   }
   return [];
@@ -982,10 +994,10 @@ export function viewerFor(mime: string, chosen?: RendererChoices | undefined): F
  * palette is stored against exactly that pair. Asked against a guess it is a preference read from
  * the wrong key, which is a control that silently does nothing.
  */
-export function viewerPick(mime: string, chosen?: RendererChoices | undefined): PanelPick | null {
-  const preview = viewRenderer(mime, "preview", "read", chosen);
+export function viewerPick(mime: string, chosen?: RendererChoices | undefined, from: SurfaceRegistry = REGISTRY): PanelPick | null {
+  const preview = viewRenderer(mime, "preview", "read", chosen, from);
   if (preview !== null) return { renderer: preview, kind: "preview", view: "read" };
-  const data = viewRenderer(mime, "data", "read", chosen);
+  const data = viewRenderer(mime, "data", "read", chosen, from);
   return data !== null && data.writes !== true ? { renderer: data, kind: "data", view: "read" } : null;
 }
 
@@ -1007,8 +1019,8 @@ export function editorFor(mime: string, chosen?: RendererChoices | undefined): F
 }
 
 /** The lower half's resolution, with the pair it resolved through — see {@link viewerPick}. */
-export function editorPick(mime: string, chosen?: RendererChoices | undefined): PanelPick | null {
-  const data = viewRenderer(mime, "data", "write", chosen);
+export function editorPick(mime: string, chosen?: RendererChoices | undefined, from: SurfaceRegistry = REGISTRY): PanelPick | null {
+  const data = viewRenderer(mime, "data", "write", chosen, from);
   // A data editor that draws NOTHING is a refusal of the data editor, not of editing: the text
   // renderer takes it, which is what "give me the source of my state file instead of the form" has
   // always meant. Only a real surface stops the fall-through.
@@ -1018,9 +1030,9 @@ export function editorPick(mime: string, chosen?: RendererChoices | undefined): 
   // how to draw a surface with no Save; without this, a text reading that does not write would be a
   // preference the panel silently declined. Everything else falls through to the editor, which is
   // what "how do I edit a `.ts` file" has always meant.
-  const read = viewRenderer(mime, "text", "read", chosen);
+  const read = viewRenderer(mime, "text", "read", chosen, from);
   if (read !== null && read.writes !== true) return { renderer: read, kind: "text", view: "read" };
-  const write = viewRenderer(mime, "text", "write", chosen);
+  const write = viewRenderer(mime, "text", "write", chosen, from);
   return write === null ? null : { renderer: write, kind: "text", view: "write" };
 }
 

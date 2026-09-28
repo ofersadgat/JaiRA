@@ -1,6 +1,9 @@
 import type { ComponentType } from "react";
 import { Markdown as DomMarkdown } from "@jaira/ui/markdown";
-import { Markdown } from "@jaira/universal";
+import type { FileSource } from "@jaira/shared/browser";
+import { FileInspector as DomFileInspector } from "@jaira/ui/files";
+import { DataView as DomDataView } from "@jaira/ui/valueView";
+import { DataView, FileInspector, Markdown } from "@jaira/universal";
 
 /**
  * The specimens: a DOM component and its universal copy, each drawn from the same fixture, for
@@ -49,7 +52,40 @@ const PROSE = [
   "and its continuation.",
 ].join("\n");
 
+/** A parsed document with every kind of leaf the data tree draws, nested two deep. */
+const DATA = {
+  name: "feature/plan",
+  version: 3,
+  strict: true,
+  owner: null,
+  steps: ["draft", "critique", { id: "human_review", timeout: 3600, notes: "a longer value, to see where the line goes when it is wider than a key" }],
+  empty: {},
+  none: [],
+};
+
+/** The facts behind the Files address's ⓘ: a plain file. */
+const FILE: FileSource = {
+  layer: "project",
+  path: "prompts/plan/draft.md",
+  file: "/home/me/work/checkout/.jaira/prompts/plan/draft.md",
+  mime: "text/markdown",
+  text: ["# Draft", "", "Write the plan.", ""].join("\n"),
+  exists: true,
+};
+
 export const SPECIMENS: Record<string, Specimen> = {
+  // `valueView.tsx`'s data tree — the Files viewer of a JSON or YAML file (decision 0015).
+  "data-view": {
+    width: 520,
+    dom: () => <DomDataView value={DATA} />,
+    rn: () => <DataView value={DATA} />,
+  },
+  // The ⓘ popover's contents on the Files address (`.facts-pop`: 320 wide, padding 12 — the box here).
+  "file-facts": {
+    width: 296,
+    dom: () => <DomFileInspector doc={FILE} />,
+    rn: () => <FileInspector doc={FILE} />,
+  },
   markdown: {
     width: 520,
     dom: () => (

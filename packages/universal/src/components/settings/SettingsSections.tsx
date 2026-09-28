@@ -3,7 +3,7 @@ import { ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import { SECTIONS, SETTINGS_ICONS } from "@jaira/ui/settingsSections";
 import type { SettingsSection } from "@jaira/ui/store";
-import { Press, Txt, edge, lengthToken, scrollbarProps } from "../../primitives";
+import { Press, Txt, edge, lengthToken, PLAIN_SCROLLER, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Pills } from "../Pills";
 import { Svg } from "../panel/Svg";
@@ -44,7 +44,7 @@ export function SettingsSections({
   const parts = useSettingsParts();
   const radius = lengthToken(t, "control-radius-sm", 6);
   return (
-    <ScrollView style={{ flexGrow: 1, flexShrink: 1 }} contentContainerStyle={{ paddingTop: 2, paddingBottom: 4 }} {...scrollbarProps(t)}>
+    <ScrollView style={{ flexGrow: 1, flexShrink: 1, ...PLAIN_SCROLLER } as never} contentContainerStyle={{ paddingTop: 2, paddingBottom: 4, ...PLAIN_SCROLLER } as never} {...scrollbarProps(t)}>
       {SECTIONS.map(({ id, label, icon }) => {
         const here = open && section === id;
         const counts = problems(id);

@@ -37,7 +37,7 @@ import type {
 import { isWritableLayer } from "@jaira/shared/browser";
 import { CrumbBar } from "./crumbs";
 import { editorPaint } from "./editorThemes";
-import { editorPick, pickPalette, viewerPick, type FileSurfaceContext } from "./fileTypes";
+import { pickPalette, type FileSurfaceContext } from "./fileTypes";
 import {
   HALF_GLYPHS,
   HALF_WORDS,
@@ -45,13 +45,12 @@ import {
   LAYER_LABEL,
   ROOT_WORD,
   anchorIn,
-  builtInItems,
-  childStateDraft,
   crumbInputOf,
   crumbsOf,
   folderFactsOf,
   issueCountsOf,
   entriesUnder,
+  filePanelOf,
   newItems,
   nextHalf,
   rootEmptyText,
@@ -59,12 +58,13 @@ import {
   runToggleableOf,
   stateIdsOf,
   treeMatches,
+  treeMenus,
   treeRowOf,
   type CrumbInput,
   type FileSelection,
   type TreeDraft,
 } from "./filesModel";
-import { AskDialog, ContextMenu, pointOf, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
+import { AskDialog, ContextMenu, pointOf, type AskSpec, type MenuAnchor, type MenuPoint } from "./menu";
 import { Popover, usePopover } from "./popover";
 import { RunModeToggle } from "./runViews";
 import { Splitter } from "./splitter";
@@ -524,236 +524,20 @@ export function FileTreePanel({
   const openNew = (root: FileRoot, dir: string, at: MenuPoint): void =>
     setMenu({ ...at, items: newItems(root, dir, startDraft) });
 
-  /**
-   * Run a move, and if it was refused because other states point at this one, say who and offer to
-   * go ahead. The second ask is the whole value of the refusal — a rename that silently broke three
-   * workflows would be discovered later, by a run that failed to load.
-   */
-  const move = async (request: MoveRequest, verb: string): Promise<void> => {
-    const result = await onMove(request);
-    if (!result || result.applied) return;
-    setAsk({
-      title: `${verb} '${request.stateId}' anyway?`,
-      note: `${result.referencedBy.join(", ")} declare${result.referencedBy.length === 1 ? "s" : ""} it as a child. They will name a state that no longer exists.`,
-      confirmLabel: `${verb} anyway`,
-      danger: true,
-      onConfirm: () => {
-        setAsk(null);
-        void onMove({ ...request, force: true });
-      },
-    });
-  };
-
-  const remove = async (stateId: string, layer: WorkflowLayer): Promise<void> => {
-    const result = await onDelete(stateId, layer);
-    if (!result || result.applied) return;
-    setAsk({
-      title: `Delete '${stateId}' anyway?`,
-      note: `${result.referencedBy.join(", ")} declare${result.referencedBy.length === 1 ? "s" : ""} it as a child, and will fail to load without it.`,
-      confirmLabel: "Delete anyway",
-      danger: true,
-      onConfirm: () => {
-        setAsk(null);
-        void onDelete(stateId, layer, true);
-      },
-    });
-  };
-
-  /**
-   * The same two verbs for everything in the tree that is not a state.
-   *
-   * They exist separately from {@link move} and {@link remove} because these are addressed by PATH:
-   * a prompt has no state id, and a directory has neither an id nor a single state to check. The
-   * second ask is the same one, over whatever states the path turned out to cover — a directory
-   * under `workflows/` is an id prefix, so renaming one is a bulk state rename wearing a different
-   * verb, and it can break a workflow just as thoroughly.
-   */
-  const pathOp = async (
-    run: (force?: boolean) => Promise<FileMutationResult | null>,
-    path: string,
-    verb: string,
-    consequence: string,
-  ): Promise<void> => {
-    const result = await run();
-    if (!result || result.applied) return;
-    const subject = result.states.length === 1 ? "it" : `${result.states.length} states inside it`;
-    setAsk({
-      title: `${verb} '${path}' anyway?`,
-      note: `${result.referencedBy.join(", ")} declare${result.referencedBy.length === 1 ? "s" : ""} ${subject} as a child. ${consequence}`,
-      confirmLabel: `${verb} anyway`,
-      danger: true,
-      onConfirm: () => {
-        setAsk(null);
-        void run(true);
-      },
-    });
-  };
-
-  /**
-   * "Rename…" and "Delete", for a file or a directory.
-   *
-   * Rename asks for a PATH rather than a name, so the same dialog moves a prompt into another folder
-   * — the field is prefilled with where it is now, and editing the last segment is the common case.
-   */
-  const pathItems = (node: FileNode, abs: string): MenuItem[] => {
-    const what = node.kind === "directory" ? "folder" : "file";
-    return [
-      {
-        label: "Rename…",
-        separator: true,
-        onSelect: () =>
-          setAsk({
-            title: `Rename '${node.name}'`,
-            field: "Path",
-            initial: node.path,
-            note: `Relative to ${node.layer === "base" ? "~/.jaira/" : ".jaira/"}`,
-            confirmLabel: "Rename",
-            onConfirm: (v) => {
-              setAsk(null);
-              void pathOp(
-                (force) => onRenameFile(node.layer, node.path, v, force),
-                node.path,
-                "Rename",
-                "They will name a state that no longer exists.",
-              );
-            },
-          }),
-      },
-      {
-        label: "Delete",
-        danger: true,
-        onSelect: () =>
-          setAsk({
-            title: `Delete this ${what}?`,
-            // The absolute path, because "prompts/goals.md" exists in both layer roots and the one
-            // about to go is decided by which row was right-clicked.
-            note: node.kind === "directory" ? `${abs} — and everything inside it.` : abs,
-            confirmLabel: "Delete",
-            danger: true,
-            onConfirm: () => {
-              setAsk(null);
-              void pathOp(
-                (force) => onDeleteFile(node.layer, node.path, force),
-                node.path,
-                "Delete",
-                "They will fail to load without it.",
-              );
-            },
-          }),
-      },
-    ];
-  };
-
-  /**
-   * The verbs a node offers, by what the node actually is.
-   *
-   * The creation half is {@link newItems}, which every other surface shares — a folder's `+`, the
-   * root's, the Files row's. Right-click adds what acts on the node itself: rename, delete, and the
-   * two ways out to the file system.
-   *
-   * Offered on files too, where "here" means the directory the file sits in — right-clicking the
-   * thing next to where you want the new one is how people actually reach for this.
-   */
-  const itemsFor = (node: FileNode, root: FileRoot): MenuItem[] => {
-    const abs = `${root.dir}/${node.path}`;
-    // What ships is read and overridden, and nothing else (decision 0006) — see {@link builtInItems}.
-    if (!isWritableLayer(root.layer)) {
-      return builtInItems(node, root, {
-        hasProject,
-        onOpen,
-        onOverride: (id, toLayer) => void move({ stateId: id, layer: "system", to: id, toLayer, copy: true }, "Override"),
-        onCopy: copyText,
-        onReveal,
-      });
-    }
-    const parentDir = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
-    const reveal: MenuItem[] = [
-      { label: "Copy path", onSelect: () => copyText(abs), separator: true },
-      { label: "Reveal in file explorer", onSelect: () => onReveal(abs) },
-    ];
-
-    if (node.kind === "directory") {
-      return [...newItems(root, node.path, startDraft), ...pathItems(node, abs), ...reveal];
-    }
-
-    if (node.stateId === undefined) {
-      // A prompt, a skill, or config: real files, but not states. No state-id verbs — but the same
-      // rename and delete, addressed by path, because "the tree cannot rename a prompt" is not a
-      // distinction anyone holds in their head while looking at one.
-      return [...newItems(root, parentDir, startDraft), ...pathItems(node, abs), ...reveal];
-    }
-
-    const id = node.stateId;
-    const other: WorkflowLayer = node.layer === "base" ? "project" : "base";
-    return [
-      { label: "Open", onSelect: () => onOpen(id, node.layer) },
-      {
-        // The folder as well as the state: `feature/` is where `feature.json`'s children live, and
-        // the first child is what creates it. Typed under the parent's own row — see
-        // {@link childStateDraft} — so the id you are extending is the line directly above.
-        label: "New child state…",
-        note: `${id}/`,
-        onSelect: () => startDraft(childStateDraft(root, node, id)),
-      },
-      {
-        label: "Duplicate…",
-        separator: true,
-        onSelect: () =>
-          setAsk({
-            title: `Duplicate '${id}'`,
-            field: "New state id",
-            initial: `${id}-copy`,
-            confirmLabel: "Duplicate",
-            onConfirm: (v) => {
-              setAsk(null);
-              void move({ stateId: id, layer: node.layer, to: v, toLayer: node.layer, copy: true }, "Duplicate");
-            },
-          }),
-      },
-      {
-        label: "Rename…",
-        onSelect: () =>
-          setAsk({
-            title: `Rename '${id}'`,
-            field: "New state id",
-            initial: id,
-            note: "A state's id is its path, and every state that names it as a child names this id.",
-            confirmLabel: "Rename",
-            onConfirm: (v) => {
-              setAsk(null);
-              void move({ stateId: id, layer: node.layer, to: v, toLayer: node.layer }, "Rename");
-            },
-          }),
-      },
-      {
-        // The point of the shared layer: changing a shared workflow for ONE project should not mean
-        // copying files by hand. Shadowed already means the project has its own copy.
-        label: node.layer === "base" ? "Override in this project" : "Copy to shared root",
-        separator: true,
-        disabled: node.shadowed === true || (node.layer === "base" && !hasProject),
-        onSelect: () => void move({ stateId: id, layer: node.layer, to: id, toLayer: other, copy: true }, "Copy"),
-      },
-      { label: "Copy state id", separator: true, onSelect: () => copyText(id) },
-      { label: "Copy path", onSelect: () => copyText(abs) },
-      { label: "Reveal in file explorer", onSelect: () => onReveal(abs) },
-      {
-        label: "Delete",
-        danger: true,
-        separator: true,
-        onSelect: () =>
-          setAsk({
-            title: `Delete '${id}'?`,
-            note: `${abs}`,
-            confirmLabel: "Delete",
-            danger: true,
-            onConfirm: () => {
-              setAsk(null);
-              void remove(id, node.layer);
-            },
-          }),
-      },
-    ];
-  };
+  // Every verb a row or a root offers, and the second asks behind them — `treeMenus` (`filesModel.ts`),
+  // shared with the universal copy.
+  const { itemsFor, rootItems } = treeMenus({
+    hasProject,
+    onOpen,
+    onMove,
+    onDelete,
+    onRenameFile,
+    onDeleteFile,
+    onReveal,
+    copy: copyText,
+    setAsk,
+    startDraft,
+  });
 
   const openMenu = (node: FileNode, root: FileRoot, at: MenuPoint): void =>
     setMenu({ ...at, items: itemsFor(node, root) });
@@ -812,16 +596,7 @@ export function FileTreePanel({
               e.stopPropagation();
               setMenu({
                 ...pointOf(e),
-                items: [
-                  // Nothing is made in what ships, so its root offers the two ways of looking only.
-                  ...(writable ? newItems(root, "", startDraft) : []),
-                  { label: "Copy path", separator: writable, onSelect: () => copyText(root.dir) },
-                  {
-                    label: "Reveal in file explorer",
-                    disabled: !root.exists,
-                    onSelect: () => onReveal(root.dir),
-                  },
-                ],
+                items: rootItems(root, writable),
               });
             };
             return (
@@ -1109,13 +884,6 @@ export function FileAddressBar({
   );
 }
 
-/**
- * When copy-on-edit last asked to copy each shipped file, by path. Module state rather than a hook,
- * because {@link FilePanel} returns early before its hooks would run; the window is how long a copy
- * takes to open, after which the file shown is the copy and nothing here is asked again.
- */
-const COPY_ASKED = new Map<string, number>();
-const COPY_WINDOW_MS = 5000;
 
 /**
  * The open file: what it IS above, what it SAYS below.
@@ -1206,11 +974,9 @@ export function FilePanel({
    * `.json` file can have a data tree above and an editor below without either being described as
    * the other's alternative.
    */
-  const viewer = viewerPick(doc.mime, context.renderers);
-  const View = viewer?.renderer.surface ?? null;
-  const edits = editorPick(doc.mime, context.renderers);
-  const editor = edits?.renderer ?? null;
-  const Edit = editor?.surface ?? null;
+  // The two halves, the lower half's position and the props each half mounts with — see
+  // `filePanelOf` (`filesModel.ts`), which the universal copy resolves with too.
+  const { viewer, View, edits, Edit, at, shut, viewProps, editProps } = filePanelOf({ doc, busy, onSave, context }, half);
   /**
    * The palette each half is painted in — the one thing a surface cannot work out for itself.
    *
@@ -1225,40 +991,6 @@ export function FilePanel({
    */
   const viewPaint = editorPaint(pickPalette(viewer, doc.mime, context.renderers));
   const editPaint = editorPaint(pickPalette(edits, doc.mime, context.renderers));
-  const props = { doc, busy, onSave, context };
-  // The same props, said to be the READING. Only this function knows which half it is mounting, and
-  // the palette is keyed per view — so a viewer built from `props` would be drawn in the editor's
-  // colours. See `FileSurfaceContext.view`.
-  const viewProps = { ...props, context: { ...context, view: "read" as const } };
-  /**
-   * A shipped file that is not a state, mounted LIVE for copy-on-edit: its first draft asks the shell
-   * to copy the file into Shared, and the draft moves to the copy (`editBuiltInFile`). The draft is
-   * still written under the shipped file's own key, so the editor shows every keystroke while the
-   * copy is being made. `undefined` — a reading — when Shared already has its copy, or when this
-   * host cannot copy.
-   */
-  const copyFile = context.builtInActions?.onEditFileCopy;
-  const shippedProps: typeof props | undefined =
-    doc !== null && doc.layer === "system" && doc.stateId === undefined && copyFile !== undefined && doc.builtIn?.layers.includes("base") !== true
-      ? {
-          ...props,
-          context: {
-            ...context,
-            onDraft: (key: string, text: string | null) => {
-              context.onDraft?.(key, text);
-              // Once per copy: every keystroke until the copy opens is a draft here, and the draft is
-              // what moves across — see `COPY_ASKED`.
-              if (text === null || Date.now() - (COPY_ASKED.get(doc.path) ?? 0) < COPY_WINDOW_MS) return;
-              COPY_ASKED.set(doc.path, Date.now());
-              copyFile(doc.path, doc.text);
-            },
-          },
-        }
-      : undefined;
-  // With no viewer the editor IS the panel, so there is nothing to fold it away from and nothing to
-  // grow into: a file type with no viewer is always at `full`, whatever was remembered.
-  const at: HalfMode = View === null ? "full" : half;
-  const shut = at === "shut";
 
   return (
     <div
@@ -1328,7 +1060,7 @@ export function FilePanel({
           // Shared on its first change; any other shipped file is mounted live with its first draft
           // turned into the same copy (`shippedProps`). Only a file Shared already has a copy of —
           // the copy is what is read — is mounted as the READING of its type.
-          <Edit {...(isWritableLayer(doc.layer) || doc.stateId !== undefined ? props : (shippedProps ?? viewProps))} />
+          <Edit {...editProps} />
         ) : (
           // Reached only by a type that is not text — an image, the database, an archive. Naming the
           // type is the useful part: "no editor" alone reads as a missing feature rather than as a

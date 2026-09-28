@@ -112,9 +112,165 @@ export const SCENES: readonly Scene[] = [
       },
     }),
   ),
+  // Appearance on the personal layer: the "Which rows" choice under the lead, and "What you changed"
+  // leaving nothing on the page.
+  {
+    name: "settings-appearance-you",
+    reach: async (app) => {
+      await app.clickText("Settings");
+      await clickFirst(app, "Appearance");
+      await app.until(`[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === "Appearance" && e.getBoundingClientRect().left > 250)`, "the Appearance page");
+      await clickFirst(app, "Just you");
+      await app.until(says("What you changed"), "the Just you view");
+    },
+  },
+  // Appearance scrolled to one of its sections, its heading at the top of the page — the viewport
+  // photographs only what is scrolled into view, and the page is several windows tall.
+  ...(["Board", "Conversation", "Text"] as const).map(
+    (heading): Scene => ({
+      name: `settings-appearance-${heading.toLowerCase()}`,
+      reach: async (app) => {
+        await app.clickText("Settings");
+        await clickFirst(app, "Appearance");
+        await app.until(`[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === "Appearance" && e.getBoundingClientRect().left > 250)`, "the Appearance page");
+        const find = `[...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(heading)} && e.getBoundingClientRect().left > 250)`;
+        await app.until(`${find} !== undefined`, `the ${heading} heading`);
+        // To a whole pixel measured the same way on both pages: `scrollIntoView` lands a fraction apart.
+        await app.evaluate(`(() => {
+          const el = ${find};
+          let box = el.parentElement;
+          while (box && !(box.scrollHeight > box.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+          box.scrollTop = 2 * Math.round((el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop) / 2);
+        })()`);
+        await settle(300);
+      },
+    }),
+  ),
   // The other rooms, each reached from the sidebar (decision 0015's universal copies are checked in them).
   { name: "files", reach: (app) => app.clickText("Files") },
+  // A file opened from the Files drawer: the address bar, the viewer over the editor (decision 0015's
+  // Files copy). `open` is the path down the tree; a folder is clicked only while what is under it is
+  // not showing, since the tree remembers what was unfolded and a second click would fold it again.
+  ...(
+    [
+      ["files-markdown", ["plan_doc.md"], "The Plan"],
+      ["files-readme", ["README.md"], "an edit copies it to Shared"],
+      ["files-json", ["permission-sets", "chat", "ask-first.json"], "read_file"],
+    ] as const
+  ).map(
+    ([name, open, shows]): Scene => ({
+      name,
+      reach: async (app) => {
+        await app.clickText("Files");
+        await app.until(says(open[0]), "the Files drawer");
+        for (const [i, step] of open.entries()) {
+          const next = open[i + 1];
+          if (next !== undefined && (await app.evaluate<boolean>(says(next)))) continue;
+          await clickFirst(app, step);
+          if (next !== undefined) await app.until(says(next), `${step} to unfold`);
+        }
+        await app.until(says(shows), `${open.at(-1)} to open`);
+      },
+    }),
+  ),
+  // A folder, as the Files panel lists one: a file opened, then the root crumb of its address (the last
+  // ".jaira" on the page — the tree's row comes first).
+  {
+    name: "files-folder",
+    reach: async (app) => {
+      await app.clickText("Files");
+      await app.until(says("plan_doc.md"), "the Files drawer");
+      await clickFirst(app, "plan_doc.md");
+      await app.until(says("The Plan"), "plan_doc.md to open");
+      await app.clickText(".jaira");
+      await app.until(`!document.body.innerText.includes("The Plan")`, "the folder to open");
+    },
+  },
+  // The ⓘ at the end of a plain file's address, open: its facts in a float under it.
+  {
+    name: "files-facts",
+    reach: async (app) => {
+      await app.clickText("Files");
+      await app.until(says("plan_doc.md"), "the Files drawer");
+      await clickFirst(app, "plan_doc.md");
+      await app.until(says("The Plan"), "plan_doc.md to open");
+      await app.evaluate(`document.querySelector('[title="About this"], [aria-label="About this"]').click()`);
+      await app.until(says("the file"), "the facts to open");
+    },
+  },
+  // A file's right-click menu in the Files drawer (a long press on a phone).
+  {
+    name: "files-menu",
+    reach: async (app) => {
+      await app.clickText("Files");
+      await app.until(says("plan_doc.md"), "the Files drawer");
+      await app.evaluate(`(() => {
+        const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === "plan_doc.md");
+        const box = el.getBoundingClientRect();
+        el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: Math.round(box.left + 20), clientY: Math.round(box.top + 8), button: 2 }));
+      })()`);
+      await app.until(says("Rename…"), "the menu to open");
+    },
+  },
+  // …and its "Rename…": the dialog asking for the new path.
+  {
+    name: "files-rename",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "files-menu")!.reach(app);
+      await clickFirst(app, "Rename…");
+      await app.until(says("Rename 'plan_doc.md'"), "the dialog to open");
+      await app.until(`document.activeElement?.tagName === "INPUT"`, "the field to take the caret");
+      await app.evaluate(`document.activeElement.style.caretColor = "transparent"`);
+    },
+  },
+  // The Files row's two verbs: find (the filter field over the tree), and `+` → "New file…" (the row a
+  // name is typed into, at the top of the root the drawer stands in).
+  ...(
+    [
+      ["files-find", "find in files", null],
+      ["files-new", "new file, folder or workflow", "New file…"],
+    ] as const
+  ).map(
+    ([name, act, item]): Scene => ({
+      name,
+      reach: async (app) => {
+        await app.clickText("Files");
+        await app.until(says("plan_doc.md"), "the Files drawer");
+        await app.evaluate(`document.querySelector('[aria-label=${JSON.stringify(act)}]').click()`);
+        if (item !== null) {
+          await app.until(says(item), "the new menu");
+          await clickFirst(app, item);
+        }
+        await app.until(`document.activeElement?.tagName === "INPUT"`, "the field to take the caret");
+        // The caret blinks, so it is hidden: both pictures have none. (A blur would drop the draft.)
+        await app.evaluate(`document.activeElement.style.caretColor = "transparent"`);
+      },
+    }),
+  ),
   { name: "chat", reach: (app) => app.clickText("Chat") },
+  {
+    // A conversation open in the Chat room: a message and its answer (a fake model's, in markdown), the
+    // composer under them, the project's Chat drawer listing it and its name in the title bar. Made
+    // here the first time it is reached rather than in `seed`, so a studio seeded before it existed
+    // has it too; the same conversation is opened on both pages after that.
+    name: "conversation",
+    reach: async (app) => {
+      await conversation(app);
+      await app.clickText("Chat");
+      await app.until(says(CONVERSATION), "the conversation to be listed");
+      await app.clickText(CONVERSATION);
+      await app.until(says("It checks that"), "the answer to be drawn");
+    },
+  },
+  {
+    // The same conversation from the root's "All conversations" drawer: its rows carry their project's chip.
+    name: "all-conversations",
+    reach: async (app) => {
+      await conversation(app);
+      await app.clickText("All conversations");
+      await app.until(says(CONVERSATION), "the conversation to be listed at the root");
+    },
+  },
   {
     name: "logs",
     reach: async (app) => {
@@ -151,6 +307,33 @@ export const SCENES: readonly Scene[] = [
     },
   },
 ];
+
+/** The conversation the `conversation` scene opens. */
+export const CONVERSATION = "explain the sync lint";
+
+/**
+ * The conversation, made once in the world's project: a chat task (`chat/session`, as the Chat view
+ * starts one) whose first message is its run, answered by a fake model. A no-op once it exists.
+ */
+async function conversation(app: App): Promise<void> {
+  const projects = await app.ipc<Array<{ project: string; kind: string }>>("project:list", {});
+  const project = projects.find((p) => p.kind === "user")?.project;
+  if (project === undefined) throw new Error("the world has no project to talk in");
+  const tasks = await app.ipc<Array<{ title: string }>>("task:list", { project });
+  if (tasks.some((t) => t.title === CONVERSATION)) return;
+  const made = await app.ipc<{ taskId: string }>("task:create", {
+    title: CONVERSATION,
+    workflow: "chat/session",
+    inputs: { message: "What does the sync lint check?" },
+    project,
+  });
+  await app.ipc("task:start", {
+    taskId: made.taskId,
+    project,
+    fake: [{ output: "It checks that **every state** a workflow names exists:\n\n- the `sequence` entries\n- each transition's `to`\n\nRun it with `jaira lint`." }],
+  });
+  await settle(1500);
+}
 
 /**
  * Click the FIRST element in the page whose own text is exactly `text` (`clickText` takes the last that
@@ -220,7 +403,9 @@ export async function goTo(app: App, path: string, to: { look?: Look; scene?: Sc
   step("navigate");
   await app.navigate(url);
   step("draw");
-  await app.until(drawn, `${url} to draw`);
+  // Patient: the dev server is shared between studios, and one rebuilding for another copier's edit
+  // holds every page for several seconds.
+  await app.until(drawn, `${url} to draw`, 240);
   await app.hover(2, 2);
   step("scene");
   if (to.scene !== undefined) await to.scene.reach(app);
