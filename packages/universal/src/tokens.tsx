@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 
 /**
- * Tokens on WEB (decision 0013): every value is the CSS variable itself.
+ * Tokens on WEB (decision 0015): every value is the CSS variable itself.
  *
  * The browser resolves it against the palette, scheme and subtree the DOM app has applied — the same
  * cascade the CSS beside a copy reads — so a copy cannot drift from it, and a palette switch reaches it

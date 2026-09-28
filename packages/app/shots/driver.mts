@@ -65,7 +65,7 @@ export interface Options {
   readonly height?: number;
   /** Not the default 9222: a browser someone already has open would answer instead of the app. */
   readonly port?: number;
-  /** A phone instead of a window: its viewport and scale, with touch (the island harness, 0013 S5). */
+  /** A phone instead of a window: its viewport and scale, with touch (the island harness, 0015 S5). */
   readonly phone?: { readonly width: number; readonly height: number; readonly scale: number };
   /** Extra switches for a {@link browse}d browser. */
   readonly flags?: readonly string[];
@@ -120,7 +120,7 @@ export class App {
   }
 
   /**
-   * A plain browser, headless, on `url` — the One client served by the desktop's spike socket (0013
+   * A plain browser, headless, on `url` — the One client served by the desktop's spike socket (0015
    * S2), photographed with the same verbs as the app. `browser` is the executable (Chrome, Edge).
    */
   static async browse(browser: string, url: string, options: Options): Promise<App> {

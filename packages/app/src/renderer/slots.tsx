@@ -2,7 +2,7 @@ import { createContext, useContext, type ComponentProps, type ComponentType, typ
 import type { CardProps } from "./board";
 
 /**
- * Where a universal copy stands in for a DOM component (decision 0013).
+ * Where a universal copy stands in for a DOM component (decision 0015).
  *
  * A component that has a copy is exported through `slotted`: it draws the copy when the page has
  * provided one, and its DOM self otherwise. The desktop provides nothing and draws exactly what it

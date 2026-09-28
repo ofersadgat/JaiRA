@@ -1,5 +1,5 @@
 /**
- * The island test of decision 0013 (S5), in a browser standing in for the phone.
+ * The island test of decision 0015 (S5), in a browser standing in for the phone.
  *
  *   npm --workspace @jaira/client run build:island
  *   npx tsx packages/app/shots/islands.mts            with file access for file pages (as the WebView will be set)
@@ -9,7 +9,7 @@
  * `file://`, as a WebView loads it from the app's assets: each island is its own opaque origin, and a
  * worker or module script is subject to the same file-URL rules Android applies. It drives each
  * island over the real bridge (`packages/client/island/protocol.ts`) on a phone-sized viewport with
- * touch, and records what 0013's island test asks: time to drawn, whether Monaco got its worker,
+ * touch, and records what 0015's island test asks: time to drawn, whether Monaco got its worker,
  * whether the grammars coloured the text, how the content height settles, memory with three islands
  * live, a palette switch, and typed input in the editable editor. Keyboard, IME and gestures are not
  * measured here — they need the device.

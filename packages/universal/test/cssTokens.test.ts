@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluate, resolveAt } from "../src/cssTokens";
 
 /**
- * The native side of decision 0013's tokens: `styles.css`'s cascade, replayed. Each expectation is worked
+ * The native side of decision 0015's tokens: `styles.css`'s cascade, replayed. Each expectation is worked
  * by hand from the CSS, the way the browser's cascade and CSS Color 5's `color-mix` define it.
  */
 describe("styles.css tokens, replayed for native", () => {

@@ -1,12 +1,12 @@
 ---
-id: engineering/decisions/0013-one-universal-client
+id: engineering/decisions/0015-one-universal-client
 type: decision
 status: accepted
 updated: 2026-09-27
 decides_for: [engineering/units/app-shell, engineering/units/ipc-bridge, engineering/units/renderer-store]
 ---
 
-# 0013. One client for desktop and mobile, reached by a spike that migrates component by component
+# 0015. One client for desktop and mobile, reached by a spike that migrates component by component
 
 The person, 2026-09-27: "I want to create a mobile app which shares as much code as possible with the
 jaira app … use the One framework … an electron build which will build the desktop apps that we have
@@ -61,7 +61,7 @@ primitives. That is the real cost, and it is paid per component.
    as there is on desktop. This is meant as a migration step, not as a final step (which will do a
    mobile ui/ux pass)." No drawer, no sheets, no phone layout in this work.
 2. **Styling: Tamagui.**
-3. **Transport: throwaway.** "There is another session building out the remote properly … just do the
+3. **Transport: throwaway.** (It landed as [0013, machines](0013-machines.md).) "There is another session building out the remote properly … just do the
    quickest thing to get it working and expect to throw it away."
 4. **One 1.27.1, Tamagui 2.7, Metro for native, and the native side thin** ([Version](#version)). The
    person: "your recommendations sound fine."
@@ -431,9 +431,35 @@ markdown island at 732 KB; only the diff carries Monaco (27 MB).
 - **The board's pure half moved to `boardModel.ts`,** so the copies and the phone use it without
   `react-dom`.
 
+**Rebased on main (2026-09-27).** The spike was first numbered 0013; main had meanwhile accepted its own
+[0013 (machines)](0013-machines.md) and [0014](0014-archived-tasks.md), so this is 0015. What the rebase met:
+- **The engine moved** into `@jaira/service` and the window's code into `desktop.ts` (0012 steps 1–4). The
+  `app://` protocol and the spike socket moved with it; the socket dispatches exactly as the window's IPC
+  does (host-only verbs here, the rest through the link to wherever the engine runs) and fans out through
+  `pushToWindow`.
+- **The real remote transport has landed** as 0013: machines paired over Tailscale, the engine reachable
+  from other machines on loopback. The spike's socket and `socketBridge` are now the thing to delete: the
+  phone should reach an engine the way 0013's other machines do.
+- **UI to catch up on.** Archived tasks sit at the foot of the Finished lane, faded, wearing the pill of how
+  they finished and saying when they were archived; a card in a project of several workspaces carries a
+  machine chip. The card copy draws both (`MachineChip` is a copy of its own). `Lanes` now also tells a
+  card when the archived foot follows it, since that makes the last live card not `:last-child`. The gate
+  world gained an archived task and an "archived" scene; the machine chip needs a paired machine to appear,
+  so it is not in the world yet.
+- **Dependencies.** React is one 19.2.3 everywhere (the client had drifted to 19.3.0, which npm let win
+  over the override); `react-native-webview` is one 13.16.1, Expo 57's own choice, where npm had installed
+  a second copy as Expo's peer — two copies of a native module fail at run time on a device.
+- **Metro ignores this repository's build output.** Watching the root to see the workspace packages also
+  watched `packages/app/release/`, and an `app:dist` rewriting it crashed the dev server.
+- **Verified after the rebase:** typecheck (with the native graph) and 5,665 tests; the S1 gate 28/28 and
+  the universal gate 26/26, both across every look; native colours 1,616/1,616; the remote browser; the
+  phone app in the browser; the islands under strict file:// rules; Metro bundles for Android (1,614
+  modules) and iOS (1,613); the installer, its probe, CLI and smoke test; Monaco on all four surfaces in the
+  development build and the installer.
+
 **Still open:**
-- The Monaco preview sometimes never draws its lines on a load, under either renderer. A separate task
-  is flagged, and the gate reloads to get past it.
+- ~~The Monaco preview sometimes never draws its lines.~~ Not an app bug: Windows marks a covered window
+  hidden and Chromium draws no frames for it. The rigs launch with `CalculateNativeWinOcclusion` off.
 - **On a device:** `one prebuild` and `one run:android` with the islands plugin; S5's gestures, IME and
   memory; the Desktop UI view's viewport (desktop width and zoomable, as a WebView gives a page without a
   viewport tag).
@@ -486,6 +512,6 @@ from a universal tree it can rearrange.
 - **Islands fail S5 on iOS or Android.** Then the components concerned need native equivalents (a
   read-only diff view first) before v1 can show them.
 - **One publishes a stable 2.** Then move before migration step 3, not during it (see [Version](#version)).
-- **The other session's remote transport lands.** Then `socketBridge` and the spike's WebSocket are
-  deleted.
+- **Now (0013 has landed).** `socketBridge` and the spike's WebSocket are deleted, and the phone reaches an
+  engine as 0013's other machines do.
 - **One gains `'use dom'`.** Then the islands move to it.

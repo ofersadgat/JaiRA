@@ -1,7 +1,7 @@
 {
   "name": "fast-flow-transform",
   "version": "0.0.3",
-  "description": "A JavaScript stand-in for fast-flow-transform 0.0.3, whose win32 binary panics on any input (decision 0013, S0).",
+  "description": "A JavaScript stand-in for fast-flow-transform 0.0.3, whose win32 binary panics on any input (decision 0015, S0).",
   "private": true,
   "main": "index.cjs",
   "exports": {

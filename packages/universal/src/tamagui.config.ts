@@ -1,7 +1,7 @@
 import { createTamagui, createTokens } from "@tamagui/core";
 
 /**
- * Tamagui, configured to stay out of the way of `styles.css` (decision 0013).
+ * Tamagui, configured to stay out of the way of `styles.css` (decision 0015).
  *
  * No themes and no colour tokens: Tamagui would publish them as CSS variables named after their keys
  * (`--accent`), redefining the app's own inside every subtree it wraps. Colours come from `useTokens`

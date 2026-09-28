@@ -501,7 +501,7 @@ export function Lanes({
   cards: readonly BoardCard[];
   /**
    * `last`: the card is the last in its lane, which the CSS says with `.card:last-child`. Passed as a
-   * fact because a universal copy (decision 0013) cannot see its siblings; the DOM card ignores it.
+   * fact because a universal copy (decision 0015) cannot see its siblings; the DOM card ignores it.
    */
   render: (card: BoardCard, last: boolean) => ReactNode;
   /**
@@ -583,7 +583,7 @@ function LiveLanes({
 
 
 /**
- * Slotted (decision 0013): the One client's universal tree draws `@jaira/universal`'s copy instead.
+ * Slotted (decision 0015): the One client's universal tree draws `@jaira/universal`'s copy instead.
  */
 export const Card = slotted("TaskCard", DomCard);
 

@@ -1,5 +1,5 @@
 /**
- * The S2 check of decision 0013: the One client, in an ordinary browser, drives a desktop's engine over
+ * The S2 check of decision 0015: the One client, in an ordinary browser, drives a desktop's engine over
  * the throwaway spike socket.
  *
  *   npm --workspace @jaira/app run build

@@ -1,5 +1,5 @@
 /**
- * Does native get the colours the desktop draws? (decision 0013)
+ * Does native get the colours the desktop draws? (decision 0015)
  *
  *   npx tsx packages/app/shots/tokens-check.mts
  *

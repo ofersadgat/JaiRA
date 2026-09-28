@@ -1,5 +1,5 @@
 /**
- * The CSS cascade of `styles.css`'s custom properties, replayed without a browser (decision 0013).
+ * The CSS cascade of `styles.css`'s custom properties, replayed without a browser (decision 0015).
  *
  * The declarations come from `cssTokens.generated.ts` (see `scripts/tokens.mjs`). Given where a
  * component stands — a palette, a scheme, and the subtrees around it (`sidebar`, …) — this picks the

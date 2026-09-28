@@ -1,5 +1,5 @@
 /**
- * Native stand-in for monaco-editor's `externalLinesDiffComputer.js` (decision 0013).
+ * Native stand-in for monaco-editor's `externalLinesDiffComputer.js` (decision 0015).
  *
  * The shared package computes diffs with Monaco's pure line-diff algorithm (`vs/editor/common/diff`,
  * VS Code's `common` layer: no DOM, no Node). Its sibling module loads an optional external computer

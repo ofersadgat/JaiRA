@@ -8,7 +8,7 @@ import { TaskCard } from "../components/TaskCard";
 import { useTokens } from "../tokens";
 
 /**
- * The board, drawn natively from the copies that exist (decision 0013): today, only the cards (and
+ * The board, drawn natively from the copies that exist (decision 0015): today, only the cards (and
  * their pills and chips) are copies, so the columns around them here are PLACEHOLDERS — plain
  * headed stacks, not the desktop's `.column`. What this screen proves is the native path: the store
  * over the socket, the replayed tokens, and the copies drawing live data on a phone. The screen a

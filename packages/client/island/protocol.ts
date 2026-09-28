@@ -1,5 +1,5 @@
 /**
- * The island bridge (decision 0013, S5): how a native screen (or, for testing, a web page) drives one
+ * The island bridge (decision 0015, S5): how a native screen (or, for testing, a web page) drives one
  * DOM component rendered in a WebView (or an iframe).
  *
  * Host → island, delivered as a `message` event (`WebView.postMessage` on native, `postMessage` into

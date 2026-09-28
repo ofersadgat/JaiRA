@@ -6,7 +6,7 @@ import { useLook } from "../tokens";
 import type { IslandProps } from "./types";
 
 /**
- * An island on NATIVE (decision 0013, S5): the island page for `component`, bundled with the app by
+ * An island on NATIVE (decision 0015, S5): the island page for `component`, bundled with the app by
  * `plugins/withIslands.js` and loaded from `file://`, driven over the bridge in
  * `packages/client/island/protocol.ts`.
  *

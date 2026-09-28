@@ -53,7 +53,7 @@ function whichIsland(): Plugin {
 }
 
 /**
- * An island page (decision 0013, S5), built on its own: `base: "./"` so every asset resolves beside
+ * An island page (decision 0015, S5), built on its own: `base: "./"` so every asset resolves beside
  * `index.html`, which is how a WebView loads it from the app bundle's asset folder. One page per
  * component, in `dist-island/<component>/`.
  */

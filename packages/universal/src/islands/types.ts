@@ -1,4 +1,4 @@
-/** An island (decision 0013): one of the renderer's DOM components, hosted where DOM is not. */
+/** An island (decision 0015): one of the renderer's DOM components, hosted where DOM is not. */
 export interface IslandProps {
   component: "markdown" | "diff" | "markdownEditor";
   props: Record<string, unknown>;

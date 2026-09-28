@@ -1,5 +1,5 @@
 /**
- * Bundle the island pages into the app (decision 0013, S5): `dist-island/<component>/` becomes
+ * Bundle the island pages into the app (decision 0015, S5): `dist-island/<component>/` becomes
  * `android/app/src/main/assets/island/<component>/` (read at `file:///android_asset/island/…`) and a
  * folder reference `island` in the iOS app bundle (read under `Paths.bundle`). Build them first:
  * `npm --workspace @jaira/client run build:island`.

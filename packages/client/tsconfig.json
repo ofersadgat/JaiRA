@@ -8,7 +8,7 @@
     // Relative to THIS folder, not the repository root the base config uses: One's Metro preset turns
     // these paths into module-resolver aliases resolved against the project folder and ignores
     // `baseUrl` (1.27.1), so `./packages/universal/…` became packages/client/packages/…. TypeScript reads
-    // both forms the same. `@jaira/ui` is today's renderer where it stands (0013, S1).
+    // both forms the same. `@jaira/ui` is today's renderer where it stands (0015, S1).
     "baseUrl": ".",
     "paths": {
       "@jaira/ui/*": ["../app/src/renderer/*"],

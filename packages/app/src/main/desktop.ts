@@ -67,14 +67,14 @@ import { startPlugins } from "@jaira/runtime";
 /** `dist/` layout produced by the build (see build.mjs / vite.config.ts). */
 const DIST = __dirname;
 const RENDERER_HTML = join(DIST, "renderer", "index.html");
-/** One's `dist/client`, copied here by `build:client` (decision 0013, S1). */
+/** One's `dist/client`, copied here by `build:client` (decision 0015, S1). */
 const CLIENT_DIR = join(DIST, "client");
 /**
  * Which renderer the window loads: the One client (the default), or the Vite build it replaced, kept
  * while the spike compares the two (`JAIRA_RENDERER=vite`).
  */
 const RENDERER: "one" | "vite" = process.env.JAIRA_RENDERER === "vite" ? "vite" : "one";
-/** The throwaway remote transport (0013 S2), when `JAIRA_SPIKE_WS` asks for it. */
+/** The throwaway remote transport (0015 S2), when `JAIRA_SPIKE_WS` asks for it. */
 let spike: SpikeSocket | undefined;
 const PRELOAD = join(DIST, "preload.cjs");
 
@@ -618,7 +618,7 @@ async function readLicenseManifest(): Promise<unknown> {
   return fromPlugins.length === 0 || !Array.isArray(manifest.entries) ? manifest : { ...manifest, entries: [...manifest.entries, ...fromPlugins] };
 }
 
-/** One request, from whichever transport carried it: the window's IPC, or the spike socket (0013 S2). */
+/** One request, from whichever transport carried it: the window's IPC, or the spike socket (0015 S2). */
 async function dispatch(channel: IpcChannel, request: unknown): Promise<unknown> {
   try {
     // Errors surface as rejections the renderer can display; the service's

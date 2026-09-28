@@ -31,15 +31,15 @@ function oneWithJsonFix(options: Parameters<typeof one>[0]): PluginOption[] {
 }
 
 /**
- * The One app (decision 0013).
+ * The One app (decision 0015).
  *
  * SPA only, and no loaders: Electron serves `dist/client` from its `app://` protocol, where there is
  * no server to render or load anything. The aliases are the app's own (`packages/app/vite.config.ts`),
  * for the same reason — a workspace junction can point into another checkout — plus `@jaira/ui`, which
- * is today's renderer where it stands. It is not moved during the spike; see 0013, S1.
+ * is today's renderer where it stands. It is not moved during the spike; see 0015, S1.
  */
 export default {
-  // Metro for native (0013: "native is stable in Metro mode"); `metro.config.js` carries the monorepo.
+  // Metro for native (0015: "native is stable in Metro mode"); `metro.config.js` carries the monorepo.
   plugins: [oneWithJsonFix({
       web: { defaultRenderMode: "spa" },
       native: { bundler: "metro" },

@@ -6,7 +6,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { IPC_CHANNELS, type IpcChannel, type PushMessage } from "@jaira/shared";
 
 /**
- * THROWAWAY (decision 0013, S2): the quickest remote transport that works, so a phone or a browser on
+ * THROWAWAY (decision 0015, S2): the quickest remote transport that works, so a phone or a browser on
  * another machine can drive this window's engine. The real remote step is being built elsewhere and
  * replaces this file and `socketBridge.ts` together; nothing else knows either exists.
  *
@@ -66,7 +66,7 @@ export function startSpikeSocket(
   http.listen(port, "0.0.0.0");
   const server = new WebSocketServer({ server: http });
   const clients = new Set<WebSocket>();
-  log(`spike socket (0013 S2, throwaway) on http://0.0.0.0:${port}/ — token ${token}`);
+  log(`spike socket (0015 S2, throwaway) on http://0.0.0.0:${port}/ — token ${token}`);
 
   const matches = (offered: unknown): boolean => {
     if (typeof offered !== "string" || offered.length !== token.length) return false;

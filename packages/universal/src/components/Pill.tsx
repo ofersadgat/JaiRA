@@ -4,7 +4,7 @@ import type { PillSlotProps } from "@jaira/ui/slots";
 import { useTokens } from "../tokens";
 
 /**
- * `pill.tsx`'s `Pill`, universal (decision 0013, S3). Read that one for what a pill says; this one
+ * `pill.tsx`'s `Pill`, universal (decision 0015, S3). Read that one for what a pill says; this one
  * only has to look the same. Every value below is the `.pill` rule in `styles.css`, line for line:
  *
  *   .pill          inline-flex, centred, gap 3, padding 1 6 1 5, radius 999, line-height 15px,

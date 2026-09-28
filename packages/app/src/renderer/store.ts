@@ -158,7 +158,7 @@ declare global {
   }
 }
 
-/** A bridge installed by the host page, which wins over `window.jaira` (decision 0013). */
+/** A bridge installed by the host page, which wins over `window.jaira` (decision 0015). */
 let installed: JairaBridge | undefined;
 
 /**
@@ -1089,7 +1089,7 @@ export function useApp() {
    * way out and is the last point at which the renderer can still reach main.
    */
   useEffect(() => {
-    // React Native has a `window` without events (decision 0013); unmounting still flushes there.
+    // React Native has a `window` without events (decision 0015); unmounting still flushes there.
     const events = typeof window.addEventListener === "function";
     if (events) window.addEventListener("pagehide", flushUi);
     return () => {
@@ -2173,7 +2173,7 @@ export function useApp() {
   // over every one. Before the first read it is the defaults, which is what `index.html` stamps.
   const systemDark = useSystemDark();
   const look = useMemo(() => lookOf(state.config), [state.config]);
-  // No document on native (decision 0013): there the look is read from `appearance` below instead.
+  // No document on native (decision 0015): there the look is read from `appearance` below instead.
   const hasDocument = typeof document !== "undefined";
   useEffect(() => {
     if (hasDocument) document.documentElement.dataset["theme"] = resolveTheme(look.mode, systemDark);
@@ -2205,7 +2205,7 @@ export function useApp() {
 
   /**
    * The look as three facts, for a host with no root element to read it from — the native universal
-   * tree (decision 0013), whose tokens replay `styles.css` for a palette and a scheme it has to be told.
+   * tree (decision 0015), whose tokens replay `styles.css` for a palette and a scheme it has to be told.
    */
   const appearance = useMemo(
     () => ({ palette: look.palette, scheme: resolveTheme(look.mode, systemDark), wash: surfaceOf(look).statusWash }),

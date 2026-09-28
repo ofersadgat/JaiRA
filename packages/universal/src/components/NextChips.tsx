@@ -4,7 +4,7 @@ import type { NextMove } from "@jaira/shared/browser";
 import { useTokens } from "../tokens";
 
 /**
- * `board.tsx`'s `NextChips`, universal (decision 0013): one chip per move out of where the task
+ * `board.tsx`'s `NextChips`, universal (decision 0015): one chip per move out of where the task
  * stands. Each chip is a `<button>` on web, so it takes the base `button` rule first and `.move-chip`
  * over it; the contests that matter:
  *

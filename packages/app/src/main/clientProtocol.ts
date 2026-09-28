@@ -4,7 +4,7 @@ import { extname, join, normalize, sep } from "node:path";
 import { protocol } from "electron";
 
 /**
- * The One client, served to the window from `app://jaira/` (decision 0013, S1).
+ * The One client, served to the window from `app://jaira/` (decision 0015, S1).
  *
  * Not `loadFile`: One has no hash history, so under `file://` its router would read the file's path
  * as the route. A standard, secure scheme gives the page an ordinary origin, absolute `/assets/…`

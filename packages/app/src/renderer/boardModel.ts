@@ -1,5 +1,5 @@
 /**
- * The board's pure half (decision 0013): what a card says and where it goes, with no DOM in it, so the
+ * The board's pure half (decision 0015): what a card says and where it goes, with no DOM in it, so the
  * universal copies and the native app can use it without pulling in the board's React-DOM half
  * (`board.tsx` → `menu` → `popover` → `react-dom`). `board.tsx` re-exports all of it.
  */

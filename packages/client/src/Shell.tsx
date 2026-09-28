@@ -11,7 +11,7 @@ import { socketBridge } from "../bridges/socketBridge";
 // imports every page in Node to read its exports, even in SPA mode, and there is no window there.
 if (typeof window !== "undefined") installGlobalErrorReporting();
 
-/** Where the token is remembered in a browser. Throwaway, with the rest of 0013 S2. */
+/** Where the token is remembered in a browser. Throwaway, with the rest of 0015 S2. */
 const TOKEN_KEY = "jaira.spike.token";
 
 /**

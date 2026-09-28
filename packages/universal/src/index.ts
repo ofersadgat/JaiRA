@@ -12,7 +12,7 @@ export { CopiesBoard } from "./screens/CopiesBoard";
 export const COPIES: Partial<Slots> = { Pill, TaskCard };
 
 /**
- * The copies the DESKTOP draws (decision 0013, S4): each passed the fidelity gate against its DOM
+ * The copies the DESKTOP draws (decision 0015, S4): each passed the fidelity gate against its DOM
  * original, and then the S1 gate with the desktop switched to it.
  */
 export const SHARED: Partial<Slots> = { Pill, TaskCard };

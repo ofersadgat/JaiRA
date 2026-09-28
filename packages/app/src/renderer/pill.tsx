@@ -336,7 +336,7 @@ export function layoutPills(counts: PillCounts, budget: number): PillLayout {
  * `word` is what the board card uses (§5.3) — a card is one task, so "how many" is always one and
  * saying so is noise, while "running" is what the column sorts itself by before a title is read.
  *
- * Slotted (decision 0013): the One client's universal tree draws `@jaira/universal`'s copy instead.
+ * Slotted (decision 0015): the One client's universal tree draws `@jaira/universal`'s copy instead.
  */
 export const Pill = slotted("Pill", DomPill);
 

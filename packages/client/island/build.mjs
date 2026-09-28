@@ -1,5 +1,5 @@
 /**
- * Build every island page (decision 0013, S5): one classic page per component, in `dist-island/<name>/`.
+ * Build every island page (decision 0015, S5): one classic page per component, in `dist-island/<name>/`.
  *
  *   npm --workspace @jaira/client run build:island
  */

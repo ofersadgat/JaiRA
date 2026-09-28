@@ -1,13 +1,13 @@
 import type { IpcChannel } from "@jaira/shared/browser";
 
 /**
- * What a read-only remote client may ask (decision 0013, ruling 5: "read only as a v1 and interactive
+ * What a read-only remote client may ask (decision 0015, ruling 5: "read only as a v1 and interactive
  * as v2"). An ALLOWLIST, so a channel added to the contract later is refused until someone decides it
  * only reads. v2 drops the list.
  *
  * Three entries change something, and are here because the UI cannot be walked without them:
  * `project:open` (standing on a project; the spike's clients share the desktop's current project,
- * 0013 S2), `artifact:serve` (a grant to show an artifact that already exists), and `limits:watch` and
+ * 0015 S2), `artifact:serve` (a grant to show an artifact that already exists), and `limits:watch` and
  * `file:release` (a subscription and a handle, both bookkeeping).
  */
 const READS = new Set<IpcChannel>([

@@ -1,5 +1,5 @@
 /**
- * The phone app, run in a browser standing in for the phone (decision 0013, ruling 6).
+ * The phone app, run in a browser standing in for the phone (decision 0015, ruling 6).
  *
  *   npm --workspace @jaira/app run build
  *   npx tsx packages/app/shots/phone.mts

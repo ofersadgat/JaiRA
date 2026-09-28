@@ -3,7 +3,7 @@ import { evaluate, resolveAt, type TokenValue, type Where } from "./cssTokens";
 import type { Look, Tokens } from "./tokens";
 
 /**
- * Tokens on NATIVE (decision 0013): `styles.css`'s cascade replayed for where the component stands.
+ * Tokens on NATIVE (decision 0015): `styles.css`'s cascade replayed for where the component stands.
  * The same API as `tokens.tsx`, which on web returns the CSS variables themselves.
  */
 const WhereContext = createContext<Where & { wash: boolean }>({ palette: "ink", scheme: "light", scopes: [], wash: false });

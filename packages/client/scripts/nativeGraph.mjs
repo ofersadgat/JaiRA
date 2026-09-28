@@ -1,5 +1,5 @@
 /**
- * What the native app pulls in (decision 0013): the import graph from every route file (Metro bundles
+ * What the native app pulls in (decision 0015): the import graph from every route file (Metro bundles
  * all of `app/` for native, whichever platform a page is for), resolved the
  * way Metro resolves it for a phone (`.android`/`.native` files first, the client's aliases), checked
  * for packages that cannot run there. Needs no device and no Android SDK.

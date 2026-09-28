@@ -4,7 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import { useTokens } from "../tokens";
 
 /**
- * Where a phone says which desktop to talk to (decision 0013). THROWAWAY with the spike's transport:
+ * Where a phone says which desktop to talk to (decision 0015). THROWAWAY with the spike's transport:
  * an address and a token, both printed by a desktop started with `JAIRA_SPIKE_WS=<port>`. The real
  * remote step pairs instead.
  */

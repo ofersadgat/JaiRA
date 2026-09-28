@@ -8,7 +8,7 @@ import { readsOnly } from "../../bridges/readOnly";
 import { socketBridge } from "../../bridges/socketBridge";
 
 /**
- * The phone (decision 0013). Ruling 1: "the exact same ui on mobile as there is on desktop", as a
+ * The phone (decision 0015). Ruling 1: "the exact same ui on mobile as there is on desktop", as a
  * migration step. Two views of one connection:
  *
  * - DESKTOP: the desktop's own UI, served by its spike socket and drawn in a WebView — the whole app as

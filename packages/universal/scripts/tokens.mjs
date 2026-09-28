@@ -1,5 +1,5 @@
 /**
- * `styles.css`'s custom properties, as data the universal tree can resolve on native (decision 0013).
+ * `styles.css`'s custom properties, as data the universal tree can resolve on native (decision 0015).
  *
  *   npm --workspace @jaira/universal run tokens          write src/cssTokens.generated.ts
  *   npm --workspace @jaira/universal run tokens -- --check   fail if it is stale (typecheck runs this)

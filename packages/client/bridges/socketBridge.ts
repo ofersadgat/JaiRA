@@ -1,7 +1,7 @@
 import type { IpcChannel, IpcRequest, IpcResponse, JairaBridge, PushMessage } from "@jaira/shared/browser";
 
 /**
- * THROWAWAY (decision 0013, S2): `JairaBridge` over the desktop's spike socket
+ * THROWAWAY (decision 0015, S2): `JairaBridge` over the desktop's spike socket
  * (`packages/app/src/main/spikeSocket.ts`, whose header has the frames). Replaced, with that file, by
  * the real remote transport when it lands; nothing above the bridge notices.
  *
