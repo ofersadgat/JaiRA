@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-island/
 # Installers and unpacked apps from `npm run app:dist` (packages/app/package.mjs).
 packages/app/release/
 *.tsbuildinfo
@@ -17,3 +18,7 @@ packages/app/shots/parity/
 packages/app/shots/.world*/
 # The same, for the scratch TypeScript project `verifyTypeCheck.mts` builds to check itself against.
 packages/app/shots/.verify/
+# Expo's and One's generated state in the client (decision 0013): the dev server's cache and typed routes.
+packages/client/.expo/
+packages/client/app/routes.d.ts
+packages/client/.native-graph/

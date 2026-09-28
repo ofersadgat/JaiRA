@@ -55,7 +55,7 @@ function whichIsland(): Plugin {
 /**
  * An island page (decision 0013, S5), built on its own: `base: "./"` so every asset resolves beside
  * `index.html`, which is how a WebView loads it from the app bundle's asset folder. One page per
- * component, in `dist/island/<component>/`.
+ * component, in `dist-island/<component>/`.
  */
 export default defineConfig({
   root: local("."),
@@ -69,7 +69,7 @@ export default defineConfig({
     ],
   },
   build: {
-    outDir: local(`../dist/island/${ISLAND}`),
+    outDir: local(`../dist-island/${ISLAND}`),
     emptyOutDir: true,
     target: "chrome111",
     chunkSizeWarningLimit: 65536,

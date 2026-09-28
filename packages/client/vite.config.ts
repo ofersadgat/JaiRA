@@ -39,7 +39,15 @@ function oneWithJsonFix(options: Parameters<typeof one>[0]): PluginOption[] {
  * is today's renderer where it stands. It is not moved during the spike; see 0013, S1.
  */
 export default {
-  plugins: [oneWithJsonFix({ web: { defaultRenderMode: "spa" } })],
+  // Metro for native (0013: "native is stable in Metro mode"); `metro.config.js` carries the monorepo.
+  plugins: [oneWithJsonFix({
+      web: { defaultRenderMode: "spa" },
+      native: { bundler: "metro" },
+      // Off: One rewrites path-mapped imports itself, against this folder rather than the tsconfig`s
+      // `baseUrl`, so `@jaira/universal` became `../packages/…` under packages/client. Both bundlers
+      // carry the aliases explicitly instead (here, and `metro.config.cjs`).
+      config: { tsConfigPaths: false },
+    })],
   resolve: {
     alias: [
       { find: "@jaira/ui", replacement: local("../app/src/renderer") },

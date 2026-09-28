@@ -126,6 +126,7 @@ import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } fr
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
 import { applyAppearance, useSystemDark } from "./appearance";
+import { surfaceOf } from "@jaira/shared/browser";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
 import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
@@ -1088,9 +1089,11 @@ export function useApp() {
    * way out and is the last point at which the renderer can still reach main.
    */
   useEffect(() => {
-    window.addEventListener("pagehide", flushUi);
+    // React Native has a `window` without events (decision 0013); unmounting still flushes there.
+    const events = typeof window.addEventListener === "function";
+    if (events) window.addEventListener("pagehide", flushUi);
     return () => {
-      window.removeEventListener("pagehide", flushUi);
+      if (events) window.removeEventListener("pagehide", flushUi);
       flushUi();
     };
   }, [flushUi]);
@@ -2170,9 +2173,11 @@ export function useApp() {
   // over every one. Before the first read it is the defaults, which is what `index.html` stamps.
   const systemDark = useSystemDark();
   const look = useMemo(() => lookOf(state.config), [state.config]);
+  // No document on native (decision 0013): there the look is read from `appearance` below instead.
+  const hasDocument = typeof document !== "undefined";
   useEffect(() => {
-    document.documentElement.dataset["theme"] = resolveTheme(look.mode, systemDark);
-  }, [look.mode, systemDark]);
+    if (hasDocument) document.documentElement.dataset["theme"] = resolveTheme(look.mode, systemDark);
+  }, [look.mode, systemDark, hasDocument]);
 
   /**
    * Apply the typography preferences to the same element (SHELL.md §6).
@@ -2183,8 +2188,8 @@ export function useApp() {
    * property writes and the whole window moves coherently.
    */
   useEffect(() => {
-    applyAppearance(document.documentElement, look);
-  }, [look]);
+    if (hasDocument) applyAppearance(document.documentElement, look);
+  }, [look, hasDocument]);
 
   /**
    * Publish how each editor looks, on the same terms — see `editorLook.ts`.
@@ -2195,8 +2200,17 @@ export function useApp() {
    * screen follows a switch as it is flipped instead of at the next time a file is opened.
    */
   useEffect(() => {
-    applyEditors(document.documentElement, look.editors);
-  }, [look.editors]);
+    if (hasDocument) applyEditors(document.documentElement, look.editors);
+  }, [look.editors, hasDocument]);
+
+  /**
+   * The look as three facts, for a host with no root element to read it from — the native universal
+   * tree (decision 0013), whose tokens replay `styles.css` for a palette and a scheme it has to be told.
+   */
+  const appearance = useMemo(
+    () => ({ palette: look.palette, scheme: resolveTheme(look.mode, systemDark), wash: surfaceOf(look).statusWash }),
+    [look, systemDark],
+  );
 
   /**
    * Publish the renderer choices for the components that cannot be handed them.
@@ -4816,5 +4830,5 @@ export function useApp() {
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 
-  return { state, actions };
+  return { state, actions, appearance };
 }

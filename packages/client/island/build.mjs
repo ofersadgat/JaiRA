@@ -1,5 +1,5 @@
 /**
- * Build every island page (decision 0013, S5): one classic page per component, in `dist/island/<name>/`.
+ * Build every island page (decision 0013, S5): one classic page per component, in `dist-island/<name>/`.
  *
  *   npm --workspace @jaira/client run build:island
  */
@@ -8,7 +8,8 @@ import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-rmSync(fileURLToPath(new URL("../dist/island", import.meta.url)), { recursive: true, force: true });
+// Beside `dist/`, not in it: `one build` empties `dist/` on every run.
+rmSync(fileURLToPath(new URL("../dist-island", import.meta.url)), { recursive: true, force: true });
 for (const island of ["markdown", "diff", "markdownEditor"]) {
   console.log(`island: ${island}`);
   execFileSync(process.execPath, [fileURLToPath(new URL("../../../node_modules/vite/bin/vite.js", import.meta.url)), "build", "--config", "vite.config.ts", "--logLevel", "warn"], {

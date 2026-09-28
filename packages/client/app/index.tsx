@@ -1,15 +1,6 @@
-import { TamaguiProvider } from "@tamagui/core";
-import { SHARED, config } from "@jaira/universal";
-import { Shell } from "../src/Shell";
-
 /**
- * The desktop's page, as Electron loads it (decision 0013): today's DOM tree, with the universal
- * copies that have passed the fidelity gate standing in for their DOM originals (`SHARED`, S4).
+ * `/`. The platforms split one level down, in `src/routes/index(.web).tsx`, not here: One 1.27 names a
+ * `.web.tsx` page as a route of its own (`/index.web`), and Metro bundles every file in `app/` for
+ * native — so a DOM page here would drag the whole DOM tree into the phone's bundle.
  */
-export default function Index() {
-  return (
-    <TamaguiProvider config={config} defaultTheme="light">
-      <Shell slots={SHARED} />
-    </TamaguiProvider>
-  );
-}
+export { default } from "../src/routes/index";

@@ -5,7 +5,7 @@
  *   npx tsx packages/app/shots/islands.mts            with file access for file pages (as the WebView will be set)
  *   npx tsx packages/app/shots/islands.mts --strict   without it: what a WebView left at its defaults would do
  *
- * A harness page loads the built island page (`packages/client/dist/island/`) in iframes, from
+ * A harness page loads the built island page (`packages/client/dist-island/`) in iframes, from
  * `file://`, as a WebView loads it from the app's assets: each island is its own opaque origin, and a
  * worker or module script is subject to the same file-URL rules Android applies. It drives each
  * island over the real bridge (`packages/client/island/protocol.ts`) on a phone-sized viewport with
@@ -20,7 +20,7 @@ import { pathToFileURL } from "node:url";
 import { App } from "./driver.mjs";
 
 const CLIENT_DIST = join(import.meta.dirname, "..", "..", "client", "dist");
-const HARNESS = join(CLIENT_DIST, "island-harness.html");
+const HARNESS = join(CLIENT_DIST, "..", "dist-island", "harness.html");
 const OUT = join(import.meta.dirname, "parity", "islands");
 const CHROME = ["C:/Program Files/Google/Chrome/Application/chrome.exe", "/usr/bin/google-chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find(existsSync);
 const STRICT = process.argv.includes("--strict");
@@ -32,7 +32,7 @@ window.__events = [];
 const frames = {};
 window.open_ = (id, component, props, look, height, auto) => {
   const f = document.createElement("iframe");
-  f.src = "island/" + component + "/index.html";
+  f.src = component + "/index.html";
   f.style.cssText = "width:100%;border:0;display:block;height:" + height + "px";
   document.body.appendChild(f);
   frames[id] = { f, component, props, look, auto, t0: performance.now() };
@@ -114,7 +114,7 @@ async function waitFor(app: App, test: string, what: string, seconds = 60): Prom
 
 async function main(): Promise<void> {
   if (CHROME === undefined) throw new Error("no Chrome to stand in for the phone");
-  if (!existsSync(join(CLIENT_DIST, "island", "diff", "index.html"))) throw new Error("build the island first: npm --workspace @jaira/client run build:island");
+  if (!existsSync(join(CLIENT_DIST, "..", "dist-island", "diff", "index.html"))) throw new Error("build the island first: npm --workspace @jaira/client run build:island");
   writeFileSync(HARNESS, HARNESS_HTML);
   mkdirSync(OUT, { recursive: true });
   const flags = STRICT ? [] : ["--allow-file-access-from-files"];

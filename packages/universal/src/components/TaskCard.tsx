@@ -1,11 +1,12 @@
 import type { JSX, MouseEvent as ReactMouseEvent } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
-import { CardDom, chipTip, endedLabel, holdingLabelOf, originLineOf, waitingKindOf } from "@jaira/ui/board";
+import { chipTip, endedLabel, holdingLabelOf, originLineOf, waitingKindOf } from "@jaira/ui/boardModel";
 import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
 import type { CardProps } from "@jaira/ui/slots";
 import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskName";
 import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
 import { useLook, useTokens } from "../tokens";
+import { CardDom } from "./domFallback";
 import { NextChips } from "./NextChips";
 import { Pill } from "./Pill";
 
@@ -36,7 +37,7 @@ export function TaskCard(props: CardProps): JSX.Element {
   const look = useLook();
   const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, child = false, last = false } = props;
   const uncovered = onUndo !== undefined || originLineOf(card) !== undefined;
-  if (uncovered && isWeb) return <CardDom {...props} />;
+  if (uncovered && CardDom !== null) return <CardDom {...props} />;
 
   const status = card.activeStatus ?? card.status;
   const pill = pillKindOf(status as TaskStatus | InstanceStatus | undefined);

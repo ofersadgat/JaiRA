@@ -10,8 +10,13 @@
     "build:island": "node island/build.mjs"
   },
   "dependencies": {
+    "@expo/cli": "57.0.27",
+    "@jaira/universal": "*",
     "@react-navigation/native": "~7.3.16",
+    "@tamagui/core": "~2.7.7",
+    "@vxrn/vite-plugin-metro": "1.27.1",
     "expo": "~57.0.11",
+    "expo-build-properties": "~57.0.22",
     "one": "1.27.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -19,7 +24,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-web": "^0.21.3",
-    "@jaira/universal": "*",
-    "@tamagui/core": "~2.7.7"
-  }
+    "react-native-webview": "^13.16.1"
+  },
+  "main": "one/metro-entry"
 }
