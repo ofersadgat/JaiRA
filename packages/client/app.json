@@ -31,7 +31,8 @@
           }
         }
       ],
-      "./plugins/withIslands.cjs"
+      "./plugins/withIslands.cjs",
+      "./plugins/withBundledFonts.cjs"
     ]
   }
 }

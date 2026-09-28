@@ -28,7 +28,7 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
-import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, statesPath, withPaths, isPluginId, SHARED_SESSION, type HealthItem, type HealthPage } from "@jaira/shared/browser";
+import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, withPaths, isPluginId, SHARED_SESSION, type HealthItem, type HealthPage } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
@@ -47,7 +47,8 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared/browser";
 import { isArchivableStatus } from "@jaira/shared/browser";
-import { Board, lanesOf } from "./board";
+import { Board } from "./board";
+import { boardCardOrderOf, pickCard } from "./boardModel";
 import { dragOffersOf, undoableOn } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
@@ -62,10 +63,11 @@ import {
   type MenuPoint,
 } from "./menu";
 import { AppearancePane } from "./appearancePane";
+import { appearanceLayeringOf, settingsLocked } from "./appearanceModel";
 import { useSettingsParts } from "./settingsParts";
 import { Segmented, SettingsPage } from "./settingsLayout";
 import { SettingsLayerContext, SettingsRowsContext } from "./controls";
-import { SECTIONS, settingsLayersFor, type SettingsIconName } from "./settingsSections";
+import { JUST_YOU_VIEWS, SECTIONS, SETTINGS_ICONS, settingsFrameOf, settingsLayersFor, settingsLeadParts, settingsPageProblems, settingsProjectLabel, type JustYouView, type SettingsIconName } from "./settingsSections";
 import { Icon } from "./icons";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "./workSummaryView";
 import { AboutPane } from "./aboutPane";
@@ -132,7 +134,8 @@ import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView } from "./runViews";
 import { SidePanel } from "./sidePanel";
 import { faceOf, type HostedGate, type PanelHost } from "./panelFaces";
-import { EMPTY_STACK, push, reconcile, routeChange, selectStep, shownStack, topOf, widthKeyOf, type PanelEntry, type PanelStack } from "./panelStack";
+import { EMPTY_STACK, push, selectStep, topOf, type PanelEntry, type PanelStack } from "./panelStack";
+import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, roomOf, usePanelStacks, useRoomRule } from "./panelHost";
 import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
 import { FOOTER_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "./shellModel";
@@ -147,7 +150,6 @@ import {
   PANE,
   PANE_WIDE,
   PANEL_MIN,
-  PANEL_RAIL,
   OPENED,
   SHUT,
   SIDEBAR_RAIL,
@@ -161,16 +163,6 @@ import {
 import { publishUsageFigures, useNow } from "./limitsStore";
 import { History, NewTask, NewTaskForm } from "./widgets";
 import { invoke, subscribe, useApp, type SettingsSection, type View } from "./store";
-
-/** The rooms that have a side panel, and the fold each remembers — see `uiState.ts`'s `FOLD`. */
-type PanelRoom = "files" | "tasks" | "chat" | "debug";
-const PANEL_FOLD: Record<PanelRoom, string> = {
-  files: FOLD.panelFiles,
-  tasks: FOLD.panelTasks,
-  chat: FOLD.panelChat,
-  debug: FOLD.panelDebug,
-};
-const EMPTY_STACKS: Record<PanelRoom, PanelStack> = { files: EMPTY_STACK, tasks: EMPTY_STACK, chat: EMPTY_STACK, debug: EMPTY_STACK };
 
 /**
  * The layer switch at a settings page's top-right corner — always there, on every page, whatever the
@@ -199,13 +191,6 @@ function SettingsHeader({
   return <LayerPicker value={layer} layers={settingsLayersFor(project !== null)} projectName={project ?? undefined} onChange={onLayer} disabled={busy} />;
 }
 
-/** The Just you view's two readings: only what the personal layer states, or every row. */
-type JustYouView = "changed" | "every";
-
-const JUST_YOU_VIEWS: ReadonlyArray<readonly [string, JustYouView]> = [
-  ["What you changed", "changed"],
-  ["Every row", "every"],
-];
 
 /**
  * A settings tab as a PAGE — its name, whose settings these are, the layer switch, and on the personal
@@ -228,22 +213,22 @@ function SettingsFrame({
   layer: ConfigLayer;
   children: ReactNode;
 }): JSX.Element {
-  const meta = SECTIONS.find((s) => s.id === section);
+  const frame = settingsFrameOf(section, layer, justYou);
   // A page with no setting on it (Licenses) has no layer to switch and no "Just you" rows to pick.
-  if (meta?.layered === false) {
+  if (!frame.layered) {
     return (
-      <SettingsPage title={meta.label} lead={lead}>
+      <SettingsPage title={frame.title} lead={lead}>
         {children}
       </SettingsPage>
     );
   }
   return (
     <SettingsPage
-      title={meta?.label ?? "Settings"}
+      title={frame.title}
       lead={lead}
       aside={aside}
-      onlyStated={layer === "you" && justYou === "changed"}
-      {...(layer === "you" ? { under: <Segmented label="Which rows" value={justYou} options={JUST_YOU_VIEWS} onChange={onJustYou} /> } : {})}
+      onlyStated={frame.onlyStated}
+      {...(frame.under ? { under: <Segmented label="Which rows" value={justYou} options={JUST_YOU_VIEWS} onChange={onJustYou} /> } : {})}
     >
       {children}
     </SettingsPage>
@@ -255,29 +240,7 @@ function SettingsFrame({
  * left unset falls back to — what the layer switch at the head's right edge changes, said in words.
  */
 function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: string | null): ReactNode {
-  const meta = SECTIONS.find((s) => s.id === section);
-  if (meta === undefined) return undefined;
-  const purpose = meta.purpose;
-  if (!meta.layered) return purpose;
-  if (layer === "you") {
-    return (
-      <>
-        {purpose} Showing <b>Just you</b>: kept on this machine in <b>personal-settings.json</b>, never shared, and read after every other layer.
-      </>
-    );
-  }
-  if (layer === "project" && project !== null) {
-    return (
-      <>
-        {purpose} Editing <b>{projectName(project)}</b>; anything left unset comes from <b>~/.jaira</b>, and yours override both.
-      </>
-    );
-  }
-  return (
-    <>
-      {purpose} Editing <b>~/.jaira</b>, shared by every project on this machine; a project's own settings override it, and yours override both.
-    </>
-  );
+  return settingsLeadParts(section, layer, project)?.map((part, i) => (part.bold === true ? <b key={i}>{part.text}</b> : part.text));
 }
 
 
@@ -306,20 +269,9 @@ function windowTitle(project: string | null, view: View | "settings", doc: strin
  * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models and
  * Tools borrow its model and tool; the other five are its own: a disc half filled (how a thing looks),
  * a plug (what it connects to), a play mark (a run), stacked disks (stored), an i in a circle (about
- * this build). The pages themselves, in
- * the sidebar's one list, are `settingsSections.ts`.
+ * this build) — `SETTINGS_ICONS`, in `settingsSections.ts` with the pages themselves, in the sidebar's
+ * one list.
  */
-const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
-  appearance: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 3v18"],
-  connections: ["M9 3v5", "M15 3v5", "M6 8h12v3a6 6 0 0 1-12 0Z", "M12 17v4"],
-  machines: ["M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z", "M8 20h8", "M12 16v4"],
-  models: ["m12 3 8 4.5v9L12 21l-8-4.5v-9Z", "M12 12l8-4.5", "M12 12v9", "M12 12 4 7.5"],
-  tools: ["M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"],
-  runs: ["M7 4.5v15l12-7.5Z"],
-  data: ["M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z", "M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6", "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"],
-  about: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 11v5.5", "M12 7.6v.1"],
-};
-
 function SettingsIcon({ name }: { name: SettingsIconName }): JSX.Element {
   return (
     <svg className="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -919,48 +871,14 @@ export default function App(): JSX.Element {
    * person shift-clicking. Built from the same `lanesOf` the board renders with, so the range can
    * never disagree with what is on screen.
    */
-  const boardCardsOf = useCallback(
-    (project: string): BoardCard[] => {
-      const b = state.boards[project];
-      if (b === undefined || b === null) return [];
-      return [
-        ...b.columns.flatMap((c) => lanesOf(c.cards).flatMap((l) => l.cards)),
-        ...lanesOf(b.atLevel).flatMap((l) => l.cards),
-      ];
-    },
-    [state.boards],
-  );
+  const boardCardsOf = useCallback((project: string): BoardCard[] => boardCardOrderOf(state.boards[project]), [state.boards]);
 
-  /** A click on a card: plain selects, ctrl/cmd toggles membership, shift extends from the anchor. */
+  /** A click on a card: plain selects, ctrl/cmd toggles membership, shift extends from the anchor (`pickCard`). */
   const pickTask = useCallback(
     (project: string, taskId: string, e?: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
-      const same = picked !== null && picked.project === project ? picked : null;
-      if (e?.shiftKey === true && same !== null) {
-        const order = boardCardsOf(project).map((c) => c.taskId);
-        const a = order.indexOf(same.anchor);
-        const b = order.indexOf(taskId);
-        if (a >= 0 && b >= 0) {
-          // The range REPLACES the set (explorer semantics), and the anchor stays put so a second
-          // shift-click re-measures from the same end rather than from wherever the first landed.
-          setPicked({ project, ids: order.slice(Math.min(a, b), Math.max(a, b) + 1), anchor: same.anchor });
-          actions.select(taskId, project);
-          return;
-        }
-      }
-      if ((e?.ctrlKey === true || e?.metaKey === true) && same !== null) {
-        const had = same.ids.includes(taskId);
-        const ids = had ? same.ids.filter((id) => id !== taskId) : [...same.ids, taskId];
-        if (ids.length === 0) {
-          setPicked(null);
-          return;
-        }
-        setPicked({ project, ids, anchor: had ? same.anchor : taskId });
-        // The panel follows the last card TOUCHED — for a removal, the last one still standing.
-        actions.select(had ? ids[ids.length - 1]! : taskId, project);
-        return;
-      }
-      setPicked({ project, ids: [taskId], anchor: taskId });
-      actions.select(taskId, project);
+      const next = pickCard(picked, project, taskId, e, () => boardCardsOf(project).map((c) => c.taskId));
+      setPicked(next.picked);
+      if (next.select !== undefined) actions.select(next.select, project);
     },
     [actions, boardCardsOf, picked],
   );
@@ -998,37 +916,11 @@ export default function App(): JSX.Element {
    * about the next few minutes. What IS remembered — widths per kind, the fold per room — is in `ui`.
    * Per room, so going to Settings and back finds each panel where it was left.
    */
-  const [stacks, setStacks] = useState<Record<PanelRoom, PanelStack>>(EMPTY_STACKS);
   /** Where a letterhead's pick goes — set below, once the panel's host exists. */
   const pickStepRef = useRef<(instanceId: string) => void>(() => undefined);
-  const room: PanelRoom | null = view === "files" || view === "tasks" || view === "chat" || view === "debug" ? view : null;
-  const roomRef = useRef(room);
-  roomRef.current = room;
-  /**
-   * The PINNED stack — one for the whole window, not one per room (the person's ruling, 2026-09-24:
-   * "a pinned context panel should be immune from any stack switches"). While it is set it is the
-   * panel in every room that has one; each room keeps reconciling its own stack underneath, and a room
-   * standing on something else offers it on the offer bar. Pushes, pops and tabs work on it as on any
-   * stack. Unpinning — or taking the offer, or closing — hands the column back to the room.
-   */
-  const [pinnedStack, setPinnedStack] = useState<PanelStack | null>(null);
-  /** The offer the person waved away, so it is not offered again until the room moves on. */
-  const [dismissedOffer, setDismissedOffer] = useState<string | null>(null);
-  const stacksRef = useRef(stacks);
-  stacksRef.current = stacks;
-  const pinnedRef = useRef<PanelStack | null>(null);
-  /** The stack the frame is drawing — the pinned one with its offer, or the room's. See below. */
-  const shownRef = useRef<PanelStack>(EMPTY_STACK);
-  const onStack = useCallback((next: (stack: PanelStack) => PanelStack): void => {
-    const at = roomRef.current;
-    const shown = pinnedRef.current !== null ? shownRef.current : at === null ? EMPTY_STACK : stacksRef.current[at];
-    if (pinnedRef.current === null && at === null) return;
-    // See `routeChange`: whose stack a change lands on, pinned or not.
-    const routed = routeChange(pinnedRef.current, shown, next(shown));
-    if (routed.pinned !== pinnedRef.current) setPinnedStack(routed.pinned);
-    if (routed.dismissed !== undefined) setDismissedOffer(routed.dismissed);
-    if (routed.room !== undefined && at !== null) setStacks((was) => ({ ...was, [at]: routed.room! }));
-  }, []);
+  // The stacks, the pinned stack and `onStack` — see `panelHost.ts`, which the universal shell shares.
+  const room = roomOf(view);
+  const { stacks, setStacks, pinnedStack, onStack, roomRef, panelStack } = usePanelStacks(room);
   /**
    * The values somebody asked to HOLD — the Held tab of a conversation's context. Across rooms: a
    * thing held is held, wherever you go to read it next.
@@ -1474,13 +1366,7 @@ export default function App(): JSX.Element {
    *
    * A task that is not the selected one has no plan here, and copying is what is legal for any task.
    */
-  const startAgain = (taskId: string): void => {
-    const project = state.selectedProject ?? undefined;
-    const act = detail !== null && detail.taskId === taskId ? primaryAct(detail) : "rerun";
-    if (act === "resume") void actions.resumeTask(taskId, project);
-    else if (act === "start") void actions.startTask(taskId, undefined, project);
-    else void actions.rerunTask(taskId, project);
-  };
+  const startAgain = (taskId: string): void => startAgainOf(actions, detail, state.selectedProject ?? undefined, taskId);
 
   /**
    * Everything a file surface may need beyond the file itself.
@@ -1663,90 +1549,14 @@ export default function App(): JSX.Element {
   /* ---------------------------------------------------------------------------------------------- */
 
   /**
-   * Whether the main view is showing the selected task's CONVERSATION — the one fact that decides
-   * whether the panel beside it may show that conversation too. It may not (the person's ruling,
-   * 2026-09-24): the same conversation is never on screen twice, so the panel shows its CONTEXT.
-   *
-   * A walked-into run shows its conversation when the toggle says so, when the tail is a subagent's,
-   * or when there is no board to show instead — a run that declared no children and entered none is
-   * read as what it said whatever the toggle says (`RunView`).
+   * Whether the main view is showing the selected task's CONVERSATION, and what each room's panel
+   * stands on — its RULE (the panel rulings, 2026-09-24). See `panelHost.ts`, shared with the universal
+   * shell: the stack's root is the rule; everything else in the stack was pushed by a link inside it.
    */
-  const trailTail = state.trail.at(-1);
-  const trailNode = trailTail === undefined || detail === null ? undefined : nodeAt(detail.instances, trailTail.instanceId);
-  const trailHasBoard = (state.trailState?.children.length ?? state.state?.children.length ?? 0) > 0 || (trailNode?.children.length ?? 0) > 0;
-  const conversationInMain =
-    (view === "tasks" || view === "files") &&
-    trailTail !== undefined &&
-    detail !== null &&
-    (trailTail.sidechain !== undefined || runMode === "conversation" || !trailHasBoard);
-
-  /** A task as the panel's root, and the same task's context beside its conversation. */
-  const taskEntryOf = (taskId: string, project: string | undefined): PanelEntry => ({
-    kind: "task",
-    key: `task:${taskId}`,
-    taskId,
-    ...(project !== undefined ? { project } : {}),
-    tab: "conversation",
-  });
-  const convoEntryOf = (taskId: string, project: string | undefined): PanelEntry => ({
-    kind: "convo",
-    key: `convo:${taskId}`,
-    taskId,
-    ...(project !== undefined ? { project } : {}),
-    tab: "steps",
-  });
+  const conversationInMain = conversationInMainOf(state, runMode);
   const selectedProject = state.selectedProject ?? undefined;
-  /**
-   * What each room's panel stands on — its RULE (the panel rulings, 2026-09-24). The stack's root is
-   * this; everything else in the stack was pushed by a link inside the panel.
-   *
-   *  - Files: a run on the trail — its context beside its conversation, or the task beside its board;
-   *    a state file — the state (Run · Checks; its configuration is the editor); a plain file or a
-   *    folder — nothing: the panel closes, and what there is to say is the ⓘ on the address.
-   *  - Tasks: the same for a run walked into; a column — its state; a card — its task.
-   *  - Chat: the conversation's context (folded until asked for).
-   *  - Debug: the self-test's task.
-   */
-  const ruleOf = (at: PanelRoom): PanelEntry | null => {
-    if (at === "chat") {
-      return chat.taskId === null ? null : { kind: "chat", key: `chat:${chat.taskId}`, taskId: chat.taskId, project: chatProject, tab: "produced" };
-    }
-    if (at === "debug") {
-      return detail !== null && detail.taskId === state.debug.taskId ? taskEntryOf(detail.taskId, selectedProject) : null;
-    }
-    if (trailTail !== undefined && detail !== null && (at === "files" || state.taskFocus !== null)) {
-      return conversationInMain ? convoEntryOf(detail.taskId, selectedProject) : taskEntryOf(detail.taskId, selectedProject);
-    }
-    if (at === "files") {
-      return state.stateId !== null && state.doc?.stateId !== undefined
-        ? { kind: "state", key: `state:${state.at ?? ""}:${state.stateId}`, stateId: state.stateId, project: state.at, tab: "run" }
-        : null;
-    }
-    if (state.taskWorkflow !== null && state.inspect !== "workflow") {
-      return { kind: "state", key: `state:${state.taskWorkflowProject ?? ""}:${state.taskWorkflow}`, stateId: state.taskWorkflow, project: state.taskWorkflowProject, tab: "run" };
-    }
-    return detail !== null ? taskEntryOf(detail.taskId, selectedProject) : null;
-  };
-  const rule = room === null ? null : ruleOf(room);
-  const ruleSig = rule === null ? "" : JSON.stringify(rule);
-  useEffect(() => {
-    if (room === null) return;
-    setStacks((was) => {
-      const next = reconcile(was[room], rule);
-      return next === was[room] ? was : { ...was, [room]: next };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room, ruleSig]);
-  /**
-   * A question arriving takes the task's panel to its conversation — the one time the panel moves
-   * the reader by itself, because the alternative is a task that stopped for no visible reason.
-   */
-  const askingId = inlineGate?.requestId;
-  useEffect(() => {
-    if (askingId === undefined || room !== "tasks" || rule?.kind !== "task") return;
-    setStacks((was) => ({ ...was, tasks: reconcile(was.tasks, rule, { tab: "conversation" }) }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askingId]);
+  const rule = room === null ? null : panelRuleOf(room, state, { taskId: chat.taskId, project: chatProject }, conversationInMain);
+  useRoomRule(room, rule, inlineGate?.requestId, setStacks);
 
   /** A subagent adopted into the main view before its task's run was on the trail: walked into once it is. */
   const [adoptAfter, setAdoptAfter] = useState<{ taskId: string; step: TrailStep } | null>(null);
@@ -1757,10 +1567,6 @@ export default function App(): JSX.Element {
     setAdoptAfter(null);
   }, [adoptAfter, state.selected, state.trail.length, detail, actions]);
 
-  const roomStack = room === null ? EMPTY_STACK : stacks[room];
-  const panelStack: PanelStack = room === null ? EMPTY_STACK : shownStack(pinnedStack, roomStack, dismissedOffer);
-  pinnedRef.current = pinnedStack;
-  shownRef.current = panelStack;
   const panelTop = topOf(panelStack);
   // A re-run with changes needs its workflow's form, which is read on demand like the New-task form's.
   const rerunOf = panelTop?.kind === "rerun" ? (detail?.taskId === panelTop.taskId ? detail.workflow : null) : null;
@@ -1830,7 +1636,7 @@ export default function App(): JSX.Element {
 
   /** The gate a task is parked on, wherever its panel is — not only the selected one's. */
   const gateOf = (taskId: string): HostedGate | undefined => {
-    const asking = pending.find((p) => (p.about === taskId || p.taskId === taskId) && p.moves !== true);
+    const asking = parkedGateOf(pending, taskId);
     if (asking === undefined) return undefined;
     return {
       pending: asking,
@@ -2006,10 +1812,7 @@ export default function App(): JSX.Element {
    * stack is empty. Its width is remembered per KIND of thing on top (`widthKeyOf`), and animates when
    * that kind changes — a form wants more room than a task's tabs, and the column says so by moving.
    */
-  const panelFoldKey = room === null ? null : PANEL_FOLD[room];
-  const panelOpen = panelFoldKey === null ? true : openOf(ui, panelFoldKey);
-  const panelWidthKey = panelTop === undefined ? PANE.panelTask : widthKeyOf(panelTop.kind);
-  const panelWidth = panelTop === undefined ? 0 : panelOpen ? Math.max(PANEL_MIN, Math.min(paneOf(ui, panelWidthKey), PANE_WIDE)) : PANEL_RAIL;
+  const { foldKey: panelFoldKey, open: panelOpen, widthKey: panelWidthKey, width: panelWidth } = panelGeometryOf(ui, room, panelTop);
   const [panelTween, setPanelTween] = useState(false);
   useEffect(() => {
     setPanelTween(true);
@@ -2043,16 +1846,13 @@ export default function App(): JSX.Element {
             onFold={(folded) => panelFoldKey !== null && actions.setFold(panelFoldKey, !folded)}
             // Beside a conversation — a chat, or one adopted into the main view — the panel is its
             // context and has no other door: ✕ folds it to the rail.
-            closeFolds={panelStack.entries[0]?.kind === "chat" || panelStack.entries[0]?.kind === "convo"}
+            closeFolds={closeFoldsOf(panelStack)}
           />
         </aside>
       </>
     );
   /** The New-task form is a panel root in the Tasks room; the button opens it there. */
-  const openNewTask = (): void => {
-    onStack((was) => push(was, { kind: "newTask", key: "newTask" }));
-    actions.setFold(PANEL_FOLD.tasks, true);
-  };
+  const openNewTask = (): void => openNewTaskWith(onStack, actions.setFold);
 
   /**
    * The sidebar's rows, with the drawer each one opens onto.
@@ -2236,7 +2036,7 @@ export default function App(): JSX.Element {
         {SECTIONS.flatMap(({ id, label, icon }) => {
           const open = view === "settings" && state.section === id;
           // What needs attention on this page, as the Settings row's pills say it for all of them.
-          const problems = id === "connections" || id === "about" ? healthCounts(health, id) : {};
+          const problems = settingsPageProblems(health, id);
           const row = (
             <li
               key={id}
@@ -2725,7 +2525,7 @@ export default function App(): JSX.Element {
                 <SettingsFrame
                   section={state.section}
                   lead={settingsLeadOf(state.section, state.configLayer, state.at)}
-                  aside={<SettingsHeader layer={state.configLayer} project={state.at === null ? null : (shownProjects.find((p) => p.project === state.at)?.label ?? projectName(state.at))} busy={state.busy} onLayer={actions.setConfigLayer} />}
+                  aside={<SettingsHeader layer={state.configLayer} project={settingsProjectLabel(shownProjects, state.at)} busy={state.busy} onLayer={actions.setConfigLayer} />}
                   layer={state.configLayer}
                   justYou={justYou}
                   onJustYou={setJustYou}
@@ -2912,14 +2712,10 @@ export default function App(): JSX.Element {
                     conversation={look.conversation}
                     editors={look.editors}
                     renderers={look.renderers}
-                    busy={state.busy || !(state.configLayer !== "project" || state.at !== null)}
+                    busy={settingsLocked(state.busy, state.configLayer, state.at)}
                     // Every change lands in the layer the page's switch shows and is taken out of the
                     // stronger ones, so it shows (`clearedAbove`); a row's ↺ takes this layer's out.
-                    layered={{
-                      stated: (path) => statesPath(state.config?.[state.configLayer], path),
-                      inherit: (paths) => void actions.writeLook(paths.map((path) => [path, undefined] as const), state.configLayer),
-                      locked: state.busy || !(state.configLayer !== "project" || state.at !== null),
-                    }}
+                    layered={appearanceLayeringOf(state.config, state.configLayer, settingsLocked(state.busy, state.configLayer, state.at), (writes, layer) => void actions.writeLook(writes, layer))}
                     onChange={(patchTo) => void actions.setAppearance(patchTo, state.configLayer)}
                     onTheme={(mode) => void actions.setTheme(mode, state.configLayer)}
                     onConversation={(patchTo) => void actions.setConversation(patchTo, state.configLayer)}

@@ -8,16 +8,9 @@
 import type { JSX } from "react";
 import type { ConfigLayer, WorkflowLayer } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "./fileTypes";
-import { BUILT_IN_LABEL, LAYER_LABELS } from "./layerLabels";
+import { layerSegmentOf } from "./layerLabels";
 
 export type { ConfigLayer };
-
-const LAYER_TITLES: Record<WorkflowLayer | ConfigLayer, string> = {
-  you: "only you, on this machine — personal-settings.json, never shared, and read after every other layer",
-  project: "this project only",
-  base: "the shared root — changes here affect every project that has not overridden them",
-  system: "what ships with JaiRA — read-only; it is changed by overriding it in one of the other two",
-};
 
 /**
  * The layer switch, used wherever a write has to name where it lands.
@@ -47,8 +40,8 @@ export function LayerPicker<L extends WorkflowLayer | ConfigLayer = ConfigLayer>
   return (
     <div className="layer-picker" role="group" aria-label="Configuration layer">
       {(layers ?? (["you", "project", "base"] as L[])).map((layer) => (
-        <button key={layer} className={value === layer ? "layer-on" : "ghost"} onClick={() => onChange(layer)} disabled={disabled} title={layer === "project" && projectName !== undefined ? `${projectName} only` : LAYER_TITLES[layer]}>
-          {layer === "system" ? BUILT_IN_LABEL : layer === "project" && projectName !== undefined ? projectName : LAYER_LABELS[layer as ConfigLayer]}
+        <button key={layer} className={value === layer ? "layer-on" : "ghost"} onClick={() => onChange(layer)} disabled={disabled} title={layerSegmentOf(layer, projectName).title}>
+          {layerSegmentOf(layer, projectName).label}
         </button>
       ))}
     </div>

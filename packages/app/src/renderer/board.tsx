@@ -13,14 +13,14 @@
  */
 import { Fragment, useEffect, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { BoardCard, BoardColumn, BoardView, InstanceStatus, MoveConfirm as MoveConfirmKind, NextMove, TaskStatus } from "@jaira/shared/browser";
-import { canConnect, ConnectDrag, nestUnder, ownColumnOf, previewOf, type ConnectAsk, type ConnectPreview, type Words } from "./connectDrag";
+import { canConnect, ConnectDrag, ownColumnOf, previewOf, type ConnectAsk, type ConnectPreview, type Words } from "./connectDrag";
 import { MachineChip } from "./machineChip";
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
 import { slotted } from "./slots";
-import { chipTip, endedAtOf, endedLabel, holdingLabelOf, LANE_LABEL, laneOf, lanesOf, LANES, originLineOf, waitingKindOf, type Lane } from "./boardModel";
+import { archivedSplitOf, chipTip, drillTargetOf, endedAtOf, endedLabel, holdingLabelOf, LANE_HEADED, LANE_LABEL, laneOf, laneRunsOf, lanesOf, LANES, originLineOf, waitingKindOf, type Lane, type LaneEntry } from "./boardModel";
 
-export { chipTip, endedAtOf, endedLabel, holdingLabelOf, LANE_LABEL, laneOf, lanesOf, LANES, originLineOf, waitingKindOf, type Lane };
+export { chipTip, drillTargetOf, endedAtOf, endedLabel, holdingLabelOf, LANE_HEADED, LANE_LABEL, laneOf, lanesOf, LANES, originLineOf, waitingKindOf, type Lane };
 import { cardRemoteWord } from "./remoteStrip";
 import { canDrag, requestFor, NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
 import { TaskName } from "./taskName";
@@ -69,22 +69,6 @@ export function StatusPill({ status }: { status?: string }): JSX.Element | null 
   const kind = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
   if (kind === null) return null;
   return <Pill kind={kind} word={PILL_WORD[kind]} title={status} />;
-}
-
-/**
- * Which state a card walks into.
- *
- * A card drill follows the TASK, not the column: it lands on the state that card is actually in one
- * level down, which is the same place a column drill goes right up until a task's active path skips
- * a level — and then it is the more useful of the two answers.
- *
- * At the root listing there is no level on the path to step past, so the target is the card's own
- * workflow root.
- */
-export function drillTargetOf(board: BoardView, card: BoardCard): string | undefined {
-  if (board.level === "") return card.workflow.length > 0 ? card.workflow : undefined;
-  const at = card.activePath.findIndex((step) => step.stateId === board.level);
-  return at < 0 ? undefined : card.activePath[at + 1]?.stateId;
 }
 
 /**
@@ -473,19 +457,6 @@ export function NextChips({ moves, onMove }: { moves: readonly NextMove[]; onMov
 }
 
 /**
- * Which lanes still earn a heading (SHELL.md §5.3).
- *
- * Not the active two. Every card in `running` and `paused` now carries a FILLED pill naming what it
- * is doing, so a "Running" rule over them is a line saying what each card under it already says —
- * the same argument `lanesOf` makes about a single-lane column, applied one level in.
- *
- * `finished` keeps its heading, and that is where the argument stops working: its pills go flat, and
- * flat is the register the whole rest of the column is in. `not-started` keeps one for a blunter
- * reason — a queued card has no pill at all, so the heading is the only thing saying what it is.
- */
-const LANE_HEADED: ReadonlySet<Lane> = new Set<Lane>(["not-started", "finished"]);
-
-/**
  * A column's cards, under a heading per lane.
  *
  * Headings only where there is something under them, and none at all when every card in the column
@@ -510,8 +481,7 @@ export function Lanes({
    */
   archived?: { shown: boolean; onToggle: () => void } | undefined;
 }): JSX.Element {
-  const put = cards.filter((card) => card.status === "archived").sort((a, b) => (b.archived?.at ?? 0) - (a.archived?.at ?? 0));
-  const live = put.length === 0 ? cards : cards.filter((card) => card.status !== "archived");
+  const { live, held: put } = archivedSplitOf(cards);
   const foot =
     put.length === 0 ? null : (
       <>
@@ -544,36 +514,27 @@ function LiveLanes({
   render: (card: BoardCard, last: boolean) => ReactNode;
   trailing?: boolean;
 }): JSX.Element {
-  // An adopted task files BENEATH the task that adopted it (decision 0005 §2), wherever its own
-  // status would have put it: what relates the two is not a lane.
-  const { top, beneath } = nestUnder(cards);
-  const withBeneath = (card: BoardCard, lastInLane: boolean): ReactNode => {
-    const under = beneath.get(card.taskId) ?? [];
-    return (
+  // Adopted tasks beneath their adopters, one lane unboxed and unheaded, `last` per lane: `laneRunsOf`.
+  const { boxed, runs } = laneRunsOf(cards, trailing);
+  const inOrder = (entries: readonly LaneEntry[]): ReactNode[] =>
+    entries.map(({ card, last, beneath }) => (
       <Fragment key={card.taskId}>
-        {render(card, lastInLane && under.length === 0)}
-        {under.map((child, i) => render(child, lastInLane && i === under.length - 1))}
+        {render(card, last)}
+        {beneath.map((child) => render(child.card, child.last))}
       </Fragment>
-    );
-  };
-  const inOrder = (list: readonly BoardCard[], followed = false): ReactNode[] => list.map((card, i) => withBeneath(card, !followed && i === list.length - 1));
-  const lanes = lanesOf(top);
-  // One lane: no heading, because a rule saying "Finished" over a column of nothing but finished
-  // cards says what every card under it says. The lane's OWN cards, not the ones passed in — a
-  // column that is all finished is the commonest case there is, and it is the one whose order the
-  // lane fixed.
-  if (lanes.length <= 1) return <>{inOrder(lanes[0]?.cards ?? [], trailing)}</>;
+    ));
+  if (!boxed) return <>{inOrder(runs[0]?.entries ?? [])}</>;
   return (
     <>
-      {lanes.map(({ lane, cards: inLane }) => (
+      {runs.map(({ lane, headed, count, entries }) => (
         <div key={lane} className={`lane lane-${lane}`}>
-          {LANE_HEADED.has(lane) ? (
+          {headed ? (
             <h5>
               <span className="grow app-label">{LANE_LABEL[lane]}</span>
-              <span className="count data-num">{inLane.length}</span>
+              <span className="count data-num">{count}</span>
             </h5>
           ) : null}
-          {inOrder(inLane)}
+          {inOrder(entries)}
         </div>
       ))}
     </>

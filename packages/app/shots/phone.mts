@@ -7,8 +7,8 @@
  * A desktop with the spike socket, a couple of finished tasks on its board, and a phone-sized headless
  * Chrome on `/native` — `NativeApp` through react-native-web, the same component tree Metro bundles
  * for Android and iOS. It connects with the address and token (as the Connect screen would be filled),
- * then photographs both views: the desktop's own UI in its frame (the whole-app island), and the
- * native copies drawing the desktop's live board through the store.
+ * then photographs the universal shell the phone draws — the desktop's frame from the copies, fitted to
+ * the phone's width and then at its own size — and checks there is no frame (WebView) in it.
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -44,24 +44,20 @@ async function main(): Promise<void> {
     await phone.until(says("Connect to a JaiRA desktop"), "the phone's connect screen");
     await phone.shot("connect");
     await phone.clickText("Connect");
-    await phone.until(`${says("Desktop UI")} && ${says("Native copies")}`, "the phone to connect");
+    // Connected, the phone draws the universal shell: the desktop's frame from the copies, no WebView.
+    await phone.until(says("Open a project"), "the phone to connect and draw the shell");
     console.log("(1) the phone app connected over the socket");
-
-    // The desktop's own UI, in the frame: wait for the board inside it.
-    await phone.until(
-      `(() => { const f = document.querySelector("iframe"); try { return f && f.contentDocument && f.contentDocument.body.innerText.includes("add dark mode"); } catch { return false; } })()`,
-      "the desktop UI to draw in its frame",
-    );
     await new Promise((r) => setTimeout(r, 1500));
-    await phone.shot("desktop-ui");
-    console.log("(2) the Desktop UI view draws the desktop's own board in its frame");
-
-    await phone.clickText("Native copies");
-    await phone.until(says("add dark mode"), "the native copies to draw the board");
-    await new Promise((r) => setTimeout(r, 1000));
-    await phone.shot("native-copies");
-    const census = await phone.evaluate<string>(`"Tamagui views " + document.querySelectorAll(".is_View").length + ", DOM cards " + document.querySelectorAll(".card").length`);
-    console.log(`(3) the Native copies view draws the live board from universal components (${census})`);
+    await phone.shot("shell-fit");
+    const census = await phone.evaluate<string>(
+      `"frames " + document.querySelectorAll("iframe").length + ", Tamagui views " + document.querySelectorAll(".is_View").length + ", DOM cards " + document.querySelectorAll(".card").length + ", not copied yet: " + ([...document.querySelectorAll("[data-testid^=uncopied-]")].map((e) => e.getAttribute("data-testid").slice(9)).join(", ") || "nothing")`,
+    );
+    console.log(`(2) the shell, fitted to the phone's width (${census})`);
+    if (!census.startsWith("frames 0")) throw new Error("the phone drew a frame: the shell must be native, not a WebView");
+    await phone.clickText("1:1");
+    await new Promise((r) => setTimeout(r, 800));
+    await phone.shot("shell-full");
+    console.log("(3) the shell at its own size, scrolled sideways");
     const complaints = [...phone.complaints].filter((c) => !/disk_cache|gpu_disk|Gpu Cache/.test(c));
     if (complaints.length > 0) console.log(`the phone spoke up:\n  ${complaints.slice(0, 8).join("\n  ")}`);
   } finally {

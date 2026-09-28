@@ -30,7 +30,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type JSX, type MouseEvent as ReactMouseEvent } from "react";
 import type { InstanceNode } from "@jaira/shared/browser";
-import { paletteOf, railOf, type RailLane, type RailStep } from "./rail";
+import { nameOf, paletteOf, paletteOfRun, railOf, type RailLane, type RailStep } from "./rail";
 import { autoFold, compact, type DisplayItem, type FoldCandidate, type VisibleRow } from "./stepCompaction";
 import { RailedRows } from "./railView";
 import { headerToneOf, surfaceKindOf, type HeaderTone } from "./stateSurface";
@@ -83,40 +83,9 @@ function stepsIn(node: InstanceNode): number {
   return node.children.reduce((total, child) => total + (child.children.length === 0 ? 1 : stepsIn(child)), 0);
 }
 
-/**
- * What a lane is CALLED, which is also what it is coloured by.
- *
- * The child key, because that is what the conversation's rail keys on: its lanes are opened from an
- * instance's ADDRESS (`atPiece` → `address.map(step => step.childKey)`), so a lane there is named by
- * the key its parent mounted it under. The two coincide on most workflows and do not have to — one
- * state file mounted twice is two lanes, two names and two colours, and keying the index on the state
- * id would give both of them one.
- */
-function nameOf(node: InstanceNode): string {
-  return node.childKey ?? node.stateId;
-}
-
-/**
- * The colours of one run — the single list both readings of it are drawn from.
- *
- * A hue is a state's position in the order states first appear (see `paletteOf`), so this only works
- * if there is ONE order. There was not: the conversation built its palette from its own band rows and
- * the index from its own instance rows, which are different lists in a different order, so the same
- * state came out olive in one column and blue in the next while both claimed to be drawing the same
- * run. The tree is the honest source for both — it is the run itself, it is in journal order, and it
- * holds every state either view can draw.
- */
-export function paletteOfRun(instances: readonly InstanceNode[]): Map<string, string> {
-  const names: { stateId: string }[] = [];
-  const walk = (nodes: readonly InstanceNode[]): void => {
-    for (const node of nodes) {
-      names.push({ stateId: nameOf(node) });
-      walk(node.children);
-    }
-  };
-  walk(instances);
-  return paletteOf(names);
-}
+// `nameOf` and `paletteOfRun` live in `rail.ts`, shared with the universal copy of the conversation
+// (decision 0015); re-exported here, where their callers have always found them.
+export { paletteOfRun } from "./rail";
 
 /**
  * How loud a row is.

@@ -1129,30 +1129,8 @@ function useMentions(hasProject: boolean, project: string | undefined): {
   }, [hasProject, project]);
 }
 
-/**
- * Which project the Chat view reads and writes — the rule, so it can be stated once and tested.
- *
- * **A chat call always names its project.** Left unnamed, main resolves "the focused project", and
- * that answers only while exactly one user project is open: it throws `no project is open` on a
- * window standing on `~/.jaira` — a shared session is not a user one — and `several projects are
- * open, so this call must name one` the moment a second checkout is, which is the arrangement this
- * shell exists for. Every read the view makes went through that resolution: the thread, the artifact
- * list, the plan the composer shows before the first message, and the `@` completion per keystroke.
- *
- * Three answers, in order:
- *
- *  - the OPEN conversation's own project. It is what `openConversation` was already being told and
- *    what nothing was reading, so a thread opened from the root list — which spans every project —
- *    was read out of whichever database main resolved rather than the one holding it.
- *  - the project the address is standing on: where a new conversation goes, and what the composer's
- *    plan is read from.
- *  - the shared root at the root of the address, where there is no project to stand in. The same
- *    rule `runTargetOf` gives base-layer workflows, and the one project that means the same thing in
- *    every window.
- */
-export function chatProjectOf(open: string | null, at: string | null): string {
-  return open ?? at ?? SHARED_SESSION;
-}
+// `chatProjectOf` lives in `chatWorkflow.ts` (pure), shared with the universal shell (decision 0015).
+export { chatProjectOf } from "./chatWorkflow";
 
 /** Which of a project's tasks are conversations — the list the drawer shows. */
 export function conversationsOf(tasks: readonly TaskSummary[]): TaskSummary[] {

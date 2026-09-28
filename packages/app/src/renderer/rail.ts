@@ -25,6 +25,7 @@
  * its state id — `explore` running twice is two lanes with one colour, and a rail that keyed on the
  * name would draw the second pass as a continuation of the first.
  */
+import type { InstanceNode } from "@jaira/shared/browser";
 
 /** How tall a row that forks or joins is. Fixed, because the curves are drawn inside it. */
 export const CAP = 34;
@@ -407,4 +408,39 @@ export function paletteOf(steps: readonly { stateId: string }[]): Map<string, st
     hues.set(step.stateId, (HUE0 + hues.size * GOLDEN) % 360);
   }
   return new Map([...hues].map(([id, hue]) => [id, `hsl(${hue.toFixed(1)} var(--rail-s) var(--rail-l))`]));
+}
+
+/**
+ * What a lane is CALLED, which is also what it is coloured by.
+ *
+ * The child key, because that is what the conversation's rail keys on: its lanes are opened from an
+ * instance's ADDRESS (`atPiece` → `address.map(step => step.childKey)`), so a lane there is named by
+ * the key its parent mounted it under. The two coincide on most workflows and do not have to — one
+ * state file mounted twice is two lanes, two names and two colours, and keying the index on the state
+ * id would give both of them one.
+ */
+export function nameOf(node: InstanceNode): string {
+  return node.childKey ?? node.stateId;
+}
+
+/**
+ * The colours of one run — the single list both readings of it are drawn from.
+ *
+ * A hue is a state's position in the order states first appear (see `paletteOf`), so this only works
+ * if there is ONE order. There was not: the conversation built its palette from its own band rows and
+ * the index from its own instance rows, which are different lists in a different order, so the same
+ * state came out olive in one column and blue in the next while both claimed to be drawing the same
+ * run. The tree is the honest source for both — it is the run itself, it is in journal order, and it
+ * holds every state either view can draw.
+ */
+export function paletteOfRun(instances: readonly InstanceNode[]): Map<string, string> {
+  const names: { stateId: string }[] = [];
+  const walk = (nodes: readonly InstanceNode[]): void => {
+    for (const node of nodes) {
+      names.push({ stateId: nameOf(node) });
+      walk(node.children);
+    }
+  };
+  walk(instances);
+  return paletteOf(names);
 }

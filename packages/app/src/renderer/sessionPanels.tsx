@@ -67,6 +67,7 @@ import {
   type SessionSegment,
 } from "./sessionBands";
 import { RailedRows } from "./railView";
+import { isLiveNode, isSolo, keyOfPiece, metaOf, pageRowsOf, spanOf, stepOfNote, summaryOf } from "./sessionRows";
 import type { RailStep } from "./rail";
 
 /** Nothing folded — the default for a host that does not remember folds. Frozen, so it cannot be
@@ -287,40 +288,7 @@ function sideOf(
   return undefined;
 }
 
-/**
- * What a piece is remembered as when it is folded.
- *
- * Three parts, and each one is load-bearing. The INSTANCE, which names one execution of one state
- * for the task's whole life. The SEQUENCE, because a state that called twice is two pieces. And the
- * SCOPE — the task — because the other two are not enough on their own: this map outlives the
- * selection, and two tasks would otherwise fold each other's pieces under one key.
- *
- * The alternative was a bucket per task, which is what `SHUT` ids are for. It loses to this by one
- * property: a task pruned from the database leaves its keys behind either way, and a single bucket
- * is one entry to forget rather than one per task nobody can enumerate.
- */
-function keyOfPiece(piece: SessionPiece, scope: string): string {
-  return `${scope}:${piece.node.instanceId}:${piece.seq ?? ""}`;
-}
 
-/**
- * The SESSION's span — when it started, and how long the whole of it took.
- *
- * The envelope of its pieces rather than the sum of them: a session interrupted and resumed spent
- * the gap doing nothing, and reporting the sum would say a conversation took four minutes when it
- * was open for twenty. Which is also why this belongs to the gutter and not to any letterhead — it
- * is a fact about the thread, and no single state in it knows it.
- *
- * A session still open has no duration yet and says only when it began.
- */
-function spanOf(segment: SessionSegment): string {
-  const from = Math.min(...segment.pieces.map((piece) => piece.startedAt));
-  if (!Number.isFinite(from)) return "";
-  const ends = segment.pieces.map((piece) => piece.endedAt);
-  const to = ends.some((end) => end === undefined) ? undefined : Math.max(...(ends as number[]));
-  const took = to !== undefined && to >= from ? durationOf(to - from) : undefined;
-  return [clockOf(from), took].filter((part) => part !== undefined && part.length > 0).join(" · ");
-}
 
 /**
  * One state inside a session's panel — its letterhead, and its transcript under it.
@@ -386,64 +354,9 @@ function Piece({
   );
 }
 
-/**
- * The clock a header carries, and how long it took.
- *
- * Formatted here rather than in the header because it is arithmetic over a node, and a header should
- * be handed words. A run still going has no duration to state, and says nothing rather than zero.
- */
-export function metaOf(node: InstanceNode, now?: number): string {
-  // How long it TOOK, or — for a state still going, when the caller is keeping time — how long it has
-  // been going. The second reading is what a live run wants from its rail: the moment a state was
-  // entered is a fact about the past, and "twenty minutes so far" is the fact about the present. A
-  // caller that passes no clock gets the finished reading only, exactly as before.
-  const took =
-    node.endedAt !== undefined
-      ? durationOf(node.endedAt - node.startedAt)
-      : now !== undefined && isLiveNode(node)
-        ? `${durationOf(Math.max(0, now - node.startedAt))} so far`
-        : undefined;
-  return [clockOf(node.startedAt), took].filter((part) => part !== undefined && part.length > 0).join(" · ");
-}
 
-/** A state that is still going — the same reading the projection's `isLive` makes, minus `superseded`. */
-export function isLiveNode(node: InstanceNode): boolean {
-  return !node.superseded && (node.status === "running" || node.status === "waiting_for_user" || node.status === "blocked");
-}
 
-/**
- * What a FOLDED state's line says instead of its label — see {@link StateHeader}.
- *
- * The one thing available without reading the record: how it ended, and what it cost. A richer
- * summary (the docs it wrote, the severity it exited at) is the operation's OUTPUT, which the
- * projection does not carry per instance yet — so this says the two things it can rather than
- * guessing at the one it cannot.
- */
-function summaryOf(piece: SessionPiece): string | undefined {
-  const op = piece.node.operation;
-  const parts: string[] = [];
-  if (op?.status === "failed") parts.push(op.reason ?? "failed");
-  else if (piece.node.status === "canceled") parts.push("canceled");
-  // No cost: what a state spent is in its details. The header's number is the CONTEXT it added,
-  // on the right before the time, folded or open (usage-readings contract).
-  return parts.length > 0 ? parts.join(" · ") : undefined;
-}
 
-/**
- * Whether the whole view is ONE operation — in which case none of the chrome above is earned.
- *
- * The chrome rule (see `transcriptView.tsx`) is that a card marks the boundary between one operation
- * and the next. A view holding a single piece has no next, so its card is a fold, a status dot and a
- * call signature wrapped around the only thing on the page — and it reads as a CHILD of what you are
- * looking at rather than as what you are looking at. Walking into a leaf run and being shown its
- * transcript inside a collapsible box headed with its own name is exactly that misread.
- *
- * Only the piece is dropped, never the sheet: the session name in the gutter is a different fact and
- * still worth having, because a leaf that continued its parent's conversation says so there.
- */
-function isSolo(bands: readonly SessionBand[]): boolean {
-  return bands.length === 1 && bands[0]!.segments.length === 1 && bands[0]!.segments[0]!.pieces.length === 1;
-}
 
 /**
  * One session's panel: its name in the grey above it, then what it said.
@@ -1157,37 +1070,8 @@ const VERB: Record<BandNote["kind"], string> = {
   asked: "asked",
 };
 
-/**
- * Where one note sits on the rail, and whether it OPENS a lane.
- *
- * Only entering does. The other three all happen inside a state that is already open, and two of them
- * are addressed by a path that is not their own: a transition's path is where it ARRIVES, and the row
- * belongs to the state that took it; a blocked child's path is the child, which never became a state
- * at all — which is the whole content of the note. Both are drawn against their parent.
- */
-export function stepOfNote(note: BandNote, root: string): RailStep {
-  const at = segmentsFrom(note.path, root);
-  const opens = note.kind === "entered";
-  // A made task's path is the element's (`work[0]`), and the row belongs to the state that made it:
-  // nothing was entered here, so no lane opens, and the line sits against its parent.
-  const inside = opens || note.kind === "failure" ? at : at.slice(0, -1);
-  return {
-    // The instance where there is one: `explore` running twice is two lanes, and a key on the state
-    // would fold the second pass into the first. A note that never became an instance cannot collide
-    // with anything — nothing else in the run is at its seq.
-    key: opens && note.instanceId !== undefined ? `i${note.instanceId}` : `n${note.seq}`,
-    // The PATH's last segment first, for the reason the band step above says: a path is child keys
-    // (`conversation.ts` builds it from `childKey`), the palette is keyed by child key, and
-    // `note.stateId` is the state DEFINITION's id — `feature/product/draft` against a palette
-    // holding `draft`. The id is the fallback for a root, which has no key.
-    // The KEY, not the segment: a fan-out element's segment is `build[0]`, and the palette — shared
-    // with the index — is keyed by `build`. The lane's identity keeps the element (`at`); its name
-    // and colour do not.
-    stateId: segmentKey(at[at.length - 1] ?? note.stateId?.split("/").pop() ?? ""),
-    at: inside,
-    opens,
-  };
-}
+// `stepOfNote` lives in `sessionRows.ts` with the rest of the page's row logic; re-exported here.
+export { isLiveNode, metaOf, stepOfNote };
 
 /** The whole conversation: bands down the page, in the order they happened. */
 export function SessionBandsView({
@@ -1339,83 +1223,26 @@ export function SessionBandsView({
   // never opened a conversation at all, so "this run has not said anything yet" was the whole screen
   // — a true sentence standing where the reason belonged.
   if (given.length === 0 && notes.length === 0) return <p className="empty">{empty ?? "This run has not said anything yet."}</p>;
-  // A conversation's band is cut where one of its workflow tools took effect, so the row saying what
-  // it did sits right after the call that did it, before the reply. See `splitAtNotes`.
-  const bands = splitAtNotes(given, notes);
-  const bare = isSolo(bands);
-  const placed = placeNotes(notes, bands);
-  const starters = startersOf(bands);
-  // From the bands as GIVEN: a turn a note cut is two pieces of one position, and counted twice it
-  // would read as a fork of itself.
-  const forks = forksOf(given.flatMap((band) => band.segments.flatMap((segment) => segment.pieces)));
-
-  /**
-   * The page as one flat sequence of rows, so the rail can draw the hierarchy beside it.
-   *
-   * The two lists are built together and stay index-aligned: `steps` is what the rail reasons about
-   * (a path, and whether the row enters it) and `nodes` is what the row says. They are separate
-   * because a rail row is about a STATE and a page row is about anything at all — a panel, a note, a
-   * mark — and the rail also inserts rows of its own where a state is left.
-   */
-  const steps: RailStep[] = [];
-  const nodes: ReactNode[] = [];
-  /** Each row's clock, for the two things placed among rows by time: an armed cut, and the origin seam. */
-  const ats: number[] = [];
-  /** The entered note behind each row that is one, by row index and by lane key — what a cut names. */
-  const noteRows = new Map<number, BandNote>();
-  const laneNotes = new Map<string, BandNote>();
-  const add = (step: RailStep, node: ReactNode, at: number): void => {
-    steps.push(step);
-    nodes.push(node);
-    ats.push(at);
-  };
+  // The page as one flat sequence of rows, and the rail's steps beside it — `pageRowsOf`, shared with
+  // the universal copy (decision 0015). What each row SAYS is decided here.
+  const page = pageRowsOf(given, notes, root);
+  const { bands, bare, starters, forks, noteRows, laneNotes } = page;
+  const steps: RailStep[] = [...page.steps];
+  const ats: number[] = [...page.ats];
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
-  /** Where a panel's state sits. The address is stamped from the run's root, the same basis a note's
-   *  path has, so both are trimmed to the module being read the same way. */
-  const atPiece = (piece: SessionPiece): string[] =>
-    segmentsFrom((piece.node.address ?? []).map(addressSegment).join("/"), root);
-  const addNotes = (list: readonly BandNote[]): void => {
-    for (const note of list) {
-      const step = stepOfNote(note, root);
-      if (note.kind === "entered" || note.kind === "transition") {
-        noteRows.set(steps.length, note);
-        laneNotes.set(step.key, note);
-      }
-      add(
-        step,
-        <NoteRow
-          note={note}
-          root={root}
-          {...(onCut !== undefined ? { onCut } : {})}
-          {...(onSelectTask !== undefined ? { onSelectTask } : {})}
-          {...(adopted !== undefined ? { adopted } : {})}
-          {...(moveQuestion !== undefined ? { moveQuestion } : {})}
-        />,
-        note.at,
-      );
-    }
-  };
-
-  for (const [i, band] of bands.entries()) {
-    addNotes(placed[i]!);
-    // A band can hold several conversations at once, and they are laid out ACROSS. Its place on the
-    // rail is its first piece's: the row is one row however many panels are in it.
-    const lead = band.segments[0]?.pieces[0];
-    add(
-      {
-        key: `b${i}`,
-        // The CHILD KEY where there is one, which is what {@link paletteOfRun} keys its hues by.
-        // It was the bare `stateId`, and that is the whole of why the gutter drew grey: every
-        // mounted state is `feature/product/draft` under the key `draft`, the palette holds `draft`,
-        // and `palette.get("feature/product/draft")` misses and falls back to `var(--rule)`. The
-        // index beside it looked right because it asks with `nameOf`, so the two views disagreed
-        // about a colour they are documented as sharing. See `laneColour` in `railView.tsx`.
-        stateId: lead === undefined ? "" : (lead.node.childKey ?? lead.node.stateId),
-        at: lead === undefined ? [] : atPiece(lead),
-        opens: false,
-      },
+  const nodes: ReactNode[] = page.rows.map((row) =>
+    row.kind === "note" ? (
+      <NoteRow
+        note={row.note}
+        root={root}
+        {...(onCut !== undefined ? { onCut } : {})}
+        {...(onSelectTask !== undefined ? { onSelectTask } : {})}
+        {...(adopted !== undefined ? { adopted } : {})}
+        {...(moveQuestion !== undefined ? { moveQuestion } : {})}
+      />
+    ) : (
       <Band
-        band={band}
+        band={row.band}
         bare={bare}
         starters={starters}
         forks={forks}
@@ -1427,11 +1254,9 @@ export function SessionBandsView({
         onSetShut={onSetShut}
         scope={scope}
         render={render}
-      />,
-      band.startedAt,
-    );
-  }
-  addNotes(placed[bands.length]!);
+      />
+    ),
+  );
 
   /**
    * The ARMED cut, drawn on the rail.

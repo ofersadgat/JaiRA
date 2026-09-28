@@ -23,8 +23,10 @@
  * states it, and on the personal layer the line saying what it replaces.
  */
 import type { JSX, ReactNode } from "react";
-import type { ConfigPath } from "@jaira/shared/browser";
 import { InheritButton, SettingsLayerContext, useInheritLabel, useLayerRow } from "./controls";
+import type { RowLayer } from "./settingsRows";
+
+export type { RowLayer } from "./settingsRows";
 
 /** A Settings page: its title, whose settings these are, and its sections. */
 export function SettingsPage({
@@ -68,22 +70,6 @@ export function SettingsPage({
       {children}
     </div>
   );
-}
-
-/**
- * A row's (or a section's) place in the layers: the config paths it writes, whether the layer being
- * edited states them, and how to take them out again.
- */
-export interface RowLayer {
-  /** The config paths the row writes, the first stated one being what its "instead of" line reports. */
-  paths: readonly ConfigPath[];
-  /** The layer being edited states it — the ↺ is drawn. */
-  stated: boolean;
-  /** Take the row's paths out of the layer being edited, so it inherits again. */
-  onInherit: () => void;
-  disabled?: boolean | undefined;
-  /** How the row spells a value, for the "instead of" line and the ↺ — a palette's name rather than its id. */
-  format?: ((value: unknown, path: string) => string) | undefined;
 }
 
 /** ↺ beside a layered row's or section's name, while the page's layer states it. */

@@ -44,9 +44,10 @@ export function font(t: Tokens, spec: FontSpec): Record<string, unknown> {
   const lh = spec.lineHeight ?? 1.5;
   const color = spec.color === undefined ? t.v("text") : /^[a-z][a-z0-9-]*$/.test(spec.color) ? t.v(spec.color) : spec.color;
   return {
-    ...familyOf(t, spec.voice, weight),
     fontSize: size,
     fontWeight: String(weight),
+    // After the weight: on native a cut face says `normal`, since the weight is in the face itself.
+    ...familyOf(t, spec.voice, weight, px ?? 12),
     ...(spec.italic === true ? { fontStyle: "italic" } : {}),
     // Replayed, sizes are numbers and so must spacing and line height be; on the desktop's page they
     // stay relative, as the stylesheet writes them, so a size preference moves them with the text.
@@ -61,21 +62,26 @@ export function font(t: Tokens, spec: FontSpec): Record<string, unknown> {
 /**
  * The family, as each platform names it. On web the stack (`var(--font-app)`, or the replayed stack
  * the `/rn` page registers with `@font-face`). On native a single family: the bundled face cut at the
- * nearest weight (`fonts.ts`), since Android cannot pick a weight out of one variable file.
+ * nearest weight — and for DM Sans the nearest optical size, which Chromium sets to the font size —
+ * since Android can pick neither out of one variable file (`scripts/fonts.py` cuts them).
  */
-function familyOf(t: Tokens, voice: Voice, weight: number): Record<string, unknown> {
+function familyOf(t: Tokens, voice: Voice, weight: number, size: number): Record<string, unknown> {
   const stack = t.v(`font-${voice}`);
   if (Platform.OS === "web") return { fontFamily: stack };
   const first = String(stack).split(",")[0]!.trim().replace(/^["']|["']$/g, "");
-  return { fontFamily: nativeFamily(first, weight) };
+  const family = nativeFamily(first, weight, size);
+  // A cut face is its own family, drawn at its own weight: asking for a weight on top of it would
+  // make Android fake one.
+  return family === first ? { fontFamily: family } : { fontFamily: family, fontWeight: "normal" };
 }
 
-/** The weights the bundled faces are cut at for native (`scripts/fonts.py`). */
-const CUT = [400, 500, 550, 600, 650, 700, 800];
-function nativeFamily(family: string, weight: number): string {
-  if (family !== "DM Sans" && family !== "JetBrains Mono") return family;
-  const nearest = CUT.reduce((a, b) => (Math.abs(b - weight) < Math.abs(a - weight) ? b : a));
-  return `${family} ${nearest}`;
+const WEIGHTS = [400, 450, 500, 550, 600, 650, 700, 800];
+const OPSZ = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 32];
+const nearest = (all: readonly number[], x: number): number => all.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a));
+function nativeFamily(family: string, weight: number, size: number): string {
+  if (family === "JetBrains Mono") return `JetBrainsMono_${nearest(WEIGHTS, weight)}`;
+  if (family === "DM Sans") return `DMSans_${nearest(WEIGHTS, weight)}_${nearest(OPSZ, size)}`;
+  return family;
 }
 
 /** `styles.css`'s ten registers (SHELL.md §3.3), as font specs. Data never takes a transform. */
@@ -216,4 +222,67 @@ export function edge(
     borderStyle: style,
     borderColor: /^[a-z][a-z0-9-]*$/.test(color) ? t.v(color) : color,
   };
+}
+
+/**
+ * `styles.css`'s ONE scrollbar (`::-webkit-scrollbar`: a 10px gutter, a rounded thumb inset 2px, drawn
+ * from `--text` at 16%, 26% over the box that scrolls, 40% under the pointer, 50% held), for a copy's
+ * `ScrollView` on web. A pseudo-element has no inline style, so the rules are written once per colour
+ * into a `<style>` of their own and the box is pointed at them by `data-scrollbar`. Only scrollbar
+ * rules: nothing else on the `/rn` page comes from a stylesheet. Native draws its own overlay
+ * indicator, with no gutter, and gets nothing.
+ */
+export function scrollbarProps(t: Tokens): Record<string, unknown> {
+  if (!isWeb || typeof document === "undefined") return {};
+  const ink = (pct: number): string => (t.replayed ? t.mix(t.v("text"), pct, "transparent") : `color-mix(in srgb, var(--text) ${pct}%, transparent)`);
+  const colours = [ink(16), ink(26), ink(40), ink(50)];
+  const key = colours.join("|");
+  let id = SCROLLBARS.get(key);
+  if (id === undefined) {
+    id = `s${SCROLLBARS.size + 1}`;
+    SCROLLBARS.set(key, id);
+    let sheet = document.getElementById("jaira-scrollbars") as HTMLStyleElement | null;
+    if (sheet === null) {
+      sheet = document.createElement("style");
+      sheet.id = "jaira-scrollbars";
+      document.head.appendChild(sheet);
+    }
+    const at = `[data-scrollbar="${id}"]`;
+    sheet.appendChild(
+      document.createTextNode(
+        `${at}::-webkit-scrollbar{width:10px;height:10px}` +
+          `${at}::-webkit-scrollbar-track,${at}::-webkit-scrollbar-corner{background:transparent}` +
+          `${at}::-webkit-scrollbar-thumb{min-height:32px;border:2px solid transparent;border-radius:999px;background-clip:padding-box;background-color:${colours[0]}}` +
+          `${at}:hover::-webkit-scrollbar-thumb{background-color:${colours[1]}}` +
+          `${at}::-webkit-scrollbar-thumb:hover{background-color:${colours[2]}}` +
+          `${at}::-webkit-scrollbar-thumb:active{background-color:${colours[3]}}` +
+          `${at}::-webkit-scrollbar-button{display:none}`,
+      ),
+    );
+  }
+  return { dataSet: { scrollbar: id } };
+}
+const SCROLLBARS = new Map<string, string>();
+
+/**
+ * A length token as a number where the replayed cascade has one (`--control-radius` → 7), or the
+ * variable itself on the desktop's page, which resolves it (`var(--control-radius, 7px)`).
+ */
+export function lengthToken(t: Tokens, name: string, fallback: number): number | string {
+  if (!t.replayed) return `var(--${name}, ${fallback}px)`;
+  const v = t.v(name);
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * A two-length padding token (`--control-pad: 3px 10px`) as `[vertical, horizontal]` numbers. A
+ * padding cannot be a `var()` on native, so the desktop's page takes the stylesheet's own values.
+ */
+export function padToken(t: Tokens, name: string, fallback: [number, number]): [number, number] {
+  if (!t.replayed) return fallback;
+  const [v, h] = String(t.v(name))
+    .split(/\s+/)
+    .map((one) => parseFloat(one));
+  return [Number.isFinite(v) ? v! : fallback[0], Number.isFinite(h) ? h! : Number.isFinite(v) ? v! : fallback[1]];
 }

@@ -1,4 +1,5 @@
 import type { JSX, MouseEvent as ReactMouseEvent } from "react";
+import { Pressable } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { chipTip, endedLabel, holdingLabelOf, originLineOf, waitingKindOf } from "@jaira/ui/boardModel";
 import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
@@ -37,12 +38,21 @@ import { Pill } from "./Pill";
  * drop, so never in v1's read-only reach), and one with an origin line, which is the next thing this
  * copy should learn.
  */
-export function TaskCard(props: CardProps): JSX.Element {
+/**
+ * The clicks a card (or something on it) took, by their DOM event: a column's own click, which in the DOM
+ * reads `closest(".card")` off the target, reads this instead — the copies have no classes.
+ */
+export const claimed = new WeakSet<object>();
+
+export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
   const t = useTokens();
   const look = useLook();
-  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, child = false, last = false } = props;
+  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, child = false, last = false, inTray = false } = props;
   const uncovered = onUndo !== undefined || originLineOf(card) !== undefined;
-  if (uncovered && CardDom !== null) return <CardDom {...props} />;
+  if (uncovered && CardDom !== null) {
+    const { inTray: _tray, ...dom } = props;
+    return <CardDom {...dom} />;
+  }
 
   // An ARCHIVED card wears the pill of how it finished, as the DOM card does.
   const status = card.archived !== undefined ? card.archived.from : (card.activeStatus ?? card.status);
@@ -83,7 +93,8 @@ export function TaskCard(props: CardProps): JSX.Element {
   }
   const radius =
     look.palette === "contrast" ? 2 : look.palette === "pastel" || look.palette === "pastel-rail" ? 11 : look.palette === "blueprint" ? 1 : t.v("control-radius-sm");
-  const below = look.palette === "contrast" ? 8 : named ? 6 : last ? 0 : 4;
+  // `.tray-cards .card` (0,2,0): 210 wide, no margin — which every palette's margin (0,3,0) beats.
+  const below = look.palette === "contrast" ? 8 : named ? 6 : last || inTray ? 0 : 4;
 
   // --- the words ---
   const pending = taskNamePending(card);
@@ -120,7 +131,10 @@ export function TaskCard(props: CardProps): JSX.Element {
 
   const web = isWeb
     ? {
-        onClick: (e: ReactMouseEvent) => onSelect(e),
+        onClick: (e: ReactMouseEvent) => {
+          claimed.add(e.nativeEvent);
+          onSelect(e);
+        },
         ...(onDrill !== undefined ? { onDoubleClick: onDrill } : {}),
         ...(onMenu !== undefined ? { onContextMenu: onMenu } : {}),
         onMouseDown: (e: ReactMouseEvent) => (e.shiftKey ? e.preventDefault() : undefined),
@@ -140,9 +154,9 @@ export function TaskCard(props: CardProps): JSX.Element {
             }
           : {}),
       }
-    : { onPress: (e: unknown) => onSelect(e as ReactMouseEvent), ...(onDrill !== undefined ? { onLongPress: onDrill } : {}) };
+    : {};
 
-  return (
+  const drawn = (
     <View
       {...(web as object)}
       position="relative"
@@ -154,6 +168,7 @@ export function TaskCard(props: CardProps): JSX.Element {
       paddingBottom={6}
       paddingLeft={9}
       marginBottom={below}
+      {...(inTray ? { width: 210 } : {})}
       {...((child
         ? { marginLeft: 14, ...edge(t, { left: 2 }, t.mix(t.v("accent"), 45, t.v("line"))) }
         : {}) as object)}
@@ -214,5 +229,13 @@ export function TaskCard(props: CardProps): JSX.Element {
         ) : null}
       </View>
     </View>
+  );
+  if (isWeb) return drawn;
+  // A phone: React Native's Pressable, since Tamagui's `onPress` never fires on Android. A tap selects,
+  // a long press opens the run (the desktop's double-click).
+  return (
+    <Pressable onPress={() => onSelect(undefined as never)} {...(onDrill !== undefined ? { onLongPress: onDrill } : {})}>
+      {drawn}
+    </Pressable>
   );
 }

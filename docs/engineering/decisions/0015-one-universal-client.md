@@ -511,6 +511,62 @@ What the device showed:
   viewport tag.
 - **A release build.** The bundle is embedded, not served by Metro; not built yet.
 
+## The whole UI, copied (from 2026-09-27)
+
+The person, after the emulator run: "the goal is to replicate the desktop ui, but not in a webview … you
+should keep going". The Desktop UI tab — the whole app in a WebView — is gone. The phone connects and
+draws `UniversalApp`: `App.tsx`'s frame built from universal copies, running on the same store
+(`useApp()`, once, shared by context). Asked whether to keep copying into Tamagui or to write a CSS
+engine for native that would run the DOM components as they are, the person chose copying.
+
+**How a copy is checked.** Also the person's: "test the migrated components using react-native-web and
+once everything passes there do the final check with the android emulator".
+- **`/rn`** draws the universal shell in a browser, on the native token path (`Replayed`), with no
+  `styles.css` on the page — what it matches, it matches the way a phone draws it.
+- **`studio.mts`** keeps a desktop open on a seeded world and on One's dev server, so an edit is on the
+  next load. Several run side by side (`--port`), one per copier.
+- **`pair.mts`** photographs `/` and `/rn` in one window, one state and one look, and compares them region
+  by region (sidebar, title bar, board, panel, inbox strip, a whole room). `--specimen` does the same for
+  a single component drawn from a fixture.
+- **`cascade.mts`** prints, for any element, the declarations Chromium chose and the rules they came from,
+  per look — the specificity and palette arithmetic a copy used to do by hand.
+- **The grade** is pixelmatch's perceptual test, with anti-aliased pixels forgiven: the two layouts never
+  agree to a sixty-fourth of a pixel, and a stylesheet's floating-point `color-mix()` never matches a
+  copy's 8-bit `rgba()` exactly. Exact counts are reported beside it.
+
+`docs/ui/copying.md` is the method, the primitives (`Txt` with the ten registers, `Press`, `useHover`,
+`edge`) and what trips a copy.
+
+**What sharing means here.** A copy's LOGIC is never copied. What `App.tsx` or a DOM component derives
+moves unchanged into a pure module both import:
+- `shellModel.ts`: the sidebar's rows and counts;
+- `boardModel.ts`, `markdown.tsx`'s parse and URL rules;
+- the panel's host logic.
+Only the drawing is written twice, until the desktop switches to the copy (S4).
+
+**Fonts on native.** DM Sans has an optical-size axis, which Chromium sets to the font size, and
+Android can pick neither a weight nor an optical size out of one variable file.
+- `packages/universal/scripts/fonts.py` cuts 96 static instances (3.6 MB): JetBrains Mono at eight
+  weights, DM Sans at eight weights on eleven optical sizes.
+- `expo-font`'s config plugin embeds them.
+- `primitives.tsx` names the nearest instance, e.g. `DMSans_600_12`.
+
+**Found on the way:**
+- Tamagui on web leaves unstated border sides at the browser's 3px once a style is set, so every
+  one-sided border is `edge()`.
+- React Native Web's `Pressable` is a `<button>`, which centres text.
+- Tamagui's `onPress` never fired on Android; everything pressable is React Native's `Pressable`.
+- A shorthand holding a `var()` leaves CDP's longhands empty, and they still win.
+
+**Progress:**
+- The sidebar is identical to the desktop's in all eight looks, apart from one dot's anti-aliasing in two
+  dark ones.
+- The inbox strip is identical.
+- Markdown is identical to the eye in all eight looks.
+- The title bar, the board and the task panel are being copied in parallel.
+- Files, Chat, Settings, Logs, Debug and Components are next.
+- Monaco and CodeMirror stay islands (ruling 5).
+
 ## Native desktop, later
 
 The desktop ships as Electron first, from the DOM tree and then from shared components as they are

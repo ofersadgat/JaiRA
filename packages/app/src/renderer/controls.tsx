@@ -20,8 +20,10 @@
  * that dark mode cannot override.
  */
 import { createContext, useContext, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
-import { inheritedValue, pathKeys, statesPath, type ConfigLayer, type ConfigPath, type ConfigView } from "@jaira/shared/browser";
-import { SOURCE_WORDS } from "./layerLabels";
+import type { ConfigPath } from "@jaira/shared/browser";
+import { inheritLabelOf, layerRowOf, splitHint, type SettingsLayerView } from "./settingsRows";
+
+export { shortValue, splitHint, type SettingsLayerView } from "./settingsRows";
 
 /**
  * Whether a {@link Field} is being drawn on a SETTINGS PAGE — the row shape the person picked from
@@ -44,33 +46,7 @@ export const SettingsRowsContext = createContext(false);
  * sonnet from Shared". Null outside Settings, and inside a row's own control, so a field nested in a
  * stated row is drawn as the row's content rather than judged again.
  */
-export interface SettingsLayerView {
-  layer: ConfigLayer;
-  /** Every layer's own document, for what a row inherits and from where. Null before the first read. */
-  view: ConfigView | null;
-  /** Draw only the rows this layer states. */
-  onlyStated: boolean;
-}
-
 export const SettingsLayerContext = createContext<SettingsLayerView | null>(null);
-
-/**
- * A value in a few words, for the "instead of …" line: a model id as itself, yes or no, a count of a
- * list's entries ("3 patterns"), a count of an object's settings.
- */
-export function shortValue(value: unknown, path = ""): string {
-  if (value === undefined) return "nothing";
-  if (value === null) return "none";
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "string") return value.length === 0 ? "nothing" : value.length > 40 ? `${value.slice(0, 39)}…` : value;
-  if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) {
-    const noun = path.endsWith("hidden") ? "pattern" : "entry";
-    return `${value.length} ${value.length === 1 ? noun : noun === "entry" ? "entries" : `${noun}s`}`;
-  }
-  const n = Object.keys(value as object).length;
-  return `${n} ${n === 1 ? "setting" : "settings"}`;
-}
 
 /**
  * What a row on a layered page does in the Just you view — whether it is drawn, and the line it
@@ -87,22 +63,7 @@ export function useLayerRow(
   stated?: boolean,
   format?: (value: unknown, path: string) => string,
 ): { hidden: boolean; instead: string | undefined } {
-  const at = useContext(SettingsLayerContext);
-  if (at === null) return { hidden: false, instead: undefined };
-  const doc = at.view?.[at.layer];
-  const own = paths?.filter((path) => statesPath(doc, path)) ?? [];
-  const here = stated ?? own.length > 0;
-  let instead: string | undefined;
-  if (here && at.layer === "you" && at.view !== null && own.length > 0) {
-    const path = own[0]!;
-    const { value, from } = inheritedValue(at.view, path, "you");
-    const dotted = pathKeys(path).join(".");
-    instead =
-      value === undefined && from === "built in"
-        ? "set nowhere else"
-        : `instead of ${format !== undefined ? format(value, dotted) : shortValue(value, dotted)} from ${SOURCE_WORDS[from]}`;
-  }
-  return { hidden: at.onlyStated && !here, instead };
+  return layerRowOf(useContext(SettingsLayerContext), paths, stated, format);
 }
 
 /**
@@ -110,13 +71,7 @@ export function useLayerRow(
  * Shared" — the ↺'s label. `format` spells a value the way its row does.
  */
 export function useInheritLabel(paths: readonly ConfigPath[] | undefined, format?: (value: unknown, path: string) => string): string {
-  const at = useContext(SettingsLayerContext);
-  const path = paths?.[0];
-  if (at === null || at.view === null || path === undefined) return "Take this out of this layer, so it inherits";
-  const { value, from } = inheritedValue(at.view, path, at.layer);
-  const dotted = pathKeys(path).join(".");
-  const words = value === undefined ? "not set" : format !== undefined ? format(value, dotted) : shortValue(value, dotted);
-  return `Back to ${words}, from ${SOURCE_WORDS[from]}`;
+  return inheritLabelOf(useContext(SettingsLayerContext), paths, format);
 }
 
 /**
@@ -140,13 +95,6 @@ export function InheritButton({ label, onInherit, disabled }: { label: string; o
       ↺
     </button>
   );
-}
-
-/** The first sentence of a hint, and the rest — the split a settings row draws. */
-export function splitHint(hint: string): { first: string; rest: string } {
-  const at = hint.search(/[.!?](\s|$)/);
-  if (at < 0 || at >= hint.length - 1) return { first: hint, rest: "" };
-  return { first: hint.slice(0, at + 1), rest: hint.slice(at + 1).trim() };
 }
 
 /**

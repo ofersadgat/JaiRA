@@ -24,33 +24,13 @@
  * fades, a tab crossfades. Keyed on what is on top, so the animation plays exactly when that changes.
  */
 import { useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { Icon, type PATHS } from "./icons";
+import { Icon } from "./icons";
+import type { PanelTabSpec, PanelVerb } from "./panelFaceModel";
 import { acceptOffer, close, crumbOf, forward, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "./panelStack";
 import { labelPlan } from "./panelTabs";
 
-type IconKey = keyof typeof PATHS;
-
-/** One tab of an entry. `id` is what `PanelEntry.tab` holds. */
-export interface PanelTabSpec {
-  id: string;
-  label: string;
-  icon: IconKey;
-  /** A count or a short figure after the label — also the badge on the folded rail. */
-  count?: number | string | undefined;
-  /** The count's tone: something waiting on you (amber), live (accent), failed (red). */
-  tone?: "amber" | "accent" | "red" | undefined;
-}
-
-/** A verb in the head, drawn as an icon with its name as the tooltip. */
-export interface PanelVerb {
-  icon: IconKey;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean | undefined;
-  /** The verb that matters most — drawn filled. At most one. */
-  primary?: boolean | undefined;
-  danger?: boolean | undefined;
-}
+export type { PanelTabSpec, PanelVerb } from "./panelFaceModel";
+export { TAB_ICONS } from "./panelFaceModel";
 
 /** What an entry says: the frame asks for it and draws the rest. */
 export interface PanelFace {
@@ -71,19 +51,6 @@ export interface PanelFace {
   /** A bar under the head that holds the panel until it is dealt with — unsaved edits. */
   guard?: ReactNode;
 }
-
-/** The glyph a tab id is drawn with when a face does not say — shared by the rail and the strip. */
-export const TAB_ICONS: Record<string, IconKey> = {
-  conversation: "comment",
-  steps: "plan",
-  changes: "typeChanges",
-  outputs: "typeData",
-  configuration: "form",
-  produced: "files",
-  held: "pin",
-  run: "play",
-  checks: "check",
-};
 
 /**
  * The tab strip, labelled as far as the width allows.

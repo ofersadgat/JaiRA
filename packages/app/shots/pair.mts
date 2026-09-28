@@ -2,8 +2,9 @@
  * The desktop's page against the universal one (decision 0015): `/` and `/rn`, in the same window, the
  * same state and the same look, photographed back to back and compared region by region.
  *
- *   npx tsx packages/app/shots/pair.mts [--scene board|task|archived|settings] [--look light|dark|<palette>[-wash]-<theme>]
+ *   npx tsx packages/app/shots/pair.mts [--scene board|task|gate|archived|settings|files|chat|logs] [--look light|dark|<palette>[-wash]-<theme>]
  *                                       [--every-look] [--region sidebar] [--port 9301]
+ *   npx tsx packages/app/shots/pair.mts --specimen markdown [--look …] [--every-look]   one component, from a fixture
  *
  * Attaches to the app `studio.mts` keeps running, so a change to a copy is in the next run with no
  * build. `/rn` draws the universal shell on the native token path with no `styles.css` on the page, so
@@ -31,6 +32,8 @@ const REGIONS: Record<string, string> = {
   board: ".tasks-view > .col.mid",
   panel: "aside.ctx-panel",
   inbox: "footer.strip",
+  /** The whole room under the title bar — for the rooms that are one region (Files, Chat, Settings, Logs, …). */
+  viewport: ".viewport",
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -46,27 +49,19 @@ function crop(png: PNG, r: Rect, scale: number): PNG {
 }
 
 /**
- * Pixels that differ VISIBLY — a channel off by more than {@link VISIBLE} — and, beside them, pixels that
- * differ at all. The split is there because the stylesheet's `color-mix()` is composited by Chromium in
- * floating point and a copy's colour is 8-bit `rgba()` (a phone's compositor is different again), so a
- * translucent ground comes out one level apart in one channel: identical to any eye, not to `===`.
+ * Pixels that differ TO THE EYE, and beside them pixels that differ at all.
+ *
+ * "To the eye" is pixelmatch's own perceptual test (YIQ distance over 0.1), with anti-aliased pixels
+ * told apart and forgiven — a glyph edge half a pixel over is not a difference anyone can see, and the
+ * two layouts never agree to the sixty-fourth of a pixel (Chromium's layout units against React Native
+ * Web's), nor does the stylesheet's floating-point `color-mix()` against a copy's 8-bit `rgba()`. What
+ * is left after that is something drawn differently: a line out of place, a wrong colour, a missing box.
  */
-const VISIBLE = 2;
 function differ(a: PNG, b: PNG, diffTo?: string): { differing: number; exact: number; total: number } {
   const diff = new PNG({ width: a.width, height: a.height });
-  const exact = pixelmatch(a.data, b.data, undefined, a.width, a.height, { threshold: 0 });
-  let differing = 0;
-  for (let i = 0; i < a.data.length; i += 4) {
-    const far = Math.max(Math.abs(a.data[i]! - b.data[i]!), Math.abs(a.data[i + 1]! - b.data[i + 1]!), Math.abs(a.data[i + 2]! - b.data[i + 2]!)) > VISIBLE;
-    if (far) differing++;
-    // The diff image: visible differences red, the rest a faint copy of the page.
-    const grey = Math.round((a.data[i]! + a.data[i + 1]! + a.data[i + 2]!) / 3 / 4 + 190);
-    diff.data[i] = far ? 255 : grey;
-    diff.data[i + 1] = far ? 0 : grey;
-    diff.data[i + 2] = far ? 0 : grey;
-    diff.data[i + 3] = 255;
-  }
-  if (differing > 0 && diffTo !== undefined) writeFileSync(diffTo, PNG.sync.write(diff));
+  const exact = pixelmatch(a.data, b.data, undefined, a.width, a.height, { threshold: 0, includeAA: true });
+  const differing = pixelmatch(a.data, b.data, diff.data, a.width, a.height, { threshold: 0.1, includeAA: false, alpha: 0.15, aaColor: [255, 210, 0] });
+  if (exact > 0 && diffTo !== undefined) writeFileSync(diffTo, PNG.sync.write(diff));
   return { differing, exact, total: a.width * a.height };
 }
 
@@ -77,9 +72,106 @@ async function capture(app: App): Promise<PNG> {
   return PNG.sync.read(Buffer.from(shot.data, "base64"));
 }
 
+/**
+ * A specimen (`--specimen markdown`): one component drawn from a fixture on `/specimen-dom` and its copy
+ * on `/specimen-rn` (`packages/client/src/specimens/registry.tsx`), photographed and compared — the gate
+ * for a leaf, with no world to seed and no scene to reach.
+ */
+/**
+ * Every run of text under `#specimen`, where it is drawn: its words and its box, relative to the specimen.
+ * Compared between the two pages, this says WHICH line moved and by how much — what a diff picture
+ * cannot say.
+ */
+const TEXTS = `(() => {
+  const root = document.getElementById("specimen");
+  const o = root.getBoundingClientRect();
+  const out = [];
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    const text = n.textContent.replace(/\\s+/g, " ").trim();
+    if (text === "") continue;
+    const range = document.createRange();
+    range.selectNodeContents(n);
+    const r = range.getBoundingClientRect();
+    out.push({ text: text.slice(0, 40), x: r.x - o.x, y: r.y - o.y, w: r.width, h: r.height });
+  }
+  return out;
+})()`;
+type Run = { text: string; x: number; y: number; w: number; h: number };
+
+function compareTexts(dom: readonly Run[], rn: readonly Run[]): string[] {
+  const left = [...rn];
+  const out: string[] = [];
+  for (const d of dom) {
+    const i = left.findIndex((r) => r.text === d.text);
+    if (i < 0) {
+      out.push(`  missing on rn: "${d.text}"`);
+      continue;
+    }
+    const r = left.splice(i, 1)[0]!;
+    const f = (n: number): string => (Math.round(n * 100) / 100).toString();
+    const moved = [["x", r.x - d.x], ["y", r.y - d.y], ["w", r.w - d.w], ["h", r.h - d.h]].filter(([, v]) => Math.abs(v as number) > 0.05);
+    if (moved.length > 0) out.push(`  "${d.text}" at ${f(d.x)},${f(d.y)} ${f(d.w)}×${f(d.h)}: ${moved.map(([k, v]) => `${k} ${(v as number) > 0 ? "+" : ""}${f(v as number)}`).join(" ")}`);
+  }
+  for (const r of left) out.push(`  only on rn: "${r.text}"`);
+  return out;
+}
+
+async function specimen(app: App, name: string, looks: readonly Look[]): Promise<boolean> {
+  let failed = false;
+  const origin = await app.evaluate<string>("location.protocol + '//' + location.host");
+  for (const look of looks) {
+    const shots: PNG[] = [];
+    const sizes: string[] = [];
+    const runs: Run[][] = [];
+    for (const side of ["dom", "rn"]) {
+      await app.navigate(`${origin}/specimen-${side}?name=${encodeURIComponent(name)}&look=${lookName(look)}`);
+      await app.until("document.getElementById('specimen') !== null", `the ${side} specimen to draw`);
+      await app.evaluate("document.fonts.ready.then(() => true)");
+      await new Promise((r) => setTimeout(r, 400));
+      const r = await app.evaluate<Rect>(`(() => { const r = document.getElementById("specimen").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
+      sizes.push(`${Math.round(r.width * 100) / 100}×${Math.round(r.height * 100) / 100}`);
+      runs.push(await app.evaluate<Run[]>(TEXTS));
+      await app.cdp("Page.bringToFront");
+      const shot = await app.cdp<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { ...r, scale: 1 } });
+      shots.push(PNG.sync.read(Buffer.from(shot.data, "base64")));
+    }
+    const [dom, rn] = shots as [PNG, PNG];
+    const base = `specimen-${name}-${lookName(look)}`;
+    const moved = compareTexts(runs[0]!, runs[1]!);
+    writeFileSync(join(OUT, `${base}.dom.png`), PNG.sync.write(dom));
+    writeFileSync(join(OUT, `${base}.rn.png`), PNG.sync.write(rn));
+    if (dom.width !== rn.width || dom.height !== rn.height) {
+      failed = true;
+      const w = Math.min(dom.width, rn.width);
+      const h = Math.min(dom.height, rn.height);
+      const d = differ(crop(dom, { x: 0, y: 0, width: w, height: h }, 1), crop(rn, { x: 0, y: 0, width: w, height: h }, 1), join(OUT, `${base}.diff.png`));
+      console.log(`${base}: DIFFERENT SIZE (dom ${sizes[0]}, rn ${sizes[1]}); over the common part ${verdict(d)}`);
+      if (moved.length > 0) console.log(`  text that moved (rn − dom):\n${moved.join("\n")}`);
+      continue;
+    }
+    const d = differ(dom, rn, join(OUT, `${base}.diff.png`));
+    if (d.differing !== 0) failed = true;
+    console.log(`${base}: ${verdict(d)}  (${sizes[0]})`);
+    if (moved.length > 0) console.log(`  text that moved (rn − dom):\n${moved.join("\n")}`);
+  }
+  return failed;
+}
+
 async function main(): Promise<void> {
   mkdirSync(OUT, { recursive: true });
   const app = await App.connect(Number(arg("--port") ?? STUDIO_PORT), { out: OUT });
+  const named = arg("--specimen");
+  if (named !== undefined) {
+    try {
+      const failed = await specimen(app, named, process.argv.includes("--every-look") ? LOOKS : [parseLook(arg("--look") ?? "light")]);
+      console.log(`wrote ${OUT}`);
+      if (failed) process.exitCode = 1;
+    } finally {
+      await app.close();
+    }
+    return;
+  }
   const scenes = SCENES.filter((s) => s.name === (arg("--scene") ?? "board"));
   if (scenes.length === 0) throw new Error(`no scene ${arg("--scene")}: ${SCENES.map((s) => s.name).join(", ")}`);
   const looks: readonly Look[] = process.argv.includes("--every-look") ? LOOKS : [parseLook(arg("--look") ?? "light")];
@@ -142,7 +234,7 @@ async function main(): Promise<void> {
 
 function verdict(d: { differing: number; exact: number; total: number }): string {
   if (d.exact === 0) return "identical";
-  if (d.differing === 0) return `identical to the eye (${d.exact} px one or two levels apart)`;
+  if (d.differing === 0) return `identical to the eye (${d.exact} px differ only in anti-aliasing or by a level)`;
   return `${d.differing} px differ (${((100 * d.differing) / d.total).toFixed(2)}%)`;
 }
 

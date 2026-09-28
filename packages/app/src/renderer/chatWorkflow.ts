@@ -46,7 +46,7 @@
 // Which tasks are conversations lives in `@jaira/shared` (`task.ts`): the engine archives tasks by themselves
 // and leaves conversations alone, so it has to ask the same question the Chat view does.
 export { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, isChatWorkflow, type ChatKind } from "@jaira/shared/browser";
-import { CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX } from "@jaira/shared/browser";
+import { CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, SHARED_SESSION } from "@jaira/shared/browser";
 
 /** What `task:all` is asked for to list every conversation — the states, and the dynamic namespace. */
 export const CHAT_LIST_WORKFLOWS: readonly string[] = [...CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX];
@@ -63,4 +63,29 @@ export function titleOf(message: string): string {
   const line = message.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
   if (line === "") return "New conversation";
   return line.length <= 60 ? line : `${line.slice(0, 57).trimEnd()}…`;
+}
+
+/**
+ * Which project the Chat view reads and writes — the rule, so it can be stated once and tested.
+ *
+ * **A chat call always names its project.** Left unnamed, main resolves "the focused project", and
+ * that answers only while exactly one user project is open: it throws `no project is open` on a
+ * window standing on `~/.jaira` — a shared session is not a user one — and `several projects are
+ * open, so this call must name one` the moment a second checkout is, which is the arrangement this
+ * shell exists for. Every read the view makes went through that resolution: the thread, the artifact
+ * list, the plan the composer shows before the first message, and the `@` completion per keystroke.
+ *
+ * Three answers, in order:
+ *
+ *  - the OPEN conversation's own project. It is what `openConversation` was already being told and
+ *    what nothing was reading, so a thread opened from the root list — which spans every project —
+ *    was read out of whichever database main resolved rather than the one holding it.
+ *  - the project the address is standing on: where a new conversation goes, and what the composer's
+ *    plan is read from.
+ *  - the shared root at the root of the address, where there is no project to stand in. The same
+ *    rule `runTargetOf` gives base-layer workflows, and the one project that means the same thing in
+ *    every window.
+ */
+export function chatProjectOf(open: string | null, at: string | null): string {
+  return open ?? at ?? SHARED_SESSION;
 }

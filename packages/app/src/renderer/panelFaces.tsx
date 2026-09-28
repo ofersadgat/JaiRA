@@ -28,7 +28,6 @@ import { GateSurface, type EditorServices } from "./components";
 import { ConfigPanel, type ConfigPanelServices } from "./configPanel";
 import type { FileSurfaceContext } from "./fileTypes";
 import { Icon } from "./icons";
-import { EVENTS_STATE_ID } from "./automationsModel";
 import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "./panelStack";
 import {
   HeldView,
@@ -47,9 +46,9 @@ import {
 import { ChangesPanel } from "./changesPanel";
 import { RunPanel, type RunSurface } from "./runPanel";
 import { RunConversation, SidechainConversation, askingInstanceOf, hasAsking } from "./runViews";
-import { TAB_ICONS, type PanelFace, type PanelTabSpec, type PanelVerb } from "./sidePanel";
+import type { PanelFace } from "./sidePanel";
+import { countSteps, isEventsTask, tab, taskTabs as taskTabsOf, taskVerbsOf } from "./panelFaceModel";
 import { StatePanel } from "./statePanel";
-import { stoppedAction } from "./taskAction";
 import { TaskName } from "./taskName";
 import { nodeAt, type TrailStep } from "./trail";
 import { useTaskRun } from "./taskRun";
@@ -132,12 +131,6 @@ export interface PanelHost {
   automationsOf: (project: string | undefined, onOpenConversation: () => void) => ReactNode;
 }
 
-/** The events task (decision 0010 §4): the one task whose configuration is its automations. */
-const isEventsTask = (detail: TaskDetail | null): boolean => detail?.workflow === EVENTS_STATE_ID;
-
-/** A tab with its icon filled in from the shared table. */
-const tab = (id: string, label: string, extra: Omit<PanelTabSpec, "id" | "label" | "icon"> = {}): PanelTabSpec => ({ id, label, icon: TAB_ICONS[id] ?? "note", ...extra });
-
 /**
  * An entry about a task the store is NOT holding — a pinned panel after the selection moved on. It
  * loads the task's run itself (`taskRun.ts`) and draws the entry's body over a host that is about
@@ -177,26 +170,6 @@ function taskHeadOf(detail: TaskDetail | null, taskId: string): Pick<PanelFace, 
       </>
     ),
   };
-}
-
-/** The verbs every task-shaped entry carries, as icons. */
-function taskVerbsOf(host: PanelHost, detail: TaskDetail, project: string | undefined, adopt: boolean): PanelVerb[] {
-  const action = stoppedAction(detail);
-  const live = detail.status === "running" || detail.status === "queued" || detail.status === "stopping";
-  const verbs: PanelVerb[] = [];
-  if (!live) {
-    verbs.push({ icon: "play", label: action?.verb ?? (detail.runs.length > 0 ? "Re-run" : "Start"), primary: true, onClick: () => host.startAgain(detail.taskId) });
-  }
-  if (live || detail.status === "interrupted") verbs.push({ icon: "stop", label: "Cancel", onClick: () => host.cancel(detail.taskId) });
-  if (detail.runs.length > 0 && !live) {
-    verbs.push({
-      icon: "pencil",
-      label: "Re-run with changes",
-      onClick: () => host.onStack((was) => push(was, { kind: "rerun", key: `rerun:${detail.taskId}`, taskId: detail.taskId, ...(project !== undefined ? { project } : {}) })),
-    });
-  }
-  if (adopt) verbs.push({ icon: "adopt", label: "Show the conversation in the main view", onClick: () => host.adoptTask(detail.taskId, project, detail.workflow) });
-  return verbs;
 }
 
 /** A pinned value, pushed on top of whatever is there. */
@@ -352,24 +325,6 @@ function StateConfig({ host, stateId }: { host: PanelHost; stateId: string }): J
   );
 }
 
-/** Badges for a task's tabs: a question waiting, a run going. */
-function taskTabs(host: PanelHost, detail: TaskDetail | null, withConversation: boolean): PanelTabSpec[] {
-  const waiting = host.gate !== undefined && detail !== null && (host.gate.pending.taskId === detail.taskId || host.gate.pending.about === detail.taskId);
-  const live = detail?.status === "running";
-  const steps = detail === null ? 0 : countSteps(detail.instances);
-  return [
-    ...(withConversation ? [tab("conversation", "Conversation", waiting ? { count: "!", tone: "amber" } : live ? { count: "•", tone: "accent" } : {})] : []),
-    tab("steps", "Steps", steps > 0 ? { count: steps } : {}),
-    tab("changes", "Changes", {}),
-    tab("outputs", "Outputs", {}),
-    ...(withConversation ? [tab("configuration", isEventsTask(detail) ? "Automations" : "Configuration")] : []),
-  ];
-}
-
-function countSteps(nodes: readonly InstanceNode[]): number {
-  return nodes.reduce((sum, node) => sum + (node.children.length === 0 ? 1 : countSteps(node.children)), 0);
-}
-
 /** The face of any entry. */
 export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): PanelFace {
   const detail = "taskId" in entry && entry.taskId !== undefined ? host.detailOf(entry.taskId) : null;
@@ -407,7 +362,7 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
       return {
         ...head,
         verbs: detail === null ? [] : taskVerbsOf(host, detail, project, true),
-        tabs: taskTabs(host, detail, true),
+        tabs: taskTabsOf(host.gate, detail, true),
         tab: entry.tab,
         body: body(),
         scroll: detail === null || !((entry.tab === "conversation" && loaded) || entry.tab === "steps"),

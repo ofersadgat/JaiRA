@@ -135,10 +135,6 @@ export interface EditMessage {
   fork?: ((turn: number, text: string) => void) | undefined;
 }
 
-/** `09:14:02`. Seconds included: the gap between two calls is the thing being read. */
-export function clockOf(at: number | undefined): string {
-  return at === undefined || at === 0 ? "" : new Date(at).toLocaleTimeString();
-}
 
 /**
  * The whole moment, for the tooltip behind the clock — every field, in the reader's own format.
@@ -173,14 +169,9 @@ export function sizeOf(bytes: number): string {
   return `${bytes} B`;
 }
 
-/** `2.4 s`, `1 m 12 s`, `14 h 32 m` — past an hour the seconds are noise, and 872 minutes is a sum to do. */
-export function durationOf(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const seconds = Math.round(ms / 1000);
-  if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} m`;
-  return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
-}
+// `durationOf` and `useElapsed` live in `runActivityModel.ts`, shared with the universal copy (decision 0015).
+import { clockOf, durationOf, useElapsed } from "./runActivityModel";
+export { clockOf, durationOf, useElapsed };
 
 /**
  * How long a model thought, said the way a person waiting would say it — `0.4 seconds`,
@@ -852,33 +843,6 @@ function Tool({
   );
 }
 
-/**
- * A wall clock that ticks while something is live, and not otherwise.
- *
- * TENTHS, because a counter that moves once a second is doing the job of a pulse: what the number
- * is for is telling a stalled run from a working one, and a digit that changes ten times a second is
- * the fastest way to say "still going" that is also a measurement. It costs one `setState` per
- * 100 ms on ONE row — the interval exists only while `live` is true, so a transcript with forty
- * settled rows in it re-renders none of them.
- */
-const TICK_MS = 100;
-
-/**
- * `tick` is a parameter because the two things that count here are counting different quantities.
- * A thinking block is a pause you are WAITING OUT, measured in tenths so the digits prove something
- * is alive. A run has been going for four minutes and nobody is watching the seconds — a tenth there
- * is forty re-renders a second spent on a number whose last digit nobody reads.
- */
-export function useElapsed(startedAt: number | undefined, live: boolean, tick = TICK_MS): number | undefined {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!live || startedAt === undefined) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), tick);
-    return () => clearInterval(timer);
-  }, [live, startedAt, tick]);
-  return startedAt === undefined ? undefined : Math.max(0, now - startedAt);
-}
 
 /**
  * One block of reasoning — and how long it took, which is the question actually being asked of it.

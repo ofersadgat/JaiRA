@@ -49,7 +49,12 @@ const MARKDOWN = new MarkdownIt({ html: false, linkify: true, breaks: false });
  * by path picks a side that the next `npm install` can move; reading it off `parse` cannot be wrong
  * about the tokens `parse` returns.
  */
-type Token = ReturnType<typeof MARKDOWN.parse>[number];
+export type Token = ReturnType<typeof MARKDOWN.parse>[number];
+
+/** The one parse, for the universal copy (`packages/universal/src/components/Markdown.tsx`, decision 0015). */
+export function parseMarkdown(text: string): Token[] {
+  return MARKDOWN.parse(text, {});
+}
 
 // --- the seam ----------------------------------------------------------------
 
@@ -132,9 +137,9 @@ const CONTROL_CHARS = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 
 /** A scheme, if the URL has one at all. */
 const SCHEME = /^([a-z][a-z0-9+.\-]*):/i;
-const HREF_SCHEMES = new Set(["http", "https", "mailto"]);
+export const HREF_SCHEMES = new Set(["http", "https", "mailto"]);
 /** Images may also be inline: markdown-it's own `validateLink` already bounds `data:` to picture types. */
-const SRC_SCHEMES = new Set(["http", "https", "data"]);
+export const SRC_SCHEMES = new Set(["http", "https", "data"]);
 
 /**
  * A URL, or nothing.
@@ -147,7 +152,7 @@ const SRC_SCHEMES = new Set(["http", "https", "data"]);
  * Control characters are stripped BEFORE the scheme is read, because `java\tscript:alert(1)` is a
  * URL the browser will happily normalise back into one and a naive prefix test will not.
  */
-function safeUrl(raw: string | null, allowed: ReadonlySet<string>): string | undefined {
+export function safeUrl(raw: string | null, allowed: ReadonlySet<string>): string | undefined {
   if (raw === null) return undefined;
   const url = raw.replace(CONTROL_CHARS, "").trim();
   if (url === "") return undefined;
@@ -164,7 +169,7 @@ function safeUrl(raw: string | null, allowed: ReadonlySet<string>): string | und
  * `attrGet` is typed `string | number | null` — a plugin may set a numeric attribute — and every
  * consumer below wants text. Narrowed once here rather than at four call sites.
  */
-function attr(token: Token, name: string): string | null {
+export function attr(token: Token, name: string): string | null {
   const value = token.attrGet(name);
   return value === null || value === undefined ? null : String(value);
 }
@@ -348,7 +353,7 @@ function fold(tokens: readonly Token[], fence: FenceRenderer | undefined): React
 const FRONT_MATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
 /** A document, as its header and its body. `front` is absent when it has none. */
-function splitFrontMatter(text: string): { front: string | undefined; body: string } {
+export function splitFrontMatter(text: string): { front: string | undefined; body: string } {
   const found = FRONT_MATTER.exec(text);
   // An EMPTY header is not one: `---\n---` at the top of a page is two thematic breaks somebody
   // typed, and swallowing them would be the renderer deciding it knew better.

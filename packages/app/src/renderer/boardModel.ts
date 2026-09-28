@@ -3,7 +3,8 @@
  * universal copies and the native app can use it without pulling in the board's React-DOM half
  * (`board.tsx` → `menu` → `popover` → `react-dom`). `board.tsx` re-exports all of it.
  */
-import type { BoardCard, NextMove } from "@jaira/shared/browser";
+import type { BoardCard, BoardView, NextMove } from "@jaira/shared/browser";
+import { nestUnder } from "./connectDrag";
 import { cardRemoteWord } from "./remoteStrip";
 
 /**
@@ -173,4 +174,137 @@ export function holdingLabelOf(card: Pick<BoardCard, "waitingFor">): string | un
   const named = waiting.slice(0, 2).map((h) => h.title);
   const more = waiting.length - named.length;
   return `waiting for ${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+}
+
+/**
+ * Which lanes still earn a heading (SHELL.md §5.3).
+ *
+ * Not the active two. Every card in `running` and `paused` now carries a FILLED pill naming what it
+ * is doing, so a "Running" rule over them is a line saying what each card under it already says —
+ * the same argument `lanesOf` makes about a single-lane column, applied one level in.
+ *
+ * `finished` keeps its heading, and that is where the argument stops working: its pills go flat, and
+ * flat is the register the whole rest of the column is in. `not-started` keeps one for a blunter
+ * reason — a queued card has no pill at all, so the heading is the only thing saying what it is.
+ */
+export const LANE_HEADED: ReadonlySet<Lane> = new Set<Lane>(["not-started", "finished"]);
+
+/**
+ * A column's cards split for drawing: the LIVE ones, which go in the lanes, and the archived ones,
+ * held at the foot behind one line saying how many (the person, 2026-09-27) — newest archived first.
+ */
+export function archivedSplitOf(cards: readonly BoardCard[]): { live: readonly BoardCard[]; held: BoardCard[] } {
+  const held = cards.filter((card) => card.status === "archived").sort((a, b) => (b.archived?.at ?? 0) - (a.archived?.at ?? 0));
+  const live = held.length === 0 ? cards : cards.filter((card) => card.status !== "archived");
+  return { live, held };
+}
+
+/** One card in a lane, whether it is the last there (`.card:last-child`), and the adopted ones filed beneath it. */
+export interface LaneEntry {
+  card: BoardCard;
+  last: boolean;
+  beneath: { card: BoardCard; last: boolean }[];
+}
+
+/**
+ * The live cards of a column, as the board draws them (`Lanes` in `board.tsx`, and its universal copy).
+ *
+ * `boxed` false: one lane, drawn with no box and no heading — a rule saying "Finished" over a column of
+ * nothing but finished cards says what every card under it says. The lane's OWN cards, not the ones
+ * passed in, since the lane fixed their order. Otherwise every lane is a box of its own, headed where
+ * {@link LANE_HEADED} says, with its count of top-level cards.
+ *
+ * An adopted task files BENEATH the task that adopted it (decision 0005 §2), wherever its own status
+ * would have put it: what relates the two is not a lane.
+ *
+ * `trailing`: something follows the lanes (the archived foot), so with one lane the last live card is not
+ * the `:last-child` it would otherwise be. With several, each lane is its own box and ends in its card.
+ */
+export function laneRunsOf(
+  cards: readonly BoardCard[],
+  trailing = false,
+): { boxed: boolean; runs: { lane: Lane; headed: boolean; count: number; entries: LaneEntry[] }[] } {
+  const { top, beneath } = nestUnder(cards);
+  const entriesOf = (list: readonly BoardCard[], followed = false): LaneEntry[] =>
+    list.map((card, i) => {
+      const lastInLane = !followed && i === list.length - 1;
+      const under = beneath.get(card.taskId) ?? [];
+      return {
+        card,
+        last: lastInLane && under.length === 0,
+        beneath: under.map((child, j) => ({ card: child, last: lastInLane && j === under.length - 1 })),
+      };
+    });
+  const lanes = lanesOf(top);
+  if (lanes.length <= 1) {
+    const only = lanes[0];
+    return { boxed: false, runs: only === undefined ? [] : [{ lane: only.lane, headed: false, count: only.cards.length, entries: entriesOf(only.cards, trailing) }] };
+  }
+  return { boxed: true, runs: lanes.map(({ lane, cards: inLane }) => ({ lane, headed: LANE_HEADED.has(lane), count: inLane.length, entries: entriesOf(inLane) })) };
+}
+
+/**
+ * One board's cards in the order the board DRAWS them — columns left to right, each split into lanes,
+ * then the at-this-level tray — which is the order "everything in between" means to the person
+ * shift-clicking. Built from the same `lanesOf` the board renders with, so the range can never disagree
+ * with what is on screen.
+ */
+export function boardCardOrderOf(board: BoardView | null | undefined): BoardCard[] {
+  if (board === undefined || board === null) return [];
+  return [...board.columns.flatMap((c) => lanesOf(c.cards).flatMap((l) => l.cards)), ...lanesOf(board.atLevel).flatMap((l) => l.cards)];
+}
+
+/**
+ * The Tasks board's selection — one task, or a set of them, scoped to ONE project (a task id is a rowid
+ * in one database). `anchor` is where a shift-range measures from: the last plainly-clicked card.
+ */
+export type BoardPick = { project: string; ids: readonly string[]; anchor: string } | null;
+
+/**
+ * A click on a card: plain selects, ctrl/cmd toggles membership, shift extends from the anchor
+ * (explorer semantics). What the set becomes, and which task the panel should now describe
+ * (`undefined`: leave it), from the set before and the board's drawn order.
+ */
+export function pickCard(
+  picked: BoardPick,
+  project: string,
+  taskId: string,
+  e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean } | undefined,
+  order: () => readonly string[],
+): { picked: BoardPick; select?: string } {
+  const same = picked !== null && picked.project === project ? picked : null;
+  if (e?.shiftKey === true && same !== null) {
+    const ids = order();
+    const a = ids.indexOf(same.anchor);
+    const b = ids.indexOf(taskId);
+    if (a >= 0 && b >= 0) {
+      // The range REPLACES the set (explorer semantics), and the anchor stays put so a second
+      // shift-click re-measures from the same end rather than from wherever the first landed.
+      return { picked: { project, ids: ids.slice(Math.min(a, b), Math.max(a, b) + 1), anchor: same.anchor }, select: taskId };
+    }
+  }
+  if ((e?.ctrlKey === true || e?.metaKey === true) && same !== null) {
+    const had = same.ids.includes(taskId);
+    const ids = had ? same.ids.filter((id) => id !== taskId) : [...same.ids, taskId];
+    if (ids.length === 0) return { picked: null };
+    // The panel follows the last card TOUCHED — for a removal, the last one still standing.
+    return { picked: { project, ids, anchor: had ? same.anchor : taskId }, select: had ? ids[ids.length - 1]! : taskId };
+  }
+  return { picked: { project, ids: [taskId], anchor: taskId }, select: taskId };
+}
+
+/**
+ * Which state a card walks into.
+ *
+ * A card drill follows the TASK, not the column: it lands on the state that card is actually in one
+ * level down, which is the same place a column drill goes right up until a task's active path skips
+ * a level — and then it is the more useful of the two answers.
+ *
+ * At the root listing there is no level on the path to step past, so the target is the card's own
+ * workflow root.
+ */
+export function drillTargetOf(board: BoardView, card: BoardCard): string | undefined {
+  if (board.level === "") return card.workflow.length > 0 ? card.workflow : undefined;
+  const at = card.activePath.findIndex((step) => step.stateId === board.level);
+  return at < 0 ? undefined : card.activePath[at + 1]?.stateId;
 }

@@ -17,10 +17,29 @@ export interface SettingsPart {
 }
 
 /** How far below the top of the scroll box a section's heading may sit and still be the one read. */
-const READING_LINE = 56;
+export const READING_LINE = 56;
 
 /** How long a click's choice outranks the scroll it caused — a smooth scroll takes about this. */
-const CLICK_HOLD_MS = 900;
+export const CLICK_HOLD_MS = 900;
+
+/** Where a click in the accordion lands: the heading, this far below the top of the scroll box (`scroll-margin-top`). */
+export const PART_MARGIN = 12;
+
+/**
+ * The section being read: the last whose heading has reached the reading line — and at the very
+ * bottom of the page, the last section, which may never get that far up. `tops` are the sections'
+ * tops, in order, measured from the top of the scroll box as it is scrolled; `scroll` is the box.
+ */
+export function readingPartOf(
+  tops: readonly { id: string; top: number }[],
+  scroll: { top: number; height: number; contentHeight: number },
+): string | null {
+  if (tops.length === 0) return null;
+  let current = tops[0]!.id;
+  for (const part of tops) if (part.top <= READING_LINE) current = part.id;
+  if (scroll.top > 0 && scroll.top + scroll.height >= scroll.contentHeight - 2) current = tops[tops.length - 1]!.id;
+  return current;
+}
 
 /**
  * The sections drawn on the page — not every one in the DOM: under the Just you view's "What you
@@ -63,12 +82,11 @@ export function useSettingsParts(
         setActive(null);
         return;
       }
-      // The last section whose heading has reached the reading line — and at the very bottom of the
-      // page, the last section, which may never get that far up.
       const top = body.getBoundingClientRect().top;
-      let current = els[0]!.dataset["part"] ?? null;
-      for (const el of els) if (el.getBoundingClientRect().top - top <= READING_LINE) current = el.dataset["part"] ?? current;
-      if (body.scrollTop > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight - 2) current = els[els.length - 1]!.dataset["part"] ?? current;
+      const current = readingPartOf(
+        els.map((el) => ({ id: el.dataset["part"] ?? "", top: el.getBoundingClientRect().top - top })),
+        { top: body.scrollTop, height: body.clientHeight, contentHeight: body.scrollHeight },
+      );
       if (hold !== null && hold.until <= Date.now()) held.current = null;
       setActive(current);
     };

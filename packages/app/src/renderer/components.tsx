@@ -8,6 +8,7 @@
  * presentation.
  */
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { COMPONENT_ICON } from "./gateModel";
 import {
   artifactOf,
   isComponentName,
@@ -848,22 +849,6 @@ function RawJson({ onSubmit, settled }: { onSubmit: (value: unknown) => void; se
   );
 }
 
-/**
- * A glyph per component, shown beside its NAME in the dialog's sub-line.
- *
- * Beside the name rather than in the heading: the heading is the author's prompt, in their words,
- * and a picture next to a sentence is decoration. The sub-line already says `review_artifact` in
- * wire spelling, which is exactly the kind of label a glyph makes findable at a glance.
- */
-const COMPONENT_ICON: Record<ComponentName, Parameters<typeof Icon>[0]["name"]> = {
-  choose_option: "choice",
-  review_artifact: "read",
-  review_artifacts: "files",
-  edit_artifact: "pencil",
-  fill_form: "form",
-  confirm_action: "check",
-  approve_tool_call: "shield",
-};
 
 /**
  * A gate, drawn — the author's question and whatever control answers it, and NOTHING about where it

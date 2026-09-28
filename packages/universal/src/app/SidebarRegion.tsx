@@ -3,11 +3,16 @@ import { hueOf } from "@jaira/ui/pill";
 import { FOOTER_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "@jaira/ui/shellModel";
 import type { SidebarAct, SidebarView } from "@jaira/ui/sidebar";
 import type { View as AppView } from "@jaira/ui/store";
-import { FOLD, PANE, openOf, paneOf } from "@jaira/ui/uiState";
+import { newItems, standingRoot, type TreeDraft } from "@jaira/ui/filesModel";
+import { FOLD, OPENED, PANE, openOf, paneOf, unfoldedOf } from "@jaira/ui/uiState";
 import { healthCounts, logUnseen } from "@jaira/ui/updatesModel";
 import { useHealth } from "@jaira/ui/updatesStore";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
+import { settingsPageProblems } from "@jaira/ui/settingsSections";
+import { FileTreePanel } from "../components/files/FileTreePanel";
+import { ContextMenu, MENU_WIDTH, type MenuAt } from "../components/Menu";
 import { Sidebar } from "../components/Sidebar";
+import { SettingsSections } from "../components/settings/SettingsSections";
 import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
 
@@ -40,6 +45,32 @@ export function ShellSidebar(): JSX.Element {
       actions.openConversation(null);
     },
   };
+  /**
+   * The `+` on the Files row: the menu it drops, and the row in the tree it starts — `App.tsx`'s
+   * `newMenu` and `newDraft`, held here because the row and the drawer are both this region's.
+   */
+  const [newMenu, setNewMenu] = useState<MenuAt | null>(null);
+  const [newDraft, setNewDraft] = useState<TreeDraft | null>(null);
+  const newFile: SidebarAct = {
+    id: "new",
+    glyph: "+",
+    label: "new file, folder or workflow",
+    onAct: (from) => {
+      const root = standingRoot(state.tree, state.at);
+      if (root === null) return;
+      // Right-aligned under the button, as `App.tsx` places it.
+      const box = anchorBox(from, "new file, folder or workflow");
+      setNewMenu({
+        x: Math.max(4, box.right - MENU_WIDTH),
+        y: box.bottom + 4,
+        items: newItems(root, "", (draft) => {
+          actions.setView("files");
+          if (draft.reveal.length > 0) actions.unfold(OPENED.folders, draft.reveal);
+          setNewDraft(draft);
+        }),
+      });
+    },
+  };
   const roots: SidebarView[] = ROOT_VIEWS.map((v) =>
     v.id !== "chat"
       ? { ...v, counts: rooms.rootTasks, onSeen: () => actions.markSeenAll(rooms.seenRootTasks) }
@@ -56,7 +87,7 @@ export function ShellSidebar(): JSX.Element {
       ? { ...v, counts: rooms.atTasks, onSeen: () => actions.markSeenAll(rooms.seenAtTasks) }
       : v.id === "chat"
         ? { ...v, counts: rooms.atChat, onSeen: () => actions.markSeenAll(rooms.seenAtChat), acts: [newChat, find("chat")], panel: <Uncopied name="ChatListPanel" flex={1} /> }
-        : { ...v, acts: [{ id: "new", glyph: "+", label: "new file, folder or workflow", onAct: () => undefined }, find("files")], panel: <Uncopied name="FileTreePanel" flex={1} /> },
+        : { ...v, acts: [newFile, find("files")], panel: <FilesDrawer find={finding.files === true} draft={newDraft} onDraft={setNewDraft} /> },
   );
   const footer = FOOTER_VIEWS.map((row) => (row.id === "logs" ? { ...row, counts: logUnseen(health)?.counts ?? {}, seenTitle: "What needs attention" } : row));
   const settings: SidebarView = {
@@ -65,9 +96,21 @@ export function ShellSidebar(): JSX.Element {
     label: "Settings",
     counts: healthCounts(health),
     seenTitle: "What needs attention",
-    panel: <Uncopied name="SettingsSections" flex={1} />,
+    panel: (
+      <SettingsSections
+        section={state.section}
+        open={state.view === "settings"}
+        problems={(id) => settingsPageProblems(health, id)}
+        onSection={(id) => {
+          actions.setSection(id);
+          // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
+          actions.setView("settings");
+        }}
+      />
+    ),
   };
   return (
+    <>
     <Sidebar
       views={views}
       roots={roots}
@@ -91,6 +134,50 @@ export function ShellSidebar(): JSX.Element {
         actions.setConfigLayer(p.kind === "shared" ? "base" : "project");
         actions.setView("settings");
       }}
+    />
+    {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
+    </>
+  );
+}
+
+/**
+ * Where the row's `+` stands, for the menu it drops. The DOM sidebar hands its act the button; this
+ * one's `Sidebar` hands it nothing yet, so on web the button is found by its label, and on native the
+ * menu hangs from the top of the column.
+ */
+function anchorBox(from: unknown, label: string): { right: number; bottom: number } {
+  const el =
+    from !== undefined && from !== null && typeof (from as HTMLElement).getBoundingClientRect === "function"
+      ? (from as HTMLElement)
+      : typeof document === "undefined"
+        ? null
+        : document.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  if (el === null) return { right: MENU_WIDTH + 4, bottom: 60 };
+  const box = el.getBoundingClientRect();
+  return { right: box.right, bottom: box.bottom };
+}
+
+/** The Files drawer (`FileTreePanel`), with the props `App.tsx` gives its own. */
+function FilesDrawer({ find, draft, onDraft }: { find: boolean; draft: TreeDraft | null; onDraft: (draft: TreeDraft | null) => void }): JSX.Element {
+  const { state, actions } = useShell();
+  const ui = state.settings.ui;
+  const openFolders = useMemo(() => unfoldedOf(ui, OPENED.folders), [ui]);
+  const dirty = useMemo(() => new Set(Object.keys(state.drafts)), [state.drafts]);
+  return (
+    <FileTreePanel
+      tree={state.tree}
+      selected={state.doc ? { layer: state.doc.layer, path: state.doc.path, ...(state.doc.project !== undefined ? { project: state.doc.project } : {}) } : null}
+      dirty={dirty}
+      expanded={openFolders}
+      onToggleExpanded={(key) => actions.toggleUnfolded(OPENED.folders, key)}
+      onSelect={actions.selectFile}
+      onCreate={actions.createWorkflow}
+      onCreateFile={actions.createFile}
+      find={find}
+      draft={draft}
+      onDraft={onDraft}
+      onUnfold={(keys) => actions.unfold(OPENED.folders, keys)}
+      project={state.at}
     />
   );
 }

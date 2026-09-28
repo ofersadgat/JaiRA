@@ -9,9 +9,15 @@ import { useApp } from "@jaira/ui/store";
 import { FOLD, openOf } from "@jaira/ui/uiState";
 import { InboxStrip } from "../components/InboxStrip";
 import { edge } from "../primitives";
-import { TokenRoot, useTokens } from "../tokens";
+import { TokenRoot, useLook, useTokens } from "../tokens";
 import { BoardColumn } from "./BoardColumn";
+import { ChatView } from "./ChatView";
+import { DebugView } from "./DebugView";
+import { FilesView } from "./FilesView";
+import { GalleryView } from "./GalleryView";
+import { LogsView } from "./LogsView";
 import { PanelColumn } from "./PanelColumn";
+import { SettingsView } from "./SettingsView";
 import { AppContext, useShell } from "./shell";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
@@ -39,10 +45,12 @@ export function UniversalApp(): JSX.Element {
 /**
  * `.app`: the sidebar, its splitter, and the body — a row the height of the window. The body is the
  * address bar over the viewport, and the inbox strip under both. Each region is a file of its own
- * (`SidebarRegion.tsx`, `TitleBar.tsx`, `BoardColumn.tsx`, `PanelColumn.tsx`), so copies land side by side.
+ * (`SidebarRegion.tsx`, `TitleBar.tsx`, `BoardColumn.tsx`, `PanelColumn.tsx`, and a file per room:
+ * `FilesView.tsx`, `ChatView.tsx`, `SettingsView.tsx`, …), so copies land side by side.
  */
 function Frame(): JSX.Element {
   const t = useTokens();
+  const look = useLook();
   const { state } = useShell();
   return (
     <View flex={1} flexDirection="row" overflow="hidden" backgroundColor={t.v("bg") as never}>
@@ -54,8 +62,16 @@ function Frame(): JSX.Element {
         </View>
       ) : null}
       <View flex={1} minWidth={0} minHeight={0} flexDirection="column">
-        {/* `.title-bar`: at least 34 tall, --panel, a --line under it. */}
-        <View flexDirection="row" alignItems="stretch" flexShrink={0} minHeight={34} backgroundColor={t.v("panel") as never} {...(edge(t, { bottom: 1 }) as object)}>
+        {/* `.title-bar`: at least 34 tall, --panel, a --line under it — 1.5px of --rule under contrast, a
+            --rule under blueprint (`:root[data-palette=…] .title-bar`). */}
+        <View
+          flexDirection="row"
+          alignItems="stretch"
+          flexShrink={0}
+          minHeight={34}
+          backgroundColor={t.v("panel") as never}
+          {...(edge(t, { bottom: look.palette === "contrast" ? 1.5 : 1 }, look.palette === "contrast" || look.palette === "blueprint" ? "rule" : "line") as object)}
+        >
           <ShellTitleBar />
         </View>
         {/* `.viewport`: the view, taking the rest of the height. */}
@@ -67,6 +83,18 @@ function Frame(): JSX.Element {
               </View>
               <PanelColumn />
             </>
+          ) : state.view === "files" ? (
+            <FilesView />
+          ) : state.view === "chat" ? (
+            <ChatView />
+          ) : state.view === "settings" ? (
+            <SettingsView />
+          ) : state.view === "logs" ? (
+            <LogsView />
+          ) : state.view === "debug" ? (
+            <DebugView />
+          ) : state.view === "gallery" ? (
+            <GalleryView />
           ) : (
             <Uncopied name={`the ${state.view} view`} flex={1} />
           )}

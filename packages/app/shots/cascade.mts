@@ -2,7 +2,7 @@
  * What `styles.css` actually does to an element, as Chromium decided it (decision 0015): for the element
  * a selector names and the ones inside it, every declaration that WON, with the rule it came from.
  *
- *   npx tsx packages/app/shots/cascade.mts '<selector>' [--depth 3] [--scene board] [--look dark] [--inherited] [--ua] [--page dom|rn] [--port 9301]
+ *   npx tsx packages/app/shots/cascade.mts '<selector>' [--depth 3] [--scene board] [--look dark] [--inherited] [--ua] [--page dom|rn] [--path specimen-dom?name=markdown] [--port 9301]
  *
  * Attaches to the app `studio.mts` keeps running. A universal copy has no cascade: every rule it carries,
  * it carries by hand, and working out which of forty matching rules wins — specificity, source order,
@@ -169,7 +169,13 @@ async function main(): Promise<void> {
   try {
     const scene = arg("--scene");
     const look = arg("--look");
-    if (scene !== undefined || look !== undefined || arg("--page") !== undefined) {
+    const path = arg("--path");
+    if (path !== undefined) {
+      // Any page, by its path without the leading slash (Git Bash rewrites one): `specimen-dom?name=markdown`.
+      await app.navigate((await app.evaluate<string>("location.protocol + '//' + location.host")) + "/" + path);
+      await app.until("document.readyState === 'complete' && document.body.children.length > 0", path);
+      await new Promise((r) => setTimeout(r, 500));
+    } else if (scene !== undefined || look !== undefined || arg("--page") !== undefined) {
       await goTo(app, arg("--page") === "rn" ? "/rn" : "/", {
         ...(look !== undefined ? { look: parseLook(look) } : {}),
         ...(scene !== undefined ? { scene: SCENES.find((s) => s.name === scene) as Scene } : {}),

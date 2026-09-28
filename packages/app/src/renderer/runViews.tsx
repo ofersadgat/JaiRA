@@ -44,11 +44,11 @@ import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf,
 import { ValueView } from "./valueView";
 import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
-import { STOPPED, stoppedAction } from "./taskAction";
+import { activityOf, startedAtOf } from "./runActivityModel";
 import { instanceOf as instanceOfState, nodeAt, type TrailStep } from "./trail";
 import { AnsweredForYou, Paper, Pulse, Transcript, durationOf, useElapsed, type CallSurface, type EditMessage } from "./transcriptView";
 import { ApprovalAskContext, approvalCallIndex } from "./workSummaryView";
-import { PickStepContext, advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
+import { PickStepContext, advanceTargetOf, askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
@@ -65,48 +65,9 @@ import { useTaskRun } from "./taskRun";
 // is where the board that uses it has always found it.
 export { instanceOf } from "./trail";
 
-/** Whether this subtree holds a state that is asking right now — see {@link isAsking}. */
-export function hasAsking(node: InstanceNode): boolean {
-  return isAsking(node) || node.children.some(hasAsking);
-}
-
-/**
- * WHICH instance is asking — the same walk, returning the state rather than a yes.
- *
- * Every surface that draws a parked gate needs this and each of them was deriving it separately or
- * not at all. The letterhead's tint needs it (a canceled instance still holding a live question is
- * not a settled state — see `headerToneOf`), the run index needs it for the same reason, and the
- * conversation already needed it to decide which panel the question goes in.
- *
- * A pairing, not a lookup: `pending_interactions` records the component and the task, never the
- * instance, so nothing in the store says which state a surviving question belongs to. What says it
- * is the tree — exactly one instance has a function operation that dispatched and never settled —
- * which is why this is only ever asked when the hub is actually holding a request. The FIRST such
- * instance, since SPEC §7.1 gives an instance one operation and one task's tree cannot hold two
- * parked calls on one state.
- */
-/**
- * The instance whose CALL is running and which has no running child — where an agent that asks is
- * asking from. Deepest first, since a running composite's own call is never the one talking.
- */
-function runningLeafOf(nodes: readonly InstanceNode[]): string | undefined {
-  for (const node of nodes) {
-    if (node.superseded) continue;
-    const inside = runningLeafOf(node.children);
-    if (inside !== undefined) return inside;
-    if (node.status === "running" && node.operation?.status === "running") return node.instanceId;
-  }
-  return undefined;
-}
-
-export function askingInstanceOf(nodes: readonly InstanceNode[]): string | undefined {
-  for (const node of nodes) {
-    if (isAsking(node)) return node.instanceId;
-    const inside = askingInstanceOf(node.children);
-    if (inside !== undefined) return inside;
-  }
-  return undefined;
-}
+// `hasAsking` and `askingInstanceOf` live in `stateSurface.tsx` beside `isAsking`, shared with the
+// universal copy (decision 0015); re-exported here, where their callers have always found them.
+export { askingInstanceOf, hasAsking } from "./stateSurface";
 
 /** Every execution of each declared child, keyed by the child key the parent mounted it under. */
 export function runsByChild(parent: InstanceNode | undefined): Map<string, InstanceNode[]> {
@@ -1677,32 +1638,26 @@ export function RunActivity({
    */
   onSkip?: (() => void) | undefined;
 }): JSX.Element | null {
-  if (detail.fastForward !== undefined) return <FastForwardStrip forward={detail.fastForward} onStop={onStop} onSkip={onSkip} />;
-  const deepest = detail.activePath[detail.activePath.length - 1];
-  const node = deepest === undefined ? undefined : nodeAt(detail.instances, deepest.instanceId);
-  // A gate is not motion but it is still something happening, and it is happening to YOU — which is
-  // the one status here worth colouring differently, because it is the one you can end by acting.
-  const waiting = node?.status === "waiting_for_user" || asking === true;
-  const going = detail.status === "running" || waiting;
-  // A stop has been asked for and the run has not settled. Neither going nor stopped: the agent is
-  // finishing the tool it is inside, and what it says on the way out is still arriving.
-  const stopping = detail.status === "stopping";
-  const startedAt = detail.runs.find((run) => run.outcome === "running")?.startedAt;
+  // What the strip says is `activityOf` (`runActivityModel.ts`), shared with the universal copy:
+  //  - a gate is not motion but it is still something happening, and it is happening to YOU — the one
+  //    status here worth colouring differently, because it is the one you can end by acting;
+  //  - `stopping` is neither going nor stopped: the agent is finishing the tool it is inside;
+  //  - `listening` is parked only on the WORLD — an events task at rest, never "waiting for you";
+  //  - the whole active path is named, not just its tail: `review` on its own says nothing on a
+  //    workflow with three states called review.
+  const activity = activityOf(detail, asking === true, { rerun: onRerun !== undefined, resume: onResume !== undefined });
   // Once a second. The transcript's own counter runs in tenths to prove a thinking model is alive;
   // nobody watches the tenths of a run that has been going for four minutes.
-  const elapsed = useElapsed(startedAt, going, 1000);
+  const elapsed = useElapsed(startedAtOf(detail), activity.kind === "going", 1000);
+  if (activity.kind === "forward") return <FastForwardStrip forward={detail.fastForward!} onStop={onStop} onSkip={onSkip} />;
+  const at = (where: string): JSX.Element => (where.length > 0 ? <b>{where}</b> : <b>this run</b>);
 
-  // The whole path, not just its tail: `review` on its own says nothing on a workflow with three
-  // states called review, and the path is how the panel below is already labelled.
-  const where = detail.activePath.map((step) => step.childKey ?? step.stateId.split("/").pop() ?? step.stateId).join(" → ");
-  const at = where.length > 0 ? <b>{where}</b> : <b>this run</b>;
-
-  if (stopping) {
+  if (activity.kind === "stopping") {
     return (
       <div className="run-doing warn">
         <Pulse />
         <span className="ellip">
-          Stopping {at} — waiting for the agent to finish what it is doing
+          Stopping {at(activity.where)} — waiting for the agent to finish what it is doing
         </span>
         <span className="grow" />
         {/* Rung 4, OFFERED rather than taken. The gate is shut and the turn is ending; this is for
@@ -1714,15 +1669,12 @@ export function RunActivity({
     );
   }
 
-  // Parked only on the WORLD — its rules listening for events (`on_event`), nothing of its own running
-  // and nobody asked — which is an events task at rest: quiet, and never "waiting for you".
-  const listening = !waiting && detail.status === "running" && (detail.listening?.length ?? 0) > 0 && node?.operation?.status !== "running" && node?.status !== "waiting_for_user";
-  if (listening) {
+  if (activity.kind === "listening") {
     return (
       <div className="run-doing listening">
         <span className="run-doing-mark" aria-hidden="true" />
         <span className="ellip">
-          Listening for <b>{detail.listening!.join(", ")}</b>
+          Listening for <b>{activity.listening.join(", ")}</b>
         </span>
         <span className="grow" />
         <button type="button" className="quiet" onClick={onStop}>
@@ -1732,13 +1684,13 @@ export function RunActivity({
     );
   }
 
-  if (going) {
+  if (activity.kind === "going") {
     return (
-      <div className={waiting ? "run-doing waiting" : "run-doing"}>
+      <div className={activity.waiting ? "run-doing waiting" : "run-doing"}>
         <Pulse />
         <span className="ellip">
-          {waiting ? "Waiting for you in " : "Running "}
-          {at}
+          {activity.waiting ? "Waiting for you in " : "Running "}
+          {at(activity.where)}
         </span>
         {elapsed !== undefined ? (
           <>
@@ -1764,30 +1716,21 @@ export function RunActivity({
    * whole story, and the thing you wanted to do about it was three clicks away.
    *
    * `completed` is still nothing. A run that did what it was asked is the one case where silence is
-   * the correct report.
+   * the correct report. `onResume` absent (a caller that has not wired the channel) falls back to the
+   * rerun it always did — with the fallback WORDING too, since the button would otherwise promise a
+   * continuation it is not going to perform.
    */
-  const stopped = stoppedAction(detail);
-  if (stopped === undefined || onRerun === undefined) return null;
-  // `onResume` absent (a caller that has not wired the channel) falls back to the rerun it always
-  // did — with the fallback WORDING too, since the button would otherwise promise a continuation it
-  // is not going to perform.
-  const resuming = stopped.act === "resume" && onResume !== undefined;
-  const act = resuming ? onResume! : onRerun;
-  const fallback = STOPPED[detail.status]!;
+  if (activity.kind === "none") return null;
+  const act = activity.resuming ? onResume! : onRerun!;
   return (
-    <div className={`run-doing ${stopped.tone}`}>
-      <span className={`run-doing-mark ${stopped.tone}`} aria-hidden="true" />
+    <div className={`run-doing ${activity.tone}`}>
+      <span className={`run-doing-mark ${activity.tone}`} aria-hidden="true" />
       <span className="ellip">
-        {stopped.said} {detail.activePath.length > 0 ? <>in {at}</> : null}
+        {activity.said} {detail.activePath.length > 0 ? <>in {at(activity.where)}</> : null}
       </span>
       <span className="grow" />
-      <button
-        type="button"
-        className="primary"
-        onClick={() => act(detail.taskId)}
-        title={resuming ? stopped.hint : fallback.hint}
-      >
-        {resuming ? stopped.verb : fallback.verb}
+      <button type="button" className="primary" onClick={() => act(detail.taskId)} title={activity.hint}>
+        {activity.verb}
       </button>
     </div>
   );

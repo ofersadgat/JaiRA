@@ -17,6 +17,7 @@
     "@vxrn/vite-plugin-metro": "1.27.1",
     "expo": "~57.0.11",
     "expo-build-properties": "~57.0.22",
+    "expo-font": "~57.0.4",
     "one": "1.27.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",

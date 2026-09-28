@@ -31,8 +31,9 @@ export async function start(app: App, title: string, fake: unknown): Promise<str
   return made.taskId;
 }
 
-export async function seed(world: World, out: string): Promise<void> {
-  const app = await launch(world, 9239, out);
+/** `port` is the seeding launch's CDP port: studios seeding side by side each need their own. */
+export async function seed(world: World, out: string, port = 9239): Promise<void> {
+  const app = await launch(world, port, out);
   try {
     await start(app, "add dark mode", happyRules());
     await start(app, "rework the sync lint", [happyRules()[0]]);
@@ -90,6 +91,37 @@ export const SCENES: readonly Scene[] = [
     },
   },
   { name: "settings", reach: (app) => app.clickText("Settings") },
+  // Each Settings page (`settings` opens on Connections), reached from the sidebar's sections list.
+  ...(
+    [
+      ["appearance", "Appearance"],
+      ["machines", "Machines"],
+      ["models", "Models"],
+      ["tools", "Tools"],
+      ["runs", "Runs"],
+      ["data", "Data & history"],
+      ["about", "About"],
+    ] as const
+  ).map(
+    ([id, label]): Scene => ({
+      name: `settings-${id}`,
+      reach: async (app) => {
+        await app.clickText("Settings");
+        await clickFirst(app, label);
+        await app.until(`[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(label)} && e.getBoundingClientRect().left > 250)`, `the ${label} page`);
+      },
+    }),
+  ),
+  // The other rooms, each reached from the sidebar (decision 0015's universal copies are checked in them).
+  { name: "files", reach: (app) => app.clickText("Files") },
+  { name: "chat", reach: (app) => app.clickText("Chat") },
+  {
+    name: "logs",
+    reach: async (app) => {
+      await app.clickText("Settings");
+      await app.clickText("Logs");
+    },
+  },
   {
     // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the
     // renderer most likely to break under a new origin and a new content policy.
@@ -119,6 +151,21 @@ export const SCENES: readonly Scene[] = [
     },
   },
 ];
+
+/**
+ * Click the FIRST element in the page whose own text is exactly `text` (`clickText` takes the last that
+ * contains it) — the sidebar's row, not a page's sentence that mentions the same word.
+ */
+async function clickFirst(app: App, text: string): Promise<void> {
+  const hit = await app.evaluate<boolean>(`(() => {
+    const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(text)});
+    if (!el) return false;
+    (el.closest("button, a, [role=button], li") ?? el).click();
+    return true;
+  })()`);
+  if (!hit) throw new Error(`nothing to click reading "${text}"`);
+  await settle(250);
+}
 
 /**
  * The looks each gate runs in. The first two (the default palette, both modes) take every scene; the

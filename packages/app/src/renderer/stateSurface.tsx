@@ -67,7 +67,7 @@ export type SurfaceKind = "conversation" | "computed" | "called" | "asked" | "wa
 export type HeaderTone = "accent" | "amber" | "red" | undefined;
 
 /** The verb each kind's heading opens with. A `conversation` has none — it is the unmarked case. */
-const KIND_WORD: Record<Exclude<SurfaceKind, "conversation">, string> = {
+export const KIND_WORD: Record<Exclude<SurfaceKind, "conversation">, string> = {
   computed: "computed",
   called: "called",
   asked: "asked of you",
@@ -75,7 +75,7 @@ const KIND_WORD: Record<Exclude<SurfaceKind, "conversation">, string> = {
 };
 
 /** One glyph per kind — only ever drawn beside {@link KIND_WORD}, never alone. */
-const KIND_ICON: Record<Exclude<SurfaceKind, "conversation">, keyof typeof PATHS> = {
+export const KIND_ICON: Record<Exclude<SurfaceKind, "conversation">, keyof typeof PATHS> = {
   computed: "sigma",
   called: "sigma",
   asked: "comment",
@@ -130,6 +130,49 @@ export function surfaceKindOf(node: InstanceNode): SurfaceKind | undefined {
  */
 export function isAsking(node: InstanceNode): boolean {
   return surfaceKindOf(node) === "asked" && node.operation?.status === "running";
+}
+
+/** Whether this subtree holds a state that is asking right now — see {@link isAsking}. */
+export function hasAsking(node: InstanceNode): boolean {
+  return isAsking(node) || node.children.some(hasAsking);
+}
+
+/**
+ * WHICH instance is asking — the same walk, returning the state rather than a yes.
+ *
+ * Every surface that draws a parked gate needs this and each of them was deriving it separately or
+ * not at all. The letterhead's tint needs it (a canceled instance still holding a live question is
+ * not a settled state — see `headerToneOf`), the run index needs it for the same reason, and the
+ * conversation already needed it to decide which panel the question goes in.
+ *
+ * A pairing, not a lookup: `pending_interactions` records the component and the task, never the
+ * instance, so nothing in the store says which state a surviving question belongs to. What says it
+ * is the tree — exactly one instance has a function operation that dispatched and never settled —
+ * which is why this is only ever asked when the hub is actually holding a request. The FIRST such
+ * instance, since SPEC §7.1 gives an instance one operation and one task's tree cannot hold two
+ * parked calls on one state.
+ */
+/**
+ * The instance whose CALL is running and which has no running child — where an agent that asks is
+ * asking from. Deepest first, since a running composite's own call is never the one talking.
+ */
+export function runningLeafOf(nodes: readonly InstanceNode[]): string | undefined {
+  for (const node of nodes) {
+    if (node.superseded) continue;
+    const inside = runningLeafOf(node.children);
+    if (inside !== undefined) return inside;
+    if (node.status === "running" && node.operation?.status === "running") return node.instanceId;
+  }
+  return undefined;
+}
+
+export function askingInstanceOf(nodes: readonly InstanceNode[]): string | undefined {
+  for (const node of nodes) {
+    if (isAsking(node)) return node.instanceId;
+    const inside = askingInstanceOf(node.children);
+    if (inside !== undefined) return inside;
+  }
+  return undefined;
 }
 
 /**

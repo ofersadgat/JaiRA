@@ -21,7 +21,7 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   server. Stop yours when you are done (kill its `tsx … studio.mts` process and its `electron.exe`).
 - **`pair.mts`** loads `/` (the desktop's page) and `/rn` (the universal shell) in the same window, the
   same state and the same look, photographs both, and compares them region by region
-  (`sidebar`, `titlebar`, `board`, `panel`, `inbox`; `--region` for one). `--scene board|task|archived|settings`
+  (`sidebar`, `titlebar`, `board`, `panel`, `inbox`, and `viewport` for a whole room; `--region` for one). `--scene board|task|gate|archived|settings|files|chat|logs`
   picks a state and `--look light|dark|<palette>[-wash]-<theme>` a look (`--every-look` for all eight).
   Pictures and red-on-grey diffs land in `packages/app/shots/parity/rn-<port>/`: read the `.diff.png`,
   and the `.dom.png` and `.rn.png` beside it. A copy is done when its region says **identical** (or
@@ -87,5 +87,42 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
 - **Grid** is not in React Native: rows and columns of `View`s with the tracks' widths.
 - **Colours composited in floating point** (a translucent `color-mix()` ground) come out one level apart
   from the copy's `rgba()`; `pair.mts` calls that "identical to the eye", and it is.
+- **The studio's window WRITES.** The read-only bridge is the socket's (phone, browser); inside Electron
+  both `/` and `/rn` use the window's own bridge, so pressing Cancel on a parked task cancels it. Only
+  in your studio's own world — reseed it (`studio.mts --reseed --port …`) if you spoil it.
+- **The dev server remembers a missing file.** Import a file before it exists and the shared dev server
+  caches the miss; creating the file afterwards does not clear it ("Failed to resolve import"), and it
+  breaks `/` and `/rn` for every studio. Rename the IMPORTING file away and back (content unchanged).
+- **Line heights on web.** Blink multiplies a unitless line height out in floating point and snaps to
+  1/64px; `Txt` gives pixels, which drifts a long run of lines by hundredths of a pixel each. Where a
+  column of prose must stay aligned for its whole length, pass the factor the stylesheet uses.
+- **Greyscale text.** Chromium draws text greyscale where it paints over a composited scroller; a copy
+  over react-native-web's scroller must sit where the DOM's text does to match (see `OVER_SCROLLER` in
+  `components/panel/SidePanel.tsx`).
+- **Scrolling to the end on web**: `scrollTo` with a very large y; `scrollToEnd` stops a fraction short.
+- **Icons** are `components/panel/Icon.tsx` (SVG). On web a real `<svg>`; on a phone `react-native-svg`.
 - **The phone is the final check, not the loop**: `packages/app/shots/android.mts` on the emulator, once
   a region passes in every look.
+
+## A leaf, on its own
+
+A component with no place in a scene yet (or one worth checking alone, in every variation) gets a
+**specimen**: `packages/client/src/specimens/registry.tsx` names it, with its DOM original and its copy,
+each drawn from the same fixture at the width it usually has. Then:
+
+```bash
+npx tsx packages/app/shots/pair.mts --specimen markdown --every-look --port 9301
+```
+
+draws `/specimen-dom?name=markdown` (the desktop's stylesheet) and `/specimen-rn?name=markdown` (the
+native path), compares them, and lists every run of text that moved and by how much — which line is
+out, not just that something is. `cascade.mts --path 'specimen-dom?name=markdown&look=light'` reads the
+rules on a specimen page.
+
+## Shared copies
+
+- **`Markdown`** (`components/Markdown.tsx`) — `markdown.tsx`'s renderer: the same parse, native views.
+  Props for the contexts that change it: `scale` (13/12.5 in a panel, 13.5/12.5 in a transcript message,
+  12.5/12.5 in a value view), `lineHeight`, `trimEnd`, `padding`. `registerFenceRenderer` for fenced
+  blocks, as the desktop's.
+- **`Pill`**, **`Pills`**, **`TaskCard`**, **`ProjectChip`** (the inbox strip's), **`Sidebar`**.

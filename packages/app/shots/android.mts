@@ -7,9 +7,10 @@
  *
  * A desktop with a few tasks and the spike socket; Metro (`one dev`) serving the debug build its
  * JavaScript; the emulator reaching both through `adb reverse`. The app is installed, opened by the deep
- * link that connects it (`jaira:///?address=…&token=…`), and each tab photographed: the desktop's own UI
- * in its WebView, the native copies drawing the live board, the three islands with their readouts, and
- * text typed into the editable island coming back over the bridge.
+ * link that connects it (`jaira:///?address=…&token=…`) and photographed: the universal shell drawn
+ * natively (no WebView in it), fitted and at its own size; then, by the same link with `&screen=islands`,
+ * the three islands with their readouts, and text typed into the editable island coming back over the
+ * bridge.
  * What the screen says is read from Android's accessibility dump (`uiautomator`), so a tab that shows
  * an error rather than the app is caught.
  */
@@ -112,20 +113,23 @@ async function main(): Promise<void> {
     const started = Date.now();
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}'`, PACKAGE);
 
-    await until(() => says("Desktop UI") && says("Native copies"), "the app to connect", 240);
+    await until(() => says("Open a project"), "the app to connect and draw the shell", 240);
     console.log(`(1) connected by deep link in ${Math.round((Date.now() - started) / 1000)} s (first bundle from Metro included)`);
-    await sleep(6000);
-    shot("1-desktop-ui");
+    await sleep(4000);
+    shot("1-shell-fit");
+    // The shell is native: no WebView anywhere in what Android is drawing.
+    const webviews = (adb("shell", "cat", "/sdcard/ui.xml").match(/class="android\.webkit\.WebView"/g) ?? []).length;
+    if (webviews > 0) throw new Error(`the shell drew ${webviews} WebView(s): it must be native`);
+    console.log("(1) the universal shell draws natively, fitted to the phone (no WebView)");
 
-    tap("Native copies");
-    // "Planning · 2" is the copies screen's own heading: the desktop UI's WebView, whose text is in the
-    // same accessibility tree, says "add dark mode" too.
-    await until(() => says("Planning · 2") && says("add dark mode"), "the native copies to draw the board");
+    tap("1:1");
     await sleep(1500);
-    shot("2-native-copies");
-    console.log("(2) the native copies draw the desktop's live board");
+    shot("2-shell-full");
+    tap("fit");
+    console.log("(2) at its own size, and back");
 
-    tap("Islands");
+    // The island harness, opened by the same link with `&screen=islands`.
+    adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}&screen=islands'`, PACKAGE);
     await until(() => screen().filter((n) => /^(markdown|diff|editor): ready \d/.test(n.text)).length === 3, "all three islands to report ready", 120);
     await until(() => screen().filter((n) => /drawn \d/.test(n.text)).length >= 2, "the islands to draw", 120);
     await sleep(3000);

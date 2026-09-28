@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   if (process.argv.includes("--reseed") || !existsSync(join(DIR, "home"))) {
     console.log("seeding the world (a minute or two)…");
     world = buildWorld(DIR);
-    await seed(world, OUT);
+    await seed(world, OUT, PORT + 1000);
   } else {
     world = { home: join(DIR, "home"), project: join(DIR, "project"), userData: join(DIR, "user-data") };
   }

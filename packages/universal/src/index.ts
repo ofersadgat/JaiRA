@@ -6,6 +6,7 @@ export { config } from "./tamagui.config";
 export { Replayed, TokenRoot, TokenScope, useLook, useTokens, type Look, type Tokens } from "./tokens";
 export { Island, type IslandProps } from "./islands";
 export { Connect } from "./screens/Connect";
+export { Markdown, registerFenceRenderer } from "./components/Markdown";
 export { UniversalApp } from "./app/UniversalApp";
 export { useShell } from "./app/shell";
 export { Uncopied } from "./app/Uncopied";

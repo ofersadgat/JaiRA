@@ -63,29 +63,30 @@ import {
   stackOf,
   useSystemDark,
 } from "./appearance";
-import { SelectInput, Switch, shortValue } from "./controls";
-import { EDITOR_THEMES, EDITOR_THEME_APP } from "./editorThemes";
+import { SelectInput, Switch } from "./controls";
+import {
+  APPEARANCE_ROWS as ROWS,
+  BATCH_CHOICES,
+  BUCKET_CHOICES,
+  MODES,
+  SUGGESTED_APP,
+  SUGGESTED_DATA,
+  USAGE_CHOICES,
+  WORK_NOTE_CHOICES,
+  WORK_ROW_CHOICES,
+  appearanceRowLayer,
+  boardPreviewWords,
+  editorThemeChoices,
+  type AppearanceLayering,
+} from "./appearanceModel";
 import { Pill } from "./pill";
 import { Column, Tile } from "./board";
 import { PALETTE_CARDS, ThemeMini } from "./paletteCards";
-import { Segmented, SettingsRow, SettingsSection, type RowLayer } from "./settingsLayout";
+import { Segmented, SettingsRow, SettingsSection } from "./settingsLayout";
+
+export type { AppearanceLayering } from "./appearanceModel";
 import { UsageFiguresPreview } from "./usageMeters";
 import { WorkPreview } from "./workPreview";
-
-/**
- * Faces worth offering by name.
- *
- * A short list rather than an enumeration of what is installed: there is no way to enumerate system
- * fonts without a permission prompt, and the answer would be four hundred entries long in an order
- * nobody chose. What CAN be answered is whether a named one is here — measured, the same way the
- * proportional check is — so the menu says `installed` beside the ones that will actually render and
- * greys the rest rather than pretending the list is the machine's.
- *
- * Anything not here is typed in: the menu's last row takes a name, and the chip proves whether it
- * resolved, which is the same feedback a longer list would have given.
- */
-const SUGGESTED_APP = ["DM Sans", "Inter", "Segoe UI", "Helvetica Neue", "IBM Plex Sans", "Roboto"];
-const SUGGESTED_DATA = ["JetBrains Mono", "Cascadia Code", "SF Mono", "Fira Code", "IBM Plex Mono", "Consolas", "Menlo"];
 
 /**
  * One voice's stack: numbered chips in one box, tried left to right.
@@ -296,12 +297,6 @@ function Preview(): JSX.Element {
 
 const noop = (): void => undefined;
 
-const MODES: ReadonlyArray<readonly [label: string, mode: ThemeMode]> = [
-  ["Light", "light"],
-  ["Dark", "dark"],
-  ["System", "system"],
-];
-
 /** Light, dark or follow the system — each tile the current palette's board in that mode. */
 function ModeTiles({ mode, palette, busy, onTheme }: { mode: ThemeMode; palette: Appearance["palette"]; busy: boolean; onTheme: (mode: ThemeMode) => void }): JSX.Element {
   return (
@@ -414,91 +409,6 @@ function ConversationPreview({ layout }: { layout: SequentialBatchLayout }): JSX
   );
 }
 
-const BUCKET_CHOICES: ReadonlyArray<readonly [string, BucketStyle]> = [
-  ["Box", "box"],
-  ["Line", "line"],
-];
-
-const USAGE_CHOICES: ReadonlyArray<readonly [string, UsageFigures]> = [
-  ["Off", "off"],
-  ["Number", "number"],
-  ["Ring", "ring"],
-  ["Both", "both"],
-];
-
-const WORK_ROW_CHOICES: ReadonlyArray<readonly [string, `${WorkRows}`]> = [
-  ["None", "0"],
-  ["1", "1"],
-  ["3", "3"],
-  ["5", "5"],
-];
-
-const WORK_NOTE_CHOICES: Array<[string, WorkNotes]> = [
-  ["Show", "show"],
-  ["Hide phases of only these", "hide-groups"],
-  ["Hide phases and stretches of only these", "hide-blocks"],
-  ["Hide everywhere", "hide"],
-];
-
-const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
-  ["One after another", "stacked"],
-  ["Side by side", "band"],
-];
-
-/**
- * How the Appearance rows sit in the layers — handed in by the caller, which knows the layer being
- * edited and how to write it. Absent draws the rows as plain controls, with no ↺.
- */
-export interface AppearanceLayering {
-  /** Whether the layer being edited states a path (`appearance.palette`, …). */
-  stated: (path: string) => boolean;
-  /** Take paths out of the layer being edited, so they inherit again. */
-  inherit: (paths: readonly string[]) => void;
-  /** Nothing on the page may be changed — a write in flight, or a layer that cannot be written. */
-  locked: boolean;
-}
-
-/** A value of the look in the words its row uses — for the "instead of … from …" line. */
-function lookWords(value: unknown, path: string): string {
-  const field = path.replace(/^appearance\./, "");
-  const own = "the palette's own";
-  switch (field) {
-    case "mode":
-      return MODES.find(([, mode]) => mode === value)?.[0].toLowerCase() ?? shortValue(value, path);
-    case "palette":
-      return PALETTE_CARDS[value as Appearance["palette"]]?.label ?? shortValue(value, path);
-    case "laneColors":
-    case "statusWash":
-      return value === null || value === undefined ? own : value === true ? "on" : "off";
-    case "buckets":
-      return value === null || value === undefined ? own : value === "line" ? "a line" : "a box";
-    case "conversation.sequentialBatches":
-      return BATCH_CHOICES.find(([, layout]) => layout === value)?.[0].toLowerCase() ?? shortValue(value, path);
-    case "conversation.usageFigures":
-      return USAGE_CHOICES.find(([, figures]) => figures === value)?.[0].toLowerCase() ?? shortValue(value, path);
-    case "conversation.workPhases":
-    case "conversation.workThinking":
-      return value === true ? "on" : value === false ? "off" : shortValue(value, path);
-    case "conversation.workNotes":
-      return WORK_NOTE_CHOICES.find(([, notes]) => notes === value)?.[0].toLowerCase() ?? shortValue(value, path);
-    case "conversation.workRows":
-      return value === 0 ? "none" : typeof value === "number" ? `${value} rows` : shortValue(value, path);
-    case "appFamily":
-    case "dataFamily":
-      return Array.isArray(value) && value.length > 0 ? value.join(", ") : "JaiRA's own face";
-    case "sizeApp":
-    case "sizeData":
-    case "sizeEditor":
-      return typeof value === "number" ? `${value} px` : shortValue(value, path);
-    case "advanced":
-      return value === true ? "a size of its own" : "following the data font";
-    case "editorTheme":
-      return value === EDITOR_THEME_APP ? "following the window" : (EDITOR_THEMES.find((theme) => theme.id === value)?.label ?? shortValue(value, path));
-    default:
-      return shortValue(value, path);
-  }
-}
-
 /**
  * Settings → Appearance, as the sections of its page (the page itself — its title, whose settings
  * these are, the layer switch — is the caller's, like every other page's).
@@ -555,19 +465,8 @@ export function AppearancePane({
   const systemDark = useSystemDark();
   const shown: JairaTheme = theme === "system" ? (systemDark ? "dark" : "light") : theme;
   const surface = surfaceOf(appearance);
-  const card = PALETTE_CARDS[appearance.palette];
   // One row's place in the layers, from the `appearance.*` fields it writes.
-  const layer = (...fields: string[]): RowLayer | undefined => {
-    if (layered === undefined) return undefined;
-    const paths = fields.map((field) => `appearance.${field}`);
-    return {
-      paths,
-      stated: paths.some((path) => layered.stated(path)),
-      onInherit: () => layered.inherit(paths),
-      disabled: layered.locked,
-      format: lookWords,
-    };
-  };
+  const layer = (...fields: string[]) => appearanceRowLayer(layered, ...fields);
 
   return (
     <>
@@ -588,37 +487,32 @@ export function AppearancePane({
 
       <SettingsSection id="board" title="Board">
         <SettingsRow
-          name="Lane colours"
-          description="Tint each column its own colour, so a step of the workflow is recognisable at a glance."
+          {...ROWS.laneColors}
           layer={layer("laneColors")}
-          control={<Switch on={surface.laneColors} label="Lane colours" disabled={busy} onChange={(laneColors) => onChange({ laneColors })} />}
+          control={<Switch on={surface.laneColors} label={ROWS.laneColors.name} disabled={busy} onChange={(laneColors) => onChange({ laneColors })} />}
         />
         <SettingsRow
-          name="Columns"
-          description="A box around each column's cards, or a rule under its heading."
+          {...ROWS.buckets}
           layer={layer("buckets")}
-          control={<Segmented label="Columns" value={surface.buckets} options={BUCKET_CHOICES} disabled={busy} onChange={(buckets) => onChange({ buckets })} />}
+          control={<Segmented label={ROWS.buckets.name} value={surface.buckets} options={BUCKET_CHOICES} disabled={busy} onChange={(buckets) => onChange({ buckets })} />}
         />
         <SettingsRow
-          name="Status wash"
-          description="Colour a whole card by what it is doing — running, waiting or failed. Finished cards fade."
+          {...ROWS.statusWash}
           layer={layer("statusWash")}
-          control={<Switch on={surface.statusWash} label="Status wash" disabled={busy} onChange={(statusWash) => onChange({ statusWash })} />}
+          control={<Switch on={surface.statusWash} label={ROWS.statusWash.name} disabled={busy} onChange={(statusWash) => onChange({ statusWash })} />}
         />
-        <SettingsRow name="Preview" description={`What tasks look like in ${card.label}, with the options above.`} full>
+        <SettingsRow {...boardPreviewWords(appearance.palette)} full>
           <TaskPreview />
         </SettingsRow>
       </SettingsSection>
 
       <SettingsSection id="conversation" title="Conversation">
         <SettingsRow
-          name="Batches that ran in turn"
-          description="A fan-out whose elements ran one after another: down the page in the order they ran, or side by side as a band."
-          info="A band is two columns, or tabs from three elements up — the way elements that ran at the same time are always drawn."
+          {...ROWS.sequentialBatches}
           layer={layer("conversation.sequentialBatches")}
           control={
             <Segmented
-              label="Batches that ran in turn"
+              label={ROWS.sequentialBatches.name}
               value={conversation.sequentialBatches}
               options={BATCH_CHOICES}
               disabled={busy}
@@ -626,17 +520,15 @@ export function AppearancePane({
             />
           }
         />
-        <SettingsRow name="Preview" description="Two elements of one batch, as a run's conversation will draw them." full>
+        <SettingsRow {...ROWS.batchPreview} full>
           <ConversationPreview layout={conversation.sequentialBatches} />
         </SettingsRow>
         <SettingsRow
-          name="Usage figures"
-          description="How much of an account is used, after the model chip and in Connections: as a number, a ring, both, or not at all."
-          info="A subscription shows the percent of its tightest window; an API key whose provider reports its credit, what is spent; any other key, what the conversation cost. The ring draws the same share, so either one alone says it. The conversation's own ring, at the composer's right, is not this setting."
+          {...ROWS.usageFigures}
           layer={layer("conversation.usageFigures")}
           control={
             <Segmented
-              label="Usage figures"
+              label={ROWS.usageFigures.name}
               value={conversation.usageFigures}
               options={USAGE_CHOICES}
               disabled={busy}
@@ -644,23 +536,20 @@ export function AppearancePane({
             />
           }
         />
-        <SettingsRow name="Preview" description="The composer on a subscription, on a key whose provider reports its credit, and on a key whose provider does not." full>
+        <SettingsRow {...ROWS.usagePreview} full>
           <UsageFiguresPreview mode={conversation.usageFigures} />
         </SettingsRow>
         <SettingsRow
-          name="Group work into phases"
-          description="Cut the work between two messages where the agent stopped to think, and give each part a row of its own."
-          info="A phase is named by what it did: Explored, Changed, Checked or Fixed. Off, the work is one row of chips over the latest steps."
+          {...ROWS.workPhases}
           layer={layer("conversation.workPhases")}
-          control={<Switch on={conversation.workPhases} label="Group work into phases" disabled={busy} onChange={(workPhases) => onConversation({ workPhases })} />}
+          control={<Switch on={conversation.workPhases} label={ROWS.workPhases.name} disabled={busy} onChange={(workPhases) => onConversation({ workPhases })} />}
         />
         <SettingsRow
-          name="Rows shown while it works"
-          description="How many of the latest rows of the phase in progress stay rows while the agent is working. Its older steps are counted in its chips."
+          {...ROWS.workRows}
           layer={layer("conversation.workRows")}
           control={
             <Segmented
-              label="Rows shown while it works"
+              label={ROWS.workRows.name}
               value={`${conversation.workRows}`}
               options={WORK_ROW_CHOICES}
               disabled={busy}
@@ -669,16 +558,12 @@ export function AppearancePane({
           }
         />
         <SettingsRow
-          name="Show thinking"
-          description="When the provider kept the model's reasoning, its first line follows the chips. Hover it to read the whole. Off, neighbouring phases with the same name become one."
-          info="Most Claude reasoning arrives withheld; a phase with nothing to show simply has no line."
+          {...ROWS.workThinking}
           layer={layer("conversation.workThinking")}
-          control={<Switch on={conversation.workThinking} label="Show thinking" disabled={busy} onChange={(workThinking) => onConversation({ workThinking })} />}
+          control={<Switch on={conversation.workThinking} label={ROWS.workThinking.name} disabled={busy} onChange={(workThinking) => onConversation({ workThinking })} />}
         />
         <SettingsRow
-          name="Rate limits and system notes"
-          description="Lines about the run rather than work: a rate limit waited out, a context injected, a hook that ran. Every step lists them whatever this says."
-          info="Show: counted in the chips like any work. Hide phases of only these: counted, but a phase that has nothing else is left out, and a stretch that has nothing else shows only Every step. Hide phases and stretches of only these: the same, but such a stretch is not drawn at all. Hide everywhere: left out of the summary, and such a stretch is not drawn."
+          {...ROWS.workNotes}
           layer={layer("conversation.workNotes")}
           control={
             <SelectInput
@@ -689,17 +574,17 @@ export function AppearancePane({
             />
           }
         />
-        <SettingsRow name="Preview" description="One request's work, three times: early on, well into it, and when it is done. Hover a chip, a phase or Every step." full>
+        <SettingsRow {...ROWS.workPreview} full>
           <WorkPreview look={{ phases: conversation.workPhases, rows: conversation.workRows, thinking: conversation.workThinking, notes: conversation.workNotes }} />
         </SettingsRow>
       </SettingsSection>
 
       <SettingsSection id="text" title="Text">
         <SettingsRow
-          name="App font"
+          name={ROWS.appFont.name}
           description={
             <>
-              JaiRA's own words: the names of rooms, actions and states.
+              {ROWS.appFont.description}
               <span className="set-stack data-faint">
                 <Resolved families={appearance.appFamily} voice="app" fallback={DEFAULT_APP_STACK} />
               </span>
@@ -722,10 +607,10 @@ export function AppearancePane({
           }
         />
         <SettingsRow
-          name="Data font"
+          name={ROWS.dataFont.name}
           description={
             <>
-              Everything else: paths, task titles, commands, counts.
+              {ROWS.dataFont.description}
               <span className="set-stack data-faint">
                 <Resolved families={appearance.dataFamily} voice="data" fallback={DEFAULT_DATA_STACK} />
               </span>
@@ -751,8 +636,7 @@ export function AppearancePane({
           }
         />
         <SettingsRow
-          name="Editor size"
-          description="Editors follow the data font until you give them a size of their own."
+          {...ROWS.editorSize}
           layer={layer("advanced", "sizeEditor")}
           control={
             <>
@@ -766,26 +650,23 @@ export function AppearancePane({
           }
         />
         <SettingsRow
-          name="Editor palette"
-          description="What every editor is painted in, where a file type has not been given one of its own."
-          info="One answer for every editing surface: Monaco paints every editor on the page from one theme, so two palettes side by side would read as a fault. A file type can still be given its own under File types."
+          {...ROWS.editorTheme}
           layer={layer("editorTheme")}
           control={
             <SelectInput
               value={appearance.editorTheme}
-              options={[["Follows the window", EDITOR_THEME_APP], ...EDITOR_THEMES.map((theme): [string, string] => [theme.label, theme.id])]}
+              options={editorThemeChoices()}
               disabled={busy}
               onChange={(editorTheme) => onChange({ editorTheme })}
             />
           }
         />
         <SettingsRow
-          name="Smooth text"
-          description="Grayscale antialiasing, instead of the platform's own rendering."
+          {...ROWS.smoothing}
           layer={layer("smoothing")}
-          control={<Switch on={appearance.smoothing} label="Smooth text" disabled={busy} onChange={(smoothing) => onChange({ smoothing })} />}
+          control={<Switch on={appearance.smoothing} label={ROWS.smoothing.name} disabled={busy} onChange={(smoothing) => onChange({ smoothing })} />}
         />
-        <SettingsRow name="Preview" description="Both voices side by side, as a file row and a task row draw them." full>
+        <SettingsRow {...ROWS.textPreview} full>
           <Preview />
         </SettingsRow>
       </SettingsSection>
