@@ -359,56 +359,84 @@ against a Tamagui or react-native-webview release we need.
 
 ## What the spike found
 
-Built on `spike/one-client`, 2026-09-27, on this Windows machine.
+Built on `spike/one-client`, 2026-09-27, on this Windows machine. Everything short of a device is
+done, as the person asked ("make as much as possible work without native tooling").
 
 | Part | State | Evidence |
 |---|---|---|
-| S0 toolchain (web) | done | `packages/client`, One 1.27.1, SPA; `one build` on Windows after two workarounds (below) |
-| S0 toolchain (native) | **blocked** | no Android SDK or JDK here; EAS needs an Expo account |
-| S1 One hosts the renderer | done | `shots/parity.mts`: board, task, settings and the Monaco file-types preview (TextMate over WASM) pixel-identical to the Vite build, light and dark; `app:dist` builds the installer and its probe and smoke test pass |
-| S2 throwaway transport | done | `shots/remote.mts`: headless Chrome loads the client from the desktop's port, draws its board, and sees a task the desktop starts appear by push |
-| S3 universal copy (web) | done for `Pill` | `shots/parity.mts universal`: `/` against `/universal`, identical; a DOM probe confirms `/universal` draws 0 DOM pills and 5 Tamagui ones |
-| S4 desktop switched | done for `Pill` | `/` draws the Tamagui pill; the S1 gate (Vite's DOM pill against it) is identical in all 8 pairs |
-| S3 native, S5 islands | not started | need the native toolchain |
+| S0 toolchain (web) | done | `packages/client`, One 1.27.1, SPA; `one build` on Windows after the workarounds below |
+| S0 toolchain (native) | bundles; not yet run | Metro, through `one dev`, builds the Android bundle (1,611 modules) and the iOS one (1,610); `nativeGraph.mjs` (in `typecheck`) proves no DOM-only package reaches them. Running needs Android Studio (installed; not used yet) |
+| S1 One hosts the renderer | done | `shots/parity.mts`: board, task, settings and the Monaco file-types preview pixel-identical to the Vite build; `app:dist` builds the installer and its probe and smoke test pass |
+| S2 throwaway transport | done | `shots/remote.mts`: a headless Chrome loads the client from the desktop's port, draws its board, sees a task the desktop starts appear by push |
+| S3 copies (web) | done: pill, task card, next-move chips | `parity.mts universal`: `/` against `/universal` identical in ink light and dark, classic, classic with the wash, contrast, pastel, blueprint, ink with the wash (18 of 18, one transient column-heading band once); each page reports what it drew, and `/universal` draws no DOM card or pill |
+| S4 desktop switched | done: pill, task card | `/` draws the Tamagui pill and card; the S1 gate (Vite's DOM ones against them) is identical |
+| Native colours | done | `shots/tokens-check.mts`: all 1,616 colour variables of 8 palettes × 2 schemes × {root, sidebar}, replayed for native, equal what Chromium computes |
+| S5 islands (browser) | done | `shots/islands.mts`, a 390×844 Chrome loading the island pages from file:// under strict rules: markdown ready in 58 ms, auto-height; the Monaco diff ready in ~265 ms and drawn in 34–73 ms at 200 / 2,000 / 20,000 lines, grammar-coloured, worker started; palette switch without a reload; typed text back over the bridge from the editable CodeMirror |
+| Phone app (browser) | done | `shots/phone.mts`: `/native` (`NativeApp` through react-native-web) connects, shows the desktop's own UI in its frame, and draws the live boards from the universal cards |
+| On a device | not started | S5's touch, keyboard, IME and memory; the native copies' look; the WebView's desktop viewport |
 
-**Windows, as the docs warned.** Three things broke, none of them Windows-hostile by design:
+**The phone, as built (ruling 1).** `NativeApp` is a Connect screen, then two views of one connection:
+- **Desktop UI** is the desktop's own UI in a WebView — the whole app as one island, identical by
+  construction, read only. It is what a person uses until the frame is copied.
+- **Native copies** draws the copies that exist from live data through the same store. Its column
+  headings are placeholders until the board's frame is copied.
 
-- `fast-flow-transform` 0.0.3 (One's Flow stripper, web patch step and Metro alike) ships a win32
-  binary that panics on every input. A Rust panic aborts the process, so no caller can catch it.
-  `packages/fast-flow-transform` stands in for it, on Babel and the Hermes parser.
-- One's client tree-shake filters with an unanchored `/\.(js|jsx|ts|tsx)/`, so it parses `.json` as
-  JavaScript and fails on the shared package's vendored schemas. That affects every platform. The
-  client's `vite.config.ts` wraps the plugin to skip JSON. **Worth an upstream fix.**
-- `@vxrn/color-scheme` pins React to exactly 19.2.3, so React and react-dom are pinned to 19.2.3
-  workspace-wide.
+**What a copy costs.** The pill took under an hour. The task card, with its chips, took most of a
+working session. The time went on rules that a copy has to re-derive by hand: the palette's tile beats
+`:last-child`, the status wash beats hover and selection, and block layout collapses the chips' margin
+into the meta line's. Two things generalise:
+- **Structural CSS becomes props.** `Lanes` now passes `last`, because a copy cannot see its
+  siblings.
+- **Every copy needs the gate's render census.** The first "identical" compared the DOM card with
+  itself: every card in the test world was draggable, which the copy fell back on.
+
+**Windows and One, found on the way** (each worked around; the starred ones are worth upstream fixes):
+
+- `fast-flow-transform` 0.0.3's win32 binary panics on every input and aborts the process;
+  `packages/fast-flow-transform` stands in for it on Babel and the Hermes parser.
+- ★ One's client tree-shake parses `.json` as JavaScript (an unanchored extension regex); the client's
+  `vite.config.ts` wraps it.
+- ★ One's Metro preset turns tsconfig `paths` into aliases against the project folder, ignoring
+  `baseUrl`; the client's tsconfig is written relative to itself.
+- One names a `.web.tsx` page as its own route, and Metro bundles every route file for native: routes
+  stay plain and re-export from `src/routes/<name>(.web).tsx`.
+- `metro.config.cjs` must extend One's Metro config (a function of it); starting from Expo's defaults
+  replaces One's transformer and resolver. `@vxrn/vite-plugin-metro` and `@expo/cli` must be direct
+  dependencies, because One resolves them from the project.
+- `one build --platform android` uses One's Rolldown pipeline even in Metro mode, and `one build`
+  empties `dist/` (so the island pages build into `dist-island/`).
+- `@vxrn/color-scheme` pins React to exactly 19.2.3, so the workspace is pinned to it.
+
+**Tamagui, found on the way:**
+- **Its theme variables are named after their keys** (`--accent`), so a copy reads the CSS variable
+  itself on web and the replayed cascade on native (`useTokens`, `cssTokens.ts`). Tamagui carries no
+  themes.
+- **A `group` is a size-contained container** (`container-type: inline-size`), which sized each chip as
+  if it had no text.
+- **`onPress` does not fire from a synthetic click bubbling up from a child;** controls carry
+  `role="button"`.
+
+**Islands are classic pages.** As ES modules on file://, nothing loads without file access for file URLs
+(deprecated on Android). One IIFE per component, a deferred plain script, no `crossorigin`, fonts
+inlined, and Monaco's workers as blobs load under the strict rules. One page per component keeps the
+markdown island at 732 KB; only the diff carries Monaco (27 MB).
 
 **Deviations from the plan above:**
-
-- **The renderer was not moved.** `@jaira/ui` is an alias for `packages/app/src/renderer`. Moving it
-  touches every test and shot that imports it, and a spike should not. It moves at go.
-- **Tamagui carries no themes.** A copy reads colours through `useTokens()`:
-  - **On web** it returns the CSS variable itself (`var(--accent)`), so a copy resolves against the
-    same cascade as the CSS beside it, sidebar overrides included. Palette switches need no code.
-  - **On native** it replays `styles.css`'s cascade (`packages/universal/src/cssTokens.ts`) from
-    declarations `scripts/tokens.mjs` extracts and `typecheck` keeps fresh.
-  - Tamagui brings the component model and one tree for both platforms. Themes can return for native
-    if the resolver proves slow.
-- **Palettes override components, not only variables.** `styles.css` has selector-level palette
-  rules (`[data-palette="ink"] .card`, `.column h4`, …). The extractor keeps variables scoped to a
-  subtree (`:root[data-palette="ink"] .sidebar { --panel: … }`). Rule-level overrides are hand-carried
-  by each copy that needs them, and the pill needed none.
-- **The gate photographs each scene on both pages back to back, from a fresh load.** Reaching a
-  scene changes state (opening a task marks its counts seen), and a whole pass on one page before
-  the other compared two different states.
-- **The DOM pill stays for now.** The Vite renderer, which is the S1 gate's baseline, still draws
-  it. Both go when the Vite renderer is retired.
+- **The renderer was not moved.** `@jaira/ui` is an alias for `packages/app/src/renderer`. It moves
+  at go.
+- **Palettes override components by selector, not only through variables.** Variables scoped to a
+  subtree are extracted; rule-level overrides are carried by each copy (the card's header lists its own).
+- **The DOM pill and card stay,** because the Vite renderer, the S1 gate's baseline, still draws them.
+  Both go when it is retired.
+- **The board's pure half moved to `boardModel.ts`,** so the copies and the phone use it without
+  `react-dom`.
 
 **Still open:**
-
-- The Monaco preview sometimes never colours itself on a load, under either renderer. That is why
-  `run.mts` hangs, and the gate reloads to work around it.
-- The copy's cost per component. The pill took well under a day, but it is the simplest leaf.
-  `task-card` is the real measure.
+- The Monaco preview sometimes never draws its lines on a load, under either renderer. A separate task
+  is flagged, and the gate reloads to get past it.
+- **On a device:** `one prebuild` and `one run:android` with the islands plugin; S5's gestures, IME and
+  memory; the Desktop UI view's viewport (desktop width and zoomable, as a WebView gives a page without a
+  viewport tag).
 
 ## Native desktop, later
 
