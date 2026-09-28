@@ -1,5 +1,5 @@
 /**
- * The fidelity gates of decision 0013: two pages that must draw the same pixels, photographed in the
+ * The fidelity gates of decision 0015: two pages that must draw the same pixels, photographed in the
  * same states and compared.
  *
  *   npm --workspace @jaira/app run build
@@ -60,13 +60,14 @@ async function launch(world: World, port: number): Promise<App> {
   return app;
 }
 
-async function start(app: App, title: string, fake: unknown): Promise<void> {
+async function start(app: App, title: string, fake: unknown): Promise<string> {
   const made = await app.ipc<{ taskId: string }>("task:create", {
     title,
     workflow: "feature/plan",
     inputs: { issue: `# ${title}\n\nThe issue this task was raised for.` },
   });
   await app.ipc("task:start", { taskId: made.taskId, fake });
+  return made.taskId;
 }
 
 async function seed(world: World): Promise<void> {
@@ -78,6 +79,12 @@ async function seed(world: World): Promise<void> {
     await app.until(says("failed"), "the failed task");
     await start(app, PARKED, blockedAtTheGate());
     await app.until(says("Awaiting you"), "the run to park at its gate");
+    // An archived task (main, 2026-09-27): held at the foot of the Finished lane, faded, wearing the
+    // pill of how it finished — the card copy has to draw that too.
+    const retired = await start(app, "retire the old lint", happyRules());
+    await app.until(`[...document.querySelectorAll("*")].filter((e) => e.textContent === "done").length >= 2`, "the task to archive to finish");
+    await app.ipc("task:archive", { taskIds: [retired] });
+    await app.until(says("1 archived"), "the archived task to be held at the foot");
   } finally {
     await app.close();
   }
@@ -100,6 +107,16 @@ interface Scene {
 const SCENES: readonly Scene[] = [
   { name: "board", everyLook: true, reach: async (app) => void (await app.until(says("Awaiting you"), "the gate to still be parked")) },
   { name: "task", everyLook: true, reach: (app) => app.clickText(PARKED) },
+  {
+    // The Finished lane's foot opened: the archived card, faded, "archived … ago", its finishing pill.
+    name: "archived",
+    everyLook: true,
+    reach: async (app) => {
+      await app.until(says("1 archived"), "the archived foot");
+      await app.evaluate("document.querySelector('.lane-archived').click()");
+      await app.until(says("retire the old lint"), "the archived card to show");
+    },
+  },
   { name: "settings", reach: (app) => app.clickText("Settings") },
   {
     // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the

@@ -7,11 +7,12 @@ import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskName";
 import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
 import { useLook, useTokens } from "../tokens";
 import { CardDom } from "./domFallback";
+import { MachineChip } from "./MachineChip";
 import { NextChips } from "./NextChips";
 import { Pill } from "./Pill";
 
 /**
- * `board.tsx`'s `Card` (on its `Tile`), universal (decision 0013). Read that one for what a card says;
+ * `board.tsx`'s `Card` (on its `Tile`), universal (decision 0015). Read that one for what a card says;
  * this one only has to look the same, and every rule below is one `styles.css` applies to a card,
  * with the specificity contest it wins or loses worked out by hand — a copy has no cascade to do it:
  *
@@ -24,6 +25,9 @@ import { Pill } from "./Pill";
  *                                          selection becomes a 2px ring
  *   .card.card-child                       14 in, a 2px rule on the left
  *   .card-draggable                        grab cursor; HTML5 drag on web (native drags in v2)
+ *   .card.is-archived                      0.62 opacity, back to 1 when hovered or selected; the pill
+ *                                          is how it finished, the meta line when it was archived
+ *   .mchip in .card-meta                   where it runs, first on the meta line (`MachineChip`)
  *   .card-head / .card-title / .card-meta  the rows; the title is the data voice, 600 when selected
  *   (block layout)                         .card-next's 1px bottom margin collapses into .card-meta's 2px
  *                                          top; a flex column would add them, so the copy collapses them
@@ -39,7 +43,9 @@ export function TaskCard(props: CardProps): JSX.Element {
   const uncovered = onUndo !== undefined || originLineOf(card) !== undefined;
   if (uncovered && CardDom !== null) return <CardDom {...props} />;
 
-  const status = card.activeStatus ?? card.status;
+  // An ARCHIVED card wears the pill of how it finished, as the DOM card does.
+  const status = card.archived !== undefined ? card.archived.from : (card.activeStatus ?? card.status);
+  const archived = card.archived !== undefined;
   const pill = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
   const named = look.palette !== "classic";
   const wash = look.wash && pill !== null ? pill : null;
@@ -82,7 +88,13 @@ export function TaskCard(props: CardProps): JSX.Element {
   const pending = taskNamePending(card);
   const fallback = card.heading?.error !== undefined;
   const note = taskNameNote(card);
-  const where = card.under !== undefined ? `adopted · ${card.workflow}` : (card.activeStateId ?? card.status);
+  const where =
+    card.endedAt !== undefined && card.archived !== undefined
+      ? `archived ${endedLabel(card.archived.at)}`
+      : card.under !== undefined
+        ? `adopted · ${card.workflow}`
+        : (card.activeStateId ?? card.status);
+  const whereTitle = card.endedAt !== undefined && card.archived !== undefined ? `archived ${new Date(card.archived.at).toLocaleString()}` : undefined;
   const far =
     card.endedAt !== undefined
       ? { text: endedLabel(card.endedAt), title: new Date(card.endedAt).toLocaleString() }
@@ -144,7 +156,8 @@ export function TaskCard(props: CardProps): JSX.Element {
       {...((child
         ? { marginLeft: 14, borderLeftWidth: 2, borderLeftColor: t.mix(t.v("accent"), 45, t.v("line")), borderStyle: "solid" }
         : {}) as object)}
-      hoverStyle={{ backgroundColor: hoverGround as never, ...((hoverRing !== undefined ? { boxShadow: hoverRing } : {}) as object) }}
+      {...((archived ? { opacity: selected ? 1 : 0.62 } : {}) as object)}
+      hoverStyle={{ backgroundColor: hoverGround as never, ...((hoverRing !== undefined ? { boxShadow: hoverRing } : {}) as object), ...(archived ? { opacity: 1 } : {}) }}
     >
       <View flexDirection="row" alignItems="center" gap={6}>
         <Text
@@ -170,7 +183,21 @@ export function TaskCard(props: CardProps): JSX.Element {
       </View>
       {onMove !== undefined && (card.next ?? []).length > 0 ? <NextChips moves={card.next!} onMove={onMove} tip={chipTip} collapsesInto={2} /> : null}
       <View flexDirection="row" alignItems="center" gap={6} marginTop={2} overflow="hidden">
-        <Text {...(line(0.84) as object)} {...(oneLine as object)} {...(clip as object)} color={t.v("dim") as never} flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0}>
+        {/* Where it runs, first: a project of several workspaces (the machines decision, §4). */}
+        {card.where !== undefined ? (
+          <MachineChip label={card.where.label} state={card.where.state} {...(card.where.title !== undefined ? { title: card.where.title } : {})} voice={String(t.v("font-data"))} />
+        ) : null}
+        <Text
+          {...(line(0.84) as object)}
+          {...(oneLine as object)}
+          {...(clip as object)}
+          {...((isWeb && whereTitle !== undefined ? { title: whereTitle } : {}) as object)}
+          color={t.v("dim") as never}
+          flexGrow={1}
+          flexShrink={1}
+          flexBasis={0}
+          minWidth={0}
+        >
           {where}
         </Text>
         {far !== undefined ? (

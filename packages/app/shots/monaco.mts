@@ -1,5 +1,5 @@
 /**
- * Does Monaco work in the Electron app, drawn by the One client (decision 0013)? Every surface it has:
+ * Does Monaco work in the Electron app, drawn by the One client (decision 0015)? Every surface it has:
  *
  *   npm --workspace @jaira/app run build                     then either
  *   npx tsx packages/app/shots/monaco.mts                    the development build (electron .)
@@ -148,7 +148,8 @@ async function main(): Promise<void> {
   );
 
   const { file, args } = executable();
-  const child: ChildProcess = spawn(file, [...args, `--remote-debugging-port=${PORT}`, "--disable-features=CalculateNativeWinOcclusion"], {
+  // The world's own `userData` (keychain, Chromium profile), never the author's — as the driver does it.
+  const child: ChildProcess = spawn(file, [...args, `--remote-debugging-port=${PORT}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion"], {
     cwd: world.project,
     env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project, JAIRA_RENDERER: "one" },
     stdio: "ignore",

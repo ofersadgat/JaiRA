@@ -1,7 +1,7 @@
 {
   "name": "@jaira/client",
   "version": "0.1.0",
-  "description": "JaiRA's One app (decision 0013): the renderer Electron loads, and the universal tree mobile runs.",
+  "description": "JaiRA's One app (decision 0015): the renderer Electron loads, and the universal tree mobile runs.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,13 +18,13 @@
     "expo": "~57.0.11",
     "expo-build-properties": "~57.0.22",
     "one": "1.27.1",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "^0.86.2",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-web": "^0.21.3",
-    "react-native-webview": "^13.16.1"
+    "react-native-webview": "13.16.1"
   },
   "main": "one/metro-entry"
 }

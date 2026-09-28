@@ -1,5 +1,5 @@
 /**
- * Metro for the native build (decision 0013): One's Metro config, plus what a monorepo whose engine
+ * Metro for the native build (decision 0015): One's Metro config, plus what a monorepo whose engine
  * semantics live in a sibling checkout needs.
  *
  * A FUNCTION of the config One hands Metro, not a config of its own. Metro lets the file on disk win,
@@ -25,6 +25,20 @@ const aliases = [
   ["@jaira/ui", join(root, "packages/app/src/renderer")],
 ];
 const single = new Set(["react", "react-dom", "react-native"]);
+/**
+ * What Metro must not crawl or watch under the repository root: build output and scratch worlds.
+ * Watching the root is what makes the workspace packages visible, and it also made a `npm run app:dist`
+ * (which rewrites `packages/app/release/`) crash the dev server mid-bundle ("ENOENT … watch").
+ */
+// Anchored to THIS repository: a sibling's build output is not ours to ignore — `@declarative-ai/json`
+// resolves to `declarative-ai/packages/json/dist/index.js`.
+const here = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\\/g, "[\\\\/]");
+const ignored = [
+  new RegExp(`^${here}[\\\\/]packages[\\\\/]app[\\\\/](release|dist|shots)[\\\\/].*`),
+  new RegExp(`^${here}[\\\\/]packages[\\\\/]client[\\\\/](dist|dist-island|\\.native-graph)[\\\\/].*`),
+  new RegExp(`^${here}[\\\\/]packages[\\\\/](cli|shared|persistence|runtime|service|universal)[\\\\/]dist[\\\\/].*`),
+  new RegExp(`^${here}[\\\\/]\\.git[\\\\/].*`),
+];
 const stubs = { "externalLinesDiffComputer.js": join(__dirname, "native-stubs/externalLinesDiffComputer.js") };
 
 module.exports = (one) => {
@@ -35,6 +49,7 @@ module.exports = (one) => {
     watchFolders: [...(one.watchFolders ?? []), root, resolve(root, "../declarative-ai")],
     resolver: {
       ...one.resolver,
+      blockList: [...[one.resolver.blockList ?? []].flat(), ...ignored],
       nodeModulesPaths: [...(one.resolver.nodeModulesPaths ?? []), join(__dirname, "node_modules"), join(root, "node_modules")],
       resolveRequest: (context, name, platform) => {
         const stub = stubs[name.split("/").pop()];
