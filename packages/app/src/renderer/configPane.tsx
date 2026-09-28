@@ -24,12 +24,14 @@ import {
   type ConfigLayer,
   type ConfigView,
 } from "@jaira/shared/browser";
-import { Chip, Field, FieldGrid, NumInput, SelectInput, TextInput, type LayerState } from "./controls";
+import { Chip, Field, FieldGrid, NumInput, SelectInput, TextInput } from "./controls";
+import { execDistroOf, presetNamesOf, type Writer } from "./configWriter";
+
+export { configWriter, layerWriter, presetNamesOf, type Writer } from "./configWriter";
 import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 import { SettingsSection } from "./settingsLayout";
-import { withPaths } from "@jaira/shared/browser";
 
 export interface ConfigPaneProps {
   config: ConfigView | null;
@@ -40,55 +42,6 @@ export interface ConfigPaneProps {
   onSave: (layer: ConfigLayer, doc: unknown) => void;
   /** The raw-JSON escape hatch, which is still the Files view's editor. */
   children?: JSX.Element;
-}
-
-/**
- * Write into ONE layer's document, a dotted path at a time — what every form on a settings screen
- * saves through.
- *
- * `set` writes one path; `undefined` removes it, so the field inherits again, and a container the
- * removal emptied goes with it. `stated` says whether THIS layer says anything at a path, which is
- * what a field's set/not-set switch shows. Both read the layer's own document and never the merged
- * one: saving in a project must not copy the shared root's settings out of it.
- */
-export function layerWriter(
-  doc: Record<string, unknown> | null,
-  layer: ConfigLayer,
-  onSave: (layer: ConfigLayer, doc: unknown, written?: readonly string[]) => void,
-): { set: (path: string, value: unknown) => void; stated: (path: string) => boolean } {
-  // A container the removal emptied goes with it, so an untouched section leaves no trace. The path
-  // goes with the document, so the stronger layers lose it even when this layer already said the same
-  // (`clearedAbove`'s `written`).
-  const set = (path: string, value: unknown): void => onSave(layer, withPaths(doc, [[path, value]]), [path]);
-
-  const stated = (path: string): boolean => {
-    let cursor: unknown = doc;
-    for (const part of path.split(".")) {
-      if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return false;
-      cursor = (cursor as Record<string, unknown>)[part];
-      if (cursor === undefined) return false;
-    }
-    return true;
-  };
-  return { set, stated };
-}
-
-/**
- * What every section here writes through: the layer's own document, the merged one it inherits from,
- * and a row's place in the layer for one path — its ↺ while this layer states it, which removes it so
- * the row inherits again (see `Field.layer`).
- */
-export function configWriter(
-  config: ConfigView,
-  layer: ConfigLayer,
-  locked: boolean,
-  onSave: (layer: ConfigLayer, doc: unknown, written?: readonly string[]) => void,
-): Writer {
-  const doc = config[layer] as Record<string, unknown> | null;
-  const effective = config.effective as Record<string, unknown>;
-  const { set, stated } = layerWriter(doc, layer, onSave);
-  const layerOf = (path: string): LayerState => ({ stated: stated(path), disabled: locked, onInherit: () => set(path, undefined) });
-  return { effective, locked, stated, set, layer: layerOf };
 }
 
 /**
@@ -109,14 +62,6 @@ export function ConfigBlockSection({ writer, block, title }: { writer: Writer; b
       />
     </SettingsSection>
   );
-}
-
-export interface Writer {
-  effective: Record<string, unknown>;
-  locked: boolean;
-  stated: (path: string) => boolean;
-  set: (path: string, value: unknown) => void;
-  layer: (path: string) => LayerState;
 }
 
 /** Where a produced file lands — a template, offered as presets plus the variables it may use. */
@@ -279,16 +224,6 @@ export function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.El
 const MODEL_OR_PRESET_LIST = "default-model-presets";
 
 /**
- * The presets a merged document states, by name — what a model field may name instead of a model id
- * (`resolveModelField`): the built-in ones and every layer's own.
- */
-export function presetNamesOf(effective: Record<string, unknown>): string[] {
-  const models = effective["models"];
-  const presets = models !== null && typeof models === "object" ? (models as Record<string, unknown>)["presets"] : undefined;
-  return presets !== null && typeof presets === "object" && !Array.isArray(presets) ? Object.keys(presets) : [];
-}
-
-/**
  * A model box's suggestions: the presets, each marked as one — a list to pick a preset from, in a box
  * that still takes any model id.
  */
@@ -312,8 +247,7 @@ function PresetOptions({ id, presets }: { id: string; presets: readonly string[]
  * a document the parser refuses.
  */
 export function ExecEnvironment({ effective, locked, set, layer }: Writer): JSX.Element {
-  const value = effective["execEnvironment"];
-  const distro = value !== null && typeof value === "object" ? String((value as { wsl?: string }).wsl ?? "") : "";
+  const { value, distro } = execDistroOf(effective);
 
   return (
     <SettingsSection

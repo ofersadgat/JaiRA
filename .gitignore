@@ -25,3 +25,7 @@ packages/client/.native-graph/
 # The native projects `one prebuild` generates from app.json and the plugins (decision 0015): output, not source.
 packages/client/android/
 packages/client/ios/
+# Copiers' scratch rigs beside the shots (decision 0015): dotfiles, never the rigs themselves.
+packages/app/shots/.*.mts
+packages/app/shots/.*.mjs
+packages/app/shots/.*.txt

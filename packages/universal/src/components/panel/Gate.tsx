@@ -26,7 +26,8 @@ import { Icon } from "./Icon";
  *                              (--size-app × 13/12.5, 1.5), --text. Hover: an --accent edge.
  *   .question-option.primary   --fill-accent ground and edge, --sheen; the label 600 --on-accent.
  *                              Hover: --fill-accent-hover.
- *   .question-option.danger    the label --bad; the edge --bad 45% into --line
+ *   .question-option.danger    the label --bad; the edge --bad 45% into --line; no ground (`button.danger`)
+ *   .question-option-desc      a `small`: the body's size ÷ 1.2, --dim, 2 under the label
  */
 export function InlineGate({ pending, onGate, maxHeight }: { pending: PendingInteraction; onGate: (value: unknown) => void; maxHeight?: number }): JSX.Element {
   const t = useTokens();
@@ -131,7 +132,8 @@ function Option({ label, icon, description, primary = false, danger = false, sel
       borderStyle="solid"
       {...(disabled ? { opacity: 0.45 } : {})}
       box={({ hovered }) => ({
-        backgroundColor: primary ? (hovered ? t.v("fill-accent-hover") : t.v("fill-accent")) : t.v("bg"),
+        // A danger option is also `button.danger`, whose `background: none` outranks `.question-option`'s --bg.
+        backgroundColor: primary ? (hovered ? t.v("fill-accent-hover") : t.v("fill-accent")) : danger ? "transparent" : t.v("bg"),
         borderColor: primary ? (hovered ? t.v("fill-accent-hover") : t.v("fill-accent")) : hovered || selected ? accentOr : danger ? t.mix(t.v("bad"), 45, t.v("line")) : t.v("line"),
         ...(primary ? { boxShadow: t.v("sheen") } : selected ? { boxShadow: `inset 0 0 0 1px ${String(accentOr)}` } : {}),
       })}
@@ -142,7 +144,12 @@ function Option({ label, icon, description, primary = false, danger = false, sel
           {label}
         </Txt>
       </View>
-      {description !== undefined && description.length > 0 ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>{description}</Txt> : null}
+      {/* `small.question-option-desc`: the UA's `smaller` (the body's size ÷ 1.2) on the inherited 1.5, 2 below. */}
+      {description !== undefined && description.length > 0 ? (
+        <Txt spec={{ voice: "app", scale: 13 / 12.5 / 1.2, color: "dim" }} marginTop={2}>
+          {description}
+        </Txt>
+      ) : null}
     </Press>
   );
 }

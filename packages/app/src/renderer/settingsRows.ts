@@ -81,6 +81,11 @@ export function splitHint(hint: string): { first: string; rest: string } {
   return { first: hint.slice(0, at + 1), rest: hint.slice(at + 1).trim() };
 }
 
+/** A section's id for the accordion, from its title — `Model providers` → `model-providers`. */
+export function partIdOf(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 /**
  * A row's (or a section's) place in the layers: the config paths it writes, whether the layer being
  * edited states them, and how to take them out again.

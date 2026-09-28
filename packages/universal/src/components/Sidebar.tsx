@@ -187,8 +187,10 @@ function Column({
           <View
             flexDirection="column"
             // In the Settings panel the drawer is as tall as its list and scrolls past that
-            // (`.side-panel > .side-drawer { flex: 0 1 auto; overflow-y: auto }`); in the column it takes the rest.
-            {...(mode?.back !== undefined ? { flexGrow: 0, flexShrink: 1, flexBasis: "auto", ...(isWeb ? { overflowY: "auto", overflowX: "hidden" } : { overflow: "hidden" }) } : { flex: 1 })}
+            // (`.side-panel > .side-drawer { flex: 0 1 auto; overflow-y: auto }`); in the column it takes the rest —
+            // `flex: 1`, whose 0% basis CSS reads as the content in a section of no set height; Yoga's 0 would
+            // collapse the root's drawer to nothing, so the basis is said as what CSS makes of it.
+            {...(mode?.back !== undefined ? { flexGrow: 0, flexShrink: 1, flexBasis: "auto", ...(isWeb ? { overflowY: "auto", overflowX: "hidden" } : { overflow: "hidden" }) } : { flexGrow: 1, flexShrink: 1, flexBasis: "auto" })}
             minHeight={0}
             marginTop={3}
             marginBottom={6}

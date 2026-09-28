@@ -1,14 +1,15 @@
 import type { JSX } from "react";
 import { TextInput } from "react-native";
 import { font, lengthToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
-import { useLook, useTokens } from "../../tokens";
+import { useTokens } from "../../tokens";
 
 /** The body's face (app at 13/12.5, line 1.5): what an unclassed element on the desktop's page inherits. */
 export const BODY: FontSpec = { voice: "app", scale: 13 / 12.5 };
 
 /**
  * A plain `<input>` (`input` with no class): the body's font, --text on --bg, 1px --line (hovered --rule),
- * radius --control-radius, padding 5 9; its text on the inherited line (1.5).
+ * radius --control-radius, padding 5 9; its text on the inherited line (1.5). The placeholder is
+ * Chromium's light one in every look: the page sets no `color-scheme`, so a dark palette keeps #757575.
  */
 export function BarInput({
   value,
@@ -30,13 +31,12 @@ export function BarInput({
   numeric?: boolean;
 }): JSX.Element {
   const t = useTokens();
-  const look = useLook();
   const [hovered, hover] = useHover();
   return (
     <TextInput
       value={value}
       onChangeText={onChange}
-      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor(look.scheme) } : {})}
+      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") } : {})}
       editable={!disabled}
       {...(numeric ? { inputMode: "decimal" as const } : {})}
       {...(label !== undefined ? { accessibilityLabel: label } : {})}

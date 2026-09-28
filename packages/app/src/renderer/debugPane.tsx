@@ -41,6 +41,9 @@ import { Conversation } from "./detail";
 import { SELF_TEST_ROOT } from "./debugWorkflow";
 import { SessionPanel } from "./session";
 import type { DebugFile, DebugState } from "./store";
+// What the pane derives, shared with its universal copy (decision 0015).
+import { debugFileStatus, debugViewOf, readinessOf, verdictWord } from "./debugModel";
+export { debugFileStatus, verdictOf } from "./debugModel";
 
 /**
  * What the run's outputs say, read defensively.
@@ -49,15 +52,7 @@ import type { DebugFile, DebugState } from "./store";
  * a missing field, a string `"true"`, or a run that failed before publishing anything must all read
  * as "not proven", and a truthiness check would turn two of those three into a green banner.
  */
-export function verdictOf(outputs: unknown): { passed: boolean | null; greeting?: string; verdict?: string } {
-  if (outputs === null || typeof outputs !== "object" || Array.isArray(outputs)) return { passed: null };
-  const record = outputs as Record<string, unknown>;
-  return {
-    passed: record["passed"] === true ? true : record["passed"] === false ? false : null,
-    ...(typeof record["greeting"] === "string" ? { greeting: record["greeting"] } : {}),
-    ...(typeof record["verdict"] === "string" ? { verdict: record["verdict"] } : {}),
-  };
-}
+// `verdictOf` is `debugModel.ts`'s.
 
 /**
  * Who could answer the live run, as the last availability check found it.
@@ -67,15 +62,15 @@ export function verdictOf(outputs: unknown): { passed: boolean | null; greeting?
  * own check would be a second opinion nobody asked for and would occasionally disagree.
  */
 function Readiness({ availability }: { availability: AvailabilitySnapshot }): JSX.Element {
-  const ok = [...availability.routes, ...availability.executors].filter((p) => p.status === "ok");
-  if (availability.checkedAt === 0) {
+  const ready = readinessOf(availability);
+  if (ready.kind === "unchecked") {
     return (
       <div className="notice warn">
         Nothing has been checked yet, so a live run may find no provider. The scripted run needs none.
       </div>
     );
   }
-  if (ok.length === 0) {
+  if (ready.kind === "none") {
     return (
       <div className="notice warn">
         Nothing here reported healthy, so a live run will probably fail to find a model — see Settings ›
@@ -86,21 +81,12 @@ function Readiness({ availability }: { availability: AvailabilitySnapshot }): JS
   return (
     <div className="notice">
       A live run goes to whatever <code>models.default</code> resolves to. Reported healthy:{" "}
-      {ok.map((p) => p.name).join(", ")}.
+      {ready.names.join(", ")}.
     </div>
   );
 }
 
-/** What a self-test row says about the copy that loads: which layer it is in, in the pane's words. */
-export function debugFileStatus(file: Pick<DebugFile, "layer">): {
-  word: string;
-  tone: "success" | "unknown" | "error";
-} {
-  if (file.layer === null) return { word: "missing", tone: "error" };
-  if (file.layer === "system") return { word: "built in", tone: "success" };
-  // A person's copy wins over what ships.
-  return { word: "overridden", tone: "unknown" };
-}
+// `debugFileStatus` is `debugModel.ts`'s.
 
 /** One state file's row: which copy loads, and where it is. */
 function FileRow({ file, onOpen }: { file: DebugFile; onOpen: () => void }): JSX.Element {
@@ -168,12 +154,7 @@ export function DebugPane({
   // The detail panel is only about the self-test when the selection still IS the self-test. Clicking
   // a card in Tasks moves the selection, and showing that task's tree under a "self-test" heading
   // would attribute somebody else's run to this button.
-  const mine = detail !== null && detail.taskId === debug.taskId ? detail : null;
-  const run = mine?.runs[mine.runs.length - 1];
-  const result = verdictOf(run?.outputs ?? null);
-  const running = mine?.status === "running" || run?.outcome === "running";
-  const missing = debug.files.filter((f) => f.layer === null).length;
-  const overridden = debug.files.filter((f) => f.layer !== null && f.layer !== "system");
+  const { mine, run, result, running, missing, overridden } = debugViewOf(debug, detail);
 
   return (
     // `view` is what makes this a two-column grid the height of the viewport — without it the
@@ -297,15 +278,9 @@ export function DebugPane({
               <p className="empty">Started — no run has settled yet.</p>
             ) : (
               <>
-                <div
-                  className={`debug-verdict ${
-                    result.passed === true ? "good" : result.passed === false ? "bad" : "unknown"
-                  }`}
-                >
+                <div className={`debug-verdict ${verdictWord(result.passed).tone}`}>
                   <Badge status={mine.status} />
-                  <span className="debug-verdict-word">
-                    {result.passed === true ? "PASS" : result.passed === false ? "FAIL" : "NO VERDICT"}
-                  </span>
+                  <span className="debug-verdict-word">{verdictWord(result.passed).word}</span>
                   <span className="sub">
                     {run.outcome}
                   </span>

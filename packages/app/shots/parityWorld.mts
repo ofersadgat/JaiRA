@@ -279,6 +279,28 @@ export const SCENES: readonly Scene[] = [
     },
   },
   {
+    // The Debug room before a run: the self-test's stages, its files, the run buttons and the task panel.
+    name: "debug",
+    reach: async (app) => {
+      await app.clickText("Settings");
+      // By its words as written (the footer row draws them uppercase), once the Settings panel is up.
+      await app.until(`document.getElementById("root").textContent.includes("Debug")`, "the Debug row");
+      await app.clickText("Debug");
+      await app.until(says("Workflow self-test"), "the Debug room");
+    },
+  },
+  {
+    // The Components room: every surface a run can park at, a row each.
+    name: "gallery",
+    reach: async (app) => {
+      await app.clickText("Settings");
+      // By its words as written (the footer row draws them uppercase), once the Settings panel is up.
+      await app.until(`document.getElementById("root").textContent.includes("Components")`, "the Components row");
+      await app.clickText("Components");
+      await app.until(says("Every row to"), "the Components room");
+    },
+  },
+  {
     // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the
     // renderer most likely to break under a new origin and a new content policy.
     name: "file-types",

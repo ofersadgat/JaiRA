@@ -31,11 +31,14 @@ export function SelectInput({
   options,
   onChange,
   disabled = false,
+  fill = false,
 }: {
   value: string;
   options: ReadonlyArray<readonly [label: string, value: string]>;
   onChange: (v: string) => void;
   disabled?: boolean | undefined;
+  /** `width: 100%`, as a `.cfg-input` in a field's control is. */
+  fill?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const box = useRef<RNView | null>(null);
@@ -51,7 +54,7 @@ export function SelectInput({
       }),
     );
   return (
-    <RNView ref={box} collapsable={false}>
+    <RNView ref={box} collapsable={false} style={fill ? { width: "100%", minWidth: 0 } : undefined}>
       <Press
         onPress={open}
         disabled={disabled}

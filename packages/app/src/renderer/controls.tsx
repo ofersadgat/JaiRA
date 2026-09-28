@@ -21,7 +21,7 @@
  */
 import { createContext, useContext, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import type { ConfigPath } from "@jaira/shared/browser";
-import { inheritLabelOf, layerRowOf, splitHint, type SettingsLayerView } from "./settingsRows";
+import { inheritLabelOf, layerRowOf, partIdOf, splitHint, type SettingsLayerView } from "./settingsRows";
 
 export { shortValue, splitHint, type SettingsLayerView } from "./settingsRows";
 
@@ -74,19 +74,8 @@ export function useInheritLabel(paths: readonly ConfigPath[] | undefined, format
   return inheritLabelOf(useContext(SettingsLayerContext), paths, format);
 }
 
-/**
- * A setting's place in the layer a Settings page edits — the person's rule (2026-09-25): no switch.
- * The control always shows what is in effect and always edits it (a change is written to this layer
- * and taken out of the stronger ones, `clearedAbove`); `stated` draws the ↺ that takes the layer's
- * own statement out again, so the setting inherits.
- */
-export interface LayerState {
-  stated: boolean;
-  onInherit: () => void;
-  disabled?: boolean | undefined;
-  /** What the ↺ says, where "Back to <what the layers below say>" is not what taking it out does. */
-  label?: string | undefined;
-}
+export type { LayerState } from "./configWriter";
+import type { LayerState } from "./configWriter";
 
 /** ↺ beside a setting the layer being edited states: take it out, so it inherits. */
 export function InheritButton({ label, onInherit, disabled }: { label: string; onInherit: () => void; disabled?: boolean | undefined }): JSX.Element {
@@ -266,10 +255,7 @@ export function Level({
   );
 }
 
-/** A section's id for the accordion, from its title — `Model providers` → `model-providers`. */
-export function partIdOf(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
+export { partIdOf } from "./settingsRows";
 
 /** A collapsed-by-default well for the settings most projects never touch. */
 export function Disclosure({

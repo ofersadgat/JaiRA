@@ -7,6 +7,8 @@ import { AppearancePage } from "../components/settings/AppearancePage";
 import { SettingsLayerContext } from "../components/settings/layers";
 import { LayerPicker } from "../components/settings/LayerPicker";
 import { MachinesPage } from "../components/settings/MachinesPage";
+import { DataPage, RunsPage } from "../components/settings/RunsPage";
+import { FormRowsContext } from "../components/form/Field";
 import { newPage, scrolled } from "../components/settings/parts";
 import { SettingsPage } from "../components/settings/SettingsPage";
 import { Segmented } from "../components/settings/controls";
@@ -49,6 +51,10 @@ export function SettingsView(): JSX.Element {
       <AppearancePage />
     ) : section === "machines" ? (
       <MachinesPage />
+    ) : section === "runs" ? (
+      <RunsPage />
+    ) : section === "data" ? (
+      <DataPage />
     ) : (
       <Uncopied name={`${SECTIONS.find((s) => s.id === section)?.label ?? section} page`} height={320} />
     );
@@ -68,6 +74,7 @@ export function SettingsView(): JSX.Element {
         onContentSizeChange={(_, h) => scrolled({ contentHeight: h })}
         {...scrollbarProps(t)}
       >
+        <FormRowsContext.Provider value={true}>
         <SettingsLayerContext.Provider value={layerView}>
           <SettingsPage
             title={frame.title}
@@ -83,6 +90,7 @@ export function SettingsView(): JSX.Element {
             {page}
           </SettingsPage>
         </SettingsLayerContext.Provider>
+        </FormRowsContext.Provider>
       </ScrollView>
     </RNView>
   );

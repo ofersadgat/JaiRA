@@ -84,9 +84,16 @@ function differ(a: PNG, b: PNG, diffTo?: string): { differing: number; exact: nu
 
 async function capture(app: App): Promise<PNG> {
   // As `App.shot` does: a page in the background draws no frame, and a capture waits for one forever.
-  await app.cdp("Page.bringToFront");
-  const shot = await app.cdp<{ data: string }>("Page.captureScreenshot", { format: "png" });
-  return PNG.sync.read(Buffer.from(shot.data, "base64"));
+  // With several studios on one machine a capture sometimes waits anyway, so it is asked again after 20s.
+  for (let attempt = 1; ; attempt++) {
+    await app.cdp("Page.bringToFront");
+    const shot = await Promise.race([
+      app.cdp<{ data: string }>("Page.captureScreenshot", { format: "png" }),
+      new Promise<undefined>((r) => setTimeout(() => r(undefined), 20_000)),
+    ]);
+    if (shot !== undefined) return PNG.sync.read(Buffer.from(shot.data, "base64"));
+    if (attempt === 3) throw new Error("the window drew no frame to capture in a minute");
+  }
 }
 
 /**

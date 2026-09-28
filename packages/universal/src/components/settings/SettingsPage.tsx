@@ -42,7 +42,7 @@ import { dropPart, partsMoved, placePart } from "./parts";
 const CH = 541.1354 / 62 / 12.875;
 
 /** `n`ch at the app size times `scale`: a number where sizes are, the CSS length where they are not. */
-function chOf(t: ReturnType<typeof useTokens>, n: number, scale: number): number | string {
+export function chOf(t: ReturnType<typeof useTokens>, n: number, scale: number): number | string {
   const size = t.scaled("size-app", scale);
   return typeof size === "number" ? n * CH * size : `${n}ch`;
 }
@@ -51,7 +51,7 @@ function chOf(t: ReturnType<typeof useTokens>, n: number, scale: number): number
 const PageContext = createContext<{ mark: (key: object, drawn: boolean) => void } | null>(null);
 
 /** A row of the page that counts as drawn — `.cfg-field`, `.set-row:not(.full)`, `.cfg-row` in the CSS's `:has()`. */
-function useDrawnRow(drawn: boolean): void {
+export function useDrawnRow(drawn: boolean): void {
   const page = useContext(PageContext);
   const section = useContext(SectionContext);
   const key = useRef({}).current;

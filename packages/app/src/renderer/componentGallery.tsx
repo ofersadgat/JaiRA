@@ -48,18 +48,11 @@
 import { useRef, useState, type JSX } from "react";
 import {
   GALLERY_GROUPS,
-  GALLERY_VARIANT_ORDER,
-  isComponentName,
-  parseComponentConfig,
   schemaById,
   surfacesOfGroups,
-  validateComponentResult,
   type ComponentConfig,
   type GalleryGroup,
   type GallerySurface,
-  type PendingApproval,
-  type PendingInteraction,
-  type PendingQuestion,
   type ValidateSchemaResult,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
@@ -69,49 +62,31 @@ import { galleryRemote } from "./galleryRemote";
 import { SchemaJsonEditor } from "./schemaEditor";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
+// What the gallery derives, shared with its universal copy (decision 0015).
+import {
+  approvalOf,
+  clampSlide,
+  configCaption,
+  groupAnchor,
+  initialState,
+  interactionOf,
+  interactionResult,
+  parsedDoc,
+  questionOf,
+  slideAllTitle,
+  slideAt,
+  slidesFor,
+  variantsAcross,
+  type CardState,
+  type Editor,
+} from "./galleryModel";
 
-/**
- * The project every fixture claims to belong to.
- *
- * A pending request carries the project whose database holds its task, and nothing here has either.
- * A visible placeholder is better than a plausible path: it appears in the dialog's subtitle, where
- * "gallery" reads as what it is and a real-looking project id would not.
- */
-export const GALLERY_PROJECT = "gallery";
+// `GALLERY_PROJECT` is `galleryModel.ts`'s.
+export { GALLERY_PROJECT } from "./galleryModel";
 
-/** What a card is currently showing its config as. */
-type Editor = "form" | "json";
+// `Editor`, `CardState`, `initialState` and `parsedDoc` are `galleryModel.ts`'s.
 
-interface CardState {
-  /** The document as text — the single source both editors write. */
-  text: string;
-  editor: Editor;
-  /** The last answer the surface produced, and what the contract said about it. */
-  result?: { value: unknown; check?: { ok: boolean; errors?: string } };
-}
-
-const initialState = (surface: GallerySurface): CardState => ({
-  text: JSON.stringify(surface.sample, null, 2),
-  editor: "form",
-});
-
-/** The document, parsed — or the parse error, which is itself worth showing. */
-function parsedDoc(text: string): { doc?: Record<string, unknown>; error?: string } {
-  try {
-    const value = JSON.parse(text) as unknown;
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      return { error: "the document must be a JSON object" };
-    }
-    return { doc: value as Record<string, unknown> };
-  } catch (e) {
-    return { error: (e as Error).message };
-  }
-}
-
-/** A string field of a parsed document, when it is one. */
-const stringAt = (doc: Record<string, unknown>, key: string): string | undefined =>
-  typeof doc[key] === "string" ? (doc[key] as string) : undefined;
-const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+// `stringAt` and `isRecord` are `galleryModel.ts`'s, with the pendings they build.
 
 export interface ComponentGalleryProps {
   /** The schema check, over IPC — the store's, the same one every JSON editor in the app uses. */
@@ -125,10 +100,7 @@ export interface ComponentGalleryProps {
   groups?: readonly GalleryGroup[];
 }
 
-/** The element id a row carries, so a link can land on it. */
-function groupAnchor(groupId: string): string {
-  return `gallery-${groupId}`;
-}
+// `groupAnchor` is `galleryModel.ts`'s.
 
 /**
  * The variant ids these groups use, in the shared vocabulary's order, with how many rows have each.
@@ -137,12 +109,7 @@ function groupAnchor(groupId: string): string {
  * bar for those three, and an id the vocabulary does not know is appended rather than dropped — a
  * fixture nobody can reach is worse than one out of order.
  */
-function variantsAcross(groups: readonly GalleryGroup[]): { id: string; rows: number }[] {
-  const counts = new Map<string, number>();
-  for (const group of groups) for (const v of group.variants) counts.set(v.id, (counts.get(v.id) ?? 0) + 1);
-  const ordered = [...GALLERY_VARIANT_ORDER.filter((id) => counts.has(id)), ...[...counts.keys()].filter((id) => !GALLERY_VARIANT_ORDER.includes(id))];
-  return ordered.map((id) => ({ id, rows: counts.get(id)! }));
-}
+// `variantsAcross` is `galleryModel.ts`'s.
 
 /**
  * Which slide a track is showing: its scroll offset in slide widths, rounded.
@@ -152,7 +119,7 @@ function variantsAcross(groups: readonly GalleryGroup[]): { id: string; rows: nu
  * row", whichever way it got there.
  */
 function slideOf(track: HTMLDivElement): number {
-  return track.clientWidth === 0 ? 0 : Math.round(track.scrollLeft / track.clientWidth);
+  return slideAt(track.scrollLeft, track.clientWidth);
 }
 
 export function ComponentGallery({ validateSchema, groups = GALLERY_GROUPS }: ComponentGalleryProps): JSX.Element {
@@ -179,16 +146,13 @@ export function ComponentGallery({ validateSchema, groups = GALLERY_GROUPS }: Co
   const slideTo = (group: GalleryGroup, index: number): void => {
     const track = tracks.current[group.id];
     if (track === null || track === undefined) return;
-    const at = Math.max(0, Math.min(index, group.variants.length - 1));
+    const at = clampSlide(group, index);
     track.scrollTo({ left: at * track.clientWidth, behavior: "smooth" });
   };
   // The bar's whole point: every row that HAS this variant goes to it, and a row that does not
   // stays where it was rather than being sent somewhere that is not what was asked for.
   const slideAllTo = (variantId: string): void => {
-    for (const group of groups) {
-      const at = group.variants.findIndex((v) => v.id === variantId);
-      if (at >= 0) slideTo(group, at);
-    }
+    for (const [group, at] of slidesFor(groups, variantId)) slideTo(group, at);
   };
   const across = variantsAcross(groups);
 
@@ -201,7 +165,7 @@ export function ComponentGallery({ validateSchema, groups = GALLERY_GROUPS }: Co
             key={id}
             type="button"
             className="chip gallery-common-btn"
-            title={`slide the ${rows === 1 ? "one row" : `${rows} rows`} that ${rows === 1 ? "has" : "have"} a "${id}" variant to it`}
+            title={slideAllTitle(id, rows)}
             onClick={() => slideAllTo(id)}
           >
             <span className="mono">{id}</span>
@@ -358,7 +322,7 @@ function GalleryCard({
                 </button>
               </div>
               <span className="sub grow">
-                {surface.kind === "interaction" ? "the state's authored args" : "the request the dialog was raised with"}
+                {configCaption(surface)}
               </span>
               <button className="link" onClick={onReset}>
                 reset
@@ -439,19 +403,7 @@ function Stage({
   if (doc === undefined) return <p className="reason">Not JSON yet: {docError}</p>;
 
   if (surface.kind === "approval") {
-    const pending: PendingApproval = {
-      requestId: `gallery-${surface.id}`,
-      tool: stringAt(doc, "tool") ?? "Bash",
-      ...(stringAt(doc, "command") !== undefined ? { command: stringAt(doc, "command")! } : {}),
-      ...(stringAt(doc, "reason") !== undefined ? { reason: stringAt(doc, "reason")! } : {}),
-      // The parts and the permission set are the engine's own shapes, typed in whole: the gallery has no
-      // policy behind it to take a line apart, and a sample is the place to see exactly what one carries.
-      ...(isRecord(doc["parts"]) ? { parts: doc["parts"] as unknown as NonNullable<PendingApproval["parts"]> } : {}),
-      ...(isRecord(doc["permissionSet"]) ? { permissionSet: doc["permissionSet"] as unknown as NonNullable<PendingApproval["permissionSet"]> } : {}),
-      input: (doc["input"] ?? {}) as Record<string, JsonValue>,
-      project: GALLERY_PROJECT,
-      at: 0,
-    };
+    const pending = approvalOf(surface, doc);
     return (
       <div className="inline-gate">
         <ApprovalSurface
@@ -463,14 +415,8 @@ function Stage({
   }
 
   if (surface.kind === "question") {
-    const questions = Array.isArray(doc["questions"]) ? (doc["questions"] as PendingQuestion["questions"]) : [];
-    if (questions.length === 0) return <p className="reason">A question request needs at least one question.</p>;
-    const pending: PendingQuestion = {
-      requestId: `gallery-${surface.id}`,
-      questions,
-      project: GALLERY_PROJECT,
-      at: 0,
-    };
+    const pending = questionOf(surface, doc);
+    if (pending === null) return <p className="reason">A question request needs at least one question.</p>;
     return (
       <div className="inline-gate">
         <QuestionSurface
@@ -483,41 +429,14 @@ function Stage({
     );
   }
 
-  const component = surface.component ?? "";
-  const inputs = (surface.inputs ?? {}) as Record<string, JsonValue>;
-  let config: ComponentConfig | undefined;
-  let configError: string | undefined;
-  if (isComponentName(component)) {
-    try {
-      config = parseComponentConfig(component, doc);
-    } catch (e) {
-      configError = (e as Error).message;
-    }
-  }
-
-  const pending: PendingInteraction = {
-    requestId: `gallery-${surface.id}`,
-    taskId: "gallery",
-    project: GALLERY_PROJECT,
-    // An unrecognised gate names whatever the document says it does, so the fallback can be reached
-    // by typing a function name rather than by breaking something.
-    component: isComponentName(component) ? component : (stringAt(doc, "function") ?? component),
-    inputs,
-    ...(config === undefined ? {} : { config }),
-    ...(configError === undefined ? {} : { configError }),
-  };
+  const { pending, config, inputs } = interactionOf(surface, doc);
 
   return (
     <InteractionDialog
       pending={pending}
-      onSubmit={(value) =>
-        onResult({
-          value,
-          // The same check main runs before an answer may enter a run — including the changeset
-          // gate's, which judges the answer against the changeset it was shown.
-          ...(config === undefined ? {} : { check: checkOf(config, value, inputs) }),
-        })
-      }
+      // The same check main runs before an answer may enter a run — including the changeset gate's,
+      // which judges the answer against the changeset it was shown (`interactionResult`).
+      onSubmit={(value) => onResult(interactionResult(config, value, inputs))}
       services={galleryServices(surface, config)}
     />
   );
@@ -552,11 +471,4 @@ export function galleryServices(surface: GallerySurface, config: ComponentConfig
   };
 }
 
-function checkOf(
-  config: ComponentConfig,
-  value: unknown,
-  inputs: Record<string, JsonValue>,
-): { ok: boolean; errors?: string } {
-  const checked = validateComponentResult(config, value, inputs);
-  return checked.ok ? { ok: true } : { ok: false, errors: checked.errors };
-}
+// `checkOf` is `galleryModel.ts`'s.

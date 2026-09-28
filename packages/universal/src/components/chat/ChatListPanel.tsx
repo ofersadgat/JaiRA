@@ -75,7 +75,9 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
       }),
     });
   return (
-    <View flexDirection="column" flex={1} minHeight={0} gap={4} paddingVertical={4}>
+    // `flex: 1` as the stylesheet means it where the drawer's height is its content's (the root's
+    // drawer): grow from the content's height rather than from nothing, which Yoga would collapse to 0.
+    <View flexDirection="column" flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={0} gap={4} paddingVertical={4}>
       {find ? (
         <TextInput
           autoFocus
@@ -100,7 +102,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
           {emptyListText(query)}
         </Txt>
       ) : (
-        <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never} contentContainerStyle={{ flexDirection: "column" }}>
+        <ScrollView {...(scrollbarProps(t) as object)} style={{ flexGrow: 1, flexShrink: 1, flexBasis: "auto", minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never} contentContainerStyle={{ flexDirection: "column" }}>
           {shown.map((task) => (
             <Row
               key={task.taskId}

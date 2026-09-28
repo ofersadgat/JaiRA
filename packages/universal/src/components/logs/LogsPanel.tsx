@@ -5,7 +5,7 @@ import type { JobOutputChunk, LogEntry, LogLevel, LogQuery } from "@jaira/shared
 import type { LogsPanelProps } from "@jaira/ui/logs";
 import { datedOf, detailParts, keyOf, logQueryOf, nearEnd, reasonOf, sourcesOf, stamp, streamsOf, LEVELS } from "@jaira/ui/logsModel";
 import { isUnseenLog, type LogUnseen } from "@jaira/ui/updatesModel";
-import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps, type FontSpec } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps, useHover, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Pills } from "../Pills";
 import { Button } from "../settings/Button";
@@ -224,18 +224,23 @@ function LogLine({
   const cell = (extra: Record<string, unknown>): Record<string, unknown> => ({ flexShrink: 0, overflow: "hidden", ...(open ? {} : { numberOfLines: 1 }), ...extra });
   const tint = fresh ? (entry.level === "error" ? "tint-bad" : entry.level === "warn" ? "tint-warn" : undefined) : undefined;
   const cells = [...(dated ? [day] : []), time];
+  const [hovered, hover] = useHover();
   return (
     <View flexDirection="column">
-      <Press
-        onPress={onToggle}
-        {...({ "aria-expanded": open } as object)}
+      {/* The whole row is the control, and its links are controls of their own: the press is a layer under
+          the cells (which let it through) rather than their parent, so a link is never a button inside a
+          button. The hover is the row's, links and all, as `.log-row:hover` is. */}
+      <View
         flexDirection="row"
         gap={8}
         alignItems={open ? "flex-start" : "baseline"}
         paddingVertical={2}
         paddingHorizontal={10}
-        box={({ hovered }) => ({ backgroundColor: tint !== undefined ? t.v(tint) : open || hovered ? t.v("panel-2") : "transparent" })}
+        backgroundColor={(tint !== undefined ? t.v(tint) : open || hovered ? t.v("panel-2") : "transparent") as never}
+        {...hover}
       >
+        <Press onPress={onToggle} {...({ "aria-expanded": open } as object)} position="absolute" top={0} right={0} bottom={0} left={0} />
+        <View flex={1} minWidth={0} flexDirection="row" gap={8} alignItems={open ? "flex-start" : "baseline"} pointerEvents="none">
         {cells.map((words, i) => (
           <Txt key={i} spec={{ ...row, color: "dim", tabular: true }} textAlign="right" width={widths[i] as number} {...cell({})}>
             {words}
@@ -263,11 +268,12 @@ function LogLine({
           {entry.message}
           {reason !== undefined ? <Txt spec={{ ...row, color: "dim" }}> — {reason}</Txt> : null}
         </Txt>
+        </View>
         <View width={92} flexShrink={0} flexDirection="row" justifyContent="flex-end" overflow="hidden">
           {entry.taskId !== undefined ? <RowLink words="task" onPress={() => onOpenTask(entry.taskId!)} /> : null}
           {entry.jobId !== undefined ? <RowLink words="output" onPress={() => onOpenJob(entry.jobId!)} /> : null}
         </View>
-      </Press>
+      </View>
       {open ? <Detail detail={entry.detail} dated={dated} /> : null}
     </View>
   );
