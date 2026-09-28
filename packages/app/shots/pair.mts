@@ -3,7 +3,7 @@
  * same state and the same look, photographed back to back and compared region by region.
  *
  *   npx tsx packages/app/shots/pair.mts [--scene board|task|archived|settings] [--look light|dark|<palette>[-wash]-<theme>]
- *                                       [--every-look] [--region sidebar]
+ *                                       [--every-look] [--region sidebar] [--port 9301]
  *
  * Attaches to the app `studio.mts` keeps running, so a change to a copy is in the next run with no
  * build. `/rn` draws the universal shell on the native token path with no `styles.css` on the page, so
@@ -20,8 +20,9 @@ import { PNG } from "pngjs";
 import { App } from "./driver.mjs";
 import { LOOKS, SCENES, STUDIO_PORT, goTo, lookName, parseLook, type Look } from "./parityWorld.mjs";
 
-const OUT = join(import.meta.dirname, "parity", "rn");
 const arg = (name: string): string | undefined => (process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : undefined);
+/** A studio of its own (`studio.mts --port`) writes its pictures apart, so two copiers never share a folder. */
+const OUT = join(import.meta.dirname, "parity", arg("--port") === undefined ? "rn" : `rn-${arg("--port")}`);
 
 /** The shell's regions, as the desktop's page names them. A region absent from a scene is skipped. */
 const REGIONS: Record<string, string> = {
@@ -78,7 +79,7 @@ async function capture(app: App): Promise<PNG> {
 
 async function main(): Promise<void> {
   mkdirSync(OUT, { recursive: true });
-  const app = await App.connect(STUDIO_PORT, { out: OUT });
+  const app = await App.connect(Number(arg("--port") ?? STUDIO_PORT), { out: OUT });
   const scenes = SCENES.filter((s) => s.name === (arg("--scene") ?? "board"));
   if (scenes.length === 0) throw new Error(`no scene ${arg("--scene")}: ${SCENES.map((s) => s.name).join(", ")}`);
   const looks: readonly Look[] = process.argv.includes("--every-look") ? LOOKS : [parseLook(arg("--look") ?? "light")];

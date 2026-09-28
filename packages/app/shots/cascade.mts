@@ -2,7 +2,7 @@
  * What `styles.css` actually does to an element, as Chromium decided it (decision 0015): for the element
  * a selector names and the ones inside it, every declaration that WON, with the rule it came from.
  *
- *   npx tsx packages/app/shots/cascade.mts '<selector>' [--depth 3] [--scene board] [--look dark] [--inherited] [--ua] [--page dom|rn]
+ *   npx tsx packages/app/shots/cascade.mts '<selector>' [--depth 3] [--scene board] [--look dark] [--inherited] [--ua] [--page dom|rn] [--port 9301]
  *
  * Attaches to the app `studio.mts` keeps running. A universal copy has no cascade: every rule it carries,
  * it carries by hand, and working out which of forty matching rules wins — specificity, source order,
@@ -124,8 +124,10 @@ function winners(matches: readonly RuleMatch[], inline: CssProperty[] | undefine
   const out = new Map<string, Winner>();
   let rule = 0;
   const take = (p: CssProperty, from: string, line: number | undefined, names: Set<string>): void => {
-    // CDP lists a shorthand's longhands after it, some with empty values: those are not declarations.
-    if (p.disabled === true || p.parsedOk === false || p.value === "" || NOISE.test(p.name)) return;
+    if (p.disabled === true || p.parsedOk === false || NOISE.test(p.name)) return;
+    // CDP lists a shorthand's longhands after it, EMPTY when the shorthand holds a `var()` (it cannot
+    // expand one). They still override every earlier rule's longhands, so they count — as the shorthand.
+    if (p.value === "" && shorthandOf(p.name, names) === undefined) return;
     if (from === "*" && p.name === "box-sizing") return;
     if (only !== undefined && !only.has(p.name)) return;
     const prior = out.get(p.name);
@@ -163,7 +165,7 @@ function print(map: Map<string, Winner>, indent: string): void {
 }
 
 async function main(): Promise<void> {
-  const app = await App.connect(STUDIO_PORT, { out: join(import.meta.dirname, "parity", "rn") });
+  const app = await App.connect(Number(arg("--port") ?? STUDIO_PORT), { out: join(import.meta.dirname, "parity", "rn") });
   try {
     const scene = arg("--scene");
     const look = arg("--look");

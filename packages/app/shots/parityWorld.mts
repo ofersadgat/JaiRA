@@ -69,6 +69,16 @@ export const SCENES: readonly Scene[] = [
   { name: "board", everyLook: true, reach: async (app) => void (await app.until(says("Awaiting you"), "the gate to still be parked")) },
   { name: "task", everyLook: true, reach: (app) => app.clickText(PARKED) },
   {
+    // The parked task opened from the inbox strip rather than its card: the same panel, reachable on a
+    // page whose board is not copied yet (the strip is).
+    name: "gate",
+    reach: async (app) => {
+      await app.until(says("Review the critique result."), "the strip to offer the gate");
+      await app.clickText("Review the critique result.");
+      await app.until(says("Answering this continues the task."), "the gate to open in the panel");
+    },
+  },
+  {
     // The Finished lane's foot opened: the archived card, faded, "archived … ago", its finishing pill.
     name: "archived",
     everyLook: true,
