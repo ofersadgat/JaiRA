@@ -45,3 +45,10 @@ export const boardAt = shared<string | null>(null);
  */
 export const panelTopKind = shared<string | null>(null);
 export const newTaskOpener = shared<(() => void) | null>(null);
+
+/**
+ * `App.tsx`'s `reveal`: the diagnostic the state inspector last asked the editor to show. The inspector
+ * (the panel's Checks) and the editor (the Files room's middle) are siblings; the nonce makes a second
+ * click on the same issue mean "show me again". See `FileSurfaceContext.revealIssue`.
+ */
+export const issueReveal = shared<{ path: string; nonce: number } | null>(null);

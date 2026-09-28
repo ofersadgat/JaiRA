@@ -174,6 +174,7 @@ export function TextField({
   width,
   onBlur,
   onSubmit,
+  secure = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -184,6 +185,8 @@ export function TextField({
   width?: number | string | undefined;
   onBlur?: (() => void) | undefined;
   onSubmit?: (() => void) | undefined;
+  /** `type="password"`, as a secret's value box is: dots, and nothing for the browser to remember. */
+  secure?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const look = useLook();
@@ -198,6 +201,7 @@ export function TextField({
       onChangeText={onChange}
       {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */ } : {})}
       editable={!disabled}
+      {...(secure ? { secureTextEntry: true, autoComplete: "off" as const } : {})}
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       {...(onBlur !== undefined ? { onBlur } : {})}
       {...(onSubmit !== undefined ? { onSubmitEditing: onSubmit } : {})}

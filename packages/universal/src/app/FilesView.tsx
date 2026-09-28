@@ -7,7 +7,7 @@ import { FactsButton, FileAddressBar, FileInspector, FolderInspector } from "../
 import { FilePanel } from "../components/files/FilePanel";
 import { PanelColumn } from "./PanelColumn";
 import { useShell } from "./shell";
-import { runMode } from "./viewState";
+import { issueReveal, runMode } from "./viewState";
 
 /**
  * What the Files room's surfaces are handed beyond the file itself — `App.tsx`'s `surfaces`, for the
@@ -18,6 +18,7 @@ import { runMode } from "./viewState";
 export function useFileSurfaces(): FileSurfaceContext {
   const { state, actions } = useShell();
   const mode = runMode.use();
+  const reveal = issueReveal.use();
   const look = useMemo(() => lookOf(state.config), [state.config]);
   const renderers = look.renderers;
   const ui = state.settings.ui;
@@ -48,6 +49,14 @@ export function useFileSurfaces(): FileSurfaceContext {
     },
     drafts: state.drafts,
     onDraft: actions.setDraft,
+    // The state editor's (`WorkflowEdit`): its slots, reading and saving the state, which of its tabs is
+    // open, and the issue the inspector asked it to show (`viewState.issueReveal`).
+    stateSlots: actions.stateSlots,
+    readState: actions.readState,
+    saveState: actions.saveState,
+    editorTab: state.editorTab,
+    onEditorTab: actions.setEditorTab,
+    ...(reveal !== null ? { revealIssue: reveal } : {}),
     renderers,
     // The editors' (`components/files/CodeEdit.tsx`, `SchemaEdit.tsx`): saving `settings.json`, the
     // schema a document answers to and its check, wrapping, and the field reference's remembered pane.

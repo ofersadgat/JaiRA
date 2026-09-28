@@ -28,6 +28,7 @@ import type {
   SecretTarget,
 } from "@jaira/shared/browser";
 import { AddAgentRow, ProviderRows, providerGroups, type ProvidersPaneProps } from "./providersPane";
+import { checkedAgo } from "./connectionsModel";
 import { ForgeRows, type IntegrationsPaneProps } from "./integrationsPane";
 import type { McpData } from "./mcpData";
 import { McpServerRows } from "./mcpServersRows";
@@ -170,13 +171,4 @@ function RecheckLine({ checkedAt, rechecking, busy, onRecheck }: { checkedAt: nu
       </button>
     </span>
   );
-}
-
-/** "checked 2 min ago", or the honest absence of one. */
-function checkedAgo(at: number): string {
-  if (at === 0) return "not checked yet";
-  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (seconds < 60) return "checked just now";
-  const minutes = Math.round(seconds / 60);
-  return minutes < 60 ? `checked ${minutes} min ago` : `checked ${Math.round(minutes / 60)} h ago`;
 }

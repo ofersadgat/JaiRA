@@ -17,13 +17,8 @@
  */
 import { useContext, useState, type JSX } from "react";
 import {
-  BUILTIN_FORGES,
-  FORGE_LABELS,
-  FORGE_PROVIDERS,
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
-  parseIntegrations,
-  toolsInCategory,
   type ConfigLayer,
   type ConfigView,
   type ForgeCheck,
@@ -32,11 +27,13 @@ import {
   type SecretTarget,
 } from "@jaira/shared/browser";
 import { layerWriter } from "./configPane";
-import { SelectInput, SettingsLayerContext, StatusDot, Switch, stateWord, type ProviderState } from "./controls";
+import { SelectInput, SettingsLayerContext, StatusDot, Switch, stateWord } from "./controls";
 import { BrandIcon, Icon } from "./icons";
 import { SchemaForm } from "./schemaForm/SchemaForm";
-import type { Schema } from "./schemaForm/types";
-import { SettingsSection } from "./settingsLayout";
+import { BUILTIN_FORGE_SCHEMA, CUSTOM_FORGE_SCHEMA, NEW_FORGE_SCHEMA, forgeRowOf, forgesOf, gitToolsSentence, newForgeOf, secretTargetsOf } from "./connectionsModel";
+
+// What a row says and writes is `connectionsModel.ts`'s, shared with the universal copy (decision 0015).
+export { forgeState, gitToolsSentence } from "./connectionsModel";
 
 export interface IntegrationsPaneProps {
   config: ConfigView | null;
@@ -80,23 +77,6 @@ export interface IntegrationsPaneProps {
   onOpenTools?: (() => void) | undefined;
 }
 
-const SMALL_NUMBERS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
-
-/**
- * "Used by 9 Git tools — list_merge_requests, git_push and seven more", DERIVED from the vocabulary
- * (decision 0010 §1): the count and the two names are the `git` category's, so a tool added there
- * is counted here without anybody remembering this line.
- */
-export function gitToolsSentence(): { count: number; lead: string } {
-  const tools = toolsInCategory("git").map((spec) => spec.name);
-  const count = tools.length;
-  if (count === 0) return { count, lead: "Used by no Git tools" };
-  const named = count === 1 ? [tools[0]!] : [tools[0]!, tools[count - 1]!];
-  const rest = count - named.length;
-  const more = rest === 0 ? "" : ` and ${SMALL_NUMBERS[rest] ?? String(rest)} more`;
-  return { count, lead: `Used by ${count} Git tool${count === 1 ? "" : "s"} — ${named.join(rest === 0 ? " and " : ", ")}${more}` };
-}
-
 /**
  * The first line of an OPENED forge row (decision 0010 §1, option B): what uses this connection, and
  * where those are governed. Plain — a `cfg-hint`, no border, no tint — and only when the row is open.
@@ -117,84 +97,6 @@ export function ForgeToolsLine({ onOpenTools }: { onOpenTools?: (() => void) | u
   );
 }
 
-/** What a connection's row should say, from its configuration and what the check observed. */
-export function forgeState(enabled: boolean, check: ForgeCheck | undefined): ProviderState {
-  if (!enabled) return "off";
-  if (check === undefined) return "unchecked";
-  if (check.status === "ok") return "available";
-  if (check.status === "failed") return "unavailable";
-  if (check.status === "disabled") return "off";
-  return "unconfigured";
-}
-
-// No `pattern` on any of these. The form prints a pattern beside the field's name, and a regex is not
-// a sentence; main's parser refuses a bad value on save and says why in words (`parseIntegrations`).
-const CREDENTIAL: Schema = {
-  type: "string",
-  title: "token name",
-  minLength: 1,
-  description:
-    "What the token is FILED UNDER — settings hold this name and never the token. The value is stored below, in the keychain or a file that is not committed.",
-};
-
-const API_URL: Schema = {
-  type: "string",
-  title: "API address",
-  description:
-    "Only for a host whose API is not where its kind puts it — behind a path prefix, or on another port. Empty is right for gitlab.com, github.com, a self-hosted GitLab and a GitHub Enterprise Server.",
-};
-
-/**
- * The OAuth app "Sign in with …" goes through — an app registered on THIS connection's host, which is
- * why it is set per connection. Only needed for a self-hosted host, or to use an app of your own.
- */
-const OAUTH_CLIENT_ID: Schema = {
-  type: "string",
-  title: "sign-in app",
-  minLength: 1,
-  description:
-    "The client ID of an OAuth app registered on this host, for signing in through the browser. On GitLab: a non-confidential application with the api scope. On GitHub: an OAuth app with “Enable Device Flow” ticked. Unset on gitlab.com and github.com uses JaiRA's own app; unset anywhere else, paste a token instead.",
-};
-
-/** A built-in connection's host and kind are what it IS; only how it is reached can change. */
-const BUILTIN_SCHEMA: Schema = { type: "object", properties: { credential: CREDENTIAL, apiUrl: API_URL, oauthClientId: OAUTH_CLIENT_ID } };
-
-const HOST: Schema = {
-  type: "string",
-  title: "host",
-  minLength: 1,
-  description: "As a git remote spells it — git.example.org, with no https:// and no path. A project's remote picks the connection by this.",
-};
-
-const PROVIDER: Schema = {
-  type: "string",
-  title: "kind",
-  enum: [...FORGE_PROVIDERS],
-  description: "Which forge answers there: gitlab for a self-hosted GitLab, github for a GitHub Enterprise Server.",
-};
-
-const CUSTOM_SCHEMA: Schema = {
-  type: "object",
-  properties: { provider: PROVIDER, host: HOST, credential: CREDENTIAL, apiUrl: API_URL, oauthClientId: OAUTH_CLIENT_ID },
-  required: ["provider", "host"],
-};
-
-const NEW_SCHEMA: Schema = {
-  type: "object",
-  properties: {
-    name: {
-      type: "string",
-      title: "name",
-      minLength: 1,
-      description: "What this connection is called in settings — letters, digits, '-' and '_'. The host goes below.",
-    },
-    provider: PROVIDER,
-    host: HOST,
-    credential: CREDENTIAL,
-  },
-  required: ["name", "provider", "host", "credential"],
-};
-
 /** The forges, as the card of Connections → Forges: one row per connection, then "Another host". */
 export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
   const { config, layer, busy, editable, checks, onSave } = props;
@@ -203,9 +105,7 @@ export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
   if (config === null) return <p className="empty">The configuration could not be read.</p>;
 
   const doc = config[layer] as Record<string, unknown> | null;
-  const effective = config.effective as Record<string, unknown>;
-  const integrations = (effective["integrations"] ?? {}) as { forges?: Record<string, JairaForgeConnection> };
-  const forges = integrations.forges ?? {};
+  const forges = forgesOf(config);
   const locked = busy || !editable;
   const { set, stated } = layerWriter(doc, layer, onSave);
 
@@ -251,16 +151,7 @@ function ForgeRow({
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
-  const path = `integrations.forges.${name}`;
-  const builtin = BUILTIN_FORGES[name] !== undefined;
-  const enabled = connection.enabled !== false;
-  const state = forgeState(enabled, check);
-  const label = FORGE_LABELS[connection.provider].name;
-  const title = `${label} · ${connection.host}`;
-  const tokenName = connection.credential ?? `${name.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}_TOKEN`;
-  const identity = state === "available" ? check?.identity : undefined;
-  const signingIn = oauth?.signingIn.has(name) === true;
-  const viaOAuth = oauth?.viaOAuth.has(name) === true;
+  const { path, builtin, enabled, state, label, title, tokenName, identity, signingIn, viaOAuth } = forgeRowOf(name, connection, check, oauth);
 
   return (
     <li className={`cfg-row conn-row ${state}`}>
@@ -393,7 +284,7 @@ function ForgeRow({
         <div className="cfg-row-body conn-wide">
           <ForgeToolsLine onOpenTools={onOpenTools} />
           <SchemaForm
-            schema={builtin ? BUILTIN_SCHEMA : CUSTOM_SCHEMA}
+            schema={builtin ? BUILTIN_FORGE_SCHEMA : CUSTOM_FORGE_SCHEMA}
             value={connection}
             onChange={(next) => set(path, next)}
             ctx={{ path, disabled: locked, isSet: stated, setAt: set }}
@@ -443,11 +334,7 @@ function TokenEntry({
   onSave: IntegrationsPaneProps["onSaveToken"];
   onClose: () => void;
 }): JSX.Element {
-  const targets: SecretTarget[] = [
-    ...(secrets.keychain ? (["keychain"] as SecretTarget[]) : []),
-    ...(hasProject ? (["project-env-local"] as SecretTarget[]) : []),
-    "base-env-local",
-  ];
+  const targets = secretTargetsOf(secrets, hasProject);
   const [value, setValue] = useState("");
   const [target, setTarget] = useState<SecretTarget>(targets[0] ?? "base-env-local");
 
@@ -507,20 +394,16 @@ function AddHost({
   const [problem, setProblem] = useState<string | null>(null);
 
   const add = (): void => {
-    const { name, ...connection } = draft as { name?: string } & Record<string, unknown>;
-    try {
-      if (typeof name !== "string" || name.length === 0) throw new Error("give the connection a name");
-      if (forges[name] !== undefined) throw new Error(`there is already a connection called '${name}'`);
-      // The parser main will run, run here first — so "two connections on one host" is said beside
-      // the form that caused it rather than as a refused save.
-      parseIntegrations({ forges: { ...forges, [name]: connection } });
-      set(`integrations.forges.${name}`, connection);
-      setDraft({});
-      setProblem(null);
-      setOpen(false);
-    } catch (e) {
-      setProblem((e as Error).message.replace(/^config\.integrations\.forges(\.[^:.]+)?[.:]?\s*/, ""));
+    // Checked as main will check it, so what is wrong is said beside the form (`newForgeOf`).
+    const made = newForgeOf(draft, forges);
+    if ("problem" in made) {
+      setProblem(made.problem);
+      return;
     }
+    set(made.path, made.value);
+    setDraft({});
+    setProblem(null);
+    setOpen(false);
   };
 
   return (
@@ -553,7 +436,7 @@ function AddHost({
       <div className="conn-controls" />
       {open ? (
         <div className="cfg-row-body conn-wide">
-          <SchemaForm schema={NEW_SCHEMA} value={draft} onChange={(next) => setDraft((next ?? {}) as Record<string, unknown>)} ctx={{ path: "", disabled: locked, hidePaths: true }} />
+          <SchemaForm schema={NEW_FORGE_SCHEMA} value={draft} onChange={(next) => setDraft((next ?? {}) as Record<string, unknown>)} ctx={{ path: "", disabled: locked, hidePaths: true }} />
           {problem ? <p className="sub warn-text">{problem}</p> : null}
           <div className="pane-actions">
             <button type="button" className="primary" disabled={locked} onClick={add}>

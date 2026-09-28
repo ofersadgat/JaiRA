@@ -22,6 +22,7 @@
 import { createContext, useContext, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import type { ConfigPath } from "@jaira/shared/browser";
 import { inheritLabelOf, layerRowOf, partIdOf, splitHint, type SettingsLayerView } from "./settingsRows";
+import { stateWord, type ProviderState } from "./connectionsModel";
 
 export { shortValue, splitHint, type SettingsLayerView } from "./settingsRows";
 
@@ -488,16 +489,8 @@ export function Chip({
  * on a machine configured for none. "Enabled" is an intention; "available" is an observation; they
  * disagree constantly and the UI has to be able to say so.
  */
-export type ProviderState = "available" | "unavailable" | "unconfigured" | "off" | "unchecked" | "needs-sign-in";
-
-const STATE_WORDS: Record<ProviderState, string> = {
-  available: "ready",
-  unavailable: "not working",
-  unconfigured: "not set up",
-  off: "turned off",
-  unchecked: "not checked",
-  "needs-sign-in": "not signed in",
-};
+// The states and their words are `connectionsModel.ts`'s, shared with the universal copy (decision 0015).
+export { stateWord, type ProviderState } from "./connectionsModel";
 
 /**
  * The state as a DOT, with the word left to the sentence beside it.
@@ -508,12 +501,7 @@ const STATE_WORDS: Record<ProviderState, string> = {
  * line under the name says it in words for anyone who has stopped on this one.
  */
 export function StatusDot({ state }: { state: ProviderState }): JSX.Element {
-  return <span className={`cfg-dot ${state}`} title={STATE_WORDS[state]} aria-hidden="true" />;
-}
-
-/** The state in words, for the sentence that opens a row's status line. */
-export function stateWord(state: ProviderState): string {
-  return STATE_WORDS[state];
+  return <span className={`cfg-dot ${state}`} title={stateWord(state)} aria-hidden="true" />;
 }
 
 /**

@@ -178,13 +178,13 @@ export function Press({
       {...(disabled !== undefined ? { disabled } : {})}
       role="button"
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
-      {...((isWeb && title !== undefined ? { title } : {}) as object)}
       style={{ ...(outer as object), ...(isWeb ? { cursor: disabled === true ? "default" : "pointer" } : {}) } as never}
     >
       {(s: { hovered?: boolean; pressed: boolean }) => {
         const state = { hovered: s.hovered === true, pressed: s.pressed };
         return (
-          <View flexGrow={1} flexShrink={1} {...(inner as object)} {...((box?.(state) ?? {}) as object)}>
+          // The tooltip on the box: react-native-web's Pressable drops a `title`, and Tamagui hands one to the element.
+          <View flexGrow={1} flexShrink={1} {...((isWeb && title !== undefined ? { title } : {}) as object)} {...(inner as object)} {...((box?.(state) ?? {}) as object)}>
             {typeof children === "function" ? children(state) : children}
           </View>
         );

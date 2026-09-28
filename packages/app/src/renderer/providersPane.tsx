@@ -18,7 +18,7 @@
  * working providers on a machine configured for none. A provider therefore has four states, and the
  * pill says which: ready, not working, not set up, turned off.
  */
-import { useContext, useMemo, useState, type JSX } from "react";
+import { useContext, useState, type JSX } from "react";
 import { accountFor, useLimits } from "./limitsStore";
 import { AccountAllowance, KeyUsage } from "./usageMeters";
 import {
@@ -35,31 +35,33 @@ import {
   type SecretTarget,
   type WeightsFileCheck,
 } from "@jaira/shared/browser";
-import { Disclosure, Field, FieldGrid, Level, SelectInput, SettingsLayerContext, StatusDot, Switch, TextArea, TextInput, stateWord, useLayerRow, type ProviderState } from "./controls";
+import { Disclosure, Field, FieldGrid, Level, SelectInput, SettingsLayerContext, StatusDot, Switch, TextArea, TextInput, useLayerRow } from "./controls";
 import { BrandIcon, Icon } from "./icons";
+import { providerBlockPath, type FieldSpec, type ProviderSpec } from "./providerSpecs";
+import { checkCredentialName, type ExecutorPatch, type ExecutorTarget } from "./executorConfig";
+import type { ModelPatch } from "./modelsConfig";
 import {
-  MODEL_PROVIDERS,
-  agentProviders,
-  allFields,
-  fieldText,
-  fieldValue,
-  providerBlockPath,
-  type FieldSpec,
-  type ProviderSpec,
-} from "./providerSpecs";
-import { checkCredentialName, executorBlock, type ExecutorPatch, type ExecutorTarget } from "./executorConfig";
-import { routeBlock, type ModelPatch } from "./modelsConfig";
+  emptyLevelWords,
+  fieldControlOf,
+  keyBoxWords,
+  keyEntryExecutor,
+  keyEntryName,
+  levelFieldsOf,
+  localServerSaid,
+  loginAddWords,
+  loginCommandOf,
+  loginFacts,
+  paramOf,
+  placeholderFor,
+  providerSayState,
+  readAt,
+  secretTargetsOf,
+  useProviderRow,
+  weightsSize,
+} from "./connectionsModel";
 
-/** What a provider's row should say, from its configuration and what the check observed. */
-export function providerState(enabled: boolean, probe: ProbeResult | undefined): ProviderState {
-  if (!enabled) return "off";
-  if (probe === undefined) return "unchecked";
-  if (probe.status === "ok") return "available";
-  if (probe.status === "failed") return "unavailable";
-  if (probe.status === "disabled") return "off";
-  if (probe.status === "needs-sign-in") return "needs-sign-in";
-  return "unconfigured";
-}
+// What a row says and writes is `connectionsModel.ts`'s, shared with the universal copy (decision 0015).
+export { providerGroups, providerState } from "./connectionsModel";
 
 export interface ProvidersPaneProps {
   config: ConfigView | null;
@@ -106,22 +108,6 @@ export interface ProvidersPaneProps {
   /** Whether each embedded model's weights file is there, and whether the loader is. Absent ⇒ not checked yet. */
   weights?: EmbeddedWeightsReport | undefined;
 }
-
-/**
- * The three groups of providers Connections draws, in the order a person sets them up: the agents
- * first (a subscription needs no key, and it is what a bare model id reaches first), then the model
- * APIs that take a key, then what runs on this machine.
- */
-export function providerGroups(executors: ExecutorInfo[]): { agents: ProviderSpec[]; apis: ProviderSpec[]; local: ProviderSpec[] } {
-  return {
-    agents: agentProviders(executors),
-    apis: MODEL_PROVIDERS.filter((spec) => !LOCAL_PROVIDERS.has(spec.id)),
-    local: MODEL_PROVIDERS.filter((spec) => LOCAL_PROVIDERS.has(spec.id)),
-  };
-}
-
-/** The model providers that run on this machine rather than behind a key: Connections → Local models. */
-const LOCAL_PROVIDERS = new Set(["local", "embedded"]);
 
 /** One group of provider rows, as the card of a Connections section. */
 export function ProviderRows(props: ProvidersPaneProps & { specs: ProviderSpec[] }): JSX.Element {
@@ -188,8 +174,8 @@ export function LoginCards({
   onAddKey?: (() => void) | undefined;
 }): JSX.Element {
   const several = accounts.length > 1;
-  const binary = command ?? agent.replace(/-cli$/, "");
-  const login = agent === "claude-cli" ? `${binary} auth login` : `${binary} login`;
+  const { binary, login } = loginCommandOf(agent, command);
+  const add = loginAddWords(accounts);
   // A refused login's own box carries the waiting state while it is signing in again.
   const renewing = accounts.some((account) => account.refused !== undefined);
   return (
@@ -227,14 +213,14 @@ export function LoginCards({
                 <span className="cfg-login-plus" aria-hidden="true">
                   +
                 </span>
-                <span className="cfg-login-add-title">{accounts.length === 0 ? "Sign in" : "Switch account"}</span>
+                <span className="cfg-login-add-title">{add.title}</span>
               </button>
               {onAddKey !== undefined ? (
                 <button type="button" className="link cfg-login-add-sub" disabled={busy} onClick={onAddKey}>
                   or an API key
                 </button>
               ) : (
-                <span className="cfg-login-add-sub">{accounts.length === 0 ? "opens the sign-in page" : "signs in as someone else"}</span>
+                <span className="cfg-login-add-sub">{add.sub}</span>
               )}
             </div>
           )}
@@ -343,32 +329,6 @@ function LoginCard({
   );
 }
 
-/**
- * The login's plan, in the agent's own word. Only the plan: how it signed in ("via claude.ai") and a
- * personal organization named after its owner say nothing a person needs on the card (the person's
- * ruling, 2026-09-23), and the card is a fixed width.
- */
-function loginFacts(account: AgentAccount): string[] {
-  return account.plan !== undefined ? [`${account.plan.charAt(0).toUpperCase()}${account.plan.slice(1)} plan`] : [];
-}
-
-/** This layer's own block for a provider, and the merged one — values and placeholders respectively. */
-function blocksFor(spec: ProviderSpec, layerDoc: unknown, effective: unknown): {
-  here: Record<string, unknown>;
-  merged: Record<string, unknown>;
-} {
-  if (spec.location.kind === "route") {
-    return {
-      here: routeBlock(layerDoc, spec.location.key) ?? {},
-      merged: routeBlock(effective, spec.location.key) ?? {},
-    };
-  }
-  return {
-    here: executorBlock(layerDoc, spec.location.name) ?? {},
-    merged: executorBlock(effective, spec.location.name) ?? {},
-  };
-}
-
 function ProviderRow({
   spec,
   probe,
@@ -397,62 +357,20 @@ function ProviderRow({
   layerDoc: unknown;
   effective: unknown;
 }): JSX.Element | null {
-  const { here, merged } = blocksFor(spec, layerDoc, effective);
-  const fields = useMemo(() => allFields(spec), [spec]);
-  const saved = useMemo(
-    () => Object.fromEntries(fields.map((f) => [f.path, fieldText(f.control, readAt(here, f.path))])),
-    [fields, here],
-  );
-
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<Record<string, string>>(saved);
-  const [baseline, setBaseline] = useState(saved);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  // The document moved under the form — usually because this row just saved. Untouched boxes follow
-  // it, edited ones are kept, so a save never discards typing that has not been sent yet.
-  if (fields.some((f) => (baseline[f.path] ?? "") !== (saved[f.path] ?? ""))) {
-    const next = { ...saved };
-    for (const f of fields) if ((form[f.path] ?? "") !== (baseline[f.path] ?? "")) next[f.path] = form[f.path] ?? "";
-    setBaseline(saved);
-    setForm(next);
-  }
-
-  const locked = busy || !editable;
-  const enabled = here["enabled"] !== false && merged["enabled"] !== false;
-  const state = providerState(enabled, probe);
-  const dirty = fields.some((f) => (form[f.path] ?? "") !== (saved[f.path] ?? ""));
-
-  const write = (patch: Record<string, unknown>): void => {
-    if (spec.location.kind === "route") {
-      const key = spec.location.key;
-      onSaveRoute(Object.fromEntries(Object.entries(patch).map(([p, v]) => [`routes.${key}.${p}`, v])), layer);
-    } else {
-      onSaveExecutor(
-        {
-          name: spec.location.name,
-          kind: spec.location.executorKind,
-          ...(typeof merged["command"] === "string" ? { command: merged["command"] } : {}),
-        },
-        patch,
-        layer,
-      );
-    }
-  };
-
-  const save = (): void => {
-    try {
-      const patch: Record<string, unknown> = {};
-      for (const f of fields) {
-        if ((form[f.path] ?? "") === (saved[f.path] ?? "")) continue;
-        patch[f.path] = fieldValue(f, form[f.path] ?? "");
-      }
-      setProblem(null);
-      if (Object.keys(patch).length > 0) write(patch);
-    } catch (e) {
-      setProblem((e as Error).message);
-    }
-  };
+  // The row's form and what it writes (`connectionsModel.ts`): the document moved under the form —
+  // usually because this row just saved — and untouched boxes follow it, edited ones are kept.
+  const { here, merged, form, setForm, problem, locked, enabled, state, dirty, write, save, revert } = useProviderRow({
+    spec,
+    probe,
+    layerDoc,
+    effective,
+    busy,
+    editable,
+    layer,
+    onSaveRoute,
+    onSaveExecutor,
+  });
 
   // The key's store form opens under the row, across its width, from the key box on the right.
   const [keyOpen, setKeyOpen] = useState(false);
@@ -479,7 +397,7 @@ function ProviderRow({
         {/* One SENTENCE: the state of this provider on this machine right now. `spec.hint` — the
             standing "would you want this at all" line — is inside, read once while deciding. */}
         <p className="cfg-say">
-          <span className="cfg-say-state">{probe?.accounts?.some((account) => account.refused !== undefined) === true ? "sign-in expired" : stateWord(state)}</span>
+          <span className="cfg-say-state">{providerSayState(probe, state)}</span>
           {probe && state !== "off" && probe.detail ? <> — {probe.detail}</> : null}
           {probe && state !== "off" && probe.fix ? <span className="cfg-fix">→ {probe.fix}</span> : null}
         </p>
@@ -568,12 +486,12 @@ function ProviderRow({
           <p className="cfg-hint">{spec.hint}</p>
           {spec.levels.map((level, depth) => {
             // The weights are drawn as rows above, so the form does not repeat them as JSON.
-            const fieldsHere = level.fields.filter((field) => !(spec.id === "embedded" && field.path === "weights"));
+            const fieldsHere = levelFieldsOf(spec, level.fields);
             return (
               // One level deeper than the page: inside a row, a type level is a band, never a section.
               <Level key={level.title} title={level.title} hint={level.hint} depth={depth + 1}>
                 {fieldsHere.length === 0 ? (
-                  <p className="cfg-hint">{level.fields.length === 0 ? "Nothing to configure at this level." : "Edited in the rows above."}</p>
+                  <p className="cfg-hint">{emptyLevelWords(level.fields)}</p>
                 ) : (
                   <FieldGrid>
                     {fieldsHere.map((field) => (
@@ -610,10 +528,7 @@ function ProviderRow({
             </button>
             <button
               className="ghost"
-              onClick={() => {
-                setForm(saved);
-                setProblem(null);
-              }}
+              onClick={revert}
               disabled={!dirty}
             >
               Revert
@@ -636,30 +551,6 @@ function ProviderRow({
   );
 }
 
-/** The config path this field writes, for the tag beside its label. */
-function paramOf(spec: ProviderSpec, field: FieldSpec): string {
-  const path = providerBlockPath(spec);
-  if (path !== null) return `${path.join(".")}.${field.path}`;
-  return `agents.genericCli[${spec.id}].${field.path}`;
-}
-
-/** Read a dotted path out of a block. */
-function readAt(block: Record<string, unknown>, path: string): unknown {
-  let cursor: unknown = block;
-  for (const part of path.split(".")) {
-    if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return undefined;
-    cursor = (cursor as Record<string, unknown>)[part];
-  }
-  return cursor;
-}
-
-/** What the field would be if this layer said nothing — the inherited value, else the suggestion. */
-function placeholderFor(field: FieldSpec, merged: Record<string, unknown>): string {
-  const inherited = fieldText(field.control, readAt(merged, field.path));
-  if (inherited.length > 0 && field.control !== "select") return `${inherited} (inherited)`;
-  return field.placeholder ?? "—";
-}
-
 function FieldControl({
   field,
   value,
@@ -673,21 +564,14 @@ function FieldControl({
   disabled: boolean;
   onChange: (v: string) => void;
 }): JSX.Element {
-  if (field.control === "select") {
+  const control = fieldControlOf(field);
+  if (control.kind === "select") {
     return <SelectInput value={value} options={field.options ?? []} disabled={disabled} onChange={onChange} />;
   }
-  if (field.control === "json" || field.control === "argv" || field.control === "env" || field.control === "patterns") {
-    return <TextArea value={value} rows={field.control === "json" ? 5 : 3} placeholder={placeholder} disabled={disabled} onChange={onChange} />;
+  if (control.kind === "area") {
+    return <TextArea value={value} rows={control.rows} placeholder={placeholder} disabled={disabled} onChange={onChange} />;
   }
-  return (
-    <TextInput
-      value={value}
-      placeholder={placeholder}
-      disabled={disabled}
-      mono={field.control === "secret-name" || field.control === "url"}
-      onChange={onChange}
-    />
-  );
+  return <TextInput value={value} placeholder={placeholder} disabled={disabled} mono={control.mono} onChange={onChange} />;
 }
 
 /**
@@ -714,10 +598,8 @@ function KeyBoxes({
   onOpen: () => void;
 }): JSX.Element | null {
   if (spec.credential === "none") return null;
-  const named = typeof merged["credential"] === "string" ? merged["credential"] : undefined;
   // `open` is also true for an agent that signs in: its + box offers the key under the sign-in.
-  const plusTitle = named !== undefined ? "Replace the key" : "Add a key";
-  const plusSub = named ?? spec.suggestedCredential ?? (spec.credential === "optional" ? "usually none" : "name it, then paste it");
+  const { named, plusTitle, plusSub } = keyBoxWords(spec, merged);
   return (
     <>
       {named !== undefined ? (
@@ -772,22 +654,14 @@ function KeyEntry({
   onSave: ProvidersPaneProps["onSaveCredential"];
   onClose: () => void;
 }): JSX.Element {
-  const named = typeof merged["credential"] === "string" ? merged["credential"] : undefined;
-  const targets: SecretTarget[] = [
-    ...(secrets.keychain ? (["keychain"] as SecretTarget[]) : []),
-    ...(hasProject ? (["project-env-local"] as SecretTarget[]) : []),
-    "base-env-local",
-  ];
+  const targets = secretTargetsOf(secrets, hasProject);
   const [value, setValue] = useState("");
   const [typedName, setTypedName] = useState("");
   const [target, setTarget] = useState<SecretTarget>(targets[0] ?? "base-env-local");
   const [problem, setProblem] = useState<string | null>(null);
 
-  // What a stored key would be filed under: what config already names, else what has been typed
-  // here, else the conventional variable — which is what makes a first run possible without reading
-  // the documentation, and the typed one is what makes a provider with NO convention reachable.
-  const name = named ?? (typedName.trim() || spec.suggestedCredential) ?? "";
-  const needsName = named === undefined && spec.suggestedCredential === undefined;
+  // What a stored key would be filed under (`keyEntryName`).
+  const { named, name, needsName } = keyEntryName(spec, merged, typedName);
 
   return (
     <div className="cfg-key-entry">
@@ -827,11 +701,7 @@ function KeyEntry({
               return;
             }
             onSave({
-              executor: {
-                name: spec.id,
-                kind: spec.location.kind === "agent" ? spec.location.executorKind : "generic",
-                ...(named !== undefined ? { credential: named } : {}),
-              },
+              executor: keyEntryExecutor(spec, named),
               name,
               value,
               target,
@@ -898,11 +768,7 @@ export function LocalServers({
           <div key={server.baseURL} className={`conn-probe-row${server.up ? " up" : ""}${inUse ? " in-use" : ""}`}>
             <span className="conn-probe-dot" aria-hidden="true" />
             <span className="conn-probe-name">{server.name}</span>
-            <span className="conn-probe-at mono">
-              {server.baseURL.replace(/^https?:\/\//, "")}
-              {" · "}
-              {server.up ? (server.models.length > 0 ? server.models.join(", ") : "no models loaded") : (server.error ?? "not running")}
-            </span>
+            <span className="conn-probe-at mono">{localServerSaid(server)}</span>
             {inUse ? (
               <span className="cfg-login-tag accent">in use</span>
             ) : server.up ? (
@@ -937,7 +803,7 @@ export function WeightsRows({
   const [id, setId] = useState("");
   const [path, setPath] = useState("");
   const entries = Object.entries(weights);
-  const size = (bytes: number): string => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
+  const size = weightsSize;
   return (
     <div className="conn-weights">
       {entries.length === 0 ? <p className="cfg-hint">No weights named yet — add a model id and the .gguf it loads.</p> : null}

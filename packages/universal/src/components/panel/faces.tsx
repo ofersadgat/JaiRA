@@ -1,3 +1,4 @@
+import { issueReveal } from "../../app/viewState";
 import type { JSX, ReactNode } from "react";
 import type { PendingInteraction, StateView, TaskDetail } from "@jaira/shared/browser";
 import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, isEventsTask, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
@@ -324,6 +325,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
                 state={view}
                 onOpenConfig={() => host.onStack((was) => push(was, { kind: "config", key: `config:${entry.stateId}`, stateId: entry.stateId, project: entry.project }))}
                 onOpenState={host.openInFiles}
+                onRevealIssue={(path) => issueReveal.set({ path, nonce: (issueReveal.get()?.nonce ?? 0) + 1 })}
               />
             );
           case "configuration":

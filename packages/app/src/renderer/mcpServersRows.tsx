@@ -22,9 +22,7 @@ import {
   SECRET_TARGET_LABELS,
   mcpSecretsOf,
   mcpServerEnabled,
-  mcpWhere,
   isMcpStdio,
-  parseMcp,
   type ConfigLayer,
   type ConfigView,
   type McpDetectedSource,
@@ -34,11 +32,28 @@ import {
   type SecretTarget,
 } from "@jaira/shared/browser";
 import { layerWriter } from "./configPane";
-import { SelectInput, StatusDot, Switch, type ProviderState, SettingsLayerContext } from "./controls";
+import { SelectInput, StatusDot, Switch, SettingsLayerContext } from "./controls";
 import { BrandIcon, Icon } from "./icons";
 import type { McpData } from "./mcpData";
 import { SchemaForm } from "./schemaForm/SchemaForm";
-import type { Schema } from "./schemaForm/types";
+import {
+  HTTP_SCHEMA,
+  NEW_SERVER_SCHEMA,
+  STDIO_SCHEMA,
+  detectedSaid,
+  effectiveServers,
+  layerDocument,
+  mcpDetail,
+  mcpRowState,
+  mcpWord,
+  newFromSource,
+  newServerOf,
+  secretTargetsOf,
+  withServersAdded,
+} from "./connectionsModel";
+
+// What a row says and writes is `connectionsModel.ts`'s, shared with the universal copy (decision 0015).
+export { effectiveServers, layerDocument, mcpStatusLine, newFromSource } from "./connectionsModel";
 
 export interface McpServerRowsProps {
   config: ConfigView | null;
@@ -53,100 +68,6 @@ export interface McpServerRowsProps {
   onSave: (layer: ConfigLayer, doc: unknown) => void;
 }
 
-/** A layer's own document, whichever layer — `null` when it has none. */
-export function layerDocument(config: ConfigView, layer: ConfigLayer): Record<string, unknown> | null {
-  const doc = (config as unknown as Record<string, unknown>)[layer];
-  return doc !== null && typeof doc === "object" && !Array.isArray(doc) ? (doc as Record<string, unknown>) : null;
-}
-
-/** The servers the layers add up to — what a run is handed. */
-export function effectiveServers(config: ConfigView | null): Record<string, McpServerConfig> {
-  const mcp = config === null ? undefined : (config.effective as { mcp?: { servers?: Record<string, McpServerConfig> } }).mcp;
-  return mcp?.servers ?? {};
-}
-
-// No `pattern` on any of these: the form prints a pattern beside a field's name, and a regex is not a
-// sentence. `parseMcp` refuses a bad value and says why in words — here, before anything is written.
-const VALUE: Schema = {
-  title: "value",
-  anyOf: [
-    { type: "string", title: "a value", description: "Written into settings as it is — for a value that is not a secret." },
-    {
-      type: "object",
-      title: "a stored secret",
-      description: "The NAME of a secret; the value is looked up when the server starts — keychain, a .env file, the environment — and never written here.",
-      properties: { credential: { type: "string", title: "secret name", minLength: 1 } },
-      required: ["credential"],
-      additionalProperties: false,
-    },
-  ],
-};
-
-const STDIO_SCHEMA: Schema = {
-  type: "object",
-  properties: {
-    command: { type: "string", title: "command", minLength: 1, description: "The program JaiRA starts — npx, uvx, a full path. It speaks MCP on its stdin and stdout." },
-    args: { type: "array", title: "arguments", items: { type: "string" }, description: "Handed to the command in this order." },
-    env: {
-      type: "object",
-      title: "environment",
-      additionalProperties: VALUE,
-      description: "Variables the server is started with, beside a minimal environment of this machine's. A key or a token belongs in a stored secret.",
-    },
-    cwd: { type: "string", title: "working directory", description: "Where the server runs. Empty is wherever the agent runs. Claude does not take one; the tools probe and codex do." },
-  },
-};
-
-const HTTP_SCHEMA: Schema = {
-  type: "object",
-  properties: {
-    url: { type: "string", title: "address", minLength: 1, description: "Its MCP endpoint — streamable HTTP, and SSE for an older server." },
-    headers: {
-      type: "object",
-      title: "headers",
-      additionalProperties: VALUE,
-      description: "Sent with every request. An Authorization header belongs in a stored secret.",
-    },
-  },
-};
-
-const NEW_SCHEMA: Schema = {
-  type: "object",
-  properties: {
-    name: {
-      type: "string",
-      title: "name",
-      minLength: 1,
-      description: "What its tools are called under — mcp__<name>__<tool>. Letters, digits, '-' and '_'.",
-    },
-    command: { type: "string", title: "command", description: "For a server JaiRA starts (stdio): the program — npx, uvx, a full path. Set this or an address, not both." },
-    args: { type: "array", title: "arguments", items: { type: "string" }, description: "Handed to the command in this order." },
-    url: { type: "string", title: "address", description: "For a server JaiRA calls (HTTP): its MCP endpoint. Set this or a command, not both." },
-  },
-  required: ["name"],
-};
-
-/** How a server's row is coloured, from what the probe found. */
-function rowState(enabled: boolean, status: McpServerStatus | undefined): ProviderState {
-  if (!enabled) return "off";
-  if (status === undefined) return "unchecked";
-  if (status.state === "ready") return "available";
-  if (status.state === "failed") return "unavailable";
-  return "unconfigured";
-}
-
-/**
- * The sentence a row says after its state: how it is reached and what it listed —
- * "HTTP · http://127.0.0.1:3845/mcp · answered with 21 tools", "stdio · npx @playwright/mcp · 21 tools".
- */
-export function mcpStatusLine(config: McpServerConfig, status: McpServerStatus | undefined): string {
-  if (status === undefined) return `${isMcpStdio(config) ? "stdio" : "HTTP"} · ${mcpWhere(config)} · not asked yet`;
-  if (status.state !== "ready") return status.reason ?? "";
-  const count = `${status.tools.length} ${status.tools.length === 1 ? "tool" : "tools"}`;
-  if (status.transport === "stdio") return `stdio · ${status.where} · ${count}`;
-  return `${status.transport === "sse" ? "SSE" : "HTTP"} · ${status.where} · answered with ${count}`;
-}
-
 /** The rows of Connections → MCP servers: one per configured server, then "Add a server". */
 export function McpServerRows(props: McpServerRowsProps): JSX.Element {
   const { config, layer, busy, editable, mcp, onSave } = props;
@@ -158,14 +79,8 @@ export function McpServerRows(props: McpServerRowsProps): JSX.Element {
   const servers = effectiveServers(config);
   const locked = busy || !editable;
   const { set, stated } = layerWriter(doc, layer, onSave);
-  const addAll = (entries: ReadonlyArray<{ name: string; config: McpServerConfig }>): void => {
-    // One write for the lot: the layer's own document with the new servers in it.
-    const next = structuredClone(doc ?? {}) as Record<string, unknown>;
-    const block = (next["mcp"] ??= {}) as Record<string, unknown>;
-    const held = (block["servers"] ??= {}) as Record<string, unknown>;
-    for (const entry of entries) if (servers[entry.name] === undefined && held[entry.name] === undefined) held[entry.name] = entry.config;
-    onSave(layer, next);
-  };
+  // One write for the lot: the layer's own document with the new servers in it.
+  const addAll = (entries: ReadonlyArray<{ name: string; config: McpServerConfig }>): void => onSave(layer, withServersAdded(doc, servers, entries));
   return (
     <ul className="cfg-rows">
       {Object.entries(servers).filter(([name]) => !onlyStated || stated(`mcp.servers.${name}`)).map(([name, server]) => (
@@ -207,9 +122,10 @@ function McpServerRow({
   const [storing, setStoring] = useState(false);
   const path = `mcp.servers.${name}`;
   const enabled = mcpServerEnabled(server);
-  const state = rowState(enabled, status);
+  const state = mcpRowState(enabled, status);
   const credentials: McpServerStatus["credentials"] = status?.credentials ?? mcpSecretsOf(server);
-  const word = !enabled ? "turned off" : status === undefined ? "not checked" : status.state;
+  const word = mcpWord(enabled, status);
+  const detail = mcpDetail(enabled, server, status);
 
   return (
     <li className={`cfg-row conn-row ${state}`}>
@@ -223,7 +139,7 @@ function McpServerRow({
         </div>
         <p className="cfg-say">
           <span className="cfg-say-state">{word}</span>
-          {enabled && status?.state !== "not started" ? <> — {mcpStatusLine(server, status)}</> : enabled && status?.reason ? <> — {status.reason}</> : null}
+          {detail !== undefined ? <> — {detail}</> : null}
           {enabled && status?.fix ? <span className="cfg-fix">→ {status.fix}</span> : null}
         </p>
       </div>
@@ -341,11 +257,7 @@ function SecretEntry({
   onStore: (request: { name: string; value: string; target: SecretTarget }) => void;
   onClose: () => void;
 }): JSX.Element {
-  const targets: SecretTarget[] = [
-    ...(secrets.keychain ? (["keychain"] as SecretTarget[]) : []),
-    ...(hasProject ? (["project-env-local"] as SecretTarget[]) : []),
-    "base-env-local",
-  ];
+  const targets = secretTargetsOf(secrets, hasProject);
   const [name, setName] = useState(names[0] ?? "");
   const [value, setValue] = useState("");
   const [target, setTarget] = useState<SecretTarget>(targets[0] ?? "base-env-local");
@@ -394,11 +306,6 @@ function SecretEntry({
   );
 }
 
-/** The detected servers a source lists that are not configured yet — what its Add writes. */
-export function newFromSource(source: McpDetectedSource, servers: Readonly<Record<string, McpServerConfig>>): Array<{ name: string; config: McpServerConfig }> {
-  return source.servers.filter((entry) => servers[entry.name] === undefined);
-}
-
 /**
  * The last row: add a server by hand — a name and a command or an address, through the schema form —
  * and, across its width, the servers other tools on this machine already run, each source one click
@@ -422,19 +329,16 @@ function AddServerRow({
   const [problem, setProblem] = useState<string | null>(null);
 
   const add = (): void => {
-    const { name, ...server } = draft as { name?: string } & Record<string, unknown>;
-    try {
-      if (typeof name !== "string" || name.length === 0) throw new Error("give the server a name");
-      if (servers[name] !== undefined) throw new Error(`there is already a server called '${name}'`);
-      // The parser main will run, run here first, so what is wrong is said beside the form.
-      const parsed = parseMcp({ servers: { [name]: server } });
-      set(`mcp.servers.${name}`, parsed.servers[name]);
-      setDraft({});
-      setProblem(null);
-      setOpen(false);
-    } catch (e) {
-      setProblem((e as Error).message.replace(/^config\.mcp\.servers\.[^:.\s]+[.:]?\s*/, ""));
+    // The parser main will run, run here first, so what is wrong is said beside the form (`newServerOf`).
+    const made = newServerOf(draft, servers);
+    if ("problem" in made) {
+      setProblem(made.problem);
+      return;
     }
+    set(made.path, made.value);
+    setDraft({});
+    setProblem(null);
+    setOpen(false);
   };
 
   return (
@@ -467,7 +371,7 @@ function AddServerRow({
       <div className="conn-controls" />
       {open ? (
         <div className="cfg-row-body conn-wide">
-          <SchemaForm schema={NEW_SCHEMA} value={draft} onChange={(next) => setDraft((next ?? {}) as Record<string, unknown>)} ctx={{ path: "", disabled: locked, hidePaths: true }} />
+          <SchemaForm schema={NEW_SERVER_SCHEMA} value={draft} onChange={(next) => setDraft((next ?? {}) as Record<string, unknown>)} ctx={{ path: "", disabled: locked, hidePaths: true }} />
           {problem ? <p className="sub warn-text">{problem}</p> : null}
           <div className="pane-actions">
             <button type="button" className="primary" disabled={locked} onClick={add}>
@@ -519,8 +423,7 @@ export function DetectedServers({
       </div>
       {detected.map((source) => {
         const fresh = newFromSource(source, servers);
-        const names = source.servers.map((entry) => entry.name).join(", ");
-        const said = source.state === "found" ? [names, source.detail].filter((part) => part !== undefined && part.length > 0).join(" · ") : (source.detail ?? source.state);
+        const said = detectedSaid(source);
         return (
           <div key={`${source.source}:${source.where}`} className={`conn-probe-row${source.state === "found" ? " up" : ""}`}>
             <span className="conn-probe-dot" aria-hidden="true" />

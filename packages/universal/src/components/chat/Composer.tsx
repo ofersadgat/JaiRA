@@ -13,7 +13,8 @@ import { Press, Txt, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 import { Icon, type IconName } from "../panel/Icon";
-import { Svg, type Shape } from "../panel/Svg";
+import { Svg } from "../panel/Svg";
+import { INK, Ring } from "../usage/Ring";
 import { Pulse } from "./Paper";
 
 /**
@@ -252,10 +253,6 @@ function BrandMark({ t, name }: { t: Tokens; name: string }): JSX.Element {
   );
 }
 
-/** The colour a usage tone draws in (`.um-t-*`), and a ring's (`--um-c`). */
-const INK: Record<UsageFigure["tone"], string> = { accent: "text", warn: "warn", bad: "bad", none: "dim" };
-const RING: Record<UsageFigure["tone"], string> = { accent: "accent", warn: "warn", bad: "bad", none: "rule" };
-
 /** `AllowanceNumber`: the account's figure after the model chip — as a number, a ring, or both. */
 function Allowance({ t, route, model, cost, onPress }: { t: Tokens; route: string | undefined; model: string | undefined; cost: number | undefined; onPress: (e: GestureResponderEvent) => void }): JSX.Element | null {
   const limits = useLimits();
@@ -324,36 +321,6 @@ function ContextMeter({ t, context, route, onPress }: { t: Tokens; context: Cont
     </Press>
     </View>
   );
-}
-
-/**
- * `Ring`: a track, and an arc as far round as the figure from the top, clockwise (`.um-ring`: r 7 on a
- * 20 grid; the track --dim 28%, 2.6 wide; the arc the tone's colour, round-capped). With no figure the
- * track alone, dashed 2.2, 1.6 wide, --dim at .6.
- */
-function Ring({ t, pct, tone, size }: { t: Tokens; pct: number | null; tone: UsageFigure["tone"]; size: number }): JSX.Element {
-  const shapes: Shape[] =
-    pct === null
-      ? [{ kind: "path", d: CIRCLE, dash: "2.2 2.2", stroke: String(t.v("dim")), strokeWidth: 1.6, opacity: 0.6 }]
-      : [{ kind: "circle", cx: 10, cy: 10, r: 7, stroke: String(t.mix(t.v("dim"), 28, "transparent")), strokeWidth: 2.6 }, ...arcOf(Math.max(0, Math.min(100, pct)), String(t.v(RING[tone])))];
-  // Butt ends, as `.um-ring` draws the track (its dashes would grow by half a stroke each way rounded);
-  // the arc's round ends are dots of their own (`arcOf`).
-  return <Svg width={size} height={size} viewBox="0 0 20 20" color={String(t.v("dim"))} strokeWidth={2.6} linecap="butt" shapes={shapes} />;
-}
-
-/** The track as a path, so a dash can be laid on it (a circle of r 7 about 10,10, from the right, as SVG's circle starts). */
-const CIRCLE = "M17 10a7 7 0 1 1-14 0a7 7 0 1 1 14 0";
-
-/** The arc `pct` of the way round from the top, clockwise. */
-function arcOf(pct: number, stroke: string): Shape[] {
-  if (pct <= 0) return [];
-  if (pct >= 100) return [{ kind: "path", d: "M10 3a7 7 0 1 1 0 14a7 7 0 1 1 0-14", stroke, strokeWidth: 2.6 }];
-  const a = (pct / 100) * 2 * Math.PI;
-  const x = 10 + 7 * Math.sin(a);
-  const y = 10 - 7 * Math.cos(a);
-  // `stroke-linecap: round`: a dot of half the stroke at each end.
-  const cap = (cx: number, cy: number): Shape => ({ kind: "circle", cx, cy, r: 1.3, fill: stroke, strokeWidth: 0 });
-  return [{ kind: "path", d: `M10 3A7 7 0 ${pct > 50 ? 1 : 0} 1 ${x.toFixed(3)} ${y.toFixed(3)}`, stroke, strokeWidth: 2.6 }, cap(10, 3), cap(x, y)];
 }
 
 /** `.cx-send`: the arrow (a clock while the account has nothing left). */

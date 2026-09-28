@@ -32,8 +32,6 @@ import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, withPaths, SHAR
 import type {
   BoardCard,
   ConfigLayer,
-  EmbeddedWeightsReport,
-  LocalServerProbe,
   PendingApproval,
   ApprovalScope,
   PendingInteraction,
@@ -121,6 +119,7 @@ import { GalleryPane } from "./galleryPane";
 import { ModelsPane, functionRulesOverlay } from "./modelsPane";
 import { PermissionSetsPane, type PermissionSetsChannel } from "./permissionSetsPane";
 import { useMcpData } from "./mcpData";
+import { useLocalModels } from "./connectionsModel";
 import { FunctionsSections } from "./functionsPane";
 import { EventsSection, useEventStatus } from "./eventsPane";
 import { eventsConfigOf } from "./eventsModel";
@@ -379,37 +378,16 @@ export default function App(): JSX.Element {
   const [toolsData, setToolsData] = useState<PermissionSetsData | null>(null);
   /** A set a Functions cell asked the pane above to open. */
   const [toolsFocus, setToolsFocus] = useState<{ id: string; nonce: number } | undefined>(undefined);
-  /**
-   * What answers on the usual local ports, and whether each embedded model's weights are there —
-   * asked when Connections opens, on Re-check (the checks' time moves) and after a settings write
-   * (a server just picked is the one in use), never continuously.
-   */
-  const [localServers, setLocalServers] = useState<LocalServerProbe[] | undefined>(undefined);
-  /** Bumped by Scan again, which asks the ports now; true while that ask is out. */
-  const [localScan, setLocalScan] = useState(0);
-  const [scanningLocal, setScanningLocal] = useState(false);
-  const [weightsChecks, setWeightsChecks] = useState<EmbeddedWeightsReport | undefined>(undefined);
   const onConnections = state.view === "settings" && state.section === "connections";
   /** The MCP servers' state and tools, and what other tools here run — Connections, and Tools' MCP groups. */
   const mcp = useMcpData(onConnections || (state.view === "settings" && state.section === "tools"), state.config);
-  useEffect(() => {
-    if (!onConnections) return;
-    let live = true;
-    setScanningLocal(true);
-    void invoke("model:probeLocal", undefined)
-      .then(
-        (found) => live && setLocalServers(found.servers),
-        () => live && setLocalServers(undefined),
-      )
-      .finally(() => live && setScanningLocal(false));
-    void invoke("model:checkWeights", undefined).then(
-      (report) => live && setWeightsChecks(report),
-      () => live && setWeightsChecks(undefined),
-    );
-    return () => {
-      live = false;
-    };
-  }, [onConnections, state.availability.checkedAt, state.config, localScan]);
+  /**
+   * What answers on the usual local ports, and whether each embedded model's weights are there —
+   * asked when Connections opens, on Re-check (the checks' time moves) and after a settings write
+   * (a server just picked is the one in use), never continuously; `scan` is Scan again
+   * (`connectionsModel.ts`, shared with the universal copy).
+   */
+  const localModels = useLocalModels(onConnections, state.availability.checkedAt, state.config);
   /** Signing in to a forge through the browser (OAuth device flow) — see `settingsShell.ts`. */
   const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
   /**
@@ -2122,15 +2100,15 @@ export default function App(): JSX.Element {
                     onSignIn={(name) => void actions.signIn(name)}
                     onCancelSignIn={(name) => void actions.cancelSignIn(name)}
                     onSignOut={(name) => void actions.signOut(name)}
-                    localServers={localServers}
+                    localServers={localModels.localServers}
                     // The ports now, and the local route's own check — which is what turns its row
                     // from "not reachable" to ready, and refreshes the catalog's local models.
                     onScanLocal={() => {
-                      setLocalScan((n) => n + 1);
+                      localModels.scan();
                       void actions.recheckAvailability();
                     }}
-                    scanningLocal={scanningLocal || state.rechecking}
-                    weights={weightsChecks}
+                    scanningLocal={localModels.scanning || state.rechecking}
+                    weights={localModels.weights}
                     oauth={forgeOAuth}
                     mcp={mcp}
                     onOpenTools={() => actions.setSection("tools")}

@@ -4,6 +4,7 @@ import { JUST_YOU_VIEWS, SECTIONS, settingsFrameOf, settingsLayersFor, settingsL
 import { PLAIN_SCROLLER, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
 import { AppearancePage } from "../components/settings/AppearancePage";
+import { ConnectionsPage } from "../components/settings/ConnectionsPage";
 import { SettingsLayerContext } from "../components/settings/layers";
 import { LayerPicker } from "../components/settings/LayerPicker";
 import { MachinesPage } from "../components/settings/MachinesPage";
@@ -76,6 +77,8 @@ export function SettingsView(): JSX.Element {
       <AboutPage />
     ) : section === "tools" ? (
       <ToolsPage />
+    ) : section === "connections" ? (
+      <ConnectionsPage />
     ) : (
       <Uncopied name={`${SECTIONS.find((s) => s.id === section)?.label ?? section} page`} height={320} />
     );

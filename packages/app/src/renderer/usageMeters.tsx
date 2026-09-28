@@ -31,7 +31,6 @@ import {
   toneOfContext,
   toneOfPercent,
   usedPercentFor,
-  weeklyWindow,
   windowIsCurrent,
   windowStatus,
   type ContextPart,
@@ -394,7 +393,7 @@ export function CompactionLine({
 
 // An account's figure — `usageFigure.ts` (pure), shared with the universal composer (decision 0015).
 export { figureOf, type UsageFigure } from "./usageFigure";
-import { figureOf, type UsageFigure } from "./usageFigure";
+import { USAGE_PREVIEW_EXAMPLES, figureOf, keyFigureOf, weeklyFigureOf, weeklyTitleOf, type UsageFigure } from "./usageFigure";
 
 /** A ring with a $ inside: the same ring, for money. */
 export function MoneyRing({ pct, tone }: { pct: number | null; tone: string }): JSX.Element {
@@ -843,18 +842,14 @@ export function AccountAllowance({ account, plan, startOpen }: { account: LimitA
   const now = useNow();
   const pop = usePopover({ startOpen: startOpen === true });
   const { open, setOpen } = pop;
-  const week = account?.reading !== null && account?.reading !== undefined ? weeklyWindow(account.reading) : undefined;
-  const spent = week !== undefined && windowStatus(week) === "exhausted";
-  const pct = week === undefined ? null : spent ? 100 : week.usedPercent;
-  const tone = toneOfPercent(pct);
-  const figure: UsageFigure = { pct, tone, text: pct === null ? "–" : `${round(pct)}%`, money: false, title: "" };
+  const { week, spent, pct, tone, figure } = weeklyFigureOf(account);
   return (
     <>
       <div className="um-c-line">
         <span className="um-c-plan">{plan}</span>
         {account !== undefined && mode !== "off" ? (
           <div className="um-c-ringwrap" ref={pop.anchor}>
-            <button type="button" className={`um-c-ringbtn um-t-${tone}${open ? " on" : ""}`} aria-expanded={open} title={week === undefined ? "No weekly reading yet — click for every window" : `Weekly window, ${pct === null ? "no figure" : `${round(pct)}% used`} — click for every window`} onClick={() => setOpen((v) => !v)}>
+            <button type="button" className={`um-c-ringbtn um-t-${tone}${open ? " on" : ""}`} aria-expanded={open} title={weeklyTitleOf(week, pct)} onClick={() => setOpen((v) => !v)}>
               <FigureFace figure={figure} mode={mode} />
             </button>
             {open ? (
@@ -887,10 +882,7 @@ export function KeyUsage({ route }: { route: string }): JSX.Element | null {
   const { open, setOpen } = pop;
   const account = accountFor(limits, route);
   if (account === undefined || account.kind === "subscription" || mode === "off") return null;
-  const credit = account.kind === "credit" && account.credit !== undefined;
-  const figure: UsageFigure = credit
-    ? figureOf(account, { now })
-    : { pct: null, tone: account.creditRefusedAt !== undefined ? "bad" : "none", text: formatUsd(account.spent7d ?? 0), money: true, title: `${formatUsd(account.spent7d ?? 0)} spent through JaiRA in the last 7 days` };
+  const { credit, figure, under, refused } = keyFigureOf(account, now);
   return (
     <>
       <div className="um-c-line um-k-line">
@@ -905,9 +897,7 @@ export function KeyUsage({ route }: { route: string }): JSX.Element | null {
         {credit ? null : <span className="um-k-when">in the last 7 days</span>}
       </div>
       <div className="um-c-line um-c-line2">
-        <span className={`um-rs${account.creditRefusedAt !== undefined ? " is-spent" : ""}`}>
-          {credit ? "credit used" : account.creditRefusedAt !== undefined ? "refused: balance empty" : "no balance reported"}
-        </span>
+        <span className={`um-rs${refused ? " is-spent" : ""}`}>{under}</span>
       </div>
     </>
   );
@@ -919,11 +909,7 @@ export function KeyUsage({ route }: { route: string }): JSX.Element | null {
  * from the same pieces the composer uses.
  */
 export function UsageFiguresPreview({ mode }: { mode: UsageFigures }): JSX.Element {
-  const examples: Array<{ brand: string; model: string; label: string; figure: UsageFigure }> = [
-    { brand: "claude-cli", model: "claude-cli/claude-sonnet-5", label: "subscription", figure: { pct: 62, tone: "accent", text: "62%", money: false, title: "" } },
-    { brand: "openrouter", model: "openrouter/claude-sonnet-5", label: "credit reported", figure: { pct: 58, tone: "accent", text: "$11.60", money: true, title: "" } },
-    { brand: "anthropic", model: "anthropic/claude-sonnet-5", label: "no balance reported", figure: { pct: 18, tone: "none", text: "$1.20", money: true, title: "" } },
-  ];
+  const examples = USAGE_PREVIEW_EXAMPLES;
   return (
     <div className="set-preview um-preview" aria-hidden="true">
       {examples.map((e) => (
