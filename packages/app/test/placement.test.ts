@@ -68,7 +68,8 @@ async function machine(label: string): Promise<Machine> {
   const base = mkdtempSync(join(tmpdir(), `jaira-place-${label}-`));
   dirs.push(base);
   let hosted: HostedEngine | undefined;
-  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, watchWorkflows: false, publish: (m) => hosted?.host.broadcast(m) });
+  // Both engines run on this one computer, so a busy test run would read as both machines being busy.
+  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, watchWorkflows: false, placementThresholds: { cpuLimit: 2, memoryFloor: 0 }, publish: (m) => hosted?.host.broadcast(m) });
   hosted = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
   service.fleet.rename(label);
   await service.fleet.setReachable(true);

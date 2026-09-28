@@ -24,11 +24,11 @@ let project: Project;
 let logged: string[];
 let wired: { dispose(): void } | undefined;
 
-function open(policy: Record<string, unknown> = { remote: { publish: "allow" } }): void {
+function open(reviewArtifacts: Record<string, unknown> = { publish: "allow" }): void {
   const home = testHome();
   const paths = initProject(rig.work, home);
   const settings = JSON.parse(readFileSync(paths.settingsFile, "utf8")) as Record<string, unknown>;
-  writeFileSync(paths.settingsFile, JSON.stringify({ ...settings, policy }, null, 2));
+  writeFileSync(paths.settingsFile, JSON.stringify({ ...settings, functions: { review_artifacts: reviewArtifacts } }, null, 2));
   mkdirSync(join(rig.work, ".jaira"), { recursive: true });
   writeFileSync(join(rig.work, ".jaira", ".env.local"), 'GITLAB_TOKEN="good"\n');
   project = openProject(rig.work, { baseDir: home });

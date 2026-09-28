@@ -90,10 +90,6 @@ describe("the integrations block", () => {
     expect(() => parseIntegrations({ forges: { gitlab: { credental: "X" } } })).toThrow(/credental is not a setting/);
   });
 
-  it("refuses the quiet window where it used to live, naming where it went", () => {
-    expect(() => parseIntegrations({ review: { settleAfter: "30m" } })).toThrow(/functions\.review_artifacts\.settleAfter/);
-  });
-
   it("does not pick a connection that is turned off", () => {
     const parsed = parseIntegrations({ forges: { github: { enabled: false } } });
     expect(connectionForHost(parsed, "github.com")).toBeUndefined();

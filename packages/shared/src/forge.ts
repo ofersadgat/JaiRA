@@ -139,9 +139,6 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
   const out = defaultIntegrations();
   if (raw === undefined) return out;
   const block = objectAt(raw, "config.integrations");
-  if (block["review"] !== undefined) {
-    throw new Error("config.integrations.review has moved: the quiet window after a comment is functions.review_artifacts.settleAfter");
-  }
   onlyFields(block, ["forges"], "config.integrations");
 
   if (block["forges"] !== undefined) {

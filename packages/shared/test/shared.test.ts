@@ -50,25 +50,11 @@ describe("parseTaskMeta", () => {
 });
 
 describe("config", () => {
-  it("defaults artifacts.dir, and refuses the retired models.default", () => {
+  it("defaults artifacts.dir", () => {
     expect(parseConfig({}).artifacts.dir).toBe("artifacts");
     expect(parseConfig({})).toEqual(defaultConfig());
     expect(() => parseConfig({ models: "nope" })).toThrow(/must be an object/);
     expect(() => parseConfig([])).toThrow(/object/);
-    // A default MODEL could never route: the prompt router dispatches on `op.config.model` while a
-    // leaf's defaults are applied inside its own lowering, so a default naming an agent was invisible
-    // to the routing that had to happen first. Refused rather than dropped, because a config carrying
-    // it was relying on it.
-    expect(() => parseConfig({ models: { default: "anthropic/claude-sonnet-5" } })).toThrow(
-      /executors.default.prompt.defaults.model/,
-    );
-  });
-
-  it("points a config still carrying models.default at where those settings moved", () => {
-    // Any value at all, well-formed or not: the field itself is gone, so validating its shape would
-    // be validating a setting nothing reads.
-    expect(() => parseConfig({ models: { default: "claude-sonnet-5" } })).toThrow(/has moved/);
-    expect(() => parseConfig({ models: { default: "anthropic/claude-sonnet-5" } })).toThrow(/has moved/);
   });
 
   it("parses generic-cli agents", () => {

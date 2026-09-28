@@ -785,19 +785,6 @@ function parseFunctions(raw: unknown): JairaFunctionsConfig {
 }
 
 /**
- * Top-level keys that have moved, and where to. Refused by name rather than ignored: a document that
- * still carries one was relying on it, and every checkout's documents are migrated when it opens
- * (`@jaira/persistence` `migrateSettingsLayers`), so meeting one here means a layer the migration could
- * not rewrite.
- */
-const MOVED_KEYS: Record<string, string> = {
-  policy:
-    "config.policy is dissolved: a command rule is a line under the bash tool of each permission set, policy.builtins is " +
-    "functions.bash.builtins and policy.remote.publish is functions.review_artifacts.publish",
-  smart: "config.smart has moved to functions.smart",
-};
-
-/**
  * Parse the autopilot block. Strict, like every other block here: a threshold that does not parse
  * is a fast-forward answering more than somebody meant it to, which is the one failure this setting
  * exists to prevent.
@@ -1322,16 +1309,6 @@ function parseModels(value: unknown): JairaModelConfig {
   const raw = plainObject(value, "config.models");
   const models: JairaModelConfig = {};
 
-  if (raw["default"] !== undefined) {
-    // Refused rather than ignored, because a config carrying it was RELYING on it. It never worked
-    // for an agent id anyway (the router dispatches before a leaf's defaults are applied), so a
-    // silent drop would turn a broken setting into an invisible one.
-    throw new Error(
-      "config.models.default has moved: the default call settings belong to the default executor's " +
-        "prompt node — executors.default.prompt.defaults.model — which is applied before routing",
-    );
-  }
-
   if (raw["routes"] !== undefined) {
     const routes: Record<string, JairaModelRoute> = {};
     for (const [key, entry] of Object.entries(plainObject(raw["routes"], "config.models.routes"))) {
@@ -1369,10 +1346,6 @@ export function parseConfig(raw: unknown): JairaConfig {
     throw new Error("config must be a JSON object");
   }
   const cfg = raw as Record<string, unknown>;
-
-  for (const [key, moved] of Object.entries(MOVED_KEYS)) {
-    if (cfg[key] !== undefined) throw new Error(moved);
-  }
 
   const models = parseModels(cfg["models"]);
   return {

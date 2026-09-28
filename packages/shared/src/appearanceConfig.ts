@@ -17,8 +17,7 @@
  * replaced: an unknown key, a palette this release does not have, a size outside the range its
  * control offers, or an editor knob a surface cannot honour is refused with the key named. A layer is
  * a document a person may edit by hand, and a look that silently reads as the default is exactly the
- * kind of setting-that-is-not-there this file refuses everywhere else. What a person could not have
- * typed — an old preferences file — was cleaned on its way in (`migrateUserSettings`).
+ * kind of setting-that-is-not-there this file refuses everywhere else.
  *
  * The parsed block always carries every default, so a reader never asks "is this set?" — that is a
  * question about ONE layer, and `./configLayers` answers it.

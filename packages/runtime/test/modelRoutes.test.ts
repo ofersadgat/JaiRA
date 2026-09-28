@@ -289,14 +289,6 @@ describe("the config surface", () => {
     expect(() => parseConfig({ models: { routes: { anthropic: { credential: "sk ant 123" } } } })).toThrow(/must NAME a secret/);
   });
 
-  it("refuses models.default outright, naming where the default call settings went", () => {
-    // It could never route: the prompt router dispatches on `op.config.model` while a leaf's defaults
-    // are applied after routing, so a default naming an agent was invisible to the routing that had
-    // to happen first. Refused rather than dropped — a config carrying it was relying on it.
-    expect(() => parseConfig({ models: { default: "claude-cli/sonnet" } })).toThrow(
-      /executors\.default\.prompt\.defaults\.model/,
-    );
-  });
 });
 
 /**

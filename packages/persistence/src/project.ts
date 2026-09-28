@@ -25,10 +25,6 @@ import {
   type JairaPaths,
 } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
-import { migrateSettingsLayers } from "./settingsMigration";
-import { migrateHiddenLists } from "./hiddenMigration";
-import { renamePermissionSetLayers } from "./permissionSetRename";
-import { migrateUserSettings } from "./userSettingsMigration";
 import { applyStorage, isFileBacked, type ShadowReport } from "./shadow";
 import { journalFiles, replayJournal } from "./journalFile";
 import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
@@ -306,11 +302,6 @@ export function initBase(baseDir?: string): JairaBasePaths {
 export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string; builtInDir?: string }): Project {
   const base = initBase(opts?.baseDir);
   const paths = baseAsProjectPaths(base.baseDir, opts?.builtInDir);
-  // The directory first: the settings migration reads the permission sets it writes into.
-  renamePermissionSetLayers(paths);
-  migrateSettingsLayers(paths);
-  migrateHiddenLists(paths);
-  migrateUserSettings(base);
   return openAt(paths, layeredConfigOf([paths.builtIn.settingsFile, base.settingsFile, base.personalSettingsFile]), "shared", opts);
 }
 
@@ -375,15 +366,6 @@ export function openProject(
     throw refusal(log, `${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
   }
   initBase(paths.base.baseDir);
-  // Before the configuration is read: a layer still carrying the `policy` block is refused by the
-  // parser, so it is moved first — once, and never again (decision 0007, amended 2026-09-23).
-  // The directory first: the settings migration reads the permission sets it writes into.
-  renamePermissionSetLayers(paths);
-  migrateSettingsLayers(paths);
-  // A `files.hidden` written when a layer's list REPLACED the one under it, rewritten as what it adds.
-  migrateHiddenLists(paths);
-  // The look moved out of the preferences file into the personal layer, which is read just below.
-  migrateUserSettings(paths.base);
   return openAt(paths, loadLayeredConfig(paths), "project", opts);
 }
 

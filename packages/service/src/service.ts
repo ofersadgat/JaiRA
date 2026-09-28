@@ -176,7 +176,6 @@ import {
   writePermissionSet,
   policyAuditRow,
   recordHostRow,
-  migrateUserSettings,
   modelStoreAt,
   type ModelStore,
   EVENTS_TASK,
@@ -690,7 +689,7 @@ import { Fleet, type ReachPort } from "./fleet";
 import { Federation } from "./federation";
 import { Replicator } from "./replicator";
 import { machineTags } from "./machine";
-import { Placement, workspaceKey, type MachineCapacity, type PlacementRules } from "./placement";
+import { Placement, workspaceKey, type MachineCapacity, type PlacementRules, type PlacementThresholds } from "./placement";
 import { ResourceSampler } from "./resources";
 import { walkHiddenReport } from "./hiddenReport";
 import { layeredHiddenRules, whyHiddenPath, type ConfigLayer, type HiddenReport, type HiddenReportRequest, type HiddenRule, type HiddenVerdict } from "@jaira/shared";
@@ -709,6 +708,12 @@ export interface AppServiceOptions {
    * §6). A window's engine does; `jaira serve` with no window does not (ruling 7). Default: no.
    */
   replicate?: boolean;
+  /**
+   * When a workspace counts as too busy or too short of memory to take a run (decision 0013 §5). Default:
+   * `DEFAULT_THRESHOLDS`. Tests of placement across two engines on ONE computer lift them, since both
+   * report the same CPU and a busy test run would pass both over.
+   */
+  placementThresholds?: PlacementThresholds;
   /**
    * The persistent MCP bridge CLI agent runs register on. Default: a worker-thread host reading its
    * worker file from beside `main.cjs` — right for the bundled app, and a seam here so a test that
@@ -1388,6 +1393,7 @@ export class AppService {
       fleet: this.fleet,
       localCapacity: () => this.capacity(),
       log: (level, message) => this.log({ level, source: "machines", message }),
+      ...(options.placementThresholds !== undefined ? { thresholds: () => options.placementThresholds! } : {}),
     });
     // What waits for a workspace is tried again when one may have freed: now and then, and at every run's end.
     this.placementTimer = setInterval(() => void this.tryQueue(), 10_000);
@@ -1452,14 +1458,6 @@ export class AppService {
       },
       changed: (items) => this.publish({ type: "waiting:changed", items }),
     });
-    // Before anything reads how the app looks — the window's frame is painted from it before there is
-    // a window, and with no project open, so this cannot wait for an open to run it. Moves the look
-    // out of `user-settings.json` into `personal-settings.json`, once; a no-op ever after.
-    try {
-      migrateUserSettings(jairaBasePaths(this.baseDir));
-    } catch {
-      // Never a reason not to start: the old file keeps its fields, and the next start tries again.
-    }
     this.diagnostics = new Diagnostics({
       // Under the root's `system/` with the rest of what JaiRA writes for itself, rather than beside
       // the workflows a person authors — see `SYSTEM_DIR_NAME`.

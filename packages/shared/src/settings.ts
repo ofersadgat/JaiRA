@@ -14,7 +14,7 @@
  * about, and the person's own opinion is the fourth layer, `personal-settings.json` — the same schema
  * as `settings.json`, read after every other layer. It is a file of its own rather than a key in this
  * one because this one has its own whole-file writer, and two writers of one file overwrite each
- * other. `@jaira/persistence` `migrateUserSettings` moved the old fields across.
+ * other.
  *
  * Everything here is types and pure functions, so the renderer can import it: the file is READ and
  * WRITTEN in the main process, and the parsed value crosses IPC.

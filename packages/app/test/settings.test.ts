@@ -425,23 +425,6 @@ describe("the personal layer", () => {
     expect(lookOf()).toMatchObject({ palette: "zinc", mode: "system" });
   });
 
-  it("moves the look out of user-settings.json when the app starts, once", async () => {
-    await service.close();
-    writeFileSync(
-      join(baseDir, "user-settings.json"),
-      JSON.stringify({ theme: "dark", ui: { panes: { "files.tree": 310 } }, appearance: { palette: "zinc" }, filesHidden: ["drafts"] }),
-      "utf8",
-    );
-    service = new AppService({ baseDir, watchWorkflows: false, keychain: fakeKeychain(), publish: (m) => pushes.push(m) });
-
-    expect(JSON.parse(readFileSync(join(baseDir, "personal-settings.json"), "utf8"))).toEqual({
-      appearance: { mode: "dark", palette: "zinc" },
-      files: { hidden: ["drafts"] },
-    });
-    expect(service.readSettings().ui.panes["files.tree"]).toBe(310);
-    expect(service.windowAppearance()).toMatchObject({ palette: "zinc", mode: "dark" });
-    expect(lookOf()).toMatchObject({ palette: "zinc", mode: "dark", sizeApp: defaultAppearanceConfig().sizeApp });
-  });
 });
 
 describe("configuration with a project", () => {

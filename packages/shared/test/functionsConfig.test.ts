@@ -48,13 +48,6 @@ describe("functions", () => {
     expect(() => parseConfig({ functions: [] })).toThrow("config.functions must be an object");
   });
 
-  it("refuses the blocks it replaced, naming where each thing went", () => {
-    expect(() => parseConfig({ policy: {} })).toThrow(/config\.policy is dissolved: a command rule is a line under the bash tool of each permission set/);
-    expect(() => parseConfig({ policy: { builtins: false } })).toThrow(/functions\.bash\.builtins/);
-    expect(() => parseConfig({ smart: { model: "x" } })).toThrow("config.smart has moved to functions.smart");
-    expect(() => parseConfig({ integrations: { review: { settleAfter: "30m" } } })).toThrow(/functions\.review_artifacts\.settleAfter/);
-  });
-
   it("is offered in Settings as one declared section, a sub-form per function, each field with the default it falls to", () => {
     expect(CONFIG_SECTIONS.find((s) => s.key === "smart")).toBeUndefined();
     const section = CONFIG_SECTIONS.find((s) => s.key === "functions");

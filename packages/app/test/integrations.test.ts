@@ -118,10 +118,6 @@ describe("writing the integrations block", () => {
     expect(effective.functions.review_artifacts).toEqual({ settleAfter: "30m", publish: "allow" });
   });
 
-  it("refuses the two defaults where they used to live, naming where they went", () => {
-    expect(() => service.writeConfig({ layer: "project", config: { integrations: { review: { settleAfter: "30m" } } } })).toThrow(/functions\.review_artifacts\.settleAfter/);
-    expect(() => service.writeConfig({ layer: "project", config: { policy: { remote: { publish: "allow" } } } })).toThrow(/functions\.review_artifacts\.publish/);
-  });
 });
 
 describe("what a row says", () => {
