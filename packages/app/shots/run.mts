@@ -75,7 +75,8 @@ async function pass(world: World, port: number, fresh: boolean, last: boolean): 
     // The bridge AND a committed tree. Either alone is reached before the app can be asked anything:
     // the preload runs before React does, and an empty root is also what a page that threw during
     // render looks like.
-    await app.until("window.jaira && document.getElementById('root').children.length > 0", "the window to draw");
+    // `?.` because the bridge is there before the document is: a wait that throws is not a wait.
+    await app.until("window.jaira && document.getElementById('root')?.children.length > 0", "the window to draw");
     if (fresh) await seed(app);
     else await app.until(says("Awaiting you"), "the gate to still be parked after a restart");
 
@@ -133,6 +134,14 @@ async function pass(world: World, port: number, fresh: boolean, last: boolean): 
       "the preview's editor to colour itself",
     );
     await app.shot(`appearance-${theme}`, ".set-page");
+    // Scrolled to before it is framed, for the picture's sake rather than the editor's: the section is
+    // thousands of pixels down the pane's own scroll container, which a capture paints only where it
+    // is scrolled to, so framed where it lay it came out as an empty rectangle of background.
+    await app.evaluate(`document.querySelector(".ft").scrollIntoView({ block: "start" })`);
+    await app.until(
+      `(() => { const top = document.querySelector(".ft").getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
+      "File types to scroll into view",
+    );
     await app.shot(`file-types-${theme}`, ".ft");
     await app.resize(1280, 860);
 

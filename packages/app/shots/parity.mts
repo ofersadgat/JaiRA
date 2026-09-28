@@ -14,9 +14,6 @@
  * re-registers it, which adds lines to the transcript. The clock starts from the same instant on each
  * page and animations are off (`holdStill`), so the only thing that differs between a pair is the page.
  * Pairs are compared pixel by pixel, and every pair that differs gets a diff image in `shots/parity/`.
- *
- * Not `run.mts`: that pass can wait forever for the Appearance preview's Monaco to colour its tokens,
- * because it never scrolls the preview into view (see the file-types scene below).
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -112,15 +109,23 @@ const SCENES: readonly Scene[] = [
     reach: async (app) => {
       await app.clickText("Settings");
       await app.clickText("Appearance");
-      // Scrolled into view, and again on every try: Monaco draws no lines for an editor nobody can
-      // see, and the page lays out after it mounts, undoing a scroll made before that. Forty seconds,
-      // because the grammar sometimes takes more than twenty to arrive on this machine.
+      // Scrolled into view, and again on every try, for the picture rather than for Monaco: `.ft` sits
+      // in the settings pane's own scroll container, which a capture paints only where it is scrolled
+      // to, and the page lays out after the preview mounts, undoing a scroll made before that. Monaco
+      // draws an editor below the fold perfectly well; what it cannot draw in is a hidden window,
+      // which is what used to leave this editor empty (see `launch` in the driver).
       await app.until(`document.querySelector(".ft-preview-body") !== null`, "the preview to mount");
       await app.until(
         `(document.querySelector(".ft-preview-body").scrollIntoView({ block: "center" }),
           [...document.querySelectorAll(".ft-preview-body .view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
         "the preview's editor to colour itself",
-        80,
+      );
+      // Then the section's top, which is what the picture frames: centred on the preview, `.ft` is
+      // about as tall as the window and its upper half lay above the fold, unpainted on both pages.
+      await app.evaluate(`document.querySelector(".ft").scrollIntoView({ block: "start" })`);
+      await app.until(
+        `(() => { const top = document.querySelector(".ft").getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
+        "File types to scroll into view",
       );
     },
   },
@@ -192,26 +197,23 @@ async function main(): Promise<void> {
       for (const scene of relevant) {
         for (const page of PAIR) {
           const before = app.complaints.length;
-          // Three tries: the Monaco preview sometimes never colours itself on a load, under either
-          // renderer (it is why `run.mts` hangs), and a fresh load is what brings it back.
-          for (let attempt = 1; ; attempt++) {
-            await app.navigate(page.url);
-            await app.until(drawn, `${page.label} to draw`);
-            const which = await app.evaluate<string>(PROOF);
-            if (which !== page.proof) throw new Error(`expected ${page.label} (${page.proof}), found ${which}`);
-            // The pointer where the last scene left it would hover something different on this load.
-            await app.hover(2, 2);
-            try {
-              await scene.reach(app);
-              break;
-            } catch (e) {
-              const state = await app.evaluate<string>(
-                `(() => { const b = document.querySelector(".ft-preview-body"); const v = b?.querySelector(".view-lines"); const ed = b?.querySelector(".monaco-editor"); const r = b?.getBoundingClientRect(); return JSON.stringify({ lines: v ? v.children.length : null, colours: v ? [...new Set([...v.querySelectorAll("span[class^=mtk]")].map((s) => getComputedStyle(s).color))] : null, editor: ed ? ed.style.width + "x" + ed.style.height : null, body: r ? [r.x, r.y, r.width, r.height].map(Math.round) : null, view: [innerWidth, innerHeight], text: b?.innerText.slice(0, 120) }); })()`,
-              );
-              await app.shot(`${page.label}/failed-${scene.name}-${theme}-${attempt}`);
-              if (attempt === 3) throw e;
-              console.log(`  ${scene.name} on ${page.label}: ${(e as Error).message} (${state}); reloading`);
-            }
+          await app.navigate(page.url);
+          await app.until(drawn, `${page.label} to draw`);
+          const which = await app.evaluate<string>(PROOF);
+          if (which !== page.proof) throw new Error(`expected ${page.label} (${page.proof}), found ${which}`);
+          // The pointer where the last scene left it would hover something different on this load.
+          await app.hover(2, 2);
+          try {
+            await scene.reach(app);
+          } catch (e) {
+            // Once, with what the page looked like: a scene that fails is news, and a retry would hide
+            // it — the retry that used to be here was hiding a window Windows had marked hidden.
+            const state = await app.evaluate<string>(
+              `(() => { const b = document.querySelector(".ft-preview-body"); const v = b?.querySelector(".view-lines"); const ed = b?.querySelector(".monaco-editor"); return JSON.stringify({ visibility: document.visibilityState, lines: v ? v.children.length : null, editor: ed ? ed.style.width + "x" + ed.style.height : null, text: b?.innerText.slice(0, 120) }); })()`,
+            );
+            console.log(`  ${scene.name} on ${page.label}: ${state}`);
+            await app.shot(`${page.label}/failed-${scene.name}-${theme}`);
+            throw e;
           }
           await settle();
           await app.shot(`${page.label}/${scene.name}-${theme}`, scene.of);

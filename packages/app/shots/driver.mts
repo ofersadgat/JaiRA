@@ -99,7 +99,19 @@ export class App {
 
     // `--user-data-dir` is Chromium's switch and Electron's `userData` follows it: the world's keychain
     // and profile, never the author's. See `World.userData`.
-    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`], {
+    /*
+     * `CalculateNativeWinOcclusion` off, or the window is only drawn while nothing covers it.
+     *
+     * On Windows Chromium asks the OS whether a window is covered, and a covered one — behind
+     * another app, or opened behind the foreground window, which is where Windows puts a window a
+     * background process opens — is marked hidden: `document.visibilityState` reads "hidden" and
+     * `requestAnimationFrame` never fires. React and IPC carry on, so every wait on the DOM still
+     * passes, but everything drawn on a frame does not happen. Monaco is the one surface here that
+     * draws only on frames: the preview's editor mounted, measured itself at 758×199 and drew no
+     * lines, for as long as the window stayed covered — and a capture waits for a frame forever.
+     * `Page.bringToFront` does not help; it raises the page, not the OS window over what covers it.
+     */
+    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion"], {
       cwd: world.project,
       env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project },
       stdio: ["ignore", "pipe", "pipe"],
@@ -172,8 +184,9 @@ export class App {
 
     await app.send("Page.enable");
     await app.send("Runtime.enable");
-    // A window behind others (or on an idle screen) draws no frames, and `Page.captureScreenshot`
-    // then waits for one forever — a shot that hangs, not one that fails.
+    // A page in the background draws no frames, and `Page.captureScreenshot` then waits for one
+    // forever — a shot that hangs, not one that fails. This raises the PAGE; an app window that
+    // something else covers is the business of the switch in `launch`.
     await app.send("Page.bringToFront");
     await app.send("Emulation.setDeviceMetricsOverride", {
       width: options.phone?.width ?? options.width ?? 1280,
@@ -246,7 +259,9 @@ export class App {
       if ((await this.evaluate<boolean>(`Boolean(${expression})`)) === true) return;
       await sleep(250);
     }
-    throw new Error(`gave up waiting for ${what}`);
+    // The one cause that is not about the page: a hidden page draws no frames (see `launch`).
+    const hidden = (await this.evaluate<string>("document.visibilityState")) === "hidden";
+    throw new Error(`gave up waiting for ${what}${hidden ? " (the page is hidden, so nothing drawn on a frame was drawn)" : ""}`);
   }
 
   /**
@@ -405,8 +420,8 @@ export class App {
           })()`);
     if (of !== undefined && clip === null) throw new Error(`nothing matches "${of}" for ${name}`);
 
-    // Again before every capture, not only at launch: a window that fell behind another, or sits on an
-    // idle screen, stops drawing frames, and a capture waits for the next one forever.
+    // Again before every capture, not only at launch: a page that fell into the background stops
+    // drawing frames, and a capture waits for the next one forever.
     await this.send("Page.bringToFront");
     const reply = await this.send("Page.captureScreenshot", {
       format: "png",
